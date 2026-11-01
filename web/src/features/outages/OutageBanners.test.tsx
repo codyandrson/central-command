@@ -80,6 +80,18 @@ describe('OutageBanners', () => {
     expect(screen.queryByTestId('outage-banner-local')).not.toBeInTheDocument();
   });
 
+  it('shows the probe error under the duration when the dependency carries one', async () => {
+    list = list.map((d) => (d.name === 'jira' ? d : d.name === 'graph' ? {
+      ...d, error: 'configured cc-embedding/1024, graph holds old/768; run: python -m central_command.graph_reembed status',
+    } : d));
+    render(<OutageBanners />);
+    const graph = await screen.findByTestId('outage-banner-graph');
+    expect(within(graph).getByTestId('outage-error-graph')).toHaveTextContent(
+      'graph holds old/768; run: python -m central_command.graph_reembed status');
+    // A banner whose dependency sent none draws no line.
+    expect(screen.queryByTestId('outage-error-jira')).not.toBeInTheDocument();
+  });
+
   it('shows the per-kind breakdown and the interrupted count on expand', async () => {
     render(<OutageBanners />);
     await screen.findByTestId('outage-banner-graph');

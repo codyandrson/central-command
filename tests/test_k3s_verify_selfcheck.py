@@ -103,6 +103,22 @@ def test_a_warn_line_passes_with_its_text_and_exit_2_is_not_a_failure(tmp_path):
     assert "WARN selfcheck-graph-rerank: slow" in r.stdout
 
 
+def test_the_graph_embedder_row_passes_on_a_fresh_install(tmp_path):
+    """A fresh install has no record and no vectors: that row PASSes, so verify
+    does not fail it."""
+    r, _, _ = _run(tmp_path, "PASS selfcheck-graph-embedder: the graph holds no vectors "
+                             "and no embedder record yet\\n")
+    assert _counts(r) == (1, 0, 0)
+    assert "ok selfcheck-graph-embedder:" in r.stdout
+
+
+def test_a_graph_embedder_mismatch_fails_verify_naming_the_command(tmp_path):
+    r, _, _ = _run(tmp_path, "FAIL selfcheck-graph-embedder: configured a/1024, graph holds "
+                             "b/768; run: python -m central_command.graph_reembed status\\n", rc=1)
+    assert _counts(r) == (0, 1, 0)
+    assert "run: python -m central_command.graph_reembed status" in r.stdout
+
+
 @pytest.mark.parametrize(("lines", "rc"), [
     ("", 0),                                             # printed nothing
     ("", 1),

@@ -146,6 +146,21 @@ async def _patched_probes(monkeypatch):
     monkeypatch.setattr(systems, "_tcp_check", up)
     monkeypatch.setattr(systems, "_neo4j_status", up)
     monkeypatch.setattr(systems, "_graphiti_status", up)
+    await _patched_record(monkeypatch, {"alias": "cc-embedding", "dimensions": 1024,
+                                        "epoch": 3, "state": "stable"})
+
+
+async def _patched_record(monkeypatch, record):
+    """The graph row reads the embedder record; never the live graph."""
+    from central_command.integrations import embedder_record
+
+    async def read():
+        if isinstance(record, Exception):
+            raise record
+        return record
+
+    monkeypatch.setattr(embedder_record, "read_record", read)
+    embedder_record.clear_cache()
 
 
 async def test_the_graph_row_carries_the_ingest_queue_line_and_no_other_row_does(monkeypatch):
@@ -165,7 +180,7 @@ async def test_the_graph_row_carries_the_ingest_queue_line_and_no_other_row_does
     rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
     detail = rows["graphiti"]["detail"]
     assert detail.startswith("ingest queue: 3 queued, 1 running, 2 failed — retrying after: Error code: 403")
-    queue_part = detail.split(" · reranker:")[0]
+    queue_part = detail.split(" · embedder:")[0]
     assert len(queue_part) < 300 and queue_part.endswith("…")  # the error is clipped
     assert [i for i, r in rows.items() if "detail" in r] == ["graphiti"]
     assert "detail_probe" not in rows["graphiti"]
@@ -184,6 +199,7 @@ async def test_a_quiet_queue_says_only_its_counts(monkeypatch):
     rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
     assert rows["graphiti"]["detail"] == (
         "ingest queue: 0 queued, 0 running, 0 failed · "
+        "embedder: cc-embedding 1024 epoch 3 (stable) · "
         "reranker: none — rank fusion only (map cc-rerank to enable)")
 
 
@@ -198,7 +214,8 @@ async def test_an_unreadable_queue_drops_only_the_queue_line(monkeypatch):
     monkeypatch.setattr(repo, "ingest_queue_summary", broken)
     monkeypatch.setattr(settings, "graph_rerank_alias", "")
     rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
-    assert rows["graphiti"]["detail"].startswith("reranker: none")
+    assert rows["graphiti"]["detail"].startswith("embedder: cc-embedding 1024 epoch 3 (stable)")
+    assert "reranker: none" in rows["graphiti"]["detail"]
     assert "ingest queue" not in rows["graphiti"]["detail"]
     assert rows["graphiti"]["status"] == "up"
 
@@ -229,3 +246,34 @@ async def test_the_graph_row_names_the_reranker_and_its_last_failure(monkeypatch
     monkeypatch.setattr(settings, "graph_rerank_kind", "bogus")
     detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
     assert "reranker: MISCONFIGURED" in detail and "CC_GRAPH_RERANK_KIND" in detail
+
+
+async def test_the_graph_row_says_a_missing_record_and_drops_the_line_when_unreadable(monkeypatch):
+    await _patched_probes(monkeypatch)
+    await _patched_record(monkeypatch, None)
+    detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
+    assert "embedder: record missing" in detail
+
+    await _patched_record(monkeypatch, {"state": "migrating", "epoch": 0})  # interim, no alias
+    detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
+    assert "embedder: record missing" in detail
+
+    await _patched_record(monkeypatch, OSError("bolt refused"))
+    detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
+    assert "embedder:" not in detail and "reranker:" in detail
+
+
+async def test_the_graph_row_names_the_command_when_the_check_found_a_mismatch(monkeypatch):
+    """The cached verdict (no extra call) carries the reason, which ends with
+    the command to run."""
+    from central_command.integrations import embedder_record
+
+    await _patched_probes(monkeypatch)
+    embedder_record._cached = (
+        1e18, embedder_record._mismatch("iv", "the model behind cc-embedding has changed"))
+    try:
+        detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
+    finally:
+        embedder_record.clear_cache()
+    assert "embedder: cc-embedding 1024 epoch 3 (stable) — MISMATCH: " in detail
+    assert "run: python -m central_command.graph_reembed status" in detail

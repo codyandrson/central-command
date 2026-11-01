@@ -31,6 +31,9 @@ export interface OutageDependency {
    *  Null for a dependency never seen down. */
   checked_at: string | null;
   down_since: string | null;
+  /** Why it is down, as its probe recorded it; sent only while down. An
+   *  embedder mismatch carries the reason and the command to run. */
+  error?: string | null;
   waiting: OutageWaiting;
   /** Approved proposals a restart interrupted: only the operator moves them. */
   interrupted: number;

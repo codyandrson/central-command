@@ -38,6 +38,7 @@ import asyncio
 import json
 import logging
 import uuid
+import weakref
 from datetime import datetime, timezone
 
 from central_command import events
@@ -1105,6 +1106,45 @@ def _proposal_dependencies(state: dict) -> tuple[str, ...]:
     return recorded_dependencies(None)
 
 
+# The caches whose embedder verdict was already consulted: a sweep and the
+# retry-now that wraps it share one cache and must not census the graph twice.
+_embedder_consulted: weakref.WeakSet = weakref.WeakSet()
+
+
+async def _consult_embedder_check(cache) -> None:
+    """A mismatch is the `embedder` dependency DOWN though its probe answered UP.
+
+    The embedder probe is one embedding of "ping": it reads UP for a model that
+    was swapped behind the alias, so on its own the sweep would clear the row
+    the moment it looked. After an UP answer the record's check (forced: this
+    is the sweep's own question, not a gate's) decides, and a mismatch becomes
+    the probe's error, `Verdict.reason`, which ends with the remedy. An
+    exception is no verdict and the outage it already is: the dependency is
+    recorded down for it, and nothing is ever cleared on it. With the graph
+    itself probed down the check cannot run; the cached verdict (no network)
+    keeps a mismatch down rather than letting the plain UP clear it."""
+    from central_command.integrations import embedder_record
+
+    results = cache.results
+    if "embedder" not in results or cache in _embedder_consulted:
+        return
+    _embedder_consulted.add(cache)
+    if not results["embedder"]:
+        return
+    if results.get("graph") is False:
+        held = embedder_record.cached_verdict()
+        if held is not None and not held.open:
+            cache.mark_down("embedder", held.reason)
+        return
+    try:
+        verdict = await embedder_record.check(force=True)
+    except Exception as exc:  # noqa: BLE001 — no verdict is the outage, not a clear
+        cache.mark_down("embedder", f"embedder check could not run: {str(exc) or type(exc).__name__}")
+        return
+    if not verdict.open:
+        cache.mark_down("embedder", verdict.reason)
+
+
 async def probe_and_record(names, cache=None, *, states=None):
     """Probe `names` (concurrently, once each), persist what changed to
     `dependency_probe` and emit `dependency.down` / `dependency.up` on a state
@@ -1127,6 +1167,7 @@ async def probe_and_record(names, cache=None, *, states=None):
     if states is None:
         states = await repo.dependency_probe_states()
     await cache.warm(names)
+    await _consult_embedder_check(cache)
     changes = await _record_probe_changes(cache, states) if cache.results else []
     return cache, changes
 
@@ -1306,7 +1347,16 @@ async def retry_sweep(cache=None, *, only: str | None = None,
         # item released on an embedder outage, a deferred ingest job): probed
         # only, so their own loops' gates and the banner see the outage (story 7).
         queued = [n for n in await repo.dependencies_waited_on_by_queues() if n in PROBED]
-    needed = [n for u in units for n in u[2]] + recorded_down + queued
+    # A mismatch the check cached in this process: `embedder` is probed so the
+    # outage is recorded even with nothing parked (no network to ask).
+    held = []
+    if only is None:
+        from central_command.integrations import embedder_record
+
+        verdict = embedder_record.cached_verdict()
+        if verdict is not None and not verdict.open:
+            held = ["embedder"]
+    needed = [n for u in units for n in u[2]] + recorded_down + queued + held
     cache, changes = await probe_and_record(needed, cache, states=states)
     loud = await _report_failing_despite_probe() if only is None else []
 

@@ -302,6 +302,14 @@ class ProbeCache:
             await self._probe_one(dependency)
         return self._results[dependency]
 
+    def mark_down(self, dependency: str, error: str) -> None:
+        """Record `dependency` DOWN with `error`, overriding what its probe said.
+        For a caller that knows something the probe cannot (the embedder
+        record's mismatch, which the orchestration reads: this module imports
+        no integration, so it cannot ask)."""
+        self._results[dependency] = False
+        self._errors[dependency] = error
+
     @property
     def results(self) -> dict[str, bool]:
         """What was probed this sweep, and what it said — for the sweep result,

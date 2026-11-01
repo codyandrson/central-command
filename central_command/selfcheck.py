@@ -98,6 +98,7 @@ import httpx
 
 from central_command import __version__
 from central_command.config import Settings, settings
+from central_command.contract.failures import EMBEDDER_REMEDY
 from central_command.integrations import http as http_client
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -583,6 +584,32 @@ async def check_graph_patches(ctx: Context) -> Outcome:
                 "python scripts/apply_graphiti_patches.py")
 
 
+async def check_graph_embedder(ctx: Context) -> Outcome:
+    """The graph still holds the embedder the configuration names: the one check
+    every embedding read and write is gated on (`embedder_record.check`). A
+    mismatch FAILs with the check's own reason, which ends with the command to
+    run. An empty graph with no record passes (a fresh install: the first graph
+    write declares the record), and a check that cannot get an answer is not
+    applicable here, because the `graph` and `embedding-as-app` rows already
+    say that Neo4j or the embedder is unreachable."""
+    from central_command.contract.failures import EMBEDDER_REMEDY
+    from central_command.integrations import embedder_record
+
+    try:
+        verdict = await embedder_record.check(force=True)
+    except Exception as exc:  # noqa: BLE001 — no verdict is the other rows' finding
+        return not_applicable(f"the embedder or the graph did not answer ({_describe(exc)}); "
+                              "the graph and embedding-as-app rows say which")
+    if not verdict.open:
+        return fail(verdict.reason or "the graph's embedder record disagrees with the "
+                    "configuration", EMBEDDER_REMEDY)
+    if verdict.status == embedder_record.ABSENT_EMPTY:
+        return ok("the graph holds no vectors and no embedder record yet — the first graph "
+                  "write declares it")
+    return ok(f"the graph's embedder record agrees with {settings.embed_alias!r} "
+              f"({settings.embed_dim} dimensions)")
+
+
 # `graph-rerank`'s probe: one query, one clearly relevant and one clearly
 # irrelevant passage. Fixed strings; nothing about the install.
 RERANK_PROBE_QUERY = "Which city is the capital of France?"
@@ -956,6 +983,8 @@ CHECKS: tuple[Check, ...] = (
     Check("graph", "neo4j", "CC_NEO4J_URL", _fixed(_GRAPH_TIMEOUT + 5)),
     Check("graph-patches", "graphiti", "python scripts/apply_graphiti_patches.py",
           _fixed(_SHORT)),
+    Check("graph-embedder", "graphiti", EMBEDDER_REMEDY,
+          _fixed(_EMBED_TIMEOUT + _GRAPH_TIMEOUT + 5)),
     Check("graph-rerank", "graphiti", "CC_GRAPH_RERANK_ALIAS", _fixed(_RERANK_TIMEOUT)),
     Check("sandbox", "sandbox-runner", "CC_SANDBOX_RUNNER_URL", _fixed(_SHORT * 2)),
     Check("crawler", "crawler", "CC_CRAWLER_URL", _fixed(_SHORT * 2)),
@@ -1025,6 +1054,7 @@ _CHECK_IMPORTS = (
     "central_command.integrations.neo4j_writer",
     "central_command.integrations.graphiti",
     "central_command.integrations.graphiti_client",
+    "central_command.integrations.embedder_record",
     "central_command.integrations.email_facade",
     "central_command.integrations.exchange",
 )

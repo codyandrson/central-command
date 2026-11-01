@@ -354,6 +354,17 @@ def _break_graph_patches(f, mp):
     return "python scripts/apply_graphiti_patches.py"
 
 
+def _break_graph_embedder(f, mp):
+    from central_command.contract.failures import EMBEDDER_REMEDY
+    from central_command.integrations import embedder_record
+
+    async def mismatched(force=False):
+        return embedder_record._mismatch("iv", "the model behind cc-embedding has changed")
+
+    mp.setattr(embedder_record, "check", mismatched)
+    return EMBEDDER_REMEDY
+
+
 def _break_graph_rerank(f, mp):
     request = httpx.Request("POST", f"{PROXY}/rerank")
     f.rerank_error = graphiti_client.RerankHTTPError(
@@ -426,6 +437,7 @@ BREAKS = [
     ("embedding-as-app", _break_embedding), ("embedding-as-app", _break_embedding_key),
     ("graph", _break_graph), ("graph", _break_graph_neo4j),
     ("graph-patches", _break_graph_patches),
+    ("graph-embedder", _break_graph_embedder),
     ("graph-rerank", _break_graph_rerank), ("graph-rerank", _break_graph_rerank_kind),
     ("graph-rerank", _break_graph_rerank_malformed),
     ("sandbox", _break_sandbox),
@@ -457,6 +469,42 @@ async def test_each_check_fails_by_name_and_names_its_remedy(fakes, monkeypatch,
     assert others == {}, others
     assert doc["status"] == "fail" and selfcheck.exit_code(doc) == 1
     assert_no_marker(json.dumps(doc))
+
+
+async def test_graph_embedder_passes_on_an_empty_graph_and_skips_when_nothing_answers(fakes, monkeypatch):
+    """A fresh install has no vectors and no record: it must pass the installer's
+    verify. A check that cannot get an answer (Neo4j or the embedder down) is not
+    this row's finding; the graph and embedding-as-app rows say it."""
+    from central_command.integrations import embedder_record
+
+    async def empty(force=False):
+        return embedder_record.Verdict(embedder_record.ABSENT_EMPTY)
+
+    monkeypatch.setattr(embedder_record, "check", empty)
+    row = by_name(await selfcheck.run(mode="cli"))["graph-embedder"]
+    assert row["status"] == "pass" and "first graph write declares it" in row["message"]
+
+    async def unreachable(force=False):
+        raise ConnectionError("embedder down")
+
+    monkeypatch.setattr(embedder_record, "check", unreachable)
+    row = by_name(await selfcheck.run(mode="cli"))["graph-embedder"]
+    assert row["status"] == "skip" and row["message"].startswith("not applicable")
+    assert "graph and embedding-as-app" in row["message"]
+
+
+async def test_graph_embedder_asks_afresh_and_its_row_sits_beside_graphiti(fakes, monkeypatch):
+    from central_command.integrations import embedder_record
+
+    seen = []
+
+    async def fresh(force=False):
+        seen.append(force)
+        return embedder_record.VERDICT_OK
+
+    monkeypatch.setattr(embedder_record, "check", fresh)
+    row = by_name(await selfcheck.run(mode="cli"))["graph-embedder"]
+    assert seen == [True] and row["system"] == "graphiti" and row["status"] == "pass"
 
 
 # --- the one failure this module exists to catch -----------------------------------

@@ -240,6 +240,13 @@ def clear_cache() -> None:
     _cached = None
 
 
+def cached_verdict() -> Verdict | None:
+    """The last verdict this process reached, expired or not, or None before the
+    first. No network: it is what the retry sweep and the Systems row read to
+    know whether to ask, and a stale answer there only costs one more probe."""
+    return _cached[1] if _cached is not None else None
+
+
 @contextmanager
 def operator_session() -> Iterator[None]:
     """`check()` answers ok inside this block. For `graph_reembed`'s verification

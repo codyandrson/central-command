@@ -83,6 +83,11 @@ export function OutageBanners() {
             )}
             <RetryButton name={d.name} busy={retrying === d.name} onRetry={() => void retry(d.name)} />
           </span>
+          {d.error && (
+            <div className="basis-full font-normal text-foreground/80" data-testid={`outage-error-${d.name}`}>
+              {d.error}
+            </div>
+          )}
           {open[d.name] && <div className="basis-full"><Breakdown dep={d} /></div>}
         </div>
       ))}

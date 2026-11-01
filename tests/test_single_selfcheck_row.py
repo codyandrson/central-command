@@ -297,6 +297,7 @@ def test_the_modules_lines_are_reemitted_counted_and_logged(tree: Path):
         "PASS selfcheck-spine: ok\n"
         "PASS selfcheck-proxy-as-app: CC_DEFAULT_MODEL is listed\n"
         "WARN selfcheck-graph: CC_NEO4J_URL answered slowly\n"
+        "PASS selfcheck-graph-embedder: the graph holds no vectors and no embedder record yet\n"
         "some chatter that is not a protocol line\n",
         rc=2,
     )
@@ -306,8 +307,12 @@ def test_the_modules_lines_are_reemitted_counted_and_logged(tree: Path):
     lines = _protocol(r.stdout)
     assert "PASS selfcheck-spine: ok" in lines, lines
     assert "WARN selfcheck-graph: CC_NEO4J_URL answered slowly" in lines, lines
+    # A fresh install's graph-embedder row passes with no record: it is counted
+    # like any other and does not fail the installer's verify.
+    assert ("PASS selfcheck-graph-embedder: the graph holds no vectors and no embedder "
+            "record yet") in lines, lines
     row = [l for l in lines if l.startswith("PASS selfcheck:")]
-    assert row and "2 check(s) passed, 1 warned" in row[0], lines
+    assert row and "3 check(s) passed, 1 warned" in row[0], lines
     # The phase itself raised no FAIL for the row. The only FAIL selfcheck
     # line allowed is the ledger's own net (below), never the phase's.
     assert all("phase reported success but verify/selfcheck" in l

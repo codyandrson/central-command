@@ -368,12 +368,36 @@ def _reranker_line() -> str:
     return line
 
 
+async def _embedder_line() -> str | None:
+    """The embedder the graph declares: `embedder: cc-embedding 1024 epoch 1
+    (stable)`, or `embedder: record missing`. When this process's check has found
+    a mismatch (its cached verdict; no extra call) the reason follows, and it
+    ends with the command to run. Absent when the graph cannot be read: the
+    Neo4j row says that."""
+    from central_command.integrations import embedder_record
+
+    try:
+        record = await asyncio.wait_for(embedder_record.read_record(), timeout=_TIMEOUT)
+    except Exception:
+        return None
+    if not record or not record.get("alias"):
+        line = "embedder: record missing"
+    else:
+        line = (f"embedder: {record['alias']} {record.get('dimensions')} "
+                f"epoch {record.get('epoch')} ({record.get('state')})")
+    held = embedder_record.cached_verdict()
+    if held is not None and not held.open:
+        line += f" — MISMATCH: {held.reason}"
+    return line
+
+
 async def _graph_queue_detail() -> str | None:
     """The Graphiti row's detail: the ingest queue's line (absent when the
-    table cannot be read) and the reranker's."""
+    table cannot be read), the embedder record's and the reranker's."""
     queue = await _graph_queue_line()
-    rerank = _reranker_line()
-    return f"{queue} · {rerank}" if queue else rerank
+    embedder = await _embedder_line()
+    parts = [p for p in (queue, embedder, _reranker_line()) if p]
+    return " · ".join(parts)
 
 
 @router.get("/systems")

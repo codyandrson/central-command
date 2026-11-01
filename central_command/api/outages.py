@@ -51,7 +51,9 @@ async def list_outages() -> dict:
     (`repo.units_failing_despite_probe`): units past `retry_loud_after_attempts`
     whose recorded dependencies all probe up, bucketed under each of theirs.
     `total` is every waiting unit plus the interrupted ones — what the banner
-    shows. `local` is Postgres: state `n/a`, never probed."""
+    shows. A dependency that is down also carries `error`, the text its probe
+    recorded when it went down (an embedder mismatch: the reason, ending with
+    the command to run); absent when it is up or the probe said nothing. `local` is Postgres: state `n/a`, never probed."""
     counts = await repo.parked_unit_counts()
     probes = await repo.dependency_probe_states()
     failing: dict[str, list[dict]] = {}
@@ -70,7 +72,7 @@ async def list_outages() -> dict:
             state = "n/a"
         else:
             state = "down" if probe.get("state") == "down" else "up"
-        out.append({
+        row = {
             "name": name,
             "state": state,
             "checked_at": _iso(probe.get("checked_at")),
@@ -79,7 +81,10 @@ async def list_outages() -> dict:
             "interrupted": int(c["interrupted"]),
             "failing": failing.get(name, []),
             "total": sum(waiting.values()) + int(c["interrupted"]),
-        })
+        }
+        if state == "down" and probe.get("error"):
+            row["error"] = probe["error"]
+        out.append(row)
     return {"dependencies": out}
 
 
