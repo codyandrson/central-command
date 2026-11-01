@@ -54,9 +54,12 @@ def configured(monkeypatch):
     # Pinned test model everywhere a model is reachable (a real key in .env
     # would otherwise make the "offline" suite spend money), and a token so the
     # not-configured short-circuit is opted into per-test rather than by
-    # whatever the dev box has in .env.
+    # whatever the dev box has in .env. The URL too: the configured check is url
+    # AND token, and the suite's guard holds both blank.
     monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
+    monkeypatch.setattr(settings, "calendar_facade_url",
+                        "http://n8n.example.com:5678/webhook/cc-calendar-facade")
     monkeypatch.setattr(settings, "calendar_facade_token", "test-token")
     # Unlimited (0) contact budget by default — the throttle has its own tests
     # (tests/test_attention.py) and must not silently decide these. A finite
@@ -135,10 +138,129 @@ async def test_a_bare_date_all_day_event_beside_a_timed_one_does_not_crash(
     assert out["conflicts"] == []
 
 
-async def test_truncation_is_carried_through_honestly(monkeypatch):
-    monkeypatch.setattr(calendar_facade, "list_events", _Facade([], truncated=True))
-    out = await ea_calendar.day(0)
-    assert out["truncated"] is True and out["first_event_at"] is None
+# --- availability fails closed: free only on a complete list -------------------
+# One test per no-answer case. Each asserts the data and the words. The literal
+# refusal "do not treat it as free" is the one place the word may appear: it is a
+# refusal, and everything else in the answer must not claim free time.
+
+
+async def _assert_closed(reason: str):
+    out = await ea_calendar.day(1)
+    assert out == {"available": False, "reason": reason}
+    text = await tools.read_calendar(None, 1)
+    assert text == (f"availability UNKNOWN for {ea_calendar.day_name(1)}: {reason}; "
+                    "do not treat it as free")
+    assert "UNKNOWN" in text
+    assert "free" not in text.replace("do not treat it as free", "")
+
+
+def _facade_answers(monkeypatch, body: dict):
+    """The real `_call` against a 200 carrying `body`, as n8n's webhook sends it."""
+    class Answer:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return body
+
+    async def post(self, url, headers=None, json=None, **kwargs):
+        return Answer()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+
+
+async def test_a_truncated_window_is_unknown_not_a_short_day(monkeypatch):
+    monkeypatch.setattr(calendar_facade, "list_events", _Facade(
+        [_ev("2026-08-01T09:00:00-06:00", "2026-08-01T10:00:00-06:00")], truncated=True))
+    await _assert_closed("truncated: more events than the window shows")
+
+
+async def test_an_envelope_without_events_is_unknown(monkeypatch):
+    _facade_answers(monkeypatch, {"ok": True, "truncated": False})
+    with pytest.raises(calendar_facade.CalendarFacadeError,
+                       match="provider answered without an events list"):
+        await calendar_facade.list_events("2026-08-01T00:00:00Z", "2026-08-02T00:00:00Z")
+    await _assert_closed('calendar read failed (CalendarFacadeError): '
+                         '"provider answered without an events list"')
+
+
+async def test_an_envelope_whose_events_is_not_a_list_is_unknown(monkeypatch):
+    _facade_answers(monkeypatch, {"ok": True, "events": None, "truncated": False})
+    await _assert_closed('calendar read failed (CalendarFacadeError): '
+                         '"provider answered without an events list"')
+
+
+async def test_a_provider_2xx_without_items_is_unknown(monkeypatch):
+    """What the Google lib answers for that body
+    (`tests/test_n8n_workflows.py` runs the node itself)."""
+    message = "list - provider answered 2xx without an items array"
+    _facade_answers(monkeypatch, {"ok": False, "message": message})
+    out = await ea_calendar.day(1)
+    assert out["available"] is False and message in out["reason"]
+    await _assert_closed(out["reason"])
+
+
+async def test_a_semantic_failure_is_unknown(monkeypatch):
+    async def refused(*a, **kw):
+        raise calendar_facade.CalendarFacadeError(
+            "calendar façade list failed: HTTP 404 calendar not found", status_code=404)
+
+    monkeypatch.setattr(calendar_facade, "list_events", refused)
+    await _assert_closed('calendar read failed (CalendarFacadeError): '
+                         '"calendar façade list failed: HTTP 404 calendar not found"')
+
+
+async def test_an_unconfigured_provider_is_unknown_and_makes_no_call(monkeypatch):
+    monkeypatch.setattr(settings, "calendar_facade_token", "")
+    monkeypatch.setattr(calendar_facade, "list_events", _explode)
+    await _assert_closed("not configured")
+
+
+async def test_a_complete_empty_day_is_still_free(monkeypatch):
+    _facade_answers(monkeypatch, {"ok": True, "events": [], "truncated": False})
+    out = await ea_calendar.day(1)
+    assert out["available"] is True and out["event_count"] == 0
+    assert out["truncated"] is False and out["first_event_at"] is None
+    text = await tools.read_calendar(None, 1)
+    assert "UNKNOWN" not in text and json.loads(text)["event_count"] == 0
+
+
+@pytest.mark.parametrize("failure", [
+    httpx.ConnectTimeout(""),  # stringifies to nothing: only the cause chain says so
+    httpx.ConnectError("All connection attempts failed"),
+])
+async def test_an_outage_is_raised_never_answered(monkeypatch, failure):
+    async def down(self, *a, **k):
+        raise failure
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", down)
+    with pytest.raises(calendar_facade.CalendarFacadeError):
+        await ea_calendar.day(1)
+
+
+@pytest.mark.parametrize("status", [429, 503])
+async def test_a_provider_outage_status_is_raised_never_answered(monkeypatch, status):
+    class Answer:
+        status_code = status
+        text = "come back later"
+
+    async def post(self, *a, **k):
+        return Answer()
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    with pytest.raises(calendar_facade.CalendarFacadeError):
+        await ea_calendar.day(1)
+
+
+def test_every_word_the_ea_reads_says_an_unknown_day_is_not_free():
+    from central_command.runtime import packs
+
+    guidance = packs.charter_section(("calendar-read",))
+    assert "UNKNOWN" in guidance and "never as free time" in guidance
+    assert "`available: false`" in hb_actions._EA_FRAMING["morning_report"]
+    assert "availability UNKNOWN" in hb_actions._EA_FRAMING["week_ahead"]
+    assert "UNKNOWN" in tools.read_calendar.__doc__
 
 
 async def test_an_unconfigured_token_makes_no_call_at_all(monkeypatch):
@@ -281,6 +403,19 @@ async def test_the_brief_carries_the_calendar_and_says_it_is_read_only(
 
 @pytest.mark.graph_live
 @needs_pg
+async def test_a_truncated_day_reaches_the_brief_as_unknown(monkeypatch, stub_task):
+    monkeypatch.setattr(calendar_facade, "list_events", _Facade([], truncated=True))
+    await hb_actions._ea_contact("sched_cal_cut", {"kind": "morning_report"})
+
+    brief = stub_task[0]
+    block = json.loads(brief.split("```json\n")[1].split("\n```")[0])
+    assert block["calendar"] == {"available": False,
+                                 "reason": ea_calendar.TRUNCATED_REASON}
+    assert "the day is UNKNOWN" in brief and "never report it as free time" in brief
+
+
+@pytest.mark.graph_live
+@needs_pg
 async def test_an_unconfigured_calendar_leaves_the_brief_alone(
     monkeypatch, stub_task
 ):
@@ -391,7 +526,8 @@ async def test_read_calendar_degrades_without_retrying_a_semantic_failure(
 
     out = await tools.read_calendar(None, 0)
     assert calls["n"] == 1 and no_wait == []
-    assert out.startswith("calendar read failed (CalendarFacadeError)")
+    assert out.startswith("availability UNKNOWN for ")
+    assert 'calendar read failed (CalendarFacadeError): "calendar façade list refused"' in out
 
 
 async def test_read_calendar_clamps_the_day_offset(monkeypatch):
@@ -408,7 +544,8 @@ async def test_read_calendar_says_so_when_the_calendar_is_not_configured(
 ):
     monkeypatch.setattr(settings, "calendar_facade_token", "")
     monkeypatch.setattr(calendar_facade, "list_events", _explode)
-    assert "not configured" in await tools.read_calendar(None, 0)
+    out = await tools.read_calendar(None, 0)
+    assert "availability UNKNOWN" in out and "not configured" in out
 
 
 # --- slice A: the gated write path (2026-08-06) --------------------------------

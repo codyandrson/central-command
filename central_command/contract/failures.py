@@ -343,6 +343,36 @@ def classify_failure(exc: BaseException | None) -> str:
     return classify_failure_text(str(exc))
 
 
+_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
+
+
+def is_down(exc: BaseException | None) -> bool:
+    """Was a dependency DOWN, judged by `classify_failure` on the error and on
+    the chain of errors it wraps?
+
+    A façade error (`EmailFacadeError`, `CalendarFacadeError`) is the
+    integration's own type around the httpx failure that caused it, and its
+    message does not always carry a marker (a `ConnectTimeout` stringifies to
+    nothing) — so the cause chain is the evidence, and a façade's
+    `HTTP 5xx`/429 status, spelled in its message, counts as the status it
+    is. One classifier: this widens what reaches it, it adds no second policy.
+    It lives here because a read below the runtime tier (`reports/ea_calendar`)
+    has to tell an outage from a NO the same way the tools do.
+    """
+    seen: set[int] = set()
+    cur = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if classify_failure(cur) == TRANSIENT:
+            return True
+        if type(cur).__name__.endswith("FacadeError"):
+            m = _HTTP_STATUS.search(str(cur))
+            if m and int(m.group(1)) in TRANSIENT_STATUS:
+                return True
+        cur = cur.__cause__
+    return False
+
+
 def is_transient(exc: BaseException | None) -> bool:
     """Convenience for the event payloads: `{"transient": is_transient(e)}`."""
     return classify_failure(exc) == TRANSIENT

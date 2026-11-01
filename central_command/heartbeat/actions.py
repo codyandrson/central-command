@@ -465,7 +465,9 @@ _EA_FRAMING: dict[str, str] = {
         "operator wants prioritised today. This is the one contact where asking "
         "about priorities is the point rather than an interruption. Frame the "
         "day against the calendar block: what is on it, where the free stretches "
-        "are, and any conflict the operator has not resolved."
+        "are, and any conflict the operator has not resolved. A block with "
+        "`available: false` has no free stretches to report: say the day is "
+        "unknown and why."
     ),
     "week_ahead": (
         "This is the WEEK-AHEAD look — audit the coming week before it starts. "
@@ -475,7 +477,8 @@ _EA_FRAMING: dict[str, str] = {
         "travel buffer around them, conflicts, and anything on the board or in "
         "open follow-ups that has a deadline this week but no time on the "
         "calendar serving it. Propose the calendar changes that would fix what "
-        "you find rather than only listing problems."
+        "you find rather than only listing problems. A day whose read says "
+        "availability UNKNOWN is not an open day: say you could not see it."
     ),
 }
 
@@ -613,7 +616,9 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
            "READ-ONLY: you never change the calendar yourself — if something on "
            "it should change, propose the change (if you hold that pack) or "
            "tell the operator, and never imply anything has already been "
-           "created, moved or cancelled.\n" if "calendar" in snapshot else "")
+           "created, moved or cancelled. `available: false` means the day is "
+           "UNKNOWN (`reason` or `error` says why): say so, and never report it "
+           "as free time.\n" if "calendar" in snapshot else "")
         + "`open_tasks` is every task not yet finished, and "
         "`open_operator_items` every question still waiting on the operator: "
         "together they are what the team currently owes and is owed inside "

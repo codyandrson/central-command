@@ -645,8 +645,42 @@ async def test_each_dependencys_reader_answers_a_no_with_honest_text(monkeypatch
 
 async def test_a_calendar_that_is_not_configured_stays_text(monkeypatch):
     monkeypatch.setattr(settings, "calendar_facade_token", "")
+    from central_command.reports import ea_calendar
+
     out = await tools.read_calendar(_park_ctx(), 0)
-    assert out == "calendar unavailable (not configured)"
+    assert out == (f"availability UNKNOWN for {ea_calendar.day_name(0)}: not configured; "
+                   "do not treat it as free")
+
+
+@pytest.mark.parametrize("failure", [
+    httpx.ConnectTimeout(""),  # no marker in its text: only the cause chain says so
+    httpx.ConnectError("All connection attempts failed"),
+])
+async def test_a_calendar_outage_through_the_real_read_parks_and_never_answers(
+    monkeypatch, failure,
+):
+    """Through `ea_calendar.day` and the façade, not a patched `day`: the report
+    answers a NO itself now, and an outage must not be taken for one."""
+    monkeypatch.setattr(settings, "calendar_facade_url",
+                        "http://n8n.example.com:5678/webhook/cc-calendar-facade")
+    monkeypatch.setattr(settings, "calendar_facade_token", "token")
+
+    async def down(self, *a, **k):
+        raise failure
+
+    async def no_wait(delay):
+        return None
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", down)
+    monkeypatch.setattr(tools, "_sleep", no_wait)
+    with pytest.raises(CallDeferred) as paused:
+        await tools.read_calendar(_park_ctx(), 1)
+    assert paused.value.metadata["dependencies"] == ["calendar"]
+
+    with pytest.raises(Exception) as raised:
+        await tools.read_calendar(_park_ctx(park=False), 1)
+    assert not isinstance(raised.value, CallDeferred)
+    assert getattr(raised.value, tools._DEPENDENCIES_ATTR) == ("calendar",)
 
 
 async def test_a_local_reader_never_parks(monkeypatch):

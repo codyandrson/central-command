@@ -6,7 +6,11 @@ being routed AND every mode the control plane sends being validated."""
 
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 WF = Path(__file__).resolve().parents[1] / "deploy" / "n8n" / "workflows"
 
@@ -113,6 +117,38 @@ def test_every_calendar_mode_is_validated_and_routed_and_the_writes_are_the_thre
     methods = {n["name"]: n["parameters"].get("method", "GET")
                for n in provider["nodes"] if n["type"].endswith("httpRequest")}
     assert sorted(v for v in methods.values()) == ["DELETE", "GET", "PATCH", "POST"]
+
+
+def _run_list_node(tmp_path, response):
+    """The shipped 'Return: list' code, run by node with n8n's two accessors stubbed."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node needed")
+    code = _node(_load("lib-google-calendar.json"), "Return: list")["parameters"]["jsCode"]
+    script = tmp_path / "return_list.js"
+    script.write_text(
+        "const $ = () => ({ first: () => ({ json: { calendar_id: 'primary', max_results: 250 } }) });\n"
+        f"const $input = {{ first: () => ({{ json: {json.dumps(response)} }}) }};\n"
+        f"const out = (function () {{\n{code}\n}})();\n"
+        "process.stderr.write(JSON.stringify(out));\n",
+        encoding="utf-8",
+    )
+    done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stderr)[0]["json"]
+
+
+@pytest.mark.parametrize("body", [{}, {"items": None}, {"items": {}}, "not json"])
+def test_a_2xx_without_an_items_array_is_a_no_never_an_empty_list(tmp_path, body):
+    """The availability read calls an empty list a free day (epic-work-site-safety R2)."""
+    out = _run_list_node(tmp_path, {"statusCode": 200, "body": body})
+    assert out["ok"] is False and "items" in out["message"]
+    assert "events" not in out
+
+
+def test_an_empty_items_array_is_still_a_complete_empty_list(tmp_path):
+    out = _run_list_node(tmp_path, {"statusCode": 200, "body": {"items": []}})
+    assert out == {"ok": True, "events": [], "truncated": False}
 
 
 def test_no_shipped_workflow_carries_a_previous_name_or_an_instance_id():

@@ -218,6 +218,59 @@ async def test_an_exchange_error_becomes_a_calendar_facade_error(on_exchange, no
         await calendar_facade.list_events("2026-09-25T00:00:00Z", "2026-09-26T00:00:00Z")
 
 
+def _exchange_day(monkeypatch, events, truncated=False):
+    """An Exchange-only site: the façade's url and token both blank, as the
+    apply script leaves them and the suite's guard holds them."""
+    monkeypatch.setattr(settings, "calendar_facade_url", "")
+    monkeypatch.setattr(settings, "calendar_facade_token", "")
+    seen = []
+
+    async def listed(time_min, time_max, calendar_id="primary"):
+        seen.append(calendar_id)
+        return {"events": events, "truncated": truncated}
+
+    monkeypatch.setattr(exchange, "list_events", listed)
+    return seen
+
+
+@pytest.mark.asyncio
+async def test_an_exchange_only_site_is_configured_and_its_day_comes_from_exchange(
+    on_exchange, no_http, monkeypatch,
+):
+    from central_command.reports import ea_calendar
+    seen = _exchange_day(monkeypatch, [{"start": "2026-09-25T09:00:00+00:00",
+                                        "end": "2026-09-25T10:00:00+00:00",
+                                        "summary": "Standup"}])
+    assert calendar_facade.configured() is False
+    assert calendar_facade.provider_configured() is True
+
+    out = await ea_calendar.day(1)
+    assert seen == ["primary"]
+    assert out["available"] is True and out["event_count"] == 1
+    assert out["events"][0]["summary"] == "Standup"
+
+
+@pytest.mark.asyncio
+async def test_an_exchange_window_past_its_cap_is_unknown(on_exchange, no_http, monkeypatch):
+    from central_command.reports import ea_calendar
+    _exchange_day(monkeypatch, [], truncated=True)
+    assert await ea_calendar.day(1) == {"available": False,
+                                        "reason": ea_calendar.TRUNCATED_REASON}
+
+
+@pytest.mark.asyncio
+async def test_an_exchange_refusal_is_unknown(on_exchange, no_http, monkeypatch):
+    from central_command.reports import ea_calendar
+    _exchange_day(monkeypatch, [])
+
+    async def refused(*a, **k):
+        raise exchange.ExchangeError("EWS said no")
+
+    monkeypatch.setattr(exchange, "list_events", refused)
+    out = await ea_calendar.day(1)
+    assert out["available"] is False and "EWS said no" in out["reason"]
+
+
 @pytest.mark.asyncio
 async def test_without_exchange_the_calendar_facade_still_calls_n8n(on_gmail, monkeypatch):
     seen = {}

@@ -64,6 +64,25 @@ def test_configured_needs_url_and_token(module, monkeypatch):
     assert module.configured() is False
 
 
+def test_provider_configured_counts_either_provider(monkeypatch):
+    url_key, token_key, url = URL[calendar_facade]
+    monkeypatch.setattr(settings, url_key, url)
+    monkeypatch.setattr(settings, token_key, "")
+    assert calendar_facade.provider_configured() is False
+
+    monkeypatch.setattr(settings, token_key, "t")
+    assert calendar_facade.provider_configured() is True
+
+    # An Exchange site: no façade token, and `configured()` still says so.
+    monkeypatch.setattr(settings, token_key, "")
+    monkeypatch.setattr(settings, "exchange_url", "https://mail.example.com/ews/exchange.asmx",
+                        raising=False)
+    monkeypatch.setattr(settings, "exchange_username", "operator@example.com", raising=False)
+    monkeypatch.setattr(settings, "exchange_password", "secret", raising=False)
+    assert calendar_facade.configured() is False
+    assert calendar_facade.provider_configured() is True
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("module", [email_facade, calendar_facade])
 async def test_unconfigured_raises_a_semantic_error_before_any_socket(module, monkeypatch):

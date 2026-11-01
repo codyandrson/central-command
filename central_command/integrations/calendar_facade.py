@@ -48,9 +48,17 @@ def _exchange():
 
 def configured() -> bool:
     """True when the n8n calendar façade has an address AND a token. The
-    default URL is never empty, so the token is the signal (as selfcheck and
-    `reports/ea_calendar.py` already treat it)."""
+    default URL is never empty, so the token is the signal (as selfcheck
+    already treats it)."""
     return bool(settings.calendar_facade_url and settings.calendar_facade_token)
+
+
+def provider_configured() -> bool:
+    """True when ANY calendar provider can answer: the n8n façade, or the native
+    Exchange client. An Exchange site leaves the façade token empty
+    (`deploy/n8n/apply-workflows.sh`), so the façade's own check would call it
+    unconfigured. `configured()` stays the n8n path's gate."""
+    return configured() or _exchange() is not None
 
 
 async def _call(payload: dict, timeout: float = 60.0) -> dict:
@@ -98,7 +106,8 @@ async def list_events(
 
     Returns the envelope rather than a bare list ONLY because `truncated` is a
     fact about the read that the caller must be able to state honestly — a
-    brief that silently drops events is worse than one that says it was cut.
+    brief that silently drops events is worse than one that says it was cut. An
+    envelope without an `events` list is a provider failure, never an empty day.
     Each event is already normalised by the n8n lib (start, end, all_day,
     summary, location, attendee_count, organizer_is_self, has_agenda, declined) —
     and `integrations/exchange.py` builds the same shape in Python.
@@ -115,7 +124,10 @@ async def list_events(
         "time_max": time_max,
         "calendar_id": calendar_id,
     })
-    return {"events": out.get("events", []), "truncated": bool(out.get("truncated"))}
+    events = out.get("events")
+    if not isinstance(events, list):
+        raise CalendarFacadeError("provider answered without an events list")
+    return {"events": events, "truncated": bool(out.get("truncated"))}
 
 
 # --- writes: EXECUTOR-ONLY (see the module docstring) --------------------------

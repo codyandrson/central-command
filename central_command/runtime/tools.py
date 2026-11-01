@@ -18,12 +18,12 @@ from pydantic_ai import CallDeferred, ModelRetry, RunContext
 
 from central_command.config import settings as _settings
 from central_command.contract import (
-    Action, DependencyDown, Evidence, Proposal, Reversibility, TRANSIENT,
-    classify_failure, validate_action_args, validate_proposal_shape,
+    Action, DependencyDown, Evidence, Proposal, Reversibility,
+    validate_action_args, validate_proposal_shape,
 )
 from central_command.contract import dependencies as _dependencies
 from central_command.contract.dependencies import TOOL_DEPENDENCY, is_parkable, parkable_reads
-from central_command.contract.failures import TRANSIENT_STATUS
+from central_command.contract.failures import is_down as _is_down
 from central_command.integrations import confluence, forge, graphiti, jira, litellm_credstore
 from central_command.integrations import litellm as litellm_client
 from central_command.runtime.deps import ThreadDecision, TriageDeps
@@ -695,7 +695,8 @@ async def read_calendar(ctx: RunContext, day_offset: int = 0) -> str:
     Today's calendar is already in your brief block — use this tool for a
     DIFFERENT day the operator asks about ("am I free Thursday?"), not to
     re-read what you were handed. Conflicts are computed for you; a declined
-    invitation and an all-day marker are not commitments.
+    invitation and an all-day marker are not commitments. An answer that says
+    availability UNKNOWN saw nothing: report the day as unknown, never as free.
 
     Read-only: you cannot move, create or cancel anything on the calendar, and
     must never imply otherwise. If a change is needed, say so and let the
@@ -708,12 +709,17 @@ async def read_calendar(ctx: RunContext, day_offset: int = 0) -> str:
     except (TypeError, ValueError):
         return "day_offset must be a whole number of days from today (0-7)"
 
+    def unknown(reason) -> str:
+        return (f"availability UNKNOWN for {ea_calendar.day_name(offset)}: {reason}; "
+                "do not treat it as free")
+
     try:
         data = await _read_with_retry(lambda: ea_calendar.day(offset))
     except Exception as e:  # noqa: BLE001
-        return _read_failed("calendar read", e)
+        _raise_if_down(e)
+        return unknown(ea_calendar.failure_reason(e))
     if not data.get("available"):
-        return f"calendar unavailable ({data.get('reason') or data.get('error')})"
+        return unknown(data.get("reason") or data.get("error"))
     return _clip(json.dumps(data, default=str))
 
 
@@ -850,34 +856,6 @@ async def _read_with_retry(
                     raise DependencyDown(_attributed(dependency, e), tool, e) from e
                 raise
             await _sleep(delay)
-
-
-_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
-
-
-def _is_down(e: BaseException) -> bool:
-    """Was a dependency DOWN, judged by `contract.classify_failure` on the
-    error and on the chain of errors it wraps?
-
-    A façade error (`EmailFacadeError`, `CalendarFacadeError`) is the
-    integration's own type around the httpx failure that caused it, and its
-    message does not always carry a marker (a `ConnectTimeout` stringifies to
-    nothing) — so the cause chain is the evidence, and a façade's
-    `HTTP 5xx`/429 status, spelled in its message, counts as the status it
-    is. One classifier: this widens what reaches it, it adds no second policy.
-    """
-    seen: set[int] = set()
-    cur: BaseException | None = e
-    while cur is not None and id(cur) not in seen:
-        seen.add(id(cur))
-        if classify_failure(cur) == TRANSIENT:
-            return True
-        if type(cur).__name__.endswith("FacadeError"):
-            m = _HTTP_STATUS.search(str(cur))
-            if m and int(m.group(1)) in TRANSIENT_STATUS:
-                return True
-        cur = cur.__cause__
-    return False
 
 
 def _attributed(dependencies: tuple[str, ...], e: BaseException) -> tuple[str, ...]:
