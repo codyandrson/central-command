@@ -49,6 +49,19 @@ describe('ReadOnlySessionNotice', () => {
       expect(onRerun).toHaveBeenCalledWith('sess_old');
     });
 
+    it('says in the confirmation which charter a stale run would move to', async () => {
+      const user = userEvent.setup({ delay: null });
+      render(
+        <ReadOnlySessionNotice
+          composer={{ ...finishedRun, session: { ...finishedRun.session!, charterVersion: 2, charterCurrent: 4 } }}
+          onRerun={vi.fn()}
+        />,
+      );
+      await user.click(screen.getByRole('button', { name: 'Re-run' }));
+      expect(within(screen.getByRole('alertdialog')).getByText(/It ran under charter v2; a re-run uses v4\./))
+        .toBeInTheDocument();
+    });
+
     it('offers nothing the server did not offer, whatever the status says', () => {
       render(
         <ReadOnlySessionNotice

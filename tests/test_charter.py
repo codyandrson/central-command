@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 
+import uuid
+
 import pytest
 
 from central_command.config import settings
@@ -127,3 +129,49 @@ async def test_without_versions_the_builtin_charter_applies():
     run = await ingest_and_propose("DEMO-1 slipped to Aug 3.", model=make_spike_model())
     state = await repo.load_paused_session(run["session_id"])
     assert "inbox-triage agent" in json.dumps(state["messages"])
+
+
+# ── the stamp on the session row ────────────────────────────────────────────
+
+
+async def test_every_session_creator_stamps_the_current_version():
+    current = await repo.save_charter_version(AGENT, "The stamped charter.", "test")
+    running, lane, paused = ("sess_" + uuid.uuid4().hex[:12] for _ in range(3))
+    await repo.create_running_session(running, AGENT)
+    await repo.create_conversation_session(lane, AGENT)
+    await repo.save_paused_session(paused, AGENT, {"messages": []})
+    for session_id in (running, lane, paused):
+        assert (await repo.get_session(session_id))["charter_version"] == current["version"]
+
+
+async def test_the_built_in_charter_stamps_zero():
+    agent = "stamp-" + uuid.uuid4().hex[:8]
+    await repo.upsert_agent(agent, agent, "", "")
+    session_id = "sess_" + uuid.uuid4().hex[:12]
+    await repo.create_running_session(session_id, agent)
+    row = await repo.get_session(session_id)
+    assert (row["charter_version"], row["charter_current"]) == (0, 0)
+
+
+async def test_a_row_from_before_the_stamp_stays_null_with_no_derivation():
+    current = await repo.save_charter_version(AGENT, "A charter that exists.", "test")
+    session_id = "sess_" + uuid.uuid4().hex[:12]
+    conn = await repo._conn()
+    try:
+        await conn.execute(
+            "insert into session (id, agent_id, status) values ($1, $2, 'DONE')",
+            session_id, AGENT)
+    finally:
+        await conn.close()
+    row = await repo.get_session(session_id)
+    assert (row["charter_version"], row["charter_current"]) == (None, current["version"])
+    listed = next(r for r in await repo.list_sessions(limit=500, agent_id=AGENT)
+                  if r["id"] == session_id)
+    assert listed["charter_version"] is None
+    assert listed["charter_current"] == current["version"]
+
+
+async def test_an_ingest_run_stamps_through_the_one_creator():
+    current = await repo.save_charter_version(AGENT, "The triage charter.", "test")
+    out = await ingest_and_propose("Please look at this.", model=make_spike_model())
+    assert (await repo.get_session(out["session_id"]))["charter_version"] == current["version"]

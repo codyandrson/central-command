@@ -5,6 +5,7 @@ import { useModelEffort } from './useModelEffort';
 import type { SourceEmail } from '@/types';
 import type { RerunLink } from '../rerunLink';
 import { RerunButton } from './RerunButton';
+import type { CharterStamp } from '../charterStamp';
 
 interface ChatHeaderProps {
   onReset?: () => void;
@@ -29,6 +30,8 @@ interface ChatHeaderProps {
   rerunSessionId?: string | null;
   rerunRefusal?: string | null;
   onRerun?: (sessionId: string) => Promise<void>;
+  /** Central Command: which charter this session ran under, from the server's row. */
+  charter?: CharterStamp | null;
 }
 
 /** The email that spawned this lane — a chip in the header, collapsed by
@@ -88,6 +91,7 @@ export function ChatHeader({
   rerunSessionId,
   rerunRefusal,
   onRerun,
+  charter,
 }: ChatHeaderProps) {
   const {
     modelOptions,
@@ -165,7 +169,16 @@ export function ChatHeader({
         </button>
       ))}
 
-      {rerunSessionId && onRerun && <RerunButton sessionId={rerunSessionId} onRerun={onRerun} />}
+      {charter && (
+        <span className="cockpit-badge shrink-0 whitespace-nowrap" data-tone={charter.newer ? 'warning' : 'muted'}>
+          {charter.label}
+          {charter.newer && ` · ${charter.newer}`}
+        </span>
+      )}
+
+      {rerunSessionId && onRerun && (
+        <RerunButton sessionId={rerunSessionId} onRerun={onRerun} hint={charter?.rerunHint} />
+      )}
       {rerunRefusal && (
         <button type="button" disabled className="cockpit-badge shrink-0 whitespace-nowrap" data-tone="muted"
           title={`Cannot be re-run: ${rerunRefusal}`}>

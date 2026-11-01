@@ -510,3 +510,47 @@ async def test_a_failing_conclusion_falls_back_to_resting_the_session(
     assert await repo.session_status(sid) == "AWAITING_OPERATOR"
     kinds = [e["kind"] for e in await repo.list_events(since_id=since)]
     assert "session.resume_failed" in kinds
+
+
+# ── the charter stamp ───────────────────────────────────────────────────────
+
+
+@pytest.fixture
+async def clean_charter():
+    """A charter saved here must not become every later test's CURRENT one."""
+    yield
+    conn = await repo._conn()
+    try:
+        await conn.execute("delete from guidance_version where agent_id = 'jira-expert'")
+    finally:
+        await conn.close()
+
+
+@needs_pg
+async def test_a_conversation_stamps_the_version_it_started_under(clean_charter):
+    agent = "jira-expert"
+    first = await repo.save_charter_version(agent, "Charter one.", "test")
+    out = await converse.start_conversation(agent, "Hello.", model=_model())
+    assert (await repo.get_session(out["session_id"]))["charter_version"] == first["version"]
+
+    second = await repo.save_charter_version(agent, "Charter two.", "test")
+    row = await repo.get_session(out["session_id"])
+    assert (row["charter_version"], row["charter_current"]) == (first["version"], second["version"])
+
+    await converse.conversation_turn(out["session_id"], "Again.", model=_model())
+    assert (await repo.get_session(out["session_id"]))["charter_version"] == first["version"], (
+        "a later turn runs on the persisted prompt, so the stamp stays"
+    )
+
+
+@needs_pg
+async def test_a_lane_opened_empty_stamps_the_charter_of_its_first_turn(clean_charter):
+    """Its charter loads at the first message, however long after the lane opened."""
+    agent = "jira-expert"
+    await repo.save_charter_version(agent, "Charter when opened.", "test")
+    lane = (await converse.start_conversation(agent))["session_id"]
+    current = await repo.save_charter_version(agent, "Charter at the first turn.", "test")
+
+    await converse.conversation_turn(lane, "Hello.", model=_model())
+
+    assert (await repo.get_session(lane))["charter_version"] == current["version"]

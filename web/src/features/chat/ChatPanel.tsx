@@ -6,6 +6,7 @@ import { InputBar, type InputBarHandle } from './InputBar';
 import { SearchBar } from './SearchBar';
 import { useMessageSearch } from './useMessageSearch';
 import { composerRerunLinks } from './rerunLink';
+import { charterStamp } from './charterStamp';
 import { ActivityLog, ChatHeader, ProcessingIndicator, ReadOnlySessionNotice, ScrollToBottomButton, StreamingMessage, ToolGroupBlock } from './components';
 import { isMessageCollapsible } from './types';
 import type { ChatMsg, ImageAttachment, OutgoingUploadPayload } from './types';
@@ -306,6 +307,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         rerunRefusal={composer?.enabled !== false && composer?.session?.status !== 'RUNNING' && !composer?.rerun?.eligible
           ? composer?.rerun?.reason : null}
         onRerun={onRerun}
+        charter={charterStamp(composer?.session)}
       />
 
       {/* Search Bar */}

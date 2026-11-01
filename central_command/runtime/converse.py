@@ -292,6 +292,8 @@ async def _turn(session_id: str, agent_id: str, message: str, model, *, first: b
     if not first:
         run_state = await repo.get_session_run_state(session_id)
         history = load_messages(run_state) if run_state else None
+        if history is None:
+            await repo.restamp_unstarted_session(session_id)
         await repo.mark_session_running(session_id)
 
     prompt = message if first else message

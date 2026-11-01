@@ -122,17 +122,24 @@ async def upsert_agent(agent_id: str, name: str, model: str, charter: str) -> No
         await conn.close()
 
 
+def _current_charter_sql(agent_id_sql: str) -> str:
+    """The agent's CURRENT charter version as a SQL expression, 0 for the built-in
+    code charter. In the row's own statement, so a stamp and its row are one write."""
+    return ("coalesce((select g.version from guidance_version g "
+            f"where g.agent_id = {agent_id_sql} and g.status = 'CURRENT'), 0)")
+
+
 async def save_paused_session(session_id: str, agent_id: str, run_state: dict) -> None:
     """MERGE, not replace — see `update_session_run_state`."""
     conn = await _conn()
     try:
         await conn.execute(
-            """
-            insert into session (id, agent_id, status, run_state)
-            values ($1, $2, 'AWAITING_HUMAN', $3::jsonb)
+            f"""
+            insert into session (id, agent_id, status, run_state, charter_version)
+            values ($1, $2, 'AWAITING_HUMAN', $3::jsonb, {_current_charter_sql('$2')})
             on conflict (id) do update
               set status = 'AWAITING_HUMAN',
-                  run_state = coalesce(session.run_state, '{}'::jsonb) || $3::jsonb,
+                  run_state = coalesce(session.run_state, '{{}}'::jsonb) || $3::jsonb,
                   updated_at = now()
             """,
             session_id, agent_id, json.dumps(run_state),
@@ -229,9 +236,10 @@ async def create_running_session(
     conn = await _conn()
     try:
         await conn.execute(
-            """
-            insert into session (id, agent_id, status, parent_session_id, rerun_of)
-            values ($1, $2, 'RUNNING', $3, $4)
+            f"""
+            insert into session (id, agent_id, status, parent_session_id, rerun_of,
+                                 charter_version)
+            values ($1, $2, 'RUNNING', $3, $4, {_current_charter_sql('$2')})
             on conflict (id) do nothing
             """,
             session_id, agent_id, parent_session_id, rerun_of,
@@ -840,13 +848,30 @@ async def create_conversation_session(
     conn = await _conn()
     try:
         await conn.execute(
-            """
+            f"""
             insert into session (id, agent_id, status, mode, rerun_of,
-                                 model_override, thinking_override)
-            values ($1, $2, 'RUNNING', 'conversation', $3, $4, $5)
+                                 model_override, thinking_override, charter_version)
+            values ($1, $2, 'RUNNING', 'conversation', $3, $4, $5,
+                    {_current_charter_sql('$2')})
             on conflict (id) do nothing
             """,
             session_id, agent_id, rerun_of, model_override, thinking_override,
+        )
+    finally:
+        await conn.close()
+
+
+async def restamp_unstarted_session(session_id: str) -> None:
+    """A lane opened with no message loads its charter at its first turn, so the
+    version it started under is the one current then. Only while it has no record."""
+    conn = await _conn()
+    try:
+        await conn.execute(
+            f"""
+            update session set charter_version = {_current_charter_sql('session.agent_id')}
+             where id = $1 and run_state is null
+            """,
+            session_id,
         )
     finally:
         await conn.close()
@@ -1282,6 +1307,8 @@ async def list_sessions(
             select s.id, s.agent_id, s.status, s.mode, s.created_at, s.updated_at,
                    s.parent_session_id, s.closed_reason, s.model_override,
                    s.thinking_override, s.exec_failure, s.rerun_of, s.rerun_by,
+                   s.charter_version,
+                   {_current_charter_sql('s.agent_id')} as charter_current,
                    (select par.agent_id from session par
                      where par.id = s.parent_session_id) as parent_agent_id,
                    (select p.intent from proposal p where p.session_id = s.id
@@ -1871,7 +1898,9 @@ async def get_session(session_id: str) -> dict | None:
         row = await conn.fetchrow(
             "select id, agent_id, status, mode, parent_session_id, closed_reason, "
             "model_override, thinking_override, stop_requested, exec_failure, "
-            "rerun_of, rerun_by, created_at, updated_at "
+            "rerun_of, rerun_by, charter_version, "
+            f"{_current_charter_sql('session.agent_id')} as charter_current, "
+            "created_at, updated_at "
             "from session where id = $1",
             session_id,
         )

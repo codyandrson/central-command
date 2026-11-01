@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ChatHeader } from './ChatHeader';
 import { rerunLinks } from '../rerunLink';
+import { charterStamp } from '../charterStamp';
 import { useModelEffort } from './useModelEffort';
 
 // Mock the useModelEffort hook
@@ -86,6 +87,31 @@ describe('ChatHeader', () => {
     const refused = screen.getByRole('button', { name: 'Re-run' });
     expect(refused).toBeDisabled();
     expect(refused).toHaveAttribute('title', 'Cannot be re-run: no stored inputs');
+  });
+
+  it('says which charter the session ran under and whether a newer one exists', () => {
+    vi.mocked(useModelEffort).mockReturnValue(defaultMockHook);
+    const header = (row: { charterVersion: number | null; charterCurrent: number | null }) => (
+      <ChatHeader onAbort={mockOnAbort} isGenerating={false} charter={charterStamp(row)}
+        rerunSessionId="sess_1" onRerun={vi.fn()} />
+    );
+
+    const { rerender } = render(header({ charterVersion: 3, charterCurrent: 3 }));
+    expect(screen.getByText('charter v3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Re-run' })).not.toHaveAttribute('title');
+
+    rerender(header({ charterVersion: 3, charterCurrent: 5 }));
+    expect(screen.getByText(/charter v3 · a newer charter \(v5\) exists/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Re-run' }))
+      .toHaveAttribute('title', 'It ran under charter v3; a re-run uses v5.');
+
+    rerender(header({ charterVersion: null, charterCurrent: 5 }));
+    expect(screen.getByText('charter unknown')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Re-run' }))
+      .toHaveAttribute('title', 'Which charter it ran under is unknown; a re-run uses v5.');
+
+    rerender(<ChatHeader onAbort={mockOnAbort} isGenerating={false} charter={charterStamp(null)} />);
+    expect(screen.queryByText(/charter/)).not.toBeInTheDocument();
   });
 
   it('shows the file browser expand button when provided', () => {

@@ -102,6 +102,18 @@ async def test_a_session_row_carries_the_rerun_link_both_ways(monkeypatch):
     assert (new["rerunOf"], new["rerunBy"]) == ("sess_old", None)
 
 
+async def test_a_session_row_carries_its_charter_stamp_and_the_current_version(monkeypatch):
+    _wire(monkeypatch, [{**_row("sess_stale"), "charter_version": 3, "charter_current": 5},
+                        {**_row("sess_old"), "charter_version": None, "charter_current": 5}])
+
+    stale, old = (await nerve_gateway._sessions_list({}))["sessions"][:2]
+
+    assert (stale["charterVersion"], stale["charterCurrent"]) == (3, 5)
+    assert (old["charterVersion"], old["charterCurrent"]) == (None, 5), (
+        "a row from before the stamp stays null on the wire; the cockpit says unknown"
+    )
+
+
 async def test_a_waiting_session_is_not_running_and_still_gets_a_label(monkeypatch):
     _wire(monkeypatch, [_row("sess_wait", status="AWAITING_HUMAN", task_title=None)])
 

@@ -43,6 +43,17 @@ def pinned(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+async def clean_charter():
+    """A charter saved here must not become every later test's CURRENT one."""
+    yield
+    conn = await repo._conn()
+    try:
+        await conn.execute("delete from guidance_version where agent_id = $1", AGENT)
+    finally:
+        await conn.close()
+
+
+@pytest.fixture(autouse=True)
 async def enrolled_items():
     """An item left CLAIMED, or PROCESSED over an open proposal, holds the
     relatedness lock against every later item of its sender family, and
@@ -866,3 +877,37 @@ async def test_a_landing_proposal_refuses_a_conversation_too():
     lane = await _conversation()
     await _proposal(lane, "APPROVED")
     await _assert_refused(lane, "still landing")
+
+
+# ── the charter stamp ───────────────────────────────────────────────────────
+
+
+async def test_a_rerun_carries_the_current_version_and_the_old_keeps_its_own():
+    before = await repo.save_charter_version(AGENT, "The charter before.", "test")
+    task_id, old = await _finished_task()
+    after = await repo.save_charter_version(AGENT, "The charter after.", "test")
+
+    stale = await repo.get_session(old)
+    assert (stale["charter_version"], stale["charter_current"]) == (before["version"], after["version"])
+
+    new = (await _rpc_rerun(old))["sessionId"]
+    row = await _settled(new)
+
+    assert row["charter_version"] == after["version"]
+    assert (await repo.get_session(old))["charter_version"] == before["version"]
+    composer = (await nerve_gateway._dispatch(
+        "chat.history", {"sessionKey": f"agent:{AGENT}:{old}"}, _noop))["composer"]
+    assert composer["session"]["charterVersion"] == before["version"]
+    assert composer["session"]["charterCurrent"] == after["version"]
+
+
+async def test_a_conversation_rerun_carries_the_current_version_too():
+    before = await repo.save_charter_version(AGENT, "The lane charter before.", "test")
+    old = await _conversation()
+    after = await repo.save_charter_version(AGENT, "The lane charter after.", "test")
+
+    new = (await _rpc_rerun(old))["sessionId"]
+    row = await _settled(new)
+
+    assert row["charter_version"] == after["version"]
+    assert (await repo.get_session(old))["charter_version"] == before["version"]

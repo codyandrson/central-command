@@ -17,6 +17,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import type { ChatComposerState } from '@/types';
 import { composerRerunLinks } from '../rerunLink';
 import { RerunButton } from './RerunButton';
+import { charterStamp } from '../charterStamp';
 
 const TERMINAL_TASK = new Set(['DONE', 'FAILED', 'CANCELLED']);
 const TERMINAL_SESSION = new Set(['DONE', 'FAILED']);
@@ -209,7 +210,13 @@ export function ReadOnlySessionNotice({
 
           {(canRerun || (links.length > 0 && onOpenSession)) && (
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              {canRerun && <RerunButton sessionId={session!.id} onRerun={onRerun!} />}
+              {canRerun && (
+                <RerunButton
+                  sessionId={session!.id}
+                  onRerun={onRerun!}
+                  hint={charterStamp(session)?.rerunHint}
+                />
+              )}
               {onOpenSession && links.map(link => (
                 <Button
                   key={link.sessionKey}

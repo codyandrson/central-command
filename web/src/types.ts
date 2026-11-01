@@ -61,6 +61,10 @@ export interface Session {
   /** Central Command: the session this one re-runs, and the one that re-ran it. */
   rerunOf?: string | null;
   rerunBy?: string | null;
+  /** Central Command: the charter version it started under (null: unknown), and
+   *  the agent's current one. */
+  charterVersion?: number | null;
+  charterCurrent?: number | null;
 }
 
 /** Central Command: a dispatcher-claimed email — the work_item a session was
@@ -329,6 +333,9 @@ export interface ChatComposerState {
     /** The session this one re-runs, and the session that re-ran this one. */
     rerunOf?: string | null;
     rerunBy?: string | null;
+    /** The charter version it started under (null: unknown), and the current one. */
+    charterVersion?: number | null;
+    charterCurrent?: number | null;
   } | null;
   /** Whether Re-run is on offer for this session, and if not, why. */
   rerun?: { eligible: boolean; reason?: string | null };

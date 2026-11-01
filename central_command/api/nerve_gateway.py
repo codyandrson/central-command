@@ -139,6 +139,10 @@ def _session_row_dict(
         # The re-run pair (ids; the row they come from is the server's own).
         "rerunOf": row.get("rerun_of"),
         "rerunBy": row.get("rerun_by"),
+        # The version this session started under (null: from before the stamp,
+        # unknown) and the agent's current one, read now.
+        "charterVersion": row.get("charter_version"),
+        "charterCurrent": row.get("charter_current"),
         "model": _row_model(row, agent_models),
         # Per-session thinking override — the effort dropdown's saved value
         # (`useModelEffort` reads `thinkingLevel` off the session row); absent/
@@ -688,6 +692,8 @@ async def _composer_state(key: str) -> dict:
         "closedReason": session.get("closed_reason"),
         "rerunOf": session.get("rerun_of"),
         "rerunBy": session.get("rerun_by"),
+        "charterVersion": session.get("charter_version"),
+        "charterCurrent": session.get("charter_current"),
     } if session else None
     # Whether Re-run is offered, on the server's account: the cockpit draws the
     # button from this and never from the status it can see.

@@ -884,6 +884,11 @@ alter table session add column if not exists closed_reason text;
 -- is created. Plain text: the new row does not exist yet when the old one names it.
 alter table session add column if not exists rerun_of text;
 alter table session add column if not exists rerun_by text;
+-- The charter version this session started under, stamped at creation; 0 is the
+-- built-in code charter. NULL is a row from before the stamp: it stays unknown, and
+-- nothing derives it from timestamps. Not `run_state.charter_shown`, which is the
+-- coach's record of its target's charter.
+alter table session add column if not exists charter_version integer;
 
 -- A FINAL execution failure (approved proposal, write blew up, no redraft)
 -- rests its session OPEN and flagged instead of closing it — operator's rule
