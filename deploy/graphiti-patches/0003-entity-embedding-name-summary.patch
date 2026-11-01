@@ -1,0 +1,35 @@
+# Central Command local patch (no upstream number): extracted entities are
+# embedded as name + newline + summary, the one text recipe
+# (central_command/contract/embedding_text.py, kind 'entity').
+#
+# Seam: graphiti_core/nodes.py create_entity_node_embeddings. add_episode reaches
+# it from extract_attributes_from_nodes (utils/maintenance/node_operations.py) AFTER
+# the entity summaries are written, so node.summary is the final summary. Upstream
+# embeds node.name alone there, which left extractor-made vectors in a different
+# space from the curation writer's (name + summary) and from the re-embed.
+#
+# The second seam, EntityNode.generate_name_embedding (same file), is NOT on the
+# add_episode path and is deliberately left alone.
+#
+# The patch cannot import central_command, so the three lines of embedding_text
+# are inlined: (name + "\n" + (summary or "")).strip(). tests/test_graphiti_patches.py
+# applies this patch to a scratch copy of the installed package and asserts the
+# input it hands the embedder equals embedding_text('entity', name, summary).
+#
+# Written for graphiti-core 0.30.2 (see PINNED_VERSION in
+# central_command/integrations/graphiti_patches.py).
+--- a/graphiti_core/nodes.py
++++ b/graphiti_core/nodes.py
+@@ -1117,6 +1117,11 @@
+     if not filtered_nodes:
+         return
+ 
+-    name_embeddings = await embedder.create_batch([node.name for node in filtered_nodes])
++    # Central Command: embed the name AND the summary (the one recipe, see
++    # central_command/contract/embedding_text.py). The summary exists here: this is
++    # called from extract_attributes_from_nodes after the summaries are written.
++    name_embeddings = await embedder.create_batch(
++        [(node.name + '\n' + (node.summary or '')).strip() for node in filtered_nodes]
++    )
+     for node, name_embedding in zip(filtered_nodes, name_embeddings, strict=True):
+         node.name_embedding = name_embedding

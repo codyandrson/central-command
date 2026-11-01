@@ -29,7 +29,7 @@ API lifespan) runs graphiti-core's `add_episode` for each job:
   dead process (one worker per database — the lease below): if its
   `proposal=<id>` marker is on an Episodic node it is DONE, else QUEUED.
   A job interrupted by shutdown is simply left RUNNING for that recovery.
-* **The patch gate.** Without the two upstream fixes we carry (D7) the worker
+* **The patch gate.** Without the patches we carry (D7) the worker
   starts no extraction: jobs stay QUEUED, one log line says why, and the
   self-check's `graph-patches` row shows it. Reads are unaffected.
 * **The update hold.** While `runtime.hold.active`, nothing NEW is claimed

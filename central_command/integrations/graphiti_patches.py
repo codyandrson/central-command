@@ -1,4 +1,4 @@
-"""Apply the two graphiti-core fixes we carry (D7) to the INSTALLED package.
+"""Apply the three graphiti-core fixes we carry (D7) to the INSTALLED package.
 
 The patches are unified diffs under `deploy/graphiti-patches/`; `patch` is not
 guaranteed on every substrate, so this applies them with nothing but the
@@ -32,7 +32,11 @@ from pathlib import Path
 # The one definition of the pinned version; a pyproject pin test reads it.
 PINNED_VERSION = "0.30.2"
 
-PATCH_FILES = ("1729-invalidation-scope.patch", "1666-reasoning-first-dedupe.patch")
+PATCH_FILES = (
+    "1729-invalidation-scope.patch",
+    "1666-reasoning-first-dedupe.patch",
+    "0003-entity-embedding-name-summary.patch",
+)
 
 # parents[2] is the repo root (central_command/integrations/<this file>). A
 # non-editable install has no `deploy/` beside the package: the patches are

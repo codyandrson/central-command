@@ -163,8 +163,8 @@ def _entries() -> list[dict]:
         },
         {
             # graphiti-core runs IN this process (design record 2026-10-04):
-            # there is no server to reach. Its health is whether the two
-            # carried fixes are installed — without them the ingest worker
+            # there is no server to reach. Its health is whether the
+            # carried patches are installed — without them the ingest worker
             # extracts nothing.
             "id": "graphiti",
             "name": "Graphiti (in-process)",
@@ -300,7 +300,7 @@ async def _neo4j_status() -> tuple[str, float | None]:
 
 
 async def _graphiti_status() -> tuple[str, float | None]:
-    """`up` when the installed graphiti-core carries both fixes, `down` when
+    """`up` when the installed graphiti-core carries every carried fix, `down` when
     it does not (the ingest worker refuses to extract), `unknown` when the
     state cannot be read (a non-editable install ships no patch files)."""
     from central_command.integrations import graphiti_client

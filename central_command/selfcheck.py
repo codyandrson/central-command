@@ -570,14 +570,14 @@ async def check_graph(ctx: Context) -> Outcome:
 
 
 async def check_graph_patches(ctx: Context) -> Outcome:
-    """The two upstream fixes we carry are in the INSTALLED graphiti-core (D7).
+    """The upstream fixes and the one local patch we carry are in the INSTALLED graphiti-core (D7).
     Without them the ingest worker refuses to extract — approved episodes stay
     queued — so their absence is a FAIL naming the command that applies them."""
     from central_command.integrations import graphiti_client
 
     state = graphiti_client.patch_state()
     if state and all(v == "patched" for v in state.values()):
-        return ok(f"graphiti-core carries both fixes ({', '.join(sorted(state))})")
+        return ok(f"graphiti-core carries all {len(state)} fixes ({', '.join(sorted(state))})")
     shown = ", ".join(f"{k}: {v}" for k, v in sorted(state.items()))
     return fail(f"graphiti-core is missing carried fixes ({shown}) — the ingest worker "
                 "refuses to extract until python scripts/apply_graphiti_patches.py runs",

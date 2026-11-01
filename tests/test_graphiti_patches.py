@@ -53,6 +53,16 @@ index 111..222 100644
 +y = 20
  z = 3
 """
+PATCH_C = """--- a/pkg/gamma.py
++++ b/pkg/gamma.py
+@@ -1,3 +1,3 @@
+ a = 1
+-b = 2
++b = 30
+ c = 3
+"""
+GAMMA_OLD = ["a = 1", "b = 2", "c = 3", ""]
+GAMMA_NEW = ["a = 1", "b = 30", "c = 3", ""]
 
 
 def _tree(tmp_path: Path, *, version: str = gp.PINNED_VERSION, beta: list[str] = BETA_OLD):
@@ -60,14 +70,16 @@ def _tree(tmp_path: Path, *, version: str = gp.PINNED_VERSION, beta: list[str] =
     (site / "pkg").mkdir(parents=True)
     (site / "pkg" / "alpha.py").write_text("\n".join(ALPHA_OLD))
     (site / "pkg" / "beta.py").write_text("\n".join(beta))
+    (site / "pkg" / "gamma.py").write_text("\n".join(GAMMA_OLD))
     dist = site / f"graphiti_core-{version}.dist-info"
     dist.mkdir()
     (dist / "METADATA").write_text(f"Metadata-Version: 2.4\nName: graphiti-core\nVersion: {version}\n\nbody\n")
     pdir = tmp_path / "patches"
     pdir.mkdir()
-    # The applier reads the two real names; here they carry the synthetic diffs.
+    # The applier reads the real names; here they carry the synthetic diffs.
     (pdir / gp.PATCH_FILES[0]).write_text(PATCH_A)
     (pdir / gp.PATCH_FILES[1]).write_text(PATCH_B)
+    (pdir / gp.PATCH_FILES[2]).write_text(PATCH_C)
     return site, pdir
 
 
@@ -77,12 +89,15 @@ def _read(site: Path, name: str) -> str:
 
 def test_apply_patches_every_hunk_and_reports_each_file(tmp_path):
     site, pdir = _tree(tmp_path)
-    assert gp.patch_state(site, pdir) == {gp.PATCH_FILES[0]: "pristine", gp.PATCH_FILES[1]: "pristine"}
+    assert len(gp.PATCH_FILES) == 3
+    assert gp.patch_state(site, pdir) == {n: "pristine" for n in gp.PATCH_FILES}
     lines = gp.apply_patches(site, pdir)
-    assert [(f, s) for _, f, s in lines] == [("pkg/alpha.py", "patched"), ("pkg/beta.py", "patched")]
+    assert [(f, s) for _, f, s in lines] == [
+        ("pkg/alpha.py", "patched"), ("pkg/beta.py", "patched"), ("pkg/gamma.py", "patched")]
     assert _read(site, "alpha.py") == "\n".join(ALPHA_NEW)
     assert _read(site, "beta.py") == "\n".join(BETA_NEW)
-    assert gp.patch_state(site, pdir) == {gp.PATCH_FILES[0]: "patched", gp.PATCH_FILES[1]: "patched"}
+    assert _read(site, "gamma.py") == "\n".join(GAMMA_NEW)
+    assert gp.patch_state(site, pdir) == {n: "patched" for n in gp.PATCH_FILES}
 
 
 def test_second_run_is_a_no_op(tmp_path):
@@ -179,7 +194,7 @@ def test_cli_check_and_apply_and_exit_codes(tmp_path):
     assert r.returncode == 1 and "NOT patched" in r.stdout
     assert _read(site, "alpha.py") == "\n".join(ALPHA_OLD)  # --check changes nothing
     r = run("--site-packages", str(site))
-    assert r.returncode == 0 and r.stdout.count("pkg/") == 2 and "patched" in r.stdout
+    assert r.returncode == 0 and r.stdout.count("pkg/") == 3 and "patched" in r.stdout
     r = run("--site-packages", str(site))
     assert r.returncode == 0 and "already patched" in r.stdout
     assert run("--site-packages", str(site), "--check").returncode == 0
@@ -191,6 +206,7 @@ def test_the_real_patches_parse_to_the_expected_files():
     assert got == {
         "1729-invalidation-scope.patch": [("graphiti_core/utils/maintenance/edge_operations.py", 3)],
         "1666-reasoning-first-dedupe.patch": [("graphiti_core/prompts/dedupe_edges.py", 1)],
+        "0003-entity-embedding-name-summary.patch": [("graphiti_core/nodes.py", 1)],
     }
 
 
@@ -215,3 +231,109 @@ def test_each_real_patch_applies_cleanly_or_is_already_applied_to_a_copy(tmp_pat
     gp.apply_patches(copy)
     assert set(gp.patch_state(copy).values()) == {"patched"}
     assert all(s == "already patched" for _, _, s in gp.apply_patches(copy))
+
+
+# --- the third patch: one text recipe (epic-embedder-integrity story 3) ----------------
+
+ENTITY_PATCH = "0003-entity-embedding-name-summary.patch"
+_INSTALLED = importlib.util.find_spec("graphiti_core") is not None
+
+
+def _patched_create_entity_node_embeddings(tmp_path: Path):
+    """The patched function, compiled from the patched TEXT alone: applying the
+    real patches to a scratch copy of the three files they touch, then lifting
+    that one function out with `ast`. graphiti_core itself is never imported
+    (it reads the environment and arms telemetry on import); the function only
+    names `EmbedderClient` and `EntityNode` in its annotations."""
+    import ast
+
+    real = gp.find_site_packages()
+    site = tmp_path / "site"
+    for rel in {f.path for _, files in gp._load_patches(gp.PATCH_DIR) for f in files}:
+        (site / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(real / rel, site / rel)
+    for dist in real.glob("graphiti_core-*.dist-info"):
+        shutil.copytree(dist, site / dist.name)
+    if gp.installed_version(site) != gp.PINNED_VERSION:
+        pytest.skip("installed graphiti-core is not the pinned version")
+    before = (site / "graphiti_core" / "nodes.py").read_text()
+    gp.apply_patches(site)
+
+    def lift(text: str):
+        tree = ast.parse(text)
+        fn = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef)
+                  and n.name == "create_entity_node_embeddings")
+        scope = {"EmbedderClient": object, "EntityNode": object}
+        exec(compile(ast.Module([fn], []), "nodes.py", "exec"), scope)
+        return scope["create_entity_node_embeddings"]
+
+    return lift(before), lift((site / "graphiti_core" / "nodes.py").read_text())
+
+
+class _Node:
+    def __init__(self, name, summary):
+        self.name, self.summary, self.name_embedding = name, summary, None
+
+
+class _Embedder:
+    def __init__(self):
+        self.inputs: list[list[str]] = []
+
+    async def create_batch(self, texts):
+        self.inputs.append(list(texts))
+        return [[float(len(t))] for t in texts]
+
+
+@pytest.mark.skipif(not _INSTALLED, reason="graphiti-core is not installed")
+async def test_the_patched_entity_embedding_input_is_embedding_text(tmp_path):
+    """The patch cannot import central_command, so the recipe is inlined there;
+    this is where drift between the two is caught."""
+    from central_command.contract.embedding_text import embedding_text
+
+    unpatched, patched = _patched_create_entity_node_embeddings(tmp_path)
+    cases = [("Jane Doe", "Approved the storage renewal."), ("Acme", None), ("Acme", ""),
+             ("  Padded  ", "  and a summary\nover two lines  "), ("Solo", "x")]
+    nodes = [_Node(n, s) for n, s in cases] + [_Node("", "no name: filtered out")]
+
+    embedder = _Embedder()
+    await patched(embedder, nodes)
+
+    assert embedder.inputs == [[embedding_text("entity", n, s) for n, s in cases]]
+    assert [n.name_embedding for n in nodes[:-1]] == [[float(len(t))] for t in embedder.inputs[0]]
+    assert nodes[-1].name_embedding is None
+
+    old = _Embedder()
+    await unpatched(old, [_Node("Jane Doe", "Approved the storage renewal.")])
+    assert old.inputs == [["Jane Doe"]], "the seam upstream embeds the name alone"
+
+
+def test_the_third_patch_has_one_hunk_at_the_one_seam_and_names_the_left_alone_one():
+    (name, files), = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == ENTITY_PATCH]
+    assert [(f.path, len(f.hunks)) for f in files] == [("graphiti_core/nodes.py", 1)]
+    header = " ".join(ln.lstrip("# ") for ln in (gp.PATCH_DIR / ENTITY_PATCH).read_text().splitlines()
+                      if ln.startswith("#"))
+    assert "generate_name_embedding" in header and "NOT on the add_episode path" in header
+
+
+def test_the_ingest_gate_refuses_extraction_while_the_third_patch_is_pristine(tmp_path, monkeypatch):
+    """The first two applied, the third not: `patches_ok()` is False, so the worker
+    takes no extraction (the same gate as with the two)."""
+    from central_command.integrations import graphiti_client, graphiti_ingest
+
+    site, pdir = _tree(tmp_path)
+    # The real applier puts all three on a synthetic tree; the third is then taken
+    # back out, which is what an install that predates the patch looks like.
+    gp.apply_patches(site, pdir)
+    (site / "pkg" / "gamma.py").write_text("\n".join(GAMMA_OLD))
+
+    state = gp.patch_state(site, pdir)
+    assert state == {gp.PATCH_FILES[0]: "patched", gp.PATCH_FILES[1]: "patched",
+                     gp.PATCH_FILES[2]: "pristine"}
+    monkeypatch.setattr(gp, "patch_state", lambda: state)
+    assert graphiti_client.patches_ok() is False
+    monkeypatch.setattr(gp, "patch_state", lambda: {**state, gp.PATCH_FILES[2]: "patched"})
+    assert graphiti_client.patches_ok() is True
+
+    monkeypatch.setattr(gp, "patch_state", lambda: state)
+    worker = graphiti_ingest.IngestWorker()
+    assert worker._patches_gate() is False

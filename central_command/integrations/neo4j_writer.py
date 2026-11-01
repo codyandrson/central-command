@@ -70,6 +70,7 @@ from datetime import datetime, timezone
 import httpx
 
 from central_command.config import settings
+from central_command.contract.embedding_text import embedding_text
 from central_command.contract.failures import (
     TRANSIENT,
     TRANSIENT_STATUS,
@@ -282,7 +283,7 @@ async def create_node(
     if not name.strip():
         raise WriteError("a node needs a name")
     extra = _validated_labels(labels)
-    vector = await embed(f"{name}\n{summary}".strip())
+    vector = await embed(embedding_text("entity", name, summary))
     await embedder_record.require_open_for_write()
     node_uuid = str(_uuid.uuid4())
     label_clause = "".join(f":{l}" for l in extra)
@@ -325,7 +326,7 @@ async def update_node(
     text_changed = new_name != current[0]["name"] or new_summary != current[0]["summary"]
     vector = None
     if text_changed:
-        vector = await embed(f"{new_name}\n{new_summary or ''}".strip())
+        vector = await embed(embedding_text("entity", new_name, new_summary))
         await embedder_record.require_open_for_write()
 
     sets = ["n.name = $name", "n.summary = $summary"]
@@ -398,7 +399,7 @@ async def create_edge(
     )
     if not ends:
         raise WriteError("source or target entity not found")
-    vector = await embed(fact)
+    vector = await embed(embedding_text("edge", fact=fact))
     await embedder_record.require_open_for_write()
     edge_uuid = str(_uuid.uuid4())
     now = _now()
@@ -454,7 +455,7 @@ async def update_edge(
     new_name = row["name"] if name is None else name
     vector = None
     if new_fact != row["fact"]:
-        vector = await embed(new_fact)
+        vector = await embed(embedding_text("edge", fact=new_fact))
         await embedder_record.require_open_for_write()
 
     sets = ["e.name = $name", "e.fact = $fact"]
