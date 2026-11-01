@@ -189,6 +189,8 @@ class Settings(BaseSettings):
     # one tunes it per model.
     embedder_check_ttl_seconds: float = 30.0
     embedder_canary_threshold: float = 0.999
+    # `graph_reembed run` refuses a Neo4j dump older than this (R6).
+    graph_reembed_backup_max_age_seconds: float = 3600.0
     # The voice cc-tts speaks in when the cockpit names none. REQUIRED on the
     # wire: LiteLLM's Router.aspeech() and the speaches engine both reject a
     # request without one (2026-09-03 Windows run). Default = the bundled

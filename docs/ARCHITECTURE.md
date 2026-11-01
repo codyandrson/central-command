@@ -148,7 +148,8 @@ Rows for the same package are grouped by what the modules are for.
 | `skills/` | ②/③ | none | The skills library's import side: `SKILL.md` + references → DB rows and a chunked search index (`chunking.py`); whole-site import; the instance overlay rendered into each body at import (`overlay.py`: `<!-- overlay: <field> -->` markers, files under `CC_SKILL_OVERLAY_DIR`, outside the checkout); the review of a target release against the library and its apply (`refresh.py`, also a command line for the updaters) | `importer.py`, `site_import.py`, `ids.py`, `chunking.py`, `overlay.py`, `refresh.py` | — |
 
 Top-level modules of `central_command/`: `config.py` holds every `CC_*` setting
-(`settings`), with its comment as documentation; `selfcheck.py` is the
+(`settings`), with its comment as documentation; `graph_reembed.py` is the operator's
+command line that re-embeds the graph offline under a closed gate; `selfcheck.py` is the
 application self-check — the install proved as the app, one implementation run
 from the command line (`python -m central_command.selfcheck`) and from
 `api/selfcheck.py`; it reads the spine directly and reports readiness only. The k3s `deploy/k3s/verify.sh` runs it as its last section on every run (two small model requests, the venv's interpreter under a minimal environment, skipped with a stated reason under `--clean-install`), and never from the updater's health poll or a timer.

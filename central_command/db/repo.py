@@ -2379,6 +2379,18 @@ async def work_item_related_busy(item_id: str) -> bool:
         await conn.close()
 
 
+async def clear_work_item_embeddings() -> int:
+    """Forget every ledger vector after the graph's embedding model or width
+    changed: they are from the old model, and the duplicate guard embeds again on
+    demand (`graph_reembed`, epic-embedder-integrity A13). Returns the rows cleared."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        done = await conn.execute(
+            "update work_item set embedding = null where embedding is not null"
+        )
+    return int(done.split()[-1])
+
+
 async def set_work_item_embedding(item_id: str, vector: list[float]) -> None:
     """Persist the item's semantic-freeze embedding (computed once, at claim)."""
     conn = await _conn()
@@ -6469,6 +6481,15 @@ async def list_graph_verifications(status: str | None = None, limit: int = 100) 
 
 
 # --- the durable graph ingest queue (design record 2026-10-04, D5) -------------
+async def count_running_ingest_jobs() -> int:
+    """How many ingest jobs are mid-flight: `graph_reembed run` waits on them."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchval(
+            "select count(*) from graph_ingest_job where status = 'RUNNING'"
+        )
+
+
 # One `graph_ingest_job` per approved episode. The Executor writes it in the
 # same transaction as the verification row; `integrations/graphiti_ingest.py`
 # is its only consumer. Statuses are documented on the table in schema.sql.

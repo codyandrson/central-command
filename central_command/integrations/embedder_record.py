@@ -52,7 +52,7 @@ _CLOSED_STATES = (MIGRATING, AWAITING_CONFIG)
 FIELDS = frozenset({
     "alias", "dimensions", "epoch", "text_recipe", "state", "canary_texts",
     "canary_vectors", "upstream_model", "updated_at", "history", "committed_at",
-    "counters",
+    "counters", "run_started_at",
 })
 # Neo4j stores no list of lists and no map as a property.
 _JSON_FIELDS = ("canary_vectors", "counters")
