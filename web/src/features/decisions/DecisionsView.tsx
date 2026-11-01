@@ -1299,7 +1299,8 @@ function ProposalPane({
               {/* The registry's marks, joined by the server — never the agent's claim. */}
               {a.reversibility === 'irreversible' && (
                 <span
-                  className="cockpit-badge text-red-600 dark:text-red-400"
+                  className="cockpit-badge"
+                  data-tone="danger"
                   title="Cannot be undone once it runs. An auditor can never decide this class."
                 >
                   irreversible

@@ -226,6 +226,9 @@ describe('DecisionsView proposal pane', () => {
     await openProposal();
     await waitFor(() => expect(screen.getByText('irreversible')).toBeInTheDocument());
     expect(screen.getAllByText('irreversible')).toHaveLength(1);
+    // A tone the badge's own style does not override: a text colour class loses to it,
+    // and the rehearsal saw "irreversible" render like every other pill.
+    expect(screen.getByText('irreversible')).toHaveAttribute('data-tone', 'danger');
     expect(screen.getAllByText('acknowledgement class')).toHaveLength(1);
   });
 
