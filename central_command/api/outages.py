@@ -39,8 +39,12 @@ class OutageRetryIn(BaseModel):
     include_interrupted: bool = False
 
 
-_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]*@")
-_SECRET = re.compile(r"(?i)(\bsk-[A-Za-z0-9_-]{6,}|\b(?:key|token|password|secret)\s*[=:]\s*\S+)")
+_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s]*@")   # greedy: up to the LAST @ in the authority
+_SECRET = re.compile(
+    r"(?i)(\bsk-[A-Za-z0-9_.-]{6,}"
+    r"|\bbearer\s+\S+"
+    r"|[\w-]*(?:key|token|secret|password|passwd|pwd)[\"']?\s*[=:]\s*\S+)"
+)
 
 
 def _safe_error(text: str) -> str:

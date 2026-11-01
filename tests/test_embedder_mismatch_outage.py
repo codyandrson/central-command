@@ -381,6 +381,17 @@ async def test_the_outages_list_scrubs_userinfo_and_key_shapes_from_a_probe_erro
     assert "http://10.0.0.9:4000/x" in error
 
 
+@pytest.mark.parametrize("text,gone", [
+    ("POST http://op:p@ss:w0rd@10.0.0.9:4000/v1 failed", "w0rd"),     # an @ in the password
+    ("Authorization: Bearer abcDEF123456 rejected", "abcDEF123456"),
+    ("bad request api_key=zzTOP-secret-1 sent", "zzTOP-secret-1"),
+    ('{"x_api_token": "tok-777"}', "tok-777"),
+    ("rejected sk-proj_abc.def-123456", "def-123456"),
+])
+def test_the_scrub_covers_the_shapes_a_probe_error_can_carry(text, gone):
+    assert gone not in outages._safe_error(text)
+
+
 def test_the_probe_tier_stays_pure():
     """`heartbeat/probes.py` cannot import the record (its tier note); the
     orchestration reads the check and hands the cache the answer."""
