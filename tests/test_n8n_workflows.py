@@ -138,8 +138,11 @@ def _run_list_node(tmp_path, response):
     return json.loads(done.stderr)[0]["json"]
 
 
-@pytest.mark.parametrize("body", [{}, {"items": None}, {"items": {}}, "not json"])
-def test_a_2xx_without_an_items_array_is_a_no_never_an_empty_list(tmp_path, body):
+@pytest.mark.parametrize("body", [
+    {}, {"items": None}, {"items": {}}, "not json", {"kind": "calendar#event"},
+    {"kind": "calendar#events", "items": None}, {"kind": "calendar#events", "items": {}},
+])
+def test_a_2xx_that_is_not_an_events_list_is_a_no_never_an_empty_list(tmp_path, body):
     """The availability read calls an empty list a free day (epic-work-site-safety R2)."""
     out = _run_list_node(tmp_path, {"statusCode": 200, "body": body})
     assert out["ok"] is False and "items" in out["message"]
@@ -149,6 +152,18 @@ def test_a_2xx_without_an_items_array_is_a_no_never_an_empty_list(tmp_path, body
 def test_an_empty_items_array_is_still_a_complete_empty_list(tmp_path):
     out = _run_list_node(tmp_path, {"statusCode": 200, "body": {"items": []}})
     assert out == {"ok": True, "events": [], "truncated": False}
+
+
+def test_an_events_list_kind_without_items_is_a_complete_empty_list(tmp_path):
+    """Google may omit `items` on an empty day; its `kind` says the body IS the list."""
+    out = _run_list_node(tmp_path, {"statusCode": 200, "body": {"kind": "calendar#events"}})
+    assert out == {"ok": True, "events": [], "truncated": False}
+
+
+def test_an_events_list_kind_with_another_page_is_still_truncated(tmp_path):
+    out = _run_list_node(tmp_path, {"statusCode": 200, "body": {
+        "kind": "calendar#events", "nextPageToken": "next"}})
+    assert out == {"ok": True, "events": [], "truncated": True}
 
 
 def test_no_shipped_workflow_carries_a_previous_name_or_an_instance_id():
