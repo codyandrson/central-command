@@ -165,6 +165,28 @@ async def test_the_auditor_still_executes_the_reversible_graduated_class(world):
 
 
 @needs_pg
+async def test_a_stale_status_read_cannot_open_the_bar(world, monkeypatch):
+    """The bar rides the claim, not the status the caller read first: a row read
+    as EXECUTING (a concurrent approval about to hand it back) that the claim
+    then wins is still barred, and the claim goes back as it was."""
+    sid, pid = await _proposal("mail.send")
+    real = repo.load_proposal
+
+    async def stale(proposal_id):
+        row = await real(proposal_id)
+        return {**row, "status": "EXECUTING"} if row else row
+
+    monkeypatch.setattr(repo, "load_proposal", stale)
+    with pytest.raises(gateway.GraduationBarred):
+        await gateway.approve_and_execute(sid, pid, approver="auditor")
+    monkeypatch.setattr(repo, "load_proposal", real)
+
+    assert (await repo.load_proposal(pid))["status"] == "AWAITING_HUMAN"
+    assert "proposal.decided" not in await _kinds(pid)
+    assert world == []
+
+
+@needs_pg
 async def test_a_decided_proposal_is_not_reported_as_barred(world):
     """The bar applies to an open proposal; a settled one keeps its ordinary
     'not awaiting approval' refusal."""

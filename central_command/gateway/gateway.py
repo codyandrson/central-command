@@ -625,17 +625,24 @@ async def approve_and_execute(
     # and a second click inside that window used to pass the same check and
     # execute again (2026-09-17: 8 proposals ran 2–4×). EXECUTING is a status
     # the cockpit already knows and the inbox already hides.
-    # The graduation bar (epic-cockpit-rerun-reversibility-macros R6, A8): an
-    # auditor never decides an irreversible class. Checked BEFORE the claim and
-    # the decision event, so nothing says "approved", nothing executes, and the
-    # proposal stays exactly where the operator will find it.
-    if approver == "auditor" and prop_row["status"] in ("AWAITING_HUMAN", "PROPOSED"):
-        await _refuse_auditor_on_irreversible(proposal_id, session_id, prop_row)
-
-    if await repo.claim_proposal_for_execution(proposal_id) is None:
+    claimed = await repo.claim_proposal_for_execution(proposal_id)
+    if claimed is None:
         raise GatewayError(
             f"proposal {proposal_id} is not awaiting approval (status {prop_row['status']})"
         )
+
+    # The graduation bar (epic-cockpit-rerun-reversibility-macros R6, A8): an
+    # auditor never decides an irreversible class. Checked AFTER the claim —
+    # the claim is the lock, so the status the proposal held is the one the
+    # claim returned, never a stale read — and BEFORE the decision event, so
+    # nothing says "approved" and nothing executes. The claim goes back as it
+    # was, the same handback as an override's refusal.
+    if approver == "auditor":
+        try:
+            await _refuse_auditor_on_irreversible(proposal_id, session_id, prop_row)
+        except BaseException:
+            await repo.set_proposal_status(proposal_id, claimed)
+            raise
 
     proposal = _reconstruct(prop_row)
 
