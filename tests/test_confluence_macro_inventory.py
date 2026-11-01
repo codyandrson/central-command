@@ -1,0 +1,417 @@
+"""The macro inventory (epic-cockpit-rerun-reversibility-macros story 6, A9).
+
+Three things are proven here, none against a real site: the pure extractor on
+fixture storage bodies (invented macro names, example.com), the client's
+instance-version read over a mocked transport, and the operator script end to
+end against a FAKE client — the files it writes, the exit codes, and that it
+refuses to write inside the checkout. Nothing here is an inventory of a real
+instance.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import pathlib
+import sys
+
+import httpx
+import pytest
+
+from central_command.config import settings
+from central_command.integrations import confluence
+from central_command.integrations.confluence import MacroBlock, extract_macros
+from central_command.skills import overlay
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "confluence_macro_inventory.py"
+
+
+def _script():
+    spec = importlib.util.spec_from_file_location("confluence_macro_inventory", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["confluence_macro_inventory"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+GRID = (
+    '<ac:structured-macro ac:name="acme-grid" ac:schema-version="3" ac:macro-id="id-1">'
+    '<ac:parameter ac:name="columns">3</ac:parameter>'
+    '<ac:parameter ac:name="source"><ri:url ri:value="https://example.com/data.csv" /></ac:parameter>'
+    '</ac:structured-macro>'
+)
+NESTED = (
+    '<ac:structured-macro ac:schema-version="1" ac:name="acme-outer" ac:macro-id="id-2">'
+    '<ac:parameter ac:name="title">Outer</ac:parameter>'
+    '<ac:rich-text-body><p>text</p>'
+    '<ac:structured-macro ac:name="acme-inner" ac:schema-version="2">'
+    '<ac:parameter ac:name="mode">fast</ac:parameter></ac:structured-macro>'
+    '</ac:rich-text-body></ac:structured-macro>'
+)
+
+
+# --- extract_macros -----------------------------------------------------------
+
+
+def test_a_block_is_returned_whole_with_its_attributes_and_parameters():
+    [block] = extract_macros("<p>intro</p>" + GRID + "<p>outro</p>")
+    assert block == MacroBlock(
+        name="acme-grid", schema_version="3", macro_id="id-1",
+        parameters=(("columns", "3"),
+                    ("source", '<ri:url ri:value="https://example.com/data.csv" />')),
+        text=GRID,
+    )
+
+
+def test_attribute_order_does_not_matter_and_nested_macros_are_separate_blocks():
+    outer, inner = extract_macros(NESTED)
+    assert (outer.name, outer.schema_version, outer.macro_id) == ("acme-outer", "1", "id-2")
+    assert outer.text == NESTED, "the outer block carries the nested one inside it"
+    assert outer.parameters == (("title", "Outer"),), "a nested macro's parameters are its own"
+    assert (inner.name, inner.schema_version, inner.macro_id) == ("acme-inner", "2", None)
+    assert inner.parameters == (("mode", "fast"),)
+    assert inner.text in NESTED and inner.text.startswith("<ac:structured-macro")
+
+
+def test_blocks_come_back_in_document_order():
+    names = [b.name for b in extract_macros(GRID + NESTED + GRID)]
+    assert names == ["acme-grid", "acme-outer", "acme-inner", "acme-grid"]
+
+
+def test_a_self_closing_macro_is_a_block():
+    [block] = extract_macros('<p/><ac:structured-macro ac:name="acme-solo" ac:schema-version="1"/>')
+    assert block.name == "acme-solo" and block.parameters == ()
+    assert block.text.endswith("/>")
+
+
+def test_a_cdata_section_quoting_a_closing_tag_does_not_end_the_block():
+    body = (
+        '<ac:structured-macro ac:name="code"><ac:plain-text-body>'
+        '<![CDATA[</ac:structured-macro><ac:structured-macro ac:name="ghost">]]>'
+        '</ac:plain-text-body></ac:structured-macro>'
+    )
+    [block] = extract_macros(body)
+    assert block.name == "code" and block.text == body
+
+
+def test_no_body_no_macros_and_a_stray_tag_never_raise():
+    assert extract_macros(None) == [] and extract_macros("") == []
+    assert extract_macros("<p>no macros</p>") == []
+    assert extract_macros("</ac:structured-macro>") == []
+    assert [b.name for b in extract_macros(
+        '<ac:structured-macro ac:name="open-only">' + GRID)] == ["acme-grid"]
+
+
+def test_a_macro_without_a_name_is_not_a_block():
+    assert extract_macros("<ac:structured-macro><p>x</p></ac:structured-macro>") == []
+
+
+# --- the client's version read --------------------------------------------------
+
+_REAL_CLIENT = httpx.AsyncClient
+
+
+def _transport(monkeypatch, handler):
+    def factory(**kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return _REAL_CLIENT(**kwargs)
+
+    monkeypatch.setattr(confluence.httpx, "AsyncClient", factory)
+
+
+@pytest.fixture(autouse=True)
+def configured(monkeypatch):
+    monkeypatch.setattr(settings, "confluence_base_url", "https://example.atlassian.net")
+    monkeypatch.setattr(settings, "confluence_email", "bot@example.com")
+    monkeypatch.setattr(settings, "confluence_api_token", "tok")
+    monkeypatch.setattr(settings, "confluence_auth_mode", "basic")
+    monkeypatch.setattr(settings, "confluence_api_flavor", "cloud")
+
+
+async def test_instance_info_reads_the_cloud_system_info(monkeypatch):
+    seen = []
+
+    def handler(req):
+        seen.append(req.url.path)
+        return httpx.Response(200, json={"commitHash": "abc123", "baseUrl": "https://example.atlassian.net"})
+
+    _transport(monkeypatch, handler)
+    info = await confluence.instance_info()
+    assert seen == ["/wiki/rest/api/settings/systemInfo"]
+    assert info["version"] == "cloud" and info["detail"] == "abc123"
+    assert info["verify_on_site"] is False
+
+
+async def test_instance_info_reads_server_information_on_a_server_flavor(monkeypatch):
+    monkeypatch.setattr(settings, "confluence_api_flavor", "server")
+    monkeypatch.setattr(settings, "confluence_auth_mode", "bearer")
+    seen = []
+
+    def handler(req):
+        seen.append(req.url.path)
+        return httpx.Response(200, json={"version": "9.2.1", "buildNumber": "9021"})
+
+    _transport(monkeypatch, handler)
+    info = await confluence.instance_info()
+    assert seen == ["/rest/api/server-information"]
+    assert info["version"] == "9.2.1" and info["verify_on_site"] is True
+
+
+async def test_instance_info_refuses_when_the_credentials_are_refused(monkeypatch):
+    _transport(monkeypatch, lambda req: httpx.Response(401, text="no"))
+    with pytest.raises(confluence.ConfluenceError) as err:
+        await confluence.instance_info()
+    assert err.value.status_code == 401
+
+
+# --- the script, against a fake client ------------------------------------------
+
+
+def _page(pid, title="Page", body=None):
+    return {"id": pid, "title": title, "body": body}
+
+
+class FakeClient:
+    """The `confluence` module's surface the script uses, over invented pages."""
+
+    ConfluenceError = confluence.ConfluenceError
+
+    def __init__(self, *, sampler=True, usage=None, bodies=None, info=None, fail=None,
+                 truncated=()):
+        self.pages = {"900": _page("900", "Central Command Macro Sampler", GRID + NESTED)}
+        self.pages.update({k: _page(k, body=v) for k, v in (bodies or {}).items()})
+        self.sampler = sampler
+        self.usage = usage or {}
+        self.truncated = set(truncated)
+        self.info = info
+        self.fail = fail or {}
+        self.calls = []
+
+    def configured(self):
+        return True
+
+    async def instance_info(self):
+        if isinstance(self.info, Exception):
+            raise self.info
+        return self.info or {"version": "cloud", "detail": "abc123", "verify_on_site": False}
+
+    async def search(self, cql, limit=None):
+        self.calls.append(("search", cql, limit))
+        if cql.startswith("type = page AND title ="):
+            hit = [{"id": "900", "title": "Central Command Macro Sampler"}] if self.sampler else []
+            return {"results": hit, "count": len(hit), "truncated": False}
+        name = cql.split('"')[1]
+        if name in self.fail:
+            raise self.fail[name]
+        ids = self.usage.get(name, [])
+        return {"results": [{"id": i} for i in ids], "count": len(ids),
+                "truncated": name in self.truncated}
+
+    async def get_page(self, page_id):
+        self.calls.append(("get_page", page_id))
+        return {"page": self.pages[page_id]}
+
+
+def _args(mod, *argv):
+    return mod.parser().parse_args(list(argv))
+
+
+async def test_the_inventory_carries_the_stamp_the_sampler_blocks_and_usage(tmp_path, capsys):
+    mod = _script()
+    client = FakeClient(
+        usage={"acme-grid": ["901", "900"], "acme-outer": ["900"], "status": ["902"]},
+        bodies={"901": "<p>x</p>" + GRID.replace('"3"', '"4"')},
+    )
+    client.pages["902"] = _page("902", body='<ac:structured-macro ac:name="status" ac:schema-version="1">'
+                                            '<ac:parameter ac:name="colour">Green</ac:parameter>'
+                                            '</ac:structured-macro>')
+    out = tmp_path / "profile.md"
+
+    code = await mod.main(["--out", str(out), "--macro", "acme-extra"], client)
+
+    assert code == 0
+    text = out.read_text()
+    assert text.startswith("# Confluence macro inventory")
+    assert "harvested: 20" in text
+    assert "instance_version: cloud (abc123)" in text
+    assert "flavor: cloud" in text
+    assert "sampler_page: Central Command Macro Sampler (id 900)" in text
+    sections = [l[3:] for l in text.splitlines() if l.startswith("## ")]
+    # sampler blocks first (outer before inner), then the skill table, then --macro
+    assert sections[:3] == ["acme-grid", "acme-outer", "acme-inner"]
+    assert "acme-extra" == sections[-1]
+    assert {"status", "panel", "expand", "jira", "drawio"} <= set(sections)
+    grid = text.split("## acme-grid")[1].split("\n## ")[0]
+    assert "- pages using it: 2" in grid and "- on the sampler page: yes" in grid
+    assert "schema version: 3" in grid, "the sampler's own block gives the schema version"
+    assert 'ac:schema-version="4"' in grid and "from page 901" in grid, "the first hit's block is the example"
+    status = text.split("## status")[1].split("\n## ")[0]
+    assert "- pages using it: 1" in status and "- on the sampler page: no" in status
+    assert "```xml" in status and "Green" in status
+    extra = text.split("## acme-extra")[1]
+    assert "- pages using it: 0" in extra and "example: none found" in extra
+    assert (out.stat().st_mode & 0o777) == 0o600
+    assert capsys.readouterr().out == "", "a write prints nothing on stdout"
+
+
+async def test_a_macro_nobody_uses_falls_back_to_the_sampler_block(tmp_path):
+    mod = _script()
+    client = FakeClient(usage={})
+    out = tmp_path / "p.md"
+    await mod.main(["--out", str(out)], client)
+    inner = out.read_text().split("## acme-inner")[1].split("\n## ")[0]
+    assert "- pages using it: 0" in inner and "from sampler" in inner and "mode" in inner
+
+
+async def test_dry_run_prints_the_inventory_and_writes_nothing(tmp_path, capsys):
+    mod = _script()
+    out = tmp_path / "never.md"
+    code = await mod.main(["--dry-run", "--out", str(out)], FakeClient())
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out.startswith("# Confluence macro inventory")
+    assert "harvested:" in captured.out and "instance_version:" in captured.out
+    assert not out.exists()
+    assert "dry run" in captured.err
+
+
+async def test_a_truncated_usage_count_reads_as_a_lower_bound(tmp_path):
+    mod = _script()
+    ids = [str(i) for i in range(1000, 1500)]
+    client = FakeClient(usage={"acme-grid": ids}, truncated={"acme-grid"},
+                        bodies={i: "" for i in ids[:1]})
+    out = tmp_path / "p.md"
+    await mod.main(["--out", str(out)], client)
+    assert "- pages using it: 500+" in out.read_text()
+    assert ("search", 'macro = "acme-grid"', 500) in client.calls
+
+
+async def test_no_sampler_page_exits_1_and_writes_nothing(tmp_path, capsys):
+    mod = _script()
+    out = tmp_path / "p.md"
+    code = await mod.main(["--out", str(out), "--sampler-title", "Absent Page"],
+                          FakeClient(sampler=False))
+    assert code == 1 and not out.exists()
+    err = capsys.readouterr().err
+    assert "no sampler page titled 'Absent Page'" in err
+
+
+async def test_the_sampler_title_is_quoted_into_the_cql(tmp_path):
+    mod = _script()
+    client = FakeClient()
+    await mod.main(["--dry-run", "--sampler-title", 'Odd "title" \\ here'], client)
+    assert client.calls[0][1] == r'type = page AND title = "Odd \"title\" \\ here"'
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_refused_credentials_exit_2(tmp_path, status):
+    mod = _script()
+    err = confluence.ConfluenceError("auth failed", status_code=status)
+    code = await mod.main(["--dry-run"], FakeClient(info=err))
+    assert code == 2
+
+
+async def test_a_refused_credential_on_a_usage_search_exits_2(tmp_path):
+    mod = _script()
+    client = FakeClient(fail={"acme-grid": confluence.ConfluenceError("denied", status_code=403)})
+    assert await mod.main(["--dry-run"], client) == 2
+
+
+async def test_an_unreachable_instance_exits_2(monkeypatch, tmp_path):
+    mod = _script()
+
+    class Down(FakeClient):
+        async def instance_info(self):
+            raise httpx.ConnectError("no route")
+
+    assert await mod.main(["--dry-run"], Down()) == 2
+
+
+async def test_unconfigured_exits_2(monkeypatch):
+    mod = _script()
+
+    class Bare(FakeClient):
+        def configured(self):
+            return False
+
+    assert await mod.main(["--dry-run"], Bare()) == 2
+
+
+async def test_a_failed_version_read_is_stamped_unknown_not_fatal(tmp_path):
+    mod = _script()
+    out = tmp_path / "p.md"
+    code = await mod.main(["--out", str(out)], FakeClient(
+        info=confluence.ConfluenceError("instanceInfo — not found", status_code=404)))
+    assert code == 0
+    assert "instance_version: unknown — version read failed" in out.read_text()
+
+
+async def test_a_failed_usage_search_is_recorded_and_the_run_goes_on(tmp_path):
+    mod = _script()
+    out = tmp_path / "p.md"
+    client = FakeClient(fail={"acme-grid": confluence.ConfluenceError("rejected (400)", status_code=400)})
+    assert await mod.main(["--out", str(out)], client) == 0
+    text = out.read_text()
+    assert "usage count failed: rejected (400)" in text
+    assert "## acme-outer" in text
+
+
+async def test_the_server_flavor_is_marked_verify_on_site(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "confluence_api_flavor", "server")
+    mod = _script()
+    out = tmp_path / "p.md"
+    await mod.main(["--out", str(out)], FakeClient(
+        info={"version": "9.2.1", "detail": None, "verify_on_site": True}))
+    text = out.read_text()
+    assert "instance_version: 9.2.1 — VERIFY-ON-SITE" in text
+    assert "flavor: server" in text
+
+
+# --- where it writes -------------------------------------------------------------
+
+
+async def test_a_path_inside_the_checkout_is_refused_before_any_request(capsys):
+    mod = _script()
+    client = FakeClient()
+    for target in (ROOT / "inventory.md", ROOT / "docs" / "x.md", ROOT):
+        assert await mod.main(["--out", str(target)], client) == 2
+    assert client.calls == [], "refused before a single request"
+    assert "inside the checkout" in capsys.readouterr().err
+    assert not (ROOT / "inventory.md").exists()
+
+
+async def test_the_default_target_is_the_profile_field_file_in_the_overlay_dir(tmp_path, monkeypatch):
+    mod = _script()
+    monkeypatch.setattr(settings, "skill_overlay_dir", str(tmp_path / "overlay"))
+    assert await mod.main([], FakeClient()) == 0
+    written = tmp_path / "overlay" / "confluence_profile_cloud.md"
+    assert written.is_file()
+    # the overlay loader reads it as the profile field, whole
+    assert overlay.load(tmp_path / "overlay")["confluence_profile_cloud"].startswith(
+        "# Confluence macro inventory")
+
+    monkeypatch.setattr(settings, "confluence_api_flavor", "server")
+    assert await mod.main([], FakeClient(info={"version": "9", "verify_on_site": True})) == 0
+    assert (tmp_path / "overlay" / "confluence_profile_server.md").is_file()
+
+
+async def test_a_default_overlay_inside_the_checkout_is_refused_too(monkeypatch):
+    mod = _script()
+    monkeypatch.setattr(settings, "skill_overlay_dir", str(ROOT / "overlay-here"))
+    assert await mod.main([], FakeClient()) == 2
+    assert not (ROOT / "overlay-here").exists()
+
+
+# --- candidates ------------------------------------------------------------------
+
+
+def test_the_skill_tables_backticked_macro_names_are_the_candidates():
+    mod = _script()
+    names = mod.skill_table_macros()
+    assert {"status", "panel", "expand", "jira", "drawio"} <= set(names)
+    assert len(names) == len(set(names))
+    assert not any(" " in n for n in names), "a display name is not an ac:name"
+
+
+def test_a_missing_skill_table_yields_no_names(tmp_path):
+    assert _script().skill_table_macros(tmp_path / "absent.md") == []

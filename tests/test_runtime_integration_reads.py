@@ -61,8 +61,8 @@ READ_ALLOWLIST: dict[str, set[str]] = {
     # Reads only; create_page/update_page/move_page/trash_page/set_labels/
     # remove_labels/upload_attachment/create_space are the writes and are absent.
     "confluence": {
-        "get_page", "get_page_versions", "list_attachments", "list_children",
-        "list_labels", "list_spaces", "search",
+        "get_page", "get_page_versions", "instance_info", "list_attachments",
+        "list_children", "list_labels", "list_spaces", "search",
     },
     # forge.py defines no write at all today; the allowlist still names the
     # reads, so the first write added there has to be argued for here.

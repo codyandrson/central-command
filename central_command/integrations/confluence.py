@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from dataclasses import dataclass
 from urllib.parse import urlencode
 
 import httpx
@@ -466,6 +467,112 @@ async def search(cql: str, limit: int | None = None) -> dict:
         results.append(row)
     return {"ok": True, "kind": "confluence", "operation": "search",
             "cql": q, "results": results, "count": len(results), "truncated": truncated}
+
+
+async def instance_info() -> dict:
+    """The instance's own version, for the macro inventory's stamp. Cloud reads
+    `/wiki/rest/api/settings/systemInfo` (it names a build, not a product
+    number, so the version reads "cloud" and the build rides in `detail`);
+    Server/DC reads `/rest/api/server-information`. **The Server/DC path is
+    VERIFY-ON-SITE**: coded to Atlassian's published reference, not proven
+    against a live instance (`verify_on_site` says so on the envelope)."""
+    _require_configured("instanceInfo")
+    server = _flavor() == "server"
+    path = _v1("/server-information" if server else "/settings/systemInfo")
+    resp = await _call("GET", path)
+    _check(resp, "instanceInfo")
+    body = resp.json()
+    body = body if isinstance(body, dict) else {}
+    if server:
+        version = body.get("version") or body.get("versionNumber")
+        detail = body.get("buildNumber")
+    else:
+        version = "cloud"
+        detail = body.get("commitHash")
+    return {"ok": True, "kind": "confluence", "operation": "instanceInfo",
+            "flavor": _flavor(), "version": str(version) if version else None,
+            "detail": str(detail) if detail else None, "verify_on_site": server}
+
+
+# --- macros in storage format (pure) ---------------------------------------
+
+
+@dataclass(frozen=True)
+class MacroBlock:
+    """One `<ac:structured-macro>` block of a storage-format body, whole.
+    `parameters` are the macro's OWN `ac:parameter` pairs in document order
+    (a nested macro's belong to the nested block); `text` is the block exactly
+    as it stands in the body, nested blocks included."""
+
+    name: str
+    schema_version: str | None
+    macro_id: str | None
+    parameters: tuple[tuple[str, str], ...]
+    text: str
+
+
+_MACRO_TOKEN = re.compile(
+    r"<!\[CDATA\[.*?\]\]>"                      # skipped: its text is not markup
+    r"|<!--.*?-->"
+    r"|<ac:structured-macro\b(?P<attrs>[^>]*?)(?P<selfclose>/?)>"
+    r"|(?P<close></ac:structured-macro\s*>)",
+    re.DOTALL,
+)
+_ATTR = re.compile(r"""([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+_PARAMETER = re.compile(
+    r"""<ac:parameter\b[^>]*?\bac:name\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>(.*?)</ac:parameter\s*>""",
+    re.DOTALL,
+)
+
+
+def extract_macros(storage: str | None) -> list[MacroBlock]:
+    """Every `ac:structured-macro` block of a storage body, whole, in document
+    order (an outer block before the ones nested in it). Pure: no I/O, and a
+    body with no macros, no body (None) or a stray unbalanced tag yields what
+    can be read and never raises. A `CDATA` section or a comment is skipped, so
+    a code macro that QUOTES a macro's closing tag does not end the block."""
+    if not storage:
+        return []
+    stack: list[tuple[int, dict, list[tuple[int, int]]]] = []
+    done: list[tuple[int, int, dict, list[tuple[int, int]]]] = []
+    for m in _MACRO_TOKEN.finditer(storage):
+        if m.group("close") is not None:
+            if stack:
+                start, attrs, kids = stack.pop()
+                end = m.end()
+                done.append((start, end, attrs, kids))
+                if stack:
+                    stack[-1][2].append((start, end))
+        elif m.group("attrs") is not None:
+            attrs = {k: (a if a is not None else b) for k, a, b in _ATTR.findall(m.group("attrs"))}
+            if m.group("selfclose"):
+                done.append((m.start(), m.end(), attrs, []))
+                if stack:
+                    stack[-1][2].append((m.start(), m.end()))
+            else:
+                stack.append((m.start(), attrs, []))
+    blocks = []
+    for start, end, attrs, kids in sorted(done, key=lambda t: (t[0], -t[1])):
+        name = attrs.get("ac:name")
+        if not name:
+            continue
+        own, cursor = [], start
+        for ks, ke in sorted(kids):
+            own.append(storage[cursor:ks])
+            cursor = ke
+        own.append(storage[cursor:end])
+        params = tuple(
+            (a if a is not None else b, v)
+            for a, b, v in _PARAMETER.findall("".join(own))
+        )
+        blocks.append(MacroBlock(
+            name=name,
+            schema_version=attrs.get("ac:schema-version"),
+            macro_id=attrs.get("ac:macro-id"),
+            parameters=params,
+            text=storage[start:end],
+        ))
+    return blocks
 
 
 async def list_children(page_id: str, limit: int | None = None) -> dict:
