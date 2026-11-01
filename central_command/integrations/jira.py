@@ -44,12 +44,6 @@ from central_command.integrations import http as http_client
 KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,49}-[1-9][0-9]{0,9}$")
 PROJECT_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,49}$")
 LINK_TYPES = ("Blocks", "Relates", "Duplicate")
-# Proven live against this instance: Task/Story/Epic/Subtask (no hyphen,
-# subtask:true). "Sub-task" (hyphenated) is kept too — company-managed
-# projects commonly use that spelling. Issue types are PER-PROJECT, so this
-# list is a best-effort guard, not the final word; Jira's own 400 (already
-# surfaced verbatim by `_check`) is the real validator.
-ISSUE_TYPES = ("Task", "Bug", "Story", "Epic", "Subtask", "Sub-task")
 # Ownership (`assignee`), dependencies (`issuelinks`), staleness (`updated`)
 # and epic structure (`parent`) were added 2026-07-25: the D7 hygiene project
 # stalled on their absence and jira-expert DECLARED the gap twice rather than
@@ -83,6 +77,12 @@ CUSTOM_FIELDS_TTL = 300.0   # seconds; a field added in the UI is visible within
                             # up. Process-lifetime caching would reproduce the
                             # bug for anyone who never restarts.
 _custom_fields_cache: tuple[float, list[dict]] | None = None
+# Issue types are PER-PROJECT, so the read tool's cache is too: project key ->
+# (monotonic time, [{id, name, subtask}]). Same TTL, same reason as the custom
+# fields: a type the operator adds in the UI shows within CUSTOM_FIELDS_TTL.
+# It serves the read tool ONLY — `create_issue` never consults it (Jira's own
+# 400 is the one validator of a type name).
+_issue_types_cache: dict[str, tuple[float, list[dict]]] = {}
 
 # A custom field's WRITE shape is decided by `schema.custom`, never by
 # `schema.type` — the four cost/benefit fields are type "string" and take an
@@ -725,8 +725,8 @@ async def set_due_date(issue_key: str, due_date: str) -> dict:
 
 @_requires_native
 async def create_issue(
-    project_key: str, summary: str, description: str | None = None,
-    issue_type: str = "Task", due_date: str | None = None,
+    project_key: str, summary: str, issue_type: str,
+    description: str | None = None, due_date: str | None = None,
     labels: list[str] | None = None, parent: str | None = None,
     custom_fields: dict | None = None, assignee: str | None = None,
 ) -> dict:
@@ -734,8 +734,15 @@ async def create_issue(
     demanded (the coached charter told the agent to propose it before it
     existed). Model-controlled strings validated here, like every write.
 
+    `issue_type` is REQUIRED and is posted exactly as given: the type names are
+    the instance's (per project, `list_issue_types` reads them), so nothing
+    here knows a list, supplies a default or decides what needs a parent —
+    Jira's own 400 (a type the project lacks, a sub-task type without a
+    parent) is surfaced verbatim by `_check` and lands the proposal FAILED for
+    a redraft. A guard here would only duplicate that loud failure.
+
     `parent` expresses hierarchy (a Story/Task under an Epic names the Epic;
-    a Subtask REQUIRES it) — distinct from `link_issues`, which expresses
+    a sub-task type REQUIRES it) — distinct from `link_issues`, which expresses
     dependency, not structure.
 
     `custom_fields` ({name: value}, resolved and shape-checked exactly like
@@ -747,10 +754,6 @@ async def create_issue(
         raise JiraError(f"createIssue — bad project_key {project_key!r} — must match [A-Z][A-Z0-9_]*")
     if not isinstance(summary, str) or not summary.strip() or len(summary) > 255:
         raise JiraError("createIssue — summary must be a non-empty string under 255 chars")
-    if issue_type not in ISSUE_TYPES:
-        raise JiraError(
-            f"createIssue — bad issue_type {issue_type!r} (must be one of {', '.join(ISSUE_TYPES)})"
-        )
     if due_date is not None:
         due_date = _date(due_date, "createIssue", project_key)
     if labels is not None and (
@@ -759,8 +762,6 @@ async def create_issue(
         raise JiraError("createIssue — labels must be a list of strings")
     if parent is not None:
         parent = _key(parent, "parent")
-    if issue_type in ("Subtask", "Sub-task") and not parent:
-        raise JiraError(f"createIssue — issue_type {issue_type!r} requires a parent issue key")
     custom_payload, custom_applied = {}, {}
     if custom_fields is not None:
         custom_payload, custom_applied = await _resolve_custom_writes(
@@ -1356,6 +1357,61 @@ async def list_projects() -> dict:
             start += len(values)
     return {"ok": True, "kind": "jira", "operation": "listProjects",
             "projects": projects, "count": len(projects)}
+
+
+async def list_issue_types(project_key: str) -> dict:
+    """The issue types one project can create — {id, name, subtask} each.
+
+    Issue types are PER-PROJECT and per-instance (a work site's include Feature,
+    Risk and Test; a personal Cloud site's, Task/Story/Epic/Subtask), so no list
+    of names lives in this codebase: an agent proposing `jira.create_issue`
+    reads this first, exactly as it reads `list_projects` for the key, and Jira's
+    own 400 stays the only validator of what it then names.
+
+    `GET /issue/createmeta/{projectIdOrKey}/issuetypes` on both flavours (Cloud
+    v3, Data Center v2 — `_api()` picks the version), paged by startAt /
+    maxResults until the page is short or empty. The response differs only in
+    names: Data Center answers `values` + `last`; Cloud's reference documents
+    `issueTypes` (and pages by `total`). Both are read; a page with neither key
+    is an empty page. The project must be one the account may create issues in
+    — Jira answers 400/404 otherwise and `_check` raises it.
+
+    Cached per project for CUSTOM_FIELDS_TTL: the tool is read before every
+    create and the answer changes only when an administrator edits the scheme.
+    """
+    _require_native("listIssueTypes")
+    if not isinstance(project_key, str) or not PROJECT_RE.match(project_key or ""):
+        raise JiraError(
+            f"listIssueTypes — bad project_key {project_key!r} — must match [A-Z][A-Z0-9_]*"
+        )
+    now = time.monotonic()
+    hit = _issue_types_cache.get(project_key)
+    if hit and now - hit[0] < CUSTOM_FIELDS_TTL:
+        types = hit[1]
+    else:
+        types = []
+        start = 0
+        while True:
+            resp = await _call(
+                "GET",
+                _api(f"/issue/createmeta/{project_key}/issuetypes?maxResults=100&startAt={start}"),
+            )
+            _check(resp, "listIssueTypes", project_key)
+            body = resp.json()
+            body = body if isinstance(body, dict) else {}
+            page = body.get("issueTypes") or body.get("values") or []
+            types += [
+                {"id": t.get("id"), "name": t.get("name"), "subtask": bool(t.get("subtask"))}
+                for t in page if isinstance(t, dict)
+            ]
+            start += len(page)
+            total = body.get("total")
+            if (not page or body.get("last") is True or body.get("isLast") is True
+                    or (isinstance(total, int) and start >= total)):
+                break
+        _issue_types_cache[project_key] = (now, types)
+    return {"ok": True, "kind": "jira", "operation": "listIssueTypes",
+            "project_key": project_key, "issue_types": types, "count": len(types)}
 
 
 def _filter_or_dashboard_name(name: str, op: str) -> str:

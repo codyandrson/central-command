@@ -226,7 +226,7 @@ async def test_assignee_is_an_account_id_on_cloud_and_a_username_on_data_center(
         await jira.assign_issue("TASKS-9", "-1")  # "default assignee" is nobody named
 
     calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-11"})])
-    await jira.create_issue("TASKS", "New", assignee="jdoe")
+    await jira.create_issue("TASKS", "New", "Task", assignee="jdoe")
     assert calls[0][2]["fields"]["assignee"] == {key: "jdoe"}
 
 
@@ -479,25 +479,23 @@ async def test_unconfigured_client_fails_loudly_instead_of_routing_anywhere(monk
 # --- createIssue (built after the charter-v2 incident) ------------------------
 
 
-async def test_create_issue_validates_before_the_provider(monkeypatch):
+async def test_create_issue_validates_shapes_before_the_provider(monkeypatch):
     calls = _fake_call(monkeypatch, [])
     with pytest.raises(jira.JiraError, match="bad project_key"):
-        await jira.create_issue("tasks", "New work")
+        await jira.create_issue("tasks", "New work", "Example Type")
     with pytest.raises(jira.JiraError, match="summary must be"):
-        await jira.create_issue("TASKS", "   ")
-    with pytest.raises(jira.JiraError, match="bad issue_type"):
-        await jira.create_issue("TASKS", "New work", issue_type="Nonsense")
+        await jira.create_issue("TASKS", "   ", "Example Type")
     with pytest.raises(jira.JiraError, match="not a real calendar date"):
-        await jira.create_issue("TASKS", "New work", due_date="2026-02-31")
+        await jira.create_issue("TASKS", "New work", "Example Type", due_date="2026-02-31")
     with pytest.raises(jira.JiraError, match="labels must be"):
-        await jira.create_issue("TASKS", "New work", labels="not-a-list")
+        await jira.create_issue("TASKS", "New work", "Example Type", labels="not-a-list")
     assert calls == []
 
 
 async def test_create_issue_posts_the_right_fields_and_envelope(monkeypatch):
     calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-99"})])
     out = await jira.create_issue(
-        "TASKS", "Verify Example Bank trial deposits",
+        "TASKS", "Verify Example Bank trial deposits", "Task",
         description="From the account-verification email.",
         due_date="2026-07-30", labels=["email-derived"],
     )
@@ -512,48 +510,174 @@ async def test_create_issue_posts_the_right_fields_and_envelope(monkeypatch):
     assert out["issue"]["issue_key"] == "TASKS-99"
 
 
+@pytest.mark.parametrize("issue_type", ["Risk", "Sub-Task", "Feature", "Nonsense"])
+async def test_create_issue_posts_whatever_type_it_is_given(monkeypatch, flavor, issue_type):
+    """Types are the instance's, so the client holds no list and no default:
+    whatever name arrives is posted as `issuetype {name}` on both flavours,
+    and Jira alone decides whether the project has it."""
+    calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-98"})])
+    out = await jira.create_issue("TASKS", "New work", issue_type)
+    v = "2" if flavor == "server" else "3"
+    assert calls[0][:2] == ("POST", f"/rest/api/{v}/issue")
+    assert calls[0][2]["fields"]["issuetype"] == {"name": issue_type}
+    assert out["issue"]["issue_type"] == issue_type
+
+
+async def test_create_issue_has_no_default_type():
+    import inspect
+
+    param = inspect.signature(jira.create_issue).parameters["issue_type"]
+    assert param.default is inspect.Parameter.empty
+    with pytest.raises(TypeError):
+        await jira.create_issue("TASKS", "New work")  # type: ignore[call-arg]
+
+
+async def test_a_type_the_project_lacks_is_jiras_400_and_lands_loud(monkeypatch, flavor):
+    """No client or Executor check stands in front of the provider: a bad type
+    reaches Jira, whose 400 is raised verbatim, typed with its status, and
+    classifies SEMANTIC — the proposal lands FAILED and the drafter redrafts."""
+    from central_command.contract.failures import SEMANTIC, classify_failure
+
+    body = {"errors": {"issuetype": "valid issue type is required"}}
+    calls = _fake_call(monkeypatch, [FakeResponse(400, body)])
+    with pytest.raises(jira.JiraError, match="provider rejected the request \\(400\\)") as info:
+        await jira.create_issue("TASKS", "New work", "Nonsense")
+    assert len(calls) == 1
+    assert info.value.status_code == 400 and "issuetype" in str(info.value)
+    assert classify_failure(info.value) == SEMANTIC
+
+
 async def test_create_issue_unconfigured_under_basic_auth_needs_the_email(monkeypatch):
     monkeypatch.setattr(settings, "jira_email", None)
     calls = _fake_call(monkeypatch, [])
     with pytest.raises(jira.JiraError, match="CC_JIRA_EMAIL"):
-        await jira.create_issue("TASKS", "no fallback path")
+        await jira.create_issue("TASKS", "no fallback path", "Task")
     assert calls == []
 
 
 # --- parent / hierarchy (widening) --------------------------------------------
 
 
-async def test_subtask_without_parent_is_refused(monkeypatch):
-    calls = _fake_call(monkeypatch, [])
-    with pytest.raises(jira.JiraError, match="requires a parent issue key"):
-        await jira.create_issue("TASKS", "New subtask", issue_type="Subtask")
-    with pytest.raises(jira.JiraError, match="requires a parent issue key"):
-        await jira.create_issue("TASKS", "New subtask", issue_type="Sub-task")
-    assert calls == []
+async def test_a_subtask_type_without_parent_is_left_to_jira(monkeypatch):
+    """Whether a type is a sub-task is the instance's flag (`subtask: true` in
+    list_issue_types), not a name the client can know — 'Sub-Task' with a
+    capital T slipped the old name check. The create is posted as drafted and
+    Jira's 400 is the only refusal."""
+    calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-97"})])
+    await jira.create_issue("TASKS", "New subtask", "Sub-Task")
+    assert "parent" not in calls[0][2]["fields"]
 
 
 async def test_bad_parent_key_is_refused(monkeypatch):
     calls = _fake_call(monkeypatch, [])
     with pytest.raises(jira.JiraError, match="bad parent"):
-        await jira.create_issue("TASKS", "New work", parent="not-a-key")
+        await jira.create_issue("TASKS", "New work", "Task", parent="not-a-key")
     assert calls == []
-
-
-async def test_epic_is_an_accepted_issue_type(monkeypatch):
-    calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-100"})])
-    out = await jira.create_issue("TASKS", "New epic", issue_type="Epic")
-    assert out["issue"]["issue_type"] == "Epic"
-    assert calls[0][2]["fields"]["issuetype"] == {"name": "Epic"}
 
 
 async def test_parent_passes_through_to_fields_and_the_returned_issue(monkeypatch):
     calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-101"})])
     out = await jira.create_issue(
-        "TASKS", "New subtask", issue_type="Subtask", parent="TASKS-1",
+        "TASKS", "New subtask", "Sub-task", parent="TASKS-1",
     )
     body = calls[0][2]
     assert body["fields"]["parent"] == {"key": "TASKS-1"}
     assert out["issue"]["parent"] == "TASKS-1"
+
+
+# --- list_issue_types (project-scoped read; the source of a valid issue_type) ---
+
+
+@pytest.fixture
+def types_cache(monkeypatch):
+    monkeypatch.setattr(jira, "_issue_types_cache", {})
+
+
+def _dc_page(types, *, start=0, last=True, total=None):
+    return {"start": start, "size": len(types), "total": total if total is not None else len(types),
+            "last": last, "values": types}
+
+
+def _cloud_page(types, *, start=0, total=None):
+    return {"startAt": start, "maxResults": 100, "total": total if total is not None else len(types),
+            "issueTypes": types}
+
+
+_TYPES = [
+    {"id": "10001", "name": "Feature", "subtask": False, "description": "dropped"},
+    {"id": "10002", "name": "Sub-Task", "subtask": True, "iconUrl": "dropped"},
+]
+_ROWS = [{"id": "10001", "name": "Feature", "subtask": False},
+         {"id": "10002", "name": "Sub-Task", "subtask": True}]
+
+
+async def test_list_issue_types_uses_the_flavours_createmeta_path(monkeypatch, flavor, types_cache):
+    page = _dc_page(_TYPES) if flavor == "server" else _cloud_page(_TYPES)
+    calls = _fake_call(monkeypatch, [FakeResponse(200, page)])
+    out = await jira.list_issue_types("TASKS")
+    v = "2" if flavor == "server" else "3"
+    assert calls == [("GET", f"/rest/api/{v}/issue/createmeta/TASKS/issuetypes?maxResults=100&startAt=0", None)]
+    assert out == {"ok": True, "kind": "jira", "operation": "listIssueTypes",
+                   "project_key": "TASKS", "issue_types": _ROWS, "count": 2}
+
+
+async def test_list_issue_types_pages_until_the_total(monkeypatch, flavor, types_cache):
+    one, two = _TYPES[:1], _TYPES[1:]
+    if flavor == "server":
+        pages = [_dc_page(one, last=False, total=2), _dc_page(two, start=1, last=True, total=2)]
+    else:
+        pages = [_cloud_page(one, total=2), _cloud_page(two, start=1, total=2)]
+    calls = _fake_call(monkeypatch, [FakeResponse(200, p) for p in pages])
+    out = await jira.list_issue_types("TASKS")
+    assert [c[1].rsplit("startAt=", 1)[1] for c in calls] == ["0", "1"]
+    assert [t["name"] for t in out["issue_types"]] == ["Feature", "Sub-Task"]
+
+
+async def test_list_issue_types_stops_on_an_empty_page(monkeypatch, types_cache):
+    calls = _fake_call(monkeypatch, [FakeResponse(200, {"total": 5, "issueTypes": []})])
+    out = await jira.list_issue_types("TASKS")
+    assert len(calls) == 1 and out["count"] == 0 and out["issue_types"] == []
+
+
+async def test_list_issue_types_refuses_a_bad_key_before_the_provider(monkeypatch, types_cache):
+    calls = _fake_call(monkeypatch, [])
+    with pytest.raises(jira.JiraError, match="bad project_key"):
+        await jira.list_issue_types("tasks/../x")
+    assert calls == []
+
+
+async def test_list_issue_types_raises_jiras_refusal(monkeypatch, flavor, types_cache):
+    _fake_call(monkeypatch, [FakeResponse(404, {})])
+    with pytest.raises(jira.JiraError, match="not found for TASKS"):
+        await jira.list_issue_types("TASKS")
+
+
+async def test_list_issue_types_is_cached_per_project_for_the_ttl(monkeypatch, types_cache):
+    clock = [1000.0]
+    monkeypatch.setattr(jira.time, "monotonic", lambda: clock[0])
+    calls = _fake_call(monkeypatch, [
+        FakeResponse(200, _cloud_page(_TYPES)),
+        FakeResponse(200, _cloud_page(_TYPES[:1])),
+        FakeResponse(200, _cloud_page(_TYPES[1:])),
+    ])
+    first = await jira.list_issue_types("TASKS")
+    again = await jira.list_issue_types("TASKS")
+    assert len(calls) == 1 and again == first
+
+    other = await jira.list_issue_types("OPS")          # its own project, its own entry
+    assert len(calls) == 2 and other["count"] == 1
+
+    clock[0] += jira.CUSTOM_FIELDS_TTL + 1              # a type added in the UI shows
+    refreshed = await jira.list_issue_types("TASKS")
+    assert len(calls) == 3 and refreshed["count"] == 1
+
+
+async def test_creating_an_issue_never_consults_the_issue_type_cache(monkeypatch, types_cache):
+    """The cache serves the read tool only: a create naming a type the cache
+    has never seen still posts, and fills nothing."""
+    calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-96"})])
+    await jira.create_issue("TASKS", "New work", "Brand New Type")
+    assert [c[0] for c in calls] == ["POST"] and jira._issue_types_cache == {}
 
 
 # --- filters --------------------------------------------------------------

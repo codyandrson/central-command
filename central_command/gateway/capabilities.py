@@ -116,7 +116,7 @@ REGISTRY: list[Capability] = [
         risk="external, reversible — a wrongly created issue can be closed or deleted in the Jira UI",
         holder="Executor",
         route="integrations/jira.py → Jira REST createIssue (native, D23; native only, no n8n façade fallback)",
-        arguments=["project_key", "summary", "description?", "issue_type? (Task|Bug|Story|Epic|Subtask)", "parent?", "due_date?", "labels?", "custom_fields?", "assignee? (user_id from jira.find_users)"],
+        arguments=["project_key", "summary", "description?", "issue_type (a name from jira_list_issue_types for the project)", "parent?", "due_date?", "labels?", "custom_fields?", "assignee? (user_id from jira.find_users)"],
         description=(
             "Create a new Jira issue for not-yet-tracked work. Built after the "
             "2026-07-20 charter-v2 incident: the coached charter instructed the "
@@ -1448,6 +1448,23 @@ REGISTRY: list[Capability] = [
         description=(
             "The legal next statuses for an issue — read before proposing a "
             "transition, so proposals name real moves."
+        ),
+    ),
+    Capability(
+        name="jira.list_issue_types",
+        kind="read",
+        gate="ungated read",
+        default_gate="none",
+        risk="none to the world",
+        holder="agents (jira_list_issue_types tool)",
+        route="integrations/jira.py → Jira REST /issue/createmeta/{project}/issuetypes (native only — no façade counterpart; Cloud v3 + Data Center v2)",
+        arguments=["project_key"],
+        description=(
+            "The issue types one project can create — id, name and whether the "
+            "type is a sub-task. Types are per-project and per-instance, so "
+            "this is the only source of a valid `issue_type` for "
+            "jira.create_issue; Jira's own 400 stays the only validator of "
+            "what a proposal names."
         ),
     ),
     Capability(

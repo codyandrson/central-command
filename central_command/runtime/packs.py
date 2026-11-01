@@ -85,11 +85,13 @@ _JIRA_TARGET = ("target_ref = {'system': 'jira', 'id': '<the issue or project ke
 PACKS: dict[str, Pack] = {
     "jira-read": Pack(
         name="jira-read",
-        description=("Read live Jira state: projects, one issue, JQL search, "
-                     "legal transitions, custom fields, users (filters, dashboards, "
+        description=("Read live Jira state: projects, a project's issue types, one "
+                     "issue, JQL search, legal transitions, custom fields, users "
+                     "(filters, dashboards, "
                      "gadgets on Cloud)."),
         tool_names=("jira_get_issue", "jira_search_issues", "jira_get_transitions",
-                    "jira_list_projects", "jira_list_fields", "jira_find_users",
+                    "jira_list_projects", "jira_list_issue_types", "jira_list_fields",
+                    "jira_find_users",
                     "jira_list_filters",
                     "jira_list_dashboards", "jira_list_gadgets"),
     ),
@@ -111,7 +113,7 @@ PACKS: dict[str, Pack] = {
                 name="jira.create_issue",
                 arguments=("{'project_key': '<PROJ>', 'summary': '<title>', "
                            "'description'?: '<text>', "
-                           "'issue_type'?: 'Task|Bug|Story|Epic|Subtask', "
+                           "'issue_type': '<a type name from jira_list_issue_types>', "
                            "'parent'?: '<KEY>', "
                            "'due_date'?: 'YYYY-MM-DD', 'labels'?: [...], "
                            "'custom_fields'?: {'<field name>': <value>, ...}, "
@@ -122,9 +124,14 @@ PACKS: dict[str, Pack] = {
                        "jira_list_projects — a plausible-sounding key you "
                        "reasoned your way to (PERSONAL, SUPPORT, CS) fails the "
                        "write outright; the real list is short, so read it. "
+                       "'issue_type' is REQUIRED and MUST be a name you have "
+                       "seen in jira_list_issue_types for THAT project — "
+                       "types differ per project and per instance, so never "
+                       "assume Task, Bug or Story exists. "
                        "Hierarchy is expressed with 'parent': a Story or Task "
-                       "under an Epic names the Epic as parent, and a Subtask "
-                       "REQUIRES a parent. Links (jira.link_issues) express "
+                       "under an Epic names the Epic as parent, and a "
+                       "sub-task type (subtask: true in that read) REQUIRES a "
+                       "parent. Links (jira.link_issues) express "
                        "dependency; parent expresses structure — do not "
                        "conflate the two. 'custom_fields' follows the same "
                        "rules as jira.set_fields (human names from "

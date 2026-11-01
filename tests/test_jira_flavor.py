@@ -92,7 +92,7 @@ async def test_create_issue_and_add_comment_send_the_flavor_s_shape(monkeypatch)
     calls = _fake_call(monkeypatch, [
         FakeResponse(200, {"key": "TASKS-1"}), FakeResponse(200, {"id": "9"}),
     ])
-    await jira.create_issue("TASKS", "S", description="body text")
+    await jira.create_issue("TASKS", "S", "Example Type", description="body text")
     await jira.add_comment("TASKS-1", "a comment")
     assert calls[0][1] == "/rest/api/3/issue"
     assert calls[0][2]["fields"]["description"]["type"] == "doc"
@@ -103,7 +103,7 @@ async def test_create_issue_and_add_comment_send_the_flavor_s_shape(monkeypatch)
     calls = _fake_call(monkeypatch, [
         FakeResponse(200, {"key": "TASKS-2"}), FakeResponse(200, {"id": "10"}),
     ])
-    await jira.create_issue("TASKS", "S", description="body text")
+    await jira.create_issue("TASKS", "S", "Example Type", description="body text")
     await jira.add_comment("TASKS-1", "a comment")
     assert calls[0][1] == "/rest/api/2/issue"
     assert calls[0][2]["fields"]["description"] == "body text"

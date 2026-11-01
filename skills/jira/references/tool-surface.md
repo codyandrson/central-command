@@ -96,6 +96,16 @@ from an email, and a key that does not exist here fails the write. Never
 invent a plausible-sounding key — the real list is short and this tool is the
 only thing that knows it.
 
+### `jira_list_issue_types(project_key)` → `GET /rest/api/3/issue/createmeta/{project}/issuetypes` (Data Center: `GET /rest/api/2/issue/createmeta/{project}/issuetypes`)
+
+The issue types **one project** can create — `{id, name, subtask}` each, all pages
+(cached for 5 minutes per project). Read this **before** proposing
+`jira.create_issue` for that project: `issue_type` is required, and the names
+are the instance's own and differ per project — never assume `Task`, `Bug` or
+`Story` exists, and never carry a type from one project to another. A type
+with `subtask: true` needs a `parent`. Jira's own 400 is the only check on the
+name you then use; the tool is how you avoid earning it.
+
 ### `jira_find_users(query, project_key="")` → `GET /rest/api/3/user/assignable/search`
 
 Users matching a name or email fragment: `{user_id, display_name, email, active}`.
@@ -128,7 +138,7 @@ an identifier that appears in this list. Never guess one.
 
 | capability | endpoint | notes |
 |---|---|---|
-| `jira.create_issue` | `POST /rest/api/3/issue` | `project_key` must match `[A-Z][A-Z0-9_]*`; `summary` non-empty and **at most 255 chars**; `issue_type` is one of **Task, Bug, Story, Epic, Subtask** (`Sub-task` also accepted for company-managed projects — types are per-project, and Jira's own 400 is the final validator); optional `description` (plain text), `parent` (issue key — REQUIRED for Subtask, names the Epic for a Story/Task under one), `due_date`, `labels`, `custom_fields` (`{field name: value}`, resolved and shape-checked exactly like `jira.set_fields` — on the create, so one approval makes the complete issue), `assignee` (a `user_id` from `jira_find_users` — on the create, because a follow-up action cannot name the new key) |
+| `jira.create_issue` | `POST /rest/api/3/issue` | `project_key` must match `[A-Z][A-Z0-9_]*`; `summary` non-empty and **at most 255 chars**; `issue_type` is **required** — a type name returned by `jira_list_issue_types` for that project (types are the instance's and per-project; there is no default, and Jira's own 400 is the only validator); optional `description` (plain text), `parent` (issue key — REQUIRED for a sub-task type, names the Epic for a Story/Task under one), `due_date`, `labels`, `custom_fields` (`{field name: value}`, resolved and shape-checked exactly like `jira.set_fields` — on the create, so one approval makes the complete issue), `assignee` (a `user_id` from `jira_find_users` — on the create, because a follow-up action cannot name the new key) |
 | `jira.set_due_date` | `PUT /rest/api/3/issue/{key}` | sets `duedate` only |
 | `jira.update_attributes` | `PUT /rest/api/3/issue/{key}` | a **partial** edit of `priority`, `due_date`, `labels` — name only what you mean to change (at least one); an attribute you leave out is untouched. **`labels` is the FULL replacement list, not a merge** (`[]` clears); `due_date: null` clears the date; priority can be changed, not cleared |
 | `jira.set_fields` | `PUT /rest/api/3/issue/{key}` | sets **custom** fields, given as `fields: {"<field name>": value}`. Names come from `jira_list_fields` or a read's `custom_fields` (matched case-insensitively) — **never a `customfield_NNNNN` id**, and never a name you have not seen there: an unknown name is refused here with the real list, because Jira answers an unknown field key with **200 and binds nothing**. The value shape follows the field's declared type: a string for text and rich text (wrapped into ADF for you), a number for numeric, `YYYY-MM-DD` for a date, the option name for a select, a list of names for a multi-select, `null` to clear. `writable: false` fields are refused. Priority, labels and due date are NOT here — those are `jira.update_attributes` |

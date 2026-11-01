@@ -139,7 +139,7 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # `tests/test_proposal_args.py` now walks the Executor's handlers so a
     # subscripted key without a spec fails the suite, not the operator.
     "jira.set_due_date": ArgSpec(required=("issue_key", "due_date")),
-    "jira.create_issue": ArgSpec(required=("project_key", "summary")),
+    "jira.create_issue": ArgSpec(required=("project_key", "summary", "issue_type")),
     "jira.create_project": ArgSpec(required=("key", "name")),
     "jira.add_comment": ArgSpec(required=("issue_key", "body")),
     # A PARTIAL edit: only the attributes named are changed. Presence is the

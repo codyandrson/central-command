@@ -47,7 +47,7 @@ def test_every_row_declares_a_default_gate_from_the_closed_vocabulary():
         if c.default_gate != "auditor":
             assert c.default_gate == ("human" if c.gate == "human approval" else "none"), c.name
     counts = {v: sum(c.default_gate == v for c in REGISTRY) for v in DEFAULT_GATES}
-    assert counts == {"human": 63, "auditor": 1, "none": 32}
+    assert counts == {"human": 63, "auditor": 1, "none": 33}
     assert gated_write_names() == {c.name for c in REGISTRY if c.default_gate != "none" and c.kind == "write"}
     with pytest.raises(ValueError):
         dataclasses.replace(REGISTRY[0], default_gate="maybe")

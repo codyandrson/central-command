@@ -229,7 +229,7 @@ async def test_create_issue_resolves_and_merges_custom_fields(monkeypatch):
     _seed(monkeypatch)
     calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-100"})])
     out = await jira.create_issue(
-        "TASKS", "New work",
+        "TASKS", "New work", "Example Type",
         custom_fields={"Accomplishment Benefit": "Saves 3h/week"},
     )
     body = calls[0][2]["fields"]
@@ -242,6 +242,6 @@ async def test_create_issue_refuses_an_unknown_custom_field_before_the_post(monk
     calls = _fake_call(monkeypatch, [])
     with pytest.raises(jira.JiraError, match="no custom field named"):
         await jira.create_issue(
-            "TASKS", "New work", custom_fields={"Benefit": "typo'd name"}
+            "TASKS", "New work", "Example Type", custom_fields={"Benefit": "typo'd name"}
         )
     assert calls == []

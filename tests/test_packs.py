@@ -85,8 +85,8 @@ def test_toolset_assembly_dedupes_and_fails_loud():
     # keeps a pre-drop paused session resumable without it being callable).
     assert names == {"propose_action", "jira_get_issue",
                      "jira_search_issues", "jira_get_transitions",
-                     "jira_list_projects", "jira_list_fields",
-                     "jira_list_filters", "jira_list_dashboards",
+                     "jira_list_projects", "jira_list_issue_types",
+                     "jira_list_fields", "jira_list_filters", "jira_list_dashboards",
                      "jira_list_gadgets", "jira_find_users"}
     with pytest.raises(ValueError, match="unknown capability pack"):
         packs.toolset_for(["jira-read", "no-such-pack"])

@@ -90,8 +90,8 @@ async def _jira_set_due_date(args: dict, approver: str, proposer: str | None) ->
 
 async def _jira_create_issue(args: dict, approver: str, proposer: str | None) -> str:
     out = await jira.create_issue(
-        args["project_key"], args["summary"], args.get("description"),
-        args.get("issue_type", "Task"), args.get("due_date"),
+        args["project_key"], args["summary"], args["issue_type"],
+        args.get("description"), args.get("due_date"),
         args.get("labels") or [], parent=args.get("parent"),
         custom_fields=args.get("custom_fields"), assignee=args.get("assignee"),
     )

@@ -75,6 +75,7 @@ TOOL_DEPENDENCY: dict[str, tuple[str, ...]] = {
     "jira_search_issues": ("jira",),
     "jira_get_transitions": ("jira",),
     "jira_list_projects": ("jira",),
+    "jira_list_issue_types": ("jira",),
     "jira_list_fields": ("jira",),
     "jira_find_users": ("jira",),
     "jira_list_filters": ("jira",),
@@ -232,7 +233,7 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
             "jira.delete_link jira.assign_issue jira.delete_issue "
             "jira.transition_issue jira.create_filter jira.create_dashboard "
             "jira.create_project jira.get_issue jira.search_issues "
-            "jira.find_users jira.get_transitions jira.list_fields "
+            "jira.find_users jira.get_transitions jira.list_fields jira.list_issue_types "
             "jira.list_filters jira.list_dashboards jira.list_gadgets"),
     **_each((CONFLUENCE,),
             "confluence.create_page confluence.update_page confluence.move_page "

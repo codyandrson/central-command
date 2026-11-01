@@ -1121,6 +1121,24 @@ async def jira_list_projects(ctx: RunContext) -> str:
 
 
 @parkable_read
+async def jira_list_issue_types(ctx: RunContext, project_key: str) -> str:
+    """List the issue types one Jira project can create — id, name and whether
+    the type is a sub-task. Read this BEFORE proposing any `jira.create_issue`
+    for that project: `issue_type` is required and types differ per project and
+    per instance (one site has Feature, Risk and Test, another only Task and
+    Story), so a name you reasoned your way to (Task, Bug, Story) may not exist
+    there and fails the write. Never invent a type — name one this tool
+    returned for THAT project. A type with `subtask: true` needs a `parent`
+    issue key. Read-only.
+    """
+    try:
+        data = await _read_with_retry(lambda: jira.list_issue_types(project_key))
+    except Exception as e:  # noqa: BLE001
+        return _read_failed("jira issue types read", e)
+    return _clip(json.dumps(data, default=str))
+
+
+@parkable_read
 async def jira_list_fields(ctx: RunContext) -> str:
     """List the custom fields this Jira instance declares — name, type, and
     whether a jira.set_fields proposal can write it.

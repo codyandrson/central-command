@@ -23,7 +23,7 @@ from central_command.runtime import packs
 
 CLOUD_ONLY_TOOLS = {"jira_list_filters", "jira_list_dashboards", "jira_list_gadgets"}
 DATA_CENTER_TOOLS = {"jira_get_issue", "jira_search_issues", "jira_get_transitions",
-                     "jira_list_projects", "jira_list_fields"}
+                     "jira_list_projects", "jira_list_issue_types", "jira_list_fields"}
 
 
 @pytest.fixture

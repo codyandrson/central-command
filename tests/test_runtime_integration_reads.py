@@ -56,7 +56,8 @@ READ_ALLOWLIST: dict[str, set[str]] = {
     # which is Jira's own spelling of a query.
     "jira": {
         "find_users", "get_issue", "get_transitions", "list_dashboards", "list_fields",
-        "list_filters", "list_gadgets", "list_projects", "search_issues",
+        "list_filters", "list_gadgets", "list_issue_types", "list_projects",
+        "search_issues",
     },
     # Reads only; create_page/update_page/move_page/trash_page/set_labels/
     # remove_labels/upload_attachment/create_space are the writes and are absent.
