@@ -141,9 +141,23 @@ async def test_upload_refuses_while_a_run_is_in_flight(monkeypatch):
 
 # ── /api/update/apply ───────────────────────────────────────────────────────
 
+def _review(monkeypatch, unresolved):
+    """Stand in for the stored skill review of the staged target: `unresolved`
+    docs await a verdict, or None when no review is stored."""
+    asked: list[str] = []
+
+    async def fake(target):
+        asked.append(target)
+        return unresolved
+
+    monkeypatch.setattr(update, "_skills_unresolved", fake)
+    return asked
+
+
 async def test_apply_spawns_the_runner_detached(monkeypatch):
     monkeypatch.setattr(update, "read_product_version", lambda: "2.21.1")
     monkeypatch.setattr(update, "_staged_target", lambda: "2.22.0")
+    _review(monkeypatch, 0)
     spawned: list[tuple[list[str], dict | None]] = []
     # Two arguments since v2.42.0: the second carries CC_UPDATE_DIR into the
     # detached runner's environment, so both sides address the same working
@@ -187,3 +201,78 @@ async def test_apply_409s(monkeypatch):
     (upd / "status.json").write_text(json.dumps(
         {"state": "running", "phase": "apply", "updated_at": _stamp(0)}))
     assert (await update.update_apply(update.ApplyRequest(target="2.22.0"))).status_code == 409
+
+
+# ── the bundled-skill review gate (epic-skills-refresh-on-update story 6) ─────
+
+@pytest.mark.parametrize("unresolved,count", [(2, 2), (None, 0)])
+async def test_apply_409s_while_the_skill_review_is_unresolved_or_absent(monkeypatch, unresolved, count):
+    monkeypatch.setattr(update, "read_product_version", lambda: "2.21.1")
+    monkeypatch.setattr(update, "_staged_target", lambda: "2.22.0")
+    asked = _review(monkeypatch, unresolved)
+    spawned: list = []
+    monkeypatch.setattr(update, "_spawn_detached", lambda cmd, env=None: spawned.append(cmd))
+
+    resp = await update.update_apply(update.ApplyRequest(target="2.22.0"))
+    assert resp.status_code == 409
+    body = _body(resp)
+    assert body["reason"] == "skills-unresolved" and body["unresolved"] == count
+    # The dialog recognises the refusal by its error text (UpdateBadge.applyNow).
+    assert "skills-unresolved" in body["error"]
+    # The target asked about is the staged tree's VERSION, and nothing started:
+    # no runner, no copied script, no status saying "running".
+    assert asked == ["2.22.0"]
+    assert spawned == []
+    assert not (update._update_dir() / "run.sh").exists()
+    assert not (update._update_dir() / "status.json").exists()
+
+
+async def test_apply_passes_through_when_the_skill_review_is_clean(monkeypatch):
+    monkeypatch.setattr(update, "read_product_version", lambda: "2.21.1")
+    monkeypatch.setattr(update, "_staged_target", lambda: "2.22.0")
+    _review(monkeypatch, 0)
+    spawned: list = []
+    monkeypatch.setattr(update, "_spawn_detached", lambda cmd, env=None: spawned.append(cmd))
+    resp = await update.update_apply(update.ApplyRequest(target="2.22.0"))
+    assert resp.status_code == 202 and len(spawned) == 1
+
+
+async def test_apply_refuses_when_the_review_store_cannot_be_read(monkeypatch):
+    monkeypatch.setattr(update, "read_product_version", lambda: "2.21.1")
+    monkeypatch.setattr(update, "_staged_target", lambda: "2.22.0")
+
+    async def down(target):
+        raise OSError("database down")
+
+    monkeypatch.setattr(update, "_skills_unresolved", down)
+    spawned: list = []
+    monkeypatch.setattr(update, "_spawn_detached", lambda cmd, env=None: spawned.append(cmd))
+    resp = await update.update_apply(update.ApplyRequest(target="2.22.0"))
+    assert resp.status_code == 503 and spawned == []
+
+
+async def test_skills_unresolved_counts_rows_by_the_shared_rule(monkeypatch):
+    """The reader asks the store and counts with refresh.unresolved_rows — the
+    rule the updater's gate and the review endpoints share: no stored rows ->
+    None; a `modified` doc with no verdict -> unresolved; a verdict, an
+    unmodified doc and a retired-upstream doc nobody touched -> not."""
+    from central_command.db import repo
+
+    stored: dict[str, list[dict]] = {}
+
+    async def fake_list(target):
+        return stored.get(target, [])
+
+    monkeypatch.setattr(repo, "list_skill_doc_review", fake_list)
+    assert await update._skills_unresolved("2.22.0") is None
+
+    def row(status, verdict=None, ours="o", base="b"):
+        return {"status": status, "verdict": verdict, "ours_hash": ours, "base_hash": base}
+
+    stored["2.22.0"] = [
+        row("modified"), row("modified", verdict="take_release"),
+        row("unmodified"), row("retired-upstream", ours="b"), row("retired-locally"),
+    ]
+    assert await update._skills_unresolved("2.22.0") == 2
+    stored["2.22.1"] = [row("unmodified"), row("new")]
+    assert await update._skills_unresolved("2.22.1") == 0

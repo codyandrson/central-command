@@ -632,6 +632,77 @@ apply_schema() {
       _ "$ctr" "$REPO_ROOT/central_command/db/schema.sql"
 }
 
+# ── bundled skill docs: review at stage, gate at apply, refresh after the schema
+# (epic-skills-refresh-on-update stories 5-6, contract: updater-contract.md)
+# The three steps call the command line of central_command/skills/refresh.py —
+# review (exit 0 stored / 2 could not), check (0 nothing unresolved / 3
+# unresolved / 2 could not), apply (0 / 1 a row failed / 2 could not / 3
+# unresolved) — and are keyed on the tree carrying that module, never on a
+# version number. They take effect from the update AFTER the release that
+# ships them: the update INTO that release runs the previous release's
+# update.sh, which has none of this. An absent module is a skip, which is also
+# what a rollback onto an older tree finds. Single-node has no tag, so every
+# call says `--ref upstream` and the target is the staged tree's own VERSION.
+skills_refresh_module() { [[ -f "$REPO_ROOT/central_command/skills/refresh.py" ]]; }
+skills_python() { # the install's own interpreter, the way setup.sh's venv_python finds it
+  [[ -x "$REPO_ROOT/.venv/bin/python" ]] && { printf '%s' "$REPO_ROOT/.venv/bin/python"; return 0; }
+  [[ -x "$REPO_ROOT/.venv/Scripts/python.exe" ]] && { printf '%s' "$REPO_ROOT/.venv/Scripts/python.exe"; return 0; }
+  return 1
+}
+skills_refresh_cli() { # skills_refresh_cli <review|check|apply> <target> [more args] — the CLI's stdout joins stderr
+  local sub="$1" target="$2" py; shift 2
+  py="$(skills_python)" || return 2
+  ( cd "$REPO_ROOT" && "$py" -m central_command.skills.refresh "$sub" --target "$target" --ref upstream "$@" ) >&2
+}
+# cmd_stage, after cmd_plan: store the review of the staged release. The
+# installed tree's module reads the target's files through `git show upstream`.
+# A failure is a WARNING: the cockpit computes the review when the dialog opens.
+skills_review_stage() {
+  skills_refresh_module || return 0
+  (( FAILS )) && return 0
+  merged_already && return 0   # nothing staged to review
+  local target; target="$(G show upstream:VERSION 2>/dev/null | sed -n 's/^version=//p' | head -1)"
+  if [[ -z "$target" ]]; then
+    warn "skills-review" "bundled-skill review not computed — upstream has no VERSION; the cockpit will compute it on open"
+    return 0
+  fi
+  skills_refresh_cli review "$target" \
+    || warn "skills-review" "bundled-skill review not computed — the cockpit will compute it on open"
+  return 0
+}
+# cmd_apply, after version_gate and before acquire_staged: nothing has moved
+# yet, so a refusal changes nothing. A FAIL (exit 1), not a USERACTION: the
+# fix is in the cockpit's Update dialog, not in the shell.
+skills_review_gate() {
+  skills_refresh_module || return 0
+  local target rc=0; target="$(G show upstream:VERSION 2>/dev/null | sed -n 's/^version=//p' | head -1)"
+  if [[ -z "$target" ]]; then
+    fail "skills-review" "could not review the bundled skill docs — upstream has no VERSION, so the gate cannot be proven. NOTHING was changed"
+    return 1
+  fi
+  skills_refresh_cli check "$target" || rc=$?
+  case $rc in
+    0) pass "skills-review" "no bundled skill doc awaits a decision for v${target}" ;;
+    3) fail "skills-review" "bundled skill docs were changed here and by v${target} — decide each in the cockpit (Settings > Update) before applying. NOTHING was changed"
+       return 1 ;;
+    *) fail "skills-review" "could not review the bundled skill docs for v${target} (exit $rc) — the gate cannot be proven; open the cockpit's Update dialog to compute the review, then apply again. NOTHING was changed"
+       return 1 ;;
+  esac
+}
+# deploy_current_tree, right after the schema: the merged tree is HEAD, the API
+# is stopped, Postgres is up, and no run has started on the new docs. Never a
+# failure of the update: a row that did not apply keeps its apply_error in the
+# review, and the Skills page offers the retry. A rollback leaves the tree
+# BEHIND `upstream` and so refreshes nothing.
+refresh_bundled_skills() {
+  skills_refresh_module || return 0
+  merged_already || return 0
+  local target; target="$(branch_kv upstream version)"
+  skills_refresh_cli apply "$target" --actor updater \
+    || warn "skills-refresh" "bundled skill docs not refreshed — rows with an error stay in the review; retry from the Skills page"
+  return 0
+}
+
 # ── acquire BEFORE the merge (2026-10-01 design record, D5) ─────────────────
 # The comment that used to open deploy_current_tree said "acquire BEFORE
 # mutating", and the code ran `./setup.sh fetch` AFTER the fast-forward: a
@@ -792,6 +863,7 @@ deploy_current_tree() {
   # the ledger is consulted: a pre-ledger install sent to `./setup.sh` must
   # already have the new columns.
   apply_schema || return 1
+  refresh_bundled_skills
   # The manifest of the tree that is NOW checked out — the merged one, or the
   # restored one on a rollback. A tree with none (a rollback onto a pre-ledger
   # release) has no ledger gate for its phases to be refused by.
@@ -901,6 +973,7 @@ cmd_apply() {
     fi
   else
     version_gate || return 1
+    skills_review_gate || return 1
     # ACQUIRE BEFORE ANYTHING MOVES (D5) — before the backup, the checkpoint
     # and the merge. A stop here is exit 3 or 1 with nothing changed, and
     # update-run.sh, seeing HEAD where it was, does not roll anything back.
@@ -933,7 +1006,10 @@ cmd_stage() {
   initialized || { cmd_init || return 1; }
   cmd_import "$zip" || return 1
   (( FAILS )) && return 1
-  cmd_plan
+  local rc=0
+  cmd_plan || rc=$?
+  skills_review_stage
+  return "$rc"
 }
 
 # ── run <zip>: the one-command human path (2026-08-28) ──────────────────────

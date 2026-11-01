@@ -362,6 +362,21 @@ class ApplyRequest(BaseModel):
     target: str = ""
 
 
+async def _skills_unresolved(target: str) -> int | None:
+    """How many bundled skill docs of the stored review for `target` still
+    await a verdict, or None when no review is stored. The same rule as the
+    updater's gate (`update.sh`'s skills_review_gate), read from the store the
+    review CLI writes: the route cannot say yes to what the gate would refuse.
+    The target is the staged tree's VERSION, as the stage computed it."""
+    from central_command.db import repo
+    from central_command.skills import refresh
+
+    rows = await repo.list_skill_doc_review(target)
+    if not rows:
+        return None
+    return len(refresh.unresolved_rows(rows))
+
+
 def _spawn_detached(cmd: list[str], extra_env: dict[str, str] | None = None) -> None:
     devnull = subprocess.DEVNULL
     env = {**os.environ, **(extra_env or {})} if extra_env else None
@@ -401,6 +416,26 @@ async def update_apply(body: ApplyRequest) -> JSONResponse:
         return JSONResponse({"error": "nothing is staged — upload a zip first"}, status_code=409)
     if body.target and body.target != staged:
         return JSONResponse({"error": f"staged version is v{staged}, not v{body.target} — re-upload"}, status_code=409)
+
+    # The bundled skill docs: refused before the runner is spawned, so nothing
+    # stops, nothing is written and no status says "running" over an unresolved
+    # review. No stored review counts as unresolved — the dialog computes it on
+    # open (and the updater's gate would die on it anyway).
+    try:
+        unresolved = await _skills_unresolved(staged)
+    except Exception as exc:  # the store cannot be read: the gate cannot be proven
+        return JSONResponse(
+            {"error": f"could not read the bundled skill review for v{staged}: {exc}"},
+            status_code=503)
+    if unresolved is None or unresolved > 0:
+        return JSONResponse(
+            {"reason": "skills-unresolved", "unresolved": unresolved or 0,
+             # `error` carries the reason word too: the dialog recognises a
+             # skills-unresolved refusal by it (UpdateBadge.applyNow).
+             "error": (f"skills-unresolved: no bundled skill review is stored for v{staged} — open the Update dialog to compute it"
+                       if unresolved is None else
+                       f"skills-unresolved: {unresolved} bundled skill doc(s) need a decision in the Update dialog before applying")},
+            status_code=409)
 
     upd = _update_dir()
     upd.mkdir(parents=True, exist_ok=True)
