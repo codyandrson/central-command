@@ -119,6 +119,30 @@ export function requestStage(target: string): 'requested' | 'already' | 'error' 
   }
 }
 
+/**
+ * Whether the review of `target`'s bundled skill docs lets an apply through.
+ * 'clear': nothing unresolved. A number or null: refuse (null = no review stored,
+ * or one that has gone stale, so nobody knows how many). 'unreachable': the API
+ * could not answer; it says nothing about the docs.
+ */
+async function skillReviewState(target: string): Promise<number | null | 'clear' | 'unreachable'> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${config.gatewayUrl.replace(/\/+$/, '')}/api/skills/update-review/${encodeURIComponent(target)}`,
+      { signal: AbortSignal.timeout(15_000) },
+    );
+  } catch {
+    return 'unreachable';
+  }
+  if (res.status >= 500) return 'unreachable';
+  if (!res.ok) return null;
+  const review = await res.json().catch(() => null) as { counts?: { unresolved?: unknown } } | null;
+  const unresolved = review?.counts?.unresolved;
+  if (typeof unresolved !== 'number') return null;
+  return unresolved > 0 ? unresolved : 'clear';
+}
+
 const app = new Hono();
 
 app.get('/api/update/status', rateLimitGeneral, (c) => {
@@ -174,6 +198,22 @@ app.post('/api/update/apply', rateLimitGeneral, async (c) => {
   // pipeline against the version that is already installed.
   if (body.target && body.target === readProductVersion()) {
     return c.json({ error: `v${body.target} is already installed` }, 409);
+  }
+  // Refused here so the hold is never engaged, and no trigger written, over a
+  // review nobody finished; "Update anyway" answers the busy gate, not this. The
+  // updater's own gate (`skills_review_gate`) stays the proof: it reads the
+  // database directly, so a request with no known target, or a forced one while
+  // the API is down (the very case "Update anyway" exists for), goes on to it.
+  const reviewTarget = body.target || readStatusFile(STAGE_STATUS)?.target;
+  if (reviewTarget) {
+    const review = await skillReviewState(reviewTarget);
+    if (review === 'unreachable') {
+      if (body.force !== true) {
+        return c.json({ error: 'could not read the bundled-skill review from the API' }, 502);
+      }
+    } else if (review !== 'clear') {
+      return c.json({ error: 'skills-unresolved', reason: 'skills-unresolved', unresolved: review }, 409);
+    }
   }
   // Unforced: engage the hold instead of writing the trigger. The API pauses
   // the team, waits for the agents to land and writes the trigger itself;

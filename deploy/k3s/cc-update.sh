@@ -23,7 +23,7 @@
 #     -> merge the tag -> schema (additive-only, idempotent) -> pip + cockpit
 #     rebuild AS the checkout's owner (root-owned files in the checkout break every later
 #     build) -> apply changed k8s manifests + install changed unit files ->
-#     start services -> health poll -> on failure: git reset --hard to the
+#     n8n workflows -> bundled skill docs -> start services -> health poll -> on failure: git reset --hard to the
 #     checkpoint, rebuild, restore the images/manifests the forward pass
 #     touched, restart, re-poll — the rolled_back state is honest about what
 #     schema kept (additive-only means old code runs fine against it).
@@ -398,6 +398,59 @@ refuse_if_capability_pending() { # <phase>
   die "$1" "v$TARGET_VERSION removes a capability that still has undecided work — decide it first (approve, reject or dismiss in the cockpit), then apply again; 'Update anyway' does not apply to this"
 }
 
+# ── bundled skill docs ───────────────────────────────────────────────────────
+# Three steps over `central_command/skills/refresh.py`, each keyed on the tree
+# holding that module, never on a version: the update INTO a release runs the
+# previous release's copy of this script, so these take effect from the update
+# AFTER the release that ships them, and a rollback onto an older tree finds no
+# module and skips. The module opens the database directly, so it answers with
+# the API up or stopped. Exits: review 0/2, check 0/3/2, apply 0/1/2/3.
+#
+# Under `env -i`, from the repo root: Settings load the ROOT .env, and this
+# script sourced deploy/k3s/.env into its own shell, where a variable already set
+# would beat it (the same rule as verify.sh's self-check). HOME is the owner's,
+# for git and for the default state directory the overlay lives under.
+skills_refresh_cli() { # <review|check|apply> <args...>
+  "${RUNAS[@]}" env -i -C "$REPO" PATH="$PATH" HOME="$OWNER_HOME" LANG="${LANG:-C.UTF-8}" \
+    "$REPO/.venv/bin/python" -m central_command.skills.refresh "$@"
+}
+
+# Stage, keyed on the INSTALLED tree: the stage never checks the target out, and
+# the module reads the target's files through `git show`. Its counts line goes to
+# the journal. A failure costs nothing: the cockpit computes the review on open.
+skills_review_stage() {
+  [[ -f "$REPO/central_command/skills/refresh.py" ]] || return 0
+  skills_refresh_cli review --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" \
+    || note "WARNING: bundled-skill review not computed — the cockpit will compute it on open"
+  return 0
+}
+
+# Apply, keyed on the INSTALLED tree, before the busy gate and the checkpoint so
+# a refusal changes nothing. FORCE does not reach this: "Update anyway" answers
+# the busy gate, and a doc nobody decided cannot be decided by a restart. Fails
+# closed: anything but a clean answer refuses (`check` recomputes, so it answers
+# for the library as it is now).
+skills_review_gate() {
+  [[ -f "$REPO/central_command/skills/refresh.py" ]] || return 0
+  local rc=0
+  skills_refresh_cli check --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" || rc=$?
+  case $rc in
+    0) ;;
+    3) die resolve "bundled skill docs were changed here and by v$TARGET_VERSION — decide each in the cockpit (Settings > Update) before applying" ;;
+    *) die resolve "could not review the bundled skill docs for v$TARGET_VERSION (exit $rc) — the gate cannot be proven; see journalctl -u cc-update" ;;
+  esac
+}
+
+# After the merge, keyed on the MERGED tree. WARN-only: a die here stops a merged
+# tree with no rollback, and a doc not refreshed stays on the record with its
+# apply_error, to re-run from the cockpit (a re-run posts only what is missing).
+refresh_bundled_skills() {
+  [[ -f "$REPO/central_command/skills/refresh.py" ]] || return 0
+  skills_refresh_cli apply --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" --actor updater \
+    || note "WARNING: bundled skill docs not refreshed — rows with apply_error stay in the review; re-run from Settings > Skills"
+  return 0
+}
+
 # A SIGTERM (TimeoutStartSec) must not leave a silent corpse.
 trap 'write_status failed "${PHASE_NOW:-unknown}" "terminated (timeout or stop)"; exit 143' TERM
 # The build worktree must not survive ANY exit path, TERM included (the TERM
@@ -441,6 +494,7 @@ main() {
   if [[ -n "$minfrom" && "$(printf '%s\n%s\n' "$CUR_VERSION" "$minfrom" | sort -V | head -1)" == "$CUR_VERSION" && "$CUR_VERSION" != "$minfrom" ]]; then
     die resolve "v$TARGET_VERSION requires upgrading from >= $minfrom (installed $CUR_VERSION) — apply the intermediate release first"
   fi
+  skills_review_gate
 
   # Twice: here so the common refusal costs nothing, and again right before
   # the stop, because prebuild + dumps leave a window a new run can start in.
@@ -695,6 +749,11 @@ CM
   PHASE_NOW=n8n; phase "applying n8n workflows (deploy/n8n/)"
   bash "$REPO/deploy/n8n/apply-workflows.sh" --k3s || die n8n "deploy/n8n/apply-workflows.sh failed — the n8n dump from the db-backup phase restores the previous workflows"
 
+  # Services stopped, Postgres up, and before they start, so no run reads a stale
+  # doc after the restart. The same shape as the n8n step above.
+  PHASE_NOW=skills; phase "refreshing bundled skill docs"
+  refresh_bundled_skills
+
   # After every file of the release is in place and before the app starts on
   # it — the ingest worker starts with cc-uvicorn, so the patches (rebuild,
   # above), the settings and the key scope must all be there first.
@@ -822,6 +881,7 @@ stage_main() {
   if [[ -n "$minfrom" && "$(printf '%s\n%s\n' "$CUR_VERSION" "$minfrom" | sort -V | head -1)" == "$CUR_VERSION" && "$CUR_VERSION" != "$minfrom" ]]; then
     die resolve "v$TARGET_VERSION requires upgrading from >= $minfrom (installed $CUR_VERSION) — apply the intermediate release first"
   fi
+  skills_review_stage
 
   PHASE_NOW=stage-build; phase "prebuilding changed image caches (nothing imported, services stay up)"
   CKPT=HEAD   # changed_between diffs $CKPT..target; at stage time HEAD is the installed state
