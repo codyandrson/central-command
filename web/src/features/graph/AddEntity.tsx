@@ -83,9 +83,10 @@ export function AddEntity({ entityTypes, groups, onCreate, onClose }: {
               setName(''); setSummary(''); setLabels([]);
             } catch (e) {
               // The fields are cleared only on success, so a refused write
-              // (the embedder down: the backend's 503 says nothing was written)
-              // leaves the operator's entry exactly as typed — one click to
-              // save it again once the dependency is back.
+              // (the embedder down, or its record in mismatch: the backend's 503
+              // says which) leaves the operator's entry exactly as typed — one
+              // click to save it again once the dependency is back. The text is
+              // the backend's: a mismatch names the reason and what to run.
               setErr(e instanceof Error ? e.message : String(e));
             } finally {
               setBusy(false);

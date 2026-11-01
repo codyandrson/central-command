@@ -32,6 +32,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import httpx
+
 from central_command.config import settings
 from central_command.contract import EmbedderMismatch
 from central_command.contract.embedding_text import CANARY_TEXTS, TEXT_RECIPE
@@ -182,6 +184,19 @@ async def _embed_canaries(texts) -> list[list[float]]:
     return [await neo4j_writer.request_embedding(text) for text in texts]
 
 
+def _refusal(exc: httpx.HTTPStatusError) -> Verdict | None:
+    """The mismatch for an embedder that ANSWERED no: the alias deleted, or out of
+    the app key's reach. Left as an error it would classify as a NO and reach the
+    agent as "proceed without it". 408 and 429 mean come back later, and with
+    every 5xx they stay the outage they are (None: the caller re-raises)."""
+    status = exc.response.status_code
+    if not 400 <= status < 500 or status in (408, 429):
+        return None
+    return _mismatch(
+        "ii", f"configured {settings.embed_alias} is refused by the proxy (HTTP {status})",
+    )
+
+
 def _wrong_width(vectors: list[list[float]], dimensions: int) -> tuple[int, int] | None:
     """(width, how many) of the first canary whose width is wrong, else None."""
     for vector in vectors:
@@ -203,7 +218,13 @@ async def bootstrap_if_empty() -> bool:
     if any((await census()).values()):
         return False
     dimensions = int(settings.embed_dim)
-    vectors = await _embed_canaries(CANARY_TEXTS)
+    try:
+        vectors = await _embed_canaries(CANARY_TEXTS)
+    except httpx.HTTPStatusError as exc:
+        refused = _refusal(exc)
+        if refused is None:
+            raise
+        raise EmbedderMismatch(refused.reason) from exc
     wrong = _wrong_width(vectors, dimensions)
     if wrong:
         raise EmbedderMismatch(
@@ -272,7 +293,13 @@ async def _compare_canaries(record: dict, alias: str, dimensions: int) -> Verdic
             "iv", f"the record for {alias} holds no usable canaries, so the model behind "
                   "it cannot be confirmed",
         )
-    vectors = await _embed_canaries(texts)
+    try:
+        vectors = await _embed_canaries(texts)
+    except httpx.HTTPStatusError as exc:
+        refused = _refusal(exc)
+        if refused is None:
+            raise
+        return refused
     wrong = _wrong_width(vectors, dimensions)
     if wrong:
         return _mismatch("iii", _width_reason(wrong[0], wrong[1], "canary", dimensions))
@@ -327,7 +354,17 @@ async def check(force: bool = False) -> Verdict:
 
 
 async def require_open() -> None:
-    """Raise the mismatch `check()` found. What a gate calls."""
+    """Raise the mismatch `check()` found. What a read gate calls."""
     verdict = await check()
     if not verdict.open:
+        raise EmbedderMismatch(verdict.reason)
+
+
+async def require_open_for_write() -> None:
+    """`require_open`, and the first vector on an empty graph writes the record
+    first. What the curation writer calls, after `embed()` and before its write."""
+    verdict = await check()
+    if verdict.status == ABSENT_EMPTY:
+        await bootstrap_if_empty()
+    elif not verdict.open:
         raise EmbedderMismatch(verdict.reason)

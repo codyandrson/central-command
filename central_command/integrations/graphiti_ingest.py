@@ -70,10 +70,10 @@ import time
 from datetime import datetime, timezone
 
 from central_command import events
-from central_command.contract import TRANSIENT, classify_failure
+from central_command.contract import TRANSIENT, EmbedderMismatch, classify_failure
 from central_command.contract.failures import SEMANTIC, is_world_moved, retry_backoff_seconds
 from central_command.db import repo
-from central_command.integrations import graph_ontology, neo4j_reader
+from central_command.integrations import embedder_record, graph_ontology, neo4j_reader
 from central_command.integrations.graphiti import GROUP_ID
 
 log = logging.getLogger(__name__)
@@ -441,6 +441,9 @@ class IngestWorker:
         self._recovered = False
         self._indices_ok = False
         self._cutover_done = False
+        # True skips the embedder record gate, a shortcut for tests like the
+        # three above. Nothing here sets it: the gate asks on every tick.
+        self._record_ok = False
         self._cutover_logged = False
         self._patches: bool | None = None
         self._patches_checked = 0.0
@@ -544,6 +547,32 @@ class IngestWorker:
             self._patches, self._patches_checked = bool(_patches_ok()), now
         return self._patches
 
+    async def _record_gate(self) -> bool:
+        """May an extraction be taken? An extraction embeds and writes vectors, so
+        the embedder record gates it. Asked every tick, through the check's TTL.
+        A closed gate spends no attempt, because nothing is claimed. An empty graph
+        gets its record here if no curation write got there first."""
+        if self._record_ok:
+            return True
+        try:
+            verdict = await embedder_record.check()
+            if verdict.status == embedder_record.ABSENT_EMPTY:
+                if await embedder_record.bootstrap_if_empty():
+                    log.info("graph ingest: wrote the embedder record on an empty graph")
+                return True
+        except EmbedderMismatch as exc:
+            verdict = embedder_record.Verdict(embedder_record.MISMATCH, reason=exc.reason)
+        except Exception as exc:  # noqa: BLE001 — no answer is not a verdict; asked again next tick
+            self._report(
+                f"the embedder check could not answer ({type(exc).__name__})",
+                "waiting: the embedder check could not answer (deletions still run)",
+            )
+            return False
+        if verdict.open:
+            return True
+        self._report(f"extraction REFUSED: {verdict.reason}", "blocked: embedder mismatch")
+        return False
+
     async def _loop(self) -> None:
         while not self._stopping:
             try:
@@ -609,6 +638,11 @@ class IngestWorker:
             return []
         if "embedder" in down:
             self._report(None, "waiting: the embedder is down (deletions still run)")
+            kinds = (REMOVE,)
+        # Only when nothing else already refused extraction, because asking a
+        # down embedder would only wait on it, and two problems taking turns
+        # would log on every tick. A deletion is bolt-only and still runs.
+        if kinds is None and not await self._record_gate():
             kinds = (REMOVE,)
         claimed = await repo.claim_ingest_jobs(exclude_groups=list(self._jobs), kinds=kinds)
         for job in claimed:

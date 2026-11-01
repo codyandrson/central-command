@@ -78,7 +78,7 @@ from central_command.contract.failures import (
     classify_failure,
 )
 from central_command.integrations import http as http_client
-from central_command.integrations import neo4j_reader
+from central_command.integrations import embedder_record, neo4j_reader
 from central_command.integrations.neo4j_reader import _get_driver
 
 log = logging.getLogger(__name__)
@@ -283,6 +283,7 @@ async def create_node(
         raise WriteError("a node needs a name")
     extra = _validated_labels(labels)
     vector = await embed(f"{name}\n{summary}".strip())
+    await embedder_record.require_open_for_write()
     node_uuid = str(_uuid.uuid4())
     label_clause = "".join(f":{l}" for l in extra)
     vec_tail, vec_params = _vector("n", "name_embedding", "node", vector)
@@ -322,7 +323,10 @@ async def update_node(
         raise WriteError("a node needs a name")
 
     text_changed = new_name != current[0]["name"] or new_summary != current[0]["summary"]
-    vector = await embed(f"{new_name}\n{new_summary or ''}".strip()) if text_changed else None
+    vector = None
+    if text_changed:
+        vector = await embed(f"{new_name}\n{new_summary or ''}".strip())
+        await embedder_record.require_open_for_write()
 
     sets = ["n.name = $name", "n.summary = $summary"]
     params: dict = {"uuid": uuid, "name": new_name, "summary": new_summary}
@@ -395,6 +399,7 @@ async def create_edge(
     if not ends:
         raise WriteError("source or target entity not found")
     vector = await embed(fact)
+    await embedder_record.require_open_for_write()
     edge_uuid = str(_uuid.uuid4())
     now = _now()
     episode = await _record_operator_episode(
@@ -447,7 +452,10 @@ async def update_edge(
     row = current[0]
     new_fact = row["fact"] if fact is None else fact
     new_name = row["name"] if name is None else name
-    vector = await embed(new_fact) if new_fact != row["fact"] else None
+    vector = None
+    if new_fact != row["fact"]:
+        vector = await embed(new_fact)
+        await embedder_record.require_open_for_write()
 
     sets = ["e.name = $name", "e.fact = $fact"]
     params: dict = {"uuid": uuid, "name": new_name, "fact": new_fact}

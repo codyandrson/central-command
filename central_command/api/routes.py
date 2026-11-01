@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from central_command import events
-from central_command.contract import EmbedderDown, is_transient
+from central_command.contract import EmbedderDown, EmbedderMismatch, is_transient
 from central_command.contract.dependencies import waited_on
 from central_command.db import repo
 from central_command.gateway import gateway
@@ -4004,6 +4004,15 @@ async def _curate(coro, op: str, detail: dict):
             "dependency": "embedder",
             "detail": EMBEDDER_REFUSAL,
             "cause": f"{type(e.original).__name__}: {e.original}"[:300],
+        })
+    except EmbedderMismatch as e:
+        # The graph's embedder record disagrees (epic-embedder-integrity): the
+        # same refusal, but waiting will not clear it, so the panel shows the
+        # reason, which ends with what to run.
+        return JSONResponse(status_code=503, content={
+            "error": "embedder mismatch",
+            "dependency": "embedder",
+            "detail": e.reason,
         })
     except neo4j_writer.WriteError as e:
         raise HTTPException(422, str(e)) from e

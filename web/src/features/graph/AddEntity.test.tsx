@@ -35,4 +35,25 @@ describe('AddEntity', () => {
     await waitFor(() => expect(screen.getByLabelText('New entity name')).toHaveValue(''));
     expect(screen.queryByRole('alert')).toBeNull();
   });
+
+  it('shows a mismatch as its reason and remedy, with nothing about waiting', async () => {
+    const reason = 'graph has vectors but no embedder record; run: python -m central_command.graph_reembed status';
+    const onCreate = vi.fn().mockRejectedValueOnce(new Error(reason));
+    render(
+      <AddEntity
+        entityTypes={['Person']}
+        groups={[{ id: 'central_command', scope: 'shared' } as never]}
+        onCreate={onCreate}
+        onClose={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('New entity name'), 'Jane Doe');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(reason);
+    expect(alert).not.toHaveTextContent('once the embedder is back');
+    expect(screen.getByLabelText('New entity name')).toHaveValue('Jane Doe');
+  });
 });

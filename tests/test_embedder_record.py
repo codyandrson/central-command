@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,15 +27,24 @@ from central_command.api import orchestration, routes
 from central_command.config import Settings, settings
 from central_command.contract import (
     TRANSIENT,
+    Action,
     DependencyDown,
     EmbedderDown,
     EmbedderMismatch,
+    Reversibility,
     classify_failure,
 )
 from central_command.contract.embedding_text import CANARY_TEXTS, TEXT_RECIPE
 from central_command.contract.failures import EMBEDDER_REMEDY
 from central_command.db import repo
-from central_command.integrations import embedder_record, graphiti, neo4j_reader, neo4j_writer
+from central_command.gateway import executor, gateway
+from central_command.integrations import (
+    embedder_record,
+    graphiti,
+    graphiti_ingest,
+    neo4j_reader,
+    neo4j_writer,
+)
 from central_command.runtime import durable, models, tools
 from central_command.runtime.deps import TriageDeps
 from tests.conftest import aresolve, make_parks_due, needs_pg
@@ -95,6 +105,11 @@ class FakeGraph:
         self.embed_error: Exception | None = None
         self.read_error: Exception | None = None
         self.search_calls = 0
+        self.curation: list[str] = []
+        self.element = {
+            "uuid": "u-1", "group_id": "central_command", "name": "old", "summary": "old",
+            "fact": "old", "source": "a", "target": "b", "labels": ["Entity"],
+        }
 
     def session(self, **kw):
         return _Session(self)
@@ -124,10 +139,12 @@ class FakeGraph:
             return self._set(params["fields"])
         if "CCGraphMeta" in query:
             return [{"m": dict(self.record)}] if self.record else []
-        for kind, label in (("entity", "Entity"), ("edge", "RELATES_TO"), ("community", "Community")):
-            if label in query:
+        for kind, census in embedder_record._CENSUS.items():
+            if query == census:
                 return [{"width": w, "n": n} for w, n in self.widths[kind].items()]
-        raise AssertionError(f"an unexpected query: {query}")
+        # The curation writer's own statements, on whichever row they read.
+        self.curation.append(query)
+        return [dict(self.element)]
 
     def _set(self, fields):
         self.record = {"key": "embedder", **(self.record or {})}
@@ -147,6 +164,11 @@ class FakeGraph:
     def writes(self) -> list[str]:
         return [q for q in self.queries if q.startswith(("MERGE", "CREATE"))]
 
+    def curation_writes(self) -> list[str]:
+        """The writer's statements that change something; it reads through
+        `_write` too (an edge's endpoints, the current row)."""
+        return [q for q in self.curation if re.search(r"\b(CREATE|MERGE|SET|REMOVE|DELETE)\b", q)]
+
 
 @pytest.fixture
 def graph(monkeypatch):
@@ -162,6 +184,7 @@ def graph(monkeypatch):
 
     monkeypatch.setattr(neo4j_writer, "_write", write)
     monkeypatch.setattr(neo4j_writer, "request_embedding", fake.request_embedding)
+    monkeypatch.setattr(neo4j_writer, "_EMBED_DIMENSIONS", DIMS)
     return fake
 
 
@@ -395,6 +418,46 @@ async def test_an_embedder_that_cannot_answer_propagates_and_is_not_cached(graph
     assert embedder_record._cached is None
     graph.embed_error = None
     assert (await embedder_record.check()).status == embedder_record.OK
+
+
+def _refused(status: int) -> httpx.HTTPStatusError:
+    return httpx.HTTPStatusError(
+        str(status), request=httpx.Request("POST", "http://proxy.example.com"),
+        response=httpx.Response(status),
+    )
+
+
+@pytest.mark.parametrize("status", [400, 401, 403, 404])
+async def test_a_canary_the_proxy_refuses_is_a_mismatch_never_an_error(search, status):
+    """The alias deleted or out of the key's reach. As a raised error it would
+    classify as a NO and tell the agent to proceed without the graph."""
+    search.declare()
+    search.embed_error = _refused(status)
+    verdict = await embedder_record.check()
+    assert verdict.code == "ii"
+    assert verdict.reason == f"configured {ALIAS} is refused by the proxy (HTTP {status}); {REMEDY}"
+    with pytest.raises(CallDeferred) as paused:
+        await tools.search_knowledge_graph(_park_ctx(), "contract renewal")
+    assert paused.value.metadata["dependencies"] == ["graph", "embedder"]
+
+
+@pytest.mark.parametrize("status", [408, 429, 500, 502, 503])
+async def test_a_canary_told_to_come_back_later_stays_the_outage(graph, status):
+    graph.declare()
+    graph.embed_error = _refused(status)
+    with pytest.raises(httpx.HTTPStatusError):
+        await embedder_record.check()
+    assert embedder_record._cached is None
+
+
+async def test_bootstrap_refused_by_the_proxy_is_the_mismatch_and_writes_nothing(graph):
+    graph.embed_error = _refused(404)
+    with pytest.raises(EmbedderMismatch, match="refused by the proxy"):
+        await embedder_record.bootstrap_if_empty()
+    assert graph.record is None and graph.writes() == []
+    graph.embed_error = _refused(503)
+    with pytest.raises(httpx.HTTPStatusError):
+        await embedder_record.bootstrap_if_empty()
 
 
 async def test_a_graph_that_cannot_answer_propagates_and_is_not_cached(graph):
@@ -800,3 +863,256 @@ async def test_a_task_run_parks_on_a_mismatch_and_resumes_when_the_record_agrees
     assert DEGRADED not in json.dumps(rs["messages"])
     assert (await repo.get_task(task["id"]))["status"] == "DONE"
     assert graph.search_calls == 1
+
+
+# ── the write gates ──────────────────────────────────────────────────────────
+
+
+FOUR_WRITES = {
+    "create_node": lambda: neo4j_writer.create_node("Jane Doe", [], "Works at Example Co", "g"),
+    "update_node": lambda: neo4j_writer.update_node("u-1", name="new"),
+    "create_edge": lambda: neo4j_writer.create_edge("a", "b", "WORKS_AT", "Jane works there"),
+    "update_edge": lambda: neo4j_writer.update_edge("u-1", fact="new"),
+}
+CLOSED = {
+    "i": lambda g: g.widths["entity"].update({DIMS: 1}),
+    "ii": lambda g: g.declare(alias="cc-embedding-v2"),
+    "iii": lambda g: (g.declare(), g.widths["edge"].update({768: 1})),
+    "iv": lambda g: g.declare(canary_vectors=json.dumps([[-1.0, 0.0, 0.0, 0.0]] * 3)),
+    "v": lambda g: g.declare(state="migrating"),
+}
+
+
+@pytest.mark.parametrize("write", sorted(FOUR_WRITES))
+@pytest.mark.parametrize("code", sorted(CLOSED))
+async def test_each_code_closes_the_four_writes_before_anything_is_written(graph, write, code):
+    CLOSED[code](graph)
+    with pytest.raises(EmbedderMismatch) as closed:
+        await FOUR_WRITES[write]()
+    assert closed.value.reason == (await embedder_record.check()).reason
+    assert (await embedder_record.check()).code == code
+    assert graph.curation_writes() == []
+
+
+@pytest.mark.parametrize("write", sorted(FOUR_WRITES))
+async def test_the_gate_sits_after_the_embedding(graph, write):
+    """Never inside `embed()`, which the dispatcher shares. A down embedder is
+    still the writer's own `EmbedderDown`, before the check is asked."""
+    graph.widths["entity"] = {DIMS: 1}
+    graph.embed_error = httpx.ConnectError("refused")
+    with pytest.raises(EmbedderDown):
+        await FOUR_WRITES[write]()
+    assert not [q for q in graph.queries if q in embedder_record._CENSUS.values()]
+
+
+async def test_the_dispatchers_embedding_is_not_gated(graph):
+    graph.declare(state="migrating")
+    assert await neo4j_writer.embed("a duplicate check") == _vector("a duplicate check")
+    assert graph.queries == [], "embed() never asks the check"
+
+
+@pytest.mark.parametrize("call", [
+    lambda: neo4j_writer.update_node("u-1", labels=["Person"]),
+    lambda: neo4j_writer.update_edge("u-1", valid_at="2026-11-01T00:00:00Z"),
+])
+async def test_an_edit_that_writes_no_vector_stays_open(graph, call):
+    """It embeds nothing and stores nothing from any model, like the bolt-only
+    reads and deletions (A1)."""
+    graph.widths["entity"] = {DIMS: 1}
+    await call()
+    assert graph.curation_writes()
+    assert not [q for q in graph.queries if "CCGraphMeta" in q]
+
+
+async def test_the_first_create_node_on_an_empty_graph_writes_the_record_then_the_node(graph):
+    await neo4j_writer.create_node("Jane Doe", [], "Works at Example Co", "g")
+    assert graph.record["alias"] == ALIAS and graph.record["epoch"] == 1
+    record = next(i for i, q in enumerate(graph.queries) if "WHERE m.alias IS NULL" in q)
+    node = next(i for i, q in enumerate(graph.queries) if "CREATE (n:Entity" in q)
+    assert record < node
+
+
+async def test_a_second_write_does_not_bootstrap_again(graph):
+    await neo4j_writer.create_node("Jane Doe", [], "", "g")
+    await neo4j_writer.create_node("John Rivers", [], "", "g")
+    assert len([q for q in graph.queries if "WHERE m.alias IS NULL" in q]) == 1
+
+
+async def test_a_write_on_a_record_that_holds_goes_through(graph):
+    graph.declare()
+    for write in FOUR_WRITES.values():
+        await write()
+    assert graph.curation_writes()
+    assert graph.record["epoch"] == 1, "the record is not rewritten"
+
+
+# ── the worker ───────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def worker(monkeypatch, graph):
+    w = graphiti_ingest.IngestWorker()
+    w._recovered = w._indices_ok = w._cutover_done = True
+    w.claims = []
+    monkeypatch.setattr(w, "_patches_gate", lambda: True)
+
+    async def _none_down():
+        return set()
+
+    async def _claim(exclude_groups=None, kinds=None):
+        w.claims.append(kinds)
+        return []
+
+    monkeypatch.setattr(graphiti_ingest, "_dependencies_down", _none_down)
+    monkeypatch.setattr(repo, "claim_ingest_jobs", _claim)
+    return w
+
+
+@pytest.mark.parametrize("code", sorted(CLOSED))
+async def test_each_code_leaves_the_worker_only_deletions(graph, worker, code):
+    CLOSED[code](graph)
+    await worker.tick()
+    assert worker.claims == [(graphiti_ingest.REMOVE,)]
+    reason = (await embedder_record.check()).reason
+    assert worker._problem == f"extraction REFUSED: {reason}"
+    assert worker.state == "blocked: embedder mismatch"
+
+
+async def test_a_closed_gate_is_logged_once_however_many_ticks(graph, worker, caplog):
+    graph.widths["entity"] = {DIMS: 1}
+    with caplog.at_level("WARNING", logger=graphiti_ingest.log.name):
+        await worker.tick()
+        await worker.tick()
+    assert len([r for r in caplog.records if "extraction REFUSED" in r.getMessage()]) == 1
+    assert len(worker.claims) == 2
+
+
+async def test_a_check_that_cannot_answer_waits_and_deletions_still_run(graph, worker):
+    graph.declare()
+    graph.embed_error = httpx.ConnectError("refused")
+    await worker.tick()
+    assert worker.claims == [(graphiti_ingest.REMOVE,)]
+    assert worker.state.startswith("waiting")
+    assert embedder_record._cached is None, "the next tick asks again"
+
+    graph.embed_error = None
+    await worker.tick()
+    assert worker.claims[-1] is None and worker.state == "running"
+
+
+async def test_the_worker_opens_again_when_the_record_agrees(graph, worker):
+    graph.declare(state="migrating")
+    await worker.tick()
+    assert worker.claims == [(graphiti_ingest.REMOVE,)]
+    await embedder_record.update_record(state="stable")
+    await worker.tick()
+    assert worker.claims[-1] is None and worker._problem is None
+
+
+async def test_the_worker_bootstraps_an_empty_graph_once(graph, worker, caplog):
+    with caplog.at_level("INFO", logger=graphiti_ingest.log.name):
+        await worker.tick()
+        await worker.tick()
+    assert worker.claims == [None, None], "an empty graph is open"
+    assert graph.record["epoch"] == 1
+    assert len([q for q in graph.queries if "WHERE m.alias IS NULL" in q]) == 1
+    assert len([r for r in caplog.records if "embedder record" in r.getMessage()]) == 1
+
+
+async def test_whichever_comes_first_bootstraps_and_the_other_does_not(graph, worker):
+    await neo4j_writer.create_node("Jane Doe", [], "", "g")
+    written = dict(graph.record)
+    await worker.tick()
+    assert graph.record == written
+    assert len([q for q in graph.queries if "WHERE m.alias IS NULL" in q]) == 1
+
+
+async def test_the_workers_bootstrap_meeting_a_wrong_width_refuses_extraction(graph, worker):
+    graph.embed = lambda text: [1.0] * 768
+    await worker.tick()
+    assert worker.claims == [(graphiti_ingest.REMOVE,)]
+    assert "width 768" in worker._problem and graph.record is None
+
+
+async def test_the_seam_skips_the_gate(graph, worker):
+    graph.widths["entity"] = {DIMS: 1}
+    worker._record_ok = True
+    await worker.tick()
+    assert worker.claims == [None] and graph.queries == []
+
+
+async def test_nothing_asks_the_check_while_the_embedder_is_recorded_down(
+    graph, worker, monkeypatch,
+):
+    async def _embedder_down():
+        return {"embedder"}
+
+    monkeypatch.setattr(graphiti_ingest, "_dependencies_down", _embedder_down)
+    graph.widths["entity"] = {DIMS: 1}
+    await worker.tick()
+    assert worker.claims == [(graphiti_ingest.REMOVE,)] and graph.queries == []
+
+
+# ── the operator's direct write and the gated one ────────────────────────────
+
+
+async def test_the_direct_write_is_refused_with_the_reason_and_the_remedy(graph, monkeypatch):
+    emitted = []
+
+    async def _emit(*a, **k):
+        emitted.append(a)
+
+    monkeypatch.setattr(routes.events, "emit", _emit)
+    graph.widths["entity"] = {DIMS: 1}
+    res = await routes.graph_node_create(routes.GraphNodeIn(
+        name="Jane Doe", labels=[], summary="Works at Example Co", group_id="central_command"))
+    assert res.status_code == 503
+    assert json.loads(res.body) == {
+        "error": "embedder mismatch", "dependency": "embedder",
+        "detail": f"graph has vectors but no embedder record; {REMEDY}",
+    }
+    assert graph.curation_writes() == [] and emitted == []
+
+
+def _create_action():
+    return Action(capability="graph.create_node",
+                  arguments={"name": "Jane Doe", "group_id": "central_command",
+                             "summary": "Works at Example Co"},
+                  target_ref={"system": "graphiti"}, reversibility=Reversibility.reversible)
+
+
+async def test_the_executor_reads_a_mismatch_as_a_down_dependency(graph):
+    graph.widths["entity"] = {DIMS: 1}
+    with pytest.raises(executor.ExecutionFailed) as failed:
+        await executor.execute([_create_action()], approver="human:lee", source_refs=[],
+                               proposer="graph-steward", proposal_id=None)
+    assert failed.value.transient is True
+    assert failed.value.dependencies == ("graph", "embedder")
+    assert graph.curation_writes() == []
+
+
+@needs_pg
+async def test_a_curation_proposal_under_a_mismatch_parks_retry_pending(graph, monkeypatch):
+    monkeypatch.setattr(settings, "test_model", True)
+    pid = "prop_mis_" + uuid.uuid4().hex[:10]
+    sid = "sess_mis_" + uuid.uuid4().hex[:8]
+    graph.widths["entity"] = {DIMS: 1}
+    await repo.create_running_session(sid, "jira-expert")
+    await repo.save_proposal(
+        pid, sid, "jira-expert", "Record Jane Doe in the graph",
+        [{"capability": "graph.create_node",
+          "arguments": {"name": "Jane Doe", "group_id": "central_command",
+                        "summary": "Works at Example Co"},
+          "target_ref": {"system": "graphiti"}, "reversibility": "reversible"}],
+        [{"kind": "operator", "source_ref": "operator:test", "locator": "test",
+          "claim": "Jane Doe works at Example Co"}],
+        "the graph knows Jane Doe", pid,
+    )
+
+    out = await gateway.approve_and_execute(sid, pid)
+
+    assert out["execution"] == "parked"
+    row = await repo.load_proposal(pid)
+    assert row["status"] == "RETRY_PENDING"
+    assert row["retry_state"]["dependencies"] == ["graph", "embedder"]
+    assert graph.curation_writes() == []

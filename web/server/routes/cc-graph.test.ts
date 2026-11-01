@@ -74,4 +74,18 @@ describe('cc-graph adapter: episode deletion', () => {
       ok: false, error: 'The embedder is down, so nothing was written.', dependency: 'embedder',
     });
   });
+
+  it('passes a mismatch through with its reason and remedy as the error', async () => {
+    const reason = 'graph has vectors but no embedder record; run: python -m central_command.graph_reembed status';
+    fetchMock.mockResolvedValueOnce(respond({
+      error: 'embedder mismatch', dependency: 'embedder', detail: reason,
+    }, 503));
+    const app = await buildApp();
+    const res = await app.request('/api/graph/node', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Jane Doe', labels: [], summary: '', group_id: 'central_command' }),
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: reason, dependency: 'embedder' });
+  });
 });
