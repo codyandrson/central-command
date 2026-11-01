@@ -145,7 +145,7 @@ Rows for the same package are grouped by what the modules are for.
 | `reports/` | ② | none | Deterministic, judgment-free reads composed from the spine: the EA's snapshot, the operator's calendar day, the EA's open follow-ups; called only from `runtime/tools.py` and `heartbeat/actions.py` | `ea_report.py`, `ea_calendar.py`, `ea_followups.py` | — |
 | `sandbox/` | out-of-process | **none, by design** | A standalone FastAPI service giving agents a disposable workspace. Two backends behind one API: `kubectl` (a gVisor Job+Pod per session) or `podman` (a container per session). Never imported; reached only through `integrations/sandbox_client.py`. Its single exit is the gated `mcp.sync_source`, content captured at propose time | `runner.py` | [AGENTS.md](../AGENTS.md) |
 | `crawler/` | out-of-process | none | A standalone browser-rendering crawl service for whole-site documentation import. Never imported; reached through `integrations/crawler.py`, whose only caller is `skills/site_import.py` | `service.py` | — |
-| `skills/` | ②/③ | none | The skills library's import side: `SKILL.md` + references → DB rows and a chunked search index (`chunking.py`); whole-site import; the instance overlay rendered into each body at import (`overlay.py`: `<!-- overlay: <field> -->` markers, files under `CC_SKILL_OVERLAY_DIR`, outside the checkout); the review of a target release against the library (`refresh.py`, also a command line for the updaters) | `importer.py`, `site_import.py`, `ids.py`, `chunking.py`, `overlay.py`, `refresh.py` | — |
+| `skills/` | ②/③ | none | The skills library's import side: `SKILL.md` + references → DB rows and a chunked search index (`chunking.py`); whole-site import; the instance overlay rendered into each body at import (`overlay.py`: `<!-- overlay: <field> -->` markers, files under `CC_SKILL_OVERLAY_DIR`, outside the checkout); the review of a target release against the library and its apply (`refresh.py`, also a command line for the updaters) | `importer.py`, `site_import.py`, `ids.py`, `chunking.py`, `overlay.py`, `refresh.py` | — |
 
 Top-level modules of `central_command/`: `config.py` holds every `CC_*` setting
 (`settings`), with its comment as documentation; `selfcheck.py` is the
@@ -295,6 +295,65 @@ process's environ.
   anywhere else, and every hand post (`POST /api/skills/{id}/docs`), stamps
   nothing. An unreadable `VERSION` refuses the import (422) before any write.
   The `skill.imported` payload and the import result carry `bundled_release`.
+- **A bundled doc follows the release unless the operator changed it; a doc they
+  changed is decided, never auto-resolved** (DL-198, amending DL-119: the import
+  at install stays create-only). `skills/refresh.py` compares, per bundled doc,
+  three texts as the library stores them, every file from git passing
+  `importer.normalise_doc_text` first: ours (the current version), theirs (the
+  file at the target ref, read with `git show`) and base (the newest version's
+  `skill_bundled_text` row, or the installed tree's file for a doc imported before
+  provenance existed). The status comes from those alone, never from who posted:
+  `unchanged-upstream`, `unmodified`, `modified`, `retired-upstream`,
+  `retired-locally`, `new`, `local-only`, plus one `skill-retired` row per retired
+  skill (`doc_key` `*`). A `modified` doc carries `git merge-file --diff3`'s output
+  with its markers; a clean merge still needs a verdict. Everything is computed
+  first and written in one transaction to `skill_doc_review`, keyed to the target:
+  a review for another target drops every other row, and a recompute keeps a verdict
+  only where `ours_hash` and `theirs_hash` are unchanged. A review that cannot be
+  computed stores nothing and leaves the gate closed.
+
+  The updaters call it as a command line that opens the database directly, so it
+  answers with the API up or stopped, from the checkout's `.env`
+  (`CC_REPO_ROOT` overrides the root it reads, blank in every deployment):
+
+  ```
+  python -m central_command.skills.refresh review --target X --ref R                 # 0 stored, 2 could not
+  python -m central_command.skills.refresh check  --target X --ref R                 # 0 clear, 3 unresolved, 2 could not
+  python -m central_command.skills.refresh apply  --target X --ref R [--actor updater]  # 0 done, 1 a row failed, 2 could not run, 3 unresolved
+  ```
+
+  `check` recomputes, so the gate answers for the library as it is now. `apply` runs
+  the STORED review and never recomputes, because it runs after the merge. Each row
+  is one transaction that re-verifies `ours_hash` under a row lock and `theirs_hash`
+  against the target; a mismatch records `apply_error` and the run goes on, and a row
+  with `applied_at` is skipped, so a re-run posts only what is missing. Nothing is
+  edited in place. A version's `added_by` says who decided its bytes: `updater` for
+  `unmodified`, `new` and an untouched `retired-upstream` doc, `operator` for a
+  verdict. Keep-mine posts a NEW version of ours with the target's provenance, so the
+  base moves. The skill's title and summary follow the guidance doc only when its
+  text is the release's. A whole new skill is created from the target's frontmatter
+  and its `default_agents` seeded create-only; an existing skill's grants are never
+  touched. A skill the operator retired is left alone.
+
+  Routes: `POST /api/skills/update-review {target, ref}` computes;
+  `GET /api/skills/update-review/{target}` serves the review with its texts, each
+  hash-checked, and answers 409 ("recompute") for a text that moved, except on a row
+  an apply has touched, where it is null; `POST .../items/{skill_id}/{doc_key}/resolve`
+  stores one verdict bound to the hashes the operator saw (409 stale, 422 an edit
+  still holding a conflict marker); `POST .../apply` is the command line's apply (409
+  unresolved). `GET /api/skills/update-review`, with no target, is the light read of
+  the one stored review (no texts, no git reads, no 409), for a poll that must not
+  fail on the state it reports. All have RPC methods (`skills.update_review`,
+  `_get`, `_resolve`, `_apply`, `_latest`) and go through the `cc-skills` proxy.
+
+  The cockpit: the Update dialog lists the staged release's items with a colour-coded
+  diff and the three verdicts, says how many docs follow silently, and holds Apply
+  disabled with the reason while anything is unresolved. Both apply routes refuse
+  with a 409 `skills-unresolved` too, before the hold is engaged or a trigger written
+  (k3s: `cc-update.ts`; single-node: `api/update.py`). The Skills page shows a banner
+  while bundled docs were not refreshed, with the reasons and a Retry; a row whose
+  text moved needs a recompute and a fresh verdict in the dialog instead. The updaters
+  are below.
 - **The Executor replays by cursor.** The completed-actions list is the
   cursor, so a half-landed non-idempotent write may be applied twice on retry;
   façade idempotency keys are the owed fix (PRD §6.2).
@@ -1138,7 +1197,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | `cc-charter` | agent charters |
 | `cc-graph` | graph search / neighbourhood / provenance / status |
 | `cc-loe` | level-of-effort |
-| `cc-skills` | skills import (doc, file, site) |
+| `cc-skills` | skills import (doc, file, site); the bundled-skill update review (compute, read, resolve, apply) |
 | `cc-decisions` | bulk dismissal preview and submit |
 | `cc-sources` | sources and the catalog |
 | `cc-systems` | systems launchpad, API docs, the self-check (`/api/selfcheck`) |
@@ -1162,11 +1221,36 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 **The k3s updater** (`cc-update.sh`), in order: resolve → version gate
 (`min_upgrade_from`) → busy check → rollback checkpoint → prebuild changed
 images (services stay up) → database dumps → stop → merge → additive schema →
-rebuild venv and cockpit → manifests and units → n8n workflows → reconcile app
-config → start services → health → roll back on failure. It reads `VERSION` for
-the installed version, not git. `kubectl apply` never deletes, so a removed
-manifest must be tombstoned in `deploy/k3s/removed.txt`; a changed updater unit
-takes effect on the *next* run.
+rebuild venv and cockpit → manifests and units → n8n workflows → bundled skill
+docs → reconcile app config → start services → health → roll back on failure. It
+reads `VERSION` for the installed version, not git. `kubectl apply` never deletes,
+so a removed manifest must be tombstoned in `deploy/k3s/removed.txt`; a changed
+updater unit takes effect on the *next* run.
+
+**Bundled skill docs in the updaters.** Both updaters run the same three steps over
+`skills/refresh.py`. The stage reviews (`skills_review_stage`; a failure only warns,
+the cockpit computes on open). The apply refuses before anything changes while a
+verdict is missing or the review cannot be proven (`skills_review_gate`: on k3s at
+resolve, ahead of the busy gate and the checkpoint; on single-node after the version
+gate, ahead of the acquire and the backup; "Update anyway" does not bypass it). After
+the merge the refresh posts the stored review (`refresh_bundled_skills`: on k3s after
+the n8n phase, on single-node right after the schema; a failure only warns, because
+a die there would stop a merged tree, and the row keeps its `apply_error`). The k3s
+updater runs the module under `env -i` from the checkout, because it has sourced
+the containers' env file and a variable already set would beat the root `.env`. On
+single-node a rollback refreshes nothing: the staged release's review is never
+applied onto the restored older tree, and a resume skips the gate because the merge
+already happened.
+
+**The bridge.** Each step is keyed on the tree holding `skills/refresh.py`, never on
+a version, and the update INTO a release runs the previous release's updater. So the
+steps take effect from the update AFTER the release that ships them, an older tree
+(which is what a rollback finds) skips them, and the release that ships them changes
+nothing under `skills/`: its updater would merge that change with no refresh, and it
+would read as `modified` at the next update against a base the library never
+received. The first release after it that changes a bundled doc names it in
+`min_upgrade_from`. `tests/test_skills_refresh_boundary.py` pins a release whose
+CHANGELOG title names it a bridge.
 
 **What a unit may hold, and what the install is asked.** A k3s unit that names
 the checkout or the account is a template, `deploy/k3s/<name>.in` (seven today:

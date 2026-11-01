@@ -10,7 +10,6 @@ tree by the importer, so its rows carry real provenance.
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -730,33 +729,7 @@ async def test_the_review_table_has_the_contracts_columns_and_key():
     assert {r["attname"] for r in pk} == {"target", "skill_id", "doc_key"}
 
 
-def test_the_review_table_is_created_idempotently():
-    schema = (WORKTREE / "central_command" / "db" / "schema.sql").read_text()
-    assert "create table if not exists skill_doc_review" in schema
-
-
-# --- the tier ------------------------------------------------------------------
-
-
-def test_nothing_under_runtime_imports_the_module():
-    runtime = WORKTREE / "central_command" / "runtime"
-    for f in runtime.rglob("*.py"):
-        text = f.read_text(encoding="utf-8")
-        assert not re.search(r"skills\.refresh|skills import .*\brefresh\b", text), f
-
-
-def test_the_module_loads_neither_the_gateway_nor_the_runtime():
-    code = (
-        "import sys, central_command.skills.refresh\n"
-        "print([m for m in sys.modules if m.startswith("
-        "('central_command.gateway', 'central_command.executor', 'central_command.runtime'))])"
-    )
-    done = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True,
-        env={**os.environ, "PYTHONPATH": str(WORKTREE)}, cwd=WORKTREE,
-    )
-    assert done.returncode == 0, done.stderr
-    assert done.stdout.strip() == "[]"
+# The module's tier and the schema's shapes: tests/test_skills_refresh_boundary.py.
 
 
 # --- the command line the updaters build to -----------------------------------

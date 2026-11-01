@@ -174,9 +174,19 @@ graph_nodes() {
     [[ "${n:-0}" -gt 0 ]]
   fi
 }
+# The bundled-skill review's store. schema.sql is what lands it, on a fresh PVC
+# or through the updater's schema phase, so it answers in BOTH modes: the three
+# provenance columns plus the two tables make five.
+skill_review_store() {
+  local n
+  n=$("${K[@]}" exec deploy/cc-postgres -- psql -qtAX -U central_command -d central_command \
+        -c "select (select count(*) from information_schema.columns where table_name = 'skill_doc' and column_name in ('bundled_release', 'bundled_path', 'bundled_hash')) + (select count(*) from information_schema.tables where table_name in ('skill_bundled_text', 'skill_doc_review'))" 2>/dev/null) || return 1
+  [[ "$n" == 5 ]]
+}
 # The LiteLLM trio survives a clean install untouched (README.md), so its keys
 # must be present and decryptable in BOTH modes.
 if litellm_keys; then ok "litellm: virtual keys survived the salt"; else bad "litellm: virtual keys survived the salt"; fi
+if skill_review_store; then ok "spine: the bundled-skill review's columns and tables exist"; else bad "spine: the bundled-skill review's columns and tables are missing (schema.sql has not landed)"; fi
 if [[ "$CLEAN" == "1" ]]; then
   if graph_nodes; then ok "graph: neo4j answers cypher (fresh graph may be empty)"; else bad "graph: neo4j answers cypher (fresh graph may be empty)"; fi
 else

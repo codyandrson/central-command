@@ -120,6 +120,28 @@ when a matching file is read.
   rerank since graphiti-core moved in-process, and the three Graphiti-only
   keys are retired. `APP_ENV_DEFAULTS` and `setup.sh app`'s defaults loop are
   one table in two places — keep them in step.
+- **A bundled doc follows the release when the operator did not change it; one
+  they changed is decided, never auto-resolved** (DL-198;
+  `central_command/skills/refresh.py`). `cc-update.sh` has three steps over its command line, each keyed on the tree holding that module, never
+  on a version: `skills_review_stage` in `stage_main` after the floor and before the
+  images diff (`review`, WARN); `skills_review_gate` in `main` at resolve, after the
+  floor and BEFORE `refuse_if_busy` and the checkpoint (`check`: exit 3 names the
+  cockpit, anything else "cannot be proven", both `die resolve`; FORCE does not bypass
+  it, because "Update anyway" answers the busy gate); `refresh_bundled_skills` as the
+  `skills` phase after n8n and before `reconcile_app_config` (`apply --actor updater`,
+  WARN: a `die` there stops a MERGED tree, and the row keeps its `apply_error`). They
+  run under `env -i` from the checkout through `skills_refresh_cli`, because this
+  script sourced `deploy/k3s/.env` and a variable already set beats the root `.env`.
+  `cc-update.ts` refuses with a 409 `skills-unresolved` before the hold or the trigger,
+  and a forced apply with the API down goes on to the gate, which reads the database
+  directly. The steps ship ONE RELEASE AHEAD, as the "What a release needs an EXISTING
+  install to gain" bullet says: the update into the release that ships them runs the
+  previous `cc-update.sh`, so the first update after it is the first to run them, and a
+  rollback onto an older tree finds no module and skips. That release changes nothing
+  under `skills/` (its updater would merge the change with no refresh, and the doc would
+  read as `modified` next time against a base the library never received), and the
+  first later release that changes a bundled doc names it in `min_upgrade_from`.
+  Guarded by `tests/test_k3s_skills_refresh.py` and `tests/test_skills_refresh_boundary.py`.
 - **`verify.sh` ends with the application self-check, and the nightly backup
   keeps the three environment files** (epic small-fixes, rulings 4 and 5 of
   2026-10-29). Section F runs `python -m central_command.selfcheck` from the

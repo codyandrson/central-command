@@ -487,7 +487,8 @@ sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
   fixes right after the install), **applies changed `deploy/k3s/`
   manifests and installs changed unit files — rendering a changed `.in`
   template for this install, copying a changed plain unit (`daemon-reload`; a
-  changed `cc-update.service` takes effect next run)**, then — before the restart —
+  changed `cc-update.service` takes effect next run)**, posts the bundled skill docs
+  the review settled (§7), then — before the restart —
   reconciles the app's configuration with the release (v2.59.1): appends each
   `APP_ENV_DEFAULTS` setting the release's `.env.example` declares and `.env`
   lacks (never one already present, an empty "off" included), and widens the
@@ -583,12 +584,36 @@ act, for a change the updater does not carry, such as an edited `.env`:
 
 **Skills are not in the schema — the `app` phase imports them** (v2.64.0).
 Once the API answers, `setup.sh app` posts every `skills/<id>/SKILL.md` folder
-this release ships to the API's own `POST /api/skills/import`. It is
-create-only: a skill the library already holds, retired ones included, is
-never re-imported, even when the release changed the bundled copy. Re-running
-the phase on an existing install adds only the bundled skills the library
-lacks. The updater does not run this step; after an update that adds a
-bundled skill, run `./deploy/k3s/setup.sh app`.
+this release ships to the API's own `POST /api/skills/import`. At install this is
+create-only, and an update refreshes and reviews instead (below): the phase never
+re-imports a skill the library already holds, retired ones included. Re-running it
+on an existing install adds only the bundled skills the library lacks.
+
+**Bundled skill docs follow the release, and the docs you changed are yours to
+decide** (DL-198). The updater compares each bundled doc three ways: what the library
+holds, what the release ships, and the text the library last received. A doc you did
+not change becomes a new version posted by `updater`, a doc the release added or
+removed follows the same way, and a whole new skill is imported with its default
+holders. A doc you changed that the release also changed is never resolved for you:
+it is listed in the Update dialog (Settings > Update) with a diff and three verdicts
+(take the release's text, keep yours, or edit the merged text), and Apply stays
+disabled until each has one. A doc only you changed is left alone, as is a skill you
+retired. "Update anyway" does not skip this: it answers the check for running agents.
+Every verdict posts a new version, so the history keeps what you had.
+
+The stage computes the review, the resolve phase refuses while a verdict is missing
+or the review cannot be proven (`status.json` reads `failed` at `resolve` and the
+dialog shows why; nothing has changed), and the new `skills` phase posts the review
+after the merge, before the services start. That phase only warns on a failure: a row
+keeps its `apply_error`, and the Skills page shows a banner with the reasons and a
+Retry. A row whose text moved after your verdict needs a fresh verdict in the dialog,
+because a plain retry cannot fix it.
+
+These steps ship one release ahead: the update INTO a release runs the previous
+release's `cc-update.sh`, so the first update AFTER the release that ships them is the
+first to run them, and a rollback onto an older tree skips them. The journal shows the
+counts at stage and at resolve, then `== refreshing bundled skill docs` and
+`skill refresh for <target> (<ref>): applied=n failed=n skipped=n`.
 
 **The instance overlay** — a bundled skill that would name a fact only one
 deployment has (a host, a model fleet, a Jira instance's field names) carries a
@@ -612,7 +637,9 @@ frontmatter, refuses the import naming the file and line.
 
 Each skill's `default_agents` front-matter names the agents that hold it; the
 import grants those CREATE-ONLY (a revoked grant is never restored; unknown
-agent ids are reported, not fatal) and the step prints how many it applied.
+agent ids are reported, not fatal) and the step prints how many it applied; an
+update's refresh seeds a whole new skill's holders the same way and never touches an
+existing skill's grants.
 Further grants are made in the cockpit's Agents view.
 
 `cc-postgres` mounts the `cc-schema-sql` ConfigMap at

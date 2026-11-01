@@ -398,6 +398,11 @@ hash of the directory — the one non-`.env` input the manifest knows), and
 running it imports only ids the library does not hold. A skill that exists is
 never overwritten and a retired one is never resurrected.
 
+**Amended (DL-198, epic-skills-refresh-on-update).** Create-only still holds for this
+step, at install. An update now refreshes and reviews a held skill: a bundled doc the
+operator did not change follows the release, and one they changed is decided in the
+Update dialog.
+
 ### D8 — The checklist is generated, and the diagnose bundle shows the ledger
 
 `scripts/render_checklist.py` renders `deploy/single/CHECKLIST.md` from
