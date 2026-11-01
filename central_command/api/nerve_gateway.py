@@ -592,7 +592,9 @@ async def _run_session_context(session: dict) -> dict:
     untouchable transcript."""
     session_id = session["id"]
     task = await repo.task_for_session(session_id)
-    if task is None:
+    if session.get("mode") == "conversation":
+        kind = "conversation"  # here only once closed by a re-run
+    elif task is None:
         work = await repo.work_items_for_session(session_id)
         kind = "triage run" if work else "agent run"
     else:

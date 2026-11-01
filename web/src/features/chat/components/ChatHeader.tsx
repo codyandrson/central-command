@@ -4,6 +4,7 @@ import { InlineSelect } from '@/components/ui/InlineSelect';
 import { useModelEffort } from './useModelEffort';
 import type { SourceEmail } from '@/types';
 import type { RerunLink } from '../rerunLink';
+import { RerunButton } from './RerunButton';
 
 interface ChatHeaderProps {
   onReset?: () => void;
@@ -23,6 +24,11 @@ interface ChatHeaderProps {
   rerunLinks?: RerunLink[];
   /** Jump to another session, by its key. */
   onOpenSession?: (sessionKey: string) => void;
+  /** Central Command: a lane still taking messages shows no read-only notice, so
+   *  Re-run lives here for it: the session to re-run when offered, else the reason. */
+  rerunSessionId?: string | null;
+  rerunRefusal?: string | null;
+  onRerun?: (sessionId: string) => Promise<void>;
 }
 
 /** The email that spawned this lane — a chip in the header, collapsed by
@@ -79,6 +85,9 @@ export function ChatHeader({
   sourceEmail,
   rerunLinks = [],
   onOpenSession,
+  rerunSessionId,
+  rerunRefusal,
+  onRerun,
 }: ChatHeaderProps) {
   const {
     modelOptions,
@@ -155,6 +164,14 @@ export function ChatHeader({
           {link.label}
         </button>
       ))}
+
+      {rerunSessionId && onRerun && <RerunButton sessionId={rerunSessionId} onRerun={onRerun} />}
+      {rerunRefusal && (
+        <button type="button" disabled className="cockpit-badge shrink-0 whitespace-nowrap" data-tone="muted"
+          title={`Cannot be re-run: ${rerunRefusal}`}>
+          Re-run
+        </button>
+      )}
 
       {/* Model + Effort selectors on the right */}
       <div className="ml-auto flex min-w-0 shrink-0 items-center gap-1 whitespace-nowrap sm:gap-2">

@@ -324,7 +324,8 @@ def _total_tokens(result) -> int:
 
 async def ingest_and_propose(
     email_text: str, model=None, thread: ThreadContext | None = None,
-    context: dict | None = None,
+    context: dict | None = None, session_id: str | None = None,
+    rerun_of: str | None = None,
 ) -> dict:
     await repo.upsert_agent(
         AGENT_ID, "Inbox Triage", "", "triage email into Jira proposals"
@@ -332,8 +333,8 @@ async def ingest_and_propose(
     # The session id is minted BEFORE the deps, not just before the run: a
     # `declare_gap` call on this run records itself with `ref_id=deps.session_id`,
     # and a gap the operator cannot trace back to a transcript is a gap they
-    # cannot act on.
-    session_id = "sess_" + uuid.uuid4().hex[:12]
+    # cannot act on. A re-run brings the id its old session already names.
+    session_id = session_id or "sess_" + uuid.uuid4().hex[:12]
     deps = TriageDeps(
         thread=thread or ThreadContext(), agent_id=AGENT_ID, session_id=session_id,
         item_id=(context or {}).get("item_id"),
@@ -354,7 +355,8 @@ async def ingest_and_propose(
         team_section=await team_section(AGENT_ID),
     )
     result = await _run_live(
-        agent, email_text, model=model, deps=deps, agent_id=AGENT_ID, session_id=session_id
+        agent, email_text, model=model, deps=deps, agent_id=AGENT_ID, session_id=session_id,
+        rerun_of=rerun_of,
     )
 
     tokens = _total_tokens(result)

@@ -830,18 +830,23 @@ async def list_operator_items(status: str | None = "OPEN") -> list[dict]:
 # --- conversational sessions (Phase 3) ---------------------------------------
 
 
-async def create_conversation_session(session_id: str, agent_id: str) -> None:
+async def create_conversation_session(
+    session_id: str, agent_id: str, rerun_of: str | None = None,
+    model_override: str | None = None, thinking_override: str | None = None,
+) -> None:
     """A conversation session starts RUNNING in mode='conversation' — the mode
-    is what makes text replies rest in AWAITING_OPERATOR instead of going DONE."""
+    is what makes text replies rest in AWAITING_OPERATOR instead of going DONE.
+    A re-run's lane names the lane it re-runs and carries its model settings."""
     conn = await _conn()
     try:
         await conn.execute(
             """
-            insert into session (id, agent_id, status, mode)
-            values ($1, $2, 'RUNNING', 'conversation')
+            insert into session (id, agent_id, status, mode, rerun_of,
+                                 model_override, thinking_override)
+            values ($1, $2, 'RUNNING', 'conversation', $3, $4, $5)
             on conflict (id) do nothing
             """,
-            session_id, agent_id,
+            session_id, agent_id, rerun_of, model_override, thinking_override,
         )
     finally:
         await conn.close()
@@ -1311,8 +1316,21 @@ async def list_sessions(
                    -- sessions on the anchor node are ledger drains with no task, so
                    -- without this the Activity browser prints a uuid for 70%
                    -- of its rows. `work_item.session_id` is the existing link.
-                   (select w.subject from work_item w where w.session_id = s.id
-                     order by w.enrolled_at limit 1) as work_subject
+                   -- A re-run session's item moves on at the new run's terminal
+                   -- mark, so its subject is found along the chain, as the title is.
+                   coalesce(
+                     (select w.subject from work_item w where w.session_id = s.id
+                       order by w.enrolled_at limit 1),
+                     case when s.rerun_by is not null then
+                       (with recursive chain(id) as (
+                          select s.rerun_by
+                          union
+                          select n.rerun_by from session n join chain c on n.id = c.id
+                           where n.rerun_by is not null)
+                        select w.subject from work_item w
+                         where w.session_id in (select id from chain)
+                         order by w.enrolled_at limit 1)
+                     end) as work_subject
             from session s
             where {where_sql}
             order by s.created_at desc, s.id desc
@@ -2576,12 +2594,20 @@ async def release_folds(proposal_id: str) -> int:
 
 async def work_items_for_session(session_id: str) -> list[dict]:
     """The email(s) a session worked — so the reviewer can read the source, not
-    just the agent's summary of it."""
+    just the agent's summary of it. A re-run session keeps its item through the
+    rerun chain, as it keeps its task: the row names only the newest run."""
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            """select id, message_id, subject, payload, received_at, state, kind
-               from work_item where session_id = $1 order by enrolled_at""",
+            """with recursive chain(id) as (
+                   select $1::text
+                   union
+                   select s.rerun_by from session s join chain c on s.id = c.id
+                    where s.rerun_by is not null
+               )
+               select id, message_id, subject, payload, received_at, state, kind
+               from work_item where session_id in (select id from chain)
+               order by enrolled_at""",
             session_id,
         )
         out = []
@@ -2659,24 +2685,33 @@ async def list_work_items(
 
 async def work_items_for_sessions(session_ids: list[str]) -> dict[str, dict]:
     """session_id -> the work item (with payload) that session was processing.
-    Empty for sessions that were not spawned by a ledger item (tasks, chats)."""
+    Empty for sessions that were not spawned by a ledger item (tasks, chats).
+    Each asked session is walked along its rerun chain, so a re-run session keeps
+    its email after the new run's terminal mark moves the row's link."""
     if not session_ids:
         return {}
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            """select id, message_id, thread_id, feed, source, kind, subject,
-                      state, session_id, enrolled_at, payload
-               from work_item where session_id = any($1::text[])""",
+            """with recursive chain(origin, id) as (
+                   select asked, asked from unnest($1::text[]) as asked
+                   union
+                   select c.origin, s.rerun_by from session s join chain c on s.id = c.id
+                    where s.rerun_by is not null
+               )
+               select w.id, w.message_id, w.thread_id, w.feed, w.source, w.kind, w.subject,
+                      w.state, w.session_id, w.enrolled_at, w.payload, c.origin
+               from work_item w join chain c on w.session_id = c.id""",
             session_ids,
         )
         out: dict[str, dict] = {}
         for r in rows:
             d = dict(r)
+            origin = d.pop("origin")
             p = d.get("payload")
             if isinstance(p, str):
                 d["payload"] = json.loads(p)
-            out[d["session_id"]] = d
+            out[origin] = d
         return out
     finally:
         await conn.close()
@@ -4087,13 +4122,18 @@ async def resolve_task(
 
 
 async def claim_rerun(
-    session_id: str, new_session_id: str, task_id: str,
+    session_id: str, new_session_id: str, task_id: str | None = None, *,
+    work_item_id: str | None = None, refuse_live_children: bool = False,
 ) -> dict | None:
     """THE re-run claim, in one transaction: the old session closes naming the
-    new one, its undecided work is withdrawn, and its task returns to ASSIGNED
-    with no `retry_state`, so the sweep never sees it and the re-run's own start
-    is the only one. Returns the withdrawn `{"items", "proposals"}` ids, or None
-    with nothing changed.
+    new one, its undecided work is withdrawn, and whatever carries its inputs goes
+    back to its queue state. A task returns to ASSIGNED with no `retry_state`, so
+    the sweep never sees it and the re-run's own start is the only one. A work item
+    returns to UNPROCESSED and KEEPS `session_id`, so the old session holds its
+    email until the new run's terminal mark moves it; it is rule-exempt from here
+    on, as a reopened item is, because the operator asked to see it again. A
+    conversation carries its own inputs and moves nothing. Returns the withdrawn
+    `{"items", "proposals"}` ids, or None with nothing changed.
 
     One transaction because each of these is a race otherwise: an approval or a
     parked resume landing between the claim and the close would run against a
@@ -4115,6 +4155,15 @@ async def claim_rerun(
             )
             if any(r["status"] in LANDING_PROPOSAL_STATUSES for r in statuses):
                 return None
+            if refuse_live_children and await conn.fetchval(
+                """
+                select exists (select 1 from task
+                                where parent_session_id = $1
+                                  and status != all($2::text[]))
+                """,
+                session_id, list(TASK_TERMINAL),
+            ):
+                return None
             claimed = await conn.fetchval(
                 """
                 update session
@@ -4129,18 +4178,35 @@ async def claim_rerun(
                 return None
             items = await _withdraw_operator_items(conn, session_id)
             proposals = await _withdraw_proposals(conn, session_id)
-            moved = await conn.fetchval(
-                """
-                update task
-                   set status = 'ASSIGNED', retry_state = null, outcome = null,
-                       terminal_at = null
-                 where id = $1 and session_id = $2
-                returning id
-                """,
-                task_id, session_id,
-            )
-            if moved is None:
-                raise _RerunLost
+            if task_id is not None:
+                moved = await conn.fetchval(
+                    """
+                    update task
+                       set status = 'ASSIGNED', retry_state = null, outcome = null,
+                           terminal_at = null
+                     where id = $1 and session_id = $2
+                    returning id
+                    """,
+                    task_id, session_id,
+                )
+                if moved is None:
+                    raise _RerunLost
+            if work_item_id is not None:
+                moved = await conn.fetchval(
+                    """
+                    update work_item
+                       set state = 'UNPROCESSED', claimed_at = null, terminal_at = null,
+                           last_error = null, attempts = 0, not_before = null,
+                           payload = (coalesce(payload, '{}'::jsonb) - 'failure_ack')
+                                     || '{"rule_exempt": true}'::jsonb
+                     where id = $1 and session_id = $2
+                       and state not in ('CLAIMED', 'UNPROCESSED')
+                    returning id
+                    """,
+                    work_item_id, session_id,
+                )
+                if moved is None:
+                    raise _RerunLost
         return {"items": items, "proposals": proposals}
     except _RerunLost:
         return None
@@ -4168,6 +4234,30 @@ async def pending_rerun(session_id: str | None) -> dict | None:
             session_id,
         )
         return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def pending_rerun_for_work_item(item_id: str) -> dict | None:
+    """`pending_rerun`, from the work item whose run is owed."""
+    conn = await _conn()
+    try:
+        session_id = await conn.fetchval(
+            "select session_id from work_item where id = $1", item_id)
+    finally:
+        await conn.close()
+    return await pending_rerun(session_id)
+
+
+async def session_has_live_children(session_id: str) -> bool:
+    """Whether a task this session assigned has not reached a terminal state."""
+    conn = await _conn()
+    try:
+        return await conn.fetchval(
+            "select exists (select 1 from task where parent_session_id = $1 "
+            "and status != all($2::text[]))",
+            session_id, list(TASK_TERMINAL),
+        )
     finally:
         await conn.close()
 

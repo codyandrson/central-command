@@ -69,18 +69,22 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
   /* Whether Re-run is on offer is the server's call, asked again whenever the
      task moves. A failed read offers nothing. */
   const [rerunEligible, setRerunEligible] = useState(false);
+  const [rerunRefusal, setRerunRefusal] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
   const taskId = task?.id;
   const taskStatus = task?.status;
   useEffect(() => {
     setRerunEligible(false);
+    setRerunRefusal(null);
     if (!taskId) return;
     let stale = false;
     (async () => {
       try {
         const res = await fetch(`/api/kanban/tasks/${encodeURIComponent(taskId)}/rerun`);
         const body = res.ok ? await res.json() : null;
-        if (!stale) setRerunEligible(!!body?.eligible);
+        if (stale) return;
+        setRerunEligible(!!body?.eligible);
+        setRerunRefusal(body?.eligible ? null : body?.reason ?? null);
       } catch {
         if (!stale) setRerunEligible(false);
       }
@@ -544,6 +548,13 @@ export function TaskDetailDrawer({ task, onClose, onDelete, onExecute, onApprove
               {rerunEligible && (
                 <Button size="xs" variant="outline" onClick={handleRerun} disabled={rerunning || workflowLoading !== null}>
                   {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                  Re-run
+                </Button>
+              )}
+
+              {!rerunEligible && rerunRefusal && task.run && (
+                <Button size="xs" variant="outline" disabled title={`Cannot be re-run: ${rerunRefusal}`}>
+                  <RotateCcw size={12} />
                   Re-run
                 </Button>
               )}

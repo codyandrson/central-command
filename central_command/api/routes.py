@@ -611,6 +611,8 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
     # IN_PROGRESS while the agent works. A re-run keeps its old session linked
     # until the new one exists, or a restart here would lose the chain.
     await repo.start_task(task_id, rerun["rerun_of"] if rerun else None)
+    rerun_ids = ({"session_id": rerun["session_id"], "rerun_of": rerun["rerun_of"]}
+                 if rerun else {})
     if agent_id == "orchestrator":
         # D7 phase 2: a task assigned to the orchestrator is a PROJECT — it
         # runs the orchestration loop (plan review → assign → receive →
@@ -619,7 +621,8 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         from central_command.runtime.run import RunStopped
 
         try:
-            return {**(await orchestration.run_project(task)), "task_id": task_id}
+            return {**(await orchestration.run_project(task, **rerun_ids)),
+                    "task_id": task_id}
         except RunStopped as e:
             # The orchestrator loop has no stopped-outcome shape of its own —
             # the session is already parked STOPPED by `_run_live` and the
@@ -640,8 +643,7 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         # The task run has a landing tail to re-enter through (`run._land`),
         # so a DOWN read parks it in place instead of failing it (FR-40).
         park_reads=True,
-        **({"session_id": rerun["session_id"], "rerun_of": rerun["rerun_of"]}
-           if rerun else {}),
+        **rerun_ids,
     )
     if result.get("parked"):
         # A read, or the model itself, was DOWN mid-run: the session is

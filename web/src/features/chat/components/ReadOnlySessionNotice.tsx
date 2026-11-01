@@ -11,11 +11,12 @@
  * state, never re-deriving the rule client-side.
  */
 import { useState, useCallback } from 'react';
-import { Lock, ArrowRight, Loader2, Play, RotateCcw, Square, XCircle } from 'lucide-react';
+import { Lock, ArrowRight, Loader2, Play, Square, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import type { ChatComposerState } from '@/types';
 import { composerRerunLinks } from '../rerunLink';
+import { RerunButton } from './RerunButton';
 
 const TERMINAL_TASK = new Set(['DONE', 'FAILED', 'CANCELLED']);
 const TERMINAL_SESSION = new Set(['DONE', 'FAILED']);
@@ -47,11 +48,11 @@ export function ReadOnlySessionNotice({
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const [confirmRerun, setConfirmRerun] = useState(false);
-  const [rerunning, setRerunning] = useState(false);
-  const [rerunError, setRerunError] = useState<string | null>(null);
-  // Whether it is on offer is the server's call, never derived from the status.
+  // Whether it is on offer, and why not, is the server's call, never derived
+  // from the status. A re-run lane's headline already says where the work went.
   const canRerun = !!session && !!composer.rerun?.eligible && !!onRerun;
+  const rerunRefusal = !composer.rerun?.eligible && composer.code !== 'rerun' && onRerun
+    ? composer.rerun?.reason : null;
   const links = composerRerunLinks(composer);
   const isStopped = composer.code === 'stopped';
   // Central Command (2026-09-13): the two levers a task run has, offered where
@@ -92,19 +93,6 @@ export function ReadOnlySessionNotice({
     }
   }, [onResume, session, resuming]);
 
-  const handleRerun = useCallback(async () => {
-    if (!session || !onRerun || rerunning) return;
-    setRerunning(true);
-    setRerunError(null);
-    try {
-      await onRerun(session.id);
-    } catch (err) {
-      setRerunError(err instanceof Error ? err.message : 'Re-run failed');
-    } finally {
-      setRerunning(false);
-    }
-  }, [onRerun, session, rerunning]);
-
   const isRun = composer.code === 'not_a_conversation' || composer.code === 'rerun';
   // The server's sentence for anything that is not a run (a pending proposal, a
   // failed conversation, a key with no lane) — it knows the rule; we don't.
@@ -123,7 +111,7 @@ export function ReadOnlySessionNotice({
         <div className="min-w-0 flex-1">
           <p className="text-[0.8rem] font-medium text-foreground">{headline}</p>
 
-          {isRun && (
+          {isRun && composer.kind !== 'conversation' && (
             <p className="mt-1 text-[0.733rem] leading-relaxed text-muted-foreground">
               Runs are the record of work an agent did — they resolve through
               their proposals and questions, never by being replied to. The
@@ -221,17 +209,7 @@ export function ReadOnlySessionNotice({
 
           {(canRerun || (links.length > 0 && onOpenSession)) && (
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              {canRerun && (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() => setConfirmRerun(true)}
-                  disabled={rerunning}
-                >
-                  {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
-                  Re-run
-                </Button>
-              )}
+              {canRerun && <RerunButton sessionId={session!.id} onRerun={onRerun!} />}
               {onOpenSession && links.map(link => (
                 <Button
                   key={link.sessionKey}
@@ -245,18 +223,9 @@ export function ReadOnlySessionNotice({
               ))}
             </div>
           )}
-          {rerunError && (
-            <p className="mt-1.5 text-[0.733rem] text-destructive">{rerunError}</p>
+          {rerunRefusal && (
+            <p className="mt-1.5 text-[0.733rem] text-muted-foreground">Cannot be re-run: {rerunRefusal}.</p>
           )}
-          <ConfirmDialog
-            open={confirmRerun}
-            title="Re-run under the current charter?"
-            message="This session closes and its transcript is kept. Its open proposals and questions are withdrawn, and the same work runs again in a new session under the charter that is current now."
-            confirmLabel="Re-run"
-            cancelLabel="Keep it"
-            onConfirm={() => { setConfirmRerun(false); void handleRerun(); }}
-            onCancel={() => setConfirmRerun(false)}
-          />
 
           {isStopped && onResume && (
             <div className="mt-2.5">

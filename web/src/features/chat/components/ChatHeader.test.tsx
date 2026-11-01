@@ -75,6 +75,19 @@ describe('ChatHeader', () => {
     expect(onOpenSession).toHaveBeenCalledWith('agent:jira-expert:sess_old');
   });
 
+  it('offers Re-run on a lane still taking messages, or says why not', () => {
+    vi.mocked(useModelEffort).mockReturnValue(defaultMockHook);
+    const { rerender } = render(
+      <ChatHeader onAbort={mockOnAbort} isGenerating={false} rerunSessionId="sess_1" onRerun={vi.fn()} />
+    );
+    expect(screen.getByRole('button', { name: 'Re-run' })).toBeEnabled();
+
+    rerender(<ChatHeader onAbort={mockOnAbort} isGenerating={false} rerunRefusal="no stored inputs" onRerun={vi.fn()} />);
+    const refused = screen.getByRole('button', { name: 'Re-run' });
+    expect(refused).toBeDisabled();
+    expect(refused).toHaveAttribute('title', 'Cannot be re-run: no stored inputs');
+  });
+
   it('shows the file browser expand button when provided', () => {
     const mockUseModelEffort = vi.mocked(useModelEffort);
     mockUseModelEffort.mockReturnValue(defaultMockHook);

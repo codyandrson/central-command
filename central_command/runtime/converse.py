@@ -399,17 +399,25 @@ async def _land_turn(session_id: str, agent_id: str, result) -> dict:
     }
 
 
-async def start_conversation(agent_id: str, message: str | None = None, model=None) -> dict:
+async def start_conversation(
+    agent_id: str, message: str | None = None, model=None, *,
+    session_id: str | None = None, rerun_of: str | None = None,
+    model_override: str | None = None, thinking_override: str | None = None,
+) -> dict:
     """Open a conversation with any active roster agent. With a first message
     the agent replies (or proposes) immediately; without one the session simply
-    awaits the operator's opening message."""
+    awaits the operator's opening message. A re-run passes the id its old lane
+    already names, that lane's id, and its model settings."""
     if agent_id not in await conversational_agent_ids():
         # Retired or unknown — the only two ways to not be talkable now.
         raise ValueError(
             f"agent {agent_id!r} is not on the active roster (retired or unknown)"
         )
-    session_id = "sess_" + uuid.uuid4().hex[:12]
-    await repo.create_conversation_session(session_id, agent_id)
+    session_id = session_id or "sess_" + uuid.uuid4().hex[:12]
+    await repo.create_conversation_session(
+        session_id, agent_id, rerun_of=rerun_of, model_override=model_override,
+        thinking_override=thinking_override,
+    )
     if not (message and message.strip()):
         await repo.mark_session_awaiting_operator(session_id)
         return {"session_id": session_id, "awaiting": "operator"}

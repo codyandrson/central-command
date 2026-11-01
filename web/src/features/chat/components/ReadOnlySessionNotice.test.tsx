@@ -57,6 +57,20 @@ describe('ReadOnlySessionNotice', () => {
         />,
       );
       expect(screen.queryByRole('button', { name: 'Re-run' })).not.toBeInTheDocument();
+      expect(screen.getByText('Cannot be re-run: not yet.')).toBeInTheDocument();
+    });
+
+    it('a re-run conversation does not call itself a run', () => {
+      render(
+        <ReadOnlySessionNotice
+          composer={{ ...finishedRun, code: 'rerun', kind: 'conversation', task: null,
+            message: 'This is a conversation, closed and re-run as sess_new.',
+            rerun: { eligible: false, reason: 'already re-run as sess_new' } }}
+          onRerun={vi.fn()}
+        />,
+      );
+      expect(screen.queryByText(/Runs are the record of work/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Cannot be re-run/)).not.toBeInTheDocument();
     });
 
     it('shows the server\'s refusal when the re-run fails', async () => {

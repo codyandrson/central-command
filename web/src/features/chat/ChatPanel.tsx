@@ -302,6 +302,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
         sourceEmail={sourceEmail}
         rerunLinks={composerRerunLinks(composer)}
         onOpenSession={onOpenSession}
+        rerunSessionId={composer?.enabled !== false && composer?.rerun?.eligible ? composer.session?.id : null}
+        rerunRefusal={composer?.enabled !== false && composer?.session?.status !== 'RUNNING' && !composer?.rerun?.eligible
+          ? composer?.rerun?.reason : null}
+        onRerun={onRerun}
       />
 
       {/* Search Bar */}

@@ -144,13 +144,15 @@ def _call_args(call) -> dict:
 # --- the round processor -------------------------------------------------------
 
 
-async def run_project(task: dict, model=None) -> dict:
+async def run_project(task: dict, model=None, *, session_id: str | None = None,
+                      rerun_of: str | None = None) -> dict:
     """Entry point: run the orchestration loop for a project task assigned to
     the orchestrator. Returns when the loop parks (children/operator pending)
-    or finishes; the caller's detached wrapper records any exception FAILED."""
+    or finishes; the caller's detached wrapper records any exception FAILED.
+    `session_id` and `rerun_of` come together from a re-run."""
     from central_command.runtime.run import RunParked, RunWindowExhausted, _run_live
 
-    session_id = "sess_" + uuid.uuid4().hex[:12]
+    session_id = session_id or "sess_" + uuid.uuid4().hex[:12]
     agent = await _build_agent(model)
     # The round has a landing tail (`_process`, after "orchestrator"), so a DOWN
     # read or a DOWN model mid-round parks the session in place (FR-40, story 6).
@@ -164,6 +166,7 @@ async def run_project(task: dict, model=None) -> dict:
             agent, _briefing(task, await _agent_cards()), model=None, deps=deps,
             agent_id=AGENT_ID, session_id=session_id, task_id=task["id"],
             continuable=True, after="orchestrator", continue_state=state,
+            rerun_of=rerun_of,
         )
     except RunWindowExhausted as e:
         return _orch_window_parked(e, state)
