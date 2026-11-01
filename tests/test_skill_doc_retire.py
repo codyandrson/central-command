@@ -16,7 +16,6 @@ from fastapi import HTTPException
 from central_command.api import routes
 from central_command.db import repo
 from tests.conftest import needs_pg
-from tests.test_skills_store import clean_skills  # noqa: F401 — shared fixture
 
 pytestmark_db = needs_pg
 
@@ -30,7 +29,7 @@ async def _seed(skill_id: str = "cc-test-retire") -> None:
 
 @pytestmark_db
 @pytest.mark.asyncio
-async def test_retire_hides_doc_from_delivery_and_search_but_keeps_history(clean_skills):  # noqa: F811
+async def test_retire_hides_doc_from_delivery_and_search_but_keeps_history(clean_skills):
     await _seed()
     assert (await repo.search_skill_chunks("cc-test-retire", "junk"))
 
@@ -50,7 +49,7 @@ async def test_retire_hides_doc_from_delivery_and_search_but_keeps_history(clean
 
 @pytestmark_db
 @pytest.mark.asyncio
-async def test_retire_twice_reports_nothing_to_retire(clean_skills):  # noqa: F811
+async def test_retire_twice_reports_nothing_to_retire(clean_skills):
     await _seed()
     assert await repo.retire_skill_doc("cc-test-retire", "junk", "r") is not None
     assert await repo.retire_skill_doc("cc-test-retire", "junk", "r") is None
@@ -59,7 +58,7 @@ async def test_retire_twice_reports_nothing_to_retire(clean_skills):  # noqa: F8
 
 @pytestmark_db
 @pytest.mark.asyncio
-async def test_reimport_after_retire_becomes_current_again(clean_skills):  # noqa: F811
+async def test_reimport_after_retire_becomes_current_again(clean_skills):
     """"Retire then refresh" and "supersede" converge: the next add under the
     same doc_key is version N+1, current, searchable — retirement is not a
     tombstone on the key."""
@@ -72,7 +71,7 @@ async def test_reimport_after_retire_becomes_current_again(clean_skills):  # noq
 
 @pytestmark_db
 @pytest.mark.asyncio
-async def test_detail_route_carries_retired_docs_for_the_cockpit(clean_skills):  # noqa: F811
+async def test_detail_route_carries_retired_docs_for_the_cockpit(clean_skills):
     """The wire shape, asserted on the BACKEND (the cockpit hand-declares its
     interfaces, so a frontend test building its own payload proves nothing):
     a retired doc_key still rides the detail response, flagged by retired_at,
@@ -89,7 +88,7 @@ async def test_detail_route_carries_retired_docs_for_the_cockpit(clean_skills): 
 
 @pytestmark_db
 @pytest.mark.asyncio
-async def test_route_refuses_guidance_and_409s_a_dead_key(clean_skills):  # noqa: F811
+async def test_route_refuses_guidance_and_409s_a_dead_key(clean_skills):
     await _seed()
 
     # Guidance is refused — a skill with no guidance is a catalog entry that

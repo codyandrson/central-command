@@ -690,6 +690,35 @@ async def isolated_queue(request):
             await repo.close_pool()
 
 
+async def sweep_test_skills() -> None:
+    """Delete every `cc-test-%` skill (its docs, chunks and grants cascade), then
+    any bundled text nobody references any more: a leftover of a test's import,
+    swept so `first_seen_release` is this test's own (the row is written once and
+    never changed; a shared text would otherwise carry whichever test imported it
+    first). `_` is a single-character wildcard in LIKE, so test skill ids stay
+    inside the `cc-test-%` shape the dev database is cleaned by."""
+    conn = await repo._conn()
+    try:
+        await conn.execute("delete from skill where id like 'cc-test-%'")
+        await conn.execute(
+            "delete from skill_bundled_text where hash not in "
+            "(select bundled_hash from skill_doc where bundled_hash is not null)"
+        )
+    finally:
+        await conn.close()
+
+
+@pytest.fixture()
+async def clean_skills():
+    """The skills library cleaned before and after the test. One definition: the
+    skills test files used to carry six copies of it. A file whose cleanup does
+    something different (more tables, another id shape) keeps its own fixture of
+    this name, which overrides this one, and says why."""
+    await sweep_test_skills()
+    yield
+    await sweep_test_skills()
+
+
 async def event_kinds(ref_id: str) -> list[str]:
     """The kinds of every event logged against `ref_id`, oldest first. Seven
     outage-doctrine test files each defined this one-liner; the log is

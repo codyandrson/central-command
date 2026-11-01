@@ -32,10 +32,13 @@ import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { readProductVersion } from '../lib/release-source.js';
 import { config } from '../lib/config.js';
 
+/** The API tier's base URL, without a trailing slash. */
+const gatewayBase = () => config.gatewayUrl.replace(/\/+$/, '');
+
 // The update hold lives in the API tier (it owns the loops and the run gate);
 // these routes only proxy it so the cockpit reaches it same-origin.
 async function holdProxy(method: string, sub = '', body?: unknown): Promise<Response> {
-  return fetch(`${config.gatewayUrl.replace(/\/+$/, '')}/api/update/hold${sub}`, {
+  return fetch(`${gatewayBase()}/api/update/hold${sub}`, {
     method,
     headers: { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -129,7 +132,7 @@ async function skillReviewState(target: string): Promise<number | null | 'clear'
   let res: Response;
   try {
     res = await fetch(
-      `${config.gatewayUrl.replace(/\/+$/, '')}/api/skills/update-review/${encodeURIComponent(target)}`,
+      `${gatewayBase()}/api/skills/update-review/${encodeURIComponent(target)}`,
       { signal: AbortSignal.timeout(15_000) },
     );
   } catch {

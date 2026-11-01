@@ -23,7 +23,7 @@ from central_command.config import settings
 from central_command.db import repo
 from central_command.skills import importer, refresh
 from central_command.skills.importer import bundled_text_hash, import_skill_folder
-from tests.conftest import needs_pg
+from tests.conftest import needs_pg, sweep_test_skills
 
 ALPHA = "cc-test-alpha"
 BETA = "cc-test-beta"
@@ -93,16 +93,17 @@ def _overlay(tmp_path: Path, monkeypatch, **fields: str) -> None:
 
 
 async def _sweep() -> None:
+    """The shared `clean_skills` cleanup plus this file's own tables: the stored
+    review and the events a review, a verdict or an apply write. That is why the
+    file keeps its own `clean_skills` fixture instead of the conftest one."""
     conn = await repo._conn()
     try:
         await conn.execute("delete from skill_doc_review")
-        await conn.execute("delete from skill where id like 'cc-test-%'")
-        # A bundled text nobody references any more is a leftover of a test's
-        # import (the same sweep as the import and store test files).
-        await conn.execute(
-            "delete from skill_bundled_text where hash not in "
-            "(select bundled_hash from skill_doc where bundled_hash is not null)"
-        )
+    finally:
+        await conn.close()
+    await sweep_test_skills()
+    conn = await repo._conn()
+    try:
         await conn.execute(
             "delete from audit_event where kind in ('skill.review_computed', 'skill.review_resolved') "
             "or (kind like 'skill.%' and ref_id like 'cc-test-%') "

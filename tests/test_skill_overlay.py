@@ -307,6 +307,9 @@ _CLEAN = (
 )
 
 
+# Its own fixture, not the conftest one: this file also uses ids in the
+# `cc!_test!_` shape (an escaped-underscore LIKE), which the shared cleanup's
+# `cc-test-%` does not reach, and it never imports a bundled text.
 @pytest.fixture()
 async def clean_skills():
     async def wipe():

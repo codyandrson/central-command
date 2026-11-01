@@ -52,7 +52,8 @@ import os
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -250,12 +251,48 @@ def _classify_all(installed, theirs_tree, library, labels) -> list[dict]:
     return rows
 
 
+@dataclass(frozen=True)
+class _StatusRule:
+    """What one status asks of the operator and what the apply does with it."""
+
+    # Whether the operator must decide the row: a bool, or a test of the row.
+    decides: bool | Callable[[dict], bool] = False
+    # The act posted, as the updater, when nobody had to decide (a row with a
+    # verdict only when `verdict_free`: those rows never carry one).
+    auto: str | None = None
+    verdict_free: bool = False
+    # verdict -> act, posted as the operator.
+    verdicts: Mapping[str, str] = field(default_factory=dict)
+
+
+# THE status table (the contract's apply table): the eight statuses, which of
+# them wait for a verdict, and what each verdict does. `needs_verdict` and the
+# apply's `_apply_act` both read it, so neither can drift from the other.
+STATUS_RULES: dict[str, _StatusRule] = {
+    "unchanged-upstream": _StatusRule(),
+    "unmodified": _StatusRule(auto="post_theirs", verdict_free=True),
+    "new": _StatusRule(auto="post_theirs", verdict_free=True),
+    "local-only": _StatusRule(),
+    "skill-retired": _StatusRule(),
+    # A clean merge still must be decided: a `modified` doc is never resolved
+    # automatically.
+    "modified": _StatusRule(
+        decides=True,
+        verdicts={"take_release": "post_theirs", "keep_mine": "post_ours", "edit": "post_edit"},
+    ),
+    "retired-upstream": _StatusRule(
+        decides=lambda row: row["ours_hash"] != row["base_hash"],
+        auto="retire", verdicts={"take_release": "retire"},
+    ),
+    "retired-locally": _StatusRule(decides=True, verdicts={"take_release": "post_theirs"}),
+}
+_NO_RULE = _StatusRule()
+
+
 def needs_verdict(row: dict) -> bool:
-    """Whether the operator must decide this row. A clean merge still must: a
-    `modified` doc is never resolved automatically."""
-    if row["status"] == "retired-upstream":
-        return row["ours_hash"] != row["base_hash"]
-    return row["status"] in ("modified", "retired-locally")
+    """Whether the operator must decide this row."""
+    decides = STATUS_RULES.get(row["status"], _NO_RULE).decides
+    return decides(row) if callable(decides) else decides
 
 
 def unresolved_rows(rows: list[dict]) -> list[dict]:
@@ -324,22 +361,14 @@ class ReviewUnresolved(Exception):
 def _apply_act(row: dict, actor: str) -> tuple[str, str | None]:
     """The contract's apply table: (act, who posts it). `actor` posts what nobody
     decided; a verdict is the operator's."""
-    status, verdict = row["status"], row["verdict"]
-    if status in ("unmodified", "new"):
-        return "post_theirs", actor
-    if status == "retired-upstream" and verdict is None and not needs_verdict(row):
-        return "retire", actor
-    act = {
-        ("modified", "take_release"): "post_theirs",
-        ("modified", "keep_mine"): "post_ours",
-        ("modified", "edit"): "post_edit",
-        ("retired-upstream", "take_release"): "retire",
-        ("retired-locally", "take_release"): "post_theirs",
-    }.get((status, verdict))
-    if act is not None:
-        return act, "operator"
+    rule = STATUS_RULES.get(row["status"], _NO_RULE)
+    verdict = row["verdict"]
+    if verdict in rule.verdicts:
+        return rule.verdicts[verdict], "operator"
+    if rule.auto and (verdict is None or rule.verdict_free) and not needs_verdict(row):
+        return rule.auto, actor
     if needs_verdict(row) and verdict != "keep_mine":
-        raise ValueError(f"no apply rule for a {status} doc with verdict {verdict!r}")
+        raise ValueError(f"no apply rule for a {row['status']} doc with verdict {verdict!r}")
     return "nothing", None
 
 
@@ -387,8 +416,8 @@ async def _apply_row(row: dict, tree: dict, target: str, actor: str) -> dict | N
         post={
             "kind": theirs.kind, "title": doc_title, "content": content,
             "added_by": added_by, "captured_at": datetime.now(timezone.utc),
-            "bundled_release": target, "bundled_path": theirs.path,
-            "bundled_hash": row["theirs_hash"], "bundled_text": theirs.text,
+            **importer.provenance(target, theirs.path, theirs.text),
+            "bundled_text": theirs.text,
         },
     )
     if out is None:

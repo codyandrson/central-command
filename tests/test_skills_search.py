@@ -50,21 +50,6 @@ def test_empty_content_yields_no_chunks():
 # --- search (needs Postgres) -------------------------------------------------
 
 
-@pytest.fixture()
-async def clean_skills():
-    conn = await repo._conn()
-    try:
-        await conn.execute("delete from skill where id like 'cc-test-%'")
-    finally:
-        await conn.close()
-    yield
-    conn = await repo._conn()
-    try:
-        await conn.execute("delete from skill where id like 'cc-test-%'")
-    finally:
-        await conn.close()
-
-
 @pytestmark_db
 @pytest.mark.asyncio
 async def test_search_finds_the_matching_chunk_with_its_citation(clean_skills):

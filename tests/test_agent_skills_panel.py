@@ -26,28 +26,6 @@ from tests.conftest import needs_pg
 AGENT = "inbox-triage"
 
 
-# `_` is a single-character WILDCARD in SQL LIKE, so ids here stay inside the
-# `cc-test-%` shape `tests/test_skills_delivery.py`'s fixture also cleans —
-# the dev database is shared and a leaked skill row would follow every later
-# run around. Deleting the skill cascades to its docs, chunks and grants.
-_CLEAN = "delete from skill where id like 'cc-test-%'"
-
-
-async def _clean() -> None:
-    conn = await repo._conn()
-    try:
-        await conn.execute(_CLEAN)
-    finally:
-        await conn.close()
-
-
-@pytest.fixture()
-async def clean_skills():
-    await _clean()
-    yield
-    await _clean()
-
-
 @pytest.fixture(autouse=True)
 def pinned(monkeypatch):
     # `_agents_detail` composes REST handlers that import runtime modules; with

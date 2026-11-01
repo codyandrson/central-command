@@ -22,21 +22,6 @@ _ORIGINAL_CLIENT = httpx.AsyncClient
 pytestmark_db = needs_pg
 
 
-@pytest.fixture()
-async def clean_skills():
-    conn = await repo._conn()
-    try:
-        await conn.execute("delete from skill where id like 'cc-test-%'")
-    finally:
-        await conn.close()
-    yield
-    conn = await repo._conn()
-    try:
-        await conn.execute("delete from skill where id like 'cc-test-%'")
-    finally:
-        await conn.close()
-
-
 @pytestmark_db
 @pytest.mark.asyncio
 async def test_url_and_content_both_present_is_422(clean_skills):

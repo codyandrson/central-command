@@ -4,6 +4,10 @@ import { isReview, itemKey, type Review, type ReviewCounts, type ReviewItem, typ
 const POLL_MS = 3000;
 const BASE = '/api/skills/update-review';
 
+// Plain `fetch` over the HTTP proxy, not the gateway RPC: the Update dialog also
+// opens from Settings › Updates, where no gateway socket is mounted. The Skills
+// page's banner (`useBundledRefresh`) always has the socket and reads over RPC.
+
 /** What the update dialog needs of the review of one staged release. */
 export interface SkillReviewState {
   /** The stored review, once one has been read. */

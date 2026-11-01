@@ -113,6 +113,18 @@ def bundled_text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def provenance(release: str, path: str, text: str) -> dict:
+    """The provenance triple a version posted from a bundled file carries: the
+    release it came from, the file's path under the checkout, and the hash of
+    the text as stored. The ONE builder — the import stamps with it and the
+    review's apply posts with it, so the two cannot name a version differently."""
+    return {
+        "bundled_release": release,
+        "bundled_path": path,
+        "bundled_hash": bundled_text_hash(text),
+    }
+
+
 def checkout_root() -> Path:
     """The checkout the bundled skills are read from: `CC_REPO_ROOT` when set,
     else the one this code runs from (`central_command/skills/` is two levels
@@ -224,11 +236,7 @@ async def import_skill_folder(
         if stamp is None:
             return {}
         rel = folder.relative_to(stamp[0]) / f.relative_to(folder)
-        return {
-            "bundled_release": release,
-            "bundled_path": rel.as_posix(),
-            "bundled_hash": bundled_text_hash(text),
-        }
+        return provenance(release, rel.as_posix(), text)
 
     fields = skill_overlay.load(settings.resolved_skill_overlay_dir())
     resolved: set[str] = set()
