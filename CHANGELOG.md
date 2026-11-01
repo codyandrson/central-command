@@ -4,6 +4,112 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-10-31 — v2.77.0: the bridge — bundled skill docs follow the release, and the operator decides the ones they changed
+
+epic-skills-refresh-on-update. Fourteen commits since v2.76.0 (`v2.76.0..3266cdbd`, ten
+stories and three test follow-ups, plus one route fix the release rehearsal found) end
+the stale library. Bundled docs were imported create-only, so a release that changed a
+reference doc never reached the library. Now a doc the operator did not change follows
+the release, and one they changed is decided in the Update dialog and never resolved
+automatically. Behaviour comes first, then the test suite, then the documents. No value,
+host or account appears here.
+
+**This is a bridge: its updater steps take effect from the NEXT update.** The update INTO
+v2.77.0 is run by the installed v2.76.0 `cc-update.sh` (single-node: the pre-merge
+`update.sh apply`), which has none of them, so this apply reviews nothing, gates nothing
+and has no `skills` phase. Its schema phase lands the new columns and tables, and
+everything the running API and cockpit serve is live once it is applied. The first update
+after this one runs the steps for the first time. **This release changes nothing under
+`skills/`**: its updater would merge such a change with no refresh, and the doc would read
+as `modified` at the next update against a base the library never received.
+**The first later release that changes a bundled doc must set `min_upgrade_from` to
+2.77.0.** `min_upgrade_from` is unchanged here. Apply v2.76.0 first: going from v2.75.0
+straight to this release would merge v2.76.0's marker edits with neither review nor
+refresh.
+
+- **A version posted from a bundled file records where it came from.** `skill_doc` gains
+  `bundled_release`, `bundled_path` and `bundled_hash` (sha256 of the text as stored, after
+  the frontmatter strip and the overlay render), and the new content-addressed
+  `skill_bundled_text` keeps each text the library received, so the three-way base never
+  depends on a git ref. A hand post stamps nothing. A doc imported before this release has
+  no provenance, and its base is the installed tree's file, which is exact for the first
+  reviewed update because this release changes no doc.
+- **One module computes the review: `central_command/skills/refresh.py`.** Per bundled doc
+  it compares ours, theirs and base as the library stores them: `unchanged-upstream`,
+  `unmodified`, `modified`, `retired-upstream`, `retired-locally`, `new`, `local-only`, and
+  one `skill-retired` row per retired skill. "Modified" is decided only against base, and a
+  `modified` doc carries `git merge-file --diff3`'s output with its markers; a clean merge
+  still needs a verdict. It computes everything and then writes one transaction to
+  `skill_doc_review`, keyed to the target: another target's rows go, and a verdict survives a
+  recompute only where `ours_hash` and `theirs_hash` are unchanged. A review that cannot be
+  computed stores nothing and leaves the gate closed.
+- **The command line opens the database directly**, so it answers with the API up or
+  stopped, from the checkout's `.env`: `python -m central_command.skills.refresh review`
+  (exit 0 stored, 2 could not), `check` (0 clear, 3 unresolved, each doc named, 2 could not;
+  it recomputes, so the gate answers for the library as it is now) and `apply [--actor
+  updater]` (0 done or nothing due, 1 a row failed, 2 could not run, 3 unresolved), each with
+  `--target` and `--ref`. New optional setting `CC_REPO_ROOT`, the one root seam; blank means
+  this checkout, which is what every deployment wants.
+- **The apply posts the stored review, row by row, and never edits in place.** One
+  transaction per doc, re-verifying `ours_hash` under a row lock and `theirs_hash` against
+  the target; a mismatch records `apply_error` and the run goes on, and a row with `applied_at`
+  is skipped, so a re-run posts only what is missing. `added_by` says who decided the bytes:
+  `updater` for `unmodified`, `new` and an untouched `retired-upstream` doc, `operator` for a
+  verdict. Keep-mine posts a new version of ours with the target's provenance, so the base
+  moves. Title and summary follow the guidance doc only when its text is the release's. A
+  whole new skill is created from the target's frontmatter with its `default_agents` seeded
+  create-only; an existing skill's grants and a skill the operator retired are left alone.
+- **Routes and RPC.** `POST /api/skills/update-review` computes; `GET .../{target}` serves
+  the texts, each hash-checked (409 means recompute, except on a row an apply has touched);
+  `POST .../{target}/items/{skill_id}/{doc_key}/resolve` takes one verdict bound to the
+  hashes the operator saw (409 stale, 422 an edit still holding a conflict marker);
+  `POST .../{target}/apply` (409 unresolved); `GET /api/skills/update-review` is the light
+  read of the one stored review, with no texts and no git. RPC: `skills.update_review`,
+  `skills.update_review_get`, `skills.update_review_resolve`, `skills.update_review_apply`,
+  `skills.update_review_latest`. The `cc-skills` proxy forwards them.
+- **The Update dialog holds Apply until every doc is decided.** A section lists the staged
+  release's items with a colour-coded diff, amber conflict regions and three verdicts (take
+  the release, keep mine, edit the merged text), says how many docs follow silently, and
+  renders Apply disabled with the reason while anything is unresolved.
+- **The Skills page says when a refresh did not fully apply**: a banner naming the count,
+  with the reasons and a Retry. A row whose text moved says a plain retry cannot fix it and
+  points at the dialog.
+- **Both apply routes refuse over an unresolved review**: `POST /api/update/apply` answers
+  409 `skills-unresolved` when docs are unresolved or no review is stored, before the hold is
+  engaged, a trigger written or the runner started (k3s: `cc-update.ts`, forced or not;
+  single-node: `api/update.py`). On k3s a forced apply with the API down goes on to the
+  updater, whose gate reads the database directly.
+- **Both updaters gain three steps, each keyed on the tree holding the module, never on a
+  version:** `skills_review_stage` (a failure only warns; the cockpit computes on open);
+  `skills_review_gate`, before anything changes (k3s: at resolve, ahead of the busy gate and
+  the checkpoint; single-node: after the version gate, ahead of the acquire), where exit 3
+  names the cockpit, anything else "cannot be proven", and "Update anyway" does not bypass it;
+  `refresh_bundled_skills` after the merge (k3s: a new `skills` phase after n8n; single-node:
+  right after the schema), which only warns, because a stop there would strand a merged tree.
+  On k3s the module runs under `env -i` from the checkout. On single-node a rollback refreshes
+  nothing and a resume skips the gate. An older tree finds no module and skips all three.
+- **The create-only import at install is unchanged.** `setup.sh app` and
+  `boot/skills-imported` still import only the skills the library lacks.
+- **Fixed by the release rehearsal: `GET /api/skills/update-review` was unreachable over
+  HTTP.** `GET /api/skills/{skill_id}` was registered first and answered 404 for a skill named
+  `update-review`. The Skills banner reads over the RPC and was unaffected; handler-level tests
+  could not see it, so a test now checks real route matching for every review route.
+
+**Tests.** `tests/test_skills_update_review.py` walks every status and apply-table row against
+a temp git repo, with the command line's exit codes as named nodes through the real
+`python -m`. `tests/test_k3s_skills_refresh.py` and `tests/test_single_update_skills_refresh.py`
+lift each updater's functions under a stub interpreter and pin their source order.
+`tests/test_skills_refresh_boundary.py` pins the module's tier, the schema's shapes, the gate
+strings, route matching, and the bridge rule: a release whose CHANGELOG title names it a
+bridge changes nothing under `skills/` since the release before it. `deploy/k3s/verify.sh`
+gains one row asserting the three columns and two tables exist. The release rehearsal ran the
+whole path off the cluster against a scratch database and a fixture repo, including the real
+dialog and banner in a browser.
+
+**Documents.** DL-198 records the decision and amends DL-119 (create-only stays true at
+install; updates refresh and review). `docs/ARCHITECTURE.md`, `deploy/k3s/README.md` §7, both
+deploy rule files and PRD FR-23 say it as built.
+
 ## 2026-10-30 — v2.76.0: instance facts leave the public tree — a skill overlay, unit templates, a required compute key, and a guard that keeps them out
 
 epic-instance-facts-relocation. Fifteen commits since v2.75.0 (`v2.75.0..c77c0319`,
