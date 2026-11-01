@@ -132,7 +132,7 @@ async def test_a_check_that_cannot_answer_is_the_outage_it_already_is(monkeypatc
 
     assert cache.results == {"embedder": False}
     assert changes == [{"dependency": "embedder", "state": "down"}]
-    assert table["embedder"]["error"].startswith("embedder check could not run: ")
+    assert table["embedder"]["error"] == "embedder check could not run (ConnectionError)"
 
 
 async def test_with_the_graph_probed_down_a_cached_mismatch_is_held_not_cleared(
@@ -341,6 +341,44 @@ async def test_the_outages_list_carries_the_error_only_while_down(monkeypatch):
 
     assert rows["embedder"]["error"] == f"mismatch; {REMEDY}"
     assert "error" not in rows["jira"] and "error" not in rows["graph"]
+
+
+async def test_an_unanswerable_check_records_its_kind_never_its_text(monkeypatch, graph):
+    graph.declare()
+    graph.embed_error = ConnectionError("refused at http://user:hunter2@10.0.0.9:4000/v1")
+    _no_probes(monkeypatch, embedder=True)
+    _empty_worklists(monkeypatch)
+    table = _table(monkeypatch)
+
+    await orchestration.probe_and_record(["embedder"])
+
+    assert table["embedder"]["error"] == "embedder check could not run (ConnectionError)"
+    assert "hunter2" not in table["embedder"]["error"]
+
+
+async def test_the_outages_list_scrubs_userinfo_and_key_shapes_from_a_probe_error(monkeypatch):
+    now = datetime.now(timezone.utc)
+    dirty = ("connect to http://op:hunter2@10.0.0.9:4000/x failed; "
+             "Authorization key=sk-abcdef123456 token: abc123")
+
+    async def states():
+        return {"graph": {"name": "graph", "state": "down", "checked_at": now,
+                          "down_since": now, "error": dirty}}
+
+    async def counts():
+        return {}
+
+    async def failing(n):
+        return []
+
+    monkeypatch.setattr(repo, "dependency_probe_states", states)
+    monkeypatch.setattr(repo, "parked_unit_counts", counts)
+    monkeypatch.setattr(repo, "units_failing_despite_probe", failing)
+
+    error = {d["name"]: d for d in (await outages.list_outages())["dependencies"]}["graph"]["error"]
+
+    assert "hunter2" not in error and "sk-abcdef" not in error and "abc123" not in error
+    assert "http://10.0.0.9:4000/x" in error
 
 
 def test_the_probe_tier_stays_pure():

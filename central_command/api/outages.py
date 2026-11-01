@@ -20,6 +20,8 @@ state `up`, `checked_at` null.
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -35,6 +37,18 @@ KINDS = ("sessions", "proposals", "tasks", "work_items", "ingest_jobs")
 
 class OutageRetryIn(BaseModel):
     include_interrupted: bool = False
+
+
+_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]*@")
+_SECRET = re.compile(r"(?i)(\bsk-[A-Za-z0-9_-]{6,}|\b(?:key|token|password|secret)\s*[=:]\s*\S+)")
+
+
+def _safe_error(text: str) -> str:
+    """A probe's error as the banner may show it: URL userinfo and anything
+    shaped like a key or `token=…` removed. Probe errors are exception text,
+    which is other people's prose; the reason a mismatch records is ours and
+    passes through unchanged."""
+    return _SECRET.sub("[redacted]", _USERINFO.sub(r"\1", text))[:500]
 
 
 def _iso(value) -> str | None:
@@ -83,7 +97,7 @@ async def list_outages() -> dict:
             "total": sum(waiting.values()) + int(c["interrupted"]),
         }
         if state == "down" and probe.get("error"):
-            row["error"] = probe["error"]
+            row["error"] = _safe_error(probe["error"])
         out.append(row)
     return {"dependencies": out}
 

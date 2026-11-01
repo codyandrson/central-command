@@ -1139,7 +1139,13 @@ async def _consult_embedder_check(cache) -> None:
     try:
         verdict = await embedder_record.check(force=True)
     except Exception as exc:  # noqa: BLE001 — no verdict is the outage, not a clear
-        cache.mark_down("embedder", f"embedder check could not run: {str(exc) or type(exc).__name__}")
+        # The error is shown on the outage banner: say the kind of failure, never
+        # the exception's own text (it can carry a URL with userinfo). The log
+        # has the rest.
+        log.warning("embedder check could not run: %s", exc)
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        what = f"HTTP {status}" if isinstance(status, int) else type(exc).__name__
+        cache.mark_down("embedder", f"embedder check could not run ({what})")
         return
     if not verdict.open:
         cache.mark_down("embedder", verdict.reason)
