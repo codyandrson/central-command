@@ -27,7 +27,13 @@ export interface ProposalAction {
   capability: string;
   arguments?: Record<string, unknown>;
   target_ref?: string | TargetRef;
-  reversibility?: string;
+  /** The capability registry's word, joined by the server at read time
+   *  (proposals.get) — never the agent's own claim. `null` for a capability the
+   *  registry does not hold as a write. Pinned by tests/test_overrides_wire.py. */
+  reversibility?: 'reversible' | 'irreversible' | null;
+  /** Does an override on this capability need the operator's acknowledgement?
+   *  Server-joined like `reversibility`; `null` when the capability is unknown. */
+  requires_acknowledgement?: boolean | null;
   charter_diff?: string;
   /** skill.doc_add against an existing doc version — absent means nothing to
    *  diff (skill.create, or a skill.doc_add with no prior version). */

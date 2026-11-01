@@ -2679,6 +2679,17 @@ def requires_acknowledgement(capability: str) -> bool:
     return bool(row and row.acknowledge)
 
 
+def action_marks(capability: str) -> dict:
+    """The registry's server-held marks for one proposed action, for the inbox:
+    `{"reversibility", "requires_acknowledgement"}`, both None for a name the
+    registry does not hold as a write (never a guess). Reads the row, never the
+    agent-written `Action.reversibility`."""
+    row = _BY_NAME.get(capability.split("@", 1)[0])
+    if row is None or row.kind != "write":
+        return {"reversibility": None, "requires_acknowledgement": None}
+    return {"reversibility": row.reversibility, "requires_acknowledgement": row.acknowledge}
+
+
 def effective_shadow_runs(capability: str, setting: int) -> int:
     """The shadow period an override on `capability` actually runs: the
     setting, floored at 1 for a class that requires acknowledgement."""

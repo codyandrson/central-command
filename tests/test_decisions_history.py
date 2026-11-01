@@ -105,3 +105,28 @@ async def test_decisions_history_carries_processed_work_items(monkeypatch):
     out = await nerve_gateway._decisions_history(50, 0)
 
     assert out["processedItems"] == [item]
+
+
+async def test_decisions_history_rows_stay_light_and_carry_no_actions(monkeypatch):
+    """The action marks (`reversibility`, `requires_acknowledgement`) ride the
+    proposal DETAIL, which is what a history row opens; the row itself carries no
+    actions and adds none (tests/test_overrides_wire.py pins the detail)."""
+    row = {
+        "id": "prop_1", "session_id": "sess_1", "agent_id": "ea",
+        "intent": "send it", "status": "EXECUTED",
+        "created_at": None, "decided_at": None, "origin": None,
+    }
+
+    async def fake_history(limit, offset):
+        return [dict(row)], False
+
+    async def no_facts(ids):
+        return {}
+
+    monkeypatch.setattr(nerve_gateway.repo, "list_decided_proposals", fake_history)
+    monkeypatch.setattr(nerve_gateway.repo, "list_processed_work_items", _no_processed_items)
+    monkeypatch.setattr(nerve_gateway.repo, "proposal_gate_facts", no_facts, raising=False)
+
+    out = await nerve_gateway._decisions_history(50, 0)
+
+    assert "actions" not in out["proposals"][0]

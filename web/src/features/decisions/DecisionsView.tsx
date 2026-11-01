@@ -1296,6 +1296,23 @@ function ProposalPane({
             <div className="mb-1 flex items-center gap-2">
               <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.7rem] text-foreground/90">{a.capability}</span>
               {a.target_ref != null && <span className="font-mono text-[0.667rem] text-muted-foreground">{refLabel(a.target_ref)}</span>}
+              {/* The registry's marks, joined by the server — never the agent's claim. */}
+              {a.reversibility === 'irreversible' && (
+                <span
+                  className="cockpit-badge text-red-600 dark:text-red-400"
+                  title="Cannot be undone once it runs. An auditor can never decide this class."
+                >
+                  irreversible
+                </span>
+              )}
+              {a.requires_acknowledgement === true && (
+                <span
+                  className="cockpit-badge"
+                  title="An override on this capability needs the operator's acknowledgement and runs a shadow period first."
+                >
+                  acknowledgement class
+                </span>
+              )}
               {/* D11-r1: scope is a reviewable routing decision, not a detail
                   buried in the args JSON — approving a true fact into the wrong
                   partition is its own kind of mistake. */}

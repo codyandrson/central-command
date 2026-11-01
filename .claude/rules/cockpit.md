@@ -27,6 +27,10 @@ when a matching file is read.
   frontend test** — the feature silently never renders. The defence is a
   BACKEND test asserting the wire shape; a frontend test building its own
   payload object proves nothing.
+  The inbox's per-action `reversibility` / `requires_acknowledgement` are
+  joined from the registry on `proposals.get` only (never the agent's claim);
+  `tests/test_overrides_wire.py::test_the_proposal_detail_shows_the_registry_mark_never_the_agents_claim`
+  pins the wire.
 - **`nerve_gateway._COMPOSER_DISABLING` is an ALLOWLIST, not a check.** A new
   `why_not_sendable` refusal code missing from that tuple leaves the cockpit
   rendering an ENABLED message box that `_chat_send` then 409s. Adding a

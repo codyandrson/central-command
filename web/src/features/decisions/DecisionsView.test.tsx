@@ -209,6 +209,39 @@ describe('DecisionsView proposal pane', () => {
     expect(screen.queryByText('other arguments')).not.toBeInTheDocument();
   });
 
+  it('badges an irreversible action and an acknowledgement class from the server fields only', async () => {
+    // Server shape (tests/test_overrides_wire.py): the registry's word per action.
+    state.detail = {
+      id: 'p1', agent_id: 'ea', intent: 'Send it', status: 'AWAITING_HUMAN',
+      created_at: hoursAgo(1), evidence: [],
+      actions: [
+        { capability: 'mail.send', arguments: {}, reversibility: 'irreversible',
+          requires_acknowledgement: true },
+        { capability: 'jira.add_comment', arguments: {}, reversibility: 'reversible',
+          requires_acknowledgement: false },
+        { capability: 'mystery.write', arguments: {}, reversibility: null,
+          requires_acknowledgement: null },
+      ],
+    };
+    await openProposal();
+    await waitFor(() => expect(screen.getByText('irreversible')).toBeInTheDocument());
+    expect(screen.getAllByText('irreversible')).toHaveLength(1);
+    expect(screen.getAllByText('acknowledgement class')).toHaveLength(1);
+  });
+
+  it('shows no mark when the server sent none, whatever the agent claimed', async () => {
+    state.detail = {
+      id: 'p1', agent_id: 'ea', intent: 'Send it', status: 'AWAITING_HUMAN',
+      created_at: hoursAgo(1), evidence: [],
+      // No server fields: the cockpit builds no mark of its own.
+      actions: [{ capability: 'mail.send', arguments: {}, claimed: 'irreversible' }],
+    };
+    await openProposal();
+    await waitFor(() => expect(screen.getByText('mail.send')).toBeInTheDocument());
+    expect(screen.queryByText('irreversible')).not.toBeInTheDocument();
+    expect(screen.queryByText('acknowledgement class')).not.toBeInTheDocument();
+  });
+
   it('renders a mail.create_rule proposal with its description, queued count and a sample', async () => {
     state.detail = {
       id: 'p1', agent_id: 'inbox-triage', intent: 'Auto-dismiss newsletter noise', status: 'AWAITING_HUMAN',

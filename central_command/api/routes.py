@@ -2437,6 +2437,15 @@ async def get_proposal(proposal_id: str) -> dict:
     row["folds"] = await repo.work_items_folded_into(proposal_id)
     row["jira_issues"] = await _jira_issues_for(row["actions"])
 
+    # The inbox shows each action's SERVER-HELD marks, joined from the registry
+    # at read time (epic-cockpit-rerun-reversibility-macros R5/A7): the agent's
+    # own `reversibility` is a claim, stored in the record and replaced here by
+    # the registry's word, with `requires_acknowledgement` beside it.
+    from central_command.gateway.capabilities import action_marks
+
+    for a in row["actions"]:
+        a.update(action_marks(str(a.get("capability", ""))))
+
     # Deterministic policy flags, computed at review time only — a due date
     # that was fine when approved naturally falls into the past afterwards,
     # and history must not flag amber for it.

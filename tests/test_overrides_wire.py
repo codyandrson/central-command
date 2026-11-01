@@ -254,3 +254,67 @@ async def test_get_events_returns_the_override_live_event(demo, granted, monkeyp
     got = await routes.get_events(kind="override.live", ref_id=ovr["id"])
     assert [e["kind"] for e in got["events"]] == ["override.live"]
     assert got["events"][0]["ref_id"] == ovr["id"]
+
+
+# --- epic-cockpit-rerun-reversibility-macros story 4: the inbox's action marks ---
+#
+# Each action of GET /proposals/{id} (the proposals.get RPC) carries the
+# registry's `reversibility` and `requires_acknowledgement`, joined at read time.
+# The agent-written `Action.reversibility` (three-valued, a claim) stays in the
+# stored record and is never what the detail shows. History rows (decisions.history)
+# carry no actions, like the pending list cards, and are unchanged: a decided
+# proposal's marks are read from its detail.
+
+import uuid  # noqa: E402
+
+from central_command.gateway.capabilities import REGISTRY, action_marks  # noqa: E402
+
+
+async def _park(capabilities: list[tuple[str, str]], status: str = "AWAITING_HUMAN") -> str:
+    """A stored proposal whose agent-written field is the second item of each pair."""
+    pid = "prop_mark_" + uuid.uuid4().hex[:10]
+    sid = "sess_mark_" + uuid.uuid4().hex[:8]
+    await repo.create_running_session(sid, "jira-expert")
+    await repo.save_proposal(
+        pid, sid, "jira-expert", "marks",
+        [{"capability": cap, "arguments": {}, "target_ref": {"system": "x"},
+          "reversibility": claim} for cap, claim in capabilities],
+        [], "x", pid, status=status,
+    )
+    return pid
+
+
+def test_action_marks_read_the_registry_row_and_leave_unknowns_null():
+    assert action_marks("mail.send") == {"reversibility": "irreversible", "requires_acknowledgement": True}
+    assert action_marks("mail.send@v1")["reversibility"] == "irreversible"
+    assert action_marks("jira.create_issue") == {"reversibility": "reversible", "requires_acknowledgement": False}
+    assert action_marks("nope.nothing") == {"reversibility": None, "requires_acknowledgement": None}
+    for c in REGISTRY:
+        if c.kind == "write":
+            assert action_marks(c.name) == {"reversibility": c.reversibility,
+                                            "requires_acknowledgement": c.acknowledge}
+
+
+@needs_pg
+async def test_the_proposal_detail_shows_the_registry_mark_never_the_agents_claim():
+    # "hard" is the third value of the agent's enum; "reversible" is its lie.
+    pid = await _park([("mail.send", "hard"), ("mail.send", "reversible"),
+                       ("jira.create_issue", "hard"), ("mystery.write", "reversible")])
+    stored = await repo.load_proposal(pid)
+    assert [a["reversibility"] for a in stored["actions"]] == [
+        "hard", "reversible", "hard", "reversible"], "the claim stays in the record"
+
+    shown = (await _detail(pid))["actions"]
+    assert [(a["reversibility"], a["requires_acknowledgement"]) for a in shown] == [
+        ("irreversible", True), ("irreversible", True),
+        ("reversible", False), (None, None)]
+
+
+@needs_pg
+async def test_a_decided_proposals_detail_carries_the_marks_and_its_history_row_stays_light():
+    pid = await _park([("mail.send", "reversible")], status="EXECUTED")
+    detail = await _detail(pid)
+    assert detail["actions"][0]["reversibility"] == "irreversible"
+    assert detail["actions"][0]["requires_acknowledgement"] is True
+    row = await _rpc_history_row(pid)
+    assert "actions" not in row, "history rows carry no actions; their detail does"
