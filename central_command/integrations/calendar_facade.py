@@ -4,7 +4,9 @@ THE BOUNDARY, honestly (revised 2026-08-06, EA widening slice A): the Google
 credential inside n8n is FULL-SCOPE by operator decision — it always COULD
 write, and now there are write helpers here that do. The boundary is no longer
 "no write path exists"; it is **who may call one**: `list_events` is an ungated
-read anyone may make, while `create_event`/`update_event`/`delete_event` are
+read anyone may make (`get_event` is a read too, but its only caller is the
+Executor, which reads an event before it deletes it), while
+`create_event`/`update_event`/`delete_event` are
 called ONLY from `gateway/executor.py`, i.e. only after a human approved the
 proposal that named them. `tests/test_ea_calendar.py::
 test_only_the_executor_calls_the_calendar_write_helpers` walks the sources and

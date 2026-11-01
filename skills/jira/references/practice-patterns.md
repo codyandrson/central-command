@@ -9,7 +9,8 @@ not repeated.
 
 Covered in `SKILL.md` (core rule 2) and `good-updates` ("Generic links faking
 hierarchy"). One line worth restating here because it is the most common
-error: `parent` is structure (Epic > Story > Task > Sub-task), typed
+error: `parent` is structure (Epic > Story > Task > Sub-task; the names are
+the instance's, from `jira_list_issue_types`), typed
 `issuelinks` are dependency ("blocks", "is blocked by", "relates to",
 "duplicates"). A dependency expressed as `parent`, or structure expressed as
 a `Relates` link, reads fine in one issue view and breaks every board filter

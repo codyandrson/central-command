@@ -74,9 +74,11 @@ substitute for the verification itself.
 - **Story / Task** = one deliverable a person finishes; it names its Epic via
   `parent` when it belongs to one. Story for user-visible value, Task for
   work-about-work — where both types exist, don't agonise; be consistent
-  within a project. <!-- overlay: jira_issue_types_present -->
-- **Subtask** = a checklist step of ONE parent issue, never freestanding
-  (`parent` is mechanically required). If a "subtask" would make sense
+  within a project. The names are the instance's own, per project: read
+  `jira_list_issue_types` and use a name it returned. <!-- overlay: jira_issue_types_present -->
+- **Sub-task** (the type with `subtask: true` in that read) = a checklist step
+  of ONE parent issue, never freestanding (`parent` is required by Jira; the
+  client does not check it, Jira's 400 does). If a "subtask" would make sense
   assigned to a different week or person than its parent, it is a Task under
   the Epic instead.
 - Hierarchy via `parent`, dependency via links — the rule you already hold.

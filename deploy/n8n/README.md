@@ -11,7 +11,7 @@ touches them. Edit the JSON, not the canvas.
 |---|---|---|
 | `workflows/cc-email-facade.json` | `kC81tDmXwPb25Nsj` | the webhook (`POST /webhook/cc-email-facade`): checks `x-cc-token`, refuses attachments, calls the provider. Holds no credential. |
 | `workflows/lib-email-provider.json` | `tfoEVgB8uHHIokWQ` | the Gmail REST calls under the `Gmail account` credential: `message`, `thread`, `list`, and the one write, `report_spam` (`messages.modify`, +SPAM −INBOX). |
-| `workflows/cc-calendar-facade.json` | `gMh57mcPQJ2gfLa7` | the calendar webhook (`POST /webhook/cc-calendar-facade`): checks `x-cc-token`, allows exactly `list` (the EA's ungated read) plus `create_event` / `update_event` / `delete_event` (reachable only from the Executor, after approval), calls the provider. Holds no credential. **Optional** — shipped only when `CC_CALENDAR_FACADE_TOKEN` is set. |
+| `workflows/cc-calendar-facade.json` | `gMh57mcPQJ2gfLa7` | the calendar webhook (`POST /webhook/cc-calendar-facade`): checks `x-cc-token`, allows exactly `list` (the EA's ungated read), `get_event` (the Executor's read before a delete) plus `create_event` / `update_event` / `delete_event` (reachable only from the Executor, after approval), calls the provider. Holds no credential. **Optional** — shipped only when `CC_CALENDAR_FACADE_TOKEN` is set. |
 | `workflows/lib-google-calendar.json` | `GSyOmRlOCoyc9Nrh` | the Google Calendar REST calls under the `Google Calendar account` credential; raw `httpRequest` nodes on purpose (the `googleCalendar` node cannot address `primary` and hides the HTTP status). |
 
 `apply-workflows.sh --k3s | --podman` renders the façade token from `.env`,

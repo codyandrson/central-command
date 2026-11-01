@@ -3,6 +3,8 @@ paths:
   - "deploy/n8n/**"
   - "central_command/integrations/jira.py"
   - "central_command/integrations/exchange.py"
+  - "central_command/integrations/calendar_facade.py"
+  - "central_command/reports/ea_calendar.py"
   - "central_command/contract/mail.py"
   - "central_command/ingest/**"
 ---
@@ -62,13 +64,35 @@ when a matching file is read.
 - **A façade is `configured()` only when its URL AND its token are set, and
   an unconfigured one FAILS — it never parks** (epic small-fixes, ruled
   2026-10-29). The default URLs are never empty, so the token is the signal (the
-  self-check and the EA calendar report read it the same way). `email_facade`
+  self-check reads it the same way; the EA calendar report asks
+  `calendar_facade.provider_configured()`, which also counts an Exchange-only
+  site). `email_facade`
   and `calendar_facade` check `configured()` on the n8n path before any socket
   and raise "…not configured — set CC_…_URL and CC_…_TOKEN", which classifies
   SEMANTIC (the wording carries no transient marker word on purpose) and lands
   FAILED at once: a retry cannot succeed, so parking it would wait for nothing.
   A configured façade whose host is down stays transient and parks. Guarded by
   `tests/test_facade_configured.py`.
+- **A Jira issue type comes from the instance, never a constant** (epic
+  work-site-safety, DL-201). `jira_list_issue_types(project_key)` reads a
+  project's types (`id`, `name`, `subtask`) from the createmeta endpoint on both
+  flavours; `issue_type` is required in `ARG_SPECS`; `create_issue` posts what
+  it is given and Jira's own 400 is the only validator (loud, so no guard).
+  Never add a list of type names, a `Task` default, or a name-based sub-task
+  check: `tests/test_jira_issue_types.py` walks the source for them.
+- **An availability read fails closed.** `reports/ea_calendar.day()` is `free`
+  only on a complete successful list; a truncated window, a missing `events`
+  list, a provider answer without `items`, a semantic failure and no provider
+  are `available: false` with a reason, and an outage re-raises so the read
+  parks. Tell an outage from a NO with `contract.failures.is_down`, not
+  `classify_failure` alone (a `ConnectTimeout` stringifies to nothing).
+- **An Exchange calendar delete is never a hard delete, and a NO from an n8n
+  Code node must be `ok:false`.** `exchange.delete_event` is
+  `move_to_trash(send_meeting_cancellations=…)` (cancellations only for the
+  organiser; an undecidable organiser raises); `item.delete()` and `cancel()`
+  are pinned absent by a source walk. A Code node's `fail()` reaches Python as
+  an HTTP 500, which classifies TRANSIENT and parks, so a read that finds
+  nothing (`get_event` on a gone event) answers `ok:false` and lands FAILED.
 - **A Jira gadget's config keys are declared BY THE GADGET — read its XML,
   never a table.** A gadget silently ignores any pref it does not declare, so
   a wrong key is a 200 with no binding and no error.

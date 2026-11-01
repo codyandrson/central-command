@@ -35,8 +35,9 @@ performs it.
    `jira_get_transitions` are free. A proposal that names a status, transition
    or link you did not verify is a guess wearing an issue key.
 2. **Hierarchy and links are different mechanisms.** `parent` expresses
-   structure (Epic > Story > Task > Sub-task). `issuelinks` expresses
-   dependency. Never fake one with the other.
+   structure (Epic > Story > Task > Sub-task, as a doctrine: the type NAMES a
+   project has are the instance's, read with `jira_list_issue_types`).
+   `issuelinks` expresses dependency. Never fake one with the other.
 3. **`updateAttributes` replaces labels wholesale.** It is not a merge. Send
    the full intended list or you delete labels nobody asked you to delete.
 4. **`assignee: null` means UNASSIGNED, not "unknown".** The client maps a
@@ -46,7 +47,9 @@ performs it.
    nowhere else — a guessed uri creates an EMPTY dashboard (it happened live,
    2026-08-08). A filter's JQL gets pre-flighted through `jira_search_issues`
    before you propose it. A filter created in the same proposal is bound by
-   `filterName`, never by a made-up or placeholder id.
+   `filterName`, never by a made-up or placeholder id. `jira.create_issue`
+   requires an `issue_type`: name one `jira_list_issue_types` returned for
+   THAT project, never `Task`, `Bug` or `Story` from memory.
 
 ## References
 

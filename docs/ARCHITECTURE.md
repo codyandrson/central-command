@@ -141,8 +141,8 @@ Rows for the same package are grouped by what the modules are for.
 | `heartbeat/` | ② | none | The scheduler for recurring team work: tick loop, action registry, dependency-health probes | `engine.py` (`fire`, one firing path for tick and run-now), `actions.py` (`ActionSpec`, 12 action kinds), `probes.py` | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `integrations/` | ④ | each client holds its own | **Native clients**: Jira, Confluence, the git forge, LiteLLM (proxy) and its credential store, the Exchange (EWS) mail client, Neo4j (reads and the closed curation write set) | `jira.py`, `confluence.py`, `forge.py`, `litellm.py`, `litellm_credstore.py`, `exchange.py`, `neo4j_reader.py`, `neo4j_writer.py` | [integrations](../.claude/rules/integrations.md) |
 | `integrations/` | ④ | as above | **graphiti-core, in-process** (no server): `graphiti.py` reads (the one graph module `runtime/` may import; it imports graphiti-core search modules function-locally, after the client has prepared the environment), `graphiti_client.py` is the one place the library is built and configured, `graphiti_ingest.py` is the durable ingest queue's worker, `graph_ontology.py` holds the ten entity types, `graphiti_patches.py` applies the two carried graphiti-core fixes | `graphiti.py`, `graphiti_client.py`, `graphiti_ingest.py`, `graph_ontology.py`, `graphiti_patches.py` | [graph](../.claude/rules/graph.md), [models](../.claude/rules/models.md) |
-| `integrations/` | ④ | n8n holds the OAuth | **n8n façades** for mail and calendar (n8n holds the OAuth; the Jira façade fallback was removed in v2.50.0). **Uncredentialed**: web fetch, the crawler client, the sandbox client. `http.py` is the pluggable-trust httpx factory and the ONE TLS surface: every client built from `client_kwargs()` (the native clients, the agents' web fetch, the Systems probes, the self-check) honours `CC_CA_BUNDLE`, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and `CC_TLS_INSECURE`, which turns verification off for all of them and wins over the bundle. A façade is `configured()` when its URL and its token are both set; an unconfigured one fails "not configured" as a NO, it never parks | `email_facade.py`, `calendar_facade.py`, `webfetch.py`, `crawler.py`, `sandbox_client.py`, `http.py` | [integrations](../.claude/rules/integrations.md) |
-| `reports/` | ② | none | Deterministic, judgment-free reads composed from the spine: the EA's snapshot, the operator's calendar day, the EA's open follow-ups; called only from `runtime/tools.py` and `heartbeat/actions.py` | `ea_report.py`, `ea_calendar.py`, `ea_followups.py` | — |
+| `integrations/` | ④ | n8n holds the OAuth | **n8n façades** for mail and calendar (n8n holds the OAuth; the Jira façade fallback was removed in v2.50.0). **Uncredentialed**: web fetch, the crawler client, the sandbox client. `http.py` is the pluggable-trust httpx factory and the ONE TLS surface: every client built from `client_kwargs()` (the native clients, the agents' web fetch, the Systems probes, the self-check) honours `CC_CA_BUNDLE`, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and `CC_TLS_INSECURE`, which turns verification off for all of them and wins over the bundle. A façade is `configured()` when its URL and its token are both set; an unconfigured one fails "not configured" as a NO, it never parks; `calendar_facade.provider_configured()` also counts an Exchange-only site as configured | `email_facade.py`, `calendar_facade.py`, `webfetch.py`, `crawler.py`, `sandbox_client.py`, `http.py` | [integrations](../.claude/rules/integrations.md) |
+| `reports/` | ② | none | Deterministic, judgment-free reads composed from the spine: the EA's snapshot, the operator's calendar day (fail-closed: see "Work-site safety defaults"), the EA's open follow-ups; called only from `runtime/tools.py` and `heartbeat/actions.py` | `ea_report.py`, `ea_calendar.py`, `ea_followups.py` | — |
 | `sandbox/` | out-of-process | **none, by design** | A standalone FastAPI service giving agents a disposable workspace. Two backends behind one API: `kubectl` (a gVisor Job+Pod per session) or `podman` (a container per session). Never imported; reached only through `integrations/sandbox_client.py`. Its single exit is the gated `mcp.sync_source`, content captured at propose time | `runner.py` | [AGENTS.md](../AGENTS.md) |
 | `crawler/` | out-of-process | none | A standalone browser-rendering crawl service for whole-site documentation import. Never imported; reached through `integrations/crawler.py`, whose only caller is `skills/site_import.py` | `service.py` | — |
 | `skills/` | ②/③ | none | The skills library's import side: `SKILL.md` + references → DB rows and a chunked search index (`chunking.py`); whole-site import; the instance overlay rendered into each body at import (`overlay.py`: `<!-- overlay: <field> -->` markers, files under `CC_SKILL_OVERLAY_DIR`, outside the checkout); the review of a target release against the library and its apply (`refresh.py`, also a command line for the updaters) | `importer.py`, `site_import.py`, `ids.py`, `chunking.py`, `overlay.py`, `refresh.py` | — |
@@ -873,6 +873,47 @@ CANCELLED` (the founding design's `BLOCKED` was never built); a work item runs
 `UNPROCESSED → CLAIMED → (FOLD_PENDING | DISMISS_PENDING) → PROCESSED | FOLDED |
 FAILED`. Guidance has exactly one `CURRENT` version per agent (a partial unique
 index in `schema.sql`); history is kept as `SUPERSEDED`.
+
+### Work-site safety defaults
+
+FR-27 (decided 2026-11-01, DL-201). Four rules make the safe step the default
+where a wrong action reaches other people. None adds a second operator step:
+a `mail.send` or `calendar.create_event` proposal already shows every
+recipient or attendee, and nothing edits it between approval and execution, so
+the approval gate IS the explicit second step. `mail.send` and `mail.move`
+(Exchange-only) stay as built, dormant and granted to no agent; there is no
+draft step, no separate invitation step and no mail trash.
+
+- **Jira issue types come from the instance.** `jira_list_issue_types
+  (project_key)` (the `jira-read` pack on both flavours; Cloud v3 and Data
+  Center v2 `GET /issue/createmeta/{project}/issuetypes` through `_api()`,
+  paged, cached per project for five minutes) returns each type's `id`,
+  `name` and `subtask`. `issue_type` is required in `ARG_SPECS`; no constant
+  list, no `Task` default and no name check remain, and Jira's own 400 is the
+  only validator (loud: FAILED, redraft).
+- **The availability read fails closed.** `reports/ea_calendar.day()` answers
+  `available: true` only on a complete, successful list (an empty one
+  included). A truncated window, an envelope without an `events` list, a
+  provider answer without `items`, a semantic failure and an unconfigured
+  provider each answer `available: false` with the reason, and `read_calendar`
+  says "availability UNKNOWN … do not treat it as free". An outage still
+  raises and parks under the outage doctrine. `provider_configured()` counts
+  an Exchange-only site as configured.
+- **A calendar delete is never a hard delete.** On Exchange it is
+  `item.move_to_trash(...)` (Deleted Items), with cancellations sent to the
+  attendees only when the account is the organiser; `item.delete()` and
+  `cancel()` are unreachable, a provider error raises, and an organiser that
+  cannot be compared raises rather than skipping the cancellations. On Google
+  the event becomes `cancelled`. The Executor reads the event first (the
+  façades' `get_event` mode) and its result line is the restore record (the
+  title and organiser, which an invitation's sender writes, are cut to 200
+  characters and quoted); the
+  mark stays irreversible with acknowledgement, because notified attendees
+  cannot be un-notified. The Exchange delete is VERIFY-ON-SITE.
+- **Known gap.** Google's list mode emits no `event_id`, so on Google an agent
+  has no readable id for `calendar.update_event` or `calendar.delete_event`.
+  Pre-existing and outside this decision; the operator decides whether it is
+  fixed.
 
 ## 4. Spine mechanics
 

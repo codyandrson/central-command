@@ -795,8 +795,10 @@ async def move_page(page_id: str, new_parent_id: str) -> dict:
 async def trash_page(page_id: str) -> dict:
     """Cloud DELETE /pages/{id} moves to trash by default (no `draft` param
     sent, so the current — not a draft — page is trashed). Server/DC DELETE
-    /content/{id} trashes a current page on its first call too (a second
-    DELETE on an already-trashed page purges it — out of scope here)."""
+    /content/{id} trashes a current page on its first call too. A purge of an
+    already-trashed page needs `status=trashed` in the query (the vendored
+    Confluence 8.5.0 reference, content-delete), which this client never sends,
+    so a repeated DELETE does not purge."""
     _require_configured("trashPage")
     pid = _id(page_id)
     path = _crud(f"/content/{pid}") if _flavor() == "server" else _crud(f"/pages/{pid}")

@@ -9,7 +9,7 @@ All are `JiraError`. The message tells you which half of the system failed.
 - `bad issue_key '<x>' — must match [A-Z][A-Z0-9_]*-<number>`
 - `createIssue — bad project_key '<x>' — must match [A-Z][A-Z0-9_]*`
 - `createIssue — summary must be a non-empty string under 255 chars` (255 itself is accepted)
-- `createIssue — bad issue_type '<x>' (must be one of Task, Bug, Story, Epic, Subtask, Sub-task)`
+- `listIssueTypes — bad project_key '<x>' — must match [A-Z][A-Z0-9_]*` (the read for a project's issue types refuses a malformed key; a type the project lacks is NOT checked by the client: Jira answers the create with its own 400, see below)
 - `<op> for <KEY> — due_date '<x>' must be strict YYYY-MM-DD`
 - `<op> for <KEY> — due_date '<x>' is not a real calendar date`
 - `linkIssues — bad link_type '<x>' (must be one of Blocks, Relates, Duplicate)`
@@ -51,8 +51,8 @@ When the "other" status row above fires with a body naming a specific field
 (a bad `issue_type`, a field not on the project's screen, a value shape the
 field rejects), the field name is the lead: retry by varying **that field**
 through its documented alternatives (a different issue type from
-`tool-surface`'s list, the field's declared type from `jira_list_fields`, a
-hierarchy level one step up or down) before abandoning the proposal.
+`jira_list_issue_types` for that project, the field's declared type from
+`jira_list_fields`, a hierarchy level one step up or down) before abandoning the proposal.
 
 Keep the retry and the conclusion separate. A retry that still fails is
 evidence about THIS attempt, not about Jira's capabilities in general — do

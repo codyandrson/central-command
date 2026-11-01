@@ -289,9 +289,11 @@ class Settings(BaseSettings):
 
     # n8n calendar façade — wraps the operator's Google Calendar; the OAuth
     # credential stays in n8n. The credential is FULL-SCOPE by operator
-    # decision: read-only is enforced by the façade workflow's mode gate and by
-    # integrations/calendar_facade.py exposing only a list. Empty token =
-    # not configured; the EA's brief simply carries no calendar.
+    # decision: the writes are reachable only from the Executor, after approval
+    # (integrations/calendar_facade.py and the workflow's mode gate). Empty
+    # token = the n8n façade is not configured; a deployment whose calendar is
+    # on Exchange is still configured (calendar_facade.provider_configured()),
+    # and a deployment with neither answers the EA's day "availability unknown".
     calendar_facade_url: str = "http://127.0.0.1:5678/webhook/cc-calendar-facade"
     calendar_facade_token: str = ""
 
