@@ -244,6 +244,13 @@ def node_filters(entity_types=None):
 
 async def _search(kind: str, query: str, limit: int, group_ids: list[str], *,
                   search_filter=None, center_node_uuid: str | None = None):
+    # Every embedding read passes here, and the embedder record gates all of
+    # them: vectors from another model would answer, wrongly and silently. The
+    # bolt-only reads below embed nothing and stay open. Function-local, as
+    # with the client, so that importing this module loads no write path.
+    from central_command.integrations import embedder_record
+
+    await embedder_record.require_open()
     client = _client()
     graphiti = client.get_graphiti()
     config = _recipe(kind, limit, centered=bool(center_node_uuid))

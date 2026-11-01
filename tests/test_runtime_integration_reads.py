@@ -142,6 +142,11 @@ BANNED_MODULES = {
     # list tests/test_governance.py bans in every import spelling.
     "graphiti_ingest": "the ingest queue's worker body, which writes episodes",
     "graphiti_client": "builds the Graphiti object, whose methods write",
+    # The embedder record (epic-embedder-integrity): `graphiti._search` reaches
+    # the check function-locally; `runtime/` never does, because the module also
+    # writes the record and holds `operator_session`, which opens a closed gate.
+    "embedder_record": "writes the embedder record and can open the closed graph gate",
+    "graph_reembed": "the operator's offline re-embed, command line only",
 }
 
 

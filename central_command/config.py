@@ -182,6 +182,13 @@ class Settings(BaseSettings):
     # model"). Defaults = the reference deployment.
     embed_alias: str = "cc-embedding"
     embed_dim: int = 1024
+    # The embedder record's check (integrations/embedder_record.py): how long a
+    # verdict is reused, because a read passes the gate twice and a census scans
+    # the graph, and the cosine below which a canary means the model behind the
+    # alias changed. The threshold holds for a deterministic embedder; a lossy
+    # one tunes it per model.
+    embedder_check_ttl_seconds: float = 30.0
+    embedder_canary_threshold: float = 0.999
     # The voice cc-tts speaks in when the cockpit names none. REQUIRED on the
     # wire: LiteLLM's Router.aspeech() and the speaches engine both reject a
     # request without one (2026-09-03 Windows run). Default = the bundled

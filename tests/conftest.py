@@ -23,7 +23,13 @@ import pytest
 
 from central_command.config import settings
 from central_command.db import repo
-from central_command.integrations import graphiti, graphiti_client, jira, neo4j_writer
+from central_command.integrations import (
+    embedder_record,
+    graphiti,
+    graphiti_client,
+    jira,
+    neo4j_writer,
+)
 
 # The durable ingest worker never starts under the suite (an app lifespan in a
 # TestClient would otherwise claim other tests' jobs). Tests that exercise it
@@ -217,6 +223,36 @@ def no_live_graph_writes():
         neo4j_writer._write = real_write
         neo4j_writer._write_tx = real_write_tx
         neo4j_writer._embedding_client = real_embedding_client
+
+
+# The embedder record's check answers ok for the whole suite: it would otherwise
+# read the live graph and embed its canaries on every search. Tests of the check
+# carry `@pytest.mark.embedder_check_live`, which puts the real function back for
+# that test (`_embedder_check_opt_out`). It sits on the module's name because the
+# gates call it there. Held HERE at import, not in a session fixture, because
+# the live-graph preflight below runs at collection, before any fixture: the real
+# check closed its read on the live graph and every `graph_live` test skipped as
+# "backend down". Never restored, for the reason `no_live_graph_writes` is
+# session-scoped: a task can outlive the test that spawned it.
+_REAL_EMBEDDER_CHECK = embedder_record.check
+
+
+async def _embedder_check_held_open(force=False):
+    return embedder_record.VERDICT_OK
+
+
+embedder_record.check = _embedder_check_held_open
+
+
+@pytest.fixture(autouse=True)
+def _embedder_check_opt_out(request, monkeypatch):
+    if request.node.get_closest_marker("embedder_check_live") is None:
+        yield
+        return
+    monkeypatch.setattr(embedder_record, "check", _REAL_EMBEDDER_CHECK)
+    embedder_record.clear_cache()
+    yield
+    embedder_record.clear_cache()
 
 
 REAL_EMBEDDING_REFUSED = (

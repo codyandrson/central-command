@@ -137,6 +137,7 @@ testpaths = ["tests"]
 timeout = 120
 markers = [
     "graph_live: performs a LIVE knowledge-graph read (embedder/LLM must answer). conftest's session preflight skips these when the backend does not answer within 10 s.",
+    "embedder_check_live: runs the real embedder record check instead of the suite's held-open answer (tests/conftest.py embedder_check_held_open); fake the graph and the embedder.",
     "eager_settle: settle the test database's queue at fixture setup, not on the first pool request (a test that plants rows over its own asyncpg.connect first). See tests/conftest.py isolated_queue.",
 ]
 

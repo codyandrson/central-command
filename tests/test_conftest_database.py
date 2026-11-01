@@ -86,3 +86,13 @@ async def test_an_eager_test_keeps_a_row_planted_over_its_own_connection():
     finally:
         await conn.close()
     assert (await repo.get_session(sid))["status"] == "AWAITING_AGENTS"
+
+
+async def test_the_suite_holds_the_embedder_check_open():
+    """Without this every search in the suite would read the live graph and embed
+    its canaries. A test of the check opts out with `embedder_check_live`."""
+    from central_command.integrations import embedder_record
+
+    verdict = await embedder_record.check()
+    assert verdict.status == embedder_record.OK
+    await embedder_record.require_open()

@@ -118,6 +118,30 @@ class EmbedderDown(DependencyDown):
     def __init__(self, original: BaseException):
         super().__init__(("graph", "embedder"), "embed", original)
 
+
+EMBEDDER_REMEDY = "run: python -m central_command.graph_reembed status"
+
+
+class EmbedderMismatch(DependencyDown):
+    """The graph's embedder record and what the embedder is now disagree
+    (`integrations/embedder_record.check`). A `DependencyDown` because a plain
+    exception classifies as a NO, and a NO tells the agent to proceed without
+    the graph; a graph that would answer with vectors from another model is
+    DOWN until the operator re-embeds it. Parks on the same two dependencies as
+    `EmbedderDown`. `reason` is the check's whole sentence, ending with the
+    remedy, and `str()` is that sentence, because a read's park records it."""
+
+    def __init__(self, reason: str, remedy: str = EMBEDDER_REMEDY):
+        super().__init__(("graph", "embedder"), "embedder_check", RuntimeError(reason))
+        # Its own original: a run with no landing tail re-raises `original` into
+        # its unit's DOWN path, which must still read as this outage.
+        self.original = self
+        self.reason = reason
+        self.remedy = remedy
+
+    def __str__(self) -> str:
+        return self.reason
+
 # HTTP status codes that mean "come back later", not "no".
 #
 # 408 request timeout, 429 too many requests (LiteLLM's cooldown/no-deployment
