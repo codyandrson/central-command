@@ -21,6 +21,7 @@ import importlib.util
 import pathlib
 import sys
 
+import httpx
 import pytest
 
 from central_command.config import settings
@@ -88,3 +89,71 @@ def test_an_empty_page_body_is_present_not_missing():
 def test_the_flags_are_accepted(flag):
     source = PROBE_PATH.read_text(encoding="utf-8")
     assert flag in source
+
+
+# --- the Confluence version line (epic-cockpit-rerun-reversibility-macros story 7)
+
+_REAL_CLIENT = httpx.AsyncClient
+
+
+def _fake_confluence(monkeypatch, handler):
+    def factory(**kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return _REAL_CLIENT(**kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", factory)
+    monkeypatch.setattr(settings, "confluence_base_url", "https://example.atlassian.net")
+    monkeypatch.setattr(settings, "confluence_email", "bot@example.com")
+    monkeypatch.setattr(settings, "confluence_api_token", "tok")
+
+
+def _wiki(version_body, status=200):
+    def handler(req):
+        path = req.url.path
+        if path.endswith(("/settings/systemInfo", "/server-information")):
+            return httpx.Response(status, json=version_body)
+        if path.endswith(("/spaces", "/space")):
+            return httpx.Response(200, json={"results": [{"id": "1"}]})
+        if path.endswith("/search"):
+            return httpx.Response(200, json={"results": []})
+        return httpx.Response(404)
+
+    return handler
+
+
+async def test_the_probe_prints_the_cloud_version_line(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "confluence_api_flavor", "cloud")
+    monkeypatch.setattr(settings, "confluence_auth_mode", "basic")
+    _fake_confluence(monkeypatch, _wiki({"commitHash": "abc123"}))
+    probe = _probe()
+    probe.QUIET = False
+    await probe.probe_confluence()
+    out = capsys.readouterr().out
+    assert "INFO confluence version=cloud (abc123)" in out
+    assert "VERIFY-ON-SITE" not in out.split("INFO confluence version")[1].split("\n")[0]
+    assert "instance_version" in out
+
+
+async def test_the_probe_prints_the_server_version_line_marked_verify_on_site(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "confluence_api_flavor", "server")
+    monkeypatch.setattr(settings, "confluence_auth_mode", "bearer")
+    _fake_confluence(monkeypatch, _wiki({"version": "9.2.1", "buildNumber": "9021"}))
+    probe = _probe()
+    probe.QUIET = False
+    await probe.probe_confluence()
+    line = next(l for l in capsys.readouterr().out.splitlines()
+                if l.startswith("INFO confluence version="))
+    assert "version=9.2.1 (9021)" in line and "VERIFY-ON-SITE" in line
+
+
+async def test_a_version_endpoint_that_refuses_is_a_line_not_a_failure(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "confluence_api_flavor", "cloud")
+    monkeypatch.setattr(settings, "confluence_auth_mode", "basic")
+    _fake_confluence(monkeypatch, _wiki({"message": "forbidden"}, status=403))
+    probe = _probe()
+    probe.QUIET = False
+    probe._checks = probe._failures = 0
+    await probe.probe_confluence()
+    out = capsys.readouterr().out
+    assert "INFO confluence version=unavailable" in out
+    assert probe._failures == 0, "the version line never fails a probe run"

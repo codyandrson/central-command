@@ -29,6 +29,7 @@ type = page and space = OPS and text ~ "onboarding" order by lastmodified desc
 | full-text | `text ~ "onboarding"` — CONTAINS, tokenised like Jira's `~`, not a substring match |
 | by label | `label = "runbook"` |
 | by creator | `creator = "jdoe"` |
+| pages using a macro | `macro = "table-filter"` — the value is the macro's storage `ac:name` (see pitfalls) |
 | created recently | `created >= "2026-08-01"` |
 | edited recently | `lastmodified >= now("-14d")` |
 | combine | `type = page and space = OPS and label = "runbook"` |
@@ -43,6 +44,14 @@ space, hyphen, or punctuation.
   not the same field value as `space = OPS` (the key) — CQL wants the key.
   Verify the key with `confluence_list_spaces` before writing the clause; a
   wrong-but-plausible value doesn't error, it just matches nothing.
+- **`macro` takes the storage `ac:name`, not the display name.** `macro =
+  "table-filter"` finds pages whose storage markup carries
+  `<ac:structured-macro ac:name="table-filter">`; the macro browser's display
+  name ("Table Filter") does not always match it verbatim, and a wrong name
+  matches nothing without erroring. An empty result is weak evidence a macro
+  is unused: the account sees only what its permissions allow, so a macro
+  with no hit goes on the operator's sampler page (`macro-discovery`) rather
+  than being guessed.
 - **`~` is tokenised, not substring.** `text ~ "onboard"` may not match
   "onboarding" depending on tokenisation; search the whole word, and widen
   with a wildcard or a synonym before concluding nothing exists.

@@ -332,6 +332,24 @@ async def probe_jira() -> None:
 # --- Confluence ---------------------------------------------------------------
 
 
+async def confluence_version_line() -> None:
+    """One INFO line naming the Confluence version the macro inventory is
+    stamped against. Reuses the client's `instance_info` (Cloud
+    `settings/systemInfo`: "cloud" plus the build; Server/DC
+    `server-information`, VERIFY-ON-SITE like every Server/DC path here)."""
+    try:
+        got = await confluence.instance_info()
+    except Exception as exc:  # noqa: BLE001 — a probe reports, never raises
+        info(f"confluence version=unavailable ({type(exc).__name__}: {_snippet(str(exc))})")
+        return
+    line = f"confluence version={_scrub(str(got.get('version') or 'unknown'))}"
+    if got.get("detail"):
+        line += f" ({_scrub(str(got['detail']))})"
+    if got.get("verify_on_site"):
+        line += " VERIFY-ON-SITE (Server/DC shape, not proven against a live instance)"
+    info(line + " — compare with `instance_version:` in the macro inventory")
+
+
 async def probe_confluence() -> None:
     if not confluence.configured():
         skip("confluence", "(all checks)",
@@ -352,6 +370,13 @@ async def probe_confluence() -> None:
     results = body.get("results") if isinstance(body, dict) else None
     note = f"{len(results)} space(s) on page 1" if isinstance(results, list) else ""
     report("confluence", "GET", path, resp, note=note)
+
+    # The instance version, for drift against the macro inventory's
+    # `instance_version` stamp (docs/CONFLUENCE_MACROS.md). Informational only:
+    # a version endpoint an account may not read is not a failed check. Only
+    # asked once the instance answered at all, so a down site reports once.
+    if resp is not None:
+        await confluence_version_line()
 
     # CQL search is v1-only on BOTH flavors, permanently (Atlassian's own docs).
     path = confluence._v1("/search?" + urlencode({"cql": "type=page", "limit": 1}))

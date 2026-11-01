@@ -836,6 +836,13 @@ is a valid answer, and validate is the first phase of the `all` chain, so it
 must never stop there), an incomplete credential set is a `FAIL`. The phase
 mutates nothing; the live probe is verify's.
 
+After verification, the operator can have agents compose the site's real
+macros: `docs/CONFLUENCE_MACROS.md` is the runbook for inventorying the
+Confluence instance's macros from a sampler page (`scripts/confluence_macro_inventory.py`,
+stamped with the harvest date and instance version) and getting the result to
+agents. `scripts/atlassian_probe.py --confluence-only` prints the instance
+version to compare with that stamp.
+
 The flag changes only section **B**: it asserts the stores are alive,
 authenticated and schema-loaded (roster seeded, event log queryable, neo4j
 answering cypher) instead of asserting *migrated instance data* (`audit_event >

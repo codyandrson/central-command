@@ -392,8 +392,11 @@ Onboarding is the product's job (2026-09-18); nothing here is an interview.
   Crons tab. Tell them their EA is waiting there to introduce the team, and
   stop: the tour is the EA's conversation, not yours.
 - **The Confluence macro harvest** is a separate, optional session after the
-  install, not part of it — `skills/confluence/references/macro-discovery.md`'s
-  "sampler-page harvest" section is the procedure. Offer it; record the choice.
+  install, not part of it — `docs/CONFLUENCE_MACROS.md` is the runbook
+  (build the sampler page, run `scripts/confluence_macro_inventory.py` with
+  `--dry-run` first, re-import the Confluence skill) and
+  `skills/confluence/references/macro-discovery.md`'s "sampler-page harvest"
+  section is the procedure behind it. Offer it; record the choice.
 
 ### Demo shapes
 

@@ -86,8 +86,8 @@ you're actually talking to.
   a macro-selection decision table for common authoring intents.
 - `instance-profiles` — the per-instance macro allowlist concept: what
   each profile the deployment ships actually has (its definitions are
-  instance facts that belong in the gitignored instance overlay, whose loader
-  is not built yet), and the rule that `CC_CONFLUENCE_PROFILE` is an
+  instance facts that belong in the operator's instance overlay, which the
+  skill importer renders into the library at import), and the rule that `CC_CONFLUENCE_PROFILE` is an
   informational label naming which one the operator means.
 - `errors-and-limits` — status codes per flavor, rate limits, the
   `X-Atlassian-Token` header, and CQL pitfalls that produce a wrong answer

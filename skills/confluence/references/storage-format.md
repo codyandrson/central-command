@@ -18,6 +18,13 @@ A macro is:
 </ac:structured-macro>
 ```
 
+A macro as the macro browser writes it also carries `ac:schema-version`
+(the version of the macro's parameter layout, which an app upgrade can
+change) and `ac:macro-id` (an instance-generated identifier). When you copy a
+recipe from the instance profile, copy the whole block with both attributes
+exactly as stored; a skeleton without the schema version can render
+differently from the real thing. Never invent either.
+
 Plain XHTML — `<p>`, `<h1>`–`<h6>`, `<table>`/`<tr>`/`<td>`, `<a href="...">`,
 `<ul>`/`<li>` — is valid alongside macros anywhere in the body.
 

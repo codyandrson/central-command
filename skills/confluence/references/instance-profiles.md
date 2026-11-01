@@ -16,8 +16,11 @@ A profile is a named allowlist of the macros one instance really has. The
 profile names the deployment ships, and each one's macro inventory (the
 instance's edition, its installed marketplace apps, which categories exist),
 are instance facts: they belong in the gitignored instance overlay, not in
-this file (the overlay loader is not built yet, so until it is the operator
-supplies the allowlist).
+this file. The overlay loader reads them from the operator's overlay
+directory when the skill is imported, so the text below is the instance's
+own and was written for it; the operator produces the file with the macro
+inventory command (`macro-discovery`, the sampler-page harvest) and an edit
+reaches you only through a re-import of this skill.
 
 <!-- overlay: confluence_profile_cloud -->
 <!-- overlay: confluence_profile_server -->

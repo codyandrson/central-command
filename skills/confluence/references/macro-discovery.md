@@ -117,15 +117,22 @@ whole doctrine exists to prevent. The division of labor:
    list of macros with no verified recipe (the families above), they insert
    each via the macro browser with simple defaults onto one page ("Central Command Macro
    Sampler"), and name the page.
-3. **Harvest**: `confluence_get_page(page_id)` on the sampler (its `body` is
-   storage format); extract every `<ac:structured-macro>` block whole (schema
-   version and all); record each as an instance-verified recipe — in an
-   instance-profile note or a skill doc — stamped with the harvest date and
-   the instance version it came from.
+3. **Harvest**: the operator runs `scripts/confluence_macro_inventory.py` on
+   the API host (`--dry-run` first). It reads the sampler page's storage
+   body, extracts every `<ac:structured-macro>` block whole (schema version
+   and all), counts the pages using each candidate macro with CQL, and writes
+   the inventory, stamped `harvested: <date>` and `instance_version: <version>`
+   and with a `sampler_identified_by` line, to the instance overlay as the
+   profile field; the operator then re-imports this skill so the text reaches
+   you. The runbook (`docs/CONFLUENCE_MACROS.md`) holds the flags and exit
+   codes. A recipe is a block from the sampler; a macro found only on ordinary
+   pages is listed with a usage pointer and no block.
 4. **Re-harvest is the upgrade path**: a marketplace app install or upgrade
    can change a macro's parameter surface; add/refresh the macro on the
-   sampler page and harvest again. The stamp from step 3 is what tells you
-   the recipe predates the app version you're now on.
+   sampler page and run the inventory again (`docs/CONFLUENCE_MACROS.md` names
+   the three moments: onboarding, an app install or upgrade, and the probe's
+   Confluence version differing from the stamp). The stamp from step 3 is what
+   tells you the recipe predates the app version you're now on.
 
 Governance: at onboarding this runs as the operator's own hands (Claude
 Code + operator present, before any agent exists). After onboarding, an
