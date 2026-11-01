@@ -104,6 +104,32 @@ def test_the_dialog_reads_that_string():
     assert "includes('skills-unresolved')" in _text("web/src/components/UpdateBadge.tsx")
 
 
+# ── the routes reach their handlers ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "method,path,handler",
+    [
+        ("POST", "/api/skills/update-review", "compute_skill_review_route"),
+        ("GET", "/api/skills/update-review", "get_latest_skill_review_route"),
+        ("GET", "/api/skills/update-review/2.68.0", "get_skill_review_route"),
+        ("POST", "/api/skills/update-review/2.68.0/items/jira/api/resolve", "resolve_skill_review_item_route"),
+        ("POST", "/api/skills/update-review/2.68.0/apply", "apply_skill_review_route"),
+    ],
+)
+def test_the_first_route_that_matches_is_the_reviews_own(method: str, path: str, handler: str):
+    """The tests call handlers directly, which proves nothing about routing: the
+    no-target read once sat behind `/skills/{skill_id}`, and every request became
+    a 404 for a skill named `update-review`."""
+    from starlette.routing import Match
+
+    from central_command.api.routes import router
+
+    scope = {"type": "http", "method": method, "path": path, "headers": []}
+    first = next(r for r in router.routes if r.matches(scope)[0] == Match.FULL)
+    assert first.endpoint.__name__ == handler
+
+
 # ── the bridge ──────────────────────────────────────────────────────────────
 
 _HEADING = re.compile(r"^## .*?\bv(\d+\.\d+\.\d+)\b:?\s*(.*)$", re.M)

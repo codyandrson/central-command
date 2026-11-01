@@ -3019,6 +3019,54 @@ async def list_skills_route(include_retired: bool = True) -> dict:
     return {"skills": await repo.list_skills(include_retired=include_retired)}
 
 
+# Registered before `/skills/{skill_id}`, which would otherwise take the request as a
+# skill named `update-review` (first match wins).
+@router.get("/skills/update-review")
+async def get_latest_skill_review_route() -> dict:
+    """The stored review without naming its target — what the Skills page asks
+    to learn whether a refresh did not fully apply. The review is single-target
+    by design (computing another target drops the old rows), so "the latest" is
+    the one stored; 404 when none is. Deliberately LIGHTER than the by-target
+    read: no texts, so no git reads and no 409 for a text that moved — a page
+    polling for a banner must never fail on the very state it is reporting.
+
+    An item is `pending_apply` when it was not applied and either recorded an
+    `apply_error`, or holds a verdict while the update is finished (the
+    installed version has reached the target) — a decision the updater never
+    carried out. `moved` marks an error saying a text changed since the review,
+    which a plain retry cannot fix.
+    """
+    from central_command.api.update import _semver_key, read_product_version
+    from central_command.skills import refresh
+
+    target = await repo.latest_skill_review_target()
+    rows = await repo.list_skill_doc_review(target) if target else []
+    if not rows:
+        raise HTTPException(404, "no bundled-skill review is stored")
+    installed = read_product_version()
+    finished = _semver_key(installed) >= _semver_key(target)
+    items = []
+    for r in rows:
+        err = r["apply_error"]
+        pending = r["applied_at"] is None and (
+            err is not None or (finished and r["verdict"] is not None)
+        )
+        items.append({
+            "skill_id": r["skill_id"], "doc_key": r["doc_key"], "status": r["status"],
+            "verdict": r["verdict"], "resolved_at": r["resolved_at"],
+            "applied_at": r["applied_at"], "apply_error": err,
+            "pending_apply": pending,
+            "moved": bool(err) and "changed since the review" in err,
+        })
+    return {
+        "target": target, "ref": rows[0]["ref"],
+        "computed_at": max(r["computed_at"] for r in rows),
+        "installed": installed, "finished": finished,
+        "counts": {**refresh.review_counts(rows), "not_refreshed": sum(i["pending_apply"] for i in items)},
+        "items": items,
+    }
+
+
 @router.get("/skills/{skill_id}")
 async def get_skill_route(skill_id: str) -> dict:
     """One skill: its current documents and which agents hold it."""
@@ -3527,52 +3575,6 @@ async def compute_skill_review_route(body: SkillReviewIn) -> dict:
     except Exception as e:
         raise HTTPException(500, f"could not compute the review: {e}") from e
     return await _review_shape(body.target)
-
-
-@router.get("/skills/update-review")
-async def get_latest_skill_review_route() -> dict:
-    """The stored review without naming its target — what the Skills page asks
-    to learn whether a refresh did not fully apply. The review is single-target
-    by design (computing another target drops the old rows), so "the latest" is
-    the one stored; 404 when none is. Deliberately LIGHTER than the by-target
-    read: no texts, so no git reads and no 409 for a text that moved — a page
-    polling for a banner must never fail on the very state it is reporting.
-
-    An item is `pending_apply` when it was not applied and either recorded an
-    `apply_error`, or holds a verdict while the update is finished (the
-    installed version has reached the target) — a decision the updater never
-    carried out. `moved` marks an error saying a text changed since the review,
-    which a plain retry cannot fix.
-    """
-    from central_command.api.update import _semver_key, read_product_version
-    from central_command.skills import refresh
-
-    target = await repo.latest_skill_review_target()
-    rows = await repo.list_skill_doc_review(target) if target else []
-    if not rows:
-        raise HTTPException(404, "no bundled-skill review is stored")
-    installed = read_product_version()
-    finished = _semver_key(installed) >= _semver_key(target)
-    items = []
-    for r in rows:
-        err = r["apply_error"]
-        pending = r["applied_at"] is None and (
-            err is not None or (finished and r["verdict"] is not None)
-        )
-        items.append({
-            "skill_id": r["skill_id"], "doc_key": r["doc_key"], "status": r["status"],
-            "verdict": r["verdict"], "resolved_at": r["resolved_at"],
-            "applied_at": r["applied_at"], "apply_error": err,
-            "pending_apply": pending,
-            "moved": bool(err) and "changed since the review" in err,
-        })
-    return {
-        "target": target, "ref": rows[0]["ref"],
-        "computed_at": max(r["computed_at"] for r in rows),
-        "installed": installed, "finished": finished,
-        "counts": {**refresh.review_counts(rows), "not_refreshed": sum(i["pending_apply"] for i in items)},
-        "items": items,
-    }
 
 
 @router.get("/skills/update-review/{target}")
