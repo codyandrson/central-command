@@ -4251,21 +4251,43 @@ class _RerunLost(Exception):
 
 
 async def pending_rerun(session_id: str | None) -> dict | None:
-    """The re-run a task's linked session is still owed: `{"rerun_of", "session_id"}`
-    while the session it names has no row yet, else None."""
+    """What this start owes the rerun chain from the session its task or item names:
+    `{"rerun_of", "session_id"}`, or None when that session is in no chain.
+
+    At the chain's tail is either an id no row has yet, which is the owed id the old
+    session promised, or a row that already ran: an attempt that died on a DOWN
+    dependency or a restart, whose work is being started again. Then the chain grows by
+    one, or the old session would lose its task and its email at the next mark."""
     if not session_id:
         return None
     conn = await _conn()
     try:
-        row = await conn.fetchrow(
+        tail = await conn.fetchrow(
             """
-            select s.id as rerun_of, s.rerun_by as session_id from session s
-             where s.id = $1 and s.rerun_by is not null
-               and not exists (select 1 from session n where n.id = s.rerun_by)
+            with recursive chain(id, prev, depth) as (
+                select $1::text, null::text, 0
+                union all
+                select s.rerun_by, c.id, c.depth + 1 from session s join chain c on s.id = c.id
+                 where s.rerun_by is not null and c.depth < 100
+            )
+            select id, prev, depth,
+                   exists (select 1 from session n where n.id = chain.id) as has_row,
+                   (select s.rerun_of from session s where s.id = $1) as first_of
+              from chain order by depth desc limit 1
             """,
             session_id,
         )
-        return dict(row) if row else None
+        if not tail["has_row"]:
+            return {"rerun_of": tail["prev"], "session_id": tail["id"]}
+        if tail["depth"] == 0 and tail["first_of"] is None:
+            return None
+        next_id = "sess_" + uuid.uuid4().hex[:12]
+        await conn.execute(
+            "update session set rerun_by = $2, updated_at = now() "
+            "where id = $1 and rerun_by is null",
+            tail["id"], next_id,
+        )
+        return {"rerun_of": tail["id"], "session_id": next_id}
     finally:
         await conn.close()
 

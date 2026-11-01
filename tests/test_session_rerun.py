@@ -911,3 +911,66 @@ async def test_a_conversation_rerun_carries_the_current_version_too():
 
     assert row["charter_version"] == after["version"]
     assert (await repo.get_session(old))["charter_version"] == before["version"]
+
+
+# ── an attempt that died keeps the chain (found by rehearsal R9) ────────────
+
+
+async def test_an_email_rerun_that_met_a_down_dependency_keeps_the_chain(monkeypatch):
+    """The dependency being DOWN is the case the doctrine promises: the item goes back
+    to the queue and its retry ran under a new id with no link, so the old session lost
+    its email and its subject at the retry's terminal mark."""
+    import httpx
+
+    from central_command.ingest import dispatcher
+
+    subject = "Down " + uuid.uuid4().hex[:8]
+    item_id, old = await _triaged_email(subject)
+
+    async def down(*a, **k):
+        def refuse(messages, info):
+            raise httpx.ConnectError("connection refused")
+        return FunctionModel(refuse)
+
+    real = dispatcher.resolve_model
+    monkeypatch.setattr(dispatcher, "resolve_model", down)
+    first_attempt = (await _rpc_rerun(old))["sessionId"]
+    await _settled(first_attempt)
+    assert await _item_session(item_id) == (old, "UNPROCESSED"), "released, link kept"
+
+    monkeypatch.setattr(dispatcher, "resolve_model", real)
+    out = await dispatcher.dispatch_item(item_id)
+    retry = out["session_id"]
+
+    assert retry != first_attempt
+    assert (await repo.get_session(retry))["rerun_of"] == first_attempt
+    assert (await repo.get_session(first_attempt))["rerun_by"] == retry
+    assert (await _item_session(item_id))[0] == retry
+    assert [i["id"] for i in await repo.work_items_for_session(old)] == [item_id]
+    rows = {r["id"]: r for r in await repo.list_sessions(limit=200, agent_id="inbox-triage")}
+    assert rows[old]["work_subject"] == subject
+
+
+async def test_a_task_rerun_started_again_keeps_the_chain():
+    """A restart or a retry starts a dead run fresh, under a new id."""
+    task_id, old = await _finished_task()
+    attempt = (await _rpc_rerun(old))["sessionId"]
+    await _settled(attempt)
+
+    conn = await repo._conn()
+    try:
+        await conn.execute("update task set status = 'ASSIGNED' where id = $1", task_id)
+    finally:
+        await conn.close()
+    out = await routes._run_assigned_task(await repo.get_task(task_id))
+    retry = out["session_id"]
+
+    assert (await repo.get_session(retry))["rerun_of"] == attempt
+    assert (await repo.get_session(attempt))["rerun_by"] == retry
+    assert (await repo.task_for_session(old))["id"] == task_id
+
+
+async def test_a_session_in_no_chain_starts_with_no_link():
+    _, plain = await _finished_task()
+    assert await repo.pending_rerun(plain) is None
+    assert (await repo.get_session(plain))["rerun_by"] is None
