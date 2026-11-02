@@ -13,6 +13,7 @@ import asyncio
 import gzip
 import hashlib
 import json
+import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -489,6 +490,7 @@ def test_check_with_the_cache_off_is_clear(world, capsys):
 
 @pytest.mark.parametrize("cache", [
     _Response(401, {}), _Response(200, {}), _Response(200, {"litellm_cache_params": "text"}),
+    _Response(200, {"litellm_cache_params": "[1]"}), _Response(200, {"litellm_cache_params": "{}"}),
 ])
 def test_a_cache_config_that_cannot_be_read_exits_three(world, capsys, cache):
     world.cache = cache
@@ -1127,9 +1129,52 @@ def test_finish_is_on_the_log_too(world, capsys):
 
 
 def test_the_cache_ping_response_shape_is_the_vendored_documents():
-    """`/cache/ping`'s field, as LiteLLM documents it. A live answer is the
-    rehearsal's to check."""
+    """`/cache/ping`'s field, as LiteLLM documents it. The deployed proxy's string
+    form is the next two tests'."""
     from pathlib import Path
 
     doc = Path(graph_reembed.ROOT, "docs/vendor/litellm/docs/proxy/caching.md").read_text()
     assert '"litellm_cache_params"' in doc and '"supported_call_types"' in doc
+
+
+def test_the_cache_params_the_proxy_double_encodes_are_read(world, capsys):
+    world.cache = _Response(200, {"litellm_cache_params": json.dumps({
+        "supported_call_types": ["completion", "acompletion"], "type": "redis",
+    })})
+    assert _main(world, "check") == 0
+    assert (
+        "ok: the LiteLLM cache excludes embeddings (['completion', 'acompletion'])"
+        in capsys.readouterr().out
+    )
+
+
+def test_double_encoded_cache_params_that_cover_embeddings_exit_one(world, capsys):
+    world.cache = _Response(200, {"litellm_cache_params": json.dumps({
+        "supported_call_types": ["completion", "embedding", "aembedding"],
+    })})
+    assert _main(world, "check") == 1
+    assert "the LiteLLM cache covers embeddings" in capsys.readouterr().out
+
+
+@pytest.fixture(autouse=True)
+def _notifications_level():
+    """`main` sets a process-wide logger's level; no test here leaves it set."""
+    notifications = logging.getLogger("neo4j.notifications")
+    level = notifications.level
+    notifications.setLevel(logging.NOTSET)
+    yield notifications
+    notifications.setLevel(level)
+
+
+def test_the_cli_quiets_the_drivers_notifications_before_any_graph_call(
+    monkeypatch, _notifications_level,
+):
+    seen = []
+
+    async def _run(args):
+        seen.append(_notifications_level.isEnabledFor(logging.WARNING))
+        return 0
+
+    monkeypatch.setattr(graph_reembed, "_run", _run)
+    assert graph_reembed.main(["status"]) == 0
+    assert seen == [False]

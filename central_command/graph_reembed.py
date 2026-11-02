@@ -55,6 +55,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import gzip
+import json
+import logging
 import os
 import re
 import sys
@@ -398,6 +400,12 @@ async def _check_cache() -> Finding:
             "check CC_LLM_PROXY_ADMIN_KEY"
         ))
     params = resp.json().get("litellm_cache_params")
+    # The vendored document shows an object; a deployed proxy double-encodes it.
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except ValueError:
+            params = None
     types = params.get("supported_call_types") if isinstance(params, dict) else None
     if types is None:
         return Finding(ACTION, (
@@ -933,6 +941,9 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "batch", 1) < 1:
         print("error: --batch must be at least 1", file=sys.stderr)
         return 2
+    # The record is absent by design before first use, and the driver warns twice
+    # per read that its label and property do not exist.
+    logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
     try:
         return asyncio.run(_run(args))
     except Exception as e:
