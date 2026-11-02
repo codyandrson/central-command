@@ -303,6 +303,21 @@ create index if not exists work_item_sender_key_idx on work_item (sender_key);
 -- NOT generated — it costs an embedder call, so it is written, not derived.
 alter table work_item add column if not exists embedding jsonb;
 
+-- Relatedness lock, fourth key (epic relatedness-hold, 2026-11-02): the ENTITIES
+-- the item is about — "porsche", "usaa", an order number — extracted once at
+-- claim time by the triage model (`ingest/entities.py`) from the hydrated text,
+-- normalized to lowercase names with the operator, places and mail providers
+-- dropped (those are hubs that would relate everything to everything). Two
+-- items sharing one key are related whatever their thread, subject or sender:
+-- a quote from one insurer and a service mail from a dealer about the same car
+-- never run as two sessions. NOT generated — it costs a model call — and it is
+-- TEXT, so `graph_reembed`'s clearing of every ledger vector cannot erase it.
+-- NULL means "not extracted yet" (a refs-only stub, or an item claimed before
+-- this column existed); the dispatcher fills it after hydration and re-asks the
+-- lock, exactly as it does for the subject and sender keys.
+alter table work_item add column if not exists entity_keys text[];
+create index if not exists work_item_entity_keys_idx on work_item using gin (entity_keys);
+
 -- Outage equivalence slice 4 (2026-07-31). A run that died because the PROVIDER
 -- was down is not the item's fault, so a transient release hands the attempt
 -- back (see `repo.release_work_item`) and there is NO exhaustion on that path —

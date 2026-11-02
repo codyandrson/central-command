@@ -143,6 +143,21 @@ when a matching file is read.
   `FOLD_PENDING` and only go terminal (`FOLDED`) when the covering proposal
   is approved; rejection releases them to `UNPROCESSED`. Never mark a folded
   email terminal at fold time — that's how you silently drop mail.
+- **The relatedness lock reads BUSY from the tables, and busy is anything
+  short of fully complete.** `repo._BUSY_ITEM` is the one definition (claimed;
+  pending a fold or dismissal; PROCESSED/FOLDED under a session not `DONE`;
+  owing an unexecuted proposal; FAILED and unacknowledged) and the claim
+  predicate, the post-hydration re-check and the semantic gate's comparison
+  set all interpolate it. Why: keyed on the proposal table alone, a question
+  parked for the operator (`agent.asked`, no proposal) and a Reject (decided,
+  redraft not yet parked) both opened the lock, and two sessions wrote the
+  graph for one ChargePoint thread (2026-10-27). Never key busy on an event:
+  the withdraw and dismiss close paths emit no `session.completed`. Related
+  means thread, subject, sender OR one shared `entity_keys` entry (the triage
+  model's extraction at claim time, `ingest/entities.py`, stored as TEXT so a
+  graph re-embed cannot clear it); a DOWN extractor releases the item on `llm`
+  like a DOWN embedder does, never runs it. Guarded by
+  `tests/test_relatedness_hold.py`.
 - **Every email takes one path:** `dispatcher.process_claimed()`. Queued work
   arrives via `dispatch_once`, hand-fed work via `dispatch_item` — both claim
   from the ledger first. Don't add a route that calls `ingest_and_propose()`

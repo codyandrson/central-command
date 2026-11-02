@@ -291,7 +291,19 @@ async def test_parked_proposal_holds_related_items(clean_ledger):
                 f"an unexecuted proposal ({status}) must still hold the thread"
             )
 
+        # Executed is not finished either (2026-11-02): the session that
+        # drafted it is still AWAITING_HUMAN — a question, a redraft, a resume
+        # not yet landed — and the lock reads the SESSION now. Only its landing
+        # opens the thread.
         await repo.set_proposal_status(prop_id, "EXECUTED")
+        assert await repo.claim_next_work_item("sess_b") is None, (
+            "an executed proposal under an unlanded session must still hold the thread"
+        )
+        conn = await repo._conn()
+        try:
+            await conn.execute("update session set status = 'DONE' where id = $1", sess_id)
+        finally:
+            await conn.close()
         assert await repo.claim_next_work_item("sess_b") is not None
     finally:
         conn = await repo._conn()

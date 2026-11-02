@@ -2217,22 +2217,49 @@ async def enroll_work_item(
 # comparison set so the three can never drift.
 _UNEXECUTED_PROPOSALS = "('AWAITING_HUMAN', 'APPROVED', 'EXECUTING', 'RETRY_PENDING')"
 
+# What "busy" means for the relatedness lock (epic relatedness-hold,
+# 2026-11-02, the operator's rule: "if something is in any state other than
+# 100% completed, anything that is related is skipped"). An item `s` is busy
+# while ANY of these holds — read from the tables, never from the event log:
+#   - it is in flight or awaiting a verdict on its own fate (CLAIMED,
+#     FOLD_PENDING, DISMISS_PENDING);
+#   - it is PROCESSED or FOLDED and the session that processed it is not DONE
+#     (RUNNING, AWAITING_HUMAN, AWAITING_OPERATOR, FAILED): a question parked
+#     for the operator, a rejected draft being redrafted, a run that died —
+#     none of these has a proposal to key on, and all of them resume;
+#   - a proposal of that session is still undecided or not yet executed;
+#   - it is FAILED and the operator has not acknowledged the failure: the
+#     operator may requeue it, and a relative run meanwhile is the duplicate
+#     session this lock exists to prevent. `failure_ack` is the exit — the
+#     operator's "seen, not worth retrying" — so a dead-end failure cannot
+#     hold its family forever.
+# A session row that does not exist holds nothing. The fragment is shared by
+# the claim predicate and the semantic gate's comparison set.
+_BUSY_ITEM = f"""(s.state in ('CLAIMED', 'FOLD_PENDING', 'DISMISS_PENDING')
+                             or (s.state in ('PROCESSED', 'FOLDED') and (
+                                     exists (select 1 from session ss
+                                             where ss.id = s.session_id
+                                               and ss.status <> 'DONE')
+                                  or exists (select 1 from proposal p
+                                             where p.session_id = s.session_id
+                                               and p.status in {_UNEXECUTED_PROPOSALS})))
+                             or (s.state = 'FAILED'
+                                 and not coalesce((s.payload ->> 'failure_ack')::boolean, false)))"""
+
 # The relatedness lock's shared predicate: `w` is claimable only if no other
-# item sharing a key with it (thread, normalized subject, or sender family) is
-# in flight or awaiting an operator verdict — including a PROCESSED item whose
-# proposal has not yet EXECUTED.
+# item sharing a key with it — thread, normalized subject, sender family, or
+# one extracted ENTITY (`entity_keys`, the fourth key) — is busy as
+# `_BUSY_ITEM` defines it.
 _RELATED_BUSY = f"""
                   and not exists (
                       select 1 from work_item s
                       where s.id <> w.id
                         and ((s.thread_id is not null and s.thread_id = w.thread_id)
                              or (s.subject_key is not null and s.subject_key = w.subject_key)
-                             or (s.sender_key is not null and s.sender_key = w.sender_key))
-                        and (s.state in ('CLAIMED', 'FOLD_PENDING', 'DISMISS_PENDING')
-                             or (s.state = 'PROCESSED' and exists (
-                                     select 1 from proposal p
-                                     where p.session_id = s.session_id
-                                       and p.status in {_UNEXECUTED_PROPOSALS})))
+                             or (s.sender_key is not null and s.sender_key = w.sender_key)
+                             or (s.entity_keys is not null and w.entity_keys is not null
+                                 and s.entity_keys && w.entity_keys))
+                        and {_BUSY_ITEM}
                   )"""
 
 
@@ -2251,17 +2278,19 @@ async def claim_next_work_item(session_id: str | None = None) -> dict | None:
     bug; feed with a Date header if pick order matters. `for update skip
     locked` makes concurrent dispatchers safe once concurrency rises above 1.
 
-    Relatedness lock (D17/M9, widened 2026-08-19 per the operator): an item is skipped
-    while ANY other item sharing its thread_id, its normalized subject
-    (`subject_key`), or its sender family (`sender_key`) is in flight or
-    awaiting an operator verdict — CLAIMED, FOLD_PENDING, DISMISS_PENDING, or
-    PROCESSED with its session's proposal not yet EXECUTED (see
-    `_UNEXECUTED_PROPOSALS`: the lock holds through approval and any outage
-    park, so the world change LANDS before a related item starts). Deliberately
-    aggressive: concurrent related runs produce duplicate Jira/graph writes,
-    while a frozen item merely waits its turn at ~zero opportunity cost. The
-    lock releases by itself at execution or a terminal verdict — no new state
-    transitions.
+    Relatedness lock (D17/M9, widened 2026-08-19 and again 2026-11-02 per the
+    operator): an item is skipped while ANY other item sharing its thread_id,
+    its normalized subject (`subject_key`), its sender family (`sender_key`) or
+    one extracted entity (`entity_keys`) is BUSY as `_BUSY_ITEM` defines it:
+    in flight or awaiting a verdict on its own fate, PROCESSED/FOLDED under a
+    session that is not DONE, owing an unexecuted proposal, or FAILED and not
+    yet acknowledged. The lock holds through approval, any outage park, an
+    operator question and a rejected draft's redraft, so the world change LANDS
+    and the session CLOSES before a related item starts. Deliberately broad:
+    a false "related" costs one deferred item at ~zero opportunity cost, a
+    false "unrelated" costs a duplicate session. The lock releases by itself
+    when the session lands DONE, the proposal executes, or the operator
+    acknowledges the failure — no new state transitions.
 
     Outage equivalence (slice 4): a row transiently released while a dependency
     was down carries `not_before`, and is simply not eligible until then. The
@@ -2289,7 +2318,7 @@ async def claim_next_work_item(session_id: str | None = None) -> dict | None:
                    claimed_at = now()
              where id in (select id from picked)
             returning id, message_id, thread_id, feed, source, subject, payload,
-                      attempts, kind, transient_releases, embedding
+                      attempts, kind, transient_releases, embedding, entity_keys
             """,
             session_id,
         )
@@ -2336,7 +2365,7 @@ async def claim_specific_work_item(item_id: str, session_id: str | None = None) 
                    claimed_at = now()
              where id in (select id from picked)
             returning id, message_id, thread_id, feed, source, subject, payload,
-                      attempts, kind, transient_releases, embedding
+                      attempts, kind, transient_releases, embedding, entity_keys
             """,
             item_id, session_id,
         )
@@ -2403,6 +2432,80 @@ async def set_work_item_embedding(item_id: str, vector: list[float]) -> None:
         await conn.close()
 
 
+async def set_work_item_entity_keys(item_id: str, keys: list[str]) -> None:
+    """Persist the item's extracted entity keys (the lock's fourth key, computed
+    once at claim, after hydration). An empty list is a real answer — "about
+    nothing nameable" — distinct from NULL, which means not extracted yet."""
+    conn = await _conn()
+    try:
+        await conn.execute(
+            "update work_item set entity_keys = $2::text[] where id = $1",
+            item_id, list(keys),
+        )
+    finally:
+        await conn.close()
+
+
+async def held_work_items(limit: int = 20) -> dict:
+    """What the relatedness lock is holding right now, for the dispatch status:
+    every busy item (`_BUSY_ITEM`) that has at least one claimable relative
+    queued behind it, with how many it holds and why it is busy. A SQL-level
+    skip is otherwise silent — the claim simply does not pick the row — so this
+    is the one place a hold becomes visible. Bounded by the busy set, which the
+    valves keep small; `held` is the count of distinct queued items held."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            f"""
+            with busy as (
+                select s.id, s.subject, s.state, s.session_id, s.claimed_at,
+                       s.thread_id, s.subject_key, s.sender_key, s.entity_keys
+                from work_item s
+                where {_BUSY_ITEM}
+            ),
+            holds as (
+                select b.id as holder, w.id as held
+                from busy b
+                join work_item w
+                  on w.id <> b.id
+                 and w.state = 'UNPROCESSED'
+                 and (w.not_before is null or w.not_before <= now())
+                 and ((b.thread_id is not null and b.thread_id = w.thread_id)
+                      or (b.subject_key is not null and b.subject_key = w.subject_key)
+                      or (b.sender_key is not null and b.sender_key = w.sender_key)
+                      or (b.entity_keys is not null and w.entity_keys is not null
+                          and b.entity_keys && w.entity_keys))
+            )
+            select b.id, b.subject, b.state, b.session_id, b.claimed_at,
+                   (select status from session ss where ss.id = b.session_id) as session_status,
+                   (select count(*) from proposal p where p.session_id = b.session_id
+                      and p.status in {_UNEXECUTED_PROPOSALS}) as open_proposals,
+                   count(h.held) as holds,
+                   (select count(distinct held) from holds) as held_total
+            from busy b join holds h on h.holder = b.id
+            group by b.id, b.subject, b.state, b.session_id, b.claimed_at
+            order by holds desc, b.claimed_at
+            limit $1
+            """,
+            limit,
+        )
+        return {
+            "held": int(rows[0]["held_total"]) if rows else 0,
+            "holders": [
+                {
+                    "item_id": r["id"], "subject": r["subject"], "state": r["state"],
+                    "session_id": r["session_id"], "session_status": r["session_status"],
+                    "open_proposals": int(r["open_proposals"] or 0),
+                    "holds": int(r["holds"]),
+                    "since": r["claimed_at"].isoformat() if r["claimed_at"] else None,
+                }
+                for r in rows
+            ],
+        }
+    finally:
+        await conn.close()
+
+
 async def in_flight_embeddings(exclude_id: str) -> list[dict]:
     """Embeddings of every item the relatedness lock counts as busy — the
     semantic gate's comparison set. Small by construction: bounded by
@@ -2415,11 +2518,7 @@ async def in_flight_embeddings(exclude_id: str) -> list[dict]:
             from work_item s
             where s.embedding is not null
               and s.id <> $1
-              and (s.state in ('CLAIMED', 'FOLD_PENDING', 'DISMISS_PENDING')
-                   or (s.state = 'PROCESSED' and exists (
-                           select 1 from proposal p
-                           where p.session_id = s.session_id
-                             and p.status in {_UNEXECUTED_PROPOSALS})))
+              and {_BUSY_ITEM}
             """,
             exclude_id,
         )

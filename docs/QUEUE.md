@@ -13,9 +13,9 @@ Every email (and document) becomes one row in the `work_item` table,
 enrolled idempotently on its Message-ID — re-running any sweep adds nothing
 twice. A single drain loop (the dispatcher) pulls one item at a time: it
 asks the valves "may I take one more?", claims the row atomically
-(`FOR UPDATE SKIP LOCKED`, thread-locked so one session owns a thread), runs
-the agent, and lands the row terminal (PROCESSED / FOLDED / FAILED) or
-releases it for retry. A DOWN dependency (the model, the embedder, anything the
+(`FOR UPDATE SKIP LOCKED`, skipping anything related to a busy item — see
+"What holds an item" below), runs the agent, and lands the row terminal
+(PROCESSED / FOLDED / FAILED) or releases it for retry. A DOWN dependency (the model, the embedder, anything the
 item needs) costs nothing: the item is released with its attempt handed back,
 backs off, and waits for as long as the outage lasts; semantic failures spend
 attempts and park FAILED at the cap for a human to look at (see "When a
@@ -32,6 +32,43 @@ curl 'localhost:8080/api/events?since=0&kind=work'   # the work.* audit trail
 `may_dispatch: false` with a `reason` is the queue telling you which valve is
 shut — most often the approval throttle, which means the Decisions Inbox is
 waiting on you, not the system on itself.
+
+`held` on the same status is the relatedness hold: how many claimable rows are
+waiting behind busy ones, and which items hold them (`holders`, each with its
+state, its session's status, its open proposals and how many rows it holds). A
+`reason` of "N related item(s) held behind M busy item(s)" with nothing in
+flight is not a stall: the queue is waiting for YOU to land those sessions.
+
+## What holds an item
+
+One session at a time works on a thing. While an item is busy, the dispatcher
+skips every item related to it, and "busy" is anything short of fully complete
+(the operator's rule, 2026-11-02): claimed, pending a fold or a dismissal,
+processed or folded under a session that is not `DONE` (running, awaiting your
+answer to a question, awaiting a decision, redrafting after a Reject, stopped,
+failed), owing a proposal not yet executed, or `FAILED` and not yet
+acknowledged. The hold ends by itself when the session lands `DONE`, the
+proposal executes, or you acknowledge the failure (`POST /api/work/{id}/ack_failure`)
+— there is nothing to unlock by hand. Related means any of four keys:
+
+| Key | What it is | Where it comes from |
+|---|---|---|
+| thread | the mail thread | headers, at enrollment |
+| subject | the subject with Re/Fwd stripped | generated column |
+| sender | the sender's registrable domain (full address on gmail.com and the like) | generated column |
+| entities | the things the mail is about — "porsche", "usaa", an order number | the triage model, once, at claim time, after hydration (`work_item.entity_keys`) |
+
+plus the semantic freeze: an item whose embedding sits within
+`CC_SEMANTIC_FREEZE_THRESHOLD` (0.70) of a busy item's is released with a
+backoff and `work.frozen` says which. A refs-only backlog stub has no subject,
+sender or entities when the claim's SQL runs; they appear at hydration and the
+lock is asked again before anything costs.
+
+A held item costs nothing: it is processed later, with whatever the earlier
+session recorded in the graph, Jira and Confluence in front of the agent. A
+hold lasts as long as your review of the busy item — the same cadence the
+approval throttle already pauses the whole queue on. `CC_ENTITY_KEYS_ENABLED=false`
+switches the entity layer off (rows already keyed keep locking).
 
 ## Mail rules (standing dismissals)
 
@@ -112,6 +149,7 @@ attempt and parks `FAILED` at `CC_DISPATCH_MAX_ATTEMPTS`.
 | `CC_DISPATCH_APPROVAL_LIMIT` | 3 | pause dispatch while this many proposals + unconfirmed dismissals await review — the "agents can't outrun the human" valve |
 | `CC_DISPATCH_MAX_ATTEMPTS` | 3 | semantic failures before a row parks FAILED |
 | `CC_DISPATCH_POLL_SECONDS` | 2.0 | drain-loop poll interval |
+| `CC_ENTITY_KEYS_ENABLED` | true | extract entity keys at claim time for the relatedness hold |
 
 Raising `CC_DISPATCH_APPROVAL_LIMIT` is how you let the queue run further
 ahead of your review; raising `CC_DISPATCH_CONCURRENCY` above 1 is safe by

@@ -220,10 +220,13 @@ async def test_dispatcher_folds_a_matching_claim_without_a_run(seeded, monkeypat
     monkeypatch.setattr(dispatcher, "ingest_and_propose", never)
     # The CLAIMED sibling shares the sender family, and the relatedness lock
     # refuses a claim while it is in flight — park it so this test is about
-    # rules, not the lock.
+    # rules, not the lock. An unacknowledged FAILED item holds its family too
+    # (2026-11-02), so the park is an acknowledged failure.
     conn = await repo._conn()
     try:
-        await conn.execute("update work_item set state='FAILED' where id='wi_mr_claimed'")
+        await conn.execute(
+            "update work_item set state='FAILED', "
+            "payload = payload || '{\"failure_ack\": true}'::jsonb where id='wi_mr_claimed'")
     finally:
         await conn.close()
     item = await repo.claim_specific_work_item("wi_mr_match1", "sess_test")

@@ -939,6 +939,18 @@ draft step, no separate invitation step and no mail trash.
   call. Valves: concurrency, the approval-coupled throttle (don't outrun
   review), max attempts (the token-budget valve was removed in v2.75.0, PRD FR-24, DL-148; `CC_DISPATCH_TOKEN_BUDGET` is a retired key that warns once at start). Dispatch is opt-in. Operations and
   defaults: [`QUEUE.md`](QUEUE.md).
+- **The relatedness hold.** One session at a time works on a thing: the
+  claim skips every item related to a BUSY one, where busy is anything short
+  of fully complete — claimed, pending a fold or dismissal, processed or
+  folded under a session not `DONE`, owing an unexecuted proposal, or FAILED
+  and unacknowledged — read from the tables (`repo._BUSY_ITEM`), never from
+  the event log. Related is four keys (thread, subject, sender family, and the
+  entities the triage model extracts at claim time into `work_item.entity_keys`,
+  `ingest/entities.py`) plus the semantic freeze. A refs-only stub gets its
+  keys at hydration and the lock is asked again before anything costs; a DOWN
+  extractor releases the item on `llm`. The hold is on the dispatch status
+  (`held`) and in `dispatch.held` (DL-203; [`QUEUE.md`](QUEUE.md) "What holds
+  an item").
 - **Outage equivalence.** A dependency that is DOWN costs latency, never work
   (PRD FR-34 and FR-40): the sweep, the parks, the backoff, the banner and
   their rules are one section, [The outage doctrine](#the-outage-doctrine),

@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-02 — v2.81.0: The dispatcher holds everything related to a busy item until it is fully complete, and "related" includes the things a mail is about
+
+The relatedness lock decided "busy" from the proposal table, so three states with no proposal to key
+on each let a related item start a second session: a question parked for the operator, a rejected
+draft being redrafted, and a failed item the operator could still requeue. At the operator's ruling the
+lock now reads busy from the tables — the item's own state, its session's status, its session's open
+proposals and an unacknowledged failure — and holds while any of them is short of complete (DL-203).
+
+- **Busy is anything short of fully complete.** Claimed, pending a fold or a dismissal, processed or
+  folded under a session that is not `DONE`, owing a proposal not yet executed, or `FAILED` and not yet
+  acknowledged. The hold ends by itself when the session lands, the proposal executes, or the operator
+  acknowledges the failure; nothing is unlocked by hand. One definition (`repo._BUSY_ITEM`) feeds the
+  claim, the post-hydration re-check and the semantic freeze's comparison set.
+- **A fourth key: the entities.** At claim time, after hydration, the triage model extracts the things
+  the mail is about ("porsche", "usaa", an order number) and the dispatcher stores them as text on the row
+  (`work_item.entity_keys`, additive schema). Two items sharing one entity are related whatever their
+  thread, subject or sender. Places, the operator and mail providers are hubs and never keys. A model that
+  is DOWN releases the item transient on `llm`, attempt handed back, exactly as an embedder outage does; an
+  unparseable answer is retried once and then loud. `CC_ENTITY_KEYS_ENABLED=false` switches the layer off.
+- **The hold is visible.** `GET /api/dispatch` carries `held` (the count of claimable rows waiting and the
+  items holding them, each with its session status and open proposals), the loop's `reason` says so
+  instead of "queue empty", and `dispatch.held` is emitted whenever the holders change.
+- Docs: `QUEUE.md` "What holds an item"; PRD FR-24; the integrations bite mark; DL-203.
+
 ## 2026-11-02 — v2.80.2: The self-check's redaction exemption is exactly a dotted module path's head
 
 v2.80.1's exemption was wider than the defect needed: a short or lowercase secret inside a longer

@@ -172,6 +172,10 @@ async def test_a_ledger_item_whose_freeze_check_meets_the_outage_is_released(
 
     monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "semantic_freeze_enabled", True)
+    # The entity-key layer runs first and would meet the same unreachable
+    # client as an `llm` outage; this test is about the EMBEDDER's release
+    # (`tests/test_relatedness_hold.py` covers the extractor's).
+    monkeypatch.setattr(settings, "entity_keys_enabled", False)
     ran: list[str] = []
 
     async def must_not_run(item, siblings, siblings_capped, note, model):

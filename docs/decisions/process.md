@@ -1921,3 +1921,38 @@ hygiene, and how the test suite itself must be written. See
 - **Why:** The operator ruled on 2026-11-01 ("we don't need the running app to work while this is done, we will take everything down, do the migration, and come back online. I don't care that this incurs an outage"), and that the model changes in LiteLLM, never in Central Command. That ruling superseded two answers the operator gave on 2026-10-19 to the research on embedding-model change: a new alias per model, and seven days of retained previous vectors for rollback. Nothing looked at what the graph held: the width guards compared configuration with configuration, the only migration was a script that wrote in place and skipped community nodes, and a same-width model swap behind the alias was undetectable, so search degraded with no error anywhere. With the app allowed to be down, the in-place rewrite that DL-149 rejected is safe, because the gate is closed for the whole pass and a kill is redone whole; what stays rejected is a rewrite live search can see. A mismatch is the `embedder` dependency DOWN, so every existing park path holds the work, spends no attempt and resumes by itself (DL-189); nothing falls back and there is no keyword-only mode (DL-140). The record lives in the graph, because separate stores restore separately. Rejected, each with its reason: a staged live migration (staging labels, a second alias, a cutover) — the complexity buys availability the operator declined; `adopt` of an unrecorded graph as it stands — it would bless vectors nobody measured, so a graph with vectors and no record is closed until the first `run`; a cockpit button or a heartbeat action — a migration is a command the operator runs deliberately, with a dump, watching; an embedder record in Postgres (DL-149); a rollback window of retained vectors — the dump is the rollback; a recall quality gate — what the model is worth is the operator's judgement when choosing it, and the checks measure that the vectors are consistent; gating bolt-only reads — they embed nothing, and curation deletions must stay possible while the graph is closed. The first use after the release closes the live graph until the operator runs `check` and `run` once, which also re-embeds every entity under the single text recipe (name, newline, summary; a fact is its text) that the writer, the module and the third carried graphiti-core patch now share.
 - **Enforced:** test: `tests/test_embedder_record.py::test_each_code_closes_the_read_with_its_reason`, `tests/test_embedder_record.py::test_the_gate_sits_after_the_embedding`, `tests/test_embedder_mismatch_outage.py::test_the_sweep_never_clears_a_recorded_mismatch_and_says_up_once_when_it_ends`, `tests/test_graph_reembed.py::test_a_kill_after_batch_one_leaves_it_closed_and_a_re_run_ends_stable`, `tests/test_graph_reembed_boundary.py::test_nothing_under_runtime_or_gateway_names_the_module`
 - **Source:** docs/ARCHITECTURE.md "The graph declares its embedder"; `central_command/integrations/embedder_record.py`; `central_command/graph_reembed.py`; `skills/graphiti/references/operations.md`; `docs/PRD.md` FR-33; epic-embedder-integrity (kept privately)
+
+### DL-203 — The relatedness lock holds while anything related is short of complete, and "related" includes the things a mail is about
+
+- **Status:** active
+- **Date:** 2026-11-02
+- **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**The relatedness lock reads BUSY from the tables, and busy is anything short of fully complete.**"
+- **Why:** The lock existed to keep two sessions off one thing, and it decided
+  "busy" from the proposal table: in flight, or processed with a proposal not
+  yet executed. Three states had no proposal to key on and each produced a
+  duplicate session on the record — a question parked for the operator left
+  the item PROCESSED and the lock open (a same-thread sibling was claimed one
+  second later and both sessions wrote the graph, 2026-10-27); a Reject
+  decided the proposal before the redraft parked; a FAILED item was terminal
+  while the operator could still requeue it. The operator's rule (2026-11-02):
+  "if something is in any state other than 100% completed, anything that is
+  related is skipped … I don't care what of these incomplete states it's in",
+  because a held item costs nothing (it runs later with the earlier session's
+  graph, Jira and Confluence writes in front of it) and a duplicate session
+  costs the work twice. So busy is read from the session row, the proposal
+  rows and the item's own failure acknowledgement, never from the event log
+  (the withdraw and dismiss closes emit no completion event). The same rule
+  named relatedness by the THING ("anything cayenne related, regardless of
+  sender, subject, date"), which no header key and not the 0.70 embedding
+  catches (same-entity mail measured 0.67–0.69); a read-only replay chose the
+  triage model's typed entity extraction over text heuristics (28% of all
+  pairs related), dictionary filters (drop the brands that are words) and
+  graph-name matching (miss short forms): it paired exactly the right
+  families on the sample with no false positive, at about 5% of a triage
+  turn. Keys are text on the row so the offline re-embed cannot clear them;
+  places, the operator and mail providers are hubs and never keys. A DOWN
+  extractor parks the item on `llm`; an unparseable answer is loud, never an
+  empty list. The hold is visible: `held` on the dispatch status and a
+  `dispatch.held` event whenever the holders change.
+- **Enforced:** test: `tests/test_relatedness_hold.py` (the three holes, the fourth key, the outage release, the hub rules); `tests/test_ledger.py::test_parked_proposal_holds_related_items` (executed is not landed)
+- **Source:** `central_command/db/repo.py` (`_BUSY_ITEM`, `_RELATED_BUSY`, `held_work_items`); `central_command/ingest/entities.py`; `central_command/ingest/dispatcher.py` (`_entity_keys_for`, the loop's hold report); `docs/QUEUE.md` "What holds an item"

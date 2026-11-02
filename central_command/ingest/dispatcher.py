@@ -10,12 +10,17 @@ one more?" and only then claims a row. Every valve is a reason to answer no:
   producing more. Draining slowly is a correctness requirement (DESIGN.md §4).
 
 Pick order (D16) is live-feed-first, then newest-first, and an item related to
-one in flight or owing an unexecuted proposal (same thread, normalized subject,
-or sender family; CLAIMED / FOLD_PENDING / DISMISS_PENDING / proposal not yet
-EXECUTED) is skipped — all enforced in `repo.claim_next_work_item` (widened
-2026-08-19). A fourth, fuzzy layer runs here after the claim: the semantic
-freeze (`_semantic_freeze_check`) releases a claimed item back with a backoff
-when its embedding is too close to anything in flight.
+a BUSY one is skipped: same thread, normalized subject, sender family or one
+extracted entity (`ingest/entities.py`), where busy is anything short of fully
+complete — in flight, pending a fold or dismissal, processed under a session
+that is not DONE, owing an unexecuted proposal, or FAILED and unacknowledged
+(`repo._BUSY_ITEM`; widened 2026-08-19 and 2026-11-02 at the operator's word).
+All of it is enforced in `repo.claim_next_work_item`, re-asked here once
+hydration has materialized the keys, and a fuzzy layer runs after that: the
+semantic freeze (`_semantic_freeze_check`) releases a claimed item back with a
+backoff when its embedding is too close to anything busy. A SQL-level skip is
+silent by nature, so the loop reports what the lock holds (`dispatch.held`,
+and `held` on the status) whenever the queue has claimable rows it may not take.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ from central_command.contract import (
     retry_not_before,
 )
 from central_command.db import repo
-from central_command.ingest import ledger
+from central_command.ingest import entities, ledger
 from central_command.runtime import context
 from central_command.runtime.deps import ThreadContext
 from central_command.runtime.models import resolve_model
@@ -398,6 +403,18 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
+async def _entity_keys_for(item: dict, agent_id: str = entities.EXTRACTOR_AGENT) -> list[str] | None:
+    """The lock's fourth key for a claimed, hydrated item — extracted once and
+    stored, so a frozen item re-claimed later pays nothing. None means "do not
+    store": the test model, or the layer switched off. A model that is DOWN
+    raises `DependencyDown(('llm',))` out of here and `process_claimed`
+    releases the item transient on `llm`, exactly as an embedder outage is
+    handled: a run never starts with its lock half-computed."""
+    if settings.test_model or not settings.entity_keys_enabled:
+        return None
+    return await entities.entity_keys(item, agent_id=agent_id)
+
+
 async def _semantic_freeze_check(item: dict) -> dict | None:
     """The fuzzy layer of the relatedness lock (2026-08-19): freeze a claimed
     item whose embedding is too close to anything in flight or owing an
@@ -571,9 +588,23 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
         # release uses (the growing exponent is a feature here — a proposal
         # pending overnight rechecks ever less often instead of churning the
         # claim loop).
+        # The fourth key, the entities (epic relatedness-hold): computed from
+        # the hydrated text, once, and stored as text on the row, BEFORE the
+        # exact re-check so a same-thing relative is caught the way a same-
+        # subject one is. NULL on the row means not extracted yet; an empty
+        # list is a real answer and is not recomputed.
+        if item.get("entity_keys") is None:
+            # Extracted by the model of the agent that handles this KIND (the
+            # handler's actor, `agent:<id>`): a document's text goes to the
+            # steward's model, never the triage one.
+            keys = await _entity_keys_for(item, handler.actor.split(":", 1)[-1])
+            if keys is not None:
+                await repo.set_work_item_entity_keys(item["id"], keys)
+                item["entity_keys"] = keys
+
         freeze = None
         if await repo.work_item_related_busy(item["id"]):
-            freeze = {"reason": "related item in flight (keys appeared at hydration)"}
+            freeze = {"reason": "related item busy (keys appeared at hydration)"}
         if freeze is None:
             freeze = await _semantic_freeze_check(item)
         if freeze is not None:
@@ -915,6 +946,7 @@ class Dispatcher:
         log.info("dispatch: loop started (concurrency=%d, approval limit=%d)",
                  settings.dispatch_concurrency, settings.dispatch_approval_limit)
         stalled_on: str | None = None
+        held_on: tuple[str, ...] = ()
         while not self._stopping.is_set():
             try:
                 ok, reason = await check_valves()
@@ -945,6 +977,22 @@ class Dispatcher:
                         task.add_done_callback(self._tasks.discard)
                         continue  # work available — go straight round again
                     self.last_reason = "queue empty"
+                    # Nothing claimable: say whether that is an empty queue or
+                    # the relatedness lock holding rows behind busy ones. The
+                    # SQL skip is silent, so this is where a hold is recorded —
+                    # once per change of holders, never per poll.
+                    held = await repo.held_work_items()
+                    holders = tuple(h["item_id"] for h in held["holders"])
+                    if held["held"]:
+                        self.last_reason = (
+                            f"{held['held']} related item(s) held behind "
+                            f"{len(holders)} busy item(s)"
+                        )
+                    if holders != held_on:
+                        held_on = holders
+                        await events.emit(
+                            "dispatch.held", payload=held, actor="dispatcher"
+                        )
             except Exception:  # noqa: BLE001 — the loop outlives any single error
                 log.exception("dispatch: loop iteration failed")
                 self.last_reason = "error (see logs)"
@@ -964,6 +1012,7 @@ class Dispatcher:
             "reason": reason if not ok else self.last_reason,
             "in_flight": await repo.count_in_flight(),
             "awaiting_human": await repo.count_awaiting_human(),
+            "held": await repo.held_work_items(),
             "valves": {
                 "concurrency": settings.dispatch_concurrency,
                 "approval_limit": settings.dispatch_approval_limit,

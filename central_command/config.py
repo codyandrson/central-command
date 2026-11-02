@@ -516,6 +516,12 @@ class Settings(BaseSettings):
     #                                item is frozen; lower = more aggressive
     semantic_freeze_enabled: bool = True
     semantic_freeze_threshold: float = 0.70
+    # Relatedness lock, fourth key (epic relatedness-hold, 2026-11-02): the
+    # entities the triage model extracts from each claimed item, stored on the
+    # row as `work_item.entity_keys`. Off means no extraction and no entity
+    # overlap in the lock; rows already keyed keep locking.
+    #   entity_keys_enabled -> the layer itself
+    entity_keys_enabled: bool = True
 
     # Targeted pending-proposal context (2026-09-22, v2.40.0). The triage
     # prompt used to carry the intents of up to 20 proposals awaiting the

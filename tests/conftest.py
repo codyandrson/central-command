@@ -625,6 +625,17 @@ async def _settle_queue(conn) -> None:
                        "where status = 'AWAITING_AGENTS'")
     await conn.execute("update task set status = 'CANCELLED', retry_state = null "
                        "where status = 'ASSIGNED' and retry_state is not null")
+    # The relatedness hold (2026-11-02) reads busy from the tables: a FAILED
+    # item an earlier test left unacknowledged, or a session it left short of
+    # DONE over a processed item, would hold every later test's related row
+    # (the e2e family all mails as dana@example.com). Acknowledge the one and
+    # land the other — this database is nobody's record.
+    await conn.execute("update work_item set payload = payload || "
+                       "'{\"failure_ack\": true}'::jsonb where state = 'FAILED' "
+                       "and not coalesce((payload ->> 'failure_ack')::boolean, false)")
+    await conn.execute("update session set status = 'DONE' where status <> 'DONE' "
+                       "and id in (select session_id from work_item "
+                       "where state in ('PROCESSED', 'FOLDED') and session_id is not null)")
 
 
 class _LazySettle:
