@@ -918,3 +918,20 @@ async def test_a_reranker_that_ranks_backwards_is_a_warning(fakes):
     fakes.rerank_order.reverse()
     check = by_name(await selfcheck.run(mode="cli"))["graph-rerank"]
     assert check["status"] == "warn" and check["remedy"] == "CC_GRAPH_RERANK_ALIAS"
+
+
+def test_a_dev_default_database_password_does_not_mask_the_package_name(monkeypatch):
+    monkeypatch.setattr(settings, "database_url", "postgresql://cc:central_command@127.0.0.1:5442/x")
+    out = selfcheck._redact(
+        "run: python -m central_command.graph_reembed status; "
+        "dsn postgresql://cc:central_command@127.0.0.1:5442/x"
+    )
+    assert "python -m central_command.graph_reembed status" in out
+    assert ":central_command@" not in out and ":***@" in out
+
+
+def test_a_random_database_password_is_masked_everywhere(monkeypatch):
+    secret = "k3Zq9vXw2LmN8pRt"
+    monkeypatch.setattr(settings, "database_url", f"postgresql://cc:{secret}@127.0.0.1:5442/x")
+    out = selfcheck._redact(f"a {secret} b {secret}.x postgresql://cc:{secret}@h/x")
+    assert secret not in out

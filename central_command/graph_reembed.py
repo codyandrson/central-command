@@ -54,11 +54,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import gzip
 import json
 import logging
 import os
 import re
+import stat
 import sys
 import time
 from dataclasses import dataclass
@@ -432,15 +434,39 @@ def _age_text(seconds: float) -> str:
     return f"{days}d {hours}h {minutes}m"
 
 
-def _gzip_ok(path: Path) -> bool:
-    """`gzip -t`: read through to the end, which checks the CRC."""
+def _gzip_state(path: Path) -> str:
+    """`gzip -t`: read through to the end, which checks the CRC. Returns "ok",
+    "corrupt" (it opened and the read failed) or "unreadable" (the open itself
+    failed, so nothing is known about the bytes)."""
     try:
-        with gzip.open(path, "rb") as dump:
-            while dump.read(1 << 20):
+        dump = path.open("rb")
+    except OSError:
+        return "unreadable"
+    try:
+        with gzip.GzipFile(fileobj=dump, mode="rb") as gz:
+            while gz.read(1 << 20):
                 pass
     except (OSError, EOFError):
-        return False
-    return True
+        return "corrupt"
+    finally:
+        dump.close()
+    return "ok"
+
+
+def _unreadable_text(path: Path) -> str:
+    try:
+        user = getpass.getuser()
+    except Exception:
+        user = str(os.getuid())
+    try:
+        st = path.stat()
+        owner = f", owned by uid {st.st_uid} mode {stat.S_IMODE(st.st_mode):04o}"
+    except OSError:
+        owner = ""
+    return (
+        f"the newest dump {path.name} cannot be read by the current user ({user}{owner}); "
+        f"make it readable (`sudo chown {user} {path}`) or run this module as a user that can"
+    )
 
 
 async def _check_backup(directory: Path) -> Finding:
@@ -468,7 +494,10 @@ async def _check_backup(directory: Path) -> Finding:
             f"the newest dump {path.name} is {path.stat().st_size} bytes, too small to be a "
             f"graph: {BACKUP_COMMANDS}"
         ))
-    if not await asyncio.to_thread(_gzip_ok, path):
+    state = await asyncio.to_thread(_gzip_state, path)
+    if state == "unreadable":
+        return Finding(ACTION, _unreadable_text(path))
+    if state != "ok":
         return Finding(ACTION, f"the newest dump {path.name} fails gzip -t: {BACKUP_COMMANDS}")
     return Finding(OK, f"the newest dump {path.name} is {_age_text(age)} old and passes gzip -t")
 

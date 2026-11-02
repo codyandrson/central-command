@@ -930,7 +930,7 @@ from `<checkout>`, as the user that owns it (the settings come from the root
    name. `run` also refuses to start inside 15 minutes either side of the 03:00
    nightly timer ("inside 15 minutes of the nightly backup at 03:00: wait, or pass
    `--ignore-backup-window` if it is disabled"): wait, and use the flag only when
-   the timer is disabled. If the dump is root-owned and 0600, make sure the user running the module can read it.
+   the timer is disabled. The nightly `cc-backup.service` writes dumps root-owned 0600, so a run from the venv as the checkout's user first needs `sudo chown <user> <dump>`; otherwise the check prints "the newest dump … cannot be read by the current user" (not "fails gzip -t", which means the file opened and is corrupt).
 2. **Re-point `cc-embedding` in the LiteLLM UI.** Within a check's cache (30
    seconds) the graph closes with reason (iv) and the banner shows `embedder`
    down: expected.

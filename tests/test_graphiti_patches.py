@@ -256,6 +256,19 @@ def _patched_create_entity_node_embeddings(tmp_path: Path):
         shutil.copytree(dist, site / dist.name)
     if gp.installed_version(site) != gp.PINNED_VERSION:
         pytest.skip("installed graphiti-core is not the pinned version")
+    # The install may already carry the third patch (the operator applies them
+    # after every update); "before" must be the upstream seam either way, so on
+    # a patched copy the patch's one hunk is reversed (new lines back to old).
+    if gp.patch_state(site)[ENTITY_PATCH] == "patched":
+        (_, files), = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == ENTITY_PATCH]
+        for fp in files:
+            lines = (site / fp.path).read_text().split("\n")
+            for h in fp.hunks:
+                n = len(h.new)
+                at = next(i for i in range(len(lines) - n + 1) if tuple(lines[i:i + n]) == h.new)
+                lines[at:at + n] = list(h.old)
+            (site / fp.path).write_text("\n".join(lines))
+        assert gp.patch_state(site)[ENTITY_PATCH] == "pristine"
     before = (site / "graphiti_core" / "nodes.py").read_text()
     gp.apply_patches(site)
 

@@ -4,6 +4,22 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-02 — v2.80.1: The re-embed check tells an unreadable dump from a corrupt one, and the self-check stops masking the package name
+
+Two message fixes found on the first use of v2.80.0; no behaviour changes beyond what is printed.
+
+- `graph_reembed check` no longer reports a dump the current user cannot open as "fails gzip -t". It
+  now says the dump cannot be read by the current user and names the fix (`sudo chown <user> <dump>`,
+  or run the module as a user that can read it); "fails gzip -t" is kept for a dump that opens and
+  then fails to read through. The nightly backup writes dumps root-owned 0600, so a venv run needs the
+  chown first (the runbook says so).
+- The application self-check no longer prints `python -m ***.graph_reembed status` when the database
+  password is the dev default `central_command`: a generic secret value is masked where it stands as
+  a credential (a DSN password, a standalone value), not inside a module path. Rotating a
+  dev-default Postgres password is the operator's separate fix.
+- The patch drift test assumed an unpatched install and went red after the first apply of v2.80.0; it
+  now derives the upstream seam from the patch itself.
+
 ## 2026-11-02 — v2.80.0: The graph declares its embedder, refuses a wrong one, and is re-embedded offline by one command
 
 epic-embedder-integrity. Ten commits since v2.79.0 (`v2.79.0..4f786415`), from seven stories.

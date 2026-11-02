@@ -577,6 +577,30 @@ def test_a_corrupt_dump_refuses(world, capsys):
     assert "fails gzip -t" in capsys.readouterr().out
 
 
+def test_an_unreadable_dump_is_not_called_corrupt(world, capsys, monkeypatch):
+    path = _only(world, 60)
+    real_open = type(path).open
+
+    def deny(self, *a, **kw):
+        if self == path:
+            raise PermissionError(13, "Permission denied")
+        return real_open(self, *a, **kw)
+
+    monkeypatch.setattr(type(path), "open", deny)
+    assert _main(world, "check") == 3
+    out = capsys.readouterr().out
+    assert "cannot be read by the current user" in out
+    assert "sudo chown" in out
+    assert "fails gzip -t" not in out
+
+
+def test_a_good_dump_passes_the_gzip_state(world):
+    path = _only(world, 60)
+    assert graph_reembed._gzip_state(path) == "ok"
+    path.write_bytes(path.read_bytes()[:2000])
+    assert graph_reembed._gzip_state(path) == "corrupt"
+
+
 def test_the_newest_dump_is_the_one_judged(world, capsys):
     _only(world, 60)
     _dump(world.backup_dir, 7200)

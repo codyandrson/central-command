@@ -228,9 +228,30 @@ def _secret_values() -> list[str]:
     return sorted(set(values), key=len, reverse=True)
 
 
+_PACKAGE = "central_command"
+
+
+def _redact_secret(text: str, secret: str) -> str:
+    """Mask `secret` everywhere, except that a value too generic to be a secret
+    shape (short, the package name, or a lowercase word that this text uses as
+    a dotted module path) is masked only as a standalone token: a Postgres
+    password left at the dev default `central_command` must not turn
+    `python -m central_command.graph_reembed` into `python -m ***.graph_reembed`.
+    Standing alone covers the DSN userinfo (`:<secret>@`) and a value followed
+    by whitespace or the end."""
+    generic = (
+        len(secret) < 8
+        or secret == _PACKAGE
+        or (re.fullmatch(r"[a-z_]+", secret) and re.search(rf"\b{re.escape(secret)}\.\w", text))
+    )
+    if not generic:
+        return text.replace(secret, "***")
+    return re.sub(rf"(?<![\w.]){re.escape(secret)}(?!\w)(?!\.\w)", "***", text)
+
+
 def _redact(text: str) -> str:
     for secret in _secret_values():
-        text = text.replace(secret, "***")
+        text = _redact_secret(text, secret)
     text = _KEYLIKE.sub("sk-***", text)
     return _EMAIL.sub("<email>", text)
 
