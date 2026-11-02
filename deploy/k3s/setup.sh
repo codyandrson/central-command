@@ -1050,7 +1050,7 @@ phase_app() {
     step "install" "central_command installed editable with [dev,runtime]" \
       in_repo uv pip install -e ".[dev,runtime]" || return 1
   fi
-  # The two carried graphiti-core fixes (deploy/graphiti-patches/, design
+  # The three carried graphiti-core fixes (deploy/graphiti-patches/, design
   # record 2026-10-04 D7), applied after EVERY dependency install — an install
   # puts back a pristine package. Idempotent; a hunk that matches neither the
   # pristine nor the patched file FAILS here (the version is pinned, so that

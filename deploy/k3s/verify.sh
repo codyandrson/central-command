@@ -84,7 +84,7 @@ check "speech             127.0.0.1:8093" "curl -fsS http://127.0.0.1:8093/healt
 check "speech TTS model installed        " "curl -fsS http://127.0.0.1:8093/v1/models/speaches-ai/Kokoro-82M-v1.0-ONNX"
 check "speech STT model installed        " "curl -fsS http://127.0.0.1:8093/v1/models/Systran/faster-whisper-small"
 check "control plane API  127.0.0.1:8080" "curl -fsS http://127.0.0.1:8080/health"
-# graphiti-core runs inside the API (design record 2026-10-04, D7): the two
+# graphiti-core runs inside the API (design record 2026-10-04, D7): the three
 # carried fixes must be on the INSTALLED package, or the ingest worker refuses
 # extraction. Re-applied after every install by setup.sh and cc-update.sh.
 check "graphiti-core carries the fixes in deploy/graphiti-patches/" \

@@ -242,7 +242,7 @@ phase_app() {
       in_repo uv pip install -e ".[dev,runtime]" || return 1
   fi
 
-  # app/graphiti-patches: the two carried graphiti-core fixes (design record
+  # app/graphiti-patches: the three carried graphiti-core fixes (design record
   # 2026-10-04, D7) onto the package the install just put down — after EVERY
   # install, because an install puts back a pristine copy. The applier is the
   # venv's own Python (no `patch` binary is assumed), idempotent, atomic

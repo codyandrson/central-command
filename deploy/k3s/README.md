@@ -927,8 +927,10 @@ from `<checkout>`, as the user that owns it (the settings come from the root
    `neo4j_<stamp>.dump.gz` in `$CC_BACKUP_DIR` (else the running user's
    `~/cc-backups`; `--backup-dir` overrides) that passes `gzip -t`, is over 1024
    bytes, is not a `pre-update` file and is under an hour old by the stamp in its
-   name, and inside 15 minutes either side of the 03:00 nightly timer. If the
-   dump is root-owned and 0600, make sure the user running the module can read it.
+   name. `run` also refuses to start inside 15 minutes either side of the 03:00
+   nightly timer ("inside 15 minutes of the nightly backup at 03:00: wait, or pass
+   `--ignore-backup-window` if it is disabled"): wait, and use the flag only when
+   the timer is disabled. If the dump is root-owned and 0600, make sure the user running the module can read it.
 2. **Re-point `cc-embedding` in the LiteLLM UI.** Within a check's cache (30
    seconds) the graph closes with reason (iv) and the banner shows `embedder`
    down: expected.

@@ -177,7 +177,7 @@ the dry gate: it runs nine sections that change nothing (`./setup.sh check
 
 46. `app/venv`: Assert the virtual environment the app runs in.
 47. `app/install`: Install central_command editable into that environment.
-48. `app/graphiti-patches`: Apply the two carried graphiti-core fixes (deploy/graphiti-patches/) to the installed package — after every install, because an install puts back a pristine copy; without them the API holds graph extraction.
+48. `app/graphiti-patches`: Apply the three carried graphiti-core fixes (deploy/graphiti-patches/) to the installed package — after every install, because an install puts back a pristine copy; without them the API holds graph extraction.
 49. `app/app-env`: Assert the one answer file and its mode (0600 where the filesystem honours it).
 50. `app/mint-key`: Mint the spine's OWN LiteLLM virtual key, scoped to the aliases this deployment requires (and the reranker alias when one is in use), or widen an existing key's scope to cover them, so a leak of the agents' credential cannot reconfigure the proxy.
 51. `app/app-llm-base-url`: Derive the proxy URL the app dials.
