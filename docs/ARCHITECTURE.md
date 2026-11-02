@@ -140,7 +140,7 @@ Rows for the same package are grouped by what the modules are for.
 | `ingest/` | ② | as above | The sources catalog and bulk actions: filesystem watcher, text extraction (the markitdown seam shared with chat attachments), catalog enrollment, bulk dismissal, the wiki freshness sweep | `watcher.py`, `extract.py`, `catalog_enroll.py`, `bulk_dismiss.py`, `wiki_freshness.py` | [integrations](../.claude/rules/integrations.md) |
 | `heartbeat/` | ② | none | The scheduler for recurring team work: tick loop, action registry, dependency-health probes | `engine.py` (`fire`, one firing path for tick and run-now), `actions.py` (`ActionSpec`, 12 action kinds), `probes.py` | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `integrations/` | ④ | each client holds its own | **Native clients**: Jira, Confluence, the git forge, LiteLLM (proxy) and its credential store, the Exchange (EWS) mail client, Neo4j (reads and the closed curation write set) | `jira.py`, `confluence.py`, `forge.py`, `litellm.py`, `litellm_credstore.py`, `exchange.py`, `neo4j_reader.py`, `neo4j_writer.py` | [integrations](../.claude/rules/integrations.md) |
-| `integrations/` | ④ | as above | **graphiti-core, in-process** (no server): `graphiti.py` reads (the one graph module `runtime/` may import; it imports graphiti-core search modules function-locally, after the client has prepared the environment), `graphiti_client.py` is the one place the library is built and configured, `graphiti_ingest.py` is the durable ingest queue's worker, `graph_ontology.py` holds the ten entity types, `embedder_record.py` holds the record of the graph's embedder and the one check that closes every embedding read on a mismatch, `graphiti_patches.py` applies the two carried graphiti-core fixes | `graphiti.py`, `graphiti_client.py`, `graphiti_ingest.py`, `graph_ontology.py`, `graphiti_patches.py` | [graph](../.claude/rules/graph.md), [models](../.claude/rules/models.md) |
+| `integrations/` | ④ | as above | **graphiti-core, in-process** (no server): `graphiti.py` reads (the one graph module `runtime/` may import; it imports graphiti-core search modules function-locally, after the client has prepared the environment), `graphiti_client.py` is the one place the library is built and configured, `graphiti_ingest.py` is the durable ingest queue's worker, `graph_ontology.py` holds the ten entity types, `embedder_record.py` holds the record of the graph's embedder and the one check that closes every embedding read on a mismatch, `graphiti_patches.py` applies the three carried graphiti-core fixes | `graphiti.py`, `graphiti_client.py`, `graphiti_ingest.py`, `graph_ontology.py`, `graphiti_patches.py` | [graph](../.claude/rules/graph.md), [models](../.claude/rules/models.md) |
 | `integrations/` | ④ | n8n holds the OAuth | **n8n façades** for mail and calendar (n8n holds the OAuth; the Jira façade fallback was removed in v2.50.0). **Uncredentialed**: web fetch, the crawler client, the sandbox client. `http.py` is the pluggable-trust httpx factory and the ONE TLS surface: every client built from `client_kwargs()` (the native clients, the agents' web fetch, the Systems probes, the self-check) honours `CC_CA_BUNDLE`, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and `CC_TLS_INSECURE`, which turns verification off for all of them and wins over the bundle. A façade is `configured()` when its URL and its token are both set; an unconfigured one fails "not configured" as a NO, it never parks; `calendar_facade.provider_configured()` also counts an Exchange-only site as configured | `email_facade.py`, `calendar_facade.py`, `webfetch.py`, `crawler.py`, `sandbox_client.py`, `http.py` | [integrations](../.claude/rules/integrations.md) |
 | `reports/` | ② | none | Deterministic, judgment-free reads composed from the spine: the EA's snapshot, the operator's calendar day (fail-closed: see "Work-site safety defaults"), the EA's open follow-ups; called only from `runtime/tools.py` and `heartbeat/actions.py` | `ea_report.py`, `ea_calendar.py`, `ea_followups.py` | — |
 | `sandbox/` | out-of-process | **none, by design** | A standalone FastAPI service giving agents a disposable workspace. Two backends behind one API: `kubectl` (a gVisor Job+Pod per session) or `podman` (a container per session). Never imported; reached only through `integrations/sandbox_client.py`. Its single exit is the gated `mcp.sync_source`, content captured at propose time | `runner.py` | [AGENTS.md](../AGENTS.md) |
@@ -1010,7 +1010,7 @@ them concurrently, once per name per sweep:
 | Name | What it is | Probe |
 |---|---|---|
 | `llm` | the agent model chain | a 1-token completion on the default alias |
-| `embedder` | the embedding alias | one embedding of one word on `CC_EMBED_ALIAS` |
+| `embedder` | the embedding alias, and the graph's record of its embedder | one embedding of one word on `CC_EMBED_ALIAS`; once that answers, the sweep also consults the record's check (see [The graph declares its embedder](#the-graph-declares-its-embedder)), and a mismatch is held DOWN with its reason as the error |
 | `graph` | Neo4j (graphiti-core runs in-process) | a TCP connect to the bolt port |
 | `litellm` | the proxy's admin plane | `GET /health/liveliness` |
 | `n8n` | the mail façade host | `GET /healthz` |
@@ -1208,7 +1208,7 @@ landed*. The `AWAITING_HUMAN` dismiss keeps its DONE "no action needed".
 
 *The outages API.* `GET /api/outages` (`api/outages.py`; no auth dependency,
 access is the private network) returns `{dependencies: [...]}` for every name
-in `DEPENDENCIES`, each `{name, state, checked_at, down_since, waiting:
+in `DEPENDENCIES`, each `{name, state, checked_at, down_since, error (only while down; the probe's own error, scrubbed of URL credentials and key shapes and clipped; an embedder mismatch carries its reason and the command to run), waiting:
 {sessions, proposals, tasks, work_items, ingest_jobs}, interrupted, failing:
 [{kind, id, attempts, last_error}], total}`; `state` is `up`, `down` or n/a for
 `local`. One SQL statement (`repo.parked_unit_counts`, built by
@@ -1263,6 +1263,111 @@ Settings: `CC_RETRY_BACKOFF_CAP_SECONDS` (default 3600) and
 world-moved redraft (a NO, not an outage) adds its own: the `proposal.redraft`
 column, the event `proposal.redraft_limit_reached` and the setting
 `CC_WORLD_MOVED_REDRAFT_LIMIT` (default 3), all described under "Proposal".
+
+### The graph declares its embedder
+
+*PRD FR-33 and FR-34; DL-149 (as amended) and DL-202; the operator's ruling of
+2026-11-01: a migration is an accepted outage, and the model changes in LiteLLM
+only.* Vectors from two models are not comparable even at the same width, and
+nothing in Neo4j enforces the width, so the graph states its own embedder and
+refuses to be used when the configuration or the model behind the alias
+disagrees.
+
+**The record.** One node, `(:CCGraphMeta {key: 'embedder'})` (a uniqueness
+constraint on `key`; no `group_id`, so every graphiti-core and `neo4j_reader`
+query, which filter on a label, cannot see it). Fields: `alias`, `dimensions`,
+`epoch` (+1 per completed migration), `text_recipe`, `state` (`stable`,
+`migrating`, `awaiting_config`), three `canary_texts` with their
+`canary_vectors`, `upstream_model` (LiteLLM's name for the model, information
+only), `updated_at`, `history` (one line per completed run), `committed_at` and
+the run's counters. The record lives in the graph, not in Postgres, because
+separate stores restore separately. A record with no `alias` (the interim record
+`run` writes on an undeclared graph so it has somewhere to keep its state)
+counts as absent. `integrations/embedder_record.py` is the only reader and
+writer; `contract/embedding_text.py` holds the text recipe and the canary texts.
+
+**The check.** `embedder_record.check()` is the one function, cached for
+`CC_EMBEDDER_CHECK_TTL_SECONDS` (30 s). It answers ok, absent-and-empty (no
+vectors and no record: open), or a mismatch with a plain reason ending in the
+remedy, `run: python -m central_command.graph_reembed status`: (i) vectors and no
+record, (ii) the record's alias or width differs from the settings, (iii) a
+census width differs from the record's, (iv) the three canaries, embedded now,
+fall below cosine `CC_EMBEDDER_CANARY_THRESHOLD` (0.999) against the stored ones,
+which is how a same-width model swap is caught, (v) `state` is `migrating` or
+`awaiting_config`. Reason (v) is tested first and embeds nothing, so a down
+embedder cannot turn a migration into an outage. A check that cannot answer (the
+embedder or the graph unreachable) is not a verdict: the error propagates as the
+DOWN it is and nothing is cached. A mismatch is raised as
+`EmbedderMismatch(DependencyDown)` on `('graph', 'embedder')`, so every existing
+park path treats it as DOWN and never as a NO the agent may proceed without.
+
+**Five gates, each calling the check.** (1) The ingest worker's first tick,
+beside the index DDL, and (2) its claim, which takes only bolt-only deletions
+while the graph is closed (jobs stay QUEUED, no attempt is spent; on an empty
+graph the first claim writes the record through `bootstrap_if_empty()`). (3) The
+curation writer's four embedding writes (`create_node`, `update_node`,
+`create_edge`, `update_edge`), after `embed()` returns and before the write, never
+inside `embed()` (the dispatcher shares it); the Graph panel's direct write is
+refused `503 {error: 'embedder mismatch', dependency: 'embedder', detail: <reason>}`
+and a gated write parks. (4) The embedding reads, in `graphiti._search`, so every
+agent search parks its session; bolt-only reads, `get_status` and bolt-only
+deletions are unaffected. (5) The self-check row `graph-embedder` (system
+`graphiti`), whose FAIL carries the reason and the remedy and whose PASS covers an
+empty graph, and the Systems page's Graphiti card, which prints the record and any
+mismatch.
+
+**A mismatch is a held outage.** `orchestration.probe_and_record` consults the
+check once the embedder and graph probes answer UP and marks `embedder` DOWN with
+the reason as the probe error, even when nothing is parked, within one 300-second
+sweep of the verdict first being cached. The sweep never clears it and the retry
+sweep skips the parked unit before calling its driver (DL-189), so no attempt is
+spent and `retry.failing_despite_probe` never fires for the graph. The banner
+reads the reason and the remedy; Retry-now re-runs the check. It clears by itself
+within one tick of the record and the configuration agreeing again, with one
+`dependency.up`.
+
+**The module.** `central_command/graph_reembed.py` is operator-run and
+command-line only (`python -m central_command.graph_reembed status | check | run
+[--finish]`; exit 0 ok, 1 a problem, 2 could not run, 3 the operator must act).
+It reads the checkout's `.env`, talks to Neo4j and Postgres directly, and is
+never imported by `runtime/` or `gateway/`, never a `propose_*`, a route, a
+cockpit button or a heartbeat action. `check` changes nothing: the census, the
+alias's measured width, an alignment probe (a batch with repeated texts, each
+position equal to its single-call vector, which reproduces the 2026-09-01 cache
+incident), LiteLLM's cache configuration (embeddings must not be cached), the
+backup, and the vector and token counts. `run` emits `graph.reembed.run` first
+(the only new event), refuses on anything `check` refuses, writes
+`state=migrating`, waits the check's cache plus 5 seconds so no process still
+holds an open verdict, waits for any running ingest job, re-embeds every entity,
+fact and community in place through `cc-embedding` in batches of 32 (through
+`db.create.setNodeVectorProperty` / `setRelationshipVectorProperty` only),
+writes the record with `epoch` + 1, verifies (the census, no lost vector, the
+canaries, no identical vectors for different texts, three real searches under
+`operator_session()`, a sample against fresh single embeddings) and sets
+`stable`. A failed verification leaves the record `migrating` and the graph
+closed; a kill is redone whole by running `run` again (nothing is half-visible,
+because the gate is closed throughout). The rewrite in place is safe only under
+that closed gate, which is what DL-149's rejection was about. A width change
+ends `awaiting_config`, closed, exit 3, naming `CC_EMBED_DIM`; the operator sets
+it and restarts the units, and `run --finish` checks the two agree. A fresh
+`neo4j_<stamp>.dump.gz` (younger than `CC_GRAPH_REEMBED_BACKUP_MAX_AGE_SECONDS`,
+3600) is required and never taken by the module; the rollback is that dump, or
+re-pointing the alias back and running `run` again. Operator procedure:
+`deploy/k3s/README.md` §9a and `skills/graphiti/references/operations.md`.
+
+**One text recipe.** An entity's vector is its name, a newline and its summary,
+stripped; a fact's is its text. The curation writer, the module and the third
+carried graphiti-core patch (one hunk at `create_entity_node_embeddings`) share
+`embedding_text`, and a parity test pins the patched input to it. Changing the
+recipe changes what the vectors mean, so it needs a re-embed; the record's
+`text_recipe` names it.
+
+**The first use after the release that introduced this.** The live graph holds
+vectors and no record, so applying that release closes it (reason (i)) until the
+operator, with a fresh dump, runs `check` and `run` once under the same alias and
+width. That run re-embeds every entity under the single recipe and writes the
+first record at epoch 1. Until then graph reads and curation writes park and
+extraction waits; nothing is lost.
 
 ## 5. The cockpit (`web/`)
 
@@ -1328,7 +1433,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | `deploy/shared/` | Assets both deployment substrates read: `litellm/` — `register-models.py` (run by both installers), `policy.py`/`checks.sh` and the k3s profile's declared LiteLLM policy (`config.yaml`, `model-preferences.yaml`; the single profile's equivalents are `deploy/single/litellm-config.yaml` and `deploy/single/models.json`). `gateway/executor.py` and `runtime/tools.py` name these files by path | — | [`deploy/shared/README.md`](../deploy/shared/README.md) |
 | `deploy/n8n/` | The mail and calendar façade workflows as code; applied by both updaters | `apply-workflows.sh` | [`deploy/n8n/README.md`](../deploy/n8n/README.md) |
 | `deploy/discover.sh`, `deploy/AIRGAP.md` | Environment discovery and the mirror / CA / proxy seams for restricted networks (`deploy/env-lib.sh` maps the answers to settings). Registry mirrors are per-upstream: `CC_REGISTRY_DOCKERIO`, `CC_REGISTRY_GHCR`, `CC_REGISTRY_MCR` | `discover.sh` | [`deploy/AIRGAP.md`](../deploy/AIRGAP.md) — **first**, for any mirrored or no-egress install |
-| `deploy/graphiti-patches/` | The two graphiti-core fixes the project carries, as patch files; applied to the installed package by `integrations/graphiti_patches.py` (`scripts/apply_graphiti_patches.py` at install time), pinned and checked at ingest | — | [graph rules](../.claude/rules/graph.md) |
+| `deploy/graphiti-patches/` | The three graphiti-core fixes the project carries (two upstream, and a local one that makes an entity's vector its name plus summary, shared with the curation writer through `embedding_text`), as patch files; applied to the installed package by `integrations/graphiti_patches.py` (`scripts/apply_graphiti_patches.py` at install time), pinned and checked at ingest | — | [graph rules](../.claude/rules/graph.md) |
 | `docker-compose.yml` (root) | The dev database only: `cc-postgres` on 127.0.0.1:**5442** with the schema auto-loaded | `docker compose up -d postgres` | [AGENTS.md](../AGENTS.md) |
 
 **The k3s updater** (`cc-update.sh`), in order: resolve → version gate

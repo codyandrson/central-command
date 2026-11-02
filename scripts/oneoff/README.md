@@ -16,13 +16,13 @@ superseded by **D23**'s move of Jira to a native client
 (`central_command/integrations/jira.py`) — n8n keeps only the mail and
 calendar façades, where it already solved a hard OAuth problem.
 
-**`reembed_graph.py` is NOT spent** — it is, for now, the procedure for an
-embedding-model swap, cited by `skills/graphiti/references/operations.md`,
-`central_command/integrations/graphiti.py` and
-`deploy/shared/litellm/model-preferences.yaml`. Re-run it (dry run → `--apply` →
-`--verify`) any time the embedding model changes; it stays here because it is
-still a manual, deliberate-invocation operation. PRD FR-33 replaces it with the
-`graph_reembed` module and retires this script (build list, PRD §6.1 item 6).
+**The graph re-embed script was DELETED** (epic embedder-integrity): it re-embedded the
+graph in place with no record of the embedder, skipped community nodes and could
+not tell a same-width model swap from no swap. `python -m
+central_command.graph_reembed` replaced it (PRD FR-33, DL-149 as amended, DL-202):
+the graph records its embedder and closes on a mismatch, and the operator re-embeds
+it offline with `check` then `run` (runbook: `deploy/k3s/README.md`, "Changing the
+embedding model"). The old script is in git history before that release.
 
 **`repair_spend_prices.py` is NOT spent until a deployment that booked the
 bad prices has run it** (v2.33.0, 2026-09-14): it re-prices LiteLLM spend rows

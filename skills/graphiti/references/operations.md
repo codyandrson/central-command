@@ -168,62 +168,125 @@ is a graph **write outage**, not a degraded capability: ingest jobs cannot
 complete until it is back. The LLM being down is the degradable case; the
 embedder being down is not. Report them differently.
 
-## Changing the embedding model (a migration, never a swap)
+## Changing the embedding model (a migration, an accepted outage)
 
-`cc-embedding` being re-pointable in the LiteLLM UI does NOT make an embedder
-change a config change. Vectors from two models are not comparable — even at
-the same width — so a re-point without a re-embed leaves hybrid search
-returning plausible-looking nonsense with no error anywhere. Investigated
-2026-08-30 against the live graph and graphiti_core source:
+`cc-embedding` is the one alias Central Command ever addresses, and the model
+behind it changes in LiteLLM only — never in Central Command, never as a second
+alias. Vectors from two models are not comparable, even at the same width, so
+the graph does not trust the alias: it records its own embedder and refuses to
+be read or written when the two disagree.
 
-- Embeddings live as plain float-array properties: `Entity.name_embedding`
-  and `RELATES_TO.fact_embedding` (community nodes carry `name_embedding`
-  too, when any exist).
-- **There is no Neo4j vector index.** graphiti_core builds only
-  RANGE/FULLTEXT/LOOKUP indexes and scores similarity per-row with the
-  scalar `vector.similarity.cosine()` in Cypher. So there is no
-  index-drop/rebuild step, and nothing at the database level enforces the
-  dimension — the enforcement is two hand-synced declarations that MUST
-  change together: the app's `CC_EMBED_ALIAS`/`CC_EMBED_DIM` (config.py,
-  which the in-process graphiti-core embedder is built from), and
-  `EMBEDDER_MODEL`/`EMBEDDER_DIMENSIONS` for the migration script.
+**The record.** One node, `(:CCGraphMeta {key: 'embedder'})`, written by the
+module and by nothing else (the one exception is the first write into an EMPTY
+graph, which declares the configured embedder). It holds `alias`, `dimensions`,
+`epoch` (+1 per completed migration), `text_recipe` (names how an entity and a
+fact are turned into the text that is embedded), `state` (`stable`,
+`migrating` or `awaiting_config`), three `canary_texts` with their
+`canary_vectors`, `upstream_model` (LiteLLM's name for the model, as
+information), `updated_at`, `history` (one line per completed run) and
+`committed_at`. `python -m central_command.graph_reembed status` prints it.
 
-**Same-dimension swap (new model, still 1024d):**
-1. Re-point `cc-embedding` in the LiteLLM UI (or register the new model and
-   re-point the role at it). The application sends only the alias name, so no
-   name or dimension declaration changes.
-2. Re-embed everything — NOT optional. Today that is
-   `python3 scripts/oneoff/reembed_graph.py` (dry run) → `--apply` →
-   `--verify`, the interim procedure: PRD FR-33 replaces it with an
-   operator-run module that records the embedder in the graph itself, fails
-   closed on a mismatch, gives each model its own alias and fixes the
-   text recipe in the same change (build list §6.1 item 6, which retires the
-   script). Until that ships, a same-width model swap that skips the re-embed is
-   not detected. On the host the app runs on; needs `NEO4J_PASSWORD` and
-   `EMBEDDER_API_KEY` set in the shell — the latter is any LiteLLM key that
-   reaches `cc-embedding` (the app's `CC_LLM_API_KEY` does — export it under
-   that name for the run). Neo4j HTTP is loopback-only.
+**The check, and what closes the graph.** One cached check (30 seconds) runs at
+the ingest worker's claim, the four curation writes, every graph search and the
+`graph-embedder` self-check row. It closes the graph, with the reason on the
+outage banner and the remedy `run: python -m central_command.graph_reembed
+status`, when: (i) the graph has vectors and no record, (ii) the record's alias
+or width differs from the settings, (iii) the vectors in the graph are not the
+record's width, (iv) the model behind the alias has changed — the three canary
+texts, embedded now, no longer match the stored canary vectors (cosine below
+0.999), which is how a same-width swap is caught — or (v) a migration is in
+progress. A closed graph is the `embedder` dependency DOWN: reads and writes
+park, nothing fails open, no keyword-only mode, and the work resumes by itself
+once the record and the configuration agree again. An empty graph is open.
+Bolt-only reads and deletions keep working while it is closed.
 
-**Different-dimension swap — all of the above, plus:**
-- Change `CC_EMBED_DIM` in the app's `.env` (setup.sh REFUSES a drifted
-  value until you clear it deliberately — that refusal is the guard, respect
-  it) and `EMBEDDER_DIMENSIONS` for the script, in the same change; the
-  application builds its embedder once per process, so it picks the new width
-  up on its next restart.
-- Mixed-width vectors coexist on the same property mid-migration and
-  `vector.similarity.cosine()` behavior on a width mismatch is unverified —
-  prefer a stop-writes-then-migrate window (dispatch off, no curation)
-  rather than migrating under load.
+**A migration is an outage the operator accepts.** The app does not need to
+work while it runs. `run` closes the graph, re-embeds every entity, fact and
+community in place through the alias as it now points, rewrites the record and
+opens the graph again. There is no staging, no second graph and no rollback
+window; the rollback is the dump taken first.
 
-**Stamps:** the reembed script records `embedding_model` +
-`embedding_dimensions` beside every vector it writes and keys its
-resumability and `--verify` on them. The curation writer stamped its own
-writes from v2.8.1 to v2.60.0 and no longer does (v2.61.0): extraction never
-stamps either, upstream's readers surface any unknown property as an entity
-attribute, and the stamps are stripped from search results. An unstamped
-row is simply "pending" to the script, so between migrations `--verify`
-reports every row written since the last run as unstamped — expected, not
-drift.
+The sequence:
+
+1. **A fresh backup.** `run` refuses without a `neo4j_<stamp>.dump.gz` in the
+   backup directory that passes `gzip -t`, is over 1024 bytes, is not a
+   `pre-update` file and is under an hour old (the age is read from the stamp in
+   the file name, not the file time). The module never takes the backup. On the
+   multi-node profile run `deploy/k3s/backup.sh`. The single-node profile has no
+   Neo4j backup, so take one by hand (the `neo4j-admin` dump runs against a
+   stopped database; do it in the operator's maintenance window):
+   `neo4j-admin database dump neo4j --to-stdout | gzip > <dir>/neo4j_<stamp>.dump.gz`
+   where the stamp is `%Y%m%dT%H%M%SZ`. The backup directory is
+   `CC_BACKUP_DIR`, else the running user's `~/cc-backups`; `--backup-dir`
+   overrides both. `run` also refuses within 15 minutes either side of the
+   03:00 nightly backup (`--ignore-backup-window` if it is disabled).
+2. **Re-point `cc-embedding` in the LiteLLM UI.** The next check closes the graph
+   with reason (iv), and the banner shows `embedder` down with the remedy. That
+   is expected, and it is the proof the detector works. For a hosted embedder
+   the cost is one embedding per entity, fact and community; `check` reports the
+   counts and the tokens (from the proxy's counter, or marked estimated).
+3. **`python -m central_command.graph_reembed check`.** Read-only. Run it from
+   the checkout, as the user that owns it: the settings come from the checkout's
+   `.env`. It counts the graph by kind and width, embeds through the alias with
+   the app's key and reports the width it measured, runs the alignment probe
+   (one batch of repeated and different texts, each position equal to its own
+   single call, which reproduces the 2026-09-01 cache incident), reads LiteLLM's
+   cache configuration (`GET /cache/ping`, with `CC_LLM_PROXY_BASE_URL` and
+   `CC_LLM_PROXY_ADMIN_KEY`) and refuses if the cache covers embeddings, and
+   checks the dump. It exits 0, or 3 naming the fix. On a copy of the live graph
+   it took 3 seconds.
+4. **`python -m central_command.graph_reembed run`.** It requires the same
+   checks to pass, writes `state=migrating` (every gate is closed within the
+   check's 30-second cache; `run` waits that out plus 5 seconds, 35 in all),
+   waits for an extraction job that is still running, then re-embeds in
+   batches of 32 and verifies: every vector the measured width, none lost,
+   the canaries agree, no identical vectors for different texts, three
+   searches through the real read path, and a sample compared against a fresh
+   single embedding. On success it writes the record (`epoch` + 1, a history
+   line), sets `state=stable`, and the gates reopen within the cache's
+   30 seconds; the report is saved under `<backup-dir>/reembed/`. Rehearsed on
+   a copy of a small graph: 209 vectors in 47 seconds (about 4.5 vectors a
+   second on a local 1024-wide embedder), plus the wait.
+   A second run is idempotent: the epoch goes up once more and the history gains
+   a line.
+5. **Confirm.** `status` reads `epoch`, `stable`, the alias and width. The
+   banner clears within one sweep (a `dependency.up` for `embedder`), and a
+   search answers.
+
+**If the width changes** (a model with a different number of dimensions): `run`
+still re-embeds everything and records the width it measured, but it ends
+`awaiting_config`, closed, exit 3, with the line
+`the graph is re-embedded at width <m> and CC_EMBED_DIM is <d>: set CC_EMBED_DIM=<m> in .env, restart the units (the setting is bound at import), then run: python -m central_command.graph_reembed run --finish`.
+The setup drivers refuse to change `CC_EMBED_DIM` themselves, which is the guard;
+this is the one path that sets it, by the operator. Set the key, restart the
+units yourself (the module restarts nothing), then `run --finish`: it checks that
+the record and the configuration agree, verifies, and sets `stable`. A same-width
+change needs no edit and no restart.
+
+**If a run is killed** (or exits 2 or 3 mid-pass) the record stays `migrating`
+and the graph stays closed. Run `run` again: it redoes the whole pass, and the
+epoch is counted once. There is no lock against two runs at once, so do not
+start a second while one is going. A refusal before the first write
+(`run refused: nothing was changed`) leaves the graph exactly as it was.
+
+**Rollback.** Either restore the dump taken in step 1 by the procedure in the
+k3s README (it brings back the graph and its record as they were, so the alias
+must point at the old model again too, or the check closes the graph at once), or re-point `cc-embedding` back
+in LiteLLM and run `run` again: the graph is re-embedded by the old model and the
+epoch goes up. Nothing else is retained.
+
+**The first use after the release that introduced this.** The graph already
+holds vectors and has no record, so that release's update closes it (reason (i))
+until the operator runs `check` and `run` once, with a fresh dump, under the
+same alias and width. That one run also re-embeds every entity under the single
+text recipe (an entity is its name, a newline and its summary; a fact is its
+text), so no vector is left in the older name-only form. Do it straight after the
+update.
+
+**Text recipe.** One function, `contract/embedding_text.py`, is the recipe for
+the curation writer, the module and the third carried graphiti-core patch (see
+`deploy/graphiti-patches/`), which makes the extractor embed an entity's name and
+summary rather than the name alone. The record's `text_recipe` names it.
 
 ## Where knowledge comes from
 

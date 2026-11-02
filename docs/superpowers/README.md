@@ -43,7 +43,7 @@ This indexes the design records under `docs/superpowers/`: specs, plans, and res
 | 2026-07-27 | [Stage 5 — Coaching experiences: hire the coach](specs/2026-07-27-coaching-experiences-design.md) | partial | `central_command/runtime/coach_profile.py` |
 | 2026-07-26 | [The Skills Library — design](specs/2026-07-26-skills-library-design.md) | implemented | `central_command/runtime/packs.py` |
 | 2026-07-26 | [Quality-router migration — design](specs/2026-07-26-quality-router-migration-design.md) | superseded | `docs/superpowers/specs/2026-07-27-default-alias-seam-design.md` |
-| 2026-07-26 | [Local model serving + embedding migration — design](specs/2026-07-26-local-serving-and-embedding-migration-design.md) | partial | `central_command/integrations/neo4j_writer.py`, `scripts/oneoff/reembed_graph.py` |
+| 2026-07-26 | [Local model serving + embedding migration — design](specs/2026-07-26-local-serving-and-embedding-migration-design.md) | partial | `central_command/integrations/neo4j_writer.py`, `central_command/graph_reembed.py` |
 | 2026-07-26 | [Adaptive routing that learns — design](specs/2026-07-26-adaptive-routing-that-learns-design.md) | superseded | `deploy/shared/litellm/model-preferences.yaml` |
 
 ## Plans (18)

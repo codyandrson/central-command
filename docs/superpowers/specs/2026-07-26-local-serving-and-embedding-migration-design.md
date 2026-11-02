@@ -1,8 +1,8 @@
 # Local model serving + embedding migration — design
 
 > **Status:** partial — Units 2-4 built (co-resident embedder, Graphiti via LiteLLM, resumable re-embed); Unit 1 (llama-server router mode) not built
-> **As-built:** `central_command/integrations/neo4j_writer.py`, `scripts/oneoff/reembed_graph.py`
-> **As-built note (2026-09-20):** Units 2-4 built — the co-resident embedder, Graphiti repointed through LiteLLM, and the stamped, resumable re-embed are live. Unit 1 (llama-server router mode) was not built as specified; a model-swapping proxy in front of llama.cpp serves the same one-model-at-a-time goal outside this repo.
+> **As-built:** `central_command/integrations/neo4j_writer.py`, `central_command/graph_reembed.py`
+> **As-built note (2026-09-20):** Units 2-4 built — the co-resident embedder, Graphiti repointed through LiteLLM, and the stamped, resumable re-embed were live. **Superseded (epic embedder-integrity, 2026-11-01):** the stamped, resumable one-off re-embed script in `scripts/oneoff/` is deleted; the graph now records its embedder and re-embeds offline under a closed gate through `python -m central_command.graph_reembed` (DL-149 as amended, DL-202). Unit 1 (llama-server router mode) was not built as specified; a model-swapping proxy in front of llama.cpp serves the same one-model-at-a-time goal outside this repo.
 
 > Status: design approved 2026-07-26 (The operator). Not yet planned or implemented.
 > Companion spec: `2026-07-26-adaptive-routing-that-learns-design.md`.

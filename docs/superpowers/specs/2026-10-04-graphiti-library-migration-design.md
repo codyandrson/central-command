@@ -387,7 +387,7 @@ generated through the library's embedder and stored with
 `db.create.setNodeVectorProperty` / `setRelationshipVectorProperty`, as the
 bulk path does. Whether `embedding_model`/`embedding_dimensions` — which
 upstream's reads surface as entity attributes — stay on nodes is settled in
-release 2 against what `reembed_graph.py` needs.
+release 2 against what the then re-embed script needed. (Settled: no stamps; the script is deleted and `python -m central_command.graph_reembed` replaced it, DL-149 as amended.)
 
 As built (v2.61.0): `tests/test_graph_write_shape.py` derives the bulk path's
 property sets for an entity, a fact, an episode and a MENTIONS edge from the

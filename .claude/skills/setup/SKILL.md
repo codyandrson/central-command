@@ -264,10 +264,12 @@ answer in conversation (then you write the answer into `.env`).
   values are the UPSTREAM model ids (`deploy/single/discover-llm.sh models`
   lists what a server names them — the operator's command). Either way the
   operator owns the values; a row they fill in the UI always wins over `.env`.
-- **The embedding-permanence warning** — say it in one sentence: the
-  embedding choice is effectively permanent, because `CC_EMBED_DIM` gets
-  used as the width of every vector the graph stores; changing the embedder later means
-  re-embedding the whole graph. **Leave `CC_EMBED_DIM`
+- **The embedding-change warning** — say it in one sentence: the embedding
+  choice is costly to change, because `CC_EMBED_DIM` is the width of every vector
+  the graph stores and the graph records its embedder; changing the model later is
+  an offline migration (a fresh dump, a re-point in LiteLLM, then `python -m
+  central_command.graph_reembed check` and `run`) and an outage the operator
+  accepts. **Leave `CC_EMBED_DIM`
   blank** — the run measures it, and refuses to overwrite a different value
   that is already there.
 - **Enable flags** — `CC_ENABLE_N8N` (default 0; only needed by an

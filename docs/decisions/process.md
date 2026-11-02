@@ -918,33 +918,38 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** test: `tests/test_token_budget_retired.py::test_no_token_budget_setting_remains_under_central_command` (the valve half; the enterprise-features half is a design position with nothing to enforce)
 - **Source:** PRD addendum §B and §E (MODELS-018, MODELS-024)
 
-### DL-149 — Embedding changes: per-vector stamps, a keyword-only freeze, a Postgres embedder record, a heartbeat re-embed, in-place rewrite and a second graph are rejected
+### DL-149 — Embedding changes: per-vector stamps, a keyword-only freeze, a Postgres embedder record, a heartbeat re-embed, an in-place rewrite visible to live search and a second graph are rejected
 
 - **Status:** active
 - **Date:** 2026-10-19
 - **Rule:** (recorded here) The embedding model changes only through the FR-33
-  migration (PRD §6.1 item 6; not yet built), and an
+  migration (PRD §6.1 item 6; built as `python -m
+  central_command.graph_reembed`, DL-202), and an
   embedding never falls back to a model with different weights. Rejected,
   each with its reason: per-vector embedding stamps; a keyword-only read
   mode during a freeze; an embedder record in Postgres; re-embedding as a
-  heartbeat action; an in-place vector rewrite; a second graph built and cut
-  over.
+  heartbeat action; an in-place vector rewrite that live search can see; a
+  second graph built and cut over.
 - **Why:** From the embedding-model-change research (PRD addendum §B). Stamps
   leaked into agent results and extraction never wrote them, so they were a
   claim, not a measurement. A keyword-only mode is a fail-soft fallback,
   which a standing ruling forbids (see DL-140). The embedder record belongs
   with the graph, because separate stores restore separately and a graph
   restore would contradict a Postgres record. A heartbeat re-embed is a
-  one-shot that needs its own state. An in-place rewrite leaves mixed
-  vectors visible to live search for the whole run, and a second graph
-  doubles storage for one operator. The local-serving record adds that
+  one-shot that needs its own state. An in-place rewrite
+  leaves mixed vectors visible to live search for the whole run, which is what
+  was rejected: the module rewrites in place only under a closed gate (DL-202),
+  where nothing can read a mixed state. A second graph doubles storage for one
+  operator. The local-serving record adds that
   vectors from different weights are incompatible, so a failed embedding
   write fails and retries; a second embedding host is legitimate only if it
   passes the same-weights checklist (model and revision, pooling, L2
   normalisation, output dimensions, instruction prefix, precision); the
-  re-embed is a tracked, resumable script, and the graph write path accepting
-  a workstation dependency was the operator's explicit availability trade.
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
+  re-embed is the operator-run module `central_command.graph_reembed`, redone
+  whole after a kill rather than resumed by stamps, and the graph write path
+  accepting a workstation dependency was the operator's explicit availability
+  trade.
+- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce (the mechanism that replaced the script is pinned under DL-202)
 - **Source:** docs/superpowers/specs/2026-07-26-local-serving-and-embedding-migration-design.md; docs/PRD.md FR-33, FR-34; PRD addendum §B (embedding rows)
 
 ### DL-150 — Provisional write-now-veto-later memory and Letta-style agent self-editing are rejected
@@ -1907,3 +1912,12 @@ hygiene, and how the test suite itself must be written. See
 - **Why:** FR-27 was distilled from the work-environment survey of 2026-08-21, a description of the toolset the work site already uses, not a request of the operator's; its draft-first mail and no-invitation meeting lines asked for a second step that the approval gate already is (a `mail.send` or `calendar.create_event` proposal shows every recipient or attendee, and nothing edits it between approval and execution). The operator ruled on 2026-11-01 ("I don't specifically care about draft at all"; "I also never requested anything for meetings") that `mail.send` and `mail.move` stay as built, dormant and granted to no agent, and that the EA's calendar writes stay as built. What the survey did expose were three real defects, fixed instead: Jira's hard-coded issue types and `Task` default fail on a site whose types include Feature, Risk and Test (a read tool and a required `issue_type` replace them); the availability read called a truncated window, a missing event list or a 2xx without `items` a free day (it now answers unknown, in data and in words, and an Exchange-only site counts as configured); the Exchange calendar delete fell back from `cancel()` to `item.delete()`, a hard delete behind a swallowed exception (every delete is `move_to_trash`, cancellations only when the account is the organiser, and the result line is the restore record). Rejected: draft-first mail with a digest check; Gmail draft, send and trash modes; a separate `calendar.send_invitations`; `mail.trash`; removing `mail.send`; and an execution-time or propose-time issue-type check, because Jira's 400 is already loud (FAILED, redraft) and a guard exists only for a failure that returns 200 and binds nothing. Open, outside this decision: Google's list mode emits no `event_id`, so on Google an agent has no readable id for an update or delete (pre-existing).
 - **Enforced:** test: `tests/test_jira_issue_types.py::test_no_collection_of_issue_type_names_remains_in_the_package`, `tests/test_jira_issue_types.py::test_arg_specs_require_an_issue_type`, `tests/test_ea_calendar.py::test_a_truncated_window_is_unknown_not_a_short_day`, `tests/test_exchange.py::test_no_path_in_the_client_reaches_a_hard_delete_or_a_cancel`
 - **Source:** CHANGELOG (the release after v2.78.0); docs/ARCHITECTURE.md "Work-site safety defaults"; `.claude/rules/integrations.md`; `docs/PRD.md` FR-27; epic-work-site-safety (kept privately)
+
+### DL-202 — An embedder change is an accepted outage: the graph records its embedder and closes on a mismatch, the model changes in LiteLLM only, and the operator re-embeds offline behind a fresh dump
+
+- **Status:** active
+- **Date:** 2026-11-01
+- **Rule:** (recorded here) The graph declares its embedder in a record of its own (`(:CCGraphMeta {key: 'embedder'})`), and one cached check closes every embedding read and write when the alias, the width, the model behind the alias (three canary vectors) or a migration in progress disagree with it; a graph with vectors and no record is closed, an empty one is open. The model changes in LiteLLM only (`cc-embedding` is the one alias the application addresses), and a change is an outage the operator accepts: `python -m central_command.graph_reembed check`, then `run`, re-embeds every vector in place under a closed gate behind a fresh dump the module requires and never takes. Rollback is that dump, or re-pointing the alias back and running `run` again.
+- **Why:** The operator ruled on 2026-11-01 ("we don't need the running app to work while this is done, we will take everything down, do the migration, and come back online. I don't care that this incurs an outage"), and that the model changes in LiteLLM, never in Central Command. That ruling superseded two answers the operator gave on 2026-10-19 to the research on embedding-model change: a new alias per model, and seven days of retained previous vectors for rollback. Nothing looked at what the graph held: the width guards compared configuration with configuration, the only migration was a script that wrote in place and skipped community nodes, and a same-width model swap behind the alias was undetectable, so search degraded with no error anywhere. With the app allowed to be down, the in-place rewrite that DL-149 rejected is safe, because the gate is closed for the whole pass and a kill is redone whole; what stays rejected is a rewrite live search can see. A mismatch is the `embedder` dependency DOWN, so every existing park path holds the work, spends no attempt and resumes by itself (DL-189); nothing falls back and there is no keyword-only mode (DL-140). The record lives in the graph, because separate stores restore separately. Rejected, each with its reason: a staged live migration (staging labels, a second alias, a cutover) — the complexity buys availability the operator declined; `adopt` of an unrecorded graph as it stands — it would bless vectors nobody measured, so a graph with vectors and no record is closed until the first `run`; a cockpit button or a heartbeat action — a migration is a command the operator runs deliberately, with a dump, watching; an embedder record in Postgres (DL-149); a rollback window of retained vectors — the dump is the rollback; a recall quality gate — what the model is worth is the operator's judgement when choosing it, and the checks measure that the vectors are consistent; gating bolt-only reads — they embed nothing, and curation deletions must stay possible while the graph is closed. The first use after the release closes the live graph until the operator runs `check` and `run` once, which also re-embeds every entity under the single text recipe (name, newline, summary; a fact is its text) that the writer, the module and the third carried graphiti-core patch now share.
+- **Enforced:** test: `tests/test_embedder_record.py::test_each_code_closes_the_read_with_its_reason`, `tests/test_embedder_record.py::test_the_gate_sits_after_the_embedding`, `tests/test_embedder_mismatch_outage.py::test_the_sweep_never_clears_a_recorded_mismatch_and_says_up_once_when_it_ends`, `tests/test_graph_reembed.py::test_a_kill_after_batch_one_leaves_it_closed_and_a_re_run_ends_stable`, `tests/test_graph_reembed_boundary.py::test_nothing_under_runtime_or_gateway_names_the_module`
+- **Source:** docs/ARCHITECTURE.md "The graph declares its embedder"; `central_command/integrations/embedder_record.py`; `central_command/graph_reembed.py`; `skills/graphiti/references/operations.md`; `docs/PRD.md` FR-33; epic-embedder-integrity (kept privately)

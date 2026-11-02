@@ -105,9 +105,9 @@ def _iso(value) -> str | None:
 def _no_embedding(attributes: dict | None) -> dict:
     """Upstream's readers surface every property they do not know as an
     ATTRIBUTE, so the `embedding_model`/`embedding_dimensions` stamps the
-    curation writer wrote until v2.61.0 (and that `scripts/oneoff/
-    reembed_graph.py` still writes) would ride into agents' results. Any key
-    containing 'embedding' is dropped, as the retired server dropped it."""
+    curation writer wrote until v2.61.0 (and that the retired re-embed script
+    wrote) would ride into agents' results. Any key containing 'embedding' is
+    dropped, as the retired server dropped it."""
     return {k: v for k, v in (attributes or {}).items() if "embedding" not in k.lower()}
 
 

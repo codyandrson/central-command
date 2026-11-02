@@ -202,7 +202,10 @@ for every row and asks nothing. (Under Git Bash, a non-TTY stdin is usually the
 Two properties make the loop worth running:
 
 * **it changes nothing but `.env`** — and inside `.env`, only `CC_STATE_DIR` and
-  `CC_EMBED_DIM` (measured from the upstream embedder, written only when unset).
+  `CC_EMBED_DIM` (measured from the upstream embedder, written only when unset;
+  changing the embedder later is a migration, not an edit: `python -m
+  central_command.graph_reembed check`, see "Changing the embedding model" in
+  `skills/graphiti/references/operations.md`).
   Triage means editing `.env`, never a script, a Dockerfile or `images.txt`.
 * **it is the GATE.** The full run starts with it and refuses to continue past a
   `FAIL` or a `USERACTION`. A WARN-only check continues with
@@ -234,7 +237,10 @@ inputs, not builds.**
 * `CC_EMBED_DIM` is measured, never declared. `check` measures it against the
   upstream embedder and writes it only when unset; the `llm` phase measures it
   again through the proxy alias — the path production takes — and FAILS on a
-  mismatch rather than overwriting it.
+  mismatch rather than overwriting it. That failure is the guard, not a defect:
+  the graph records its embedder and closes on a change, and the operator
+  re-embeds it offline (`python -m central_command.graph_reembed check`, then
+  `run`), which ends by naming the width to set if it changed.
 * The podman machine's own process environment (see below).
 
 The target is "no CONFIGURATION failure at setup", not "no failure of any kind".

@@ -38,7 +38,25 @@ when a matching file is read.
   waits), a mis-sized vector is refused loudly (`EmbedWidthError`; nothing
   schema-side enforces the width), and there is no second embedder to fall back
   on — the old best-effort "degraded write" that stored a node invisible to
-  semantic search is gone. `embed()` returns `None` only for empty text. Neo4j
+  semantic search is gone. `embed()` returns `None` only for empty text.
+  **The graph declares its embedder, and a mismatch closes it** (epic
+  embedder-integrity, DL-149 as amended and DL-202): `(:CCGraphMeta {key:
+  'embedder'})` holds the alias, width, epoch, text recipe, state and three canary
+  vectors, and `integrations/embedder_record.check()` (one cached function) closes
+  five gates when it disagrees with the settings or the model behind
+  `cc-embedding` — the ingest worker's claim, the curation writer's four embedding
+  writes (after `embed()`, never inside it: the dispatcher shares `embed()`),
+  `graphiti._search`, the sweep (`embedder` DOWN with the reason, so work parks and
+  no attempt is spent) and the `graph-embedder` self-check. A graph with vectors
+  and no record is closed; an empty one is open, and its first vector write
+  declares the record. Nothing falls back and nothing is keyword-only. The model
+  changes in LiteLLM only, and then the operator runs `python -m
+  central_command.graph_reembed check` and `run` offline behind a fresh dump —
+  never a second alias, never a per-vector stamp, never a button or a heartbeat
+  action, and `runtime/` never imports the module. An entity's vector is its
+  name, a newline and its summary, a fact's is its text, both from
+  `contract/embedding_text.py` — the writer, the module and the third carried
+  patch share it, so a change to it needs a re-embed. Neo4j
   5.x has no parameterized labels, hence the closed `ENTITY_TYPES` allowlist
   mirroring `integrations/graph_ontology.py` (a test pins the two equal).
 - **The bulk path's shape is canonical; a model's `save()` writes a different
@@ -170,10 +188,14 @@ when a matching file is read.
   carry upstream #1729 (invalidation scope) and #1666 (reasoning-first dedupe)
   as patch files in `deploy/graphiti-patches/`, applied to the INSTALLED
   package by `scripts/apply_graphiti_patches.py` after every dependency
-  install (setup, the updater, and by hand in a development environment); the
+  install (setup, the updater, and by hand in a development environment); a
+  local third patch rides in the same directory (an entity's vector is name plus
+  summary, shared with the writer through `embedding_text`); the
   ingest worker refuses to extract without them and the self-check's
-  `graph-patches` row says so — drop both when they merge upstream and the pin
-  moves. Before blaming extraction quality on the model, check the
+  `graph-patches` row says so — drop the first two when they merge upstream and
+  the pin moves; the third has no upstream number and goes only if graphiti-core
+  itself embeds the summary (then `embedding_text` and the patch change together,
+  with a re-embed). Before blaming extraction quality on the model, check the
   invalidation scope, the sampling (unset temperature means the backend
   default, not deterministic — `graph_llm_temperature` is 0), and the field
   ORDER of the schema (with schema-constrained decoding, index arrays before a

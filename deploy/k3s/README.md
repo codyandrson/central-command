@@ -378,8 +378,10 @@ python scripts/apply_graphiti_patches.py             # AFTER every install
 ```
 
 The knowledge graph's extraction and search run inside the API through
-graphiti-core (no Graphiti pod). Two upstream fixes we carry
-(`deploy/graphiti-patches/`) are applied to the INSTALLED package by
+graphiti-core (no Graphiti pod). Three fixes we carry — two upstream ones and a
+local one that makes an entity's vector name plus summary, shared with the
+curation writer through `contract/embedding_text.py`
+(`deploy/graphiti-patches/`) — are applied to the INSTALLED package by
 `scripts/apply_graphiti_patches.py` — after every dependency install, because
 an install puts back a pristine copy. It is idempotent and atomic (uv's
 hardlinked cache is never written through), and `--check` reports without
@@ -907,6 +909,58 @@ report which target answered. Whatever the outcome, delete the pod:
 ```bash
 sudo k3s kubectl -n cc-sandbox delete pod reach-drill
 ```
+
+## 9a. Changing the embedding model
+
+The model behind `cc-embedding` changes in LiteLLM and nowhere else, and a change
+is an **outage the operator accepts**: the graph records its embedder, closes the
+moment the model behind the alias no longer matches, and stays closed (reads and
+writes park, the outage banner names `embedder` and the remedy) until one
+offline command has re-embedded every vector. Reasons and the record's fields:
+`skills/graphiti/references/operations.md`, "Changing the embedding model", and
+`docs/ARCHITECTURE.md`, "The graph declares its embedder". Run everything below
+from `<checkout>`, as the user that owns it (the settings come from the root
+`.env`), in its venv.
+
+1. **A fresh dump.** `sudo <checkout>/deploy/k3s/backup.sh` (Neo4j goes to zero
+   for about a minute and comes back). `run` refuses without a
+   `neo4j_<stamp>.dump.gz` in `$CC_BACKUP_DIR` (else the running user's
+   `~/cc-backups`; `--backup-dir` overrides) that passes `gzip -t`, is over 1024
+   bytes, is not a `pre-update` file and is under an hour old by the stamp in its
+   name, and inside 15 minutes either side of the 03:00 nightly timer. If the
+   dump is root-owned and 0600, make sure the user running the module can read it.
+2. **Re-point `cc-embedding` in the LiteLLM UI.** Within a check's cache (30
+   seconds) the graph closes with reason (iv) and the banner shows `embedder`
+   down: expected.
+3. **`python -m central_command.graph_reembed check`.** Read-only; exits 0, or 3
+   naming the fix. It reports the census by kind and width, the width the alias
+   answers at, the alignment probe, LiteLLM's cache configuration (read with
+   `CC_LLM_PROXY_BASE_URL` and `CC_LLM_PROXY_ADMIN_KEY`), the dump and the token
+   count. It took 3 seconds on a copy of the live graph.
+4. **`python -m central_command.graph_reembed run`.** Closes the graph
+   (`state=migrating`), waits the check's cache plus 5 seconds (35 in all), then
+   re-embeds every entity, fact and community in place and verifies. Rehearsed on
+   a copy of the live graph: 209 vectors in 47 seconds. The graph reopens by
+   itself within 30 seconds of `state=stable`, with one `dependency.up` for
+   `embedder`. `python -m central_command.graph_reembed status` reads the record.
+5. **A different width.** `run` ends `awaiting_config`, closed, exit 3, naming
+   `CC_EMBED_DIM=<m>`. Set it in the root `.env` (the setup drivers refuse to),
+   restart `cc-uvicorn` yourself (the setting is bound at import, and the
+   module restarts nothing),
+   then `python -m central_command.graph_reembed run --finish`.
+6. **A killed or failed `run`** leaves the graph closed with the record
+   `migrating`; run `run` again, which redoes the whole pass and counts the epoch
+   once. There is no lock against two runs at once.
+7. **Rollback.** Restore the dump (backup.sh's RESTORE section, the dumper-pod
+   cycle, including the `chown -R 7474:7474 /data`) **and** re-point the alias
+   back, or re-point the alias back and `run` again.
+
+**The first use after the release that introduced this.** The live graph holds
+vectors and no record, so applying that release closes it (reason (i): `graph has
+vectors but no embedder record`) until you take a fresh dump, then `check` and
+`run` once, under the same alias and width. That run also re-embeds every entity
+under the single text recipe. A graph of a few hundred vectors takes about a
+minute (rehearsed: 209 vectors in 47 seconds) plus the 35-second wait. Until then graph reads park and extraction waits; nothing is lost.
 
 ## 10. Rollback
 
