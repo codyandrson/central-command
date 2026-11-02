@@ -933,5 +933,29 @@ def test_a_dev_default_database_password_does_not_mask_the_package_name(monkeypa
 def test_a_random_database_password_is_masked_everywhere(monkeypatch):
     secret = "k3Zq9vXw2LmN8pRt"
     monkeypatch.setattr(settings, "database_url", f"postgresql://cc:{secret}@127.0.0.1:5442/x")
-    out = selfcheck._redact(f"a {secret} b {secret}.x postgresql://cc:{secret}@h/x")
+    out = selfcheck._redact(f"a {secret} b {secret}_x postgresql://cc:{secret}@h/x")
     assert secret not in out
+
+
+def _redact_with(monkeypatch, secret, text):
+    monkeypatch.setattr(selfcheck, "_secret_values", lambda: [secret])
+    return selfcheck._redact(text)
+
+
+def test_a_short_secret_is_masked_inside_a_longer_token(monkeypatch):
+    assert _redact_with(monkeypatch, "abc123", "pw=abc123x,") == "pw=***x,"
+    assert _redact_with(monkeypatch, "abc123", "abc123xy_suffix") == "***xy_suffix"
+
+
+def test_only_the_head_of_a_dotted_module_path_is_spared(monkeypatch):
+    assert _redact_with(monkeypatch, "hunter", "hunter said hi") == "*** said hi"
+    assert _redact_with(monkeypatch, "hunter", "hunter.module") == "hunter.module"
+    assert _redact_with(monkeypatch, "hunter", "x.hunter.module") == "x.***.module"
+
+
+def test_the_dev_default_password_keeps_the_module_path_and_masks_the_dsn(monkeypatch):
+    out = _redact_with(
+        monkeypatch, "central_command",
+        "python -m central_command.graph_reembed status; postgresql://cc:central_command@h/x",
+    )
+    assert out == "python -m central_command.graph_reembed status; postgresql://cc:***@h/x"

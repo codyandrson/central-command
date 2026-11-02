@@ -228,25 +228,22 @@ def _secret_values() -> list[str]:
     return sorted(set(values), key=len, reverse=True)
 
 
-_PACKAGE = "central_command"
-
-
 def _redact_secret(text: str, secret: str) -> str:
-    """Mask `secret` everywhere, except that a value too generic to be a secret
-    shape (short, the package name, or a lowercase word that this text uses as
-    a dotted module path) is masked only as a standalone token: a Postgres
+    """Mask every occurrence of `secret`, whatever its length or shape and even
+    inside a longer token, EXCEPT the head of a dotted module path: a Postgres
     password left at the dev default `central_command` must not turn
     `python -m central_command.graph_reembed` into `python -m ***.graph_reembed`.
-    Standing alone covers the DSN userinfo (`:<secret>@`) and a value followed
-    by whitespace or the end."""
-    generic = (
-        len(secret) < 8
-        or secret == _PACKAGE
-        or (re.fullmatch(r"[a-z_]+", secret) and re.search(rf"\b{re.escape(secret)}\.\w", text))
-    )
-    if not generic:
-        return text.replace(secret, "***")
-    return re.sub(rf"(?<![\w.]){re.escape(secret)}(?!\w)(?!\.\w)", "***", text)
+    The exception needs an identifier secret, a non-word, non-dot character (or
+    the start) before it and `.<word char>` after it; nothing else is spared."""
+    ident = re.fullmatch(r"[A-Za-z_]\w*", secret) is not None
+
+    def mask(m: re.Match) -> str:
+        if ident and (m.start() == 0 or not re.match(r"[\w.]", text[m.start() - 1])) \
+                and re.match(r"\.\w", text[m.end():m.end() + 2]):
+            return m.group(0)
+        return "***"
+
+    return re.sub(re.escape(secret), mask, text)
 
 
 def _redact(text: str) -> str:

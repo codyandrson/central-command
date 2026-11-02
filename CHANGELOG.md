@@ -4,6 +4,13 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-02 — v2.80.2: The self-check's redaction exemption is exactly a dotted module path's head
+
+v2.80.1's exemption was wider than the defect needed: a short or lowercase secret inside a longer
+token went unmasked. Every occurrence of every secret is masked again, whatever its length or shape,
+except the head of a dotted module path (`central_command.graph_reembed`), which is all the dev-default
+database password needed. No other behaviour changes.
+
 ## 2026-11-02 — v2.80.1: The re-embed check tells an unreadable dump from a corrupt one, and the self-check stops masking the package name
 
 Two message fixes found on the first use of v2.80.0; no behaviour changes beyond what is printed.
