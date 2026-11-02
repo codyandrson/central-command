@@ -4,6 +4,98 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-02 — v2.80.0: The graph declares its embedder, refuses a wrong one, and is re-embedded offline by one command
+
+epic-embedder-integrity. Ten commits since v2.79.0 (`v2.79.0..4f786415`), from seven stories.
+No value, host or account appears here.
+
+The graph now records the embedder it was built with, and refuses to answer through a different
+one. Changing the model is a LiteLLM re-point followed by one offline command behind a fresh dump.
+
+**Applying this release closes the live graph until the first use.** Within one sweep (300 s) of
+the apply, the outage banner shows `embedder` down with "graph has vectors but no embedder record ;
+run: python -m central_command.graph_reembed status". Graph reads and curation writes park,
+extraction waits, and the self-check row `graph-embedder` FAILs with that remedy. Nothing is lost,
+and the first use below opens it.
+
+**`min_upgrade_from` stays `2.77.0`, and this is a reviewed update** because the bundled graphiti
+skill docs change. No verdict is due: the library is current, so the updater posts the changed
+`operations` doc itself. The `graphiti-patches` step applies the third carried patch, and
+`graph-patches` then reads "carries all 3 fixes". The `n8n` phase re-imports nothing new.
+
+### The record and the gate
+
+- **The graph holds a record of its embedder:** alias, width, epoch, state, text recipe and three
+  canary vectors, on one `CCGraphMeta` node. An empty graph declares it on its first write.
+- **One cached check closes every graph read and write on a mismatch:** vectors with no record, a
+  different alias or width, a stored vector of another width, a different model behind the alias
+  (a same-width swap included, by the canaries), or a migration in progress. New settings:
+  `CC_EMBEDDER_CHECK_TTL_SECONDS` (30) and `CC_EMBEDDER_CANARY_THRESHOLD` (0.999).
+- **The write gates hold too.** The curation writer refuses a mismatch, and the ingest worker
+  claims only deletions, which need no embedding, while the graph is closed.
+
+### The held outage
+
+- **A mismatch is the `embedder` dependency DOWN, with its reason on the banner.** Work parks,
+  spends no attempt and resumes by itself. The sweep records it within one tick and clears it with
+  one `dependency.up` once the record and the configuration agree.
+- **`GET /api/outages` gains `error` while a dependency is down.** A probe error shown there carries
+  no URL userinfo or key. The Systems page's Graphiti card names the embedder, its epoch and state.
+
+### One text recipe and the third patch
+
+- **An entity's vector is its name, a newline and its summary, everywhere.** The curation writer,
+  the re-embed and a third carried graphiti-core patch share `embedding_text`. The patch is local
+  with no upstream number, and goes only if graphiti-core embeds the summary itself.
+- **Extraction holds between the app update and the patch step,** and its jobs stay queued. Reads
+  are not affected by that hold.
+
+### The module
+
+- **`python -m central_command.graph_reembed status|check|run` is the operator's command line, and
+  nothing else's:** no agent tool, route or heartbeat action reaches it. `check` is read-only: the
+  alias preflight, the alignment probe and the backup interlock. `run` re-embeds every entity, fact
+  and community in place under a closed gate, rewrites the record and verifies. A killed run leaves
+  the graph closed, and a re-run finishes it.
+- **A fresh dump is required and never taken for you.** `run` refuses one older than
+  `CC_GRAPH_REEMBED_BACKUP_MAX_AGE_SECONDS` (3600) by its name stamp, and refuses to start within 15
+  minutes of the nightly backup. Rollback is the dump, or re-pointing the alias back and running
+  `run` again.
+- **A width change ends `awaiting_config`** and names the `CC_EMBED_DIM` to set before
+  `run --finish`. The three `CC_EMBED_DIM` refusals in the installers stay refusals and name the
+  module. Runbook: `deploy/k3s/README.md` section 9a.
+- **Rehearsed end to end on a copy of the live graph:** two cycles, a kill mid-pass, two epochs. It
+  found two defects, both fixed here: the deployed proxy string-encodes `litellm_cache_params` on
+  `/cache/ping`, which the vendored document shows as an object, and the driver warned on every read
+  of a record that did not exist yet. One new event: `graph.reembed.run`.
+
+### First use
+
+Straight after the apply, from the live checkout's venv:
+
+```
+sudo systemctl start cc-backup.service
+python -m central_command.graph_reembed check
+python -m central_command.graph_reembed run
+```
+
+It runs under the same alias and width, so nothing is restarted. It re-embeds every entity under
+the one text recipe and writes the first record. A few hundred vectors take about a minute plus the
+35-second wait. The banner clears within one sweep.
+
+### The record
+
+- **Removed:** `scripts/oneoff/reembed_graph.py`.
+- **Decisions.** DL-149 amended, DL-202 added. PRD FR-33 (c) is amended to the offline shape on the
+  operator's authority.
+
+### Operator notes
+
+- **`run` uses the checkout's `.env` for Postgres as well as Neo4j.** On a model or width change it
+  clears `work_item.embedding` in that database. A rehearsal against a scratch graph needs a scratch
+  database too.
+- **Not guarded.** Nothing locks against two `run`s at once.
+
 ## 2026-11-01 — v2.79.0: Work-site safety: Jira issue types come from the instance, the availability read fails closed, and a calendar delete is never a hard delete
 
 epic-work-site-safety. Seven commits since v2.78.0 (`v2.78.0..7196aba1`), from four stories.
