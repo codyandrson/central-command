@@ -14,6 +14,7 @@ anywhere in `_prepare_window` sends the clip, never the raw record."""
 from __future__ import annotations
 
 import pytest
+import uuid
 from pydantic_ai.messages import ModelRequest, ToolReturnPart
 
 from central_command.config import settings
@@ -187,6 +188,22 @@ async def test_density_is_measured_from_what_the_proxy_counted(monkeypatch):
     assert context.density_for(name) == context.DENSITY_BOUNDS[1]
     context.record_density(name, msgs, RequestUsage(input_tokens=0))
     assert context.density_for(name) == context.DENSITY_BOUNDS[1], "no tokens counted, no change"
+
+
+async def test_density_counts_the_prompt_once(monkeypatch):
+    """2026-11-03: on the chat-completions wire `prompt_tokens` already holds the
+    cached part, which pydantic-ai reports again as `cache_read_tokens`. Summing
+    them halved the measured density and compaction fired at ~60% of the real
+    window. The calibration reads the prompt count alone, cached or not."""
+    from pydantic_ai.usage import RequestUsage
+
+    msgs = _transcript(turns=2, payload=3000)
+    chars = len(__import__("pydantic_ai.messages", fromlist=["x"]).ModelMessagesTypeAdapter.dump_json(msgs))
+    counted = chars // 2
+    name = "density-once-" + uuid.uuid4().hex[:6]
+    context.record_density(name, msgs, RequestUsage(input_tokens=counted, cache_read_tokens=counted // 2,
+                                                    cache_write_tokens=counted // 4))
+    assert abs(context.density_for(name) - 2.0) < 0.05, "cached tokens are a subset of the prompt, not extra"
 
 
 async def test_the_guard_trips_on_the_measured_density(monkeypatch):

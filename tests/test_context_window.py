@@ -355,3 +355,57 @@ def test_headroom_is_a_validated_number():
         routes.ContextSettingsIn(summarize_threshold=0.2)
     with pytest.raises(ValueError):
         routes.ContextSettingsIn(tool_results_keep_turns=-1)
+
+
+async def test_the_summary_runs_with_thinking_off(monkeypatch):
+    """2026-11-03: the summariser inherits the session's model and ran at its
+    thinking level — 9-21k tokens of deliberation before a 3-6k-token summary.
+    A summary is transcription: it asks for thinking OFF through the model's
+    declared mechanism, and the session's other settings still ride along."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from central_command.runtime import models as models_mod
+
+    seen = {}
+
+    def fn(messages, info):
+        seen["settings"] = dict(info.model_settings or {})
+        return ModelResponse(parts=[TextPart("SUMMARY")])
+
+    async def declared_off(model_name, level):
+        seen["asked"] = (model_name, level)
+        return {"chat_template_kwargs": {"enable_thinking": False}, "cache": {"no-cache": True}}
+
+    monkeypatch.setattr(models_mod, "_thinking_body", declared_off)
+    monkeypatch.setattr(settings, "test_model", False)
+    model = context.WindowedModel(FunctionModel(fn))
+    out = await context.summarize(model, _transcript(turns=2, payload=500))
+    assert out == "SUMMARY"
+    assert seen["asked"] == (model.wrapped.model_name, "off")
+    assert seen["settings"]["extra_body"]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+async def test_the_summary_degrades_to_the_default_when_nothing_is_declared(monkeypatch):
+    """No declared mechanism (or a proxy read that fails) sends no control: the
+    summary still runs, at the deployment default."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from central_command.runtime import models as models_mod
+
+    seen = {}
+
+    def fn(messages, info):
+        seen["settings"] = info.model_settings
+        return ModelResponse(parts=[TextPart("SUMMARY")])
+
+    async def boom(model_name, level):
+        raise RuntimeError("proxy unreachable")
+
+    monkeypatch.setattr(models_mod, "_thinking_body", boom)
+    monkeypatch.setattr(settings, "test_model", False)
+    out = await context.summarize(context.WindowedModel(FunctionModel(fn)), _transcript(turns=2, payload=500))
+    assert out == "SUMMARY"
+    assert not (seen["settings"] or {}).get("extra_body")
+

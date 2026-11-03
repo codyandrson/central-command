@@ -4,6 +4,32 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-03 — v2.82.1: Compaction counts the prompt once, and the summary never thinks
+
+A review of twelve inbox-triage sessions put about a third of their wall time inside context
+compaction calls that the sessions did not need. Two defects, one release:
+
+- **The density calibration counted cached tokens twice.** Every live model speaks chat-completions
+  to the proxy, and on that wire `prompt_tokens` is the whole prompt; the cached part is reported
+  again under `prompt_tokens_details.cached_tokens`, which pydantic-ai surfaces as
+  `cache_read_tokens`. `context.record_density` summed the two, so with half a prompt cached the
+  measured chars-per-token fell ~1.5x, every estimate rose ~1.5x, and the summariser fired near 60%
+  of the real window (ten compactions in eight sessions whose real peak never passed 60%). It now
+  calibrates on `input_tokens` alone. Nothing else about the window changes: the overflow clip,
+  the pressure note and the operator's thresholds read the corrected estimate.
+- **The summary runs with thinking off.** The summariser inherits the session's model, and with
+  it the session's thinking level; at the deployment's default it deliberated for 9-21k tokens
+  before writing a 3-6k-token summary — the largest generations in the proxy's log, 160-360 s
+  each. A summary is transcription, not judgment: `context.summarize` now asks for `off` through
+  the model's declared thinking mechanism (`models._thinking_body`), keeps every other pinned
+  setting, and sends no control at all when the model declares none, so an undeclared model is
+  unchanged.
+
+Not in this release, recorded for the operator: the deployment-level default thinking for the
+local alias is a LiteLLM row setting, not code — set it deliberately and resend every extra key
+when editing the row, because the proxy's update endpoint rebuilds the parameter block from what
+it is given.
+
 ## 2026-11-03 — v2.82.0: The app holds no clock on a model call shorter than LiteLLM's, never re-sends on its own, and a queued resume is never mistaken for a dead one
 
 On the first busy evening after v2.81.0 the single FIFO model slot built a fifteen-minute queue and

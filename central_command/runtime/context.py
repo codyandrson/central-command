@@ -157,10 +157,18 @@ def density_for(model: str | None) -> float:
 
 
 def record_density(model: str | None, messages, usage) -> None:
-    """Calibrate from what the proxy counted for `messages`. Cache tokens are
-    input the provider counted separately; they still occupied the window."""
-    tokens = sum(int(getattr(usage, f, 0) or 0)
-                 for f in ("input_tokens", "cache_read_tokens", "cache_write_tokens"))
+    """Calibrate from what the proxy counted for `messages`.
+
+    `input_tokens` alone. Every live model is an `OpenAIChatModel` against the
+    proxy's chat-completions endpoint (`models.py`, the one seam), and on that
+    wire `prompt_tokens` is the WHOLE prompt — the cached part is a subset
+    reported again under `prompt_tokens_details.cached_tokens`, which pydantic-ai
+    surfaces as `cache_read_tokens`. Adding the two counted every cached token
+    twice: with ~20k of a 40k prompt cached the density read ~1.5x too low, every
+    estimate ~1.5x too high, and compaction fired at ~60% of the real window
+    (ten summaries in eight triage sessions, 2026-11-03, each a 150-350 s model
+    call that the sessions did not need)."""
+    tokens = int(getattr(usage, "input_tokens", 0) or 0)
     if tokens <= 0 or not messages:
         return
     from pydantic_ai.messages import ModelMessagesTypeAdapter
@@ -511,15 +519,36 @@ def render_for_summary(messages, part_cap: int = 4000) -> str:
     return "\n".join(lines)
 
 
+async def _summary_settings(model) -> dict | None:
+    """Thinking OFF for the summary, whatever the session runs at. A summary is
+    transcription, not judgment: at the session's level the summariser
+    deliberated for 9-21k tokens before writing a 3-6k-token summary (the
+    largest generations in the whole proxy log, 160-360 s each, 2026-11-03).
+    The control is the model's DECLARED mechanism via `_thinking_body`, so an
+    undeclared model gets no control and the deployment default applies."""
+    if settings.test_model:
+        return None
+    try:
+        from central_command.runtime.models import _thinking_body
+
+        name = getattr(getattr(model, "wrapped", model), "model_name", None)
+        body = await _thinking_body(name, "off") if name else None
+    except Exception:  # noqa: BLE001 — a missing control is a dearer summary, never a dead run
+        return None
+    return {"extra_body": body} if body else None
+
+
 async def summarize(model, messages) -> str:
     """One bare model call over the rendered region. The session's own model
-    (its pinned settings ride along) — a summary written by a different model
-    than the one that will read it is a second seam to get wrong."""
+    (its pinned settings ride along, thinking excepted — see
+    `_summary_settings`) — a summary written by a different model than the one
+    that will read it is a second seam to get wrong."""
     from pydantic_ai import Agent, UsageLimits
 
     agent = Agent(model, name="context-summarizer", system_prompt=SUMMARY_PROMPT, output_type=str)
     result = await agent.run(
         render_for_summary(messages), usage_limits=UsageLimits(request_limit=1),
+        model_settings=await _summary_settings(model),
     )
     return result.output
 
