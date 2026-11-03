@@ -282,7 +282,13 @@ registration_only:
     registration:
       model: openai/PLACEHOLDER
       api_base: PLACEHOLDER
-      timeout: 300
+      # 6000, the same as cc-default (the operator's 2026-11-02 decision,
+      # DL-204): one FIFO slot answers both aliases, so a graph write waits
+      # behind agent turns exactly as a turn does, and the 300 s it had never
+      # failed outside a queue (3052 calls, p95 46 s) but failed four times in
+      # one. register-models.py is create-only: an EXISTING row keeps its
+      # value and reads as drift until the operator sets it in the LiteLLM UI.
+      timeout: 6000
     # THINKING OFF, ON THE ROW (declared 2026-09-26; hand-set since 2026-09-20).
     # A hybrid-thinking local model reasons before every structured extraction
     # call unless told not to, and graphiti-core only sends reasoning controls

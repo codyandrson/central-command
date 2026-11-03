@@ -1956,3 +1956,49 @@ hygiene, and how the test suite itself must be written. See
   `dispatch.held` event whenever the holders change.
 - **Enforced:** test: `tests/test_relatedness_hold.py` (the three holes, the fourth key, the outage release, the hub rules); `tests/test_ledger.py::test_parked_proposal_holds_related_items` (executed is not landed)
 - **Source:** `central_command/db/repo.py` (`_BUSY_ITEM`, `_RELATED_BUSY`, `held_work_items`); `central_command/ingest/entities.py`; `central_command/ingest/dispatcher.py` (`_entity_keys_for`, the loop's hold report); `docs/QUEUE.md` "What holds an item"
+
+### DL-204 — The app holds no clock on a model call shorter than LiteLLM's and never re-sends; a resume is an orphan only if armed before this process started
+
+- **Status:** active
+- **Date:** 2026-11-03
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**No client of the model holds a read timeout or a retry of its own.**"
+- **Why:** The operator decided on 2026-08-20 that a request to the single
+  FIFO model slot waits behind the whole queue rather than fail for waiting
+  (`cc-default` declared at 6000 s in LiteLLM), and on 2026-10-05 that
+  "anything that fails should try again or throw an error … we are using
+  LiteLLM for our routing and retry logic". Neither reached the app's own
+  clients, which carried library defaults: the OpenAI SDK's 600 s read timeout
+  and two automatic retries on the agents' provider and the graph client, and
+  a hand-written 180 s on the v2.81.0 claim-time extractor. On 2026-11-02 a
+  burst of six operator decisions resumed four triage sessions (26-37k-token
+  prompts, 400-870 s each in the queue); the SDK re-sent every turn over 600 s
+  at exactly 600 s as a NEW request behind its still-running original (ten
+  pairs in the spend log), the extractor timed out and the dispatcher claimed
+  the next copy of the same mail into the same queue (nine extraction calls,
+  all `success` upstream at 195-862 s), and the retry sweep's 900 s orphan age
+  re-drove four queued resumes as "died with its process" — one session
+  answered the operator twice and a duplicate proposal reached the Inbox.
+  LiteLLM meanwhile did its job: its timeout is 408, which it retries by
+  `num_retries` and the failure taxonomy parks as transient. A read timeout is
+  "no bytes for N seconds", and a non-streamed completion sends nothing until
+  it is done, so every client clock was a cap on queue time. Measured on the
+  deployed proxy image (1.98.0) that same night: with
+  `general_settings.cancel_on_disconnect: true`, llama.cpp stops within 2 s of
+  the caller disconnecting; without it the slot runs on to the token cap.
+- **Decision:** (1) One clock, `integrations/http.llm_timeout()` (connect
+  only), and one SDK client, `integrations/http.openai_client()`
+  (`max_retries=0`, the trust settings), taken by the agents' provider
+  (`OpenAIProvider(openai_client=...)`), the graph client and the extractor;
+  the only timeout on a completion is LiteLLM's per-model one. (2) A resume
+  marker is an orphan only if armed before `orchestration.PROCESS_STARTED_AT`
+  — a resume dies only with its process, and `arm` stamps the row — so the
+  startup sweep lands the previous process's orphans at once and the
+  recurring sweep can never re-drive a queued one. (3) In LiteLLM:
+  `cancel_on_disconnect: true` (read at proxy start; the updater's ConfigMap
+  refresh rolls the pod) and `graphiti-llm` declared at 6000 like
+  `cc-default` (the operator's 2026-11-02 decision; the existing row is set in
+  the UI, `register-models.py` being create-only). Declined by the operator
+  the same day: a cache-bypassing LLM probe (its cached "healthy" is cosmetic
+  once nothing times out).
+- **Enforced:** test: `tests/test_llm_client_clock.py` (the clock, the client, the three call sites, the orphan predicate both ways); `tests/test_resume_parking.py` and `tests/test_retry_sweep.py` stand in for a restart by moving `PROCESS_STARTED_AT`.
+- **Source:** `central_command/integrations/http.py` (`llm_timeout`, `openai_client`); `central_command/runtime/models.py`; `central_command/integrations/graphiti_client.py` (`_openai_client`); `central_command/ingest/entities.py` (`_complete`); `central_command/api/orchestration.py` (`PROCESS_STARTED_AT`, `park_orphaned_resumes`); `central_command/db/repo.py` (`sessions_with_orphaned_resume`); `deploy/shared/litellm/config.yaml`; `deploy/shared/litellm/model-preferences.yaml`.

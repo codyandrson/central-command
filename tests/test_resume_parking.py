@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
@@ -161,7 +162,8 @@ async def test_a_semantic_resume_failure_keeps_todays_behaviour(monkeypatch):
     # is a note, only a status flip is a retry.
     assert run["session_id"] not in await repo.sessions_awaiting_resume()
     assert run["session_id"] not in [
-        r["id"] for r in await repo.sessions_with_orphaned_resume(0)
+        r["id"] for r in await repo.sessions_with_orphaned_resume(
+            datetime.now(UTC) + timedelta(days=1))
     ]
     kinds = await _kinds(run["session_id"])
     assert "session.resume_failed" in kinds
@@ -453,7 +455,8 @@ async def test_a_killed_resume_is_recovered_by_the_sweep(monkeypatch):
 
     monkeypatch.undo()
     monkeypatch.setattr(settings, "test_model", True)
-    monkeypatch.setattr(settings, "dispatch_stale_claim_seconds", 0)
+    monkeypatch.setattr(orchestration, "PROCESS_STARTED_AT",
+                        datetime.now(UTC) + timedelta(days=1))  # "we restarted after it was armed"
     swept = await orchestration.resume_sweep()
 
     assert run["session_id"] in swept["orphaned"]
@@ -483,6 +486,6 @@ async def test_a_stale_marker_beside_a_new_call_is_not_re_driven(monkeypatch):
     assert state.get("pending_resume"), "the rejection should have armed a marker"
     assert state["pending_resume"]["tool_call_id"] != state["tool_call_id"]
 
-    monkeypatch.setattr(settings, "dispatch_stale_claim_seconds", 0)
-    orphans = [r["id"] for r in await repo.sessions_with_orphaned_resume(0)]
+    orphans = [r["id"] for r in await repo.sessions_with_orphaned_resume(
+        datetime.now(UTC) + timedelta(days=1))]
     assert session_id not in orphans

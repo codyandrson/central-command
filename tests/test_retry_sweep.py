@@ -98,7 +98,7 @@ def _empty_worklists(monkeypatch, *, sessions=(), proposals=(), tasks=(),
         assert due_only is True, "the sweep must respect the backoff"
         return list(sessions)
 
-    async def _orphans(age_seconds):
+    async def _orphans(armed_before):
         return list(orphans)
 
     async def _proposals(status=None, due_only=False):
@@ -562,13 +562,12 @@ async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch, wor
     """A resume killed with its process is recovered WITHOUT a restart.
 
     `resume_sweep` has owned the orphan worklist since 2026-08-15, but it runs
-    only at startup — and an orphan is invisible until it is older than
-    `dispatch_stale_claim_seconds`, because until then it is indistinguishable
-    from a resume still in flight. The restart that creates an orphan is the
-    same restart that runs the sweep, so the sweep always looks too early. On
-    2026-08-19 two triage sessions killed 100s before a restart sat AWAITING_
-    HUMAN over an EXECUTED and a REJECTED proposal for as long as the process
-    stayed up: armed, findable, and on nobody's cadence.
+    only at startup. On 2026-08-19 two triage sessions killed 100s before a
+    restart sat AWAITING_HUMAN over an EXECUTED and a REJECTED proposal for as
+    long as the process stayed up: armed, findable, and on nobody's cadence
+    (the orphan test was then an age, and the sweep looked too early; since
+    DL-204 it is "armed before this process started", which this test stands
+    in for by moving `PROCESS_STARTED_AT` past the marker).
 
     So this drives `fire(SWEEP_SCHEDULE)` — the heartbeat ENTRY, not the sweep
     function — because a worklist that exists only in the startup path is
@@ -601,7 +600,8 @@ async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch, wor
     # approval's single write).
     resweep_log = fake_world(monkeypatch)
     monkeypatch.setattr(settings, "test_model", True)
-    monkeypatch.setattr(settings, "dispatch_stale_claim_seconds", 0)
+    monkeypatch.setattr(orchestration, "PROCESS_STARTED_AT",
+                        datetime.now(timezone.utc) + timedelta(days=1))  # "we restarted after it was armed"
     _no_probes(monkeypatch, llm=True)
     _no_touch(monkeypatch)
 

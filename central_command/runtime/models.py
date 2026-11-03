@@ -181,7 +181,14 @@ async def _live_model(model_name: str, agent_id=None, thinking: str | None = Non
     base = base_url.rstrip("/")
     if not base.endswith("/v1"):
         base += "/v1"
-    provider = OpenAIProvider(api_key=api_key, base_url=base)
+    # The CLIENT is the app's (`http.openai_client`): no read timeout and no
+    # SDK retries, so the only clock on a turn is LiteLLM's per-model timeout
+    # and nothing re-sends a 30k-token prompt behind its own still-running
+    # original (DL-204). `OpenAIProvider(openai_client=...)` is pydantic-ai's
+    # documented way to supply one; api_key/base_url then live on the client.
+    from central_command.integrations import http as http_client
+
+    provider = OpenAIProvider(openai_client=http_client.openai_client(api_key, base))
     # max_tokens is pinned HERE, at the one model seam, rather than left to the
     # client default: an unset max_tokens is an unbounded generation on the
     # local model (llama.cpp n_predict -1), and the Anthropic-era client

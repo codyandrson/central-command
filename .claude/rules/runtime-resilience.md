@@ -13,6 +13,16 @@ Rules below exist because a real failure produced them. Trust the rule even
 where the story is gone. Moved verbatim from the root instructions; they load
 when a matching file is read.
 
+- **No client of the model holds a read timeout or a retry of its own.** The
+  model server is one FIFO slot; LiteLLM declares the per-model timeout and
+  owns the retry. Every completion client takes `integrations/http.llm_timeout()`
+  (connect only) and, when it is the SDK, `integrations/http.openai_client()`
+  (`max_retries=0`). A read timeout is "no bytes for N seconds" and a
+  non-streamed completion sends nothing until it is done, so a client clock
+  is a cap on queue time, and a client retry is a second copy of the prompt
+  behind the first (DL-204, the 2026-11-02 queue storm). Likewise a resume
+  is an orphan only if armed before `orchestration.PROCESS_STARTED_AT` —
+  never by age; a queued resume looks exactly like a dead one by status.
 - **An attachment reaches the agent as content, or the SEND fails — there is
   no third state** (`api/attachments.py`). Attachments are extracted to text
   at the GATEWAY (model-agnostic); nothing sends native multimodal blocks,

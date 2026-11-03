@@ -70,6 +70,14 @@ general_settings:
   # decided to make. Re-enable deliberately, after testing the probe, when a
   # routing direction is chosen.
   background_health_checks: false
+  # A caller that goes away (the API restarting, an operator's Cancel) takes
+  # its upstream request with it, instead of leaving llama.cpp generating an
+  # answer nobody will read on the one FIFO slot. Read at proxy START only (no
+  # runtime path applies it), so a change here needs the rollout the updater
+  # performs when this file changes. Measured 2026-11-02 on this image: with
+  # it, generation stops within 2 s of the disconnect; without it, the slot
+  # runs on to the token cap (DL-204).
+  cancel_on_disconnect: true
 
 litellm_settings:
   request_timeout: 300

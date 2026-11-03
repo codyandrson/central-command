@@ -426,15 +426,11 @@ def build_reranker(kind: str | None = None, alias: str | None = None):
 
 
 def _openai_client(api_key: str, base_url: str):
-    """One AsyncOpenAI per client, honouring the integration trust settings
-    (CC_CA_BUNDLE / CC_CLIENT_CERT) the other LiteLLM calls already use."""
-    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
-
-    kwargs = http_client.client_kwargs()
-    if kwargs:
-        return AsyncOpenAI(api_key=api_key, base_url=base_url,
-                           http_client=DefaultAsyncHttpxClient(**kwargs))
-    return AsyncOpenAI(api_key=api_key, base_url=base_url)
+    """One AsyncOpenAI per client — the app's (`http.openai_client`): the trust
+    settings, no read timeout, no SDK retries. graphiti-core re-raises
+    timeouts for "OpenAI's client" to retry, so the SDK default of 2 was a
+    third copy of every graph call in a queue (DL-204)."""
+    return http_client.openai_client(api_key, base_url)
 
 
 def _llm_client_class():

@@ -182,7 +182,8 @@ async def _complete(model_id: str, text: str) -> str | None:
     on `reasoning_content` first and a tight cap answers nothing (measured
     2026-11-01, two of fourteen calls at 2000 tokens)."""
     base = (settings.llm_base_url or "").rstrip("/")
-    async with httpx.AsyncClient(timeout=180, **http_client.client_kwargs()) as client:
+    async with httpx.AsyncClient(timeout=http_client.llm_timeout(),
+                                 **http_client.client_kwargs()) as client:
         resp = await client.post(
             f"{base}/v1/chat/completions",
             headers={"Authorization": f"Bearer {settings.llm_api_key}"},

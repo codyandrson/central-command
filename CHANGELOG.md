@@ -4,6 +4,39 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-03 — v2.82.0: The app holds no clock on a model call shorter than LiteLLM's, never re-sends on its own, and a queued resume is never mistaken for a dead one
+
+On the first busy evening after v2.81.0 the single FIFO model slot built a fifteen-minute queue and
+the cockpit reported timeouts against a "healthy" model. Every one of those calls had succeeded
+upstream. The queue was manufactured by client defaults nobody had chosen: the OpenAI SDK's 600 s
+timeout and two automatic retries re-sent ten 26-37k-token agent turns as fresh requests behind
+their still-running originals; the new claim-time entity extractor gave up at 180 s and the
+dispatcher claimed the next copy of the same mail into the same queue; and the retry sweep's
+orphan rule, a 900 s age, judged four merely-queued resumes "died with its process" and re-drove
+them, so one session answered the operator twice and a duplicate proposal reached the Inbox.
+LiteLLM already declared the operator's 6000 s per-model timeout and owns the retry (DL-204):
+
+- One clock, one client: `integrations/http.llm_timeout()` (connect only) and
+  `integrations/http.openai_client()` (`max_retries=0`, the trust settings). The agents' provider
+  (`OpenAIProvider(openai_client=...)`), the graph client and the extractor all take them, so the
+  only timeout on a completion is LiteLLM's per-model one, whose 408 the failure taxonomy already
+  parks as transient. The agent path now honours `CC_CA_BUNDLE` / `CC_CLIENT_CERT` too.
+- The orphan test is "armed before this process started" (`orchestration.PROCESS_STARTED_AT`),
+  not an age: a resume dies only with its process, and arming stamps the row. The startup sweep
+  now lands the previous process's orphans at once; the recurring sweep can never re-drive a queued
+  one. `CC_DISPATCH_STALE_CLAIM_SECONDS` keeps its one job, stale CLAIMED items.
+- LiteLLM declarations: `general_settings.cancel_on_disconnect: true` (a caller that goes away
+  takes its upstream request with it; measured on the deployed image: generation stops within 2 s
+  of the disconnect, versus running to the token cap without it; read at proxy start, so the
+  updater's ConfigMap refresh rolls `cc-litellm`), and `graphiti-llm`'s registration timeout 300 ->
+  6000 to match `cc-default` on the shared slot. `register-models.py` is create-only, so the EXISTING
+  `graphiti-llm` row keeps 300 until the operator sets it in the LiteLLM UI (it reads as drift
+  until then).
+- Not changed: the LLM probe still answers from LiteLLM's response cache (the operator's call,
+  2026-11-02); the queue itself is as long as the slot makes it, it just costs nothing extra now.
+
+Enforced by `tests/test_llm_client_clock.py`.
+
 ## 2026-11-02 — v2.81.0: The dispatcher holds everything related to a busy item until it is fully complete, and "related" includes the things a mail is about
 
 The relatedness lock decided "busy" from the proposal table, so three states with no proposal to key

@@ -698,31 +698,40 @@ def spawn_child_resolved(task: dict) -> None:
         asyncio.create_task(child_resolved(task))
 
 
-async def park_orphaned_resumes() -> list[str]:
+# The instant this process started. A resume dies only with its process, so a
+# resume marker armed BEFORE this instant belongs to a process that is gone and
+# one armed after it is in flight here — the orphan test, no clock involved.
+# Tests that stand in for a restart set it past the markers they armed.
+PROCESS_STARTED_AT = datetime.now(timezone.utc)
+
+
+async def park_orphaned_resumes(armed_before: datetime | None = None) -> list[str]:
     """Write the park record a KILLED resume never reached, for every session
-    old enough to be dead rather than in flight. Returns the session ids.
+    whose marker was armed by a process that is gone. Returns the session ids.
 
     Parking is all this does — the AWAITING_RESUME worklist that follows it in
     BOTH sweeps is what drives them, so discovery and recovery still converge in
     one pass. It needs no health gate of its own: a park is a database write,
     and the driver behind it is already gated on the LLM.
 
-    One seam because it has two callers on two cadences, and that difference is
-    the 2026-08-19 bug: `resume_sweep` runs at STARTUP, where an orphan is
-    younger than `dispatch_stale_claim_seconds` (900s) by construction — the
-    restart that orphaned it is the same restart that runs the sweep. Two
-    sessions killed 100s before a restart were therefore too young to be seen at
-    05:49 and had no second look for as long as the process stayed up, because
-    the recurring `retry_sweep` carried every OTHER worklist but this one. An
-    orphan is only findable once it is stale, so the sweep that finds it must be
-    the RECURRING one.
+    "Gone" is decided by `PROCESS_STARTED_AT`, not by age (DL-204). The age
+    rule (older than `dispatch_stale_claim_seconds`, 900 s) was the 2026-08-19
+    fix for a startup sweep that always looked too early, and it carried a
+    premise its own docstring stated — "the threshold must exceed a real
+    resume's duration" — that a single FIFO model slot breaks: on 2026-11-02
+    four resumes queued 10-20 minutes behind a burst of agent turns were
+    re-driven as dead, one session answered the operator twice, and a
+    duplicate proposal reached the Inbox. Armed-before-this-process is exact
+    in both directions: the startup sweep now lands the previous process's
+    orphans at once (a restart is not an outage, so they are due now), and the
+    recurring sweep can never mistake a queued resume for a dead one.
     """
     from central_command.runtime import resume_park
 
+    if armed_before is None:
+        armed_before = PROCESS_STARTED_AT
     orphaned = []
-    for row in await repo.sessions_with_orphaned_resume(
-        settings.dispatch_stale_claim_seconds
-    ):
+    for row in await repo.sessions_with_orphaned_resume(armed_before):
         # A restart is not an outage: nothing to wait out, so due at once —
         # the same sweep pass drives it.
         await resume_park.park_resume(

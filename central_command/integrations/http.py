@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import logging
 
+import httpx
+
 from central_command.config import settings
 
 log = logging.getLogger(__name__)
@@ -59,6 +61,40 @@ def _warn_insecure_once() -> None:
         "CC_CA_BUNDLE with your internal CA.",
         overridden,
     )
+
+
+# The ONE clock the app holds on a model completion: CONNECT only. A read
+# timeout is "no bytes for N seconds", and a non-streamed completion sends
+# nothing until it is finished, so any read timeout is really a cap on queue
+# time plus generation — and the model server is a single FIFO slot. LiteLLM
+# declares the per-model `timeout` (6000 s on the local slot, the operator's
+# 2026-08-20 decision: wait, never crash for waiting) and owns the retry, so no
+# client here may hold a shorter one or resend on its own. The 2026-11-02 queue
+# storm was exactly that: the SDK's default 600 s + 2 retries re-sent ten
+# 30k-token agent turns behind their still-running originals, and a 180 s
+# extractor cycled four copies of one mail (DL-204).
+LLM_CONNECT_TIMEOUT_SECONDS = 5.0
+
+
+def llm_timeout() -> httpx.Timeout:
+    """`httpx.Timeout(None, connect=5)`: a dead proxy still fails fast, a slow
+    one is waited for. Every model-completion client takes its timeout here."""
+    return httpx.Timeout(None, connect=LLM_CONNECT_TIMEOUT_SECONDS)
+
+
+def openai_client(api_key: str, base_url: str):
+    """The AsyncOpenAI the app waits on — agents (pydantic-ai's provider), the
+    graph client (graphiti-core) and anything else that speaks the SDK: no
+    read timeout, `max_retries=0` (LiteLLM owns routing AND retry; the SDK's
+    default of 2 re-sends the whole prompt as a NEW request while the old one
+    keeps the slot), and the integration trust settings (CC_CA_BUNDLE /
+    CC_CLIENT_CERT / CC_TLS_INSECURE) the other outbound clients already use."""
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
+
+    kwargs = client_kwargs()
+    extra = {"http_client": DefaultAsyncHttpxClient(**kwargs)} if kwargs else {}
+    return AsyncOpenAI(api_key=api_key, base_url=base_url,
+                       timeout=llm_timeout(), max_retries=0, **extra)
 
 
 def client_kwargs() -> dict:

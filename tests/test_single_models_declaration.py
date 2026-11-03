@@ -64,7 +64,7 @@ def test_k3s_declaration_is_skeletons_too(rm):
         assert want[rerank]["api_base"].endswith("/v1/rerank")
     assert rm.probe_judged(rm.load_declaration(K3S_POLICY)) == {"cc-rerank"}
     assert "gpt-4.1-nano" not in want
-    assert want["graphiti-llm"]["timeout"] == 300  # registration_only carries its own
+    assert want["graphiti-llm"]["timeout"] == 6000  # registration_only carries its own; 6000 like cc-default (DL-204)
 
 
 def test_matches_treats_a_declared_value_as_a_pattern(rm):

@@ -717,7 +717,7 @@ async def sessions_awaiting_resume(due_only: bool = False) -> list[str]:
         await conn.close()
 
 
-async def sessions_with_orphaned_resume(age_seconds: int) -> list[dict]:
+async def sessions_with_orphaned_resume(armed_before: datetime) -> list[dict]:
     """Sessions whose resume died with its process — still AWAITING_HUMAN, but
     holding an armed `pending_resume` describing a turn the agent is OWED.
     Oldest first. Returns `{id, pending}`.
@@ -735,10 +735,16 @@ async def sessions_with_orphaned_resume(age_seconds: int) -> list[dict]:
       means the session is still parked on the very call the marker describes —
       i.e. the resume genuinely never landed.
 
-    * **Age.** A live resume does not flip any status while it runs (it reads
-      through `load_paused_session` and writes only when it settles), so an
-      in-flight resume is indistinguishable from a dead one except by clock.
-      The threshold must exceed a real resume's duration.
+    * **Armed before `armed_before`.** A live resume does not flip any status
+      while it runs (it reads through `load_paused_session` and writes only
+      when it settles), so an in-flight resume is indistinguishable from a dead
+      one by status. What kills a resume is its PROCESS dying, and `arm` stamps
+      the row (`updated_at = now()`), so the caller passes the instant THIS
+      process started: a marker armed before it was armed by a process that is
+      gone; one armed after it is in flight here, however long the model's
+      queue holds it. (Until DL-204 this was a 900 s clock, which re-drove
+      resumes that were merely queued behind a burst of agent turns and made
+      duplicate proposals, 2026-11-02.)
 
     Like `park_orphaned_sessions` (which lands RUNNING sessions at startup),
     these are re-driven, never failed: the operator answered a question or
@@ -754,10 +760,10 @@ async def sessions_with_orphaned_resume(age_seconds: int) -> list[dict]:
                and run_state->'pending_resume' is not null
                and run_state->'pending_resume'->>'tool_call_id'
                    = run_state->>'tool_call_id'
-               and updated_at < now() - ($1 || ' seconds')::interval
+               and updated_at < $1
              order by updated_at
             """,
-            str(int(age_seconds)),
+            armed_before,
         )
         return [
             {"id": r["id"],

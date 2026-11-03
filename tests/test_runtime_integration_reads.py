@@ -113,6 +113,10 @@ READ_ALLOWLIST: dict[str, set[str]] = {
     "litellm_credstore": {"list_provider_credentials"},
     # One function, an HTTP GET of a public URL.
     "webfetch": {"fetch"},
+    # Builds the SDK client the agents wait on (no read timeout, no SDK
+    # retries, DL-204); constructs, sends nothing. The credential it carries
+    # is the agent's own LiteLLM key, the one the runtime already held.
+    "http": {"openai_client"},
 }
 
 # EXEMPT, by the rule in AGENTS.md: "The agent sandbox is CONTAINMENT, not
