@@ -467,6 +467,29 @@ def _llm_client_class():
     return JsonPrimedClient
 
 
+def _give_bolt_liveness_check(driver) -> None:
+    """Replace graphiti's bolt client — built by its constructor with the
+    driver defaults, no option reaches it — with one carrying the process-wide
+    pool options (`neo4j_reader.bolt_driver_kwargs()`: the idle liveness
+    check, DL-206). Safe here and only here: the constructor's DDL task was
+    just cancelled, so the default client never acquired a connection; it is
+    closed on the running loop when there is one (a pool with no sockets),
+    else simply dropped. Every graphiti operation reads `driver.client`."""
+    from neo4j import AsyncGraphDatabase
+
+    from central_command.integrations import neo4j_reader
+
+    unused = driver.client
+    driver.client = AsyncGraphDatabase.driver(
+        settings.neo4j_url, auth=(NEO4J_USER, settings.neo4j_password),
+        **neo4j_reader.bolt_driver_kwargs(),
+    )
+    try:
+        asyncio.get_running_loop().create_task(unused.close())
+    except RuntimeError:
+        pass
+
+
 def _build():
     _require_config()
     _prepare_environment()
@@ -514,6 +537,7 @@ def _build():
     if init_task is not None:
         init_task.cancel()
         driver._init_task = None
+    _give_bolt_liveness_check(driver)
     return Graphiti(
         graph_driver=driver,
         llm_client=llm,

@@ -39,6 +39,25 @@ from central_command.config import settings
 _driver = None
 _driver_loop = None
 
+# A pooled bolt connection idle longer than this is TESTED (one RESET round
+# trip) before it is handed out again. Without it the pool trusts an idle
+# socket until the first read fails — "Failed to read from defunct connection
+# ... OSError('No data')" at ERROR, then the managed transaction's retry. On
+# this topology idle connections die routinely: the app reaches Neo4j through
+# a loopback socat relay to a ClusterIP on the other node, and the nightly
+# backup scales Neo4j to zero for its dump. Dozens of such errors since
+# 2026-10-26, three in one minute on 2026-11-04 (DL-206). The driver's own
+# words: "Assuming the database is running, these exceptions will go away if
+# you retry" — this makes them not happen instead. 60 s: the backlog keeps the
+# graph busy, so a probe is rare, and a relay-dropped socket is never reused.
+BOLT_LIVENESS_CHECK_SECONDS = 60.0
+
+
+def bolt_driver_kwargs() -> dict:
+    """The driver options every bolt pool in this process takes — ONE place,
+    for the reader/writer pool here and graphiti-core's client."""
+    return {"liveness_check_timeout": BOLT_LIVENESS_CHECK_SECONDS}
+
 
 def _get_driver():
     """The one bolt driver, shared with `neo4j_writer` (same database, one pool
@@ -54,7 +73,8 @@ def _get_driver():
     loop = asyncio.get_running_loop()
     if _driver is None or _driver_loop is not loop:
         _driver = AsyncGraphDatabase.driver(
-            settings.neo4j_url, auth=("neo4j", settings.neo4j_password)
+            settings.neo4j_url, auth=("neo4j", settings.neo4j_password),
+            **bolt_driver_kwargs(),
         )
         _driver_loop = loop
     return _driver

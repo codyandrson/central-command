@@ -2040,3 +2040,40 @@ hygiene, and how the test suite itself must be written. See
   fail closed by DL-201 and no refusal of this shape has been seen there.
 - **Enforced:** test: `tests/test_n8n_workflows.py` (the routing; the classifier run under node for four refusals, six outages and an error object); `tests/test_mail_read.py` (422 is text, 503 still parks).
 - **Source:** `deploy/n8n/workflows/cc-email-facade.json` (nodes `Classify provider error`, `Respond (envelope)`, `Respond (refusal or outage)`); `deploy/n8n/README.md`; `central_command/runtime/tools.py` (`mail_search`, `_raise_if_down`); `central_command/contract/failures.py` (`TRANSIENT_STATUS`).
+
+### DL-206 — Every bolt pool tests an idle connection before reusing it
+
+- **Status:** active
+- **Date:** 2026-11-04
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**A bolt driver is built with `neo4j_reader.bolt_driver_kwargs()`, never with the defaults.**"
+- **Why:** The app reaches Neo4j through a loopback socat relay
+  (`cc-graph-bolt.service`, 127.0.0.1:7687 → the `neo4j` ClusterIP on the
+  compute node), and the nightly backup scales Neo4j to zero for its offline
+  dump. An idle pooled bolt socket therefore dies routinely, and the Python
+  driver's default is to trust it until the first read fails: `neo4j.io`
+  logs "Failed to read from defunct connection … OSError('No data')" at
+  ERROR, the managed transaction retries, and the cockpit shows the error.
+  Read 2026-11-04: dozens since 2026-10-26, one most days at 10:02Z (two
+  minutes into the 03:00 MST backup, the relay logging "Connection refused"
+  while Neo4j is scaled down), three in one minute at 03:46-03:47Z with the
+  server still listing the client's older connections as open — the socket
+  died in the middle, not at either end — and not one failed graph job,
+  session or ingest in any of them. The driver's documentation: "No
+  connection liveliness check is done by default … you may receive sessions
+  that are backed by no longer live connections, which will lead to
+  exceptions … these exceptions will go away if you retry"; the option that
+  prevents them is `liveness_check_timeout`: "Pooled connections that have
+  been idle in the pool for longer than this timeout will be tested before
+  they are used again."
+- **Decision:** One set of pool options, `neo4j_reader.bolt_driver_kwargs()`
+  (`liveness_check_timeout` = 60 s), taken by every bolt driver the process
+  builds: the reader/writer pool, and graphiti-core's client, whose
+  constructor accepts no driver option — `graphiti_client._give_bolt_liveness_check`
+  swaps the default client for one built with the options, in the one place
+  that is safe (right after the constructor's scheduled DDL task is
+  cancelled, before any connection is acquired; the unused default is closed
+  on the running loop). The relay and the backup are unchanged: a dropped
+  socket is now found by a probe, not by the first query. Not a setting: the
+  number is a property of this topology, and tuning it is a release.
+- **Enforced:** test: `tests/test_bolt_liveness.py` (the options, a driver's pool config, the swap on graphiti's client, and a source walk over every `AsyncGraphDatabase.driver(` in the app).
+- **Source:** `central_command/integrations/neo4j_reader.py` (`BOLT_LIVENESS_CHECK_SECONDS`, `bolt_driver_kwargs`, `_get_driver`); `central_command/integrations/graphiti_client.py` (`_give_bolt_liveness_check`, `_build`).

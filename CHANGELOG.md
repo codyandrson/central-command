@@ -4,6 +4,24 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-04 — v2.82.3: Every bolt pool tests an idle connection before reusing it, so a connection the relay or the backup dropped is replaced quietly instead of failing at ERROR and retrying
+
+Three "Failed to read from defunct connection IPv4Address(('127.0.0.1', 7687)) … OSError('No data')"
+errors reached the cockpit in one minute, and one a day had since 2026-10-26, most at 10:02Z, two
+minutes into the nightly backup. None cost anything: the driver's managed transactions retried and
+no graph job or session failed. The app reaches Neo4j through a loopback socat relay to a ClusterIP
+on the other node, and the backup scales Neo4j to zero for its dump, so an idle pooled socket dies
+routinely; the driver's default is to trust it until the first read fails (DL-206).
+
+- `neo4j_reader.bolt_driver_kwargs()` is the one set of pool options, `liveness_check_timeout` 60 s:
+  a connection idle longer than that is tested with one round trip before it is handed out. The
+  reader/writer pool takes it, and graphiti-core's client — built by its constructor with the
+  defaults, no option reaches it — is swapped for one that carries it, right after the constructor's
+  DDL task is cancelled and before any connection is acquired.
+- Nothing else changes: no setting, no relay change, no backup change.
+
+Enforced by `tests/test_bolt_liveness.py`.
+
 ## 2026-11-04 — v2.82.2: The mail façade answers a provider refusal with 422, so a search that matches too many messages is advice to the agent, not an n8n outage
 
 A triage session searched the mailbox with a bare `from:` query; the provider workflow fetched its

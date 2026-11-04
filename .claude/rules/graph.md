@@ -15,6 +15,15 @@ Rules below exist because a real failure produced them. Trust the rule even
 where the story is gone. Moved verbatim from the root instructions; they load
 when a matching file is read.
 
+- **A bolt driver is built with `neo4j_reader.bolt_driver_kwargs()`, never
+  with the defaults.** The pool must test an idle connection before reuse
+  (`liveness_check_timeout`): the app reaches Neo4j through a loopback socat
+  relay and the nightly backup scales Neo4j to zero, so an idle socket dies
+  routinely and the driver's default finds out on the first read — an ERROR
+  in the cockpit and a retry, every day. graphiti-core's constructor takes no
+  driver option, so `_give_bolt_liveness_check` swaps its client right after
+  the DDL task is cancelled; a third construction site takes the kwargs too
+  (DL-206, a source walk enforces it).
 - **A Graphiti entity and edge each store their identity TWICE, and a
   hand-made write must set both halves.** Types live in real Neo4j labels AND
   an `n.labels` property; edge endpoints live in the relationship AND in
