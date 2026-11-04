@@ -38,7 +38,7 @@ from central_command.runtime.durable import (
     proposal_from_call,
     resume,
 )
-from central_command.runtime.proposals import park_proposal
+from central_command.runtime.proposals import park_proposal, verified_email_evidence
 from pydantic_ai import ToolDenied
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
@@ -72,6 +72,52 @@ async def redraft_link(parent_id: str, cause: str) -> dict:
         "cause": cause,
         "world_moved_count": count + 1 if cause == "world_moved" else count,
     }
+
+
+async def _recheck_against_session_sources(
+    session_id: str, evidence
+) -> list[dict] | None:
+    """Re-check a later leg's quotes against the sources the session was fed.
+
+    The FIRST proposal of a run is checked where the source is in hand
+    (`steward.run_document` for a document, `run.ingest_and_propose` for mail);
+    every later leg — a redraft after a Reject or a failed execution, a
+    follow-on after an Approve — parks from here, and the session→work-item
+    link is what carries the source to it. A document quote is checked against
+    the stored document (`payload["text"]`, nothing else) and an email quote
+    against each mail's stored text on its own. An unchecked majority would gut
+    the anti-hallucination defence precisely on the sessions rich enough to
+    need it (the follow-on lesson of 2026-08-13; the email gap of 2026-11-04).
+
+    Returns None unless a verdict was actually recorded — a session with no
+    source at all (a chat, a task, the coach), or one whose later leg cites
+    nothing the sources can judge — so `park_proposal` keeps its own
+    `charter.update` citation check on those paths: it runs that check only
+    when it is given None, and a list that judged nothing would bypass it.
+    """
+    items = await repo.work_items_for_session(session_id)
+    doc_texts = [
+        (i.get("payload") or {}).get("text") or ""
+        for i in items if i.get("kind") == "document"
+    ]
+    mail_texts = [
+        (i.get("payload") or {}).get("text") or ""
+        for i in items if (i.get("kind") or "email") == "email"
+    ]
+    doc_texts = [t for t in doc_texts if t]
+    mail_texts = [t for t in mail_texts if t]
+    if not doc_texts and not mail_texts:
+        return None
+    out = evidence
+    if doc_texts:
+        # gateway → runtime is the allowed import direction.
+        from central_command.runtime.steward import verified_evidence
+
+        out = verified_evidence(out, doc_texts[0])
+    judged = verified_email_evidence(out, mail_texts)
+    if any(e.get("claim_matches_source") is not None for e in judged):
+        return judged
+    return None
 
 
 async def _park_redraft(
@@ -413,28 +459,18 @@ async def finish_decision_resume(
     if call is not None and after == "approved":
         # Park the follow-on and keep the session open; the task (if any)
         # resolves only when the agent finally closes out in plain text. The
-        # quote re-check must survive the chain: on a document session, facts
-        # 2..N are re-checked against the stored document exactly as fact 1
-        # was in `steward.run_document` — an unchecked majority would gut the
-        # anti-hallucination defence precisely on the sources rich enough to
-        # need it. Other sessions (a chat citing kind='operator') pass their
+        # quote re-check must survive the chain: facts 2..N of a document
+        # session and a later email proposal are re-checked against the stored
+        # source exactly as the first was (`_recheck_against_session_sources`).
+        # A session with no source (a chat citing kind='operator') passes its
         # evidence through with claim_matches_source ABSENT — NOT CHECKED.
         _meta = None
         if isinstance(final.output, DeferredToolRequests):
             _meta = final.output.metadata.get(call.tool_call_id)
         follow_on = proposal_from_call(call, metadata=_meta)
-        evidence = None
-        doc_text = next(
-            ((i.get("payload") or {}).get("text") or ""
-             for i in await repo.work_items_for_session(session_id)
-             if i.get("kind") == "document"),
-            "",
+        evidence = await _recheck_against_session_sources(
+            session_id, follow_on.evidence
         )
-        if doc_text:
-            # gateway → runtime is the allowed import direction.
-            from central_command.runtime.steward import verified_evidence
-
-            evidence = verified_evidence(follow_on.evidence, doc_text)
         parked = await park_proposal(
             session_id=session_id, agent_id=agent_id, result=final, call=call,
             evidence=evidence, context={"follow_on_of": proposal_id},
@@ -462,9 +498,14 @@ async def finish_decision_resume(
         if final is not None and isinstance(final.output, DeferredToolRequests):
             _meta = final.output.metadata.get(call.tool_call_id)
         redraft = proposal_from_call(call, metadata=_meta)
+        # The operator-quote check first (it REPLACES the agent's pointer with
+        # the authoritative one), then the session's own sources for the email
+        # and document quotes a redraft still carries — a redraft that re-cites
+        # the mail is checked exactly as the first draft was.
+        evidence = await _redraft_evidence(redraft, after, feedback, decided_event_id)
+        evidence = await _recheck_against_session_sources(session_id, evidence) or evidence
         parked = await _park_redraft(
-            session_id, agent_id, final, call, proposal_id,
-            await _redraft_evidence(redraft, after, feedback, decided_event_id),
+            session_id, agent_id, final, call, proposal_id, evidence,
             cause=redraft_cause or after,
         )
         if after == "rejected":

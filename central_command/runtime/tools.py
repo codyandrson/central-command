@@ -2439,7 +2439,12 @@ async def propose_bulk_dismiss(ctx: RunContext, query: str, rationale: str) -> s
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
-            kind="email",
+            # Not `email`: that kind means a QUOTE from a message the session
+            # was fed, re-checked verbatim at the park (`proposals.
+            # verified_email_evidence`, 2026-11-04). This claim is a count the
+            # tool computed from the mailbox and the ledger — nothing to quote,
+            # and the Executor re-derives the set at execution.
+            kind="mailbox",
             source_ref=f"gmail-query:{query}",
             locator="Gmail search via the email façade, cross-read against work_item state",
             claim=(

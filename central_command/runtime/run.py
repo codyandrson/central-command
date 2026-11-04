@@ -325,8 +325,19 @@ def _total_tokens(result) -> int:
 async def ingest_and_propose(
     email_text: str, model=None, thread: ThreadContext | None = None,
     context: dict | None = None, session_id: str | None = None,
-    rerun_of: str | None = None,
+    rerun_of: str | None = None, source_texts: list[str] | None = None,
 ) -> dict:
+    """Run inbox-triage over one email (or a thread bundle) and park what it
+    proposes.
+
+    `source_texts` is what an email quote is re-checked against: one string
+    per message the agent was shown. The dispatcher passes the claimed item's
+    stored text and each surveyed sibling's, separately — never the framed
+    prompt, which carries the recurrence context, the pending-proposals note
+    and the operator's reopen note around the mail. The hand-fed and test paths
+    pass nothing and are checked against `email_text` itself, which on those
+    paths IS the mail.
+    """
     await repo.upsert_agent(
         AGENT_ID, "Inbox Triage", "", "triage email into Jira proposals"
     )
@@ -419,8 +430,31 @@ async def ingest_and_propose(
             ),
         }
 
+    # The email quote is re-checked HERE, like the steward's document quote in
+    # `run_document`: the work item is linked to this session only after this
+    # run returns (`dispatcher.finish_work_item`), so the park seam cannot look
+    # the mail up by session for a first proposal. Later legs (a redraft, a
+    # follow-on) read it through the link in `gateway.finish_decision_resume`.
+    from pydantic_ai import DeferredToolRequests
+
+    from central_command.runtime.proposals import verified_email_evidence
+
+    _meta = None
+    if isinstance(result.output, DeferredToolRequests):
+        _meta = result.output.metadata.get(call.tool_call_id)
+    judged = verified_email_evidence(
+        proposal_from_call(call, metadata=_meta).evidence,
+        source_texts if source_texts is not None else [email_text],
+    )
+    # Hand the seam a list only when a verdict was recorded: `park_proposal`
+    # runs its own `charter.update` citation check when it is given None, and
+    # a list that judged nothing would silently bypass it on this door.
+    evidence = (
+        judged if any(e.get("claim_matches_source") is not None for e in judged) else None
+    )
     parked = await park_proposal(
-        session_id=session_id, agent_id=AGENT_ID, result=result, call=call, context=context
+        session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+        context=context, evidence=evidence,
     )
     proposal, proposal_id = parked["proposal"], parked["proposal_id"]
     return {

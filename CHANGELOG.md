@@ -4,6 +4,37 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-04 — v2.82.4: An email quote is re-checked against the mail the session was fed, on the first draft and on every later leg
+
+The triage charter has asked for a verbatim email quote since v0 (`kind='email'`, `claim=<the exact
+thing the email states>`), and AGENTS.md says no agent claim is trusted unverified on every path that
+makes one — but the mechanism was narrower than the rule. The redraft path re-checked operator quotes
+against the rejection feedback, the coach checked its citations against the record, the steward checked
+document quotes against the stored document, and the most common proposal in the system, a triage
+proposal citing the email it was handling, reached the Inbox with `claim_matches_source` ABSENT (not
+checked), rendering as unremarkable. Found by a code read on 2026-11-03.
+
+- `runtime/proposals.verified_email_evidence` judges every `kind='email'` entry that carries no verdict
+  yet against each source message ON ITS OWN (the claimed mail, then each surveyed sibling — a folded
+  sibling's words are a legitimate source), never against the framed prompt or a serialized item.
+  Other kinds, an entry already judged, and a session with no mail keep the flag ABSENT.
+- The first draft is checked where the source is in hand, in `run.ingest_and_propose`, because the
+  work item is linked to its session only after the run returns; the dispatcher passes each message's
+  stored text (whole, where `_bound_prompt` may have cut the prompt). The seam is handed a list only
+  when a verdict was recorded, so `park_proposal`'s own `charter.update` check keeps its door. Every
+  later leg — a redraft after a Reject or a failed execution, a follow-on after an Approve — is checked
+  through the session→work-item link in `gateway._recheck_against_session_sources`, which now also
+  carries the steward's document check for follow-ons.
+- A `false` verdict shows as "unverified quote" in the Inbox and parks any override that would have
+  decided the proposal (`overrides.review_flags`, unchanged). The deterministic test model's triage
+  quote is now verbatim from the fixture email it is fed, so the suite exercises a live pairing.
+- `propose_bulk_dismiss` built its evidence in code as `kind='email'` with a computed count as the
+  claim ("N message(s) match this query…"), which is not a quote from any mail; it is now
+  `kind='mailbox'` (the mail-rule tool's `queue` is the same shape), so a bulk dismissal an override
+  decides is not parked over a count nobody could have quoted. No consumer keys on an evidence kind.
+
+Enforced by `tests/test_email_evidence_check.py`.
+
 ## 2026-11-04 — v2.82.3: Every bolt pool tests an idle connection before reusing it, so a connection the relay or the backup dropped is replaced quietly instead of failing at ERROR and retrying
 
 Three "Failed to read from defunct connection IPv4Address(('127.0.0.1', 7687)) … OSError('No data')"

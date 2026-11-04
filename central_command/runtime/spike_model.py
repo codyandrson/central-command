@@ -31,7 +31,13 @@ _PROPOSAL = {
             "kind": "email",
             "source_ref": "gmail:msg_1846d2",
             "locator": "email.get_message(msg_1846d2)",
-            "claim": "Sender states DEMO-1 deadline moves Jul 27 to Aug 3.",
+            # Verbatim from the fixture email the suite feeds this model
+            # ("Dana: DEMO-1 slipped, due Aug 3."): the email-quote re-check
+            # (`proposals.verified_email_evidence`, 2026-11-04) runs on every
+            # triage park, so a paraphrase here would flag every spike-model
+            # proposal and park every override that decides one. A test that
+            # wants the flag passes a paraphrase on purpose.
+            "claim": "DEMO-1 slipped, due Aug 3.",
         }
     ],
     "expected_effect": "DEMO-1.duedate == 2026-08-03",

@@ -25,6 +25,7 @@ import uuid
 
 from central_command import events
 from central_command.db import repo
+from central_command.contract import claim_supported
 from central_command.runtime.durable import dump_run_state, proposal_from_call
 
 
@@ -132,6 +133,44 @@ async def park_proposal(
         actor=actor or f"agent:{agent_id}",
     )
     return {"proposal_id": proposal_id, "proposal": proposal}
+
+
+def verified_email_evidence(evidence, source_texts: list[str]) -> list[dict]:
+    """Re-check an email quote against the mail the session was actually fed.
+
+    The triage charter has asked for a verbatim quote (`kind='email'`,
+    `claim=<the exact thing the email states>`) since v0, but until 2026-11-04
+    nothing re-checked it: the redraft path checked operator quotes, the coach
+    checked citations, the steward checked document quotes, and the most common
+    proposal in the system — a triage proposal citing the email it was handling
+    — reached the Inbox with `claim_matches_source` ABSENT, rendering as
+    unremarkable. The rule in AGENTS.md ("no agent claim is trusted unverified,
+    on every path that makes one") was wider than the mechanism.
+
+    `source_texts` is the mail as the agent saw it, one string per message
+    (the claimed email, then its surveyed siblings — a folded sibling's words
+    are a legitimate source). Each is checked ON ITS OWN, never a serialized
+    item (`run._event_source_texts`: a quote must not verify against JSON
+    structure or span two messages). Only `kind='email'` entries are judged and
+    only when no verdict is recorded yet, so the gateway may run this over a
+    redraft the operator-quote check already marked. No sources, or another
+    kind, keeps `claim_matches_source` ABSENT — NOT CHECKED, never "checked and
+    inconclusive"; the steward's checker keeps the same rule.
+    """
+    out = []
+    for e in evidence:
+        d = e.model_dump() if hasattr(e, "model_dump") else dict(e)
+        if (
+            d.get("kind") == "email"
+            and d.get("claim_matches_source") is None
+            and source_texts
+        ):
+            claim = d.get("claim") or ""
+            d["claim_matches_source"] = any(
+                claim_supported(claim, t) for t in source_texts if t
+            )
+        out.append(d)
+    return out
 
 
 async def _stamp_charter_base(session_id: str, proposal) -> None:

@@ -206,10 +206,17 @@ where the story is gone.
   `proposal.created` lands after its save and that is not a violation.
 - **No agent claim is trusted unverified — on every path that makes one.**
   `contract.claim_supported()` re-checks a quoted claim against the recorded
-  source. It lives in `contract/`, not `gateway/`, because BOTH tiers need it
-  and `runtime/` may never import `gateway/`. On the coach path the agent
-  supplies the POINTER as well as the quote, so citing a signal the session
-  was never fed is flagged exactly like a misquote. **`claim_matches_source:
+  source: a redraft's operator quote against the rejection feedback, a coach
+  citation against the signal or event it points at, a steward quote against
+  the stored document, and an email quote against the stored text of each
+  mail the session was fed — at the triage park for the first draft and
+  through the session→work-item link for every redraft and follow-on
+  (`proposals.verified_email_evidence`,
+  `gateway._recheck_against_session_sources`). It lives in `contract/`, not
+  `gateway/`, because BOTH tiers need it and `runtime/` may never import
+  `gateway/`. On the coach path the agent supplies the POINTER as well as the
+  quote, so citing a signal the session was never fed is flagged exactly like
+  a misquote. **`claim_matches_source:
   None` means NOT CHECKED** — never "checked and inconclusive". Don't fork
   the checker, and don't backfill the flag onto decided proposals — that
   would falsify the record.

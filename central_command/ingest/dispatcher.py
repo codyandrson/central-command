@@ -280,6 +280,10 @@ async def _handle_email(item, siblings, siblings_capped, note, model) -> dict:
         _with_operator_note(prompt, note),
         model=model or await resolve_model(agent_id="inbox-triage"),
         thread=thread,
+        # What an email quote is checked against: each message's STORED text on
+        # its own (whole, where `_bound_prompt` may have cut the prompt), never
+        # the framed prompt with its context notes around the mail.
+        source_texts=[item["payload"]["text"], *(s["payload"]["text"] for s in siblings)],
         **({"session_id": rerun["session_id"], "rerun_of": rerun["rerun_of"]}
            if rerun else {}),
         # `proposal.created` is emitted by the one park path now; the email
