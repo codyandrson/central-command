@@ -58,5 +58,14 @@ name).
   `list_unsubscribe_post`, `authentication_results[]` (in header order — Gmail
   prepends its own, so index 0 is Gmail's verdict) and `dkim_signatures[]`.
 - `report_spam` returns `{ok: true, label_ids: [...]}` or an error.
-- Every failure reaches the client as HTTP 500 `{"message":"Error in
-  workflow"}`; the sentence is in n8n's execution log.
+- A failure inside `lib-email-provider` reaches the client with its own
+  sentence in the body, `{"message": "lib-email-provider: ..."}`, and a status
+  that says whose problem it is (DL-205): **422** for a refusal the provider
+  states in words (a list matching more than the page cap — narrow
+  `scope_query`; an unparseable query; a bad mode or a missing field) and
+  **503** for everything else (auth, rate limit, transport, an unreadable
+  page, any message the façade's classifier does not know). The app's failure
+  taxonomy parks a 503 as an outage and hands a 422 back to the caller as
+  text. A failure BEFORE the provider is called (a wrong token, a missing
+  mode) is still n8n's generic HTTP 500 `{"message":"Error in workflow"}`;
+  the sentence is in n8n's execution log.

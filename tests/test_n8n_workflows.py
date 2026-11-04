@@ -212,3 +212,75 @@ def test_no_shipped_workflow_carries_a_previous_name_or_an_instance_id():
         for node in json.loads(text)["nodes"]:
             for cred in (node.get("credentials") or {}).values():
                 assert cred.get("id") is None, f"{path.name}: {node['name']} binds a credential by id"
+
+
+# --- DL-205: the façade answers a provider REFUSAL with its own status ----------
+
+
+def test_facade_answers_through_respond_nodes_and_routes_a_provider_error():
+    """n8n reports any thrown sub-workflow error as HTTP 500 "Error in
+    workflow", which the app reads as "n8n down" (every 5xx is transient). A
+    refusal the provider states in words — a list matching more than the page
+    cap, an unparseable query — is the caller's to act on, so the façade now
+    answers it with 422 through a Respond node, and everything else with 503."""
+    wf = _load("cc-email-facade.json")
+    assert _node(wf, "Webhook")["parameters"]["responseMode"] == "responseNode"
+    call = _node(wf, "Call lib-email-provider")
+    assert call.get("onError") == "continueErrorOutput"
+    outs = wf["connections"]["Call lib-email-provider"]["main"]
+    assert [c["node"] for c in outs[0]] == ["Respond (envelope)"]
+    assert [c["node"] for c in outs[1]] == ["Classify provider error"]
+    ok = _node(wf, "Respond (envelope)")["parameters"]
+    assert ok["respondWith"] == "firstIncomingItem", "the envelope must stay the first item's JSON, as lastNode answered"
+    assert [c["node"] for c in wf["connections"]["Classify provider error"]["main"][0]] == ["Respond (refusal or outage)"]
+    err = _node(wf, "Respond (refusal or outage)")["parameters"]
+    assert err["respondWith"] == "json"
+    assert "$json.message" in err["responseBody"]
+    assert err["options"]["responseCode"] == "={{ $json.status }}"
+
+
+def _run_facade_classifier(tmp_path, error):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node needed")
+    code = _node(_load("cc-email-facade.json"), "Classify provider error")["parameters"]["jsCode"]
+    script = tmp_path / "classify.js"
+    item = f"{{ json: {{ error: {json.dumps(error)} }} }}"
+    script.write_text(
+        f"const $input = {{ first: () => ({item}), all: () => [{item}] }};\n"
+        f"const out = (function () {{\n{code}\n}})();\n"
+        "process.stderr.write(JSON.stringify(out));\n",
+        encoding="utf-8",
+    )
+    done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30, check=False)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stderr)[0]["json"]
+
+
+@pytest.mark.parametrize("message", [
+    "lib-email-provider: list pagination cap hit (5 pages fetched, more remain) - refusing to silently truncate; narrow scope_query",
+    "lib-email-provider: provider rejected the list query (400) - check scope_query syntax",
+    "lib-email-provider: bad or missing mode 'frobnicate' (must be 'message', 'thread', 'list', or 'report_spam')",
+    'lib-email-provider: mode "list" requires scope_query (non-empty Gmail search string)',
+])
+def test_a_refusal_the_provider_states_is_422(tmp_path, message):
+    out = _run_facade_classifier(tmp_path, message)
+    assert out["status"] == 422 and out["message"] == message
+
+
+@pytest.mark.parametrize("message", [
+    "lib-email-provider: provider auth failed (401) - check the shared email credential",
+    "lib-email-provider: provider rate limit hit - retry later",
+    "lib-email-provider: list request failed before a response (connection/transport): connect ECONNREFUSED",
+    "lib-email-provider: provider list failed (502)",
+    "lib-email-provider: unexpected list response shape (no statusCode) - refusing to treat as an empty page",
+    "Something this facade has never seen",
+])
+def test_everything_else_stays_an_outage_503(tmp_path, message):
+    out = _run_facade_classifier(tmp_path, message)
+    assert out["status"] == 503 and out["message"] == message
+
+
+def test_the_classifier_reads_an_error_object_too(tmp_path):
+    out = _run_facade_classifier(tmp_path, {"message": "lib-email-provider: list pagination cap hit (5 pages fetched, more remain)", "name": "NodeOperationError"})
+    assert out["status"] == 422 and out["message"].startswith("lib-email-provider: list pagination cap hit")

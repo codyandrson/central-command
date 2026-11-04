@@ -15,6 +15,15 @@ Rules below exist because a real failure produced them. Trust the rule even
 where the story is gone. Moved verbatim from the root instructions; they load
 when a matching file is read.
 
+- **An n8n façade never reports a refusal as an outage.** n8n answers any
+  thrown sub-workflow error as HTTP 500 "Error in workflow", and the failure
+  taxonomy parks every 5xx as "dependency down". A refusal the provider
+  states in words (the mail list's page cap, an unparseable query, a bad
+  mode) is the caller's to act on: the façade routes the provider call's
+  error output through a classifier to a Respond node — 422 with the
+  provider's sentence, 503 for everything it does not recognise (fail-safe
+  is "outage"). A new refusal the provider learns to state needs a line in
+  that classifier, or it is an outage again (DL-205, 2026-11-04).
 - **Jira Cloud and Jira Data Center are two products, not two logins.** DC
   (and the retired Server line) never exposed REST v3 — it answers 404 to
   every `/rest/api/3/...` path — and beyond the version segment rich text is

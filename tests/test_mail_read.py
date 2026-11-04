@@ -105,3 +105,39 @@ async def test_mail_read_fetches_an_unhydrated_backlog_row_from_the_mailbox(monk
     assert "ENROLLED, not yet fetched by the queue" in out
     assert "Subject: Session" in out and out.endswith("Here's the link")
     assert "(no message text recorded)" not in out
+
+
+@pytest.mark.asyncio
+async def test_a_provider_refusal_reaches_the_agent_as_text_and_an_outage_still_parks(monkeypatch):
+    """DL-205: the façade answers a refusal the provider states in words (a
+    search matching more than the page cap, an unparseable query) with 422,
+    and `mail_search` hands the agent the narrowing advice it always carried;
+    a 503 (auth, rate limit, transport, anything unknown) is still an outage
+    and still parks the read. Before 2026-11-04 both arrived as HTTP 500
+    "Error in workflow", so every broad `from:` search was an 'n8n outage'."""
+    from central_command.integrations import email_facade
+
+    async def refused(query):
+        raise email_facade.EmailFacadeError(
+            'email façade list failed: HTTP 422 {"message":"lib-email-provider: list '
+            'pagination cap hit (5 pages fetched, more remain) - refusing to silently '
+            'truncate; narrow scope_query"}', status_code=422)
+
+    monkeypatch.setattr(email_facade, "list_refs", refused)
+    out = await tools.mail_search(None, "from:myprotein")
+    assert out.startswith("mail search failed (")
+    assert "pagination cap hit" in out and "narrow it" in out
+
+    async def down(query):
+        raise email_facade.EmailFacadeError(
+            'email façade list failed: HTTP 503 {"message":"lib-email-provider: '
+            'provider auth failed (401) - check the shared email credential"}',
+            status_code=503)
+
+    monkeypatch.setattr(email_facade, "list_refs", down)
+    # Outside a parkable run (no deps on the ctx) the wrapper re-raises the
+    # ORIGINAL error, tagged with the dependency the unit's own DOWN path
+    # parks on — never the narrowing text.
+    with pytest.raises(email_facade.EmailFacadeError) as info:
+        await tools.mail_search(None, "from:myprotein")
+    assert "n8n" in getattr(info.value, tools._DEPENDENCIES_ATTR, ())

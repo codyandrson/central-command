@@ -4,6 +4,31 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-04 — v2.82.2: The mail façade answers a provider refusal with 422, so a search that matches too many messages is advice to the agent, not an n8n outage
+
+A triage session searched the mailbox with a bare `from:` query; the provider workflow fetched its
+five pages of 500 ids, found more remaining, and refused ("pagination cap hit … narrow
+scope_query") — by design. n8n reports any thrown sub-workflow error as HTTP 500 `{"message":
+"Error in workflow"}`, and every 5xx is an outage to the failure taxonomy, so the read parked as
+"n8n down", the session failed, and the item retried on its backoff with the same search. The
+`mail_search` tool had carried the right sentence since 2026-09-02 ("narrow it with an explicit
+after:/before: window") and could never reach it. Reproduced from the host: `from:myprotein`
+refuses in 1.5 s, the same sender over 730 days answers 827 refs in 0.7 s, so no rate limit and no
+outage (DL-205).
+
+- `cc-email-facade` answers through Respond nodes: the provider call routes a thrown error to its
+  error output, a classifier maps the refusals the provider states in words (page cap, unparseable
+  query, bad mode, missing field) to **422** and everything else — auth, rate limit, transport, an
+  unreadable page, any sentence it does not know — to **503**, fail-safe toward "outage", and the
+  body carries the provider's own sentence instead of "Error in workflow". A 200 envelope is still
+  the first item's JSON, byte for byte. A failure before the provider is called (wrong token,
+  missing mode) is unchanged.
+- No app code change: `ProviderStatusError` already carries the status, 422 is semantic, and
+  `mail_search` hands the agent its narrowing advice. The updater's n8n import applies the workflow.
+
+Enforced by `tests/test_n8n_workflows.py` (the routing, and the classifier run under node) and
+`tests/test_mail_read.py`.
+
 ## 2026-11-03 — v2.82.1: Compaction counts the prompt once, and the summary never thinks
 
 A review of twelve inbox-triage sessions put about a third of their wall time inside context

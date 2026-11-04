@@ -2002,3 +2002,41 @@ hygiene, and how the test suite itself must be written. See
   once nothing times out).
 - **Enforced:** test: `tests/test_llm_client_clock.py` (the clock, the client, the three call sites, the orphan predicate both ways); `tests/test_resume_parking.py` and `tests/test_retry_sweep.py` stand in for a restart by moving `PROCESS_STARTED_AT`.
 - **Source:** `central_command/integrations/http.py` (`llm_timeout`, `openai_client`); `central_command/runtime/models.py`; `central_command/integrations/graphiti_client.py` (`_openai_client`); `central_command/ingest/entities.py` (`_complete`); `central_command/api/orchestration.py` (`PROCESS_STARTED_AT`, `park_orphaned_resumes`); `central_command/db/repo.py` (`sessions_with_orphaned_resume`); `deploy/shared/litellm/config.yaml`; `deploy/shared/litellm/model-preferences.yaml`.
+
+### DL-205 — A façade answers a provider's refusal with 4xx and its own sentence; only a failure is 5xx
+
+- **Status:** active
+- **Date:** 2026-11-04
+- **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**An n8n façade never reports a refusal as an outage.**"
+- **Why:** The failure taxonomy reads every 5xx as transient — the provider
+  was down, nothing about the request was judged — and parks the unit to
+  retry when the dependency is up. n8n reports ANY thrown sub-workflow error
+  as HTTP 500 `{"message":"Error in workflow"}`, so a refusal the provider
+  states in words arrived indistinguishable from an outage. On 2026-11-03
+  (evening MST) a triage session's `mail_search("from:myprotein")` hit the
+  list workflow's deliberate page cap (5 × 500 ids, "refusing to silently
+  truncate; narrow scope_query"); the read parked as "n8n down", the session
+  failed, the item retried on its backoff with the same search, and the
+  cockpit toasted a façade 500 twice in two minutes. The day before,
+  `from:USAA` did the same once. `mail_search` had carried the right answer
+  since 2026-09-02 — "If the query matched too many messages, narrow it with
+  an explicit after:/before: window" — behind a `_raise_if_down` that a 500
+  always took first. Reproduced from the host: `from:myprotein` refuses in
+  1.5 s; the same sender over 365 and 730 days answers 437 and 827 refs in
+  under a second; `from:USAA newer_than:365d` answers 189. Not a rate limit,
+  not an outage: a refusal.
+- **Decision:** The façade webhook answers through Respond nodes. The
+  provider call carries `onError: continueErrorOutput`; a classifier reads
+  the error item's sentence and answers **422** for the refusals the
+  provider states (page cap hit, query rejected 400, bad or missing mode, a
+  missing or mistyped field) and **503** for everything else (auth, rate
+  limit, transport, an unreadable page, any sentence it does not know) —
+  fail-safe is "outage", exactly what the caller saw before. The body is
+  `{"message": <the provider's sentence>}`. The 200 envelope stays the first
+  item's JSON. A failure before the provider is called (wrong token, missing
+  mode) stays n8n's generic 500. No app change: `ProviderStatusError`
+  already carries the status, 422 is SEMANTIC, and the tool's own text
+  reaches the agent. The calendar façade is unchanged for now: its reads
+  fail closed by DL-201 and no refusal of this shape has been seen there.
+- **Enforced:** test: `tests/test_n8n_workflows.py` (the routing; the classifier run under node for four refusals, six outages and an error object); `tests/test_mail_read.py` (422 is text, 503 still parks).
+- **Source:** `deploy/n8n/workflows/cc-email-facade.json` (nodes `Classify provider error`, `Respond (envelope)`, `Respond (refusal or outage)`); `deploy/n8n/README.md`; `central_command/runtime/tools.py` (`mail_search`, `_raise_if_down`); `central_command/contract/failures.py` (`TRANSIENT_STATUS`).

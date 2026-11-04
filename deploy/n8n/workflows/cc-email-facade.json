@@ -18,7 +18,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "cc-email-facade",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "options": {}
       },
       "webhookId": "3ce8f52b-74be-4436-9d20-c473cc71bf55"
@@ -55,7 +55,52 @@
           "value": "tfoEVgB8uHHIokWQ",
           "cachedResultName": "lib-email-provider"
         }
-      }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// cc-email-facade - the provider REFUSED or FAILED: say which, in the status.\n// n8n reports any thrown sub-workflow error as HTTP 500 \"Error in workflow\",\n// which Central Command's failure taxonomy reads as \"n8n down\" and parks the\n// run (DL-205). A refusal the provider states in words is the caller's to act\n// on (narrow the query, fix the mode): 422. Anything else - auth, rate limit,\n// transport, an unreadable page, a message this list does not know - stays\n// an outage: 503, exactly what the caller saw before. Fail-safe is \"outage\".\nconst err = $input.first().json.error;\nconst msg = typeof err === 'string' ? err\n  : (err && (err.message || err.description)) ? String(err.message || err.description)\n  : JSON.stringify(err ?? 'unknown error');\nconst REFUSALS = [\n  /pagination cap hit/i,                 // list: more than the page cap matches - narrow scope_query\n  /rejected the list query \\(400\\)/i,    // list: the provider could not parse scope_query\n  /bad or missing mode/i,                // Validate request\n  /requires (scope_query|source_ref)/i,  // Validate request\n  /must be (boolean|a positive number)/i // Validate request\n];\nconst status = REFUSALS.some(re => re.test(msg)) ? 422 : 503;\nreturn [{ json: { message: msg.slice(0, 500), status } }];\n"
+      },
+      "id": "c0f2a1d4-6e5b-4f7a-9c3d-2b8e1f0a5d61",
+      "name": "Classify provider error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "e7b9d3c1-5a2f-4c8e-b6d0-9f1a3c5e7b20",
+      "name": "Respond (envelope)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ message: $json.message }) }}",
+        "options": {
+          "responseCode": "={{ $json.status }}"
+        }
+      },
+      "id": "a4c6e8f0-1b3d-4e5f-8a7c-6d9e0f1b2c43",
+      "name": "Respond (refusal or outage)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        600,
+        220
+      ]
     }
   ],
   "connections": {
@@ -75,6 +120,35 @@
         [
           {
             "node": "Auth + unwrap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call lib-email-provider": {
+      "main": [
+        [
+          {
+            "node": "Respond (envelope)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Classify provider error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify provider error": {
+      "main": [
+        [
+          {
+            "node": "Respond (refusal or outage)",
             "type": "main",
             "index": 0
           }
