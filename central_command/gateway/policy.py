@@ -40,17 +40,48 @@ EPISODE_TIME_RE = re.compile(
 )
 
 
+# How old a source must be before an episode's `reference_time` sitting on the
+# proposal's own date is a hazard worth a flag (DL-208): a month. Inside that,
+# "now" and "when the mail came" bound the same validity window for any search
+# that will ever run; past it, the graph records a months-old fact as having
+# become true this week — and Graphiti's temporal resolution then lets it
+# supersede facts that are actually newer.
+SOURCE_AGE_FLAG_DAYS = 30
+
+
 def _today() -> date:
     # Module-level seam so tests can pin the clock.
     return datetime.now(timezone.utc).date()
 
 
-def check_actions(actions: list[dict], today: date | None = None) -> list[dict]:
+def _as_date(value) -> date | None:
+    """A calendar date from a date, a datetime or an ISO-8601 string (a trailing
+    Z accepted); None for anything else."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text[:-1] + "+00:00" if text[-1] in "Zz" else text).date()
+    except ValueError:
+        return None
+
+
+def check_actions(actions: list[dict], today: date | None = None,
+                  source_time=None) -> list[dict]:
     """Run every deterministic check over a proposal's actions. Returns one
     flag per hazard found; an empty list means clean. Flags are advisory —
-    they ride the proposal to the reviewer and the decision onto the log."""
+    they ride the proposal to the reviewer and the decision onto the log.
+
+    `source_time` is when the proposal's source material is from (the earliest
+    `received_at` of the mail the session worked), supplied by callers that
+    know it; without it the reference-time check does not run."""
     today = today or _today()
     flags: list[dict] = []
+    source_date = _as_date(source_time)
     known = gated_write_names()
     for i, a in enumerate(actions):
         capability = a["capability"].split("@", 1)[0]
@@ -89,6 +120,32 @@ def check_actions(actions: list[dict], today: date | None = None) -> list[dict]:
                         "the fact has a real start (or end), reject and ask "
                         "for it; a genuinely timeless claim should say so "
                         "('long-standing', 'start date unknown')"
+                    ),
+                })
+            # An episode from months-old mail whose reference_time is the
+            # proposal's own date: the graph will record the claim as having
+            # become true this week (read 2026-11-05: 18 of 78 episodes in ten
+            # days, "registration was completed as of 2026-11-05" from a
+            # December mail). The operator decides with that visible.
+            ref = _as_date(arguments.get("reference_time"))
+            if (source_date is not None and ref is not None
+                    and abs((ref - today).days) <= 1
+                    and (today - source_date).days >= SOURCE_AGE_FLAG_DAYS):
+                age = (today - source_date).days
+                flags.append({
+                    "policy": "reference-time-is-the-source-time",
+                    "action_index": i,
+                    "capability": capability,
+                    "argument": "reference_time",
+                    "value": str(arguments.get("reference_time")),
+                    "problem": (
+                        f"reference_time is the proposal's own date, but the "
+                        f"source is from {source_date.isoformat()}, {age} days "
+                        "earlier — the graph will record the claim as becoming "
+                        "true now and let it supersede newer facts. If it was "
+                        "true as of the source, reject and ask for the source's "
+                        "date (the operator confirming it is when it was "
+                        "LEARNED, not when it became true)"
                     ),
                 })
         for key in sorted(DATE_ARGUMENTS & set(arguments)):

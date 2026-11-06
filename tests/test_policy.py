@@ -8,7 +8,7 @@ reviewer and, if approved anyway, the flag rides the decision record.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -228,3 +228,46 @@ def test_non_episode_actions_never_carry_the_time_flag():
         "arguments": {"issue_key": "T-1", "body": "no dates here at all"},
     }])
     assert flags == []
+
+
+# --- reference-time-is-the-source-time (DL-208) --------------------------------
+
+
+def _episode(reference_time: str) -> list[dict]:
+    return [{
+        "capability": "graph.add_episode@v1",
+        "arguments": {"name": "n", "scope": "shared",
+                      "episode_body": "Lee Doe joined Initech in January 2026.",
+                      "reference_time": reference_time},
+    }]
+
+
+def test_an_episode_from_old_mail_dated_to_the_proposal_is_flagged():
+    """Read 2026-11-05: 18 of 78 triage episodes in ten days carried the
+    proposal's own date as reference_time while the mail was months old —
+    "registration was completed as of 2026-11-05" from a December mail."""
+    flags = policy.check_actions(_episode("2026-07-19T09:00:00Z"), today=TODAY,
+                                 source_time=datetime(2026, 1, 20, tzinfo=timezone.utc))
+    assert [f["policy"] for f in flags] == ["reference-time-is-the-source-time"]
+    assert flags[0]["argument"] == "reference_time"
+    assert "source is from 2026-01-20, 180 days earlier" in flags[0]["problem"]
+    # A day either side of today still reads as "the proposal's own date".
+    assert policy.check_actions(_episode("2026-07-18"), today=TODAY,
+                                source_time="2026-01-20T10:00:00+00:00")
+
+
+def test_an_episode_dated_to_its_source_is_clean():
+    assert policy.check_actions(_episode("2026-01-20T23:05:26Z"), today=TODAY,
+                                source_time=datetime(2026, 1, 20, tzinfo=timezone.utc)) == []
+
+
+def test_recent_mail_and_an_unknown_source_time_do_not_flag():
+    # Inside a month, "now" and "when the mail came" bound the same window.
+    assert policy.check_actions(_episode("2026-07-19"), today=TODAY,
+                                source_time=date(2026, 7, 1)) == []
+    # No source time known (a hand-fed text, a non-mail session): the check
+    # does not run rather than guess.
+    assert policy.check_actions(_episode("2026-07-19"), today=TODAY) == []
+    # An unparseable reference_time is the Executor's refusal, not this flag.
+    assert policy.check_actions(_episode("today"), today=TODAY,
+                                source_time=date(2026, 1, 20)) == []

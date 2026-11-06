@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-06 — v2.82.6: The triage agent is told how old the mail is, a confirmation is never a fact's time, and the reviewer sees an episode dated to the proposal instead of its source
+
+Working the backlog, inbox-triage read months-old mail as current: in ten days it proposed 27 tasks
+from mail older than six months and the operator dismissed 22 of them, and 18 of its 78 graph
+episodes carried the proposal's own date as `reference_time` — the graph said a December registration
+"was completed as of 2026-11-05". The date was never missing (the charter stamps today's date, the
+mail's Date header is in the prompt, `current_time` exists, every session searched the graph first);
+nothing did the subtraction, and the graph pack called "the moment the operator said it" a valid
+source instant (DL-208). None of the three changes is a rule for the agent.
+
+- The dispatcher states the mail's age as a fact beside the recurrence note — "This email was
+  received on 2026-01-20, 290 days before today (2026-11-06)." — computed in code, absent when no date
+  is known. The claim rows now return `received_at`.
+- The graph-propose pack's `reference_time` guidance names the source's time and the date the
+  operator gives; the operator confirming a fact is when the agent learned it, never when it became
+  true, and a claim true as of the source says "as of".
+- `policy.check_actions` takes the session's source time and flags
+  `reference-time-is-the-source-time` when an episode from mail at least 30 days old is dated within a
+  day of today; the Decisions card and the decision record carry it.
+
+Enforced by `tests/test_email_age_context.py` and `tests/test_policy.py`.
+
 ## 2026-11-05 — v2.82.5: A queued model probe is a busy slot, not an outage, and a toast can be swiped away
 
 The cockpit showed "llm down for 3m … ReadTimeout" while triage was running normally. The retry

@@ -187,7 +187,15 @@ when a matching file is read.
   The same law covers the operator's hand: `graph.create_edge` requires
   `valid_at`, spelled `unbounded` when the text gives no start (the Executor
   maps it to null), and `neo4j_writer.create_edge` stores a None start as
-  null rather than the creation instant. Windows live on FACTS and are read
+  null rather than the creation instant. **The operator confirming a fact is
+  when it was LEARNED, never when it became true** (DL-208, 2026-11-06): a
+  fact from an old mail the operator confirms keeps the mail's date, a fact
+  the operator dates takes that date, and the pack says so; the triage
+  prompt states the mail's age as a fact (`dispatcher._with_age_context`),
+  and the reviewer sees `reference-time-is-the-source-time` when an episode
+  from months-old mail is dated to the proposal — 18 of 78 episodes were,
+  and the graph had "registration was completed as of 2026-11-05" from a
+  December mail. Windows live on FACTS and are read
   from words — Graphiti has no per-fact date input — so the pack tells agents
   the phrasings the extractor keys on, and the auditor's judgment prompt
   compares every fact's window with the text's dates.

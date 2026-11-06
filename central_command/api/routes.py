@@ -2454,7 +2454,11 @@ async def get_proposal(proposal_id: str) -> dict:
     if row["status"] in ("AWAITING_HUMAN", "PROPOSED"):
         from central_command.gateway import policy
 
-        row["policy_flags"] = policy.check_actions(row["actions"])
+        from central_command.gateway.gateway import source_time_for_session
+
+        row["policy_flags"] = policy.check_actions(
+            row["actions"], source_time=await source_time_for_session(row.get("session_id")),
+        )
         # D25: was the proposal within the agent's pack grants? Advisory —
         # surfaces grant/charter drift to the reviewer, never blocks.
         from central_command.runtime.packs import granted_capability_names, granted_packs

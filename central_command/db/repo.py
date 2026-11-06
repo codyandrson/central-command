@@ -2324,7 +2324,8 @@ async def claim_next_work_item(session_id: str | None = None) -> dict | None:
                    claimed_at = now()
              where id in (select id from picked)
             returning id, message_id, thread_id, feed, source, subject, payload,
-                      attempts, kind, transient_releases, embedding, entity_keys
+                      attempts, kind, transient_releases, embedding, entity_keys,
+                      received_at
             """,
             session_id,
         )
@@ -2371,7 +2372,8 @@ async def claim_specific_work_item(item_id: str, session_id: str | None = None) 
                    claimed_at = now()
              where id in (select id from picked)
             returning id, message_id, thread_id, feed, source, subject, payload,
-                      attempts, kind, transient_releases, embedding, entity_keys
+                      attempts, kind, transient_releases, embedding, entity_keys,
+                      received_at
             """,
             item_id, session_id,
         )

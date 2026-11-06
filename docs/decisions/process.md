@@ -2116,3 +2116,48 @@ hygiene, and how the test suite itself must be written. See
   own clock fails the run, which the failure taxonomy then parks as before.
 - **Enforced:** test: `tests/test_dependency_probes.py` (`test_a_queued_completion_is_busy_not_down_when_the_proxy_answers`: queued + proxy up is up, queued + proxy down is down, an answered completion never asks, a refused connection raises).
 - **Source:** `central_command/heartbeat/probes.py` (`probe_llm`, `ProbeCache._probe_one`).
+
+### DL-208 — The agent is told a mail's age, and the operator's confirmation is never a fact's time
+
+- **Status:** active
+- **Date:** 2026-11-06
+- **Rule:** [.claude/rules/graph.md](../../.claude/rules/graph.md) — "**The operator confirming a fact is when it was LEARNED, never when it became true**"
+- **Why:** Working the backlog, inbox-triage read months-old mail as if it
+  were current: in ten days it proposed 27 tasks from mail older than six
+  months and the operator dismissed 22 (a January "confirm within 30 days",
+  a December RMA, a verification long expired); of 78 graph episodes, 57
+  carried the mail's date as `reference_time` but 18 carried the proposal's
+  own date, and the graph now says a December registration "was completed as
+  of 2026-11-05". The date was never missing: the charter builder stamps
+  "Today's date is …" on every system prompt, the mail's ISO Date header is
+  in the prompt, `current_time` exists, and every session searched the graph
+  first. Nothing did the subtraction (the header and the stamp sit 10k
+  characters apart, and the default model runs at low thinking), and the
+  graph pack listed "the moment the operator said it" as a valid source
+  instant — so a confirmation of an old fact dated it to the answer. The
+  operator's words on a rejection, 2026-11-06: "I am not confirming the
+  currency of any of this information, it is current as of the email." Not
+  a charter rule: the operator wants the agent to weigh the mail's age
+  against the graph and decide, asking when it cannot place a fact in time
+  (the charter already sends an uncertain fact to a question, never an
+  episode).
+- **Decision:** Three things, none a rule for the agent. (1) The dispatcher
+  states the age as a fact beside the recurrence note — "This email was
+  received on 2026-01-20, 290 days before today (2026-11-06)." — computed in
+  code in the host's zone (the stamp's zone), absent when no date is known;
+  the claim rows return `received_at` for it. (2) The graph-propose pack's
+  `reference_time` guidance names the source's time and the date the
+  operator GIVES; the operator confirming is when the agent learned it, never
+  when it became true, and a claim true as of the source says "as of". (3)
+  `policy.check_actions` takes `source_time` (the earliest `received_at` of
+  the session's mail, from `gateway.source_time_for_session`) and flags
+  `reference-time-is-the-source-time` when an episode from mail at least
+  `SOURCE_AGE_FLAG_DAYS` (30) old carries a reference time within a day of
+  today — the review surface and the decision record both pass it; the
+  override evaluator does not (a standing rule never decides an episode from
+  old mail without the operator seeing the flag). Why reference time is the
+  whole game: Graphiti anchors validity to it, so an old fact with its real
+  date lands in the past and leaves newer facts alone, while the same fact
+  stamped today supersedes them.
+- **Enforced:** test: `tests/test_email_age_context.py` (the line's wording, the day arithmetic, the honest cases, and the claim row carrying `received_at`); `tests/test_policy.py` (the flag, a source-dated episode clean, recent mail and an unknown source time silent).
+- **Source:** `central_command/ingest/dispatcher.py` (`_with_age_context`, `_today_local`); `central_command/db/repo.py` (both claim `returning` lists); `central_command/runtime/packs.py` (`graph-propose`, `graph.add_episode`); `central_command/gateway/policy.py` (`SOURCE_AGE_FLAG_DAYS`, `_as_date`, `check_actions`); `central_command/gateway/gateway.py` (`source_time_for_session`); `central_command/api/routes.py` (the review surface).

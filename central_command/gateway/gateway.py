@@ -647,6 +647,21 @@ async def _refuse_auditor_on_irreversible(
     )
 
 
+async def source_time_for_session(session_id: str | None):
+    """When a session's source material is from: the earliest `received_at`
+    among the mail it worked (through its re-run chain), for the policy
+    check's `source_time` (DL-208). None when the session worked no dated
+    mail, which switches that check off rather than guessing."""
+    if not session_id:
+        return None
+    try:
+        items = await repo.work_items_for_session(session_id)
+    except Exception:  # noqa: BLE001 — an advisory flag never fails a decision
+        return None
+    times = [i["received_at"] for i in items if i.get("received_at")]
+    return min(times) if times else None
+
+
 async def approve_and_execute(
     session_id: str, proposal_id: str, approver: str | None = None, model=None,
     *, detach: bool = False,
@@ -695,7 +710,10 @@ async def approve_and_execute(
     # decided, but if they approved over a standing flag, the log must show the
     # flag was there — an approval with a visible hazard is a different record
     # than a clean one.
-    flags = policy.check_actions(prop_row["actions"])
+    flags = policy.check_actions(
+        prop_row["actions"],
+        source_time=await source_time_for_session(prop_row.get("session_id")),
+    )
     # An `override:<id>` (or `override:<id1>+<id2>`) approver is the operator's
     # standing rule deciding the proposal (FR-4): the event names it, so every
     # reader can tell it from an operator's own verdict — it never counts as

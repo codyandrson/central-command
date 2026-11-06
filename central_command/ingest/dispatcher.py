@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+from datetime import date, datetime, timezone
 
 from central_command import events
 from central_command.config import settings
@@ -117,6 +118,43 @@ def _with_operator_note(prompt: str, note: str | None) -> str:
 # the item LOUDLY — defaulting to triage would quietly run the wrong agent on
 # the wrong shape of work, which is the failure this registry exists to make
 # impossible.
+
+
+def _today_local() -> date:
+    # Module-level seam so tests can pin the clock; the host's zone, like the
+    # "Today's date" stamp the charter builder writes.
+    return datetime.now().astimezone().date()
+
+
+def _with_age_context(prompt: str, item: dict, today: date | None = None) -> str:
+    """The email's AGE, as a fact (DL-208). The Date header is in the prompt and
+    today's date is at the end of the charter, but nothing did the subtraction:
+    read 2026-11-05, months-old mail had its requests proposed as tasks for
+    today and its facts recorded as becoming true today. Same convention as the
+    recurrence note — a fact for the agent to weigh, no directive."""
+    received = item.get("received_at")
+    if isinstance(received, str):
+        try:
+            received = datetime.fromisoformat(received)
+        except ValueError:
+            return prompt
+    if not isinstance(received, datetime):
+        return prompt
+    if received.tzinfo is None:
+        received = received.replace(tzinfo=timezone.utc)
+    today = today or _today_local()
+    sent = received.astimezone().date()
+    days = (today - sent).days
+    if days == 0:
+        age = "today"
+    elif days > 0:
+        age = f"{days} day{'s' if days != 1 else ''} before today"
+    else:
+        age = f"{-days} day{'s' if days != -1 else ''} AFTER today (a clock disagrees)"
+    return prompt + (
+        f"\n\n[queue context] This email was received on {sent.isoformat()}, "
+        f"{age} ({today.isoformat()})."
+    )
 
 
 async def _with_recurrence_context(prompt: str, item: dict) -> str:
@@ -271,6 +309,7 @@ async def _handle_email(item, siblings, siblings_capped, note, model) -> dict:
     # honest marker; `payload.text` stays whole, so a quote is still checked
     # against the full record.
     prompt = _bound_prompt(prompt)
+    prompt = _with_age_context(prompt, item)
     prompt = await _with_recurrence_context(prompt, item)
     prompt = await _with_pending_proposals_context(prompt, item)
     # A re-run comes back to the record, not an argument: the queue may have held
