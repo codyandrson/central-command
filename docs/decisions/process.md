@@ -2161,3 +2161,43 @@ hygiene, and how the test suite itself must be written. See
   stamped today supersedes them.
 - **Enforced:** test: `tests/test_email_age_context.py` (the line's wording, the day arithmetic, the honest cases, and the claim row carrying `received_at`); `tests/test_policy.py` (the flag, a source-dated episode clean, recent mail and an unknown source time silent).
 - **Source:** `central_command/ingest/dispatcher.py` (`_with_age_context`, `_today_local`); `central_command/db/repo.py` (both claim `returning` lists); `central_command/runtime/packs.py` (`graph-propose`, `graph.add_episode`); `central_command/gateway/policy.py` (`SOURCE_AGE_FLAG_DAYS`, `_as_date`, `check_actions`); `central_command/gateway/gateway.py` (`source_time_for_session`); `central_command/api/routes.py` (the review surface).
+
+### DL-209 — A verification row is judged against its own episode's text, never its proposal's first
+
+- **Status:** active
+- **Date:** 2026-11-06
+- **Rule:** `central_command/gateway/graph_auditor.py` (`_approved_episode`, `_episode_for_row`)
+- **Why:** The Verify tab parked "Rivers is a close friend of Doe" flagged for
+  inventing exactly that fact, under the approved text of a different
+  episode. The proposal carried two `graph.add_episode` actions and the
+  Executor had written one verification row and one ingest job per action,
+  each job landing its own text faithfully; but the auditor's lookup of "the
+  approved text" went by proposal id and returned the first episode action
+  whatever the row, so the second row's delta was compared, shown and
+  remediated against its sibling's claim. Every row's `episode_name` matched
+  an action of its proposal (93 of 93 originals, 10 of 10 re-checks, no
+  proposal naming two episodes alike), so the record always knew which was
+  which; the lookup did not ask. Eight executed proposals bundled two
+  episodes since 2026-10-14; in each the first row came back aligned and the
+  second flagged for "dropping the central claim" and "inventing" facts. Six
+  the operator confirmed by hand. One (a specialist referral for Rivers, from a
+  January mail) the operator marked PROBLEM on the auditor's word; the
+  graph-curator, briefed with the same wrong text, proposed deleting the
+  "invented" facts, the operator approved, and four correct facts and three
+  entities left the graph (2026-11-06 05:20Z). The re-check row then flagged
+  the same episode again for the same wrong reason.
+- **Decision:** The row is matched to ITS action, from the proposal row (the
+  control plane's record, as before): one episode action needs no matching;
+  several are told apart by `episode_name` (the action's `name`, stamped on
+  the row at execute time); two of one name by the body the row's ingest
+  job carried, which is byte-identical to the action's. A row naming none of
+  its proposal's episodes is a record inconsistency and gets NO text — the
+  sweep parks it `no_approved_text`, loudly — never a judgment against a
+  sibling. The remediation walk (`remediation_of`) ends at the original row
+  and matches by that row's name; the pre-queue enqueue and the curator's
+  brief take the same function, as does the cockpit's "approved text".
+  Decided verdicts are not rewritten: the record says what the auditor was
+  shown, and the operator's own confirmations stand. The deleted facts come
+  back through the gated path (a new episode or curation), by the operator.
+- **Enforced:** test: `tests/test_graph_verification.py` (each row of a bundled proposal gets its own text; a re-check of the second episode inherits that episode's; two of one name are told apart by the job body and a jobless one gets none; a row naming none parks without text and without a verdict; the cockpit shows each row its own).
+- **Source:** `central_command/gateway/graph_auditor.py` (`_approved_episode`, `_episode_for_row`); readers unchanged: `central_command/api/routes.py` (`graph_verifications`), `graph_auditor.remediation_instructions`, `graph_auditor._enqueue_from_proposal`.

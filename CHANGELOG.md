@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-06 — v2.82.7: A verification row is judged against its own episode's text, not its proposal's first
+
+The Verify tab showed "Rivers is a close friend of Doe" flagged for inventing exactly that fact, with
+the approved text of a different episode above it. The proposal carried two `graph.add_episode`
+actions (inbox-triage bundles two routinely) and the Executor wrote one verification row per action,
+but `graph_auditor._approved_episode` looked the approved text up by proposal id and returned the
+FIRST episode action whatever the row — so every second episode was judged, displayed and remediated
+against its sibling's text. Eight live proposals since 2026-10-14, every second row flagged for
+"dropping the central claim" and "inventing" facts that were its own text; six confirmed by hand,
+one marked PROBLEM, and that remediation deleted four correct facts from a January mail (DL-209).
+
+- `_approved_episode` matches the row to ITS action: by `episode_name` (the action's `name`, stamped
+  on the row at execute time), and, should a proposal name two episodes alike, by the body the row's
+  ingest job sent; a row naming none of its proposal's episodes gets no text and parks
+  `no_approved_text`, loudly, instead of a judgment against a sibling. The remediation walk and the
+  pre-queue enqueue take the same path. The cockpit's "approved text" and the curator's brief read
+  the same function.
+- Past verdicts are not rewritten: the record says what the auditor was shown.
+
+Enforced by `tests/test_graph_verification.py` (a bundled proposal's rows each get their own text; a
+re-check of the second episode inherits that episode's; two of one name are told apart by the job
+body; a row naming none parks without text; the cockpit shows each row its own).
+
 ## 2026-11-06 — v2.82.6: The triage agent is told how old the mail is, a confirmation is never a fact's time, and the reviewer sees an episode dated to the proposal instead of its source
 
 Working the backlog, inbox-triage read months-old mail as current: in ten days it proposed 27 tasks

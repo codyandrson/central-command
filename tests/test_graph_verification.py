@@ -639,6 +639,109 @@ async def test_recheck_rows_inherit_the_original_approved_text(monkeypatch):
     assert await _REAL_APPROVED_BODY(recheck) == "the original claim"
 
 
+# --- a proposal that bundles several episodes (DL-209, v2.82.7) -------------------
+#
+# inbox-triage bundles two `graph.add_episode` actions in one proposal
+# routinely; the Executor writes one verification row per action. Until
+# v2.82.7 `_approved_episode` returned the proposal's FIRST episode for every
+# row, so the second episode was judged, displayed and remediated against its
+# sibling's text — eight live proposals, every second row flagged for
+# "dropping" a claim it never carried, and one remediation deleted four
+# correct facts. The row is matched to ITS action.
+
+TWO_EPISODES = {"actions": [
+    {"capability": "graph.add_episode@v1",
+     "arguments": {"name": "the car", "episode_body": "Doe's car is registered in Montana.",
+                   "reference_time": "2026-01-01T00:00:00+00:00"}},
+    {"capability": "graph.add_episode@v1",
+     "arguments": {"name": "the friend", "episode_body": "Jordan Rivers is a close friend of Jane Doe.",
+                   "reference_time": "2026-01-01T00:00:00+00:00"}},
+]}
+
+
+def _proposals(monkeypatch, table: dict):
+    async def fake_load(proposal_id):
+        return table.get(proposal_id)
+
+    monkeypatch.setattr(repo, "load_proposal", fake_load)
+
+
+async def test_each_episode_of_a_bundled_proposal_is_judged_against_its_own_text(monkeypatch):
+    _proposals(monkeypatch, {"p-two": TWO_EPISODES})
+    car = await _row(proposal_id="p-two", episode_name="the car", marker="proposal=p-two")
+    friend = await _row(proposal_id="p-two", episode_name="the friend", marker="proposal=p-two")
+    assert await _REAL_APPROVED_BODY(car) == "Doe's car is registered in Montana."
+    assert await _REAL_APPROVED_BODY(friend) == "Jordan Rivers is a close friend of Jane Doe."
+
+
+async def test_a_recheck_of_the_second_episode_inherits_that_episode_text(monkeypatch):
+    """The remediation walk ends at the original row — and keeps matching by
+    THAT row's name, not the proposal's first episode."""
+    _proposals(monkeypatch, {
+        "p-two": TWO_EPISODES,
+        "p-fix": {"actions": [{"capability": "graph.delete_edge@v1",
+                               "arguments": {"uuid": "x"}}]},
+    })
+    original = await _row(proposal_id="p-two", episode_name="the friend", marker="proposal=p-two")
+    recheck = await repo.create_graph_verification(
+        proposal_id="p-fix", episode_name="the friend", group_id="central_command",
+        scope="shared", marker="proposal=p-two", remediation_of=original["id"])
+    assert await _REAL_APPROVED_BODY(recheck) == "Jordan Rivers is a close friend of Jane Doe."
+
+
+async def test_two_episodes_of_one_name_are_told_apart_by_the_job_body(monkeypatch):
+    same_name = {"actions": [
+        {"capability": "graph.add_episode@v1",
+         "arguments": {"name": "probe", "episode_body": "the first body"}},
+        {"capability": "graph.add_episode@v1",
+         "arguments": {"name": "probe", "episode_body": "the second body"}},
+    ]}
+    _proposals(monkeypatch, {"p-same": same_name})
+    ver, _job = await repo.create_graph_verification_with_job(
+        proposal_id="p-same", episode_name="probe", group_id=_fresh_group(), scope="shared",
+        marker="proposal=p-same",
+        payload={"name": "probe", "episode_body": "the second body",
+                 "source_description": "x | proposal=p-same",
+                 "reference_time": "2026-01-01T00:00:00Z"},
+    )
+    assert await _REAL_APPROVED_BODY(ver) == "the second body"
+    # No job to tell them apart: no text, never a guess.
+    jobless = await _row(proposal_id="p-same", episode_name="probe", marker="proposal=p-same")
+    assert await _REAL_APPROVED_BODY(jobless) is None
+
+
+async def test_a_row_naming_none_of_its_proposal_episodes_parks_without_text(monkeypatch):
+    """A record inconsistency is an operator finding, not a judgment against a
+    sibling's text: the sweep parks the row `no_approved_text`."""
+    monkeypatch.setattr(graph_auditor, "_approved_episode_body", _REAL_APPROVED_BODY)
+    _proposals(monkeypatch, {"p-two": TWO_EPISODES})
+    _graph(monkeypatch)
+    row = await _row(proposal_id="p-two", episode_name="the boat", marker="proposal=p-two")
+    assert await _REAL_APPROVED_BODY(row) is None
+    assert await graph_auditor.verify_one(row) == "awaiting"
+    landed = await repo.get_graph_verification(row["id"])
+    assert landed["status"] == "AWAITING_OPERATOR"
+    assert landed["mechanical"]["no_approved_text"] is True
+    assert landed["verdict"] is None
+
+
+async def test_the_cockpit_shows_each_bundled_row_its_own_text(monkeypatch):
+    from central_command.api import routes
+
+    monkeypatch.setattr(graph_auditor, "_approved_episode_body", _REAL_APPROVED_BODY)
+    monkeypatch.setattr(settings, "graph_auditor_enabled", False)
+    _proposals(monkeypatch, {"p-two": TWO_EPISODES})
+    _graph(monkeypatch)
+    car = await _row(proposal_id="p-two", episode_name="the car", marker="proposal=p-two")
+    friend = await _row(proposal_id="p-two", episode_name="the friend", marker="proposal=p-two")
+    await graph_auditor.verify_one(car)
+    await graph_auditor.verify_one(friend)
+    out = await routes.graph_verifications()
+    text = {r["id"]: r["approved_text"] for r in out["awaiting"]}
+    assert text[car["id"]] == "Doe's car is registered in Montana."
+    assert text[friend["id"]] == "Jordan Rivers is a close friend of Jane Doe."
+
+
 async def test_create_edge_carries_the_validity_window(monkeypatch):
     """graph.create_edge exists for extraction-DROPPED facts (2026-08-20) —
     and a missed fact must land with its REAL validity window, not today's."""

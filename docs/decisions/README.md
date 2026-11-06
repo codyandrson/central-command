@@ -297,3 +297,4 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-206 | Every bolt pool tests an idle connection before reusing it | active | 2026-11-04 | test: `tests/test_bolt_liveness.py` | [process.md](process.md) |
 | DL-207 | A queued model completion is a busy slot, not an outage | active | 2026-11-05 | test: `tests/test_dependency_probes.py` | [process.md](process.md) |
 | DL-208 | The agent is told a mail's age, and the operator's confirmation is never a fact's time | active | 2026-11-06 | test: `tests/test_email_age_context.py`, `tests/test_policy.py` | [process.md](process.md) |
+| DL-209 | A verification row is judged against its own episode's text, never its proposal's first | active | 2026-11-06 | test: `tests/test_graph_verification.py` | [process.md](process.md) |

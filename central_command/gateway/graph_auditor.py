@@ -194,9 +194,18 @@ async def remediation_instructions(row: dict, note: str) -> str:
 
 
 async def _approved_episode(row: dict) -> tuple[dict, str] | None:
-    """The `graph.add_episode` arguments the operator actually approved, plus
-    the approver — from the proposal row, the control plane's record,
-    deliberately not the graph's copy of it.
+    """The `graph.add_episode` arguments the operator actually approved for
+    THIS row's episode, plus the approver — from the proposal row, the control
+    plane's record, deliberately not the graph's copy of it.
+
+    A proposal may carry several episodes (inbox-triage bundles two
+    routinely) and the Executor writes one verification row per action, so
+    the row is matched to ITS action: by `episode_name` (the action's `name`,
+    stamped on the row at execute time) and, should a proposal name two
+    episodes alike, by the body the row's ingest job sent. Until v2.82.7 this
+    returned the proposal's FIRST episode whatever the row: every second
+    episode was judged, displayed and remediated against its sibling's text,
+    and one remediation deleted four correct facts (DL-209).
 
     A remediation RE-CHECK row's own proposal is the curation proposal (no
     episode on it) — follow `remediation_of` back to the row that carries the
@@ -204,20 +213,43 @@ async def _approved_episode(row: dict) -> tuple[dict, str] | None:
     ends at the one original episode."""
     for _ in range(10):
         proposal = await repo.load_proposal(row["proposal_id"])
-        for action in (proposal or {}).get("actions") or []:
-            capability = str(action.get("capability", "")).split("@", 1)[0]
-            if capability == "graph.add_episode":
-                args = action.get("arguments") or {}
-                if not args.get("episode_body"):
-                    return None
-                approver = ((proposal.get("provenance") or {}).get("approver")) or "human:operator"
-                return args, approver
+        episodes = [
+            action.get("arguments") or {}
+            for action in (proposal or {}).get("actions") or []
+            if str(action.get("capability", "")).split("@", 1)[0] == "graph.add_episode"
+        ]
+        if episodes:
+            args = await _episode_for_row(row, episodes)
+            if not args or not args.get("episode_body"):
+                return None
+            approver = ((proposal.get("provenance") or {}).get("approver")) or "human:operator"
+            return args, approver
         if not row.get("remediation_of"):
             return None
         row = await repo.get_graph_verification(row["remediation_of"]) or {}
         if not row:
             return None
     return None
+
+
+async def _episode_for_row(row: dict, episodes: list[dict]) -> dict | None:
+    """Which of a proposal's episode actions this row verifies. One action
+    needs no matching; several are told apart by name; two of one name by the
+    body the row's ingest job carried (byte-identical to the action's). A row
+    naming none of them is a record inconsistency and gets NO text — the sweep
+    parks it `no_approved_text`, loudly, rather than judging it against a
+    sibling."""
+    if len(episodes) == 1:
+        return episodes[0]
+    named = [a for a in episodes if a.get("name") == row.get("episode_name")]
+    if len(named) == 1:
+        return named[0]
+    if not named:
+        return None
+    job = await repo.ingest_job_for_verification(row["id"])
+    body = ((job or {}).get("payload") or {}).get("episode_body")
+    bodied = [a for a in named if body is not None and a.get("episode_body") == body]
+    return bodied[0] if len(bodied) == 1 else None
 
 
 async def _approved_episode_body(row: dict) -> str | None:
