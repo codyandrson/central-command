@@ -158,6 +158,15 @@ when a matching file is read.
   Why: with limits, a two-hour outage at a five-minute cadence exhausted every
   parked unit in 25 minutes and promoted a storm of operator items. One curve
   (`contract.retry_backoff_seconds`) and one cap setting now set the patience.
+- **A queued model completion is a busy slot, not an outage.** `probe_llm`
+  reads a completion the proxy accepted and had not answered within the probe
+  timeout as a queue, and asks the proxy's admin plane whether it is there
+  before answering; only a refused connection, a 429 or a 5xx is down. Why: the
+  model server queues first-in-first-out behind whatever is generating, so a
+  one-token ping behind a long triage turn waits minutes — twenty false "llm
+  down, ReadTimeout" outages in five days, every one with a run in flight
+  (DL-207). Don't lengthen the probe's clock instead: the queue wait is the
+  turn in front, not a number.
 - **The waiting dismiss is one SQL-guarded transition, and it resolves the task
   FAILED.** Dismissing an approved proposal that waits on an outage
   (`RETRY_PENDING`) goes through `repo.withdraw_proposal_if_open`, a conditional

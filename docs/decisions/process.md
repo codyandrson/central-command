@@ -2077,3 +2077,42 @@ hygiene, and how the test suite itself must be written. See
   number is a property of this topology, and tuning it is a release.
 - **Enforced:** test: `tests/test_bolt_liveness.py` (the options, a driver's pool config, the swap on graphiti's client, and a source walk over every `AsyncGraphDatabase.driver(` in the app).
 - **Source:** `central_command/integrations/neo4j_reader.py` (`BOLT_LIVENESS_CHECK_SECONDS`, `bolt_driver_kwargs`, `_get_driver`); `central_command/integrations/graphiti_client.py` (`_give_bolt_liveness_check`, `_build`).
+
+### DL-207 — A queued model completion is a busy slot, not an outage
+
+- **Status:** active
+- **Date:** 2026-11-05
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**A queued model completion is a busy slot, not an outage.**"
+- **Why:** The retry sweep's model probe (`heartbeat.probes.probe_llm`) is a
+  one-token completion against the default alias with the probe's five-second
+  clock, "exactly the route a retried agent run would take". The model server
+  behind that alias serves one slot, queued first-in-first-out, and the same
+  slot answers graph extraction; a triage turn over a long prompt holds it for
+  minutes. The ping waits its turn like every other call, the clock runs out
+  (`httpx.ReadTimeout`), and the cache reads the raise as down. Read
+  2026-11-05 from the event log: twenty `dependency.down` rows for `llm`
+  since 2026-10-29, nearly all since 2026-11-01, lasting 5 to 68 minutes,
+  every one carrying `ReadTimeout`; eighteen with triage steps or claims in
+  the minutes before, the other two during graph extraction. The sweep
+  probes the model whenever any unprocessed item carries a backoff set within
+  the last day (the relatedness hold's frozen items qualify, eleven a day),
+  so the cockpit's "0 items waiting" and the probe set disagree by design.
+  The operator's Retry now ran the same probe and failed the same way (5.1 s).
+  Cost: parked resumes and retries skipped for the length of each false
+  outage, a banner, and one more request on the busy slot per probe; the
+  dispatcher and the ingest worker (which gates on `graph` and `embedder`
+  only) were never held.
+- **Decision:** A completion the proxy ACCEPTED and had not answered within
+  the timeout is a queue, not a verdict. `probe_llm` catches the read timeout
+  and asks the proxy's admin plane whether it is there (`probe_litellm`, the
+  liveliness question the proxy answers without a model): yes is up (busy —
+  a retried run queues behind the slot exactly as it would have anyway), no
+  is down. A connect failure still raises (down, with its error); a 429 or
+  5xx is still down. The cache's backstop allows the second round trip.
+  Rejected: a longer probe clock — the wait is the turn in front, which can
+  be minutes, not a number to tune; probing a different, idle route — the
+  probe's point is the route a retried run takes. Accepted limit: a backend
+  that accepts connections and never answers reads as busy until the proxy's
+  own clock fails the run, which the failure taxonomy then parks as before.
+- **Enforced:** test: `tests/test_dependency_probes.py` (`test_a_queued_completion_is_busy_not_down_when_the_proxy_answers`: queued + proxy up is up, queued + proxy down is down, an answered completion never asks, a refused connection raises).
+- **Source:** `central_command/heartbeat/probes.py` (`probe_llm`, `ProbeCache._probe_one`).

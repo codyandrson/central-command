@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-05 — v2.82.5: A queued model probe is a busy slot, not an outage, and a toast can be swiped away
+
+The cockpit showed "llm down for 3m … ReadTimeout" while triage was running normally. The retry
+sweep's model probe is a one-token completion with a five-second clock; the model server queues
+requests first-in-first-out behind whatever is generating, and a triage turn over a long prompt holds
+the slot for minutes, so the ping waited its turn, timed out, and the sweep wrote an outage. Twenty
+such "outages" of 5 to 68 minutes in five days, every one carrying ReadTimeout, every one with a
+session or a graph extraction mid-generation (DL-207). Parked resumes and retries waited them out;
+the dispatcher and the ingest worker, which do not gate on the model probe, kept going.
+
+- `probe_llm` reads a completion the proxy accepted and had not answered within the probe timeout
+  as a queue, not a verdict: it asks the proxy's admin plane whether it is there (the existing
+  liveliness probe), and that answer is the probe's. A refused connection still raises, a 429 or
+  5xx is still down. The cache's backstop allows the second round trip.
+- A toast can be swiped away, either direction, with a mouse or a finger (one Pointer Events
+  handler); a swipe is an explicit act, so it dismisses an error toast too. The hover pause that
+  keeps a toast from vanishing mid-read now listens to mouse pointers only — a finger "enters" on
+  every tap and never leaves, which parked a tapped toast on a phone until it was closed by hand.
+  Vertical scrolling over a toast is untouched (`touch-action: pan-y`).
+
+Enforced by `tests/test_dependency_probes.py` (the queued-completion probe) and
+`web/src/features/notifications/ToastHost.test.tsx` (the swipe, the click it ends with, and the
+pause that is mouse-only).
+
 ## 2026-11-04 — v2.82.4: An email quote is re-checked against the mail the session was fed, on the first draft and on every later leg
 
 The triage charter has asked for a verbatim email quote since v0 (`kind='email'`, `claim=<the exact

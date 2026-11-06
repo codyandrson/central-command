@@ -295,3 +295,4 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-204 | The app holds no clock on a model call shorter than LiteLLM's and never re-sends; a resume is an orphan only if armed before this process started | active | 2026-11-03 | test: `tests/test_llm_client_clock.py` | [process.md](process.md) |
 | DL-205 | A façade answers a provider's refusal with 4xx and its own sentence; only a failure is 5xx | active | 2026-11-04 | test: `tests/test_n8n_workflows.py`, `tests/test_mail_read.py` | [process.md](process.md) |
 | DL-206 | Every bolt pool tests an idle connection before reusing it | active | 2026-11-04 | test: `tests/test_bolt_liveness.py` | [process.md](process.md) |
+| DL-207 | A queued model completion is a busy slot, not an outage | active | 2026-11-05 | test: `tests/test_dependency_probes.py` | [process.md](process.md) |

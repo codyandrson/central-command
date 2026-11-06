@@ -66,6 +66,9 @@ log = logging.getLogger(__name__)
 # One constant, not a config knob: this is a liveness ping on the LAN (or a
 # provider round-trip for a single token). Anything slower than this is, for the
 # sweep's purposes, down — and the sweep's own cadence is the schedule row.
+# The one exception is the model probe: a completion that is ACCEPTED and then
+# silent for this long is queued behind other work, and `probe_llm` asks the
+# proxy whether it is there before calling that an outage (DL-207).
 PROBE_TIMEOUT_SECONDS = 5.0
 
 # The dependency names (the vocabulary lives in `contract/dependencies.py`,
@@ -224,6 +227,19 @@ async def probe_llm() -> bool:
     A response the chain actually produced means the chain is up, even when it
     is a refusal (a 4xx about the request). Only 429 and 5xx — the shapes the
     failure taxonomy calls transient — count as down.
+
+    A completion the proxy ACCEPTED and had not answered within the probe
+    timeout is not, on its own, an outage: the model server queues requests
+    first-in-first-out behind whatever is generating (a triage turn over a
+    long prompt holds the slot for minutes), and a one-token ping waits its
+    turn like every other call. So a read timeout asks the proxy's admin
+    plane whether it is there (`probe_litellm`, the question it answers
+    without a model): yes means the chain is reachable and BUSY — up, and a
+    retried run queues behind the slot exactly as it would have anyway; no
+    means down. A connect failure never reaches this branch: it raises, and
+    the cache reads a raise as down. (DL-207: read 2026-11-05, twenty false
+    "llm down, ReadTimeout" outages in five days, every one with a session
+    mid-generation.)
     """
     if settings.test_model:
         return True
@@ -231,14 +247,19 @@ async def probe_llm() -> bool:
     if not base_url or not api_key:
         return False
     model = settings.default_model.split(":", 1)[-1]
-    async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS) as client:
-        resp = await client.post(
-            base_url.rstrip("/") + "/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}",
-                     "content-type": "application/json"},
-            json={"model": model, "max_tokens": 1,
-                  "messages": [{"role": "user", "content": "ping"}]},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS) as client:
+            resp = await client.post(
+                base_url.rstrip("/") + "/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}",
+                         "content-type": "application/json"},
+                json={"model": model, "max_tokens": 1,
+                      "messages": [{"role": "user", "content": "ping"}]},
+            )
+    except httpx.ReadTimeout:
+        log.info("probe llm: completion queued past %ss; asking the proxy",
+                 PROBE_TIMEOUT_SECONDS)
+        return await probe_litellm()
     return resp.status_code != 429 and resp.status_code < 500
 
 
@@ -279,7 +300,9 @@ class ProbeCache:
             self._results[dependency] = True
             return
         try:
-            ok = bool(await asyncio.wait_for(probe(), PROBE_TIMEOUT_SECONDS + 1))
+            # The backstop allows two probe round-trips: the model probe may
+            # follow its timed-out completion with the proxy question.
+            ok = bool(await asyncio.wait_for(probe(), 2 * PROBE_TIMEOUT_SECONDS + 1))
             if not ok:
                 self._errors[dependency] = "probe answered unhealthy"
         except Exception as e:  # noqa: BLE001 — an unreachable probe IS the signal

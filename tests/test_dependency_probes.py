@@ -550,3 +550,64 @@ def test_the_dependency_events_are_not_a_registry_row():
     src = Path(orchestration.__file__).read_text()
     assert '"dependency.up" if up else "dependency.down"' in src
     assert events is not None
+
+
+async def test_a_queued_completion_is_busy_not_down_when_the_proxy_answers(monkeypatch):
+    """DL-207: a one-token completion the proxy accepted and had not answered
+    within the probe timeout is a BUSY slot, not an outage — the probe then asks
+    the admin plane, and its answer is the verdict. A refused connection still
+    raises (the cache reads a raise as down)."""
+    import httpx
+
+    monkeypatch.setattr(settings, "test_model", None)
+    monkeypatch.setattr(settings, "llm_base_url", "http://127.0.0.1:4000")
+    monkeypatch.setattr(settings, "llm_api_key", "sk-test")
+    monkeypatch.setattr(settings, "default_model", "openai:cc-default")
+    monkeypatch.setattr(settings, "llm_proxy_base_url", "http://127.0.0.1:4000")
+    post_raises: dict = {"exc": httpx.ReadTimeout("read timed out")}
+    liveliness = {"code": 200}
+    calls: list[tuple[str, str]] = []
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, **kw):
+            calls.append(("POST", url))
+            if post_raises["exc"] is not None:
+                raise post_raises["exc"]
+            return httpx.Response(200, request=httpx.Request("POST", url))
+
+        async def get(self, url, **kw):
+            calls.append(("GET", url))
+            return httpx.Response(liveliness["code"], request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(probes.httpx, "AsyncClient", _Client)
+
+    # Queued completion, proxy there: up (busy).
+    assert await probes.probe_llm() is True
+    assert calls == [("POST", "http://127.0.0.1:4000/v1/chat/completions"),
+                     ("GET", "http://127.0.0.1:4000/health/liveliness")]
+
+    # Queued completion, proxy not answering: down.
+    liveliness["code"] = 503
+    assert await probes.probe_llm() is False
+
+    # A completion that answered never asks the proxy.
+    calls.clear()
+    post_raises["exc"] = None
+    assert await probes.probe_llm() is True
+    assert calls == [("POST", "http://127.0.0.1:4000/v1/chat/completions")]
+
+    # A refused connection is not a queue: it raises, as before.
+    post_raises["exc"] = httpx.ConnectError("refused")
+    with pytest.raises(httpx.ConnectError):
+        await probes.probe_llm()
+    # (`test_a_probe_that_raises_is_down_with_its_error` covers what the cache
+    # makes of that raise; the suite's conftest stubs the probe table itself.)

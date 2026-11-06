@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type SyntheticEvent } from 'react';
 import { AlertTriangle, Bell, X } from 'lucide-react';
 import { useNotifications, type Toast } from './NotificationsContext';
 import { useVisualViewportPin } from './useVisualViewportPin';
@@ -14,6 +14,11 @@ import { useVisualViewportPin } from './useVisualViewportPin';
  * Every toast is CLICKABLE and lands on the thing it is about (the Decisions
  * Inbox with the ask selected, or the discussion lane in Chat). A notification
  * the operator then has to go and find is a notification that wasted his time.
+ *
+ * Every toast is SWIPEABLE, either way, with a mouse or a finger: one Pointer
+ * Events handler covers both. A swipe is an explicit act, so it dismisses an
+ * error toast too — the auto-dismiss exemption below is about a toast going
+ * away on its own, not about the operator sending it away.
  *
  * No sound, by design — see NotificationsContext.
  */
@@ -34,13 +39,31 @@ export interface ToastHostProps {
  */
 export const AUTO_DISMISS_MS = 10_000;
 
+/** A drag that ends at least this far from where it started is a swipe. */
+export const SWIPE_DISMISS_PX = 72;
+/** Closer than this the pointer only wobbled: the tap or click still counts. */
+const SWIPE_SLOP_PX = 8;
+/** How long the card takes to slide off before it is removed. */
+export const SWIPE_OUT_MS = 150;
+
 function ToastCard({ toast, onOpen, onDismiss }: {
   toast: Toast; onOpen: () => void; onDismiss: () => void;
 }) {
   const isError = toast.severity === 'error';
   const Icon = isError ? AlertTriangle : Bell;
-  // Hovering pauses the countdown — a toast must never vanish mid-read.
+  // Hovering pauses the countdown — a toast must never vanish mid-read. MOUSE
+  // hover only: a finger "enters" on every tap and never leaves, so the mouse
+  // events would park a tapped toast on a phone until it was dismissed by hand.
   const [hovered, setHovered] = useState(false);
+  // The swipe in progress (`dragX`, px from where it started), and the card on
+  // its way out (`leaving`, the direction it slides).
+  const [dragX, setDragX] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [leaving, setLeaving] = useState<1 | -1 | null>(null);
+  const drag = useRef<{ id: number; startX: number; moved: boolean } | null>(null);
+  // Set when a release ended a real drag: the click the browser fires next is
+  // the end of that drag, not a request to open the record.
+  const swallowClick = useRef(false);
 
   // Keyed on the toast id, not on the callback: `onDismiss` is a fresh closure
   // every render, and depending on it would restart the countdown each time
@@ -48,18 +71,81 @@ function ToastCard({ toast, onOpen, onDismiss }: {
   const dismissRef = useRef(onDismiss);
   useEffect(() => { dismissRef.current = onDismiss; }, [onDismiss]);
   useEffect(() => {
-    if (isError || hovered) return;
+    if (isError || hovered || dragging || leaving !== null) return;
     const t = setTimeout(() => dismissRef.current(), AUTO_DISMISS_MS);
     return () => clearTimeout(t);
-  }, [toast.id, isError, hovered]);
+  }, [toast.id, isError, hovered, dragging, leaving]);
+  // The swipe-out: slide, then remove. Errors included — see the header.
+  useEffect(() => {
+    if (leaving === null) return;
+    const t = setTimeout(() => dismissRef.current(), SWIPE_OUT_MS);
+    return () => clearTimeout(t);
+  }, [leaving]);
 
+  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || leaving !== null) return;
+    drag.current = { id: e.pointerId, startX: e.clientX, moved: false };
+    // jsdom has no pointer capture; a browser does, and it keeps the move and
+    // release events coming when the pointer leaves the card mid-swipe.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    setDragging(true);
+  };
+  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    const dx = e.clientX - d.startX;
+    if (!d.moved && Math.abs(dx) < SWIPE_SLOP_PX) return;
+    d.moved = true;
+    setDragX(dx);
+  };
+  const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    drag.current = null;
+    setDragging(false);
+    const dx = e.clientX - d.startX;
+    swallowClick.current = d.moved;
+    if (d.moved && Math.abs(dx) >= SWIPE_DISMISS_PX) {
+      setLeaving(dx > 0 ? 1 : -1);
+      return;
+    }
+    setDragX(0);
+  };
+  const onPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    drag.current = null;
+    setDragging(false);
+    setDragX(0);
+  };
+  const onClickCapture = (e: SyntheticEvent) => {
+    if (!swallowClick.current) return;
+    swallowClick.current = false;
+    e.stopPropagation();
+    e.preventDefault();
+  };
+
+  const x = leaving !== null ? leaving * 480 : dragX;
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHovered(true); }}
+      onPointerLeave={(e) => { if (e.pointerType === 'mouse') setHovered(false); }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onClickCapture={onClickCapture}
       data-testid="cc-toast"
       data-toast-id={toast.id}
-      className={`pointer-events-auto flex w-[22rem] max-w-[calc(100vw-2rem)] items-start gap-2 rounded-xl border px-3 py-2.5 shadow-lg ${
+      data-leaving={leaving !== null ? 'true' : undefined}
+      style={{
+        transform: x ? `translateX(${x}px)` : undefined,
+        opacity: leaving !== null ? 0 : undefined,
+        transition: dragging ? 'none' : `transform ${SWIPE_OUT_MS}ms ease-out, opacity ${SWIPE_OUT_MS}ms ease-out`,
+      }}
+      className={`pointer-events-auto flex w-[22rem] max-w-[calc(100vw-2rem)] touch-pan-y items-start gap-2 rounded-xl border px-3 py-2.5 shadow-lg ${
+        dragging ? 'select-none ' : ''
+      }${
         isError
           ? 'border-destructive/30 bg-card/95 text-foreground'
           : 'border-primary/30 bg-card/95 text-foreground'
