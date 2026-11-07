@@ -13,6 +13,7 @@ from datetime import date, datetime, timezone
 
 from central_command.db import repo
 from central_command.ingest import dispatcher, ledger
+from central_command.integrations import email_facade
 from tests.conftest import needs_pg
 
 TODAY = date(2026, 11, 6)
@@ -76,3 +77,42 @@ async def test_the_claimed_row_carries_received_at_for_the_age_line():
     # Leave nothing in flight: a claimed item counts against the dispatcher's
     # concurrency, and the next test's claim would answer None.
     await repo.finish_work_item(row["id"], "PROCESSED", session_id="sess_age_line")
+
+
+async def test_a_refs_only_row_hydrated_after_the_claim_gets_the_age_line(monkeypatch):
+    """A backlog row is a refs-only stub when the claim's SQL runs — received_at
+    NULL — and is hydrated afterwards from the provider. The dispatcher frames
+    the prompt from the in-memory item, so the hydration must fill the blank
+    there too: the row carried the date and the prompt still had no line
+    (2026-11-06, 65 of 76 backlog sessions)."""
+    async def fake_get_message(uuid):
+        assert uuid == "provider-uuid-1"
+        return {
+            "uuid": uuid,
+            "conversation_id": uuid,
+            "from": "Jane Doe <jane@example.com>",
+            "to": "operator@example.com",
+            "subject": "Confirm your hostname",
+            "date": "2025-09-02T15:46:45+00:00",
+            "body_text": "Please confirm within 30 days.",
+        }
+    monkeypatch.setattr(email_facade, "get_message", fake_get_message)
+
+    async def fake_persist(item_id, payload, subject, received_at):
+        assert received_at is not None and received_at.date() == date(2025, 9, 2)
+    monkeypatch.setattr(repo, "hydrate_work_item", fake_persist)
+
+    item = {"id": "wi_refs_only", "received_at": None, "subject": None,
+            "payload": {"provider_uuid": "provider-uuid-1", "deferred_fetch": True}}
+    await ledger.hydrate_work_item(item)
+    assert item["received_at"] is not None
+    assert item["received_at"].date() == date(2025, 9, 2)
+    framed = dispatcher._with_age_context(item["payload"]["text"], item, today=TODAY)
+    assert "[queue context] This email was received on 2025-09-02," in framed
+    assert "days before today (2026-11-06)." in framed
+
+    # An enrollment-time date is never overwritten by the provider's.
+    kept = {"id": "wi_dated", "received_at": datetime(2026, 1, 20, tzinfo=timezone.utc),
+            "subject": "s", "payload": {"provider_uuid": "provider-uuid-1"}}
+    await ledger.hydrate_work_item(kept)
+    assert kept["received_at"].date() == date(2026, 1, 20)

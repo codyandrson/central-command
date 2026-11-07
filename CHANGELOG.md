@@ -4,6 +4,21 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-07 — v2.82.9: The mail's age reaches the backlog mail it was written for
+
+v2.82.6 added the "[queue context] This email was received on …, N days before today" line to the
+triage prompt, for months-old backlog mail being read as current. Read the next evening: 65 of the
+76 backlog sessions after the v2.82.7 restart had no line; the 11 that did were rows a failed earlier
+attempt had already hydrated, and the 4 live-feed sessions. A backlog row is a refs-only stub when
+the claim's SQL runs — `received_at` NULL — and `ledger.hydrate_work_item` fetched the message
+afterwards, persisted the date to the row and set the text and subject on the in-memory item, but
+not the date; the dispatcher frames the prompt from that item, so `_with_age_context` saw None and
+left the prompt alone. The age test handed the function a pre-filled item and never walked the path.
+
+- `hydrate_work_item` fills `received_at` on the in-memory item the way it already fills the row:
+  the enrollment-time date when there is one, the provider's otherwise.
+- A test drives a refs-only stub through the hydration with a stubbed façade and asserts the line.
+
 ## 2026-11-06 — v2.82.8: A dismissal's age is how long it has waited on the operator, not when it was enrolled
 
 A no-action claim parked minutes ago sat in the Decisions inbox reading "8d ago", with the section

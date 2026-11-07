@@ -422,4 +422,10 @@ async def hydrate_work_item(item: dict) -> None:
     payload.pop("deferred_fetch", None)
     item["payload"] = payload
     item["subject"] = item.get("subject") or parsed["subject"]
+    # The in-memory item is what the dispatcher frames the prompt from, and a
+    # refs-only row was claimed with received_at NULL: fill the blank here the
+    # same way the row below does, or the age line (DL-208) never reaches the
+    # backlog mail it was written for (read 2026-11-06: 65 of 76 backlog
+    # sessions after the v2.82.7 restart had no line).
+    item["received_at"] = item.get("received_at") or parsed["received_at"]
     await repo.hydrate_work_item(item["id"], payload, parsed["subject"], parsed["received_at"])
