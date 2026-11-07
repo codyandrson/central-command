@@ -249,6 +249,29 @@ async def test_dismiss_pending_holds_related_items(clean_ledger):
 
 @pytestmark_db
 @pytest.mark.asyncio
+async def test_dismiss_pending_stamps_parked_at_and_reopen_clears_it(clean_ledger):
+    """A dismissal waits on the operator from the moment it was PARKED. The
+    Decisions queue ages, sorts and labels it by `parked_at` — never by
+    `enrolled_at` (the backlog enrols in one batch) and never by the mail's
+    own date, which travels along as `received_at` for context. A reopen
+    clears the stamp so the next park starts the wait again (v2.82.8)."""
+    await ledger.enroll_email(_raw(1))
+    first = await repo.claim_next_work_item("sess_a")
+    assert (await repo.get_work_item(first["id"]))["parked_at"] is None
+
+    await repo.mark_dismiss_pending(first["id"], "no action needed", None)
+    [row] = await repo.list_work_items("DISMISS_PENDING")
+    assert row["id"] == first["id"]
+    assert row["parked_at"] is not None
+    assert row["parked_at"] >= row["enrolled_at"]
+    assert "received_at" in row
+
+    assert await repo.reopen_work_item(first["id"], "look again")
+    assert (await repo.get_work_item(first["id"]))["parked_at"] is None
+
+
+@pytestmark_db
+@pytest.mark.asyncio
 async def test_parked_proposal_holds_related_items(clean_ledger):
     """A PROCESSED item whose proposal is not yet EXECUTED holds the lock — the
     park-to-decision AND the approve-to-execute windows are covered: related

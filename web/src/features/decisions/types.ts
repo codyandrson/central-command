@@ -242,6 +242,13 @@ export interface WorkItem {
   attempts?: number;
   last_error?: string | null;
   enrolled_at?: string;
+  /** When the no-action claim was PARKED for the operator — the Decisions
+   *  queue's age, sort and "oldest" key for a dismissal. Absent on a backend
+   *  that has not sent it yet; `waitingSince` falls back to `enrolled_at`. */
+  parked_at?: string | null;
+  /** The mail's own date, from the source — context beside the wait, never
+   *  the wait itself. */
+  received_at?: string | null;
   /** When it went terminal (PROCESSED/FOLDED/FAILED) — the history view's
    *  sort/display key for confirmed dismissals. */
   terminal_at?: string | null;

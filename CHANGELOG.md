@@ -4,6 +4,23 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-06 — v2.82.8: A dismissal's age is how long it has waited on the operator, not when it was enrolled
+
+A no-action claim parked minutes ago sat in the Decisions inbox reading "8d ago", with the section
+label red at "oldest: 8d", for a mail sent a year earlier. The dismissals list aged, sorted and
+labelled each row by the work item's `enrolled_at`, which for every backlog row is the day of the
+backlog import: the one visible time matched neither the mail nor the wait, and the "oldest" label
+could never go quiet. Proposals and operator asks already aged from the moment the ask was made;
+dismissals were the only section aged from queue entry. The parking write recorded no time of its own.
+
+- `work_item.parked_at` (additive): set by `mark_dismiss_pending`, cleared by a reopen so the next
+  park starts the wait again, left alone by a confirm (`terminal_at` is the other end). The schema
+  backfills unstamped DISMISS_PENDING rows from the claim that parked them, once.
+- `decisions.list` orders dismissals by `parked_at` and sends `received_at`; the cockpit ages the row,
+  the chip, the "oldest" label and the detail header from the park, and the detail header names the
+  mail's own date beside it as context ("mail from 30 Sep 2025"). A backend that has not sent
+  `parked_at` yet falls back to `enrolled_at`.
+
 ## 2026-11-06 — v2.82.7: A verification row is judged against its own episode's text, not its proposal's first
 
 The Verify tab showed "Rivers is a close friend of Doe" flagged for inventing exactly that fact, with

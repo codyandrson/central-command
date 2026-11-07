@@ -1651,3 +1651,16 @@ alter table work_item add column if not exists failing_since timestamptz;
 update work_item
    set failing_since = now(), transient_failures = transient_releases
  where dependencies is not null and failing_since is null;
+
+-- When a no-action claim was PARKED for the operator (v2.82.8). The Decisions
+-- inbox ages a dismissal by how long it has waited on the operator, and
+-- `enrolled_at` is not that: every backlog row enrolls on the same day, so an
+-- item parked minutes ago read "8d" and the section label sat red for good.
+-- Set by `mark_dismiss_pending`, cleared by a reopen (the next park stamps it
+-- again), never by a confirm — `terminal_at` is the other end. The backfill
+-- adopts what is already waiting from the claim that parked it and matches
+-- only unstamped DISMISS_PENDING rows, so a re-run is a no-op.
+alter table work_item add column if not exists parked_at timestamptz;
+update work_item
+   set parked_at = coalesce(claimed_at, enrolled_at)
+ where state = 'DISMISS_PENDING' and parked_at is null;

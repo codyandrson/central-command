@@ -2810,7 +2810,7 @@ async def list_work_items(
     try:
         cols = """id, message_id, thread_id, feed, source, kind, subject, state,
                   session_id, attempts, last_error, enrolled_at, claimed_at,
-                  terminal_at"""
+                  terminal_at, parked_at, received_at"""
         if include_payload:
             cols += ", payload"
         if state:
@@ -3738,6 +3738,7 @@ async def mark_dismiss_pending(item_id: str, rationale: str, session_id: str | N
             """
             update work_item
                set state = 'DISMISS_PENDING',
+                   parked_at = now(),
                    session_id = coalesce($3, session_id),
                    payload = payload || jsonb_build_object('dismissal_rationale', $2::text)
              where id = $1 and state = 'CLAIMED'
@@ -3965,6 +3966,7 @@ async def reopen_work_item(item_id: str, note: str | None = None) -> bool:
             """
             update work_item
                set state = 'UNPROCESSED', claimed_at = null, session_id = null,
+                   parked_at = null,
                    payload = case when $2::text is null then payload
                                   else payload || jsonb_build_object('operator_note', $2::text) end
              where id = $1 and state = 'DISMISS_PENDING'

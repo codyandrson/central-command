@@ -1077,7 +1077,14 @@ async def _decisions_list() -> dict:
     return {
         "proposals": proposals,
         "waiting": waiting,
-        "dismissals": await repo.list_work_items("DISMISS_PENDING", include_payload=True),
+        # Newest-parked first; the cockpit reverses into its oldest-first queue.
+        # A dismissal waits from the moment it was PARKED for the operator, not
+        # from its enrolment (the backlog enrols in one batch) and not from the
+        # mail's own date (sent along as `received_at`, shown as context).
+        "dismissals": sorted(
+            await repo.list_work_items("DISMISS_PENDING", include_payload=True),
+            key=lambda d: d.get("parked_at") or d["enrolled_at"], reverse=True,
+        ),
         # Asks OF the operator — plan reviews, questions, stall escalations.
         # Since tier 2 (2026-07-25) ANY agent can ask, not just the orchestrator.
         # Answering resumes the parked run.

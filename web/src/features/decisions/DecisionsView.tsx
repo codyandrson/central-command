@@ -56,6 +56,28 @@ function RelativeTime({ iso }: { iso?: string | null }) {
    was invisible is HOW old, because every row's timestamp is the same muted
    grey. Same visual language as `session-stall-chip`: an amber pill that says
    how long, sitting inline so nothing the operator is reading moves. */
+/** How long a dismissal has waited on the operator: from the moment it was
+ *  PARKED, not from its enrolment. The backlog enrols in one batch, so by
+ *  `enrolled_at` an item parked minutes ago read "8d" and the section label
+ *  sat red for good; the mail's own date (`received_at`) is older still and is
+ *  shown beside it as context. Older backends send no `parked_at`. */
+function waitingSince(d: { parked_at?: string | null; enrolled_at?: string }): string | undefined {
+  return d.parked_at ?? d.enrolled_at;
+}
+
+/** "mail from 30 Sep 2025" — the source's date, as context next to the wait. */
+function MailDate({ iso }: { iso?: string | null }) {
+  if (!iso) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  const label = at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return (
+    <span className="shrink-0 text-[0.667rem] text-muted-foreground" title={`The mail itself is dated ${at.toLocaleString()}`}>
+      mail from {label}
+    </span>
+  );
+}
+
 function AgeChip({ iso }: { iso?: string | null }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -438,8 +460,8 @@ function DismissalRowItem({ d, active, onSelect }: {
           <AuditChip item={d} />
         </div>
       </div>
-      <AgeChip iso={d.enrolled_at} />
-      <RelativeTime iso={d.enrolled_at} />
+      <AgeChip iso={waitingSince(d)} />
+      <RelativeTime iso={waitingSince(d)} />
     </button>
   );
 }
@@ -1597,7 +1619,8 @@ function DismissalPane({ item, resolved, onDone, confirmDismissal, reopenDismiss
         <div className="mb-1 flex items-center gap-2">
           <span className="cockpit-badge">no-action claim</span>
           <AuditChip item={item} />
-          <RelativeTime iso={item.enrolled_at} />
+          <RelativeTime iso={waitingSince(item)} />
+          <MailDate iso={item.received_at} />
         </div>
         <p className="text-sm font-medium leading-snug text-foreground">{item.subject || '(no subject)'}</p>
         <div className="mt-0.5 flex items-center gap-2">
@@ -1866,7 +1889,7 @@ export function DecisionsView({
           <div className="flex items-center">
             <SectionLabel
               count={dismissals.length}
-              oldest={oldestAge(dismissals.map((d) => d.enrolled_at))}
+              oldest={oldestAge(dismissals.map((d) => waitingSince(d)))}
             >Dismissals</SectionLabel>
             <button
               onClick={() => openBulkDismiss('')}

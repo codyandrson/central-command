@@ -100,6 +100,37 @@ describe('DecisionsView aging chips', () => {
     expect(screen.getByTestId('decision-section-oldest')).toHaveTextContent('oldest: 4d');
   });
 
+  it('ages a dismissal from when it was PARKED, not from its enrolment or the mail date', async () => {
+    // A backlog row enrolled eight days ago, from a year-old mail, parked ten
+    // minutes ago: it has waited on the operator for ten minutes.
+    state.dismissals = [
+      {
+        id: 'd1', subject: 'Listing approved', enrolled_at: hoursAgo(8 * 24),
+        parked_at: hoursAgo(1 / 6), received_at: '2025-09-30T22:34:38Z',
+        payload: { from: 'Shop <help@example.com>' },
+      },
+    ];
+    render(<DecisionsView />);
+
+    expect(screen.queryByTestId('decision-age-chip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('decision-section-oldest')).not.toBeInTheDocument();
+    expect(screen.getByText('10m ago')).toBeInTheDocument();
+
+    // The detail pane names the mail's own date as context beside the wait.
+    await userEvent.click(screen.getByText('Listing approved'));
+    expect(await screen.findByText(/^mail from /)).toHaveTextContent('2025');
+  });
+
+  it('falls back to enrolled_at for a dismissal an older backend sent without parked_at', () => {
+    state.dismissals = [
+      { id: 'd1', subject: 'Listing approved', enrolled_at: hoursAgo(96) },
+    ];
+    render(<DecisionsView />);
+
+    expect(screen.getByTestId('decision-age-chip')).toHaveTextContent('4d');
+    expect(screen.getByTestId('decision-section-oldest')).toHaveTextContent('oldest: 4d');
+  });
+
   it('shows NO chip for a ten-minute-old proposal', () => {
     state.proposals = [
       { id: 'p1', agent_id: 'jira-expert', intent: 'Create JIRA-9', created_at: hoursAgo(1 / 6) },
