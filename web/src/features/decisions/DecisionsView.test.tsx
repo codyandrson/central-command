@@ -14,6 +14,11 @@ const state = {
   dismissals: [] as unknown[],
   operatorItems: [] as unknown[],
   detail: {} as Record<string, unknown>,
+  // What `getGraphKnown` answers: resolve with `graphKnown`, or reject with
+  // `graphKnownError` when set. The spy counts requests.
+  graphKnown: { proposal_id: 'p1', episodes: [] } as unknown,
+  graphKnownError: '',
+  getGraphKnown: vi.fn<(id: string) => unknown>(() => undefined),
   dismiss: vi.fn(() => Promise.resolve()),
   retryWaiting: vi.fn(() => Promise.resolve({ probe: 'up', driven: { sessions: 0, proposals: 1, tasks: 0, work_items: 0, ingest_jobs: 0 } })),
   reject: vi.fn(() => Promise.resolve()),
@@ -36,6 +41,12 @@ vi.mock('./useDecisions', () => {
   // ProposalPane's `useEffect(..., [id, getProposal])` on every keystroke,
   // which resets its feedback state and unmounts the textarea mid-type.
   const getProposal = () => Promise.resolve(state.detail);
+  const getGraphKnown = (id: string) => {
+    void state.getGraphKnown(id);
+    return state.graphKnownError
+      ? Promise.reject(new Error(state.graphKnownError))
+      : Promise.resolve(state.graphKnown);
+  };
   return {
     useDecisions: () => {
       const [showHistory, setShowHistory] = useState(false);
@@ -46,6 +57,7 @@ vi.mock('./useDecisions', () => {
         error: '',
         refresh: () => {},
         getProposal,
+        getGraphKnown,
         approve: state.approve,
         reject: state.reject,
         dismiss: state.dismiss,
@@ -74,6 +86,9 @@ beforeEach(() => {
   state.dismissals = [];
   state.operatorItems = [];
   state.detail = {};
+  state.graphKnown = { proposal_id: 'p1', episodes: [] };
+  state.graphKnownError = '';
+  state.getGraphKnown = vi.fn<(id: string) => unknown>(() => undefined);
   state.dismiss = vi.fn(() => Promise.resolve());
   state.retryWaiting = vi.fn(() => Promise.resolve({ probe: 'up', driven: { sessions: 0, proposals: 1, tasks: 0, work_items: 0, ingest_jobs: 0 } }));
   state.reject = vi.fn(() => Promise.resolve());
@@ -868,5 +883,81 @@ describe('DecisionsView redraft chain', () => {
     const marks = screen.getAllByTestId('redraft-limit-reached');
     expect(marks).toHaveLength(1);
     expect(marks[0]).toHaveTextContent('redraft limit reached');
+  });
+});
+
+/**
+ * "Graph already holds": advisory, lazy, and only for a pending proposal with
+ * an episode. The payload shape is pinned by tests/test_proposal_graph_known.py;
+ * these hold the four rendered states and the no-request rule.
+ */
+describe('DecisionsView graph already holds', () => {
+  const episodeAction = {
+    capability: 'graph.add_episode',
+    arguments: { name: 'Jane Doe account', episode_body: 'Jane Doe opened an account.', scope: 'shared' },
+  };
+  const open = async (status = 'AWAITING_HUMAN', actions: unknown[] = [{ capability: 'jira.add_comment' }, episodeAction]) => {
+    state.proposals = [
+      { id: 'p1', agent_id: 'knowledge-steward', intent: 'Record it', created_at: hoursAgo(1) },
+    ];
+    state.detail = {
+      id: 'p1', agent_id: 'knowledge-steward', intent: 'Record it', status,
+      created_at: hoursAgo(1), evidence: [], actions,
+    };
+    render(<DecisionsView />);
+    await userEvent.click(screen.getByText('Record it'));
+  };
+
+  it('shows facts with their validity and entities with their summaries, under the episode only', async () => {
+    state.graphKnown = {
+      proposal_id: 'p1',
+      episodes: [{
+        action_index: 1, name: 'Jane Doe account',
+        facts: [
+          { uuid: 'f1', fact: 'Jane Doe banks with Example Credit Union', valid_at: '2026-01-02T12:00:00Z', invalid_at: null },
+          { uuid: 'f2', fact: 'Jane Doe lived on Elm Street', valid_at: null, invalid_at: '2026-03-05T12:00:00Z' },
+        ],
+        entities: [{ uuid: 'n1', name: 'Jane Doe', summary: 'A member of Example Credit Union.' }],
+      }],
+    };
+    await open();
+    const block = await screen.findByTestId('graph-known');
+    await waitFor(() => expect(block).toHaveTextContent('Jane Doe banks with Example Credit Union'));
+    expect(block).toHaveTextContent(/valid from .*2026/);
+    expect(block).toHaveTextContent(/ended .*2026/);
+    expect(block).toHaveTextContent('A member of Example Credit Union.');
+    expect(screen.getAllByTestId('graph-known')).toHaveLength(1);
+    expect(state.getGraphKnown).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so when the graph holds nothing', async () => {
+    await open();
+    await waitFor(() => expect(screen.getByTestId('graph-known')).toHaveTextContent(
+      "nothing found in the graph for this episode's subject"));
+  });
+
+  it('shows a failed read as a warning with its reason, never as the empty state', async () => {
+    state.graphKnownError = 'graph unavailable: bolt unreachable';
+    await open();
+    const block = await screen.findByTestId('graph-known');
+    await waitFor(() => expect(block).toHaveTextContent('graph unavailable — bolt unreachable'));
+    // The API's message already opens "graph unavailable: "; the block says it once.
+    expect(block.textContent?.match(/graph unavailable/g)).toHaveLength(1);
+    expect(block).toHaveTextContent('bolt unreachable');
+    expect(block).not.toHaveTextContent('nothing found');
+    expect(block.querySelector('.text-yellow-600')).not.toBeNull();
+  });
+
+  it('makes no request for a decided proposal', async () => {
+    await open('EXECUTED');
+    await waitFor(() => expect(screen.getByText('graph.add_episode')).toBeInTheDocument());
+    expect(screen.queryByTestId('graph-known')).not.toBeInTheDocument();
+    expect(state.getGraphKnown).not.toHaveBeenCalled();
+  });
+
+  it('makes no request for a pending proposal with no episode', async () => {
+    await open('AWAITING_HUMAN', [{ capability: 'jira.add_comment' }]);
+    await waitFor(() => expect(screen.getByText('jira.add_comment')).toBeInTheDocument());
+    expect(state.getGraphKnown).not.toHaveBeenCalled();
   });
 });

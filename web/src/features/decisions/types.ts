@@ -313,3 +313,34 @@ export type DecisionSelection =
   | { kind: 'dismissal'; id: string }
   | { kind: 'operator_item'; id: string }
   | null;
+
+/** `proposals.graph_known`: what the graph already holds about each proposed
+ *  episode's subject (central_command/api/routes.py get_proposal_graph_known).
+ *  Advisory; a failed read rejects the call with "graph unavailable: <why>". */
+export interface GraphKnownFact {
+  uuid: string;
+  fact: string;
+  name?: string | null;
+  valid_at?: string | null;
+  invalid_at?: string | null;
+  group_id?: string | null;
+}
+
+export interface GraphKnownEntity {
+  uuid: string;
+  name: string;
+  summary?: string | null;
+}
+
+export interface GraphKnownEpisode {
+  /** Index into the proposal's actions. */
+  action_index: number;
+  name: string;
+  facts: GraphKnownFact[];
+  entities: GraphKnownEntity[];
+}
+
+export interface GraphKnown {
+  proposal_id: string;
+  episodes: GraphKnownEpisode[];
+}

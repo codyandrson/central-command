@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useGateway } from '@/contexts/GatewayContext';
-import type { DecisionsData, ProposalDetail, ProposalSummary, WorkItem } from './types';
+import type { DecisionsData, GraphKnown, ProposalDetail, ProposalSummary, WorkItem } from './types';
 import type { OutageRetryResult } from '@/features/outages/types';
 
 const POLL_MS = 30_000;
@@ -80,6 +80,14 @@ export function useDecisions() {
 
   const getProposal = useCallback(
     (id: string) => rpcRef.current('proposals.get', { id }) as Promise<ProposalDetail>,
+    [],
+  );
+
+  // What the graph already holds about a pending proposal's episodes. Loaded
+  // lazily by the open pane, never with the detail: the read embeds through the
+  // model server, and the card must not wait on it.
+  const getGraphKnown = useCallback(
+    (id: string) => rpcRef.current('proposals.graph_known', { id }) as Promise<GraphKnown>,
     [],
   );
 
@@ -186,7 +194,7 @@ export function useDecisions() {
 
   return {
     ...data, loading, error, refresh,
-    getProposal, approve, reject, dismiss, retryWaiting,
+    getProposal, getGraphKnown, approve, reject, dismiss, retryWaiting,
     confirmDismissal, confirmAllDismissals, reopenDismissal,
     answerOperatorItem,
     history, historyHasMore, historyLoading, showHistory, processedItems,

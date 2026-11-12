@@ -2589,6 +2589,69 @@ async def get_proposal(proposal_id: str) -> dict:
     return row
 
 
+# What the review-time "graph already holds" read asks the graph. The query is
+# the episode's name plus its body, capped: a retrieval query, not the text.
+_GRAPH_KNOWN_QUERY_CHARS = 600
+_GRAPH_KNOWN_FACTS = 6
+_GRAPH_KNOWN_NODES = 3
+
+
+@router.get("/proposals/{proposal_id}/graph-known")
+async def get_proposal_graph_known(proposal_id: str) -> dict:
+    """What the graph already holds about each proposed episode's subject, so
+    the reviewer can see a restatement or a differently-named entity. ADVISORY:
+    nothing here blocks, flags or changes a decision.
+
+    Read scope follows where the episode would LAND (the Executor's rule, see
+    `executor` graph.add_episode): a `shared` episode is compared against the
+    shared read set (`groups_for(None)`); a `private` one against the
+    partition it would be written to (`for_agent`, else the proposal's
+    drafter) plus whatever that agent reads (`groups_for(owner)`).
+
+    A failed read is the graph read routes' 503 ("graph unavailable: <why>"),
+    never an empty list: "nothing found" and "could not look" must not read
+    alike. No retry and no time budget of its own."""
+    row = await repo.load_proposal(proposal_id)
+    if row is None:
+        raise HTTPException(404, "proposal not found")
+
+    from central_command.integrations import graphiti
+
+    episodes: list[dict] = []
+    for index, action in enumerate(row["actions"]):
+        if str(action.get("capability", "")).split("@")[0] != "graph.add_episode":
+            continue
+        args = action.get("arguments") or {}
+        name = str(args.get("name") or "")
+        body = str(args.get("episode_body") or "")
+        agent_id = None
+        if args.get("scope") == "private":
+            agent_id = args.get("for_agent") or row["agent_id"]
+        query = f"{name}\n{body}".strip()[:_GRAPH_KNOWN_QUERY_CHARS]
+        try:
+            # Sequential: the embedder is one FIFO slot, so two reads at once
+            # only queue behind each other.
+            facts = await graphiti.search_facts(
+                query, max_facts=_GRAPH_KNOWN_FACTS, agent_id=agent_id)
+            entities = await graphiti.search_nodes(
+                name, max_nodes=_GRAPH_KNOWN_NODES, agent_id=agent_id)
+        except Exception as e:
+            raise HTTPException(
+                503, f"graph unavailable: {str(e) or type(e).__name__}") from e
+        episodes.append({
+            "action_index": index,
+            "name": name,
+            "facts": [
+                {k: f.get(k) for k in ("uuid", "fact", "name", "valid_at", "invalid_at", "group_id")}
+                for f in facts
+            ],
+            "entities": [
+                {k: n.get(k) for k in ("uuid", "name", "summary")} for n in entities
+            ],
+        })
+    return {"proposal_id": proposal_id, "episodes": episodes}
+
+
 @router.post("/proposals/{proposal_id}/approve")
 async def approve(proposal_id: str) -> dict:
     row = await repo.load_proposal(proposal_id)

@@ -1537,6 +1537,8 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         return await _decisions_history(limit, offset)
     if method == "proposals.get":
         return await rest.get_proposal(str(params["id"]))
+    if method == "proposals.graph_known":
+        return await rest.get_proposal_graph_known(str(params["id"]))
     if method == "proposals.approve":
         return await rest.approve(str(params["id"]))
     if method == "proposals.reject":

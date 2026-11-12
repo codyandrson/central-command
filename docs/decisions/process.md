@@ -2261,3 +2261,34 @@ hygiene, and how the test suite itself must be written. See
   cannot be stated against a live graph.
 - **Enforced:** test: `tests/test_packs.py` (the drafting order rides the notes ahead of the retention test; the rider-rewarding line is gone; the skill and the pack agree on episode shape). The behaviour itself is measured, not asserted: a briefing has no offline test.
 - **Source:** `central_command/runtime/packs.py`; `skills/graphiti/SKILL.md`; `skills/graphiti/references/what-belongs.md`.
+
+### DL-211 — The reviewer is shown what the graph already holds about a proposed episode's subject
+
+- **Status:** active
+- **Date:** 2026-11-12
+- **Rule:** `central_command/api/routes.py` (`get_proposal_graph_known`); `web/src/features/decisions/DecisionsView.tsx` (`GraphKnownBlock`)
+- **Why:** DL-210's case, seen from the reviewer's chair. The redraft named
+  an institution by the operator's shorthand and restated an account the
+  graph had held for weeks under its full name; the agent had searched for
+  the account number and found nothing. The pack tells agents to "check
+  search_knowledge_graph when unsure", and the house rule is that a "never
+  guess X" instruction needs something that can READ X: the reviewer had no
+  such read. The Decisions pane showed the proposed text, its source mail and
+  its policy flags, and nothing of what the proposal would be added to.
+- **Decision:** A read beside the proposal, not a gate on it. For each
+  proposed episode the control plane runs the search an agent would (facts
+  for the name and body, entities for the name), in the scope the episode
+  would land in, and the pane shows the result under the episode for a
+  proposal awaiting the operator. It is advisory: no flag, no park, no effect
+  on override evaluation or graduation, and nothing an agent is told about. A
+  propose-time refusal on "something similar exists" was rejected: a fuzzy
+  match is not a reason the agent can act on, and the failure it would catch
+  is one the reviewer can now see. The read is its own request, after the
+  pane opens, because it embeds and reranks through shared model capacity
+  and the card must not wait on it. A failed read is a 503 with its reason
+  and a warning in the pane: "could not look" never renders as "nothing
+  found" (the outage doctrine's rule for reads). Run against the case that
+  prompted it, the first fact returned was the account the redraft restated.
+- **Enforced:** test: `tests/test_proposal_graph_known.py` (per-action entries at the action's index; the landing scope for shared, `for_agent` and drafter-private episodes; no episode reads nothing; a raising read is a 503, never an empty list; the RPC reaches the route); `web/src/features/decisions/DecisionsView.test.tsx` (results, empty, error said once and never as empty, no request for a decided proposal or one with no episode).
+- **Source:** `central_command/api/routes.py`; `central_command/api/nerve_gateway.py` (`proposals.graph_known`); `web/src/features/decisions/DecisionsView.tsx`, `useDecisions.ts`, `types.ts`.
+

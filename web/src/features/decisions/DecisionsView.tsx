@@ -16,7 +16,7 @@ import { BulkDismissDialog } from './BulkDismissDialog';
 import { agingLevel, ageOf, oldestAge, STALE_HOURS, type OldestAge } from './aging';
 import { ListDetailSplit } from '@/components/Splitter';
 import type {
-  ChainLink, DecidedBy, DecisionSelection, JiraIssueSnapshot, OperatorItem, ProposalAction, ProposalDetail, ProposalSummary, ShadowMark, WaitingFacts, WorkItem,
+  ChainLink, DecidedBy, DecisionSelection, GraphKnown, GraphKnownEpisode, JiraIssueSnapshot, OperatorItem, ProposalAction, ProposalDetail, ProposalSummary, ShadowMark, WaitingFacts, WorkItem,
 } from './types';
 
 /* The panes used to call `useDecisions()` themselves, which meant three live
@@ -1144,8 +1144,108 @@ function proposalSpeech(d: ProposalDetail): string {
   return parts.join('\n\n');
 }
 
+type GraphKnownState =
+  | { state: 'loading' }
+  | { state: 'ok'; data: GraphKnown }
+  | { state: 'error'; reason: string };
+
+/** "valid from 2 Jan 2026" / "ended 5 Mar 2026" — the fact's own window, when it has one. */
+function validityText(f: { valid_at?: string | null; invalid_at?: string | null }): string {
+  const day = (iso: string) => {
+    const at = new Date(iso);
+    return Number.isNaN(at.getTime())
+      ? iso
+      : at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+  return [
+    f.valid_at ? `valid from ${day(f.valid_at)}` : '',
+    f.invalid_at ? `ended ${day(f.invalid_at)}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+/** What the graph already holds about a pending proposal's episodes, fetched
+ *  lazily when the pane opens. ADVISORY: it never gates a decision, and the
+ *  card renders without waiting for it. `enabled` is false for a decided
+ *  proposal and for one with no episode — no request is made then. */
+function useGraphKnown(id: string, enabled: boolean, getGraphKnown: Actions['getGraphKnown']) {
+  const [result, setResult] = useState<GraphKnownState>({ state: 'loading' });
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    getGraphKnown(id).then(
+      (data) => { if (alive) setResult({ state: 'ok', data }); },
+      (e: unknown) => {
+        if (alive) setResult({ state: 'error', reason: e instanceof Error ? e.message : String(e) });
+      },
+    );
+    return () => { alive = false; };
+  }, [id, enabled, getGraphKnown]);
+  return result;
+}
+
+/** "Graph already holds": the facts and entities the graph has near this
+ *  episode's subject, so a restatement or a differently-named entity shows at
+ *  review. A failed read is a warning with its reason, never the empty state. */
+function GraphKnownBlock({ result, episode }: { result: GraphKnownState; episode?: GraphKnownEpisode }) {
+  const body = () => {
+    if (result.state === 'loading') {
+      return <p className="text-[0.7rem] text-muted-foreground">checking the graph…</p>;
+    }
+    if (result.state === 'error') {
+      return (
+        <div className="flex items-start gap-2 text-[0.7rem] text-yellow-600 dark:text-yellow-400">
+          <ShieldAlert size={12} className="mt-0.5 shrink-0" />
+          {/* The API's own message already opens "graph unavailable: " — say it once. */}
+          <span><span className="font-semibold">graph unavailable</span> — {result.reason.replace(/^graph unavailable:\s*/i, '')}</span>
+        </div>
+      );
+    }
+    if (!episode || (episode.facts.length === 0 && episode.entities.length === 0)) {
+      return <p className="text-[0.7rem] text-muted-foreground">nothing found in the graph for this episode&apos;s subject</p>;
+    }
+    return (
+      <div className="space-y-1.5">
+        {episode.facts.length > 0 && (
+          <ul className="space-y-1">
+            {episode.facts.map((f) => {
+              const when = validityText(f);
+              return (
+                <li key={f.uuid} className="text-[0.7rem] leading-relaxed text-foreground/85">
+                  <span className="cockpit-wrap">{f.fact}</span>
+                  {when && <span className="ml-1.5 text-muted-foreground">({when})</span>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {episode.entities.length > 0 && (
+          <ul className="space-y-1">
+            {episode.entities.map((n) => (
+              <li key={n.uuid} className="text-[0.7rem] leading-relaxed text-foreground/85">
+                <span className="font-semibold">{n.name}</span>
+                {n.summary && <span className="line-clamp-3 cockpit-wrap text-muted-foreground">{n.summary}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  };
+  return (
+    <div
+      data-testid="graph-known"
+      className="mt-1.5 rounded-lg border border-border/40 p-2.5"
+    >
+      <div className="mb-1 text-[0.667rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        Graph already holds
+      </div>
+      {body()}
+    </div>
+  );
+}
+
 function ProposalPane({
-  id, pendingGone, onDone, onOpenSession, getProposal, approve, reject, dismiss, retryWaiting,
+  id, pendingGone, onDone, onOpenSession, getProposal, getGraphKnown, approve, reject, dismiss, retryWaiting,
 }: {
   id: string;
   /** No longer in the pending list nor history — decided out from under the
@@ -1155,6 +1255,7 @@ function ProposalPane({
   onDone: () => void;
   onOpenSession?: (sessionKey: string) => void;
   getProposal: Actions['getProposal'];
+  getGraphKnown: Actions['getGraphKnown'];
   approve: Actions['approve'];
   reject: Actions['reject'];
   dismiss: Actions['dismiss'];
@@ -1235,6 +1336,12 @@ function ProposalPane({
     if (acting !== '' || !feedback.trim()) return;
     act('reject');
   }, [acting, feedback, act]);
+
+  // Only a proposal still awaiting the operator is checked against the graph,
+  // and only when it proposes an episode. The pane renders without this.
+  const graphKnownWanted = detail?.status === 'AWAITING_HUMAN'
+    && detail.actions.some((a) => a.capability.split('@')[0] === 'graph.add_episode');
+  const graphKnown = useGraphKnown(id, graphKnownWanted, getGraphKnown);
 
   if (error && !detail) return <div className="p-6 text-xs text-destructive">{error}</div>;
   if (!detail) return <div className="p-6 text-xs text-muted-foreground">Loading proposal…</div>;
@@ -1368,7 +1475,19 @@ function ProposalPane({
               <IssueCard key={k} issueKey={k} issue={detail.jira_issues?.[k]} proposedAt={detail.created_at} />
             ))}
             {a.charter_diff ? <DiffBlock diff={a.charter_diff} />
-              : cap === 'graph.add_episode' ? <EpisodeBlock args={a.arguments ?? {}} />
+              : cap === 'graph.add_episode' ? (
+                <>
+                  <EpisodeBlock args={a.arguments ?? {}} />
+                  {graphKnownWanted && (
+                    <GraphKnownBlock
+                      result={graphKnown}
+                      episode={graphKnown.state === 'ok'
+                        ? graphKnown.data.episodes.find((e) => e.action_index === i)
+                        : undefined}
+                    />
+                  )}
+                </>
+              )
               : cap === 'graph.create_edge' || cap === 'graph.update_edge'
                 ? <EdgeArgsBlock args={a.arguments ?? {}} isCreate={cap === 'graph.create_edge'} />
               : cap === 'skill.doc_add' || cap === 'skill.create'
@@ -1721,7 +1840,7 @@ export function DecisionsView({
 }: DecisionsViewProps = {}) {
   const {
     proposals, waiting = [], dismissals, operatorItems, loading, error, refresh,
-    confirmAllDismissals, getProposal, approve, reject, dismiss, retryWaiting,
+    confirmAllDismissals, getProposal, getGraphKnown, approve, reject, dismiss, retryWaiting,
     confirmDismissal, reopenDismissal, answerOperatorItem,
     history, historyHasMore, historyLoading, showHistory, processedItems = [],
     toggleHistory, loadMoreHistory,
@@ -1982,6 +2101,7 @@ export function DecisionsView({
             onDone={() => clearIfStill('proposal', selected.id)}
             onOpenSession={onOpenSession}
             getProposal={getProposal}
+            getGraphKnown={getGraphKnown}
             approve={approve}
             reject={reject}
             dismiss={dismiss}

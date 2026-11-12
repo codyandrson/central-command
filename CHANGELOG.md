@@ -4,6 +4,25 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-12 — v2.83.0: The reviewer sees what the graph already holds beside a proposed episode
+
+An episode proposal read "holds a checking account at CU Example ending in 7731" while the graph
+already held "has held a checking account at Example Credit Union since 2025-10-01". Nothing at
+review showed the second sentence: the operator approved a restatement, or an institution under a
+second name, without a way to know. The agent is now briefed to look the thing up before it drafts
+(v2.82.10); this is the same lookup for the person deciding.
+
+- `GET /proposals/{id}/graph-known` (cockpit RPC `proposals.graph_known`): for each
+  `graph.add_episode` action, the facts the graph returns for the episode's name and body (six) and
+  the entities for its name (three), read in the scope the episode would land in: the shared read
+  set for a `shared` episode, the owning agent's partition plus its reads for a `private` one
+  (`for_agent`, else the drafter, as the Executor routes the write).
+- The Decisions pane shows a "Graph already holds" block under each proposed episode of a proposal
+  awaiting the operator, loaded after the pane opens so the card never waits on the search: each
+  fact with its window, each entity with its summary, "nothing found" when the graph holds nothing.
+- Advisory only: it blocks, flags and changes nothing. A failed read is the graph read routes' 503
+  with its reason and renders as a warning, never as "nothing found"; no retry, no time budget.
+
 ## 2026-11-12 — v2.82.10: An episode is written about the thing learned, not the message that taught it
 
 A transfer confirmation taught the triage agent that an account exists, and the episode it proposed
