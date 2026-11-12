@@ -33,12 +33,16 @@ before the Executor commits it.
 
 ## Four things to hold even without loading a reference
 
-1. **An episode is an INGESTION EVENT, not a fact.** You submit an episode;
-   Graphiti extracts entities and relationships from it asynchronously. You are
-   writing the source, and the graph derives the rest.
+1. **Every sentence you write becomes facts.** You submit an episode;
+   Graphiti extracts entities and relationships from each sentence
+   asynchronously. So the body says what is now known about a thing (a person,
+   an account, a project), never what the message that taught you said: a
+   sentence about a receipt becomes a receipt in the graph. The message is the
+   source, and belongs in `source_description`.
 2. **Never paste source text.** The episode body is a distilled claim of 1–3
-   self-contained sentences naming people, keys and dates. The graph holds
-   distilled claims, never source bodies (PRD FR-30).
+   self-contained sentences naming the people, things, keys and dates the
+   claim is about. The graph holds distilled claims, never source bodies
+   (PRD FR-30).
 3. **Reads span `main` + `central_command`; writes land only in `central_command`.**
    The inherited `main` graph is never polluted by this system's proposals.
    <!-- overlay: graph_main_group_origin -->

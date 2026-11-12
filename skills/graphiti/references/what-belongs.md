@@ -30,6 +30,12 @@ Durable, checkable facts about the team's world:
   supersedes the team's previous understanding of the schedule.
 - **Systems and their status** — introduced, decommissioned, degraded.
 - **New tracked work items.**
+- **What the operator's world is made of** — who a person is to them; that
+  an account, a policy, a membership, a subscription, a vehicle, a property or
+  a provider relationship exists; and its stable attributes (the institution,
+  the kind, an identifier, when it started and ended, how it is paid).
+- **Changes of status** — opened, closed, switched, traded in, cancelled,
+  disputed.
 
 The test: *a teammate reading this months from now would act differently for
 knowing it.*
@@ -46,10 +52,44 @@ knowing it.*
 Answer in plain text and the operator confirms. Never manufacture a fact to
 have something to propose.
 
+## The source is not the fact
+
+An episode records what is now known about a **thing**: a person, an account,
+a vehicle, a policy, a project, a relationship. The message that taught you is
+its **source**. It goes in `source_description` and never in the body, because
+every sentence in the body becomes a fact in the graph: a sentence about a
+receipt becomes a receipt the whole team retrieves forever.
+
+Draft in this order.
+
+1. **Name the thing** the source teaches about.
+2. **Read what the graph already holds about it.** Search for the thing itself
+   (the institution and kind of account, the person, the vehicle), not only the
+   identifier in front of you: an account number the graph has never seen can
+   belong to an account it knows well. The episode is the **delta**, what is
+   known now that was not known before, and it names the thing as the graph
+   already names it. Nothing new means no episode.
+3. **Judge the event separately.** The transfer, payment, statement, alert or
+   shipment that revealed the thing is its own question, answered by the same
+   test: would a teammate months from now act differently for knowing this
+   event happened? A change of status passes and is its own episode. A routine
+   occurrence fails and leaves no trace in the body.
+
+A figure or a date belongs in the body when it describes the thing (a plan's
+monthly price, a policy's premium, when an account was opened) and not when it
+describes one occurrence of it (this month's bill, one payment, a balance on
+one day). An occurrence is never needed in the body as **proof** that the
+thing exists: the evidence you cite and `source_description` carry the proof.
+
+People are things too. A relative's letter evidences who they are to the
+operator, when that is new. The news in the letter (a renovation, a trip, a
+greeting, a meeting invite) is that letter's occurrence, not a fact to keep.
+
 ## The shape of a good episode
 
-**One proposal, one episode.** If the source carries several unrelated facts,
-choose the one that matters most and **say in your intent what you left out**.
+**One episode per thing.** A source that teaches about two things yields two
+episodes in the same proposal, each judged on its own. Never fold a second
+fact into the first one's body: two clear episodes beat one jumbled one.
 
 - `name` — a short title.
 - `episode_body` — **1–3 self-contained sentences**, naming the people, issue
@@ -93,10 +133,32 @@ Not a fact anyone acts on. Names no date. Restates that a message existed.
 
 Speculation, unnamed entities, unfalsifiable.
 
+### The receipt and the account
+
+A bank confirms a $2,500 transfer to an account ending 7731, and the graph
+already holds Jane Doe's checking account at Example Credit Union.
+
+Bad:
+
+> "Jane Doe holds a checking account at Example Credit Union ending in 7731.
+> As of 2026-08-07, she transferred $2,500 from her other checking account to
+> this account."
+
+The first sentence restates an account the graph already knows. The second
+records a receipt: nobody acts differently next spring for knowing it.
+
+Good:
+
+> "Jane Doe's checking account at Example Credit Union ends in 7731."
+
+The one thing the mail added, said about the thing it belongs to. The transfer
+confirmation is named in `source_description`.
+
 ## Keeping the graph in sync is half the job
 
 For a triage agent this is explicit: **before you propose, answer one question —
-does this source change what the team believes about the world?** If yes, the
+does this source change what the team believes about some thing in the
+world, and which thing?** If yes, the
 proposal should include the `graph.add_episode` action alongside the other
 change, or stand alone when the source is knowledge-only. But the graph's
 failure mode is over-inclusion, so the retention test applies strictly and

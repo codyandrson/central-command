@@ -4,6 +4,38 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-12 — v2.82.10: An episode is written about the thing learned, not the message that taught it
+
+A transfer confirmation taught the triage agent that an account exists, and the episode it proposed
+recorded the account and the transfer: "holds an account ending 7731. As of 2026-08-07, transferred
+$2,500 …". The operator had been trimming the same rider out by rejection for weeks (a payment, a
+points balance, a renewal reminder, the news in a relative's letter), and half of the agent's episode
+proposals came back. The briefing was source-shaped throughout: "a distilled claim … naming issue
+keys, dates, and people", "you are writing the source, and the graph derives the rest", a list of
+episode-worthy facts from a work team's schedule, one worked example (a promo mail), and a line that
+made a new number or date the thing that qualified an episode as new. The skill also said "one
+proposal, one episode", against the pack, which pushed a second fact into the first one's body.
+
+- The `graph.add_episode` notes (every graph-proposing agent's capability section) gain a drafting
+  order, `packs._EPISODE_SHAPE_RULE`: name the thing, read what the graph already holds about it
+  (searching for the thing, not only the identifier in the source), write the delta under the name
+  the graph already uses, and judge the event that revealed it separately with the retention test.
+  A change of status is its own episode in the same proposal, one episode per thing; a routine
+  occurrence leaves no trace in the body, and is never needed there as proof. A figure belongs when
+  it describes the thing (a plan's price) and not one occurrence of it (one payment). A second
+  worked example covers the transfer case. "A version adding a number, date, or decision is new"
+  is replaced by "a fact is new when it adds an attribute of the thing".
+- The Graphiti skill agrees with the pack: `what-belongs` gains "The source is not the fact", the
+  operator's-world facts the list lacked, "one episode per thing" in place of "one proposal, one
+  episode", and a receipt-versus-account example; the guidance says every sentence becomes facts.
+- Measured before the cut by replaying recorded triage drafts against the local model from the
+  context each had, three samples a case: first drafts from transactional mail carried an occurrence
+  in 12 of 15 drafts under the old notes and 3 of 15 under the new. A REDRAFT after a rejection is
+  not changed by any briefing (12 of 12 both ways): the agent reissues its previous body and patches
+  what the feedback named. A redraft whose predecessor was clean stayed clean (3 of 3). Two
+  alternatives measured no better and are not shipped: required "about" and "already known"
+  arguments, and a sentence on the rejection message (DL-210).
+
 ## 2026-11-07 — v2.82.9: The mail's age reaches the backlog mail it was written for
 
 v2.82.6 added the "[queue context] This email was received on …, N days before today" line to the

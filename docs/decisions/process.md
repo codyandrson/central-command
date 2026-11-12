@@ -2201,3 +2201,63 @@ hygiene, and how the test suite itself must be written. See
   back through the gated path (a new episode or curation), by the operator.
 - **Enforced:** test: `tests/test_graph_verification.py` (each row of a bundled proposal gets its own text; a re-check of the second episode inherits that episode's; two of one name are told apart by the job body and a jobless one gets none; a row naming none parks without text and without a verdict; the cockpit shows each row its own).
 - **Source:** `central_command/gateway/graph_auditor.py` (`_approved_episode`, `_episode_for_row`); readers unchanged: `central_command/api/routes.py` (`graph_verifications`), `graph_auditor.remediation_instructions`, `graph_auditor._enqueue_from_proposal`.
+
+### DL-210 — An episode is drafted about the thing learned; the message that taught it is its source
+
+- **Status:** active
+- **Date:** 2026-11-12
+- **Rule:** `central_command/runtime/packs.py` (`_EPISODE_SHAPE_RULE`, the `graph.add_episode` notes); `skills/graphiti/references/what-belongs.md` ("The source is not the fact")
+- **Why:** A bank's transfer confirmation produced "Doe holds an account
+  ending 7731. As of 2026-08-07, she transferred $2,500 from her other
+  account to this account", and the redraft after the operator named the
+  institution kept the second sentence. It was not one draft. Of the triage
+  agent's episode proposals, 100 had executed, 53 were rejected and 46
+  withdrawn; the rejection feedback repeated one correction ("only the
+  existence of the account", "remove this specific upcoming payment", "trim
+  this, only include …", "nothing about the job, nothing about the home
+  projects"), and executed episodes carried a monthly interest deposit, a
+  small premium payment, two loyalty balances and a renewal reminder as
+  facts. The graph already held the account in the transfer case: the agent
+  had searched for the account number, found nothing, and written "no
+  existing record". Every text the agent drafts from framed the work as
+  distilling the SOURCE: the charter's extract step, "a distilled claim …
+  naming issue keys, dates, and people", the skill's "you are writing the
+  source", a list of episode-worthy facts from a work team's schedule, and a
+  single worked example about a promotion. Two lines pulled toward the rider
+  outright: "a version adding a number, date, or decision is new", and the
+  skill's "one proposal, one episode", which contradicted the pack and
+  folded a second fact into the first one's body. Evidence pressure did the
+  rest: the occurrence is what the mail states and the thing is an
+  inference, so the agent kept the occurrence in the body as proof.
+- **Decision:** A drafting ORDER, not a list of forbidden contents (the
+  operator declined a rule that an amount or date is recorded only at their
+  word: the agent should judge). Name the thing; read what the graph holds
+  about it, searching for the thing and not only the identifier in the
+  source; write the delta, named as the graph names it, and nothing when
+  nothing is new; judge the event separately by the retention test. A change
+  of status is its own episode, one episode per thing in one proposal (the
+  operator: several clear episodes over one jumbled). A figure or date
+  belongs when it describes the thing and not one occurrence of it; an
+  occurrence is never needed in the body as proof; people are things too.
+  The governed charter is unchanged. Measured by replaying recorded drafts
+  from the exact context each had, against the local model with the proxy
+  cache bypassed, three samples a case on the hardest nine: first drafts
+  from transactional mail carried an occurrence in 12 of 15 drafts before
+  and 3 of 15 after; fresh runs of thirteen mails differed in three, all
+  toward the new notes (one asked the operator which account an unknown
+  number belonged to, where the old notes dismissed the mail). REDRAFTS are
+  outside the rule's reach, 12 of 12 unchanged: after a rejection the agent
+  reissues its previous body and patches what the feedback named, and a
+  feedback sentence that describes the occurrence is recorded as a fact.
+  A redraft whose predecessor was clean stayed clean, 3 of 3, so the rule
+  reaches redrafts through the first draft only. Rejected on measurement:
+  required `about` and `already_known` arguments on the episode (left empty
+  in 5 of 16 drafts, "nothing found" written without a search, no fewer
+  riders, and a contract change for every graph-proposing agent), and a
+  sentence on the rejection message asking for a whole-body redraft (2 of 3
+  on one case, 0 of 9 on three). The replay harness and its record are
+  instance material and stay out of this tree; `evals/triage_judgment.yaml`
+  gains no case, because a case that turns on what the graph already holds
+  cannot be stated against a live graph.
+- **Enforced:** test: `tests/test_packs.py` (the drafting order rides the notes ahead of the retention test; the rider-rewarding line is gone; the skill and the pack agree on episode shape). The behaviour itself is measured, not asserted: a briefing has no offline test.
+- **Source:** `central_command/runtime/packs.py`; `skills/graphiti/SKILL.md`; `skills/graphiti/references/what-belongs.md`.

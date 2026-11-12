@@ -43,6 +43,46 @@ def _operator_naming_rule() -> str:
             "subscriber at all. ")
 
 
+# How an episode is SHAPED: about the thing learned, never about the message
+# that taught it. Until 2026-11 the notes only said "distilled claim … naming
+# issue keys, dates, and people" and "a version adding a number, date, or
+# decision is new", with one worked example (a promo mail). An agent reading
+# a transfer confirmation distilled the transfer: the account it revealed and
+# the receipt that revealed it landed in one body, and the operator trimmed the
+# same rider out of episode after episode by rejection. The fix is a drafting
+# order, not a list of forbidden contents: name the thing, read what the graph
+# holds about it, write the delta, and judge the event on its own.
+_EPISODE_SHAPE_RULE = (
+    "WRITE ABOUT THE THING, NOT THE MESSAGE: an episode records what is now "
+    "known about a person, an account, a vehicle, a policy, a project or a "
+    "relationship, and every sentence in the body becomes a fact in the "
+    "graph. The message that taught you is the SOURCE — it goes in "
+    "source_description, never in the body. Before you write, in order: "
+    "(1) NAME THE THING the source teaches about. (2) READ WHAT THE GRAPH "
+    "ALREADY HOLDS ABOUT IT — search for the thing itself (the institution "
+    "and kind of account, the person, the vehicle), not only the identifier "
+    "in front of you: an account number the graph has never seen can belong "
+    "to an account it knows well. The episode is the DELTA — what is known "
+    "now that was not known before — and it names the thing as the graph "
+    "already names it; nothing new means no episode. (3) JUDGE THE EVENT "
+    "SEPARATELY: the transfer, payment, statement, alert or shipment that "
+    "revealed the thing is its own question, answered by the retention test "
+    "below. A change of status passes (opened, closed, switched, traded in, "
+    "cancelled, disputed) and is its OWN episode in the same proposal — one "
+    "episode per thing, never a second fact folded into the first one's "
+    "body. A routine occurrence fails and leaves no trace in the body: a "
+    "figure or a date belongs there when it describes the thing (a plan's "
+    "monthly price, a policy's premium, when an account was opened) and not "
+    "when it describes one occurrence of it (this month's bill, one payment, "
+    "a balance on one day). An occurrence is never needed in the body as "
+    "PROOF that the thing exists: the evidence you cite and "
+    "source_description carry the proof. People are things too: a relative's "
+    "letter evidences who they are to the reader of this graph (when that is "
+    "new), not the news in the letter — a renovation, a trip, a greeting, a "
+    "meeting invite are that letter's occurrences. "
+)
+
+
 @dataclass(frozen=True)
 class GatedCapability:
     """One capability a pack lets the agent propose — the charter-facing spec.
@@ -483,8 +523,9 @@ PACKS: dict[str, Pack] = {
                        "of the source and may not be now says so in the body "
                        "('as of <date>'); when you cannot place it in time, ask. "
                        "The episode_body is a distilled claim of 1-3 sentences: "
-                       "self-contained, naming issue keys, dates, and people — "
-                       "NEVER pasted source text. " + _operator_naming_rule() +
+                       "self-contained, naming the people, things, issue keys "
+                       "and dates the claim is ABOUT — NEVER pasted source "
+                       "text. " + _operator_naming_rule() + _EPISODE_SHAPE_RULE +
                        "RETENTION TEST — the graph's "
                        "failure mode is over-inclusion (noise dilutes every "
                        "future search), so when in doubt, do NOT propose the "
@@ -502,10 +543,18 @@ PACKS: dict[str, Pack] = {
                        "rewards member there' — not the subscription address, "
                        "not this week's offer — and if the membership is "
                        "already in the graph at equal detail, it evidences "
-                       "NOTHING; check search_knowledge_graph when unsure "
-                       "whether a fact is already known (a version adding a "
-                       "number, date, or decision is new; a restatement is "
-                       "not). PROCESS STATE IS NEVER AN EPISODE, in any scope: "
+                       "NOTHING. A fact is new when it adds an attribute of "
+                       "the thing (an identifier, a start or an end, a "
+                       "decision, a changed status); a restatement, or the "
+                       "figures of one occurrence, is not. Second worked "
+                       "example: a bank confirms a $2,500 transfer to an "
+                       "account ending 7731, and the graph already holds "
+                       "<operator name>'s checking account at that bank — the "
+                       "mail evidences exactly one thing, '<operator name>'s "
+                       "checking account at <bank> ends in 7731': not the "
+                       "transfer, its amount or its date, and not the "
+                       "account's existence, which was already known. "
+                       "PROCESS STATE IS NEVER AN EPISODE, in any scope: "
                        "where a run, a session or a conversation got to, what "
                        "the next run should do, a commitment or question still "
                        "open — these are state, not knowledge, and they go "

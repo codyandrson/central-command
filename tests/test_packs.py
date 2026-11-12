@@ -416,3 +416,58 @@ def test_curator_pack_names_every_entity_type():
     for t in ENTITY_TYPES:
         assert t in cap.notes, f"pack notes omit entity type {t}"
     assert "?" not in cap.arguments, "labels is required, not optional"
+
+
+def _episode_notes() -> str:
+    cap = next(c for c in packs.PACKS["graph-propose"].capabilities
+               if c.name == "graph.add_episode")
+    return cap.notes
+
+
+def test_an_episode_is_drafted_about_the_thing_not_the_message():
+    """The drafting order rides every graph-proposing agent's capability
+    section: name the thing, read what the graph holds about it, write the
+    delta, judge the event on its own. Without it an agent distils the
+    MESSAGE, and a transfer confirmation becomes a transfer in the graph
+    beside the account it revealed (the operator trimmed that rider by
+    rejection, episode after episode, 2026-10/11)."""
+    notes = _episode_notes()
+    assert packs._EPISODE_SHAPE_RULE in notes
+    for marker in (
+        "WRITE ABOUT THE THING, NOT THE MESSAGE",
+        "it goes in source_description, never in the body",
+        "READ WHAT THE GRAPH ALREADY HOLDS ABOUT IT",
+        "nothing new means no episode",
+        "JUDGE THE EVENT SEPARATELY",
+        "one episode per thing",
+    ):
+        assert marker in notes, marker
+    # The order matters: the drafting rule is read before the retention test
+    # it hands the event to.
+    assert notes.index("WRITE ABOUT THE THING") < notes.index("RETENTION TEST")
+
+
+def test_the_notes_no_longer_reward_a_transaction_rider():
+    """'A version adding a number, date, or decision is new' made one
+    payment's amount and date the thing that qualified an episode. New means
+    a new attribute of the thing."""
+    notes = _episode_notes()
+    assert "a version adding a number, date" not in notes
+    assert "the figures of one occurrence, is not" in notes
+
+
+def test_the_graphiti_skill_agrees_with_the_pack_on_episode_shape():
+    """The pack is always in the prompt and the skill is loaded on demand, so
+    a skill that says the opposite wins the turn it is loaded in. 'One
+    proposal, one episode' told the agent to pick one fact and made it fold
+    the second into the first one's body."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "skills" / "graphiti"
+    belongs = (root / "references" / "what-belongs.md").read_text(encoding="utf-8")
+    skill = (root / "SKILL.md").read_text(encoding="utf-8")
+    assert "One proposal, one episode" not in belongs
+    assert "One episode per thing" in belongs
+    assert "The source is not the fact" in belongs
+    assert "You are\n   writing the source" not in skill
+    assert "Every sentence you write becomes facts" in skill
