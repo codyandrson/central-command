@@ -109,9 +109,10 @@ packages = ["central_command"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-# SEQUENTIAL by default, on purpose: `pytest -q` (~4 min on a Pi since the
-# connection pool, v2.31.0) is the gate because it is the run that exposes a
-# test leaking state into its neighbour. `-n 4` (~2 min) passes cleanly —
+# SEQUENTIAL by default, on purpose: `pytest -q` (about 11 min for ~6,500
+# tests on a Pi 5, as of v2.83) is the gate because it is the run that exposes
+# a test leaking state into its neighbour. `-n 4` (about half the wall time
+# when last measured) passes cleanly —
 # conftest.py gives every xdist worker its own database — and is the quick
 # pass, opted into per run rather than made the default.
 #

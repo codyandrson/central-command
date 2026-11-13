@@ -20,7 +20,7 @@ A human-supervised agentic-team framework: a control plane where the operator ta
 - Never weaken `scripts/prepush-scan.sh` (the pre-push guard) to get a push through; move the content to a private repo instead.
 - `master` is the only branch — no `main`. A feature branch is a deliberate choice to raise with the operator, not a default.
 - A release is three things: a CHANGELOG entry, a `VERSION` bump, a tag. The updaters read `VERSION` as the installed version — not git, not the tag; `tests/test_version_file.py` pins it to the newest CHANGELOG heading.
-- Never change `LITELLM_SALT_KEY` or `N8N_ENCRYPTION_KEY`; they encrypt the stored LiteLLM virtual keys and the Gmail OAuth credential, and a restore under a different key leaves the rows present but undecryptable.
+- Never change `LITELLM_SALT_KEY` or `N8N_ENCRYPTION_KEY` (the single-node profile's `.env` spells the first `CC_LITELLM_SALT_KEY`); they encrypt the stored LiteLLM virtual keys and the Gmail OAuth credential, and a restore under a different key leaves the rows present but undecryptable.
 - Never edit `docs/vendor/` (refetch via `scripts/vendor_docs_fetch.sh`, which regenerates the `docs/vendor/MANIFEST` fingerprint `update.sh import` reads to skip those 47k files — `scripts/vendor_manifest.sh`, guarded by `tests/test_vendor_manifest.py`) or hand-create anything in `servers/` (it arrives only through an approved `mcp.sync_source`; the hand-committed `servers/echo-demo/` demo is the one stated exception, and nothing else is added by hand). Regenerating `requirements.lock` is a deliberate act.
 
 ## Where things are
@@ -33,29 +33,33 @@ A human-supervised agentic-team framework: a control plane where the operator ta
 ## Running and verifying
 
 - Python `>=3.12`, Node `>=22` (`web/.nvmrc`). Install with `pip install -e ".[dev,runtime]"`; build the cockpit with `(cd web && npm install && npm run build)`; serve with `uvicorn central_command.api.app:app --port 8080`.
-- There is no CI — run the suite yourself before pushing. `pytest -q`, sequential, is the gate (~4 min): it is the run that catches a test leaking state into its neighbour, which xdist workers hide. `-n 4` (~2 min, one database per worker) is only the quick pass. Cockpit tests are separate: `(cd web && npm test)`.
+- There is no CI — run the suite yourself before pushing. `pytest -q`, sequential, is the gate (about 11 min for ~6,500 tests on a Pi 5, so give it a timeout to match): it is the run that catches a test leaking state into its neighbour, which xdist workers hide. `-n 4` (about half the wall time when last measured, one database per worker) is only the quick pass. Cockpit tests are separate: `(cd web && npm test)`.
 - Dev database: `docker compose up -d postgres` → `cc-postgres` on 127.0.0.1:5442 with the schema auto-loaded. 5442, never 5432 — the port is baked into `.env`, `.env.example`, the compose files, the k3s manifests and the `config.py` default.
 - A fresh git worktree has no `.env`; copy it in before running the suite.
-- `python scripts/m5_acceptance.py` is the live acceptance run: it needs a key and a Postgres, and spends money.
+- `python scripts/m5_acceptance.py` is the live acceptance run: it needs a key, a Postgres and Jira credentials, spends money, and performs a real Jira write on its throwaway issue.
 
 <!-- /bmad:context -->
 
-## Architecture — runtime is Pydantic AI 2.0 + Claude
+## Architecture — runtime is Pydantic AI, models through LiteLLM
 
 Modular monolith, 4 tiers:
 1. **Control Plane UI** — React (`web/`)
 2. **Control Plane API & Services** — FastAPI (`central_command/api`, `central_command/gateway`)
-3. **Agent Runtime** — Pydantic AI + Claude (`central_command/runtime`) — can **only propose + read**, with one exception: task creation is the one direct trigger tool (`create_task`), holding no credential
+3. **Agent Runtime** — Pydantic AI, any model the LiteLLM proxy serves (`central_command/runtime`) — holds **no credential**: every tool that changes an outside service is a `propose_*`. Its other tools are reads; triggers that touch only Central Command's own state (`create_task`, `consult_agent`, and the deferred `ask_operator`, `assign_work`, `submit_plan`); work inside the sandbox; and MCP tools the operator has marked ungated
 4. **Stores** — Postgres (spine), Graphiti/Neo4j (knowledge graph — graphiti-core runs in
    the API process, no server), n8n
-   (email façade holding the Gmail OAuth; Jira is a native client in
-   `integrations/jira.py` — n8n only where it already solved a hard integration
-   problem)
+   (mail and calendar façades holding the Google OAuth; Jira and Exchange are
+   native clients in `integrations/` — n8n only where it already solved a hard
+   integration problem)
 
 **The trust boundary is the import graph:** `runtime/` must never import
 `gateway`/`executor`. Agents hold only `propose_*` tools (plus `create_task`,
 a trigger through the one task-create seam and its backstops, not a write);
 the credentialed Executor performs writes *after* approval. Keep it that way.
+The ban is on importing those tiers; a guard test walks the imports. The
+runtime does reach `central_command.api` lazily (the task-create seam,
+resumes), and `api/` reaches the gateway: that is the shape as built, not a
+licence to route a new write through it.
 
 ## Conventions & gotchas (bite marks)
 
@@ -82,15 +86,19 @@ where the story is gone.
   agent-authored claim about provenance.
 - **A fresh run must load the charter; `build_agent_for` does not.** It is
   the RESUME factory and passes no charter (the persisted history carries the
-  original prompt); `run_task` and `run_coach` load the real one. If you add
-  a third fresh-run path, load the charter.
+  original prompt); `run_task` and `run_coach` load the real one. Every
+  fresh-run path loads it (the steward, the wiki repair, reflection,
+  conversations, consults and orchestration all do); a new one must too.
 - **`system_prompt=` is load-bearing — never "modernise" it to
   `instructions=`.** A system prompt is PERSISTED into the message history,
   so a session paused at a deferral resumes under the charter it was proposed
   under; `instructions=` is re-applied from the live agent at every run — a
   resume would silently execute under whatever the charter says NOW.
   Rewriting the record of what an agent was told when it proposed is a
-  governance change wearing an idiom cleanup's clothes.
+  governance change wearing an idiom cleanup's clothes. This rule is about the
+  CHARTER. Skill guidance is a different channel: it rides
+  `Capability(instructions=…)` in `runtime/skills.py` and is read live on
+  every run, so a resumed session sees the skill text as it is now.
 - **Never swap the approval gate for pydantic-ai's `approval_required()`.**
   Its semantics are "pause, collect a yes, then run the tool IN THIS PROCESS"
   — which puts the write back in `runtime/`, the tier that may never hold
@@ -113,7 +121,7 @@ where the story is gone.
   style: the updater re-runs the whole file against the live database.
 - **The agent sandbox is CONTAINMENT, not restriction.** It exists so an
   agent can work freely without risking the host — NOT to limit what it can
-  reach. Egress is open; the gate is the CAPABILITY, never reachability —
+  reach. Egress is open (link-local addresses excepted); the gate is the CAPABILITY, never reachability —
   every tool that CHANGES a service is a `propose_*`, gated by default (Policy lists the exemptions). What constrains a
   sandbox is that it holds NO credentials; provisioning one converts reach
   into ungated writes, so that is an explicit operator decision.
@@ -131,7 +139,9 @@ where the story is gone.
 - **The sandbox's only exit is `mcp.sync_source`, and content is captured at
   PROPOSE time.** The tool embeds the files in the proposal; the Executor
   writes exactly those bytes and never re-reads the sandbox — an agent that
-  could swap content after approval would make review theater.
+  could swap content after approval would make review theater. ("Exit" means
+  files leaving the sandbox for the repository; network egress is the bullet
+  above.)
   `_mcp_servers_root()` must resolve to the SAME path in `runtime/tools.py`
   and `gateway/executor.py` (a guard test pins it).
 - **A proposal has THREE verdicts.** Approve executes; Reject means "fix it
@@ -139,6 +149,9 @@ where the story is gone.
   no action needed — WITHDRAWN, folds released, session closed, and the agent
   is NEVER resumed (a test makes the agent factory raise if any path tries).
   Rejecting to make something go away is the trap Dismiss exists to end.
+  Dismissing an APPROVED proposal that is waiting on an outage is the second
+  form: it withdraws the execution and resolves the task FAILED, never DONE
+  (`.claude/rules/runtime-resilience.md`).
   Nothing feeds coaching automatically: the operator foregrounds the signals
   that matter case by case, and the coach reads everything — a selection is
   foregrounded context, not a fence.
@@ -157,7 +170,10 @@ where the story is gone.
   — or for following bad documentation — check whether anything in the system
   could actually answer the question. And don't build a propose-time guard
   for a failure that is already LOUD (400 → FAILED → redraft); guards exist
-  for failures that return 200 and bind nothing.
+  for failures that return 200 and bind nothing. The `ARG_SPECS` shape check
+  above is not a second guard of that kind: it returns every problem of a
+  draft to the model at once, where the Executor alone would surface them one
+  failed execution at a time.
 - **The event log is append-only, so write order is read order forever.**
   Emit an event *before* the thing it authorises — `proposal.decided` is
   written inside `gateway.approve_and_execute` before `executor.execute()`,
@@ -170,9 +186,9 @@ where the story is gone.
   work.
 - **A seeded heartbeat schedule that contacts the operator or the world is
   born disabled; an internal sweep may seed enabled, and each is listed
-  here.** The first enable of an outward seed (the EA contacts, `mail-poll`,
-  `drain-window`, the graph verification sweep, the Jira hygiene task) is an
-  operator click on the event log; the table default is `enabled false`.
+  here.** The first enable of every other seed (the EA contacts, `mail-poll`,
+  `drain-window`, the graph verification sweep, the Jira hygiene task and the
+  rest: `schema.sql` is the list) is an operator click on the event log; the table default is `enabled false`.
   The only internal sweep seeded enabled is `retry-sweep` (outage
   convergence — a strict no-op when nothing is parked and no dependency is
   recorded down, it re-drives only what was already authorised, and its only
@@ -183,8 +199,8 @@ where the story is gone.
   active agent except the auditor may create a task and assign it to any agent,
   the orchestrator included, with `create_task` and no approval — no proposal,
   no inbox item (`await_result` waits on the outcome). Every created task is
-  bounded at the one create seam (`api/backstops.py`): depth 3, no self or
-  cycle, fan-out 25, an assignee required; a refusal comes back to the agent as
+  bounded at the one create seam (`api/backstops.py`): depth 3 and fan-out 25 by default (`task_max_depth`,
+  `task_fanout_limit`), no self or cycle, an assignee required; a refusal comes back to the agent as
   text and is loud on the record (`task.refused`), never an inbox item. The run
   a task starts gates its own world changes like any other, an agent-created
   project parks its plan for the operator before round one, and the
@@ -193,7 +209,10 @@ where the story is gone.
   orchestrator out of agent-created work. (The heartbeat action kind named
   `task.create` is a different thing: a schedule's lever, not an agent tool.)
 - **Agents take `deps`** (`runtime/deps.py`). Every `agent.run()` needs
-  `deps=TriageDeps(...)`; resume paths pass a fresh one on purpose.
+  `deps=TriageDeps(...)`; resume paths pass a fresh one on purpose. The tools
+  read it for the agent id, the session and the consult chain, so a run
+  without it fails inside its first tool call. The agents that hold no tools
+  (the two auditors, the context summariser) take none.
 - **Every proposal takes one path too:**
   `runtime/proposals.park_proposal()` — it pauses the run at its deferred
   call, persists the proposal, AND emits `proposal.created`.

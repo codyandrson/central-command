@@ -4,6 +4,40 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-13 — v2.83.1: The agent instructions say what the code does
+
+`AGENTS.md` is loaded into every coding session, and the sessions follow it closely. Every rule in it
+was checked against the code at v2.83.0. No rule was wrong in what it forbids, and none is removed or
+weakened. Several described the code as it was some releases ago, or stated a rule more absolutely
+than the code it guards:
+
+- **The suite's time.** The file said the sequential gate takes about 4 minutes. It takes about 11
+  (some 6,500 tests on a Pi 5), which is long enough to outlive a default command timeout. The
+  `pyproject.toml` comment carried the same figure and is corrected with it.
+- **The runtime tier.** It was described as "Pydantic AI 2.0 + Claude" that can "only propose + read".
+  The runtime drives whatever model the LiteLLM proxy serves, and it holds more than proposals and
+  reads: triggers that touch only Central Command's own state, sandbox work, and MCP tools the
+  operator marked ungated. The rule is now stated as what it protects: the runtime holds no
+  credential, and every tool that changes an outside service is a `propose_*`.
+- **The import boundary.** The ban on `runtime/` importing the gateway is a ban on imports, and a
+  guard test walks them. The file now also says that the runtime reaches `central_command.api`
+  lazily, and that this is the shape as built, not a route for new writes.
+- **Fresh runs and the charter.** "If you add a third fresh-run path" dated from when there were two.
+  There are eight; the rule now says every fresh-run path loads the charter.
+- **`system_prompt=` and skills.** The rule is about the charter. Skill guidance travels through
+  `Capability(instructions=…)` and is read live on every run; the file now says so.
+- **Dismiss.** Dismissing an approved proposal that is waiting on an outage resolves its task
+  FAILED, never DONE. The file described only the first form.
+- **Smaller corrections:** the seeded schedules that are born disabled are all of them but
+  `retry-sweep` (the list named five); the task-creation limits are settings with defaults; agents
+  that hold no tools take no `deps`; sandbox egress excludes link-local addresses; the shape check
+  of `ARG_SPECS` is not the kind of propose-time guard the next rule warns against;
+  `scripts/m5_acceptance.py` performs a real Jira write; the single-node profile spells the LiteLLM
+  salt key `CC_LITELLM_SALT_KEY`; n8n hosts the calendar façade as well as the mail one.
+
+Documentation only: no code, schema, unit, manifest or skill-doc change. Not changed here, and still
+carrying the older wording: the runtime's description in `docs/ARCHITECTURE.md`.
+
 ## 2026-11-12 — v2.83.0: The reviewer sees what the graph already holds beside a proposed episode
 
 An episode proposal read "holds a checking account at CU Example ending in 7731" while the graph
