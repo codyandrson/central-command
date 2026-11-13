@@ -4,6 +4,40 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-13 — v2.85.0: Work in flight goes to the tracker or the calendar, never also to the graph
+
+The triage agent proposed a two-night hotel booking as a graph episode, with its itinerary number and
+total, beside the tracker comment that already carried them. It was doing what it was told. The
+charter's knowledge branch listed "a due date" and said "alongside the other actions"; the Graphiti
+skill said "a due-date change always qualifies" and "keeping the graph in sync is half the job"; the
+pack let an episode "ride alongside other actions"; the eval dataset failed a due-date change that
+came without an episode. Of the agent's proposals that bundled an episode with a tracker write, 17
+of 65 were approved, the worst rate of any kind, and the graph held a trip's flights, a device "in
+transit" and an order's tracking number.
+
+- ROUTE FIRST, in the `graph.add_episode` notes ahead of the drafting order
+  (`packs._EPISODE_ROUTING_RULE`): each thing a source tells you has one home. The progress of work in
+  flight belongs in the tracker, a time on a day on the calendar, and neither is repeated in the
+  graph, which keeps what is still true after the work is closed, including its outcome.
+- The route check: when an agent proposes an episode whose own words carry a date later than its
+  `reference_time`, the propose tool hands the draft back once per session with that date quoted and
+  three exits (drop the episode and keep the tracker or calendar action; restate the lasting fact
+  alone; keep it and say why). It is a question, recorded as `proposal.route_checked`, and it never
+  repeats, so a redraft the operator asked for is not second-guessed.
+- The built-in triage charter's knowledge branch asks what will still be true after the work is
+  closed and sends progress to the tracker. A governed charter is the operator's and is not touched
+  by an update; a deployment carrying the old sentence changes it through a charter proposal.
+- inbox-triage holds `calendar-propose` (seeded, and in its default packs): a flight or a stay now
+  has a home the agent can reach. Every event is still a proposal.
+- The Graphiti skill's `what-belongs` lists the tracker and the calendar as layers, drops "a
+  due-date change always qualifies", "new tracked work items" and "keeping the graph in sync is half
+  the job", and gains "Route first". The eval dataset no longer expects an episode beside a due-date
+  change.
+- Measured by replaying recorded drafts, three samples a case: of 24 drafts over eight work-in-flight
+  cases, 21 recorded the work as an episode under the old briefing, 15 under the new wording alone
+  and 6 with the route check, which fired seven times and never on a lasting fact. The six are two
+  cases whose occurrence was already past at the source's own date. Durable facts were recorded in
+  every sample of every arm (DL-213).
 ## 2026-11-13 — v2.84.0: The triage agent confirms its assumptions instead of acting on them
 
 The triage agent recorded a relative of the operator as an old friend, and later another as family

@@ -43,6 +43,33 @@ def _operator_naming_rule() -> str:
             "subscriber at all. ")
 
 
+# WHERE a thing a source tells you belongs, decided before the graph is
+# considered at all. The briefing used to make the graph a companion write: the
+# charter's knowledge branch listed "a due date" and said "alongside the other
+# actions", the skill said "a due-date change always qualifies" and "keeping
+# the graph in sync is half the job". So a trip's bookings, an order's
+# tracking number and a device "in transit" were proposed as episodes beside
+# the tracker update that already recorded them, and the operator sent three
+# in four of those bundles back. The tracker records progress; the graph
+# records what remains when the work is done.
+_EPISODE_ROUTING_RULE = (
+    "ROUTE FIRST — the graph is one home among several, and never the default "
+    "one. Each thing a source tells you has ONE home. The PROGRESS of work in "
+    "flight (a due date, a booking, an order or a shipment, a case step, a "
+    "scheduled payment, a plan that has an end) belongs in the tracker; a "
+    "time on a day (a flight, a stay, an appointment) belongs on the calendar "
+    "when you can propose there, otherwise in the tracker; and what you "
+    "record in either you do NOT also record in the graph. The graph holds "
+    "what will still be true and worth knowing after that work is closed: "
+    "who and what exists, relationships, standing arrangements, preferences, "
+    "and the OUTCOME of work that has finished (installed, delivered, sold, "
+    "cancelled, decided). So an update to tracked work is a tracker action "
+    "and no episode. An episode rides with a tracker action only when the "
+    "same source ALSO teaches something of the lasting kind, and then it "
+    "states that and nothing of the work's progress. "
+)
+
+
 # How an episode is SHAPED: about the thing learned, never about the message
 # that taught it. Until 2026-11 the notes only said "distilled claim … naming
 # issue keys, dates, and people" and "a version adding a number, date, or
@@ -525,7 +552,8 @@ PACKS: dict[str, Pack] = {
                        "The episode_body is a distilled claim of 1-3 sentences: "
                        "self-contained, naming the people, things, issue keys "
                        "and dates the claim is ABOUT — NEVER pasted source "
-                       "text. " + _operator_naming_rule() + _EPISODE_SHAPE_RULE +
+                       "text. " + _operator_naming_rule() + _EPISODE_ROUTING_RULE +
+                       _EPISODE_SHAPE_RULE +
                        "RETENTION TEST — the graph's "
                        "failure mode is over-inclusion (noise dilutes every "
                        "future search), so when in doubt, do NOT propose the "
@@ -582,8 +610,9 @@ PACKS: dict[str, Pack] = {
                        "itself ('start date not stated in the source') so the "
                        "record is honest rather than silently dated. "
                        "Preferences and standing rules need no start date — "
-                       "do not ask about those. An episode can ride alongside "
-                       "other actions in ONE proposal, or stand alone. `scope` "
+                       "do not ask about those. An episode stands alone, or "
+                       "rides in ONE proposal with other actions when the same "
+                       "source also teaches a lasting fact (ROUTE FIRST). `scope` "
                        "is 'shared' for every fact about the WORLD — people, "
                        "relationships, projects, systems, dates — no matter who "
                        "learned it or whose role it touches. 'private' is RARE: "
@@ -1816,7 +1845,9 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
                      "mail-rule-propose",
                      # v2.51.0: the working set the charter assumes (seeded too)
                      "web-read", "web-search", "calendar-read",
-                     "catalog-read", "catalog-propose", "confluence-read"),
+                     "catalog-read", "catalog-propose", "confluence-read",
+                     # DL-213: a time on a day goes on the calendar (seeded too)
+                     "calendar-propose"),
     "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
                     "jira-delete-propose",
                     "graph-read", "graph-propose",

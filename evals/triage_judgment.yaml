@@ -28,8 +28,9 @@
 #   expected_output.fold          acceptable record_thread_decision fold values
 #
 # `capabilities` / `issue_keys` / `due_dates` are SUBSET checks: extra correct
-# actions are not penalised. `graph.add_episode` is required wherever the
-# charter says "a due-date change ALWAYS qualifies".
+# actions are not penalised. A due-date change is a TRACKER update and nothing
+# more (DL-213): no case requires a `graph.add_episode` beside it, and an
+# episode that mirrors the tracker is the failure the route-first rule ends.
 
 cases:
   - name: explicit-due-date-change
@@ -37,14 +38,14 @@ cases:
       primary: 001-invoice-due.eml
     expected_output:
       disposition: [propose]
-      capabilities: [jira.set_due_date, graph.add_episode]
+      capabilities: [jira.set_due_date]
       issue_keys: [TASKS-12]
       due_dates: ['2026-08-15']
     metadata:
       charter_clause: >-
         "When an email implies a change to a Jira issue, call
-        propose_jira_update" + "A due-date change ALWAYS qualifies" for the
-        episode. The email names the issue and the date outright.
+        propose_jira_update". The email names the issue and the date
+        outright; the change is the tracker's and needs no episode (DL-213).
       difficulty: easy
 
   - name: newsletter-dismiss
@@ -67,7 +68,7 @@ cases:
       primary: 002-thread-root.eml
     expected_output:
       disposition: [propose]
-      capabilities: [jira.set_due_date, graph.add_episode]
+      capabilities: [jira.set_due_date]
       issue_keys: [TASKS-12]
       due_dates: ['2026-08-06']
     metadata:
@@ -82,7 +83,7 @@ cases:
       primary: 003-thread-reply.eml
     expected_output:
       disposition: [propose]
-      capabilities: [jira.set_due_date, graph.add_episode]
+      capabilities: [jira.set_due_date]
       issue_keys: [TASKS-12]
       due_dates: ['2026-08-07']
     metadata:
@@ -97,7 +98,7 @@ cases:
       siblings: [003-thread-reply.eml]
     expected_output:
       disposition: [propose]
-      capabilities: [jira.set_due_date, graph.add_episode]
+      capabilities: [jira.set_due_date]
       issue_keys: [TASKS-12]
       due_dates: ['2026-08-07']
       fold: [true]
@@ -119,7 +120,7 @@ cases:
       siblings: [002-thread-root.eml]
     expected_output:
       disposition: [propose]
-      capabilities: [jira.set_due_date, graph.add_episode]
+      capabilities: [jira.set_due_date]
       issue_keys: [TASKS-12]
       due_dates: ['2026-08-07']
       fold: [true]

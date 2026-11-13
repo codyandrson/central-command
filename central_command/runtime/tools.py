@@ -10,6 +10,7 @@ import functools
 import inspect
 import json
 import re
+from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Annotated
 
@@ -1634,6 +1635,68 @@ def _loads_if_str(value):
 ProposalArg = Annotated[Proposal, BeforeValidator(_loads_if_str)]
 
 
+# The route check: one question, asked once per session, at the moment an
+# agent proposes an episode whose own words date something AFTER the source it
+# came from. A date later than the reference_time is something still to happen
+# or still running when the source was written: a flight, a stay, a delivery, a
+# scheduled payment. That is work in flight, whose home is the tracker or the
+# calendar. The briefing says so (packs._EPISODE_ROUTING_RULE), and a replay of
+# recorded drafts showed the briefing alone moves about a third of them; the
+# same sentence at the moment of the draft, with the draft's own dates in it,
+# is the lever a paragraph in a long prompt is not. It is a QUESTION: the agent
+# may answer that the date is the lasting fact and propose again unchanged.
+# Once per session, read from the record itself, so a redraft the operator
+# asked for is never second-guessed.
+_ROUTE_CHECK_MARK = "ROUTE CHECK"
+_ISO_DAY_RE = re.compile(r"\b(20\d\d-\d\d-\d\d)\b")
+
+
+def _iso_day(value) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _route_check(ctx: RunContext, proposal: Proposal) -> str | None:
+    for message in getattr(ctx, "messages", None) or []:
+        for part in getattr(message, "parts", ()):
+            if (getattr(part, "part_kind", "") == "retry-prompt"
+                    and _ROUTE_CHECK_MARK in str(getattr(part, "content", ""))):
+                return None
+    found: list[str] = []
+    for a in proposal.actions:
+        if a.capability.split("@", 1)[0] != "graph.add_episode":
+            continue
+        args = a.arguments or {}
+        ref = _iso_day(args.get("reference_time"))
+        if ref is None:
+            continue
+        later = sorted({
+            d for d in _ISO_DAY_RE.findall(str(args.get("episode_body") or ""))
+            if (day := _iso_day(d)) is not None and day > ref
+        })
+        if later:
+            found.append(f"'{args.get('name') or 'episode'}' ({', '.join(later)})")
+    if not found:
+        return None
+    return (
+        f"{_ROUTE_CHECK_MARK} (asked once, then never again in this session): "
+        "the episode " + "; ".join(found) + " states a date AFTER its own "
+        "reference_time, so it describes something still to happen or still "
+        "running when the source was written. The progress of work in flight "
+        "(a booking, a trip, a delivery, a scheduled payment, an appointment) "
+        "belongs in the tracker or on the calendar, not in the graph. Choose "
+        "ONE and propose again: (a) drop the episode and keep or add the "
+        "tracker or calendar action that carries these details; (b) if the "
+        "source ALSO teaches something that outlasts this work, restate the "
+        "episode as that lasting fact alone, without the plan's dates; (c) if "
+        "the later date IS the lasting fact (a contract's end, a policy's "
+        "term), propose again unchanged and say so in the intent. If nothing "
+        "is left to propose, finish in plain text."
+    )
+
+
 async def _validate_proposal(ctx: RunContext, proposal: Proposal, *,
                              agent_authored: bool) -> None:
     """Reject an invented capability or a malformed action IN-RUN, before the
@@ -1683,7 +1746,22 @@ async def _validate_proposal(ctx: RunContext, proposal: Proposal, *,
     if agent_authored:
         problems.extend(validate_proposal_shape(proposal))
     if not problems:
-        return
+        nudge = _route_check(ctx, proposal) if agent_authored else None
+        if nudge is None:
+            return
+        deps = getattr(ctx, "deps", None)
+        await events.emit(
+            "proposal.route_checked",
+            ref_id=getattr(deps, "session_id", None),
+            payload={
+                "agent_id": getattr(deps, "agent_id", None),
+                "capabilities": [a.capability for a in proposal.actions],
+                "intent": proposal.intent,
+                "asked": nudge,
+            },
+            actor="system",
+        )
+        raise ModelRetry(nudge)
     deps = getattr(ctx, "deps", None)
     await events.emit(
         "proposal.rejected_in_run",

@@ -1559,6 +1559,16 @@ insert into agent_grant (agent_id, pack, granted_by) values
     ('inbox-triage', 'confluence-read',  'seed:2026-09-26')
 on conflict (agent_id, pack) do nothing;
 
+-- calendar-propose for inbox-triage (2026-11-13, operator-approved; DL-213).
+-- A time on a day (a flight, a stay, an appointment) had no home the triage
+-- agent could reach: it read the calendar and could write only to the tracker
+-- and the graph, so trips were proposed as graph episodes. Still gated: every
+-- event is a proposal the operator approves. Seeds and DEFAULT_PACKS move
+-- together (test_packs pins it).
+insert into agent_grant (agent_id, pack, granted_by) values
+    ('inbox-triage', 'calendar-propose', 'seed:2026-11-13')
+on conflict (agent_id, pack) do nothing;
+
 -- The team tour (2026-09-26, v2.51.0). The onboarding design (2026-08-23) said
 -- "setup's last act creates a DISABLED schedule and fires it once through the
 -- run-now button" — and no installer ever did; the reference deployment's row

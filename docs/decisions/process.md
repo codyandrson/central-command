@@ -2323,3 +2323,59 @@ hygiene, and how the test suite itself must be written. See
   obligation is still open, which no graph fact answers.
 - **Enforced:** test: `tests/test_triage_charter_assumptions.py` (the rule's sentences are in the built-in text, the replaced trigger is not, the examples use the public cast, and the text keeps its angle-bracket placeholders and step numbers)
 - **Source:** `central_command/runtime/agent.py`. A deployment whose triage agent runs a governed charter version is not changed by this: the governed version is what it loads.
+
+### DL-213 — The graph is not the tracker's shadow: work in flight has one home, and the agent is asked once when a draft says otherwise
+
+- **Status:** active
+- **Date:** 2026-11-13
+- **Rule:** `central_command/runtime/packs.py` (`_EPISODE_ROUTING_RULE`); `central_command/runtime/tools.py` (`_route_check`); `central_command/runtime/agent.py` (the built-in triage charter, DECIDE branch d); `skills/graphiti/references/what-belongs.md` ("Route first")
+- **Why:** The first episode drafted after DL-210 shipped was a hotel booking,
+  itinerary number and total included, proposed beside a tracker comment
+  carrying the same details. The operator's reading: the graph is neither the
+  only place nor automatically the right place for what a mail says; updates
+  to tasks go to the tracker, and travel plans have no presumed long-term
+  relevance. The briefing said the opposite in four places. The charter's
+  knowledge branch counted "a due date" as durable knowledge to propose
+  "alongside the other actions", directly after the branch that sends the
+  same due date to the tracker, under "act on every branch that applies". The
+  skill said "a due-date change always qualifies", listed "new tracked work
+  items" and titled a section "Keeping the graph in sync is half the job".
+  The pack let an episode "ride alongside other actions". The eval dataset
+  scored a due-date change without an episode as wrong. The doctrine came
+  from the first design, where the graph was a work team's memory of its
+  schedule. Outcome: proposals bundling an episode with a tracker write were
+  approved 17 times in 65, against 78 in 124 for an episode alone, and
+  twenty-five decisions carried feedback about where a thing belonged. A time
+  on a day had no home the agent could reach at all: it read the calendar and
+  could write only to the tracker and the graph.
+- **Decision:** Route before shape. Each thing has one home: the progress of
+  work in flight in the tracker, a time on a day on the calendar, and in the
+  graph only what is still true once the work is closed, its outcome
+  included (the operator had asked for exactly that when a finished
+  installation was proposed as a task). The triage agent gains
+  `calendar-propose`, gated like every other write. The wording was measured
+  before the cut by replaying the recorded first drafts of eight
+  work-in-flight cases against the local model, three samples each: 21 of 24
+  drafts recorded the work as an episode under the briefing as it stood, and
+  15 of 24 under the route-first wording with the charter branch reworded and
+  the calendar available. A paragraph in a long prompt was not enough, and a
+  review-time flag would only have told the operator about a proposal they
+  still had to send back. So the same sentence is asked at the moment of the
+  draft: an episode whose body carries a date later than its own
+  `reference_time` describes something still to happen or still running, and
+  the propose tool hands it back once with the date quoted and three exits.
+  With it, 6 of 24; it fired seven times, each on an in-flight episode, and
+  the agent dropped or restated the episode each time. It is a question, not
+  a refusal (the later date may be the lasting fact, a contract's end), it is
+  read from the run's own messages so it is asked once per session and never
+  on a redraft the operator directed, and it applies only to a draft the
+  model wrote. Lasting facts were recorded in every sample of every arm. Not
+  reached: an occurrence already past at the source's date (a delivered order
+  recorded with its tracking number), and old backlog mail describing work
+  that was in flight when it was written. The governed charter is the
+  operator's: an update changes the built-in text only, and a deployment
+  whose governed charter carries the old sentence changes it by a charter
+  proposal.
+- **Enforced:** test: `tests/test_route_check.py` (a later date is asked about with the draft's name and dates; a lasting, finished or same-day fact is not; once per session from the record; tool-built proposals never; the event is written), `tests/test_packs.py` (the routing rule rides the notes ahead of the drafting order; the skill no longer mirrors the tracker; triage holds `calendar-propose` in seeds and defaults). The behaviour is measured, not asserted.
+- **Source:** `central_command/runtime/packs.py`; `central_command/runtime/tools.py`; `central_command/runtime/agent.py`; `central_command/db/schema.sql` (the grant seed); `skills/graphiti/references/what-belongs.md`; `evals/triage_judgment.yaml`.
+

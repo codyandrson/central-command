@@ -10,6 +10,8 @@ Before proposing an episode, check the fact is not really something else:
 | **Capability packs + grants** | what may this agent *do* | Permissions only. **Never knowledge.** |
 | **Skills library** | *how* — procedural, stable, curated | Versioned how-to and judgment: conventions, runbooks, operator-defined standards that change rarely. |
 | **Knowledge graph + KB** | *what is true* — factual, **evolving**, shared | Steward-maintained; every agent reads the same store. Narrative artifacts (notes, reports, minutes) → the KB/Confluence; **extracted facts → the graph**. |
+| **The tracker (Jira)** | *what is in flight* — work, obligations, plans with an end | The progress of work: due dates, bookings, orders, shipments, case steps, scheduled payments. Updated as the work moves and closed when it ends. **Never mirrored into the graph.** |
+| **The calendar** | *when* — a time on a day | Flights, stays, appointments, meetings, for an agent that can propose there; otherwise the tracker. |
 | **MCP / native clients** | live-system access | Transport. Not a place to store anything. |
 
 Skills teach *how*; retrieval answers *what*; MCP reaches what changes between
@@ -26,10 +28,10 @@ Durable, checkable facts about the team's world:
 - **Decisions, and who made them.**
 - **Ownership** — who owns a system, an issue, a workstream.
 - **Dependencies** — that A blocks B, stated outright by the source.
-- **Dates and date changes.** A due-date change **always** qualifies: it
-  supersedes the team's previous understanding of the schedule.
 - **Systems and their status** — introduced, decommissioned, degraded.
-- **New tracked work items.**
+- **The outcome of work that has finished** — installed, delivered, sold,
+  cancelled, decided. The tracker held the work while it ran; the graph keeps
+  what remains true once it is closed.
 - **What the operator's world is made of** — who a person is to them; that
   an account, a policy, a membership, a subscription, a vehicle, a property or
   a provider relationship exists; and its stable attributes (the institution,
@@ -38,7 +40,29 @@ Durable, checkable facts about the team's world:
   disputed.
 
 The test: *a teammate reading this months from now would act differently for
-knowing it.*
+knowing it*, and it will still be true after the work it arrived with is
+closed.
+
+## Route first: one home for each thing
+
+The graph is one home among several and never the default one. Decide where a
+thing belongs before you consider an episode at all.
+
+- **Work in flight goes to the tracker.** A due date, a booking, an order or a
+  shipment, a case step, a scheduled payment, a plan that has an end: update
+  or create the tracked item, and write no episode. What the tracker records
+  the graph does not repeat.
+- **A time on a day goes on the calendar** when you can propose calendar
+  events (a flight, a stay, an appointment), otherwise to the tracker.
+- **The graph gets what outlasts the work**: who and what exists,
+  relationships, standing arrangements, preferences, and the outcome of work
+  that has finished.
+
+An episode rides in a proposal with a tracker update only when the same source
+also teaches something of the lasting kind, and then it states that and
+nothing of the work's progress. A date in an episode that is later than the
+source's own date is a sign you are recording something still running: the
+propose tool will ask you about it once.
 
 ## What is NOT
 
@@ -117,11 +141,12 @@ is knowledge-only.
 
 ### Good
 
-> "TASKS-12's due date moved from 2026-08-06 to 2026-08-07 after Dana
-> Rivers superseded her own morning message on 2026-07-02; the vendor invoice
-> INV-4471 payment date is unchanged."
+> "Example Heating installed a whole-home heat pump at Jane Doe's home on
+> 2026-09-29."
 
-Names the issue, both dates, the person, and the supersession.
+The outcome of finished work: it names the vendor, the thing and the date, and
+it is still true and worth knowing next year. While the job was running, its
+quote, deposit and install date belonged to the tracked item, not here.
 
 ### Bad
 
@@ -154,16 +179,17 @@ Good:
 The one thing the mail added, said about the thing it belongs to. The transfer
 confirmation is named in `source_description`.
 
-## Keeping the graph in sync is half the job
+## The graph is not the tracker's shadow
 
-For a triage agent this is explicit: **before you propose, answer one question —
+For a triage agent this is explicit: **before you propose, answer one question:
 does this source change what the team believes about some thing in the
-world, and which thing?** If yes, the
-proposal should include the `graph.add_episode` action alongside the other
-change, or stand alone when the source is knowledge-only. But the graph's
-failure mode is over-inclusion, so the retention test applies strictly and
-**when in doubt, do not propose the episode**: skip it for trivia, newsletters,
-sender dispositions ("mail from Y is expected no-action mail" is triage policy,
-not world knowledge), process state (where a run got to, what is still open),
-and facts you are unsure actually happened — an uncertain fact goes to the
+world, and which thing, in a way that outlasts the work it arrived with?** If
+yes, propose the `graph.add_episode`, alone or beside the other change. If the
+source only moves work forward (a new date, a booking, a status), the tracker
+update is the whole proposal. The graph's failure mode is over-inclusion, so
+the retention test applies strictly and **when in doubt, do not propose the
+episode**: skip it for trivia, newsletters, sender dispositions ("mail from Y
+is expected no-action mail" is triage policy, not world knowledge), process
+state (where a run got to, what is still open), the progress of tracked work,
+and facts you are unsure actually happened. An uncertain fact goes to the
 operator as a question, not to the graph.

@@ -471,3 +471,39 @@ def test_the_graphiti_skill_agrees_with_the_pack_on_episode_shape():
     assert "The source is not the fact" in belongs
     assert "You are\n   writing the source" not in skill
     assert "Every sentence you write becomes facts" in skill
+
+
+def test_an_episode_is_routed_before_it_is_shaped():
+    """ROUTE FIRST rides the notes ahead of the drafting order: the progress
+    of work in flight belongs in the tracker (a time on a day on the calendar)
+    and is never mirrored into the graph. The briefing used to say the
+    opposite in four places ('alongside the other actions', 'a due-date change
+    always qualifies'), and three in four episode-plus-tracker bundles came
+    back from the operator (DL-213)."""
+    notes = _episode_notes()
+    assert packs._EPISODE_ROUTING_RULE in notes
+    assert notes.index("ROUTE FIRST") < notes.index("WRITE ABOUT THE THING")
+    for marker in (
+        "belongs in the tracker",
+        "you do NOT also record in the graph",
+        "the OUTCOME of work that has finished",
+        "an update to tracked work is a tracker action and no episode",
+    ):
+        assert marker in notes, marker
+    assert "An episode can ride alongside other actions" not in notes
+
+
+def test_the_graphiti_skill_no_longer_mirrors_the_tracker():
+    from pathlib import Path
+
+    belongs = (Path(__file__).resolve().parent.parent / "skills" / "graphiti"
+               / "references" / "what-belongs.md").read_text(encoding="utf-8")
+    assert "A due-date change **always** qualifies" not in belongs
+    assert "Keeping the graph in sync is half the job" not in belongs
+    assert "Route first: one home for each thing" in belongs
+    assert "**Never mirrored into the graph.**" in belongs
+
+
+def test_triage_can_propose_a_calendar_event_by_default():
+    """A time on a day needs a home the triage agent can reach."""
+    assert "calendar-propose" in packs.DEFAULT_PACKS["inbox-triage"]
