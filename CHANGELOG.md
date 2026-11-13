@@ -4,6 +4,35 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-13 — v2.84.0: The triage agent confirms its assumptions instead of acting on them
+
+The triage agent recorded a relative of the operator as an old friend, and later another as family
+because of a shared surname, without asking either time. It could ask; its charter told it to ask "if
+you cannot place the sender or the relationship and it would change your handling", and it felt sure.
+
+The built-in inbox-triage charter now names what to check. Anything the agent concludes about the
+operator's world that no source states in words is an assumption: who a person is to them, that they
+hold an account or a policy, that they own a thing. A graph fact or an email that states it outright
+confirms it; a shared thread, a shared surname or a vendor's template does not. With no stating source
+the agent asks, and says what it is assuming: "It looks like Jane Rivers is a family member. Can you
+confirm, and how is she related to you?" The asking section says to ask "whenever you are about to rely
+on something nobody stated, not only when you feel unsure", and that an answer with no facts in it means
+no action and no record.
+
+- **Measured before it shipped.** One deployment ran this text as a governed charter version for twelve
+  days: 54 questions against 30 in the two weeks before, 22 of them citing what the graph did not hold,
+  and no rejected proposal was a mistake about who a person is (two were, before).
+- **Who gets it.** An agent on the built-in charter (no governed version saved) gets the new text on
+  its next fresh run. A deployment whose triage agent runs a governed version is unchanged: that version
+  is what it loads, and its operator edits it in the cockpit.
+- **Not covered.** Whether an old obligation is still open. No graph fact answers that, and the charter
+  has no trigger for it yet.
+- **A trap worth knowing.** A charter pasted from a rendered markdown view loses every `<placeholder>`
+  that parses as a tag, and its step numbers; the text still reads plausibly. Paste from the raw text.
+  `tests/test_triage_charter_assumptions.py` holds the built-in to its placeholders and numbering.
+
+Decision log: DL-212. No schema, unit, manifest or skill-doc change.
+
 ## 2026-11-13 — v2.83.1: The agent instructions say what the code does
 
 `AGENTS.md` is loaded into every coding session, and the sessions follow it closely. Every rule in it

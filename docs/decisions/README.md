@@ -300,3 +300,4 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-209 | A verification row is judged against its own episode's text, never its proposal's first | active | 2026-11-06 | test: `tests/test_graph_verification.py` | [process.md](process.md) |
 | DL-210 | An episode is drafted about the thing learned; the message that taught it is its source | active | 2026-11-12 | test: `tests/test_packs.py` | [process.md](process.md) |
 | DL-211 | The reviewer is shown what the graph already holds about a proposed episode's subject | active | 2026-11-12 | test: `tests/test_proposal_graph_known.py`, `web/src/features/decisions/DecisionsView.test.tsx` | [process.md](process.md) |
+| DL-212 | The triage agent confirms an assumption from a stating source or asks; it does not act on one | active | 2026-11-13 | test: `tests/test_triage_charter_assumptions.py` | [process.md](process.md) |

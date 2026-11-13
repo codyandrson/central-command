@@ -2292,3 +2292,34 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** test: `tests/test_proposal_graph_known.py` (per-action entries at the action's index; the landing scope for shared, `for_agent` and drafter-private episodes; no episode reads nothing; a raising read is a 503, never an empty list; the RPC reaches the route); `web/src/features/decisions/DecisionsView.test.tsx` (results, empty, error said once and never as empty, no request for a decided proposal or one with no episode).
 - **Source:** `central_command/api/routes.py`; `central_command/api/nerve_gateway.py` (`proposals.graph_known`); `web/src/features/decisions/DecisionsView.tsx`, `useDecisions.ts`, `types.ts`.
 
+
+### DL-212 — The triage agent confirms an assumption from a stating source or asks; it does not act on one
+
+- **Status:** active
+- **Date:** 2026-11-13
+- **Rule:** `central_command/runtime/agent.py` (`CHARTER`, step 1 IDENTIFY and the ASKING section)
+- **Why:** The triage agent recorded a relative of the operator as an old
+  friend, and two weeks later recorded another as family on the strength of a
+  shared surname, each time without a question. It held `ask_operator` and was
+  told to use it "if you cannot place the sender or the relationship and it
+  would change your handling". That trigger tests the agent's own feeling of
+  uncertainty, and in both cases the agent felt sure. The operator's ruling:
+  the agent should ask more freely and confirm its assumptions, so that the
+  operator is not left to catch them at review; a question that turns out to
+  be easy is cheap, and a wrong fact in the graph is not.
+- **Decision:** The charter defines the thing to check instead of the feeling.
+  Anything the agent concludes about the operator's world that no source
+  states in words (who a person is to them, that they hold an account or a
+  policy, that they own a thing) is an assumption. It is confirmed by a graph
+  fact or an email that states it outright, and by nothing weaker: a shared
+  thread, a shared surname and a vendor's template confirm nothing. With no
+  stating source the agent asks, names the assumption as one, and asks for the
+  specifics it would record. An answer that carries no facts means no action
+  and no record. One deployment ran this text as a governed charter for twelve
+  days before it became the built-in: the agent asked 54 questions in that
+  time against 30 in the two weeks before, 22 of them citing what the graph
+  did not hold, and none of 30 rejected proposals was a mistake about who a
+  person is (two were, before). What it does not cover: whether an old
+  obligation is still open, which no graph fact answers.
+- **Enforced:** test: `tests/test_triage_charter_assumptions.py` (the rule's sentences are in the built-in text, the replaced trigger is not, the examples use the public cast, and the text keeps its angle-bracket placeholders and step numbers)
+- **Source:** `central_command/runtime/agent.py`. A deployment whose triage agent runs a governed charter version is not changed by this: the governed version is what it loads.
