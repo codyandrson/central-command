@@ -816,7 +816,7 @@ async def _chat_send(params: dict, notify) -> dict:
         raise HTTPException(422, exc.message) from exc
 
     # The operator's TYPED words, on the record before the turn they start
-    # (DL-216). This event is the one place the record attributes a chat turn
+    # (DL-217). This event is the one place the record attributes a chat turn
     # to the operator: the transcript cannot, because a user-prompt part may
     # also carry extracted attachment text (appended just below) or a system
     # nudge (`heartbeat/actions._nudge_discussion`). An operator-scope note's

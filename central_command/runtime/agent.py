@@ -137,7 +137,7 @@ def build_charter(
     ASYNC output, computed by the caller and passed in — this function stays
     sync, matching the seam `packs`/`capabilities`/`skills_catalog` already
     use. `team_section` (2026-08-22) is the fresh run's GENERATED standing
-    sections — since DL-216 `notes.standing_sections`'s ASYNC output: the
+    sections — since DL-217 `notes.standing_sections`'s ASYNC output: the
     roster, then the notes block — same reasoning; a fresh-run caller computes
     it through that one seam (a source walk in tests/test_agent_notes.py fails
     a builder call that omits it or reaches `roster.team_section` directly);
@@ -252,7 +252,7 @@ async def build_agent(
     `packs_mod.mcp_toolsets_for`/`mcp_charter_section`'s ASYNC output,
     computed by the caller — same reasoning as `capabilities`. `team_section`
     (2026-08-22) is `notes.standing_sections`'s ASYNC output (the roster and,
-    since DL-216, the notes block), same pattern."""
+    since DL-217, the notes block), same pattern."""
     if packs is None:
         packs = packs_mod.DEFAULT_PACKS["inbox-triage"]
     return Agent(

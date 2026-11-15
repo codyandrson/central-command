@@ -67,7 +67,7 @@ async def park_proposal(
     `quote_source`) survives only when `propose_note`'s code built the proposal
     (`_keep_only_server_note_stamp`); the Executor refuses a note without it,
     and the stamped quote's evidence entry is recorded as checked
-    (`_note_quote_verdicts`) — on a redraft too (DL-216).
+    (`_note_quote_verdicts`) — on a redraft too (DL-217).
 
     A `skill.doc_add`'s `base_version` survives only when the TOOL built the
     proposal (`_keep_only_server_skill_base`): `propose_skill_correction`
@@ -226,7 +226,7 @@ def _keep_only_server_note_stamp(proposal, *, server_built: bool) -> None:
     session record (and, for operator scope, against the operator's own
     recorded words) by `notes.build_note_proposal`. Only that code may set it,
     so on a proposal the model authored the stamp is dropped — and the Executor
-    then refuses the note, nothing written (DL-216). `propose_action` already
+    then refuses the note, nothing written (DL-217). `propose_action` already
     hands a hand-built note back in-run; this is the seam's own guarantee."""
     if server_built:
         return

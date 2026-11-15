@@ -1756,7 +1756,7 @@ def _route_check(ctx: RunContext, proposal: Proposal) -> str | None:
 
 
 # Capabilities whose proposal only a tool's CODE may build: the model-written
-# `proposal` of propose_action & co. may not carry them (DL-216).
+# `proposal` of propose_action & co. may not carry them (DL-217).
 TOOL_BUILT_ONLY = {
     "memory.note_add": "propose_note",
     "memory.note_retire": "propose_note_retire",
@@ -1809,7 +1809,7 @@ async def _validate_proposal(ctx: RunContext, proposal: Proposal, *,
             )
             continue
         if agent_authored and name in TOOL_BUILT_ONLY:
-            # A note is never hand-built (DL-216): its quote must be checked
+            # A note is never hand-built (DL-217): its quote must be checked
             # against the session record — and, for operator scope, against
             # the operator's own recorded words — which only the note tools do.
             problems.append(
@@ -4012,7 +4012,7 @@ async def propose_skill_correction(
     raise CallDeferred(metadata={"proposal": out.model_dump(mode="json")})
 
 
-# --- the note store (memory.note_add / memory.note_retire, DL-216) -------------
+# --- the note store (memory.note_add / memory.note_retire, DL-217) -------------
 
 
 async def propose_note(
@@ -4050,7 +4050,7 @@ async def propose_note(
     # The current run is not persisted until it lands, so its messages are
     # part of "this session" — unless the quote is grounded elsewhere: by the
     # deps, or by the session's own record (a reflection drafting run, on any
-    # resume, DL-216).
+    # resume, DL-217).
     from central_command.runtime.notes import DRAFTING_RETIRE_REFUSAL, DRAFTING_SCOPE_REFUSAL
 
     grounding, live, refusal, drafting = await resolve_grounding(

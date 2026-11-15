@@ -93,7 +93,7 @@ async def _build_agent(model=None):
     # "unexpected deferred call" the batch validation hands back. The
     # orchestrator proposes a skill correction from its chat lane, which parks
     # proposals, or through session-close reflection.
-    # note-propose (DL-216) likewise: a note parks a proposal, which a round
+    # note-propose (DL-217) likewise: a note parks a proposal, which a round
     # cannot land; the orchestrator keeps notes from its chat lane.
     packs = tuple(p for p in packs if p not in ("task-create", "skill-propose",
                                                 "note-propose"))

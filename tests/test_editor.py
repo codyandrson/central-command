@@ -55,7 +55,7 @@ async def test_it_is_not_seeded_in_the_schema():
 
     schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
     # The only mentions allowed are EXCLUSIONS, not seeds: DL-215's
-    # skill-propose and DL-216's note-propose widenings leave the editor out by
+    # skill-propose and DL-217's note-propose widenings leave the editor out by
     # name (it holds no propose pack by design), which writes nothing about the
     # editor's row.
     exclusion = "and a.id not in ('auditor', 'graph-auditor', 'editor')"

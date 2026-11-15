@@ -1,4 +1,4 @@
-"""The note store (DL-216, FR-53): gated per-agent notes and the operator's
+"""The note store (DL-217, FR-53): gated per-agent notes and the operator's
 preferences, rendered into every fresh run's system prompt.
 
 Held here:
@@ -153,7 +153,7 @@ def test_only_the_executor_writes_a_note():
     assert callers == {"central_command/gateway/executor.py"}, callers
     repo_src = (SRC / "db" / "repo.py").read_text(encoding="utf-8")
     assert not re.search(r"delete\s+from\s+agent_note", repo_src, re.IGNORECASE)
-    assert not re.search(r"set\s+text\s*=", repo_src[repo_src.index("the note store (DL-216"):], re.IGNORECASE)
+    assert not re.search(r"set\s+text\s*=", repo_src[repo_src.index("the note store (DL-217"):], re.IGNORECASE)
 
 
 def test_the_capabilities_are_gated_reversible_and_dispatched():

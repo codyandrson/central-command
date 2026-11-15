@@ -178,7 +178,7 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # record of why an agent's standing rules changed (GATE-009).
     "charter.update": ArgSpec(required=("agent_id", "content", "rationale")),
     "skill.doc_add": ArgSpec(required=("skill_id",)),
-    # The note store (DL-216): a note is a scope and its text; a retirement
+    # The note store (DL-217): a note is a scope and its text; a retirement
     # names its note and why. Budget and retire-id checks are world state
     # (the store changes between propose and approve) and stay Executor-only.
     "memory.note_add": ArgSpec(required=("scope", "text"),

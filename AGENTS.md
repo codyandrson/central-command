@@ -275,7 +275,7 @@ where the story is gone.
   Multiple concurrent sessions per agent is the TARGET architecture; never
   add code assuming one session per agent.
 - **A note is written only through the gate, and a note is never a gate.**
-  The note store (`agent_note`, DL-216) is written by exactly two Executor
+  The note store (`agent_note`, DL-217) is written by exactly two Executor
   handlers (`memory.note_add`, `memory.note_retire`) after approval; there is
   no direct write path, not even for the operator, and no note is ever edited
   or deleted — retirement is a timestamp. The owner is the gateway's

@@ -217,7 +217,7 @@ TEMPLATES: dict[str, HireTemplate] = {
 # It deliberately does NOT live in TEMPLATES above. That dict is the operator's
 # hire menu, and every entry in it is a general starting loadout: the parity
 # tests require task-create on each, and so does every purpose-built loadout
-# below since story 4.9 (and skill-propose and note-propose on each but the editor's, DL-215/DL-216); the charter here is a finished document rather than a {name}/{mission} skeleton,
+# below since story 4.9 (and skill-propose and note-propose on each but the editor's, DL-215/DL-217); the charter here is a finished document rather than a {name}/{mission} skeleton,
 # and hiring a SECOND steward under an operator-chosen name would be a
 # different agent id doing the one job the ledger routes to a fixed one.
 GRAPH_CURATOR_TEMPLATE = HireTemplate(
@@ -340,7 +340,7 @@ MCP_MANAGER_TEMPLATE = HireTemplate(
 # does not break the editor's independence. skill-propose is NOT added at
 # DL-215 (2026-11-15), unlike every other loadout here: it is a propose pack,
 # and the editor's charter says it holds none. note-propose is NOT added at
-# DL-216 for the same reason.
+# DL-217 for the same reason.
 EDITOR_TEMPLATE = HireTemplate(
     id="editor",
     label="Editor",

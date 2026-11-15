@@ -1096,7 +1096,7 @@ async def _skill_doc_add(args: dict, approver: str, proposer: str | None) -> str
     return f"skill {skill_id} document '{doc_key}' added as v{doc['version']}"
 
 
-# --- the note store (DL-216) ---------------------------------------------------
+# --- the note store (DL-217) ---------------------------------------------------
 # The ONLY code that writes a note. The owner is the `proposer` the gateway
 # passes (the proposal row's drafter), never an argument; the budget is read
 # HERE, at execution, because the store can change between propose and approve
@@ -1166,7 +1166,7 @@ async def _memory_note_retire(args: dict, approver: str, proposer: str | None) -
     note_id = str(args["note_id"]).strip()
     # Retiring an OPERATOR-scope note needs the operator's own words, checked
     # by `propose_note_retire` and stamped; the park seam strips a stamp the
-    # model wrote itself, so an unstamped one was never checked (DL-216).
+    # model wrote itself, so an unstamped one was never checked (DL-217).
     target = await repo.get_agent_note(note_id)
     if target is not None and target["scope"] == "operator" and not (
             args.get("source_quote") and args.get("source_session_id")):

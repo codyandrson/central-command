@@ -1,4 +1,4 @@
-"""The note store, runtime side (DL-216, FR-53): the rendering seam and the
+"""The note store, runtime side (DL-217, FR-53): the rendering seam and the
 proposal builders.
 
 The knowledge graph is query-driven: a standing fact nobody queries is never
@@ -63,7 +63,7 @@ def _chars(n: int) -> str:
 
 
 async def budgets() -> dict[str, int]:
-    """The two operator-editable budgets (`context_settings`, DL-216)."""
+    """The two operator-editable budgets (`context_settings`, DL-217)."""
     from central_command.runtime import context
 
     s = await context.load_settings()
@@ -300,7 +300,7 @@ async def resolve_grounding(
 
 
 # What a reflection drafting run may not do, on its first draft or any redraft
-# (DL-216: reflection never proposes operator scope and never retires). The
+# (DL-217: reflection never proposes operator scope and never retires). The
 # operator's feedback may change the note's TEXT; nothing else.
 DRAFTING_SCOPE_REFUSAL = (
     "refused: this note was distilled from a closed session by reflection, which "

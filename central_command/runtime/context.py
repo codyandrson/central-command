@@ -313,7 +313,7 @@ DEFAULTS: dict = {
     "output_headroom_tokens": 8192,
     "summarize": True,
     "summarize_threshold": 0.85,
-    # The note store's character budgets (DL-216): per agent for its private
+    # The note store's character budgets (DL-217): per agent for its private
     # notes, in total for the operator-scope notes every agent is shown. They
     # sit here, beside compaction, because they are spent from the same window.
     # The Executor reads them at execution; `api/routes.ContextSettingsIn`

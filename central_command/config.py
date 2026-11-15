@@ -286,7 +286,7 @@ class Settings(BaseSettings):
     # `skill.doc_add` proposal. Off turns that part alone off; the lessons and
     # the self-nomination are unaffected.
     reflection_skill_corrections: bool = True
-    # The standing note (DL-216): at most this many PRIVATE notes per closed
+    # The standing note (DL-217): at most this many PRIVATE notes per closed
     # session, proposed only inside a distill call that already happens and
     # only for a note-propose holder — each an ordinary gated
     # `memory.note_add`. 0 turns that part alone off.

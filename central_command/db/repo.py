@@ -8558,7 +8558,7 @@ async def recall_parts(session_id: str, msg_indices: list[int]) -> list[dict]:
         await conn.close()
 
 
-# --- the note store (DL-216, FR-53) --------------------------------------------
+# --- the note store (DL-217, FR-53) --------------------------------------------
 # Append-only by convention: nothing here updates `text` or deletes a row. The
 # ONLY writers are `add_agent_note` and `retire_agent_note`, and their only
 # callers are the Executor's `memory.note_add` / `memory.note_retire` handlers
@@ -8821,7 +8821,7 @@ async def operator_words_for_session(session_id: str, *,
                                      live_prompts: list[str] | None = None) -> list[dict]:
     """Every text the RECORD attributes to the operator in this session, one
     entry per source: `{source, ref, text}`. The authorship test for an
-    operator-scope note and an operator-scope retirement (DL-216): each is
+    operator-scope note and an operator-scope retirement (DL-217): each is
     proven by an operator-actor event, never by a message's role. Fail closed:
     a source not listed here does not qualify.
 

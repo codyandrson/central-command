@@ -25,7 +25,7 @@ governed data in two vocabularies, and NOTHING here changes the world —
     shape.
 
   * at most `reflection_max_notes` (default ONE) PRIVATE note per closed
-    session (DL-216): a standing convention about how this agent works,
+    session (DL-217): a standing convention about how this agent works,
     routed to the note store instead of the graph — one lesson goes to ONE
     store, so a note that repeats an episode of the same reflection is
     dropped. Only for an agent holding `note-propose`, only inside a distill
@@ -107,7 +107,7 @@ class ReflectedNote(BaseModel):
 class Reflection(BaseModel):
     episodes: list[ReflectedEpisode]
     nomination: SelfNomination | None = None
-    # Private notes (DL-216), bounded in code by `reflection_max_notes`.
+    # Private notes (DL-217), bounded in code by `reflection_max_notes`.
     notes: list[ReflectedNote] = []
     # Its own cap of one, structural like the nomination's (DL-215).
     skill_correction: SkillCorrection | None = None
@@ -276,7 +276,7 @@ def _correction_section(skill_texts: dict[str, str]) -> str:
 
 
 def _notes_section(max_notes: int) -> str:
-    """The note part of the distill prompt (DL-216): one lesson, one store."""
+    """The note part of the distill prompt (DL-217): one lesson, one store."""
     if max_notes <= 0:
         return ""
     return (
@@ -631,7 +631,6 @@ async def _propose_note(
     the quote against the closed session's record and the budget. The drafting
     sub-run is told the closed session as its quote ground (`quote_session_id`,
     server-set), and its proposal must carry exactly the text computed here."""
-    from pydantic_ai import DeferredToolRequests
 
     from central_command.runtime.agent import build_hired_agent
     from central_command.runtime.converse import land_session
@@ -673,9 +672,7 @@ async def _propose_note(
     if call is None or classify_deferred(call) != "proposal":
         await land_session(session_id, agent_id=agent_id)
         return "standing note: the run produced no proposal"
-    metadata = (result.output.metadata.get(call.tool_call_id)
-                if isinstance(result.output, DeferredToolRequests) else None)
-    proposal = proposal_from_call(call, metadata=metadata)
+    proposal = deferred_proposal(result, call)
     matches = (
         call.tool_name == "propose_note"
         and len(proposal.actions) == 1
@@ -760,7 +757,7 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
                     skill_texts[sid] = d["content"]
     if not lessons and not skill_texts:
         return
-    # Notes ride a distill call that is happening anyway (DL-216): they never
+    # Notes ride a distill call that is happening anyway (DL-217): they never
     # buy one, and only a note-propose holder is asked for one.
     max_notes = (max(0, int(settings.reflection_max_notes))
                  if "note-propose" in granted else 0)

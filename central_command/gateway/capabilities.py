@@ -743,7 +743,7 @@ REGISTRY: list[Capability] = [
         arguments=["scope", "text", "retire_ids?", "source_quote", "source_session_id",
                    "quote_source"],
         description=(
-            "Add ONE note to the note store (DL-216), optionally retiring named "
+            "Add ONE note to the note store (DL-217), optionally retiring named "
             "notes OF THE SAME SCOPE in the same transaction so an agent at its "
             "budget swaps in one approved action; idempotent on the proposal. `scope` is 'private' (the drafter's own, "
             "rendered only to it) or 'operator' (a standing preference of the "
@@ -2416,7 +2416,7 @@ POLICIES: list[Policy] = [
         enforced_at="gateway/policy.check_note_content — capability names a proposed note quotes, or writes bare under a real namespace, are checked against the registry at review time and by overrides.review_flags",
         guard="tests/test_agent_notes.py::test_a_note_naming_an_unknown_capability_is_flagged",
         description=(
-            "A note is rendered into every later session (DL-216), so a note "
+            "A note is rendered into every later session (DL-217), so a note "
             "that names a capability the registry does not have programs every "
             "reader to propose an action that cannot execute — the charter-v2 "
             "incident with a wider audience. Advisory like every flag; a flagged "
@@ -2430,7 +2430,7 @@ POLICIES: list[Policy] = [
         guard="tests/test_agent_notes.py::test_a_note_phrased_as_an_order_is_flagged",
         description=(
             "An imperative note is re-read at the start of every session as a "
-            "standing order that overrides the request in front of it (DL-216). "
+            "standing order that overrides the request in front of it (DL-217). "
             "The flag informs the operator and parks an override; it never "
             "blocks."
         ),

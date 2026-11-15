@@ -236,7 +236,7 @@ def check_charter_content(content: str) -> list[dict]:
     return flags
 
 
-# --- the note store (DL-216) ---------------------------------------------------
+# --- the note store (DL-217) ---------------------------------------------------
 # A note is a FACT, never an instruction to oneself: an imperative note is
 # re-read at the start of every later session as a standing order that
 # overrides the current request. Simple on purpose — it informs the reviewer
@@ -262,7 +262,7 @@ def note_is_a_standing_order(text: str) -> bool:
 
 
 def check_note_content(text: str) -> list[dict]:
-    """Review-time flags on a proposed note (DL-216), applied wherever
+    """Review-time flags on a proposed note (DL-217), applied wherever
     `check_charter_content` is: a capability the note names that the registry
     does not have — quoted in the charter shape, or written bare under a real
     capability namespace (`jira.dismiss`) — and a note phrased as a standing

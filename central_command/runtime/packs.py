@@ -1975,7 +1975,7 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
                      # DL-215: every roster agent but the auditors and the
                      # editor proposes corrections to the skills it uses
                      "skill-propose",
-                     # DL-216: ... and standing notes, through the gate
+                     # DL-217: ... and standing notes, through the gate
                      "note-propose"),
     "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
                     "jira-delete-propose",
@@ -2202,7 +2202,7 @@ NON_ADVISORY_TOOLS = frozenset({
     # asked a question.
     "propose_mail_send",
     "propose_mail_move",
-    # The note store (DL-216): a consulted specialist answers a question; it
+    # The note store (DL-217): a consulted specialist answers a question; it
     # does not take standing notes mid-answer. Its session is the asker's
     # sub-run, whose prompt is another agent's words, so a quote grounded there
     # proves nothing about how the specialist works or what the operator said.

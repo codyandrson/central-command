@@ -1809,7 +1809,7 @@ update agent set deviations = replace(deviations,
  where id = 'orchestrator'
    and deviations like '%Holds NO propose tools and no write path%';
 
--- The note store (DL-216, FR-53; the operator's rulings of 2026-11-03 and
+-- The note store (DL-217, FR-53; the operator's rulings of 2026-11-03 and
 -- 2026-11-15): a small, always-in-context store beside the knowledge graph,
 -- rendered into every fresh run's system prompt (`runtime/notes.py`). Two scopes
 -- only: `private` (the drafting agent's own notes, rendered only to it) and
@@ -1839,7 +1839,7 @@ create index if not exists agent_note_owner_idx on agent_note (agent_id, scope)
 create index if not exists agent_note_scope_idx on agent_note (scope)
     where retired_at is null;
 
--- note-propose for every roster agent but the auditors and the editor (DL-216,
+-- note-propose for every roster agent but the auditors and the editor (DL-217,
 -- the operator's ruling of 2026-11-15). The skill-propose widening's shape
 -- exactly (DL-215, after the story 4.9 task-create block): "the roster" =
 -- ACTIVE, `role <> ''`, holding at least one ACTIVE grant; the auditor and the
@@ -1870,10 +1870,10 @@ values ('seed:note-propose', '{"seeded": true}'::jsonb)
 on conflict (key) do nothing;
 
 -- The orchestrator's deviation text names the propose packs it holds since
--- DL-215; it holds one more since DL-216. Rewritten in place on a row that
+-- DL-215; it holds one more since DL-217. Rewritten in place on a row that
 -- carries the DL-215 wording; a re-run matches nothing.
 update agent set deviations = replace(deviations,
         'but skill-propose (DL-215: a gated correction to a skill it used) and no write path',
-        'but skill-propose (DL-215: a gated correction to a skill it used) and note-propose (DL-216: a gated standing note) and no write path')
+        'but skill-propose (DL-215: a gated correction to a skill it used) and note-propose (DL-217: a gated standing note) and no write path')
  where id = 'orchestrator'
    and deviations like '%a skill it used) and no write path%';

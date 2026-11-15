@@ -44,7 +44,7 @@ def _normalize(text: str) -> str:
     return re.sub(r"[\W_]+", " ", folded).strip()
 
 
-# Characters a stored NOTE may not contain (DL-216): the notes block renders
+# Characters a stored NOTE may not contain (DL-217): the notes block renders
 # each note as one visible line, so nothing the reviewer cannot see may ride in
 # one. Category C* (controls, format, zero-width), the line and paragraph
 # separators, and these visible-as-nothing characters outside those classes.

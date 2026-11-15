@@ -61,7 +61,7 @@ class TriageDeps:
     # reflected on; never by the model, and None everywhere else (the tool
     # then reads the run's own messages alone).
     loaded_skills_from: str | None = None
-    # The note store (DL-216): the session whose RECORD grounds a note's quote.
+    # The note store (DL-217): the session whose RECORD grounds a note's quote.
     # None = this run's own session (and its live messages). Set only by
     # server code — session-close reflection, whose drafting sub-run proposes
     # a note grounded in the session that closed — never by an argument.

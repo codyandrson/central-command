@@ -609,7 +609,7 @@ _NO_TARGET = {
     "calendar.create_event", "mail.create_rule", "work.bulk_dismiss",
     "litellm.apply_config_change", "litellm.delete_key", "loe.create",
     "loe.record_checkin", "loe.update", "skill.create",
-    # The note store (DL-216): a note is not a world target an override would
+    # The note store (DL-217): a note is not a world target an override would
     # be scoped by; an argument scope (scope='private') is the narrowing.
     "memory.note_add", "memory.note_retire",
 }
