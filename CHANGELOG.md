@@ -4,6 +4,51 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-15 — v2.89.0: A small note store beside the graph, written only through the gate, and a Memory tab that shows what an agent has learned
+
+The knowledge graph is query-driven: a standing fact nobody queries is never seen, and the operator's
+preferences had no home at all, because the operator is never a subject of the graph. Comparable agent
+frameworks keep a tiny always-loaded core beside retrieval and let the agent write it freely. This one
+keeps the core and keeps the gate (DL-217, FR-53). The earlier rejections stand: no memory write outside
+the gate, no write-now-veto-later memory (DL-150, DL-173).
+
+- **Two scopes, one table.** A `private` note is rendered only into its drafter's system prompt; an
+  `operator` note, a preference or standing fact about how the operator wants things, is rendered into
+  every agent's. A note is one line, never edited or deleted: retirement is a timestamp. Each scope has a
+  character budget (2,000 per agent for private notes, 1,500 in total for operator notes), set beside the
+  compaction settings. The auditors are shown no notes.
+- **Every write is a proposal.** `memory.note_add` and `memory.note_retire` are gated, reversible
+  capabilities. Only `propose_note` and `propose_note_retire` can build one: a hand-built action is handed
+  back in the run, loses its provenance stamp at the park seam, and is refused by the Executor. The owner
+  is the proposer the gateway passes; the budget is enforced at execution under one lock, the swap of a
+  retired note for a new one is one transaction, and a re-executed proposal writes nothing twice.
+- **A quote grounds every note, and operator words are proven from the record.** The quote must be one
+  full phrase copied from the session (20 characters and four words once normalised), checked in code
+  before anything parks. For an operator-scope note, and for retiring one, the phrase must be found in
+  words the record attributes to the operator: a chat turn (a new `chat.operator_message` event holds the
+  typed words, written before attachment text is appended, and counts only if the turn also ran), an
+  answer to an agent's question, rejection feedback, or a reopen note. Mail, documents, attachment text,
+  tool output, task instructions, another agent's words and the agent's own never qualify.
+- **How a preference gets in.** The operator tells an agent ("remember that I always…"); the agent
+  proposes an operator-scope note quoting those words; the operator approves it in the Inbox. "Forget
+  that…" retires one the same way. There is no direct write from the cockpit.
+- **Reflection routes one lesson to one store.** Inside the distill call it already makes, session-close
+  reflection may propose at most one private note per closed session (`reflection_max_notes`, 0 turns it
+  off) when the lesson is a standing convention rather than a fact about the world; never an operator
+  note, never a retirement, on a redraft either.
+- **The quote checker reads every script.** `contract.claim_supported` normalised text to ASCII letters
+  and digits, so a Cyrillic or CJK quote could never verify and a mixed quote verified on its ASCII
+  residue alone. It now casefolds under NFKC and treats every non-word character as a separator; for pure
+  ASCII text the result is unchanged. `café` no longer verifies against `cafe`.
+- **Review flags.** A note that names a capability the registry does not have, or that reads as a standing
+  order ("always…", "never…"), is flagged in the Inbox and parks any override.
+- **The Memory tab** of an agent's workspace is now a read-only view of what that agent has learned:
+  pending proposals, the operator's preferences and the agent's notes with their budgets, private graph
+  episodes, the skill documents it wrote, and its charter versions. The old MEMORY.md editor and its
+  refused write stubs are gone. The context settings gain the two note budgets.
+
+Enforced by `tests/test_agent_notes.py`, `tests/test_agent_learned.py` and the cockpit suite.
+
 ## 2026-11-15 — v2.88.1: Review fixes for episodic recall and the skill loop: a code-built proposal parks on every run path
 
 v2.86.0 and v2.87.0 were pushed before an independent review had read them. The reviews, run afterwards
