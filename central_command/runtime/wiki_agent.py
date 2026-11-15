@@ -148,7 +148,7 @@ async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dic
     from central_command.runtime.durable import (
         classify_deferred,
         extract_deferred,
-        proposal_from_call,
+        deferred_proposal,
     )
     from central_command.runtime.packs import granted_packs
     from central_command.runtime.proposals import park_proposal
@@ -210,7 +210,7 @@ async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dic
 
     parked = await park_proposal(
         session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
-        evidence=[e.model_dump() for e in proposal_from_call(call).evidence],
+        evidence=[e.model_dump() for e in deferred_proposal(result, call).evidence],
         context={"kind": "wiki_repair", **({"item_id": item_id} if item_id else {})},
     )
     return {

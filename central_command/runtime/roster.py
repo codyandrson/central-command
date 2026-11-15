@@ -82,7 +82,8 @@ SEED: tuple[AgentDef, ...] = (
         deviations=(
             "consultable since 2026-08-05 (operator decision: the whole "
             "active roster is consultable ahead of coaching-driven usage; "
-            "auditor excepted for gate independence). Holds NO propose tools "
+            "auditor excepted for gate independence). Holds no propose tools "
+            "but skill-propose (DL-215: a gated correction to a skill it used) "
             "and no write path — it assigns work (internal state) and "
             "reports; every world change rides a granted agent's gated "
             "proposal."

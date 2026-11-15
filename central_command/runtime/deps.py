@@ -55,3 +55,9 @@ class TriageDeps:
     # sub-run, and — until story 6 — the chat turn and the orchestrator round)
     # the read re-raises its transient failure into the unit's own DOWN path.
     park_reads: bool = False
+    # Skill corrections (DL-215): the CLOSED session whose record also proves
+    # which skills were loaded, for `propose_skill_correction`'s read check.
+    # Set only by reflection's drafting sub-run, in code, from the session it
+    # reflected on; never by the model, and None everywhere else (the tool
+    # then reads the run's own messages alone).
+    loaded_skills_from: str | None = None

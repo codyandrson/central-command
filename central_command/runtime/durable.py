@@ -158,6 +158,25 @@ def proposal_from_call(call, metadata: dict | None = None) -> Proposal:
     return Proposal.model_validate(payload)
 
 
+def deferred_metadata(result, call) -> dict | None:
+    """The metadata a deferring tool attached to `call` — where a tool that
+    builds its proposal in CODE (`propose_skill_correction`, `propose_skill_doc`,
+    `propose_bulk_dismiss`, the mcp family...) puts it. Its `call.args` hold
+    only the tool's own arguments, so parsing them as a Proposal raises."""
+    output = getattr(result, "output", None)
+    if isinstance(output, DeferredToolRequests):
+        return output.metadata.get(call.tool_call_id)
+    return None
+
+
+def deferred_proposal(result, call) -> Proposal:
+    """THE way a run path reads the proposal its deferred call carries: the
+    tool-built one from metadata when present, else the model-written args.
+    `tests/test_deferred_proposal_metadata.py` walks the source so no
+    `proposal_from_call(...)` outside this module omits `metadata=`."""
+    return proposal_from_call(call, metadata=deferred_metadata(result, call))
+
+
 def dump_run_state(result, tool_call_id: str) -> dict:
     """Serialize everything needed to resume in another process, as JSON-able data."""
     return {

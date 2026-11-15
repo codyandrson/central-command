@@ -5071,14 +5071,31 @@ async def add_skill_doc(
     try:
         async with conn.transaction():
             if expected_version is not None:
-                current = await conn.fetchval(
+                # Lock the current row first (a concurrent writer waits here),
+                # then read the version from a FRESH statement that does not
+                # depend on that row surviving: the loser of a race finds the
+                # row it waited on no longer current (the locked select returns
+                # nothing), and the newest version is what it lost to — never
+                # "v0", which would read as deleted.
+                locked = await conn.fetchval(
                     """
                     select version from skill_doc
                      where skill_id = $1 and doc_key = $2 and is_current
                      for update
                     """,
                     skill_id, doc_key,
-                ) or 0
+                )
+                current = locked
+                if current is None:
+                    current = await conn.fetchval(
+                        "select max(version) from skill_doc"
+                        " where skill_id = $1 and doc_key = $2",
+                        skill_id, doc_key,
+                    ) or 0
+                    # No current row and nothing newer than the base: the key
+                    # was RETIRED, which is not the base either.
+                    if current == expected_version:
+                        current = 0
                 if current != expected_version:
                     raise StaleSkillDoc(skill_id, doc_key, expected_version, current)
             row = await _insert_skill_doc(

@@ -15,6 +15,7 @@ from central_command.runtime.durable import (
     classify_deferred,
     dump_run_state,
     extract_deferred,
+    deferred_proposal,
     proposal_from_call,
 )
 from central_command.runtime.proposals import park_proposal
@@ -970,7 +971,7 @@ async def run_coach(
 
     parked = await park_proposal(
         session_id=session_id, agent_id=COACH_ID, result=result, call=call,
-        evidence=await _verified_evidence(proposal_from_call(call).evidence, signals),
+        evidence=await _verified_evidence(deferred_proposal(result, call).evidence, signals),
         context={"coached": True, "signals": len(signals), "target": agent_id},
     )
     return {"deferred": True, "session_id": session_id, "target": agent_id,

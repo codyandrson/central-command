@@ -49,13 +49,14 @@ from pydantic import BaseModel
 
 from central_command import events
 from central_command.contract import claim_supported
+from central_command.contract.models import _normalize as _normalize_quote
 from central_command.db import repo
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.durable import (
     classify_deferred,
     extract_deferred,
+    deferred_proposal,
     full_messages,
-    proposal_from_call,
     simplify_messages,
 )
 from central_command.runtime.proposals import park_proposal
@@ -156,26 +157,42 @@ def loaded_skills(run_state: dict | None) -> list[str]:
     return loaded
 
 
+# The floor a correction's quote must clear, measured on `claim_supported`'s
+# own normalisation: "the" is a substring of every transcript, so a check with
+# no floor checks nothing.
+QUOTE_MIN_CHARS = 20
+QUOTE_MIN_WORDS = 4
+
+# Tool returns that are never grounding: the skill text itself (the document
+# being corrected is not evidence that it was wrong) and recalled sessions
+# (`search_my_sessions` can return anything, skill text included).
+_UNGROUNDED_RETURNS = ("load_capability", "search_my_sessions")
+
+
+def quote_clears_floor(quote: str) -> bool:
+    q = _normalize_quote(quote or "")
+    return len(q) >= QUOTE_MIN_CHARS and len(q.split()) >= QUOTE_MIN_WORDS
+
+
 def _quote_corpus(run_state: dict | None) -> list[str]:
-    """What a skill correction's quote may come from: every turn of the
-    session EXCEPT the charter and the skill text itself (a `load_capability`
-    return, a reference search hit). A quote is grounding only if it shows
-    what happened — the operator's correction, the tool error and the fix —
-    and the document being corrected is not evidence that it was wrong. One
-    string per turn, so a quote cannot be stitched across two."""
+    """What a skill correction's quote may come from: what the OPERATOR said
+    (user prompts) and what a TOOL returned — never the agent's own words
+    (text, thinking, tool-call arguments), which it could simply quote back,
+    and never the charter, the skill text or a recall result. One string per
+    turn, so a quote cannot be stitched across two."""
     if not run_state:
         return []
     out = []
     for t in simplify_messages(run_state):
-        if t["kind"] == "system-prompt":
-            continue
-        tool = t["tool"] or ""
-        if t["kind"] == "tool-return" and (
-            tool == "load_capability"
-            or (tool.startswith("search_") and tool.endswith("_reference"))
-        ):
-            continue
-        out.append(t["content"])
+        if t["kind"] == "user-prompt":
+            out.append(t["content"])
+        elif t["kind"] == "tool-return":
+            tool = t["tool"] or ""
+            if tool in _UNGROUNDED_RETURNS or (
+                tool.startswith("search_") and tool.endswith("_reference")
+            ):
+                continue
+            out.append(t["content"])
     return out
 
 
@@ -229,11 +246,13 @@ def _correction_section(skill_texts: dict[str, str]) -> str:
         "repeat that line at the start of `replace`.\n"
         "  replace — what the span should say instead.\n"
         "  why — the rule or pitfall, one or two sentences.\n"
-        "  quote — ONE contiguous span copied verbatim from the transcript "
-        "that shows why: the operator's correction, or the tool error and the "
-        "fix. It is re-checked mechanically against the transcript (not "
-        "against the skill text); a paraphrase, an ellipsis or fragments "
-        "joined together fail the check, and the correction is dropped.\n\n"
+        "  quote — ONE contiguous span copied verbatim from what the OPERATOR "
+        "said or what a TOOL returned in the transcript, showing why: the "
+        "operator's correction, or the tool error. Never your own words, the "
+        "skill text or a recalled session. A full phrase of at least four "
+        "words: it is re-checked mechanically, and a fragment, a paraphrase, "
+        "an ellipsis or pieces joined together fail the check, and the "
+        "correction is dropped.\n\n"
         f"{docs}"
     )
 
@@ -357,7 +376,7 @@ async def _propose_episode(
     # The scope an agent writes into its own args is agent-authored territory —
     # rewriting it here would forge the routing decision the operator reviews.
     # So this checks and skips; it never normalizes.
-    proposal = proposal_from_call(call)
+    proposal = deferred_proposal(result, call)
     scoped = any(
         a.capability.split("@", 1)[0] == "graph.add_episode"
         and a.arguments.get("scope") == episode.scope
@@ -424,22 +443,30 @@ async def _propose_skill_correction(
     the session (`claim_supported`, per turn); the span applies to the
     document's CURRENT text exactly once (`build_correction`, the same code
     the agent-facing tool runs). The drafted proposal must then carry exactly
-    the content computed here, or it is not parked."""
-    from pydantic_ai import DeferredToolRequests
-
+    every argument computed here, or it is not parked."""
     from central_command.runtime.agent import build_hired_agent
     from central_command.runtime.converse import land_session
     from central_command.runtime.roster import team_section
     from central_command.runtime.run import _run_live
-    from central_command.runtime.skill_corrections import build_correction
+    from central_command.runtime.skill_corrections import access_refusal, build_correction
 
     if c.skill_id not in loaded:
         await _dropped(source_session_id, agent_id, c,
                        f"the session did not load the skill {c.skill_id!r}")
         return None
+    refusal = await access_refusal(agent_id, c.skill_id, c.doc_key, loaded)
+    if refusal:
+        await _dropped(source_session_id, agent_id, c, refusal)
+        return None
+    if not quote_clears_floor(c.quote):
+        await _dropped(source_session_id, agent_id, c,
+                       f"the quote is shorter than {QUOTE_MIN_WORDS} words / "
+                       f"{QUOTE_MIN_CHARS} characters")
+        return None
     if not any(claim_supported(c.quote, t) for t in corpus if t):
         await _dropped(source_session_id, agent_id, c,
-                       "the quote is not one verbatim span of the session")
+                       "the quote is not one verbatim span of what the operator "
+                       "said or a tool returned in the session")
         return None
     expected = await build_correction(
         agent_id=agent_id, skill_id=c.skill_id, doc_key=c.doc_key,
@@ -448,7 +475,6 @@ async def _propose_skill_correction(
     if isinstance(expected, str):
         await _dropped(source_session_id, agent_id, c, expected)
         return None
-    content = expected.actions[0].arguments["content"]
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
     agent = await build_hired_agent(
@@ -458,27 +484,31 @@ async def _propose_skill_correction(
     )
     result = await _run_live(
         agent, _correction_prompt(c, source_session_id), model=model,
-        deps=TriageDeps(agent_id=agent_id, session_id=session_id),
+        deps=TriageDeps(agent_id=agent_id, session_id=session_id,
+                        loaded_skills_from=source_session_id),
         agent_id=agent_id, session_id=session_id,
     )
     call = extract_deferred(result)
     if call is None or classify_deferred(call) != "proposal":
         await land_session(session_id, agent_id=agent_id)
         return f"skill correction of {c.skill_id}: the run produced no proposal"
-    metadata = (result.output.metadata.get(call.tool_call_id)
-                if isinstance(result.output, DeferredToolRequests) else None)
-    proposal = proposal_from_call(call, metadata=metadata)
+    proposal = deferred_proposal(result, call)
+    # EVERY argument reflection computed is pinned, plus the intent and the
+    # evidence claim `why` becomes: a redrafted `why` riding beside the
+    # verified quote would be the model's word wearing the code's check.
     matches = (
         call.tool_name == "propose_skill_correction"
         and len(proposal.actions) == 1
-        and proposal.actions[0].capability.split("@", 1)[0] == "skill.doc_add"
-        and proposal.actions[0].arguments.get("skill_id") == c.skill_id
-        and proposal.actions[0].arguments.get("content") == content
+        and proposal.actions[0].capability == expected.actions[0].capability
+        and proposal.actions[0].arguments == expected.actions[0].arguments
+        and proposal.intent == expected.intent
+        and [e.claim for e in proposal.evidence] == [e.claim for e in expected.evidence]
     )
     if not matches:
         await land_session(session_id, agent_id=agent_id)
-        return (f"skill correction of {c.skill_id}: the drafted proposal is not "
-                "the correction distilled at close")
+        await _dropped(source_session_id, agent_id, c,
+                       "the drafted proposal is not the correction distilled at close")
+        return None
 
     evidence = [e.model_dump() for e in proposal.evidence] + [{
         "kind": "record",

@@ -27,7 +27,7 @@ from __future__ import annotations
 import uuid
 
 from central_command.contract import claim_supported
-from central_command.runtime.durable import classify_deferred, extract_deferred, proposal_from_call
+from central_command.runtime.durable import classify_deferred, deferred_proposal, extract_deferred
 from central_command.runtime.proposals import park_proposal
 from central_command.runtime.steward_profile import (
     AGENT_ID,
@@ -197,7 +197,7 @@ async def run_document(
 
     parked = await park_proposal(
         session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
-        evidence=verified_evidence(proposal_from_call(call).evidence, source_text),
+        evidence=verified_evidence(deferred_proposal(result, call).evidence, source_text),
         context={"kind": "document", **({"item_id": item_id} if item_id else {})},
     )
     return {

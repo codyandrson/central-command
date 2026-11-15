@@ -3960,7 +3960,8 @@ async def propose_skill_correction(
     that same line followed by the new text as `replace`. `why` states the rule
     or pitfall the correction teaches, in a sentence or two. `doc_key` is
     'guidance' (the document `load_capability` gave you) or a reference
-    document's key.
+    document's key. Only a skill granted to you, whose guidance you loaded
+    with `load_capability` in this session, can be corrected.
 
     The control plane applies the span to the current document now and puts the
     whole corrected document, and the diff, into the proposal; if the span does
@@ -3968,10 +3969,25 @@ async def propose_skill_correction(
     operator reviews the change itself; if the document moves before they
     approve, the correction is refused and you are asked to redraft.
     """
-    from central_command.runtime.skill_corrections import build_correction
+    from central_command.db import repo
+    from central_command.runtime.reflection import loaded_skills
+    from central_command.runtime.skill_corrections import (
+        access_refusal, build_correction, loaded_from_messages,
+    )
 
+    agent_id = getattr(ctx.deps, "agent_id", None) or "unknown"
+    skill_id, doc_key = (skill_id or "").strip(), (doc_key or "guidance").strip()
+    # The grant and read check BEFORE any span is matched — a span refusal
+    # would otherwise reveal a skill's text to an agent never granted it.
+    loaded = loaded_from_messages(getattr(ctx, "messages", None))
+    source = getattr(ctx.deps, "loaded_skills_from", None)
+    if source:  # reflection's drafting sub-run: the closed session is the proof
+        loaded += loaded_skills(await repo.get_session_run_state(source))
+    refusal = await access_refusal(agent_id, skill_id, doc_key, loaded)
+    if refusal:
+        return refusal
     out = await build_correction(
-        agent_id=getattr(ctx.deps, "agent_id", "unknown"), skill_id=skill_id,
+        agent_id=agent_id, skill_id=skill_id,
         doc_key=doc_key, find=find, replace=replace, why=why,
     )
     if isinstance(out, str):

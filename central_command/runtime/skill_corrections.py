@@ -47,13 +47,69 @@ def apply_exact_span(text: str, find: str, replace: str) -> str:
 
     Exact: no normalisation of whitespace or case, because the result is the
     document the library will hold and the drafter must be quoting what is
-    there. Raises `SpanMismatch` unless `find` occurs exactly once."""
+    there. Raises `SpanMismatch` unless `find` occurs exactly once.
+
+    One exception, line endings: a document stored with CRLF throughout is
+    matched on its LF view (a drafter's multi-line `find` is written with
+    `\\n`) and written back with CRLF, so the document keeps its own endings.
+    A document with MIXED endings is matched exactly, and a miss says so."""
     if not find:
         raise SpanMismatch(0)
+    if "\r\n" in text and "\n" not in text.replace("\r\n", ""):
+        lf = text.replace("\r\n", "\n")
+        f, r = find.replace("\r\n", "\n"), replace.replace("\r\n", "\n")
+        count = lf.count(f)
+        if count != 1:
+            raise SpanMismatch(count)
+        return lf.replace(f, r, 1).replace("\n", "\r\n")
     count = text.count(find)
     if count != 1:
-        raise SpanMismatch(count)
+        err = SpanMismatch(count)
+        if "\r" in text and "\r" not in find and "\n" in find:
+            err.args = (str(err) + " (the document mixes CRLF and LF line "
+                        "endings, so a multi-line span must match them exactly)",)
+        raise err
     return text.replace(find, replace, 1)
+
+
+def loaded_from_messages(messages) -> list[str]:
+    """`reflection.loaded_skills` over a live run's `ctx.messages` (pydantic-ai
+    message objects): the same rule, a `load_capability` call AND its return."""
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    from central_command.runtime.reflection import loaded_skills
+
+    dumped = ModelMessagesTypeAdapter.dump_python(list(messages or []), mode="json")
+    return loaded_skills({"messages": dumped})
+
+
+# ONE sentence whether the skill exists or not: per-agent skill grants are a
+# read boundary, and a refusal that differed (or a span check that ran) would
+# let an agent probe a skill it was never granted.
+NOT_GRANTED = (
+    "refused: a correction can be proposed only for a skill granted to you; "
+    "nothing was proposed"
+)
+
+
+async def access_refusal(agent_id: str, skill_id: str, doc_key: str,
+                         loaded: list[str]) -> str | None:
+    """The grant and read check, in that order, before any span is matched:
+    the agent holds an active grant for `skill_id`, and this session loaded
+    that skill's guidance (`loaded`, from the run's own record). For a
+    reference `doc_key` the guidance load is required too: which reference
+    chunks reached the agent is not determinable from a search, so the load
+    is the proof of reading this skill at all."""
+    granted = {g["skill_id"] for g in await repo.list_agent_skills(agent_id)}
+    if skill_id not in granted:
+        return NOT_GRANTED
+    if skill_id not in loaded:
+        return (
+            f"refused: you have not loaded the skill '{skill_id}' in this "
+            "session. Load it with load_capability, read the current text of "
+            f"'{doc_key}', and quote the span from that; nothing was proposed"
+        )
+    return None
 
 
 def unified_diff(old: str, new: str, label: str) -> str:
@@ -123,7 +179,13 @@ async def build_correction(
         # model (`park_proposal` strips one an agent wrote itself).
         "base_version": doc["version"],
         "correction": {"find": find, "replace": replace},
+        # Provenance travels with the text: a one-line correction to a captured
+        # page is still that page, captured then, from there — never "freshly
+        # captured, no source" (`skills._guidance_text` shows both to agents).
         **({"describes": doc["describes"]} if doc.get("describes") else {}),
+        **({"source_url": doc["source_url"]} if doc.get("source_url") else {}),
+        **({"captured_at": doc["captured_at"].isoformat()}
+           if doc.get("captured_at") is not None else {}),
     }
     return Proposal(
         intent=f"Correct the '{doc_key}' document of the skill '{skill_id}': {why.strip()}",

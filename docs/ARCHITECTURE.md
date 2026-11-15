@@ -371,13 +371,21 @@ process's environ.
   exactly once, and its replacement, applied at propose time: the proposal is
   an ordinary `skill.doc_add` carrying the whole corrected document as
   `content`, the span as `correction`, the unified diff in `expected_effect`
-  and `base_version`, the version the span was applied to. A span found zero
-  or several times returns a refusal the model can act on and proposes
-  nothing. `park_proposal` keeps `base_version` only on a tool-built proposal
+  and `base_version`, the version the span was applied to; `describes`,
+  `source_url` and `captured_at` are carried over from that version, so a
+  corrected capture keeps its source and its capture time. Before any span is
+  matched the tool checks, in order, that the agent holds an active grant for
+  the skill (one refusal sentence whether or not the skill exists: skill grants
+  are a read boundary) and that the run loaded the skill's guidance (a
+  `load_capability` call and its return in `ctx.messages`, the
+  `reflection.loaded_skills` rule; a reference `doc_key` needs the guidance
+  load too). A span found zero or several times returns a refusal the model
+  can act on and proposes nothing; a document stored with CRLF throughout is
+  matched on its LF view and written back with CRLF. `park_proposal` keeps `base_version` only on a tool-built proposal
   (one the model wrote is stripped), and the Executor re-checks it
   (`WORLD_CHECKS["skill.doc_add"]`, target `skill_doc:<skill>/<doc_key>`, and
   again inside the write's transaction with the current row locked,
-  `repo.StaleSkillDoc`): a moved document is `world_moved`, nothing is written,
+  `repo.StaleSkillDoc`, whose loser of a race names the version it lost to): a moved document is `world_moved`, nothing is written,
   and the drafter is resumed to redraft. An unstamped `skill.doc_add` is not
   re-checked.
 - **Session-close reflection proposes at most one skill correction**
@@ -386,10 +394,17 @@ process's environ.
   the current guidance text of each skill the session loaded (a
   `load_capability` call AND its return, read off the persisted record), the
   preference ladder and the do-not-capture list. A returned correction is
-  checked in code before any proposal: the skill was loaded, the quote is one
-  verbatim span of a single turn of the session other than the charter and the
-  skill text (`claim_supported`), and the span applies to the current text
-  exactly once. A failure is recorded as `reflection.skill_correction_dropped`
+  checked in code before any proposal: the skill was loaded and is granted;
+  the quote clears a floor (at least 20 characters and 4 words after
+  `claim_supported`'s normalisation) and is one verbatim span of a single
+  operator prompt or tool return of the session, never the agent's own text,
+  thinking or tool-call arguments, and never a `load_capability`,
+  `search_*_reference` or `search_my_sessions` return; and the span applies
+  to the current text exactly once. The drafted proposal must equal the one
+  computed at close in every argument, its intent and its evidence claims (a
+  reworded `why` is dropped and recorded); the drafting sub-run's
+  `TriageDeps.loaded_skills_from` names the closed session, so the tool's read
+  check reads the load from there. A failure is recorded as `reflection.skill_correction_dropped`
   `{agent_id, skill_id, doc_key, reason}` and nothing parks. A passing one is
   drafted in its own session by `_propose_skill_correction` (packs narrowed to
   `skill-propose`), parked through `park_proposal` with the drafter as
