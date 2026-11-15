@@ -8651,13 +8651,14 @@ NOTE_FORGERY_RE = re.compile(
 
 
 def note_text_problem(text: str) -> str | None:
-    """Why `text` cannot be stored as a note, or None."""
-    import unicodedata
+    """Why `text` cannot be stored as a note, or None. The character test is
+    the one the build-time collapse uses (`contract.note_forbidden_char`)."""
+    from central_command.contract import note_forbidden_char
 
     for ch in text:
-        if ch != " " and (ch.isspace() or unicodedata.category(ch).startswith("C")):
-            return ("the text carries a newline or control character; a note is ONE "
-                    "line of plain text")
+        if note_forbidden_char(ch):
+            return ("the text carries a newline, a control character or an invisible "
+                    "character; a note is ONE line of visible text")
     if NOTE_FORGERY_RE.search(text):
         return ("the text carries a note id or a notes-block header; a note states "
                 "one fact, never the block's own markup")

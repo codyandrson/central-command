@@ -4051,12 +4051,18 @@ async def propose_note(
     # part of "this session" — unless the quote is grounded elsewhere: by the
     # deps, or by the session's own record (a reflection drafting run, on any
     # resume, DL-216).
-    grounding, live, refusal = await resolve_grounding(
+    from central_command.runtime.notes import DRAFTING_RETIRE_REFUSAL, DRAFTING_SCOPE_REFUSAL
+
+    grounding, live, refusal, drafting = await resolve_grounding(
         session_id=getattr(deps, "session_id", None),
         quote_session_id=getattr(deps, "quote_session_id", None),
         live_messages=getattr(ctx, "messages", None))
     if refusal:
         return refusal
+    if drafting and (scope or "").strip() != "private":
+        return DRAFTING_SCOPE_REFUSAL
+    if drafting and any(str(r).strip() for r in (retire_ids or [])):
+        return DRAFTING_RETIRE_REFUSAL
     out = await build_note_proposal(
         agent_id=getattr(deps, "agent_id", None) or "unknown",
         scope=scope, text=text, source_quote=source_quote, retire_ids=retire_ids,
@@ -4082,10 +4088,14 @@ async def propose_note_retire(
     from central_command.runtime.notes import build_retire_proposal, resolve_grounding
 
     deps = getattr(ctx, "deps", None)
-    grounding, live, refusal = await resolve_grounding(
+    from central_command.runtime.notes import DRAFTING_RETIRE_REFUSAL
+
+    grounding, live, refusal, drafting = await resolve_grounding(
         session_id=getattr(deps, "session_id", None),
         quote_session_id=getattr(deps, "quote_session_id", None),
         live_messages=getattr(ctx, "messages", None))
+    if drafting:
+        return DRAFTING_RETIRE_REFUSAL
     if refusal:
         return refusal
     out = await build_retire_proposal(

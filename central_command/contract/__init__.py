@@ -35,6 +35,7 @@ from .models import (
     ProposalRecord,
     Provenance,
     claim_supported,
+    note_forbidden_char,
 )
 
 __all__ = [
@@ -49,6 +50,7 @@ __all__ = [
     "SessionStatus",
     "Evidence",
     "claim_supported",
+    "note_forbidden_char",
     "Action",
     "Proposal",
     "Decision",

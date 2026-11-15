@@ -9,6 +9,7 @@ agent authors the `Proposal` core; the control plane wraps it in a
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime
 
 from pydantic import BaseModel, Field, model_serializer
@@ -33,7 +34,40 @@ class Evidence(BaseModel):
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    """Case- and punctuation-insensitive, in every script: NFKC, casefold, then
+    every run of non-word characters (punctuation, symbols, whitespace) and
+    underscores becomes ONE space. Letters and digits of every script are kept
+    — a Cyrillic or CJK quote is checked on its own words, not on an ASCII
+    residue (2026-11-15). For pure-ASCII text this is byte-for-byte the old
+    `[^a-z0-9]+ -> space` after `lower()` (a test pins it)."""
+    folded = unicodedata.normalize("NFKC", text).casefold()
+    return re.sub(r"[\W_]+", " ", folded).strip()
+
+
+# Characters a stored NOTE may not contain (DL-216): the notes block renders
+# each note as one visible line, so nothing the reviewer cannot see may ride in
+# one. Category C* (controls, format, zero-width), the line and paragraph
+# separators, and these visible-as-nothing characters outside those classes.
+# ONE place: the runtime's build-time collapse removes them and the repo's
+# Executor-side check refuses them (both import from here).
+NOTE_INVISIBLE_CODEPOINTS = frozenset({
+    0x2800,                                   # braille pattern blank (So)
+    0x3164, 0xFFA0, 0x115F, 0x1160,           # Hangul fillers (Lo)
+    0x034F, 0x17B4, 0x17B5,                   # combining grapheme joiner, Khmer vowels (Mn)
+    0x180B, 0x180C, 0x180D,                   # Mongolian variation selectors (Mn)
+    *range(0xFE00, 0xFE10),                   # variation selectors 1-16
+    *range(0xE0100, 0xE01F0),                 # variation selectors 17-256
+})
+
+
+def note_forbidden_char(ch: str) -> bool:
+    """May a stored note NOT contain `ch`? Every whitespace but the plain
+    space, every C* character, the line/paragraph separators, and the
+    invisible set above."""
+    if ch == " ":
+        return False
+    return (ch.isspace() or unicodedata.category(ch)[0] in ("C", "Z")
+            or ord(ch) in NOTE_INVISIBLE_CODEPOINTS)
 
 
 def claim_supported(claim: str, source: str) -> bool:

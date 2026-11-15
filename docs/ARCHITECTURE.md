@@ -495,6 +495,20 @@ process's environ.
     a drafting run never grounds in itself. Both handlers are idempotent on the
     proposal: a re-executed add returns the note it wrote, a re-executed
     retirement succeeds.
+  - **Second review round.** The characters a note may not hold are ONE
+    predicate, `contract.note_forbidden_char` (category C*, every whitespace
+    but the space, the line and paragraph separators, and an explicit set of
+    visible-as-nothing characters: the braille blank, the Hangul fillers, the
+    combining grapheme joiner, two Khmer vowels and every variation selector);
+    `notes.one_line` removes them at build time and `repo.note_text_problem`
+    refuses them. Every draft of a reflection drafting run, redrafts included,
+    stays private and retires nothing (`notes.resolve_grounding` reports the
+    run; the tools refuse otherwise); the drafting session is created only
+    after its builder ran. `contract.models._normalize`, the one quote
+    checker's normalisation, is Unicode-aware (NFKC, casefold, runs of
+    `[\W_]` to a space) and byte-identical to the old ASCII rule on ASCII; the
+    note floor holds a quote with no ASCII word character to its character
+    count only.
   - **Rendering: one seam.** `notes.standing_sections(agent_id)` returns the
     roster (`roster.team_section`) followed by the notes block, and every
     fresh-run path passes it as `build_charter`'s `team_section`, so the block

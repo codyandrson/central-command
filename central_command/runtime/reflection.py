@@ -648,18 +648,21 @@ async def _propose_note(
     text = expected.actions[0].arguments["text"]
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
-    # The grounding is written on the drafting session's RECORD before it
-    # runs, server-side: a redraft resumed by the gateway with plain deps
-    # resolves it from here (`notes.resolve_grounding`), so it never grounds
-    # in this run's own prompt, which holds the text and the quote.
-    await repo.create_running_session(session_id, agent_id)
-    await repo.update_session_run_state(
-        session_id, {"quote_session_id": source_session_id, "reflection_drafting": True})
     agent = await build_hired_agent(
         agent_id, model=model, charter=charter, packs=("note-propose",),
         capabilities=caps, skills_catalog=catalog,
         team_section=await standing_sections(agent_id),
     )
+    # The grounding is written on the drafting session's RECORD before it
+    # runs, server-side: a redraft resumed by the gateway with plain deps
+    # resolves it from here (`notes.resolve_grounding`), so it never grounds
+    # in this run's own prompt, which holds the text and the quote. Created
+    # only AFTER everything that can raise before the run (the builder, the
+    # standing sections): a row created first would be left RUNNING by a
+    # failed setup, and the update hold counts every RUNNING row.
+    await repo.create_running_session(session_id, agent_id)
+    await repo.update_session_run_state(
+        session_id, {"quote_session_id": source_session_id, "reflection_drafting": True})
     result = await _run_live(
         agent, _note_prompt(n), model=model,
         deps=TriageDeps(agent_id=agent_id, session_id=session_id,

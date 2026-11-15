@@ -1272,3 +1272,195 @@ async def test_two_concurrent_approvals_against_one_budget_only_one_lands(monkey
     assert len(landed) == 1 and len(refused) == 1, results
     assert "over the 50chars budget" in str(refused[0])
     assert len(await repo.list_agent_notes(agent)) == 1
+
+
+# --- second review round (2026-11-15) --------------------------------------------------
+
+INVISIBLE = ["⠀", "ㅤ", "ﾠ", "ᅟ", "ᅠ", "͏", "឴", "឵",
+             "︀", "️", "\U000e0100", "\U000e01ef", "᠋", "᠌", "᠍"]
+
+
+@needs_pg
+@pytest.mark.parametrize("ch", INVISIBLE, ids=[f"U+{ord(c):04X}" for c in INVISIBLE])
+async def test_an_invisible_character_is_removed_at_build_and_refused_at_the_executor(
+        ch, clean_notes):
+    from central_command.contract import note_forbidden_char
+
+    assert note_forbidden_char(ch)
+    agent = _aid()
+    msgs = [ModelRequest(parts=[UserPromptPart(f"ok. {OPERATOR_SAYS}")])]
+    with pytest.raises(CallDeferred) as e:
+        await tools_mod.propose_note(_ctx(agent, messages=msgs), scope="private",
+                                     text=f"The operator{ch} likes tea.", source_quote=OPERATOR_SAYS)
+    assert e.value.metadata["proposal"]["actions"][0]["arguments"]["text"] == \
+        "The operator likes tea."
+    with pytest.raises(executor.ExecutorError, match="invisible character"):
+        await executor._memory_note_add(_stamped_args(text=f"The operator{ch} likes tea."),
+                                        "operator", agent)
+
+
+@needs_pg
+async def test_an_ordinary_non_english_note_passes_both_seams(clean_notes):
+    agent = _aid()
+    text = "L'opérateur préfère les réunions courtes, 日本語の要約, ☕ le matin."
+    msgs = [ModelRequest(parts=[UserPromptPart(f"ok. {OPERATOR_SAYS}")])]
+    with pytest.raises(CallDeferred) as e:
+        await tools_mod.propose_note(_ctx(agent, messages=msgs), scope="private", text=text,
+                                     source_quote=OPERATOR_SAYS)
+    assert e.value.metadata["proposal"]["actions"][0]["arguments"]["text"] == text
+    out = await executor._memory_note_add(_stamped_args(text=text), "operator", agent)
+    [row] = await repo.list_agent_notes(agent)
+    clean_notes.append(row["id"])
+    assert row["text"] == text and row["id"] in out
+
+
+@needs_pg
+async def test_a_reflection_redraft_may_change_its_text_and_nothing_else(clean_notes):
+    """The gateway resumes the drafting session with plain deps after a Reject;
+    every draft of that run stays private and retires nothing."""
+    agent = "jira-expert"
+    closed = f"sess_{uuid.uuid4().hex[:12]}"
+    await repo.create_running_session(closed, agent)
+    await repo.update_session_run_state(closed, {"messages": [
+        {"parts": [{"part_kind": "user-prompt", "content": f"good. {OPERATOR_SAYS}"}]}]})
+    drafting = await _drafting_session(agent, closed, "Call propose_note exactly as given")
+    mine = await _add(agent, "private", "I keep a running total of invoices.", clean_notes)
+    with pytest.raises(CallDeferred) as e:        # the operator's feedback changed the text
+        await tools_mod.propose_note(_ctx(agent, drafting), scope="private",
+                                     text="The operator wants the invoice number first.",
+                                     source_quote=OPERATOR_SAYS)
+    assert e.value.metadata["proposal"]["actions"][0]["arguments"]["scope"] == "private"
+    out = await tools_mod.propose_note(_ctx(agent, drafting), scope="operator", text=FACT,
+                                       source_quote=OPERATOR_SAYS)
+    assert out == notes.DRAFTING_SCOPE_REFUSAL and "scope='private'" in out
+    out = await tools_mod.propose_note(_ctx(agent, drafting), scope="private", text=FACT,
+                                       source_quote=OPERATOR_SAYS, retire_ids=[mine["id"]])
+    assert out == notes.DRAFTING_RETIRE_REFUSAL and "without retire_ids" in out
+    out = await tools_mod.propose_note_retire(_ctx(agent, drafting), note_id=mine["id"],
+                                              reason="superseded")
+    assert out == notes.DRAFTING_RETIRE_REFUSAL
+    assert (await repo.get_agent_note(mine["id"]))["retired_at"] is None
+
+
+@needs_pg
+async def test_a_failed_drafting_setup_leaves_no_session_running(pinned, monkeypatch,
+                                                                clean_notes):
+    from central_command.runtime import agent as agent_mod
+
+    real = agent_mod.build_hired_agent
+
+    async def _raising(agent_id, *a, packs=(), **k):
+        if tuple(packs) == ("note-propose",):
+            raise RuntimeError("builder exploded")
+        return await real(agent_id, *a, packs=packs, **k)
+
+    monkeypatch.setattr(agent_mod, "build_hired_agent", _raising)
+    agent_id = await _agent()
+    sid, evts = await _reflect(agent_id, {"episodes": [], "notes": [_note()]})
+    failed = [e for e in evts if e["kind"] == "reflection.failed" and e["ref_id"] == sid]
+    assert failed and "builder exploded" in failed[0]["payload"]["error"]
+    conn = await repo._conn()
+    try:
+        left = await conn.fetchval(
+            "select count(*) from session where agent_id = $1 and id <> $2 and "
+            "(status = 'RUNNING' or run_state ? 'reflection_drafting')", agent_id, sid)
+    finally:
+        await conn.close()
+    assert left == 0
+
+
+def _old_normalize(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+@pytest.mark.parametrize("text", [
+    "", "   ", "Hello, World!", "snake_case_name and CamelCase", "DOE-12: due 2026-11-15.",
+    "a__b--c..d", "  Mixed   Case\tTabs\nNewlines  ", "100% (approx.) #1 @home",
+    "it's the operator's call", "x_y_z_1_2_3", "'quoted' \"double\" `tick`", "[note_ab12] x",
+    "A1B2C3", "!!!", "___",
+])
+def test_the_unicode_normalisation_is_unchanged_for_ascii(text):
+    from central_command.contract.models import _normalize
+
+    assert _normalize(text) == _old_normalize(text)
+
+
+def test_the_quote_check_reads_every_script():
+    from central_command.contract import claim_supported
+
+    source = "Оператор просит всегда указывать номер счёта в заголовке."
+    assert claim_supported("всегда указывать номер счёта", source)
+    assert not claim_supported("всегда указывать номер договора", source)
+    # A mixed quote is checked on its non-ASCII run too, not on its ASCII residue.
+    assert claim_supported("Always use 日本語 units please", "Always use 日本語 units please.")
+    assert not claim_supported("Always use 日本語 units please", "Always use 中文 units please.")
+    assert not claim_supported("café", "the cafe on the corner")
+    assert claim_supported("CAFÉ", "the café on the corner")
+
+
+@needs_pg
+async def test_a_cjk_phrase_without_spaces_clears_the_floor_on_characters(clean_notes):
+    phrase = "請求書番号を必ず要約の先頭に入れてくださいね"     # no spaces, no ASCII
+    short = "請求書番号を先頭に"
+    msgs = [ModelRequest(parts=[UserPromptPart(f"はい。{phrase}")])]
+    with pytest.raises(CallDeferred):
+        await tools_mod.propose_note(_ctx(_aid(), messages=msgs), scope="private", text=FACT,
+                                     source_quote=phrase)
+    out = await tools_mod.propose_note(_ctx(_aid(), messages=msgs), scope="private", text=FACT,
+                                       source_quote=short)
+    assert out.startswith("refused:") and "full phrase of the source" in out
+
+
+async def _drive_chat_send(monkeypatch, target: dict, message: str) -> list[dict]:
+    """`_chat_send` itself, with the turn task closed instead of run; returns
+    every event it emitted."""
+    from central_command.api import attachments, nerve_gateway
+
+    emitted: list[dict] = []
+
+    async def _target(key):
+        return target
+
+    async def _emit(kind, ref_id=None, payload=None, actor=None):
+        emitted.append({"kind": kind, "ref_id": ref_id, "payload": payload, "actor": actor})
+        return {}
+
+    async def _model_id(session_id, agent_id):
+        return "cc-default"
+
+    async def _noop(*a, **k):
+        return None
+
+    monkeypatch.setattr(nerve_gateway, "_send_target", _target)
+    monkeypatch.setattr(nerve_gateway.events, "emit", _emit)
+    monkeypatch.setattr(attachments, "session_model_id", _model_id)
+    monkeypatch.setattr(nerve_gateway.asyncio, "create_task", lambda coro: coro.close())
+    ack = await nerve_gateway._chat_send({"sessionKey": "agent:x:main", "message": message},
+                                         _noop)
+    assert ack["status"] == "started"
+    return emitted
+
+
+@needs_pg
+async def test_chat_send_writes_no_operator_event_for_a_send_the_callee_refuses(monkeypatch):
+    # The agent left the roster between the composer state and the send.
+    events_out = await _drive_chat_send(monkeypatch, {"opener_agent": "no-such-agent-x"},
+                                        OPERATOR_SAYS)
+    assert [e for e in events_out if e["kind"] == "chat.operator_message"] == []
+    # A lane that FAILED between the composer state and the send.
+    failed = f"sess_{uuid.uuid4().hex[:12]}"
+    await repo.create_conversation_session(failed, "jira-expert")
+    await repo.mark_session_failed(failed)
+    events_out = await _drive_chat_send(
+        monkeypatch, {"session": await repo.get_session(failed), "session_id": failed},
+        OPERATOR_SAYS)
+    assert [e for e in events_out if e["kind"] == "chat.operator_message"] == []
+
+
+@needs_pg
+async def test_chat_send_writes_one_operator_event_for_an_accepted_send(monkeypatch):
+    events_out = await _drive_chat_send(monkeypatch, {"opener_agent": "jira-expert"},
+                                        OPERATOR_SAYS)
+    said = [e for e in events_out if e["kind"] == "chat.operator_message"]
+    assert len(said) == 1 and said[0]["actor"] == "operator"
+    assert said[0]["payload"]["text"] == OPERATOR_SAYS and said[0]["ref_id"].startswith("sess_")

@@ -31,9 +31,17 @@ Runtime tier: reads through `repo`, imports nothing from the gateway.
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 
-from central_command.contract import Action, Evidence, Proposal, Reversibility, claim_supported
+from central_command.contract import (
+    Action,
+    Evidence,
+    Proposal,
+    Reversibility,
+    claim_supported,
+    note_forbidden_char,
+)
 from central_command.db import repo
 
 SCOPES = ("private", "operator")
@@ -68,12 +76,19 @@ def usage(notes: list[dict]) -> int:
 
 
 def one_line(text: str) -> str:
-    """`text` as ONE line: every whitespace, control, format or zero-width
-    character becomes a space, and runs collapse. Applied when a note is BUILT,
-    so the proposal the operator reviews is byte for byte what is stored (the
-    Executor refuses text this would still change)."""
-    chars = [" " if (ch.isspace() or unicodedata.category(ch).startswith("C")) else ch
-             for ch in (text or "")]
+    """`text` as ONE visible line: whitespace and the line/paragraph
+    separators become a space, every other character a note may not contain
+    (`contract.note_forbidden_char`: controls, format and zero-width
+    characters, the invisible fillers and variation selectors) is removed, and
+    runs of spaces collapse. Applied when a note is BUILT, so the proposal the
+    operator reviews is byte for byte what is stored (the Executor refuses
+    text this would still change, with the same predicate)."""
+    chars = []
+    for ch in text or "":
+        if ch.isspace() or unicodedata.category(ch) in ("Zl", "Zp", "Zs"):
+            chars.append(" ")
+        elif not note_forbidden_char(ch):
+            chars.append(ch)
     return " ".join("".join(chars).split())
 
 
@@ -198,7 +213,11 @@ def _quote_problem(quote: str) -> str | None:
         return ("source_quote contains an ellipsis — it must be ONE contiguous span, "
                 "not fragments joined together")
     n = _normalize(q)
-    if len(n) < QUOTE_MIN_CHARS or len(n.split()) < QUOTE_MIN_WORDS:
+    # The word floor needs words: a quote with no ASCII word character at all
+    # (a CJK phrase, written without spaces) is held to the character floor
+    # only, or it could never pass. Any other quote needs both.
+    words_count = bool(re.search(r"[a-z0-9]", n))
+    if len(n) < QUOTE_MIN_CHARS or (words_count and len(n.split()) < QUOTE_MIN_WORDS):
         return ("source_quote is too short to ground anything — the quote must be a "
                 f"full phrase of the source (at least {QUOTE_MIN_WORDS} words and "
                 f"{QUOTE_MIN_CHARS} letters or digits), not a word or a fragment")
@@ -254,25 +273,44 @@ def _user_prompt_texts(message: dict) -> list[str]:
             if p.get("part_kind") == "user-prompt"]
 
 
-async def resolve_grounding(*, session_id: str | None, quote_session_id: str | None,
-                            live_messages=None) -> tuple[str | None, object, str | None]:
+async def resolve_grounding(
+    *, session_id: str | None, quote_session_id: str | None, live_messages=None,
+) -> tuple[str | None, object, str | None, bool]:
     """(the session a quote is grounded in, the live messages that count, a
-    refusal). `quote_session_id` from the deps wins; otherwise the RECORD of
-    this session decides: a session reflection created to draft a note carries
-    `quote_session_id` (and `reflection_drafting`) in its run_state, written
-    server-side, so a redraft resumed by the gateway with plain deps is still
-    grounded in the session that closed — never in the drafting run, whose
-    prompt holds the very text and quote it would be checking."""
-    if quote_session_id:
-        return quote_session_id, None, None
+    refusal, whether this is a REFLECTION drafting run). `quote_session_id`
+    from the deps wins; otherwise the RECORD of this session decides: a
+    session reflection created to draft a note carries `quote_session_id`
+    (and `reflection_drafting`) in its run_state, written server-side, so a
+    redraft resumed by the gateway with plain deps is still grounded in the
+    session that closed — never in the drafting run, whose prompt holds the
+    very text and quote it would be checking. The drafting flag is what lets
+    the tools hold EVERY draft of that run, redrafts included, to reflection's
+    limits (private scope, no retirement)."""
     state = (await repo.get_session_run_state(session_id)) if session_id else None
     state = state or {}
+    drafting = bool(state.get("reflection_drafting")) or bool(quote_session_id)
+    if quote_session_id:
+        return quote_session_id, None, None, drafting
     if state.get("quote_session_id"):
-        return state["quote_session_id"], None, None
-    if state.get("reflection_drafting"):
+        return state["quote_session_id"], None, None, drafting
+    if drafting:
         return None, None, ("refused: this session drafts a note for a closed session "
-                            "the record no longer names. Nothing was proposed.")
-    return session_id, live_messages, None
+                            "the record no longer names. Nothing was proposed."), drafting
+    return session_id, live_messages, None, False
+
+
+# What a reflection drafting run may not do, on its first draft or any redraft
+# (DL-216: reflection never proposes operator scope and never retires). The
+# operator's feedback may change the note's TEXT; nothing else.
+DRAFTING_SCOPE_REFUSAL = (
+    "refused: this note was distilled from a closed session by reflection, which "
+    "keeps only PRIVATE notes. Nothing was proposed. Redraft it with "
+    "scope='private' (the operator's feedback may change its text); an "
+    "operator-scope note is proposed from a conversation where the operator says it.")
+DRAFTING_RETIRE_REFUSAL = (
+    "refused: a note distilled by reflection never retires another note. Nothing "
+    "was proposed. Redraft it without retire_ids; retiring a note is proposed from "
+    "a conversation, not from a reflection draft.")
 
 
 # --- the proposal builders ---------------------------------------------------------
