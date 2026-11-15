@@ -2505,9 +2505,14 @@ hygiene, and how the test suite itself must be written. See
   2,000 per agent, `note_budget_operator_chars` 1,500 in total, beside the
   compaction settings) and the Executor is their authority at execution. The
   `note-propose` tools build the proposal in code: the quote is one verbatim
-  span of the session, and for operator scope one span of words the record
-  attributes to the operator (operator-actor events and operator-created
-  tasks), failing closed everywhere else. Notes render into every fresh run's
+  span of the session — a full phrase, at least four words and twenty
+  characters — and for operator scope one span of words the record attributes
+  to the operator (operator-actor events, a chat event only when its words are
+  in the session's transcript; never a task's instructions, whose
+  `created_by` names the caller, not the author), failing closed everywhere
+  else. Retiring an operator-scope note needs the same proof; a swap retires
+  notes of its own scope only. A note is one line, and both writes are
+  idempotent on their proposal. Notes render into every fresh run's
   system prompt through one seam, after the generated capability list, with
   their ids and usage; the auditors get none. Reflection may route a lesson to
   a private note instead of the graph (one lesson, one store), at most one per

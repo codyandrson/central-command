@@ -462,17 +462,39 @@ process's environ.
     `repo.operator_words_for_session` attributes to the operator in this
     session: a `chat.operator_message` event (actor `operator`, emitted by
     `nerve_gateway._chat_send` with the TYPED words only, before attachment
-    text is appended), an `orchestration.item_answered` answer of an ask of
-    this session or that ask's discussion-lane chat messages, the feedback of
-    a `proposal.decided` rejection of this session's proposal, the note of a
-    `work.reopened` on a work item this session handled, or the instructions of
-    a task this session ran whose `created_by` is exactly `operator`. A message
-    role proves nothing (a triage prompt IS the email; a chat part can carry
+    text is appended, and only once `_turn_will_be_accepted` has run the
+    callee's own refusal checks), counted only when its words are also in a
+    user prompt of that session's transcript; an `orchestration.item_answered`
+    answer of an ask of this session, or that ask's discussion-lane chat
+    messages (same transcript rule, against the lane); the feedback of a
+    `proposal.decided` rejection of this session's proposal; or the note of a
+    `work.reopened` on a work item this session handled. A message role proves
+    nothing (a triage prompt IS the email; a chat part can carry
     `<operator-attachment>` text; a heartbeat nudge and a re-run's copied
-    opening are user prompts too), so everything else — mail, documents,
-    attachments, tool results, another agent's task prompt, the agent's own
-    words, legacy tasks with no `created_by` — is refused with a sentence that
-    says to use `private` or ask the operator.
+    opening are user prompts too), and neither does `task.created_by =
+    'operator'`, which records who called the create, not who wrote the text
+    (graph remediation creates operator tasks from mail-derived episode text;
+    the Task Board appends attachment text). So everything else — mail,
+    documents, attachments, tool results, any task's instructions, the agent's
+    own words — is refused with a sentence that says to use `private` or ask
+    the operator. Retiring an operator-scope note needs the same proof
+    (`propose_note_retire(note_id, reason, source_quote)`, stamped, the
+    Executor refusing an unstamped one); a private retirement needs none, and
+    an add's `retire_ids` may name only notes of its own scope (tool and
+    `repo._active_retirable`). On both scopes a quote must clear the note
+    path's floor: at least four words and twenty characters after
+    `claim_supported`'s own normalisation (`notes.QUOTE_MIN_*`).
+  - **Review fixes (2026-11-15).** A note is ONE line: `notes.one_line`
+    collapses every whitespace, control and format character at build time (so
+    the operator reviews the stored bytes), `repo.add_agent_note` refuses text
+    that still carries one or a note id / block header
+    (`repo.note_text_problem`), and rendering collapses again. A reflection
+    drafting session carries `quote_session_id` and `reflection_drafting` in
+    its `run_state`, written before it runs, so a redraft resumed with plain
+    deps stays grounded in the closed session (`notes.resolve_grounding`) and
+    a drafting run never grounds in itself. Both handlers are idempotent on the
+    proposal: a re-executed add returns the note it wrote, a re-executed
+    retirement succeeds.
   - **Rendering: one seam.** `notes.standing_sections(agent_id)` returns the
     roster (`roster.team_section`) followed by the notes block, and every
     fresh-run path passes it as `build_charter`'s `team_section`, so the block

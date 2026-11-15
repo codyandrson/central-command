@@ -744,8 +744,8 @@ REGISTRY: list[Capability] = [
                    "quote_source"],
         description=(
             "Add ONE note to the note store (DL-216), optionally retiring named "
-            "notes in the same transaction so an agent at its budget swaps in "
-            "one approved action. `scope` is 'private' (the drafter's own, "
+            "notes OF THE SAME SCOPE in the same transaction so an agent at its "
+            "budget swaps in one approved action; idempotent on the proposal. `scope` is 'private' (the drafter's own, "
             "rendered only to it) or 'operator' (a standing preference of the "
             "operator, rendered to every agent but the auditors), written as "
             "approved. The OWNER is the drafter, supplied server-side from the "
@@ -769,12 +769,17 @@ REGISTRY: list[Capability] = [
         ),
         holder="Executor",
         route="db/repo.py → retire_agent_note (retired_at + the retiring proposal)",
-        arguments=["note_id", "reason"],
+        arguments=["note_id", "reason", "source_quote?", "source_session_id?",
+                   "quote_source?"],
         description=(
-            "Retire ONE active note: the drafter's own private note, or any "
-            "operator-scope note (the operator asked an agent to forget it). The "
-            "retiring agent is the drafter, supplied server-side. Refused when "
-            "the note is already retired or is another agent's private note."
+            "Retire ONE active note: the drafter's own private note, or an "
+            "operator-scope note the operator asked to be forgotten — the latter "
+            "only with the operator's own recorded words, checked and stamped by "
+            "`propose_note_retire` (an unstamped operator-scope retirement is "
+            "refused). The retiring agent is the drafter, supplied server-side. "
+            "Refused when the note is already retired (unless by this same "
+            "proposal: a re-execution is a no-op) or is another agent's private "
+            "note."
         ),
     ),
     Capability(

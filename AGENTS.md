@@ -284,9 +284,15 @@ where the story is gone.
 - **Operator-scope authorship is proven from the record and fails closed.**
   An operator-scope note's quote must be found in words the RECORD attributes
   to the operator in that session (`repo.operator_words_for_session`:
-  operator-actor events and `task.created_by = 'operator'`), never in a
-  message's role: a triage prompt is the email, a chat part can carry
-  attachment text, a nudge is a user prompt too. A new place the operator
+  operator-actor events only, and a chat event only when its words are also in
+  that session's transcript), never in a message's role: a triage prompt is the
+  email, a chat part can carry attachment text, a nudge is a user prompt too.
+  Never in a task's instructions either: `task.created_by` records who CALLED
+  the create, not who wrote the text (remediation writes mail-derived text,
+  the Task Board appends attachment text). The same proof is required to
+  retire an operator-scope note, and a note's quote must clear the note path's
+  own floor (four words, twenty characters) because `claim_supported` alone
+  accepts "the". A new place the operator
   speaks qualifies only once it writes such a record and is added there;
   until then it does not.
 - **The notes block is rendered by every fresh-run path through the one

@@ -216,6 +216,9 @@ def _keep_only_server_skill_base(proposal, *, server_built: bool) -> None:
 
 
 _NOTE_STAMP = ("source_quote", "source_session_id", "quote_source")
+# An add always carries the stamp; a retirement carries it when the note is
+# operator-scope (the operator's words asking for it).
+_STAMPED_NOTE_CAPABILITIES = ("memory.note_add", "memory.note_retire")
 
 
 def _keep_only_server_note_stamp(proposal, *, server_built: bool) -> None:
@@ -228,7 +231,7 @@ def _keep_only_server_note_stamp(proposal, *, server_built: bool) -> None:
     if server_built:
         return
     for action in proposal.actions:
-        if action.capability.split("@", 1)[0] != "memory.note_add":
+        if action.capability.split("@", 1)[0] not in _STAMPED_NOTE_CAPABILITIES:
             continue
         args = action.arguments or {}
         if any(k in args for k in _NOTE_STAMP):
@@ -245,7 +248,7 @@ def _note_quote_verdicts(proposal, evidence: list[dict]) -> list[dict]:
         ((a.arguments or {}).get("source_quote"),
          f"session:{(a.arguments or {}).get('source_session_id')}")
         for a in proposal.actions
-        if a.capability.split("@", 1)[0] == "memory.note_add"
+        if a.capability.split("@", 1)[0] in _STAMPED_NOTE_CAPABILITIES
         and (a.arguments or {}).get("source_quote")
     }
     if not stamped:

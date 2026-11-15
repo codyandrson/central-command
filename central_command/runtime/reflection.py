@@ -648,6 +648,13 @@ async def _propose_note(
     text = expected.actions[0].arguments["text"]
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
+    # The grounding is written on the drafting session's RECORD before it
+    # runs, server-side: a redraft resumed by the gateway with plain deps
+    # resolves it from here (`notes.resolve_grounding`), so it never grounds
+    # in this run's own prompt, which holds the text and the quote.
+    await repo.create_running_session(session_id, agent_id)
+    await repo.update_session_run_state(
+        session_id, {"quote_session_id": source_session_id, "reflection_drafting": True})
     agent = await build_hired_agent(
         agent_id, model=model, charter=charter, packs=("note-propose",),
         capabilities=caps, skills_catalog=catalog,
@@ -673,6 +680,9 @@ async def _propose_note(
         and proposal.actions[0].arguments.get("scope") == "private"
         and proposal.actions[0].arguments.get("text") == text
         and proposal.actions[0].arguments.get("source_session_id") == source_session_id
+        and proposal.actions[0].arguments.get("source_quote") == n.quote.strip()
+        # Reflection never retires.
+        and not proposal.actions[0].arguments.get("retire_ids")
     )
     if not matches:
         await land_session(session_id, agent_id=agent_id)

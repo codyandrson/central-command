@@ -8639,7 +8639,36 @@ async def _lock_notes(conn) -> None:
     await conn.execute("select pg_advisory_xact_lock(hashtext('agent_note'))")
 
 
-async def _active_retirable(conn, retire_ids: list[str], proposer: str) -> list[dict]:
+# A note is ONE line of plain text (review fix, 2026-11-15): the notes block
+# renders `- [note_id] text`, so a newline or a control character in a stored
+# note could forge a header or another note's line. The tool collapses
+# whitespace at propose time, so the operator reviews exactly what is stored;
+# here a text that still carries one is REFUSED, never cleaned — the Executor
+# writes what was approved, or nothing.
+NOTE_FORGERY_RE = re.compile(
+    r"\[note_[0-9a-f]|STANDING NOTES|THE OPERATOR'S PREFERENCES|YOUR PRIVATE NOTES",
+    re.IGNORECASE)
+
+
+def note_text_problem(text: str) -> str | None:
+    """Why `text` cannot be stored as a note, or None."""
+    import unicodedata
+
+    for ch in text:
+        if ch != " " and (ch.isspace() or unicodedata.category(ch).startswith("C")):
+            return ("the text carries a newline or control character; a note is ONE "
+                    "line of plain text")
+    if NOTE_FORGERY_RE.search(text):
+        return ("the text carries a note id or a notes-block header; a note states "
+                "one fact, never the block's own markup")
+    return None
+
+
+async def _active_retirable(conn, retire_ids: list[str], proposer: str,
+                            scope: str | None = None) -> list[dict]:
+    """The named notes, locked, each ACTIVE and one the proposer may retire.
+    `scope` (an add's swap) also requires every one to be of that SAME scope:
+    a private note may never retire an operator-scope note in passing."""
     rows = []
     for nid in dict.fromkeys(retire_ids):
         r = await conn.fetchrow("select * from agent_note where id = $1 for update", nid)
@@ -8656,6 +8685,10 @@ async def _active_retirable(conn, retire_ids: list[str], proposer: str) -> list[
             raise NoteRefused(
                 f"note {nid} is another agent's private note; an agent retires only "
                 "its own private notes or an operator-scope note")
+        if scope is not None and r["scope"] != scope:
+            raise NoteRefused(
+                f"note {nid} is a {r['scope']}-scope note; a {scope}-scope note may "
+                f"retire only {scope}-scope notes")
         rows.append(r)
     return rows
 
@@ -8670,18 +8703,37 @@ async def add_agent_note(
     store lock, refusing (`NoteRefused`, nothing written) when the scope's
     usage after the swap would exceed `budget` characters. Usage is the summed
     length of the scope's ACTIVE notes: the agent's own for `private`, every
-    agent's for `operator`."""
+    agent's for `operator`.
+
+    IDEMPOTENT on the proposal: a re-execution of the same approved proposal
+    (an emit that raised after the commit, a retry) finds the note it already
+    wrote — same `proposal_id`, agent, scope and text — and returns it, with
+    the notes that proposal retired, instead of inserting a second one."""
     if scope not in NOTE_SCOPES:
         raise NoteRefused(f"scope {scope!r} is not one of {NOTE_SCOPES}")
     text = (text or "").strip()
     if not text:
         raise NoteRefused("a note needs text")
+    problem = note_text_problem(text)
+    if problem:
+        raise NoteRefused(f"{problem} - nothing was written")
     note_id = "note_" + uuid.uuid4().hex[:12]
     conn = await _conn()
     try:
         async with conn.transaction():
             await _lock_notes(conn)
-            retiring = await _active_retirable(conn, list(retire_ids or []), agent_id)
+            if proposal_id:
+                done = await conn.fetchrow(
+                    "select * from agent_note where proposal_id = $1 and agent_id = $2 "
+                    "and scope = $3 and text = $4", proposal_id, agent_id, scope, text)
+                if done is not None:
+                    retired = await conn.fetch(
+                        "select id from agent_note where retired_by = $1 order by id",
+                        proposal_id)
+                    return {**dict(done), "retired": [r["id"] for r in retired],
+                            "replayed": True}
+            retiring = await _active_retirable(conn, list(retire_ids or []), agent_id,
+                                               scope=scope)
             if scope == "private":
                 used = await conn.fetchval(
                     "select coalesce(sum(length(text)), 0) from agent_note "
@@ -8691,8 +8743,7 @@ async def add_agent_note(
                 used = await conn.fetchval(
                     "select coalesce(sum(length(text)), 0) from agent_note "
                     "where retired_at is null and scope = 'operator'")
-            freed = sum(len(r["text"]) for r in retiring if r["scope"] == scope
-                        and (scope == "operator" or r["agent_id"] == agent_id))
+            freed = sum(len(r["text"]) for r in retiring)
             after = int(used) - freed + len(text)
             if after > budget:
                 # Counts are written `<n>chars`, never `<n> chars`: an Executor
@@ -8718,7 +8769,7 @@ async def add_agent_note(
                 note_id, agent_id, scope, text, origin, proposal_id,
                 source_session_id, source_quote,
             )
-        return {**dict(row), "retired": [r["id"] for r in retiring]}
+        return {**dict(row), "retired": [r["id"] for r in retiring], "replayed": False}
     finally:
         await conn.close()
 
@@ -8726,84 +8777,130 @@ async def add_agent_note(
 async def retire_agent_note(*, note_id: str, proposer: str,
                             proposal_id: str | None = None) -> dict:
     """Retire one ACTIVE note the proposer may retire — a timestamp and the
-    retiring proposal, never a delete. `NoteRefused` otherwise."""
+    retiring proposal, never a delete. `NoteRefused` otherwise. IDEMPOTENT on
+    the proposal: a note already retired BY THIS SAME proposal is returned as
+    done (a re-execution), never refused."""
     conn = await _conn()
     try:
         async with conn.transaction():
             await _lock_notes(conn)
+            if proposal_id:
+                done = await conn.fetchrow(
+                    "select * from agent_note where id = $1 and retired_by = $2 "
+                    "and retired_at is not null", note_id, proposal_id)
+                if done is not None:
+                    return {**dict(done), "replayed": True}
             await _active_retirable(conn, [note_id], proposer)
             r = await conn.fetchrow(
                 "update agent_note set retired_at = now(), retired_by = $2 "
                 "where id = $1 and retired_at is null returning *",
                 note_id, proposal_id)
-        return dict(r)
+        return {**dict(r), "replayed": False}
     finally:
         await conn.close()
 
 
-async def operator_words_for_session(session_id: str) -> list[dict]:
+def _user_prompts(run_state: dict | None) -> list[str]:
+    """Every user-prompt text of a stored transcript (archived + live window)."""
+    out: list[str] = []
+    for message in list((run_state or {}).get("archived") or []) + list(
+            (run_state or {}).get("messages") or []):
+        for part in message.get("parts", []) or []:
+            if part.get("part_kind") != "user-prompt":
+                continue
+            content = part.get("content")
+            if isinstance(content, str):
+                out.append(content)
+            elif isinstance(content, list):
+                out.extend(c for c in content if isinstance(c, str))
+    return out
+
+
+async def operator_words_for_session(session_id: str, *,
+                                     live_prompts: list[str] | None = None) -> list[dict]:
     """Every text the RECORD attributes to the operator in this session, one
     entry per source: `{source, ref, text}`. The authorship test for an
-    operator-scope note (DL-216): each is proven by an operator-actor event or
-    a server-written provenance column, never by a message's role. Fail
-    closed: a source not listed here does not qualify.
+    operator-scope note and an operator-scope retirement (DL-216): each is
+    proven by an operator-actor event, never by a message's role. Fail closed:
+    a source not listed here does not qualify.
 
       chat       — `chat.operator_message`, emitted by the cockpit gateway with
                    the operator's TYPED words only (attachment text is framed
-                   and appended after the event is written), ref = this session.
+                   and appended after the event is written), ref = this session,
+                   AND found in a user prompt of this session's transcript (the
+                   stored record, plus `live_prompts`: the current run's, not
+                   yet stored) — so an event for a turn that never ran grounds
+                   nothing.
       answer     — `orchestration.item_answered`, actor operator, whose session
                    is this one: the operator's answer to an ask.
       lane       — `chat.operator_message` of the discussion lane an ask of this
-                   session opened (the operator's turns there are the answer).
+                   session opened, found in a user prompt of THAT lane's
+                   stored transcript.
       rejection  — `proposal.decided`, verdict rejected, actor operator, on a
                    proposal of this session: the rejection feedback.
       reopen     — `work.reopened`, actor operator, on a work item this session
                    handled: the reopen note.
-      task       — the instructions of a task this session ran whose
-                   `created_by` is exactly 'operator' (legacy NULL rows, agent-
-                   and heartbeat-created tasks do not qualify).
+
+    Not a source: task instructions. `task.created_by = 'operator'` records who
+    CALLED the create, not who wrote the text — graph remediation creates an
+    operator task from mail-derived episode text, and the Task Board appends
+    extracted attachment text to the instructions — so a task grounds nothing
+    (review fix, 2026-11-15); the operator says it in chat.
     """
     conn = await _conn()
     try:
         rows = await conn.fetch(
             """
             select 'chat' as source, 'event:' || e.id as ref,
-                   e.payload->>'text' as text, e.id as ord
+                   e.payload->>'text' as text, e.ref_id as sid, e.id as ord
               from audit_event e
              where e.kind = 'chat.operator_message' and e.actor = 'operator'
                and e.ref_id = $1
             union all
-            select 'answer', 'event:' || e.id, e.payload->>'answer', e.id
+            select 'answer', 'event:' || e.id, e.payload->>'answer', null, e.id
               from audit_event e
              where e.kind = 'orchestration.item_answered' and e.actor = 'operator'
                and e.payload->>'session_id' = $1
             union all
-            select 'lane', 'event:' || e.id, e.payload->>'text', e.id
+            select 'lane', 'event:' || e.id, e.payload->>'text', e.ref_id, e.id
               from audit_event e
               join operator_item i on i.discussion_session_id = e.ref_id
              where e.kind = 'chat.operator_message' and e.actor = 'operator'
                and i.session_id = $1
             union all
-            select 'rejection', 'event:' || e.id, e.payload->>'feedback', e.id
+            select 'rejection', 'event:' || e.id, e.payload->>'feedback', null, e.id
               from audit_event e
               join proposal p on p.id = e.ref_id
              where e.kind = 'proposal.decided' and e.actor = 'operator'
                and e.payload->>'verdict' = 'rejected' and p.session_id = $1
             union all
-            select 'reopen', 'event:' || e.id, e.payload->>'note', e.id
+            select 'reopen', 'event:' || e.id, e.payload->>'note', null, e.id
               from audit_event e
               join work_item w on w.id = e.ref_id
              where e.kind = 'work.reopened' and e.actor = 'operator'
                and w.session_id = $1
-            union all
-            select 'task', 'task:' || t.id, t.instructions, 0
-              from task t
-             where t.session_id = $1 and t.created_by = 'operator'
              order by ord
             """,
             session_id,
         )
-        return [{"source": r["source"], "ref": r["ref"], "text": r["text"]}
-                for r in rows if (r["text"] or "").strip()]
     finally:
         await conn.close()
+    prompts: dict[str, list[str]] = {}
+
+    async def _prompts_of(sid: str) -> list[str]:
+        if sid not in prompts:
+            prompts[sid] = _user_prompts(await get_session_run_state(sid))
+            if sid == session_id:
+                prompts[sid] += list(live_prompts or [])
+        return prompts[sid]
+
+    out = []
+    for r in rows:
+        text = r["text"] or ""
+        if not text.strip():
+            continue
+        if r["source"] in ("chat", "lane") and not any(
+                text in p for p in await _prompts_of(r["sid"])):
+            continue
+        out.append({"source": r["source"], "ref": r["ref"], "text": text})
+    return out

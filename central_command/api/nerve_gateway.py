@@ -746,6 +746,22 @@ async def _chat_history(params: dict) -> dict:
     }
 
 
+async def _turn_will_be_accepted(opener_agent: str | None, session_id: str | None) -> bool:
+    """Would the turn `_chat_send` is about to start be accepted? The callee's
+    own refusal checks, reused: an opener needs an active roster agent
+    (`start_conversation`), a send into a lane needs `why_not_sendable` to
+    pass on the row as it is now (`conversation_turn`)."""
+    from central_command.runtime.converse import why_not_sendable
+    from central_command.runtime.roster import conversational_agent_ids
+
+    if opener_agent:
+        return opener_agent in await conversational_agent_ids()
+    if not session_id:
+        return False
+    session = await repo.get_session(session_id)
+    return session is not None and why_not_sendable(session) is None
+
+
 async def _chat_send(params: dict, notify) -> dict:
     """Operator -> agent message. The turn runs in the background (a real
     Claude turn can outlive the client's 30s RPC timeout); the reply reaches
@@ -804,11 +820,17 @@ async def _chat_send(params: dict, notify) -> dict:
     # to the operator: the transcript cannot, because a user-prompt part may
     # also carry extracted attachment text (appended just below) or a system
     # nudge (`heartbeat/actions._nudge_discussion`). An operator-scope note's
-    # quote is checked against it (`repo.operator_words_for_session`). A fresh
-    # lane gets its id here so the event can name it.
+    # quote is checked against it (`repo.operator_words_for_session`, which
+    # also requires the words in the session's stored transcript). A fresh
+    # lane gets its id here so the event can name it. Written only when the
+    # callee will ACCEPT the turn: the same refusal checks `start_conversation`
+    # (a retired or unknown agent) and `conversation_turn` (`why_not_sendable`)
+    # make, run here first; a send they refuse is still handed to them below,
+    # so what the cockpit is told does not change — it just leaves no record of
+    # words no agent saw.
     if opener_agent:
         target_session = "sess_" + uuid.uuid4().hex[:12]
-    if text:
+    if text and await _turn_will_be_accepted(opener_agent, target_session):
         await events.emit(
             "chat.operator_message",
             ref_id=target_session,

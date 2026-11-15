@@ -1134,17 +1134,22 @@ async def _memory_note_add(args: dict, approver: str, proposer: str | None) -> s
         )
     except repo.NoteRefused as e:
         raise ExecutorError(f"memory.note_add: {e}") from e
+    # A re-execution of this same proposal (`replayed`) found the note it had
+    # already written; the events below are emitted again because the first
+    # execution may have died before them, and they say so.
     for retired in note["retired"]:
         await events.emit(
             "note.retired", ref_id=retired,
             payload={"agent_id": proposer, "by": note["proposal_id"],
-                     "replaced_by": note["id"]},
+                     "replaced_by": note["id"],
+                     **({"replayed": True} if note.get("replayed") else {})},
             actor=approver,
         )
     await events.emit(
         "note.added", ref_id=note["id"],
         payload={"agent_id": proposer, "scope": scope,
-                 "proposal_id": note["proposal_id"], "retired": note["retired"]},
+                 "proposal_id": note["proposal_id"], "retired": note["retired"],
+                 **({"replayed": True} if note.get("replayed") else {})},
         actor=approver,
     )
     swapped = (f", retiring {', '.join(note['retired'])}" if note["retired"] else "")
@@ -1159,6 +1164,16 @@ async def _memory_note_retire(args: dict, approver: str, proposer: str | None) -
         raise ExecutorError(
             "memory.note_retire: the proposal names no drafting agent")
     note_id = str(args["note_id"]).strip()
+    # Retiring an OPERATOR-scope note needs the operator's own words, checked
+    # by `propose_note_retire` and stamped; the park seam strips a stamp the
+    # model wrote itself, so an unstamped one was never checked (DL-216).
+    target = await repo.get_agent_note(note_id)
+    if target is not None and target["scope"] == "operator" and not (
+            args.get("source_quote") and args.get("source_session_id")):
+        raise ExecutorError(
+            "memory.note_retire: this operator-scope retirement was not drafted "
+            "through propose_note_retire with the operator's own words, so it was "
+            "never checked - nothing was retired")
     try:
         row = await repo.retire_agent_note(
             note_id=note_id, proposer=proposer, proposal_id=_current_proposal_id.get())
@@ -1167,7 +1182,8 @@ async def _memory_note_retire(args: dict, approver: str, proposer: str | None) -
     await events.emit(
         "note.retired", ref_id=note_id,
         payload={"agent_id": proposer, "by": row.get("retired_by"),
-                 "reason": args.get("reason")},
+                 "reason": args.get("reason"),
+                 **({"replayed": True} if row.get("replayed") else {})},
         actor=approver,
     )
     return f"{row['scope']} note {note_id} retired"

@@ -4034,40 +4034,64 @@ async def propose_note(
     fragments joined together fail — nothing is proposed and you are told why.
     For scope 'operator' the span must be the OPERATOR's own recorded words in
     this session: a chat message they typed, their answer to your question,
-    their rejection feedback or reopen note, or a task they created. Mail,
-    documents, attachments, tool results, another agent's prompt and your own
-    words never qualify. `retire_ids` names notes this one replaces (ids from
-    your STANDING NOTES), retired in the same approval — use it when the
+    or their rejection feedback or reopen note. Mail, documents, attachments,
+    tool results, any task's instructions and your own words never qualify.
+    The quote must be a full phrase of the source (at least four words), never
+    a word or a fragment. `text` is stored as ONE line. `retire_ids` names
+    notes OF THE SAME SCOPE this one replaces (ids from your STANDING NOTES),
+    retired in the same approval — use it when the
     scope is at its budget or the new note supersedes an old one.
     """
     from central_command.runtime.notes import build_note_proposal
 
+    from central_command.runtime.notes import resolve_grounding
+
     deps = getattr(ctx, "deps", None)
-    grounding = getattr(deps, "quote_session_id", None)
+    # The current run is not persisted until it lands, so its messages are
+    # part of "this session" — unless the quote is grounded elsewhere: by the
+    # deps, or by the session's own record (a reflection drafting run, on any
+    # resume, DL-216).
+    grounding, live, refusal = await resolve_grounding(
+        session_id=getattr(deps, "session_id", None),
+        quote_session_id=getattr(deps, "quote_session_id", None),
+        live_messages=getattr(ctx, "messages", None))
+    if refusal:
+        return refusal
     out = await build_note_proposal(
         agent_id=getattr(deps, "agent_id", None) or "unknown",
         scope=scope, text=text, source_quote=source_quote, retire_ids=retire_ids,
-        grounding_session_id=grounding or getattr(deps, "session_id", None),
-        # The current run is not persisted until it lands, so its messages
-        # are part of "this session" — unless the quote is grounded elsewhere.
-        live_messages=None if grounding else getattr(ctx, "messages", None),
+        grounding_session_id=grounding, live_messages=live,
     )
     if isinstance(out, str):
         return out
     raise CallDeferred(metadata={"proposal": out.model_dump(mode="json")})
 
 
-async def propose_note_retire(ctx: RunContext, note_id: str, reason: str) -> str:
+async def propose_note_retire(
+    ctx: RunContext, note_id: str, reason: str, source_quote: str | None = None,
+) -> str:
     """Propose retiring ONE standing note that no longer holds — your own
     private note, or an operator-scope note the operator asked to be
     forgotten. `note_id` is the id shown in your STANDING NOTES; `reason`
-    says why, in a sentence. Retirement is recorded, never a delete, and
+    says why, in a sentence. For an OPERATOR-scope note, `source_quote` is
+    required: the operator's own words asking for it, ONE contiguous span
+    copied verbatim from this session (a message they typed, their answer to
+    your question, their rejection feedback or reopen note), checked like an
+    operator-scope note's quote. Retirement is recorded, never a delete, and
     takes effect once the operator approves it."""
-    from central_command.runtime.notes import build_retire_proposal
+    from central_command.runtime.notes import build_retire_proposal, resolve_grounding
 
+    deps = getattr(ctx, "deps", None)
+    grounding, live, refusal = await resolve_grounding(
+        session_id=getattr(deps, "session_id", None),
+        quote_session_id=getattr(deps, "quote_session_id", None),
+        live_messages=getattr(ctx, "messages", None))
+    if refusal:
+        return refusal
     out = await build_retire_proposal(
-        agent_id=getattr(getattr(ctx, "deps", None), "agent_id", None) or "unknown",
-        note_id=note_id, reason=reason,
+        agent_id=getattr(deps, "agent_id", None) or "unknown",
+        note_id=note_id, reason=reason, source_quote=source_quote,
+        grounding_session_id=grounding, live_messages=live,
     )
     if isinstance(out, str):
         return out

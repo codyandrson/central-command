@@ -1850,6 +1850,11 @@ create index if not exists agent_note_scope_idx on agent_note (scope)
 -- nothing new, and an agent hired after this runs gets the pack from its
 -- template. Both members of the pack are gated proposals. Applied by the
 -- updater's schema phase at release; nothing in the app process runs it.
+-- ONCE per database (the `seed:note-propose` app_setting marker): the schema
+-- re-runs at every release, and a re-run would grant the pack to an agent the
+-- operator hired LATER with an explicit pack list that leaves it out,
+-- overriding that choice. A fresh database and the first update seed the
+-- roster; later updates leave new hires alone.
 insert into agent_grant (agent_id, pack, granted_by)
 select distinct g.agent_id, 'note-propose', 'seed:note-propose-all'
   from agent_grant g
@@ -1858,7 +1863,11 @@ select distinct g.agent_id, 'note-propose', 'seed:note-propose-all'
    and a.status = 'ACTIVE'
    and a.role <> ''
    and a.id not in ('auditor', 'graph-auditor', 'editor')
+   and not exists (select 1 from app_setting where key = 'seed:note-propose')
 on conflict (agent_id, pack) do nothing;
+insert into app_setting (key, value)
+values ('seed:note-propose', '{"seeded": true}'::jsonb)
+on conflict (key) do nothing;
 
 -- The orchestrator's deviation text names the propose packs it holds since
 -- DL-215; it holds one more since DL-216. Rewritten in place on a row that

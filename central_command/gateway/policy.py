@@ -271,7 +271,10 @@ def check_note_content(text: str) -> list[dict]:
 
     flags: list[dict] = []
     names = {c.name for c in REGISTRY}
-    namespaces = {n.split(".", 1)[0] for n in names}
+    # A bare dotted word is flagged only under a namespace the registry's gated
+    # writes use (the prefixes are derived, never listed): "task.name" or
+    # "web.page" is prose, "jira.dismiss" is an invented capability.
+    namespaces = {n.split(".", 1)[0] for n in gated_write_names()}
     cited = list(CHARTER_CAPABILITY_RE.findall(text or ""))
     cited += [f"{a}.{b}" for a, b in _DOTTED_NAME_RE.findall((text or "").lower())
               if a in namespaces]
