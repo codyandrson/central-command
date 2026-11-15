@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -80,18 +81,24 @@ TEST_DB = f"central_command_test_{_CHECKOUT}" + (f"_{_WORKER}" if _WORKER else "
 _TEST_DB_PREFIX = "central_command_test_"
 _OWN_TEST_DBS = f"{_TEST_DB_PREFIX}{_CHECKOUT}"   # this checkout's set: itself and `_gw<N>`
 _SWEEP_MIN_AGE = timedelta(hours=6)
+# EXACTLY the names this harness builds for `TEST_DB` above: the prefix, the
+# eight hex digits of `_CHECKOUT` (a sha1 hexdigest slice) and, under xdist, the
+# worker id (`gw0`, `gw1`, ...). A prefix alone would also match a database
+# someone named `central_command_test_staging`, and the sweep drops as a
+# superuser, permanently.
+_TEST_DB_NAME = re.compile(r"^central_command_test_[0-9a-f]{8}(_gw\d+)?$")
 
 
 def sweepable_test_databases(rows, *, now: datetime, own: str = _OWN_TEST_DBS,
                              min_age: timedelta = _SWEEP_MIN_AGE) -> list[str]:
     """Which test databases the sweep may drop, from `(name, connections,
-    created)` rows: a `central_command_test_*` name that is not this checkout's
-    own set (`own` itself or `own_gw<N>`), has no connection at all, and was
-    created more than `min_age` ago. A pure function, so the selection is
-    testable without creating and waiting on aged databases."""
+    created)` rows: a name this harness builds (`_TEST_DB_NAME`) that is not
+    this checkout's own set (`own` itself or `own_gw<N>`), has no connection at
+    all, and was created more than `min_age` ago. A pure function, so the
+    selection is testable without creating and waiting on aged databases."""
     out = []
     for name, connections, created in rows:
-        if not name.startswith(_TEST_DB_PREFIX):
+        if not _TEST_DB_NAME.match(name):
             continue
         if name == own or name.startswith(own + "_"):
             continue
@@ -117,13 +124,24 @@ def _sweep_idle_test_databases() -> None:
             conn = await asyncpg.connect(admin_url, timeout=5)
             try:
                 rows = await conn.fetch(
-                    "select d.datname, (select count(*) from pg_stat_activity a "
-                    "where a.datname = d.datname) as n, "
-                    "(pg_stat_file('base/' || d.oid || '/PG_VERSION')).modification as created "
+                    "select d.datname, d.oid::text as oid, "
+                    "(select count(*) from pg_stat_activity a "
+                    "where a.datname = d.datname) as n "
                     "from pg_database d where d.datname like 'central\\_command\\_test\\_%'")
-                for name in sweepable_test_databases(
-                        [(r["datname"], r["n"], r["created"]) for r in rows],
-                        now=datetime.now(timezone.utc)):
+                found = []
+                for r in rows:
+                    created = None
+                    # Looked up per database, and only for a name that could
+                    # be swept: one `pg_stat_file` failing must not end the sweep.
+                    if _TEST_DB_NAME.match(r["datname"]) and not r["n"]:
+                        try:
+                            created = await conn.fetchval(
+                                "select (pg_stat_file('base/' || $1::text || "
+                                "'/PG_VERSION')).modification", r["oid"])
+                        except Exception:  # noqa: BLE001 — unreadable: left alone
+                            created = None
+                    found.append((r["datname"], r["n"], created))
+                for name in sweepable_test_databases(found, now=datetime.now(timezone.utc)):
                     try:
                         await conn.execute('drop database "%s"' % name.replace('"', '""'))
                     except Exception:  # noqa: BLE001 — connected since: refused, fine

@@ -116,6 +116,7 @@ def test_the_sweep_selects_only_idle_aged_databases_of_other_checkouts():
         (own + "_gw0", 0, old),                          # ...and its xdist workers
         ("central_command_test_bbbbbbbb", 0, old),       # another checkout, idle, aged
         ("central_command_test_bbbbbbbb_gw3", 0, old),
+        ("central_command_test_0123abcd_gw12", 0, old),
         ("central_command_test_cccccccc", 2, old),       # connected
         ("central_command_test_dddddddd", 0, fresh),     # younger than 6 hours
         ("central_command_test_eeeeeeee", 0, None),      # age unreadable: leave it
@@ -125,16 +126,89 @@ def test_the_sweep_selects_only_idle_aged_databases_of_other_checkouts():
         ("postgres", 0, old),
     ]
     assert sweepable_test_databases(rows, now=now, own=own) == [
-        "central_command_test_bbbbbbbb", "central_command_test_bbbbbbbb_gw3"]
+        "central_command_test_bbbbbbbb", "central_command_test_bbbbbbbb_gw3",
+        "central_command_test_0123abcd_gw12"]
 
 
-def test_the_sweep_runs_in_the_main_process_only_and_never_raises(monkeypatch):
+def test_the_sweep_drops_only_names_the_harness_builds():
+    """A database somebody named `central_command_test_staging` is not a
+    throwaway: the prefix alone must never select it."""
+    from datetime import datetime, timedelta, timezone
+
+    from .conftest import TEST_DB, sweepable_test_databases
+
+    now = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
+    old = now - timedelta(days=30)
+    for name in ("central_command_test_staging", "central_command_test_",
+                 "central_command_test_ABCDEF01", "central_command_test_abcdef0",
+                 "central_command_test_abcdef012", "central_command_test_abcdef01_gw",
+                 "central_command_test_abcdef01_gwx", "central_command_test_abcdef01_w1",
+                 "central_command_test_abcdef01_gw1_x", "x_central_command_test_abcdef01"):
+        assert sweepable_test_databases([(name, 0, old)], now=now, own="other") == [], name
+    # ...and the shapes `TEST_DB` itself is built in (a checkout hash, with or
+    # without the xdist worker suffix) are exactly what it selects.
+    assert sweepable_test_databases(
+        [(TEST_DB, 0, old)], now=now, own="central_command_test_00000000") == [TEST_DB]
+
+
+def test_the_sweep_does_not_connect_at_all_in_a_worker_and_never_raises(monkeypatch):
     from . import conftest
 
-    # An xdist worker returns at once, before touching the database.
+    connects = []
+
+    async def refuse(*args, **kwargs):
+        connects.append(args)
+        raise OSError("no server")
+
+    monkeypatch.setattr(conftest.asyncpg, "connect", refuse)
+    monkeypatch.setattr(conftest.settings, "database_url",
+                        "postgresql://nobody@127.0.0.1:1/x")
+    # An xdist worker returns before touching the database: no connect at all.
     monkeypatch.setattr(conftest, "_WORKER", "gw1")
-    monkeypatch.setattr(conftest.settings, "database_url", "postgresql://nobody@127.0.0.1:1/x")
     conftest._sweep_idle_test_databases()
-    # The main process with an unreachable server swallows the error.
+    assert connects == [], "a worker must not even try to connect"
+    # The main process does try, and swallows the failure.
     monkeypatch.setattr(conftest, "_WORKER", "")
     conftest._sweep_idle_test_databases()
+    assert len(connects) == 1
+
+
+def test_one_unreadable_database_does_not_end_the_sweep(monkeypatch):
+    """`pg_stat_file` failing for one database (it is looked up per database)
+    leaves that one alone and still sweeps the others."""
+    from datetime import datetime, timedelta, timezone
+
+    from . import conftest
+
+    old = datetime.now(timezone.utc) - timedelta(days=2)
+    dropped, looked_up = [], []
+
+    class FakeConn:
+        async def fetch(self, sql, *args):
+            return [
+                {"datname": "central_command_test_11111111", "oid": "1", "n": 0},
+                {"datname": "central_command_test_22222222", "oid": "2", "n": 0},
+                {"datname": "central_command_test_33333333", "oid": "3", "n": 1},
+                {"datname": "central_command_test_staging", "oid": "4", "n": 0},
+            ]
+
+        async def fetchval(self, sql, oid):
+            looked_up.append(oid)
+            if oid == "1":
+                raise RuntimeError("could not stat file")
+            return old
+
+        async def execute(self, sql):
+            dropped.append(sql)
+
+        async def close(self):
+            pass
+
+    async def connect(*args, **kwargs):
+        return FakeConn()
+
+    monkeypatch.setattr(conftest.asyncpg, "connect", connect)
+    monkeypatch.setattr(conftest, "_WORKER", "")
+    conftest._sweep_idle_test_databases()
+    assert dropped == ['drop database "central_command_test_22222222"']
+    assert looked_up == ["1", "2"], "only an idle, harness-named database is looked up"

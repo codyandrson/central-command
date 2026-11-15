@@ -924,7 +924,13 @@ world or stores a memory: the index is derived and may be dropped and rebuilt.
   nothing) and `english` stems and drops words. The query side applies the same
   substitution in SQL and matches each term as a phrase of its words, so `DEMO-12`
   finds `DEMO-12` and not `DEMO-5` beside a stray 12. Terms are all-of, widening to
-  any-of when no session holds them all; `"quotes"`, `-exclude` and `OR` are read.
+  any-of when no session holds them all; `"quotes"`, `-exclude` and `OR` are read. A
+  term with no letter or digit (`!!!`, a lone `-`) is dropped, and the SQL requires the
+  positive half of the query to be non-empty, so an exclusion alone matches nothing
+  rather than every part lacking the word; NUL bytes are stripped from what the model
+  sends. Structured content is indexed as the compact JSON of the whole item (a tool
+  result's keys stay findable) and a binary or image payload, a `data:` URL or a long
+  base64 string becomes `[binary content, not indexed]`.
 - **Lazy, idempotent.** Nothing hooks the several writers of `run_state`. A call first
   brings the CALLING agent's sessions up to date: a session is pending when it has no
   mark or its `updated_at` is later than the one the indexer read (every writer bumps
@@ -933,9 +939,18 @@ world or stores a memory: the index is derived and may be dropped and rebuilt.
   re-reads the watermark under it and indexes only messages past it (insert `on
   conflict do nothing`), so two calls racing write each part once; a record shorter
   than its watermark is re-indexed from the start. This also backfills existing history
-  on first use. The work per call is bounded: at most 40 sessions and about 6,000 parts,
-  newest first and the current session ahead of all; the result says how many sessions
-  are still not searchable and the next call continues.
+  on first use. The work inside one tool call is bounded three ways. A session is
+  indexed in CHUNKS (300 messages or about a million characters, each its own
+  transaction): the watermark advances, `source_updated_at` is stamped only when it has
+  caught up, so a big session stays pending between calls; a scroll indexes far enough
+  to serve its window and a read says plainly that a session is still being indexed.
+  A wall-clock budget (4 seconds) stops new chunks and new sessions from starting (one
+  chunk always runs, so every call makes progress), and a call takes at most 40 sessions
+  and about 6,000 parts, newest first and the current session ahead of all. The result
+  says how many sessions are still catching up. A session whose indexing raised records
+  the `updated_at` it failed at (`failed_for`) and is neither retried nor counted as
+  "not searchable yet" until it changes; the result counts it apart ("could not be
+  indexed"). Extraction never raises on a malformed part.
 - **The tool.** One tool, four shapes from its arguments: no arguments browses (id,
   date, status, what started it: task title, mail subject or chat, message count);
   `query` discovers (ranked hits grouped by session, the top hit shown with two
@@ -943,6 +958,8 @@ world or stores a memory: the index is derived and may be dropped and rebuilt.
   scrolls (three either side); `session_id` alone reads an outline (how it started and
   ended). A part is capped at 1,200 characters in discover and outline and 4,000 in
   scroll, with a marker saying how much was cut, and `_clip` bounds the whole result.
+  Discover reads the 150 best-ranked matching parts; when more matched it says the
+  session and part counts are minimums ("at least N") and to narrow the query.
   The calling agent is `ctx.deps.agent_id`, never an argument, and every query filters
   on it in SQL; a `session_id` that is not the caller's is refused in one plain
   sentence, whether it is another agent's or no session. The current session is in
@@ -958,7 +975,10 @@ world or stores a memory: the index is derived and may be dropped and rebuilt.
   past verdicts. Existing agents get it from the trailing block of `schema.sql` that the
   updater re-runs (the `task-create` widening's shape: active agents on the roster that
   already hold a grant, `on conflict do nothing`, so a revoked grant is never
-  resurrected); `DEFAULT_PACKS` and every hire template carry it for fresh databases
+  resurrected), but ONCE per database: the insert is gated on a marker row in
+  `app_setting` (`seed:session-recall`) that the next statement writes, so a later
+  update does not grant the pack to an agent the operator hired afterwards with an
+  explicit pack list (the `skill-propose` widening is gated the same way); `DEFAULT_PACKS` and every hire template carry it for fresh databases
   and new hires. Consult transcripts are out of scope for now.
 
 ### State sets

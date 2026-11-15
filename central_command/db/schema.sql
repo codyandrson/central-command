@@ -1726,6 +1726,15 @@ create table if not exists session_recall_mark (
     indexed_at          timestamptz not null default now()
 );
 create index if not exists session_recall_mark_agent_idx on session_recall_mark (agent_id);
+-- A big session is indexed in chunks: `indexed_messages` is the watermark,
+-- `total_messages` the record's length when it was last read, and
+-- `source_updated_at` is stamped only once the watermark has caught up (a null
+-- one keeps the session pending). A session whose indexing raised records the
+-- `updated_at` it failed at in `failed_for`, and is not retried until the
+-- session changes (`updated_at` moves past it).
+alter table session_recall_mark add column if not exists total_messages int;
+alter table session_recall_mark add column if not exists failed_for timestamptz;
+alter table session_recall_mark add column if not exists failed_error text;
 
 -- session-recall for every active agent but the auditors (FR-52, DL-214). The
 -- shape is the task-create block above (story 4.9): it reads only rows the
@@ -1734,9 +1743,16 @@ create index if not exists session_recall_mark_agent_idx on session_recall_mark 
 -- exactly the roster. The auditor and the graph auditor are named anyway: they
 -- re-derive a decision independently and must not anchor on their own past
 -- verdicts. A revoked row is never resurrected (`on conflict do nothing` meets
--- it), a re-run finds nothing new, and a hired agent born after this runs gets
--- the pack from its template (and `runtime/packs.DEFAULT_PACKS` mirrors the
--- founding seeds). Applied by the updater's schema phase at release.
+-- it), and a hired agent born after this runs gets the pack from its template
+-- (and `runtime/packs.DEFAULT_PACKS` mirrors the founding seeds).
+--
+-- ONCE PER DATABASE: the schema is re-run on every release, so an unguarded
+-- insert would grant the pack, at the next update, to an agent the operator
+-- hired LATER with an explicit pack list that leaves it out. The insert is
+-- therefore gated on a marker row in `app_setting` that the next statement
+-- writes: a fresh database and the first update after this release seed the
+-- roster, and every later run leaves later hires alone. Applied by the
+-- updater's schema phase at release.
 insert into agent_grant (agent_id, pack, granted_by)
 select distinct g.agent_id, 'session-recall', 'seed:session-recall'
   from agent_grant g
@@ -1745,7 +1761,11 @@ select distinct g.agent_id, 'session-recall', 'seed:session-recall'
    and a.status = 'ACTIVE'
    and a.role <> ''
    and a.id not in ('auditor', 'graph-auditor')
+   and not exists (select 1 from app_setting where key = 'seed:session-recall')
 on conflict (agent_id, pack) do nothing;
+insert into app_setting (key, value)
+values ('seed:session-recall', '{"seeded": true}'::jsonb)
+on conflict (key) do nothing;
 
 -- skill-propose for every roster agent but the auditors and the editor (DL-215,
 -- the operator's ruling of 2026-11-15): the agent that used a skill proposes
@@ -1757,7 +1777,7 @@ on conflict (agent_id, pack) do nothing;
 -- and so is the editor, whose design holds no propose packs at all (a critic
 -- that could propose could become the drafter it reviews; its charter says it
 -- holds none). A revoked skill-propose row is never resurrected (`on conflict
--- do nothing` meets it), a re-run finds nothing new, and an agent hired after
+-- do nothing` meets it), once-only (see the marker below), and an agent hired after
 -- this runs gets the pack from its template. Every member of the pack is a
 -- gated proposal (skill.create, skill.doc_add); its URL capture is a read at
 -- propose time whose text the operator reviews. Applied by the updater's schema
@@ -1770,7 +1790,14 @@ select distinct g.agent_id, 'skill-propose', 'seed:skill-propose-all'
    and a.status = 'ACTIVE'
    and a.role <> ''
    and a.id not in ('auditor', 'graph-auditor', 'editor')
+   and not exists (select 1 from app_setting where key = 'seed:skill-propose-all')
 on conflict (agent_id, pack) do nothing;
+-- Once per database, like the session-recall seed above: the marker keeps a
+-- re-run on a later release from granting the pack to an agent hired since
+-- with an explicit pack list that leaves it out.
+insert into app_setting (key, value)
+values ('seed:skill-propose-all', '{"seeded": true}'::jsonb)
+on conflict (key) do nothing;
 
 -- The orchestrator's deviation text said it holds NO propose tools; since the
 -- widening above it holds one pack of them. Rewritten in place on a row that

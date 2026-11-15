@@ -219,7 +219,15 @@ where the story is gone.
   `session_recall.SEP_RE`, pinned equal by a test; a generated column is not
   altered by `create table if not exists`, so changing it means dropping both
   tables. The agent comes from `ctx.deps`, never an argument, and every query
-  filters on it in SQL.
+  filters on it in SQL. Indexing is chunked and bounded per tool call (a big
+  session stays pending between calls) and a session that raises is parked
+  until it changes: never make a path wait on "fully indexed".
+- **A grant seed that widens a pack to the roster runs ONCE per database.**
+  `schema.sql` re-runs on every release, so an unguarded `insert ... select`
+  hands the pack, at the next update, to an agent the operator hired later with
+  an explicit pack list that leaves it out. Gate it on a marker row in
+  `app_setting` (`seed:session-recall`, `seed:skill-propose-all`) written by the
+  next statement. A test that runs the seed block must delete the marker first.
 - **Agents take `deps`** (`runtime/deps.py`). Every `agent.run()` needs
   `deps=TriageDeps(...)`; resume paths pass a fresh one on purpose. The tools
   read it for the agent id, the session and the consult chain, so a run

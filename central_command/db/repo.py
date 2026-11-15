@@ -8278,12 +8278,16 @@ _RECALL_ORIGIN_SQL = """
 
 
 async def recall_pending_sessions(agent_id: str, first: str | None,
-                                  limit: int) -> tuple[list[dict], int]:
-    """The agent's sessions whose index is missing or older than the record,
-    newest first (`first` — the caller's current session — ahead of all), and
-    how many there are in all. A session never indexed has no mark; one the
-    indexer has read since its last write has `source_updated_at >=
-    updated_at` and is skipped without touching its transcript."""
+                                  limit: int) -> tuple[list[dict], int, int]:
+    """`(sessions, pending, failed)`: the agent's sessions whose index is missing,
+    behind the record or partway through (newest first, `first` — the caller's
+    current session — ahead of all), how many there are in all, and how many
+    could not be indexed. A session never indexed has no mark; one the indexer
+    has fully read since its last write has `source_updated_at >= updated_at` and
+    is skipped without touching its transcript; a chunked one keeps a null stamp
+    until it has caught up. One whose indexing raised recorded the `updated_at`
+    it failed at in `failed_for`: it is left out here (and counted apart) until
+    the session changes."""
     conn = await _conn()
     try:
         rows = await conn.fetch(
@@ -8293,27 +8297,41 @@ async def recall_pending_sessions(agent_id: str, first: str | None,
              where s.agent_id = $1
                and (m.session_id is null or m.source_updated_at is null
                     or s.updated_at > m.source_updated_at)
+               and (m.failed_for is null or s.updated_at > m.failed_for)
              order by (s.id = $2) desc, s.created_at desc, s.id desc
              limit $3
             """,
             agent_id, first or "", limit,
         )
-        return [dict(r) for r in rows], (rows[0]["total"] if rows else 0)
+        failed = await conn.fetchval(
+            """
+            select count(*) from session s join session_recall_mark m on m.session_id = s.id
+             where s.agent_id = $1 and m.failed_for is not null
+               and s.updated_at <= m.failed_for
+            """,
+            agent_id,
+        )
+        return [dict(r) for r in rows], (rows[0]["total"] if rows else 0), failed
     finally:
         await conn.close()
 
 
-async def recall_sync_session(session_id: str, extract) -> int:
-    """Bring ONE session's index up to its record; returns the rows written.
+async def recall_sync_session(session_id: str, extract, max_messages: int | None = None,
+                              max_chars: int | None = None) -> tuple[int, int, int, bool]:
+    """Index ONE CHUNK of one session; returns `(parts written, indexed, total,
+    done)`.
 
-    `extract(run_state, start)` returns `(total_messages, parts)` for the
-    messages from position `start`; a part is `(msg_idx, part_idx, kind,
-    tool_name, body, at)`. Everything runs in one transaction
-    under a per-session advisory lock, so two calls racing on the same session
-    serialise: the second reads the watermark the first advanced and writes
-    nothing. The insert is `on conflict do nothing` as well, for the same
-    reason belt and braces. A record SHORTER than its watermark (it should
-    never be: the record is append-only) is re-indexed from the start."""
+    `extract(run_state, start, max_messages, max_chars)` returns `(total, parts,
+    end)` for the messages from position `start` (a part is `(msg_idx, part_idx,
+    kind, tool_name, body, at)`); the watermark advances to `end`. A session
+    longer than one chunk stays pending (`source_updated_at` is stamped only when
+    `end` reaches `total`) and the next call continues from the watermark.
+    Everything runs in one transaction under a per-session advisory lock, so two
+    calls racing on the same session serialise: the second reads the watermark
+    the first advanced. The insert is `on conflict do nothing` as well, belt and
+    braces. A record SHORTER than its watermark (it should never be: the record
+    is append-only) is re-indexed from the start. A successful chunk clears any
+    recorded failure."""
     conn = await _conn()
     try:
         async with conn.transaction():
@@ -8324,18 +8342,18 @@ async def recall_sync_session(session_id: str, extract) -> int:
                 "select agent_id, run_state, updated_at from session where id = $1",
                 session_id)
             if row is None:
-                return 0
+                return 0, 0, 0, True
             rs = row["run_state"]
             run_state = (json.loads(rs) if isinstance(rs, str) else rs) or {}
             mark = await conn.fetchrow(
                 "select indexed_messages from session_recall_mark where session_id = $1",
                 session_id)
             start = mark["indexed_messages"] if mark else 0
-            total, rows = extract(run_state, start)
+            total, rows, end = extract(run_state, start, max_messages, max_chars)
             if total < start:
                 await conn.execute(
                     "delete from session_recall where session_id = $1", session_id)
-                total, rows = extract(run_state, 0)
+                total, rows, end = extract(run_state, 0, max_messages, max_chars)
             if rows:
                 await conn.executemany(
                     """
@@ -8346,27 +8364,61 @@ async def recall_sync_session(session_id: str, extract) -> int:
                     """,
                     [(session_id, m, pi, row["agent_id"], k, tn, b, at)
                      for (m, pi, k, tn, b, at) in rows])
+            done = end >= total
             await conn.execute(
                 """
                 insert into session_recall_mark
-                    (session_id, agent_id, indexed_messages, source_updated_at, indexed_at)
-                values ($1, $2, $3, $4, now())
+                    (session_id, agent_id, indexed_messages, total_messages,
+                     source_updated_at, indexed_at)
+                values ($1, $2, $3, $4, case when $6::bool then $5::timestamptz end, now())
                 on conflict (session_id) do update
                    set indexed_messages = excluded.indexed_messages,
-                       source_updated_at = excluded.source_updated_at,
+                       total_messages = excluded.total_messages,
+                       source_updated_at = case when $6::bool then excluded.source_updated_at
+                                                else session_recall_mark.source_updated_at end,
+                       failed_for = null, failed_error = null,
                        indexed_at = now()
                 """,
-                session_id, row["agent_id"], total, row["updated_at"])
-            return len(rows)
+                session_id, row["agent_id"], end, total, row["updated_at"], done)
+            return len(rows), end, total, done
+    finally:
+        await conn.close()
+
+
+async def recall_session_updated_at(session_id: str) -> datetime | None:
+    conn = await _conn()
+    try:
+        return await conn.fetchval("select updated_at from session where id = $1", session_id)
+    finally:
+        await conn.close()
+
+
+async def recall_mark_failed(session_id: str, updated_at: datetime, error: str) -> None:
+    """Record that indexing `session_id` raised while it stood at `updated_at`:
+    it is not retried (and not counted as pending) until `updated_at` moves."""
+    conn = await _conn()
+    try:
+        await conn.execute(
+            """
+            insert into session_recall_mark
+                (session_id, agent_id, indexed_messages, failed_for, failed_error)
+            select s.id, s.agent_id, 0, $2, $3 from session s where s.id = $1
+            on conflict (session_id) do update
+               set failed_for = excluded.failed_for, failed_error = excluded.failed_error
+            """,
+            session_id, updated_at, error)
     finally:
         await conn.close()
 
 
 def _recall_tsquery(terms: list[tuple[str, bool]], joiner: str, first_arg: int
-                    ) -> tuple[str, list[str]]:
-    """A tsquery expression over `terms` ((text, negated) pairs): each term is a
-    PHRASE over its normalised words (`DEMO-12` is `demo <-> 12`), positives
-    joined by `joiner` (`&&` or `||`), negated terms excluded."""
+                    ) -> tuple[str, str, list[str]]:
+    """`(query, positives, args)`: a tsquery expression over `terms` ((text,
+    negated) pairs) and the same without its exclusions. Each term is a PHRASE
+    over its normalised words (`DEMO-12` is `demo <-> 12`), positives joined by
+    `joiner` (`&&` or `||`), negated terms excluded. A search must hold only
+    when the POSITIVES are not empty: an exclusion beside nothing is "every part
+    that lacks foo", which matches the whole table."""
     args: list[str] = []
 
     def frag(term: str) -> str:
@@ -8377,10 +8429,11 @@ def _recall_tsquery(terms: list[tuple[str, bool]], joiner: str, first_arg: int
 
     pos = [frag(text) for text, negated in terms if not negated]
     excluded = [f"!!({frag(text)})" for text, negated in terms if negated]
-    expr = f" {joiner} ".join(f"({p})" for p in pos) or "''::tsquery"
+    positives = f" {joiner} ".join(f"({p})" for p in pos) or "''::tsquery"
+    expr = positives
     for e in excluded:
         expr = f"({expr}) && {e}"
-    return expr, args
+    return expr, positives, args
 
 
 async def recall_search(agent_id: str, terms: list[tuple[str, bool]], joiner: str,
@@ -8388,22 +8441,26 @@ async def recall_search(agent_id: str, terms: list[tuple[str, bool]], joiner: st
     """Matching parts of the agent's own sessions, best first. The score is
     `ts_rank_cd` times `heartbeat_weight` when a heartbeat schedule created the
     task that ran the session — a multiplier, so such a session still ranks
-    when nothing else matches."""
-    expr, args = _recall_tsquery(terms, joiner, 4)
+    when nothing else matches. The heartbeat sessions are one set built once per
+    query (a hash join), not a lookup per matching part."""
+    expr, positives, args = _recall_tsquery(terms, joiner, 4)
     conn = await _conn()
     try:
         rows = await conn.fetch(
             f"""
-            with q as (select ({expr}) as q)
+            with q as (select ({expr}) as q, ({positives}) as pq),
+                 hb as (select distinct t.session_id from task t
+                         where t.agent_id = $1 and t.session_id is not null
+                           and t.created_by like 'heartbeat:%')
             select r.session_id, r.msg_idx, r.part_idx, r.kind, r.tool_name, r.body,
-                   ts_rank_cd(r.tsv, q.q, 33) * (case when exists (
-                       select 1 from task t where t.session_id = r.session_id
-                          and t.created_by like 'heartbeat:%') then $2::float8
-                       else 1.0 end) as score,
+                   ts_rank_cd(r.tsv, q.q, 33)
+                     * (case when hb.session_id is not null then $2::float8 else 1.0 end)
+                     as score,
                    s.created_at, s.status, s.mode, {_RECALL_ORIGIN_SQL}
               from q cross join session_recall r
                    join session s on s.id = r.session_id
-             where r.agent_id = $1 and numnode(q.q) > 0 and r.tsv @@ q.q
+                   left join hb on hb.session_id = r.session_id
+             where r.agent_id = $1 and numnode(q.pq) > 0 and r.tsv @@ q.q
              order by score desc, s.created_at desc, r.msg_idx
              limit $3
             """,
@@ -8422,7 +8479,8 @@ async def recall_browse(agent_id: str, limit: int) -> list[dict]:
         rows = await conn.fetch(
             f"""
             select s.id, s.status, s.mode, s.created_at, s.updated_at,
-                   s.closed_reason, coalesce(m.indexed_messages, 0) as messages,
+                   s.closed_reason,
+                   coalesce(m.total_messages, m.indexed_messages, 0) as messages,
                    {_RECALL_ORIGIN_SQL}
               from session s left join session_recall_mark m on m.session_id = s.id
              where s.agent_id = $1
@@ -8445,7 +8503,7 @@ async def recall_session(agent_id: str, session_id: str) -> dict | None:
             f"""
             select s.id, s.status, s.mode, s.created_at, s.updated_at,
                    s.closed_reason, s.exec_failure,
-                   coalesce(m.indexed_messages, 0) as messages,
+                   coalesce(m.total_messages, m.indexed_messages, 0) as messages,
                    {_RECALL_ORIGIN_SQL}
               from session s left join session_recall_mark m on m.session_id = s.id
              where s.id = $1 and s.agent_id = $2

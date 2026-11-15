@@ -155,6 +155,8 @@ async def test_the_widening_is_additive_idempotent_and_respects_history():
         await conn.execute(
             "insert into agent_grant (agent_id, pack, revoked_at, revoked_reason) "
             "values ($1, 'skill-propose', now(), 'operator took it away')", revoked)
+        # the first update after this release: no marker yet (the seed is once-only)
+        await conn.execute("delete from app_setting where key = 'seed:skill-propose-all'")
         await conn.execute(block)
         await conn.execute(block)  # a second run changes nothing
     finally:

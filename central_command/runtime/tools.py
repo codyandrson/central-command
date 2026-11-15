@@ -729,6 +729,9 @@ async def search_my_sessions(
     current = getattr(ctx.deps, "session_id", None)
     try:
         limit = max(1, min(int(limit), 30))
+        # NUL bytes make Postgres refuse the parameter; they carry nothing.
+        query = session_recall.clean_text(query)
+        session_id = session_recall.clean_text(session_id)
         if session_id and session_id.strip():
             sid = session_id.strip()
             if around_message is not None:
