@@ -727,6 +727,57 @@ REGISTRY: list[Capability] = [
         ),
     ),
     Capability(
+        name="memory.note_add",
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="reversible",
+        risk=(
+            "internal, append-only — a note is rendered into every later fresh "
+            "run's system prompt (a private note to its drafter, an operator-"
+            "scope note to every agent but the auditors), so a wrong one steers "
+            "work until it is retired; retiring is a timestamp, one approval away"
+        ),
+        holder="Executor",
+        route="db/repo.py → add_agent_note (retire + insert in one transaction, under the store lock and the scope's character budget)",
+        arguments=["scope", "text", "retire_ids?", "source_quote", "source_session_id",
+                   "quote_source"],
+        description=(
+            "Add ONE note to the note store (DL-216), optionally retiring named "
+            "notes in the same transaction so an agent at its budget swaps in "
+            "one approved action. `scope` is 'private' (the drafter's own, "
+            "rendered only to it) or 'operator' (a standing preference of the "
+            "operator, rendered to every agent but the auditors), written as "
+            "approved. The OWNER is the drafter, supplied server-side from the "
+            "proposal row — never an argument. Built only by `propose_note`, "
+            "which checks the quote against the session record and, for operator "
+            "scope, against words the record attributes to the operator; a "
+            "hand-built draft is refused. Refused at execution, nothing written, "
+            "when the scope's budget would be exceeded or a retire id is not an "
+            "active note the drafter may retire."
+        ),
+    ),
+    Capability(
+        name="memory.note_retire",
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="reversible",
+        risk=(
+            "internal — the note stops rendering into later runs; the row and "
+            "its history stay forever (retirement is a timestamp, never a delete)"
+        ),
+        holder="Executor",
+        route="db/repo.py → retire_agent_note (retired_at + the retiring proposal)",
+        arguments=["note_id", "reason"],
+        description=(
+            "Retire ONE active note: the drafter's own private note, or any "
+            "operator-scope note (the operator asked an agent to forget it). The "
+            "retiring agent is the drafter, supplied server-side. Refused when "
+            "the note is already retired or is another agent's private note."
+        ),
+    ),
+    Capability(
         name="litellm.add_model",
         target_args=("model_name",),
         kind="write",
@@ -2352,6 +2403,31 @@ POLICIES: list[Policy] = [
             "only fail at execution. Now the impossibility is visible at review "
             "time. Advisory like every policy flag — but the Executor's registry "
             "parity remains the hard stop."
+        ),
+    ),
+    Policy(
+        name="A note names only real capabilities",
+        status="enforced",
+        enforced_at="gateway/policy.check_note_content — capability names a proposed note quotes, or writes bare under a real namespace, are checked against the registry at review time and by overrides.review_flags",
+        guard="tests/test_agent_notes.py::test_a_note_naming_an_unknown_capability_is_flagged",
+        description=(
+            "A note is rendered into every later session (DL-216), so a note "
+            "that names a capability the registry does not have programs every "
+            "reader to propose an action that cannot execute — the charter-v2 "
+            "incident with a wider audience. Advisory like every flag; a flagged "
+            "note parks an override."
+        ),
+    ),
+    Policy(
+        name="A note is a fact, not an instruction",
+        status="enforced",
+        enforced_at="gateway/policy.check_note_content — a note that starts with, or consists mostly of, 'always' / 'never' / 'you must' / 'do not' is flagged at review time and by overrides.review_flags",
+        guard="tests/test_agent_notes.py::test_a_note_phrased_as_an_order_is_flagged",
+        description=(
+            "An imperative note is re-read at the start of every session as a "
+            "standing order that overrides the request in front of it (DL-216). "
+            "The flag informs the operator and parks an override; it never "
+            "blocks."
         ),
     ),
     Policy(

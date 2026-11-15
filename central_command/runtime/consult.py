@@ -515,7 +515,7 @@ async def build_advisory_agent(
     from pydantic_ai import DeferredToolRequests
 
     from central_command.runtime.agent import build_charter
-    from central_command.runtime.roster import team_section
+    from central_command.runtime.notes import standing_sections
 
     if not (charter or "").strip():
         raise ValueError(
@@ -529,7 +529,7 @@ async def build_advisory_agent(
         await _consult_model(agent_id, model),
         name=agent_id,
         system_prompt=(
-            build_charter(charter, packs, team_section=await team_section(agent_id))
+            build_charter(charter, packs, team_section=await standing_sections(agent_id))
             + (("\n\n" + skills_catalog) if skills_catalog else "")
             + "\n\n" + _ADVISORY_FRAMING
         ),

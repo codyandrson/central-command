@@ -178,6 +178,12 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # record of why an agent's standing rules changed (GATE-009).
     "charter.update": ArgSpec(required=("agent_id", "content", "rationale")),
     "skill.doc_add": ArgSpec(required=("skill_id",)),
+    # The note store (DL-216): a note is a scope and its text; a retirement
+    # names its note and why. Budget and retire-id checks are world state
+    # (the store changes between propose and approve) and stay Executor-only.
+    "memory.note_add": ArgSpec(required=("scope", "text"),
+                               enums={"scope": ("private", "operator")}),
+    "memory.note_retire": ArgSpec(required=("note_id", "reason")),
     # Not a gated write since story 4.7: task creation is a trigger, and the
     # direct `create_task` tool checks its shape here — the one list.
     "task.create": ArgSpec(required=("agent_id", "instructions")),

@@ -136,10 +136,14 @@ def build_charter(
     `mcp_section` (D-sandbox slice 5) is `packs_mod.mcp_charter_section`'s
     ASYNC output, computed by the caller and passed in — this function stays
     sync, matching the seam `packs`/`capabilities`/`skills_catalog` already
-    use. `team_section` (2026-08-22) is `roster.team_section`'s ASYNC output,
-    same reasoning — a fresh-run caller computes it; a resume caller may leave
-    it empty (the persisted history already carries the roster snapshot the
-    session was proposed under — see the CLAUDE.md system_prompt= note)."""
+    use. `team_section` (2026-08-22) is the fresh run's GENERATED standing
+    sections — since DL-216 `notes.standing_sections`'s ASYNC output: the
+    roster, then the notes block — same reasoning; a fresh-run caller computes
+    it through that one seam (a source walk in tests/test_agent_notes.py fails
+    a builder call that omits it or reaches `roster.team_section` directly);
+    a resume caller may leave it empty (the persisted history already carries
+    the roster and the notes the session was started under — see the
+    CLAUDE.md system_prompt= note)."""
     text = LAYER0 + "\n\n" + (content or _v0(CHARTER))
     if packs is not None:
         text += "\n\n" + packs_mod.charter_section(packs)
@@ -247,7 +251,8 @@ async def build_agent(
     `extra_toolsets`/`mcp_section` (D-sandbox slice 5) are
     `packs_mod.mcp_toolsets_for`/`mcp_charter_section`'s ASYNC output,
     computed by the caller — same reasoning as `capabilities`. `team_section`
-    (2026-08-22) is `roster.team_section`'s ASYNC output, same pattern."""
+    (2026-08-22) is `notes.standing_sections`'s ASYNC output (the roster and,
+    since DL-216, the notes block), same pattern."""
     if packs is None:
         packs = packs_mod.DEFAULT_PACKS["inbox-triage"]
     return Agent(

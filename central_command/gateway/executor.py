@@ -1096,6 +1096,83 @@ async def _skill_doc_add(args: dict, approver: str, proposer: str | None) -> str
     return f"skill {skill_id} document '{doc_key}' added as v{doc['version']}"
 
 
+# --- the note store (DL-216) ---------------------------------------------------
+# The ONLY code that writes a note. The owner is the `proposer` the gateway
+# passes (the proposal row's drafter), never an argument; the budget is read
+# HERE, at execution, because the store can change between propose and approve
+# — the propose-time arithmetic in the proposal is for the reviewer only.
+
+
+async def _memory_note_add(args: dict, approver: str, proposer: str | None) -> str:
+    from central_command import events
+    from central_command.db import repo
+    from central_command.runtime import context
+
+    if not proposer:
+        raise ExecutorError(
+            "memory.note_add: the proposal names no drafting agent - a note "
+            "belongs to the agent that proposed it")
+    scope = args["scope"]
+    # The provenance `propose_note` stamps after checking the quote; the park
+    # seam strips it from any model-authored draft (`proposals.
+    # _keep_only_server_note_stamp`), so a note without it was not built by
+    # the tool and never checked.
+    if not (args.get("source_quote") and args.get("source_session_id")):
+        raise ExecutorError(
+            "memory.note_add: this note was not drafted through propose_note, "
+            "so its quote was never checked - nothing was written")
+    settings_now = await context.load_settings()
+    budget = int(settings_now["note_budget_operator_chars"] if scope == "operator"
+                 else settings_now["note_budget_private_chars"])
+    try:
+        note = await repo.add_agent_note(
+            agent_id=proposer, scope=scope, text=args["text"], budget=budget,
+            retire_ids=list(args.get("retire_ids") or []),
+            proposal_id=_current_proposal_id.get(),
+            source_session_id=args.get("source_session_id"),
+            source_quote=args.get("source_quote"),
+        )
+    except repo.NoteRefused as e:
+        raise ExecutorError(f"memory.note_add: {e}") from e
+    for retired in note["retired"]:
+        await events.emit(
+            "note.retired", ref_id=retired,
+            payload={"agent_id": proposer, "by": note["proposal_id"],
+                     "replaced_by": note["id"]},
+            actor=approver,
+        )
+    await events.emit(
+        "note.added", ref_id=note["id"],
+        payload={"agent_id": proposer, "scope": scope,
+                 "proposal_id": note["proposal_id"], "retired": note["retired"]},
+        actor=approver,
+    )
+    swapped = (f", retiring {', '.join(note['retired'])}" if note["retired"] else "")
+    return f"{scope} note {note['id']} added for {proposer}{swapped}"
+
+
+async def _memory_note_retire(args: dict, approver: str, proposer: str | None) -> str:
+    from central_command import events
+    from central_command.db import repo
+
+    if not proposer:
+        raise ExecutorError(
+            "memory.note_retire: the proposal names no drafting agent")
+    note_id = str(args["note_id"]).strip()
+    try:
+        row = await repo.retire_agent_note(
+            note_id=note_id, proposer=proposer, proposal_id=_current_proposal_id.get())
+    except repo.NoteRefused as e:
+        raise ExecutorError(f"memory.note_retire: {e}") from e
+    await events.emit(
+        "note.retired", ref_id=note_id,
+        payload={"agent_id": proposer, "by": row.get("retired_by"),
+                 "reason": args.get("reason")},
+        actor=approver,
+    )
+    return f"{row['scope']} note {note_id} retired"
+
+
 async def _jira_link_issues(args: dict, approver: str, proposer: str | None) -> str:
     out = await jira.link_issues(args["from_key"], args["to_key"], args["link_type"])
     checked = ("direction verified" if out["link"]["direction_verified"]
@@ -2490,6 +2567,8 @@ HANDLERS = {
     "catalog.tag": _catalog_tag,
     "skill.create": _skill_create,
     "skill.doc_add": _skill_doc_add,
+    "memory.note_add": _memory_note_add,
+    "memory.note_retire": _memory_note_retire,
     "litellm.add_model": _litellm_add_model,
     "litellm.update_model": _litellm_update_model,
     "litellm.delete_model": _litellm_delete_model,

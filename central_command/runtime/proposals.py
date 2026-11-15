@@ -63,6 +63,12 @@ async def park_proposal(
     version the drafting session was last shown goes into the action's
     `base_version`, which the Executor re-checks (epic-small-fixes R24).
 
+    A `memory.note_add`'s provenance stamp (`source_quote`, `source_session_id`,
+    `quote_source`) survives only when `propose_note`'s code built the proposal
+    (`_keep_only_server_note_stamp`); the Executor refuses a note without it,
+    and the stamped quote's evidence entry is recorded as checked
+    (`_note_quote_verdicts`) — on a redraft too (DL-216).
+
     A `skill.doc_add`'s `base_version` survives only when the TOOL built the
     proposal (`_keep_only_server_skill_base`): `propose_skill_correction`
     stamps the version its span was applied to, and a `base_version` the model
@@ -90,6 +96,7 @@ async def park_proposal(
     proposal_id = "prop_" + uuid.uuid4().hex[:12]
     await _stamp_charter_base(session_id, proposal)
     _keep_only_server_skill_base(proposal, server_built=_server_built(metadata))
+    _keep_only_server_note_stamp(proposal, server_built=_server_built(metadata))
 
     if evidence is None and any(
         a.capability.split("@", 1)[0] == "charter.update" for a in proposal.actions
@@ -104,6 +111,11 @@ async def park_proposal(
         # and honest, since nothing was operator-selected for this session.
         evidence = await _verified_evidence(proposal.evidence, signals=[])
 
+    evidence = _note_quote_verdicts(
+        proposal,
+        evidence if evidence is not None else [e.model_dump() for e in proposal.evidence],
+    )
+
     await repo.save_paused_session(
         session_id, agent_id, dump_run_state(result, call.tool_call_id)
     )
@@ -113,9 +125,7 @@ async def park_proposal(
         agent_id=agent_id,
         intent=proposal.intent,
         actions=[a.model_dump() for a in proposal.actions],
-        evidence=(
-            evidence if evidence is not None else [e.model_dump() for e in proposal.evidence]
-        ),
+        evidence=evidence,
         expected_effect=proposal.expected_effect,
         idempotency_key=f"{proposal_id}:0",
         # The agent's own uncertainty, validated by the contract before it is
@@ -203,6 +213,50 @@ def _keep_only_server_skill_base(proposal, *, server_built: bool) -> None:
             action.arguments = {
                 k: v for k, v in action.arguments.items() if k != "base_version"
             }
+
+
+_NOTE_STAMP = ("source_quote", "source_session_id", "quote_source")
+
+
+def _keep_only_server_note_stamp(proposal, *, server_built: bool) -> None:
+    """A `memory.note_add`'s stamp says its quote was checked against the
+    session record (and, for operator scope, against the operator's own
+    recorded words) by `notes.build_note_proposal`. Only that code may set it,
+    so on a proposal the model authored the stamp is dropped — and the Executor
+    then refuses the note, nothing written (DL-216). `propose_action` already
+    hands a hand-built note back in-run; this is the seam's own guarantee."""
+    if server_built:
+        return
+    for action in proposal.actions:
+        if action.capability.split("@", 1)[0] != "memory.note_add":
+            continue
+        args = action.arguments or {}
+        if any(k in args for k in _NOTE_STAMP):
+            action.arguments = {k: v for k, v in args.items() if k not in _NOTE_STAMP}
+
+
+def _note_quote_verdicts(proposal, evidence: list[dict]) -> list[dict]:
+    """Record the verdict on a note's quote: the evidence entry carrying the
+    stamped quote and pointing at the stamped session was checked by the tool
+    before it built the proposal, so it reads `claim_matches_source: True`.
+    Nothing else is touched; a note without a stamp (stripped above) gets no
+    verdict, and the Executor refuses it."""
+    stamped = {
+        ((a.arguments or {}).get("source_quote"),
+         f"session:{(a.arguments or {}).get('source_session_id')}")
+        for a in proposal.actions
+        if a.capability.split("@", 1)[0] == "memory.note_add"
+        and (a.arguments or {}).get("source_quote")
+    }
+    if not stamped:
+        return evidence
+    out = []
+    for e in evidence:
+        d = dict(e)
+        if d.get("kind") == "record" and (d.get("claim"), d.get("source_ref")) in stamped:
+            d["claim_matches_source"] = True
+        out.append(d)
+    return out
 
 
 async def _stamp_charter_base(session_id: str, proposal) -> None:

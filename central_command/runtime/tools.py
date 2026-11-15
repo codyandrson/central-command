@@ -1755,6 +1755,14 @@ def _route_check(ctx: RunContext, proposal: Proposal) -> str | None:
     )
 
 
+# Capabilities whose proposal only a tool's CODE may build: the model-written
+# `proposal` of propose_action & co. may not carry them (DL-216).
+TOOL_BUILT_ONLY = {
+    "memory.note_add": "propose_note",
+    "memory.note_retire": "propose_note_retire",
+}
+
+
 async def _validate_proposal(ctx: RunContext, proposal: Proposal, *,
                              agent_authored: bool) -> None:
     """Reject an invented capability or a malformed action IN-RUN, before the
@@ -1798,6 +1806,15 @@ async def _validate_proposal(ctx: RunContext, proposal: Proposal, *,
                 "the intent was to dismiss (no action needed), do not propose "
                 "anything: finish with a plain-text reply stating why, and the "
                 "control plane records the dismissal for operator review."
+            )
+            continue
+        if agent_authored and name in TOOL_BUILT_ONLY:
+            # A note is never hand-built (DL-216): its quote must be checked
+            # against the session record — and, for operator scope, against
+            # the operator's own recorded words — which only the note tools do.
+            problems.append(
+                f"{name!r} is proposed only with its own tool: use "
+                f"{TOOL_BUILT_ONLY[name]} instead of writing the action yourself"
             )
             continue
         problems.extend(validate_action_args(a.capability, a.arguments))
@@ -3989,6 +4006,68 @@ async def propose_skill_correction(
     out = await build_correction(
         agent_id=agent_id, skill_id=skill_id,
         doc_key=doc_key, find=find, replace=replace, why=why,
+    )
+    if isinstance(out, str):
+        return out
+    raise CallDeferred(metadata={"proposal": out.model_dump(mode="json")})
+
+
+# --- the note store (memory.note_add / memory.note_retire, DL-216) -------------
+
+
+async def propose_note(
+    ctx: RunContext,
+    scope: str,
+    text: str,
+    source_quote: str,
+    retire_ids: list[str] | None = None,
+) -> str:
+    """Propose ONE standing note: a short declarative fact that will be shown
+    to you (scope 'private') or to every agent (scope 'operator') at the start
+    of every later session, once the operator approves it.
+
+    `text` is the fact, written as a fact ("The operator prefers concise
+    replies"), never as an order to yourself ("Always reply concisely").
+    `source_quote` is ONE contiguous span copied verbatim from THIS session
+    that shows the fact; it is re-checked mechanically against the session
+    record before anything is proposed, and a paraphrase, an ellipsis or
+    fragments joined together fail — nothing is proposed and you are told why.
+    For scope 'operator' the span must be the OPERATOR's own recorded words in
+    this session: a chat message they typed, their answer to your question,
+    their rejection feedback or reopen note, or a task they created. Mail,
+    documents, attachments, tool results, another agent's prompt and your own
+    words never qualify. `retire_ids` names notes this one replaces (ids from
+    your STANDING NOTES), retired in the same approval — use it when the
+    scope is at its budget or the new note supersedes an old one.
+    """
+    from central_command.runtime.notes import build_note_proposal
+
+    deps = getattr(ctx, "deps", None)
+    grounding = getattr(deps, "quote_session_id", None)
+    out = await build_note_proposal(
+        agent_id=getattr(deps, "agent_id", None) or "unknown",
+        scope=scope, text=text, source_quote=source_quote, retire_ids=retire_ids,
+        grounding_session_id=grounding or getattr(deps, "session_id", None),
+        # The current run is not persisted until it lands, so its messages
+        # are part of "this session" — unless the quote is grounded elsewhere.
+        live_messages=None if grounding else getattr(ctx, "messages", None),
+    )
+    if isinstance(out, str):
+        return out
+    raise CallDeferred(metadata={"proposal": out.model_dump(mode="json")})
+
+
+async def propose_note_retire(ctx: RunContext, note_id: str, reason: str) -> str:
+    """Propose retiring ONE standing note that no longer holds — your own
+    private note, or an operator-scope note the operator asked to be
+    forgotten. `note_id` is the id shown in your STANDING NOTES; `reason`
+    says why, in a sentence. Retirement is recorded, never a delete, and
+    takes effect once the operator approves it."""
+    from central_command.runtime.notes import build_retire_proposal
+
+    out = await build_retire_proposal(
+        agent_id=getattr(getattr(ctx, "deps", None), "agent_id", None) or "unknown",
+        note_id=note_id, reason=reason,
     )
     if isinstance(out, str):
         return out

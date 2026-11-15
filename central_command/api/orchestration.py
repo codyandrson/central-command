@@ -93,17 +93,20 @@ async def _build_agent(model=None):
     # "unexpected deferred call" the batch validation hands back. The
     # orchestrator proposes a skill correction from its chat lane, which parks
     # proposals, or through session-close reflection.
-    packs = tuple(p for p in packs if p not in ("task-create", "skill-propose"))
+    # note-propose (DL-216) likewise: a note parks a proposal, which a round
+    # cannot land; the orchestrator keeps notes from its chat lane.
+    packs = tuple(p for p in packs if p not in ("task-create", "skill-propose",
+                                                "note-propose"))
     governed = await repo.current_charter(AGENT_ID)
     caps, catalog = await skills_mod.loadout(AGENT_ID)
-    from central_command.runtime.roster import team_section
+    from central_command.runtime.notes import standing_sections
 
     return await build_project_orchestrator(
         model=await _resolve_project_model(model),
         charter=governed["content"] if governed else None,
         packs=packs,
         capabilities=caps, skills_catalog=catalog,
-        team_section=await team_section(AGENT_ID),
+        team_section=await standing_sections(AGENT_ID),
     )
 
 

@@ -24,6 +24,17 @@ governed data in two vocabularies, and NOTHING here changes the world —
     and recorded (`reflection.skill_correction_dropped`), never guessed into
     shape.
 
+  * at most `reflection_max_notes` (default ONE) PRIVATE note per closed
+    session (DL-216): a standing convention about how this agent works,
+    routed to the note store instead of the graph — one lesson goes to ONE
+    store, so a note that repeats an episode of the same reflection is
+    dropped. Only for an agent holding `note-propose`, only inside a distill
+    call that already happens (notes never buy one), never operator scope.
+    The quote is one verbatim span of the session, checked in code by the
+    same builder the agent-facing tool runs (`notes.build_note_proposal`,
+    budget included); a note that fails is dropped and recorded
+    (`reflection.note_dropped`).
+
 The one-per-session nomination cap is structural (the schema field is
 `SelfNomination | None`), not charter prose: it is what keeps the operator's
 queue bounded by session count rather than by agent enthusiasm.
@@ -88,9 +99,16 @@ class SkillCorrection(BaseModel):
     quote: str
 
 
+class ReflectedNote(BaseModel):
+    text: str
+    quote: str
+
+
 class Reflection(BaseModel):
     episodes: list[ReflectedEpisode]
     nomination: SelfNomination | None = None
+    # Private notes (DL-216), bounded in code by `reflection_max_notes`.
+    notes: list[ReflectedNote] = []
     # Its own cap of one, structural like the nomination's (DL-215).
     skill_correction: SkillCorrection | None = None
 
@@ -257,18 +275,46 @@ def _correction_section(skill_texts: dict[str, str]) -> str:
     )
 
 
+def _notes_section(max_notes: int) -> str:
+    """The note part of the distill prompt (DL-216): one lesson, one store."""
+    if max_notes <= 0:
+        return ""
+    return (
+        f"\n\nSTANDING NOTE — AT MOST {max_notes}, AND USUALLY NONE. A lesson is "
+        "EITHER a fact about the world (an episode, above) OR a private standing "
+        "note about how YOU work — never both. Return a note in `notes` only for "
+        "a convention that applies to every session you will ever run regardless "
+        "of the task (how the operator wants your work shaped, a standing way you "
+        "do something); never task progress, anything stale within a week, a "
+        "fact about the world, or a procedure (that is a skill). Write it as a "
+        "declarative fact (\"The operator wants Jira summaries under 80 "
+        "characters\"), never an order to yourself (\"Always keep summaries "
+        "short\"). It is shown only to you, after the operator approves it. An "
+        "operating rule about how you work belongs HERE, not in a 'private' "
+        "episode.\n"
+        "  text — the fact, one or two sentences.\n"
+        "  quote — ONE contiguous span copied verbatim from the transcript that "
+        "shows it, re-checked mechanically; a paraphrase, an ellipsis or joined "
+        "fragments fail and the note is dropped."
+    )
+
+
 def _distill_prompt(
     charter: str, transcript: str, skill_texts: dict[str, str] | None = None,
-    lessons: bool = True,
+    lessons: bool = True, max_notes: int = 0,
 ) -> str:
     """`lessons=False` is an agent that cannot propose episodes (no
-    graph-propose): it is asked only for the skill correction."""
+    graph-propose): it is asked only for the skill correction (and a note,
+    when it may keep one). `max_notes` is 0 unless the agent holds
+    `note-propose` and the setting allows notes."""
     if not lessons:
         return (
             "YOUR SESSION JUST CLOSED. You cannot record lessons in the team's "
             "memory, so return an empty `episodes` list and no nomination; the "
-            "only thing you may return is the skill correction described below."
+            "only thing you may return is the skill correction described below"
+            + (" and a standing note" if max_notes > 0 else "") + "."
             + _correction_section(skill_texts or {})
+            + _notes_section(max_notes)
             + f"\n\nYOUR CHARTER:\n---\n{charter}\n---\n\n"
             f"THE TRANSCRIPT:\n---\n{transcript}\n---"
         )
@@ -296,6 +342,7 @@ def _distill_prompt(
         "reworded one is flagged. \"I was right to do X\" is as valid as \"I "
         "should stop doing Y\". No nomination is fine."
         + (_correction_section(skill_texts) if skill_texts else "")
+        + _notes_section(max_notes)
         + "\n\n"
         f"YOUR CHARTER, for judging what is role-specific:\n---\n{charter}\n---\n\n"
         f"THE TRANSCRIPT:\n---\n{transcript}\n---"
@@ -351,14 +398,14 @@ async def _propose_episode(
     a single run cannot park twice.
     """
     from central_command.runtime.agent import build_hired_agent
-    from central_command.runtime.roster import team_section
+    from central_command.runtime.notes import standing_sections
     from central_command.runtime.run import _run_live
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
     agent = await build_hired_agent(
         agent_id, model=model, charter=charter, packs=("graph-propose",),
         capabilities=caps, skills_catalog=catalog,
-        team_section=await team_section(agent_id),
+        team_section=await standing_sections(agent_id),
     )
     result = await _run_live(
         agent, _episode_prompt(episode, source_session_id, _session_close_time()),
@@ -446,7 +493,7 @@ async def _propose_skill_correction(
     every argument computed here, or it is not parked."""
     from central_command.runtime.agent import build_hired_agent
     from central_command.runtime.converse import land_session
-    from central_command.runtime.roster import team_section
+    from central_command.runtime.notes import standing_sections
     from central_command.runtime.run import _run_live
     from central_command.runtime.skill_corrections import access_refusal, build_correction
 
@@ -480,7 +527,7 @@ async def _propose_skill_correction(
     agent = await build_hired_agent(
         agent_id, model=model, charter=charter, packs=("skill-propose",),
         capabilities=caps, skills_catalog=catalog,
-        team_section=await team_section(agent_id),
+        team_section=await standing_sections(agent_id),
     )
     result = await _run_live(
         agent, _correction_prompt(c, source_session_id), model=model,
@@ -523,6 +570,117 @@ async def _propose_skill_correction(
         evidence=evidence,
         context={"reflection": True, "source_session_id": source_session_id,
                  "skill_correction": True},
+    )
+    return None
+
+
+def _note_prompt(n: ReflectedNote) -> str:
+    return (
+        "You already decided on this standing note when your session closed. "
+        "Record it now, exactly as given — do not re-word it.\n\n"
+        "Call propose_note with EXACTLY these arguments:\n"
+        "  scope        = 'private'\n"
+        f"  text         = {n.text!r}\n"
+        f"  source_quote = {n.quote!r}\n\n"
+        "The quote is checked against the session that closed. If the operator "
+        "REJECTS it, their feedback overrides 'exactly as given' — redraft with "
+        "it incorporated, or close out in text if they say it is not needed."
+    )
+
+
+async def _note_dropped(session_id: str, agent_id: str, n: ReflectedNote, reason: str) -> None:
+    """A note that failed a condition is recorded, never guessed into shape —
+    bookkeeping, it authorises nothing."""
+    await events.emit(
+        "reflection.note_dropped",
+        ref_id=session_id,
+        payload={"agent_id": agent_id, "text": n.text[:300], "reason": reason},
+        actor="system",
+    )
+
+
+def _same_lesson(note_text: str, episodes) -> bool:
+    """One lesson goes to ONE store: a note whose text is, or is inside, an
+    episode this reflection also proposes (or the reverse) is the same lesson
+    twice. Normalised like `claim_supported`."""
+    from central_command.contract.models import _normalize
+
+    n = _normalize(note_text)
+    for e in episodes:
+        b = _normalize(e.episode_body)
+        if n and b and (n in b or b in n):
+            return True
+    return False
+
+
+async def _propose_note(
+    agent_id: str,
+    source_session_id: str,
+    n: ReflectedNote,
+    charter: str,
+    caps,
+    catalog: str,
+    model,
+) -> str | None:
+    """One distilled note -> one gated `memory.note_add` in its OWN session,
+    scope private, grounded in the closed session. Returns a failure note for
+    `reflection.failed`, or None (parked, or dropped and recorded).
+
+    Every condition is code, checked before a model is asked to draft: the
+    builder the agent-facing tool runs (`notes.build_note_proposal`) checks
+    the quote against the closed session's record and the budget. The drafting
+    sub-run is told the closed session as its quote ground (`quote_session_id`,
+    server-set), and its proposal must carry exactly the text computed here."""
+    from pydantic_ai import DeferredToolRequests
+
+    from central_command.runtime.agent import build_hired_agent
+    from central_command.runtime.converse import land_session
+    from central_command.runtime.notes import build_note_proposal, standing_sections
+    from central_command.runtime.run import _run_live
+
+    expected = await build_note_proposal(
+        agent_id=agent_id, scope="private", text=n.text, source_quote=n.quote,
+        grounding_session_id=source_session_id,
+    )
+    if isinstance(expected, str):
+        await _note_dropped(source_session_id, agent_id, n, expected)
+        return None
+    text = expected.actions[0].arguments["text"]
+
+    session_id = "sess_" + uuid.uuid4().hex[:12]
+    agent = await build_hired_agent(
+        agent_id, model=model, charter=charter, packs=("note-propose",),
+        capabilities=caps, skills_catalog=catalog,
+        team_section=await standing_sections(agent_id),
+    )
+    result = await _run_live(
+        agent, _note_prompt(n), model=model,
+        deps=TriageDeps(agent_id=agent_id, session_id=session_id,
+                        quote_session_id=source_session_id),
+        agent_id=agent_id, session_id=session_id,
+    )
+    call = extract_deferred(result)
+    if call is None or classify_deferred(call) != "proposal":
+        await land_session(session_id, agent_id=agent_id)
+        return "standing note: the run produced no proposal"
+    metadata = (result.output.metadata.get(call.tool_call_id)
+                if isinstance(result.output, DeferredToolRequests) else None)
+    proposal = proposal_from_call(call, metadata=metadata)
+    matches = (
+        call.tool_name == "propose_note"
+        and len(proposal.actions) == 1
+        and proposal.actions[0].capability.split("@", 1)[0] == "memory.note_add"
+        and proposal.actions[0].arguments.get("scope") == "private"
+        and proposal.actions[0].arguments.get("text") == text
+        and proposal.actions[0].arguments.get("source_session_id") == source_session_id
+    )
+    if not matches:
+        await land_session(session_id, agent_id=agent_id)
+        return "standing note: the drafted proposal is not the note distilled at close"
+    await park_proposal(
+        session_id=session_id, agent_id=agent_id, result=result, call=call,
+        context={"reflection": True, "source_session_id": source_session_id,
+                 "standing_note": True},
     )
     return None
 
@@ -589,6 +747,10 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
                     skill_texts[sid] = d["content"]
     if not lessons and not skill_texts:
         return
+    # Notes ride a distill call that is happening anyway (DL-216): they never
+    # buy one, and only a note-propose holder is asked for one.
+    max_notes = (max(0, int(settings.reflection_max_notes))
+                 if "note-propose" in granted else 0)
 
     charter = await _charter_context(agent_id)
     distiller = Agent(
@@ -606,7 +768,8 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
     )
     run_session = "sess_" + uuid.uuid4().hex[:12]
     result = await _run_live(
-        distiller, _distill_prompt(charter, transcript, skill_texts, lessons=lessons),
+        distiller, _distill_prompt(charter, transcript, skill_texts, lessons=lessons,
+                                   max_notes=max_notes),
         model=model,
         deps=TriageDeps(agent_id=agent_id, session_id=run_session),
         agent_id=agent_id, session_id=run_session,
@@ -622,8 +785,19 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
     # The graph-propose grant was already checked before the distill call — an
     # agent without it proposes no episode and no nomination here.
     correction = reflection.skill_correction if skill_texts else None
+    kept_notes: list[ReflectedNote] = []
+    for i, n in enumerate(reflection.notes if max_notes else []):
+        if i >= max_notes:
+            await _note_dropped(session_id, agent_id, n,
+                                f"over the per-session cap of {max_notes}")
+        elif _same_lesson(n.text, episodes):
+            await _note_dropped(session_id, agent_id, n,
+                                "the same lesson is also proposed as a graph episode; "
+                                "one lesson goes to one store")
+        else:
+            kept_notes.append(n)
     caps = catalog = None
-    if episodes or correction is not None:
+    if episodes or correction is not None or kept_notes:
         caps, catalog = await skills_mod.loadout(agent_id)
     if episodes:
         for episode in episodes:
@@ -644,6 +818,14 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
             )
         except Exception as exc:  # noqa: BLE001 — recorded with the episode notes
             note = f"skill correction of {correction.skill_id}: {type(exc).__name__}: {exc}"
+        if note:
+            notes.append(note)
+
+    for n in kept_notes:
+        try:
+            note = await _propose_note(agent_id, session_id, n, charter, caps, catalog, model)
+        except Exception as exc:  # noqa: BLE001 — recorded with the episode notes
+            note = f"standing note: {type(exc).__name__}: {exc}"
         if note:
             notes.append(note)
 

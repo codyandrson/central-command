@@ -31,7 +31,7 @@ async def test_it_is_hired_as_a_full_roster_member():
 
     grants = sorted(g["pack"] for g in await repo.list_grants(AGENT_ID)
                     if g["revoked_at"] is None)
-    assert grants == ["ask-operator", "consult", "mcp-propose", "sandbox",
+    assert grants == ["ask-operator", "consult", "mcp-propose", "note-propose", "sandbox",
                       "session-recall", "skill-propose", "task-create", "web-read"]
 
     current = await repo.current_charter(AGENT_ID)

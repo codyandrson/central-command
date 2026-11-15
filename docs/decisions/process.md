@@ -2466,3 +2466,52 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** test: `tests/test_mail_attachments.py`, test: `tests/test_mail_attachments_claim.py`, test: `tests/test_n8n_workflows.py::test_an_invite_delivered_inline_is_listed_with_its_text`, test: `tests/test_n8n_workflows.py::test_the_facade_still_refuses_the_bulk_attachment_flag`, test: `tests/test_exchange.py`
 - **Supersedes:** the "D13: text only" label on the mail façade and the Exchange design's "Attachments … follows the same rule" non-goal (`docs/superpowers/specs/2026-09-25-exchange-native-client-design.md`)
 - **Source:** the 2026-11-14 investigation and bake-off; the operator's rulings of 2026-11-15
+### DL-217 — A small note store beside the graph: two scopes, every write a gated reversible proposal, rendered into every fresh prompt
+
+- **Status:** active
+- **Date:** 2026-11-15
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "A note is written only through the gate, and a note is never a gate."
+- **Why:** The knowledge graph is query-driven: a standing fact nobody queries
+  is never seen, and the operator's preferences have no home there at all,
+  because the operator is never a subject of the graph (FR-31). Comparable
+  agent systems keep a tiny always-loaded core memory beside their searchable
+  store for exactly this, and one of them ships an approve-each-write mode for
+  that core as an option, off by default; here it is the only mode. The
+  operator ruled (2026-11-03, 2026-11-15): a note store beside the graph, two
+  scopes only — `private` (the drafting agent's own notes, rendered only to
+  it) and `operator` (a preference or standing fact about how the operator
+  wants things, rendered to every agent but the auditors); no shared-agent
+  scope, because a shared fact belongs in the graph and a team convention in
+  the charter. DL-150's rejections stand unchanged: no provisional
+  write-now-veto-later memory, and no agent self-editing of memory outside the
+  gate — every note write is a proposal the operator decides. What this adds
+  to DL-173 ("no ungoverned private agent memory"): a second governed memory
+  surface, with the same shape — the scope is a visible field on the proposal,
+  the Executor writes the approved scope, the owner is the server-held drafter
+  — and the class is REVERSIBLE (a note is never edited or deleted, retirement
+  is a timestamp), so an operator override or a graduated auditor may later
+  decide it like any other class. Operator preferences enter the simple way:
+  the operator tells an agent, the agent proposes an operator-scope note
+  quoting the operator's own recorded words, the operator approves it; there
+  is no operator-direct write path. A note is a declarative fact, never an
+  instruction to oneself, because an imperative note is re-read as a standing
+  order that overrides the current request; and a note is never a route to
+  relaxing a gate.
+- **Decision:** One table, `agent_note`, written only by the Executor's
+  `memory.note_add` (optionally retiring named notes in the same transaction,
+  so an agent at its budget swaps in one approved action) and
+  `memory.note_retire`; both default to the human gate and are marked
+  reversible. Budgets are operator-editable (`note_budget_private_chars`
+  2,000 per agent, `note_budget_operator_chars` 1,500 in total, beside the
+  compaction settings) and the Executor is their authority at execution. The
+  `note-propose` tools build the proposal in code: the quote is one verbatim
+  span of the session, and for operator scope one span of words the record
+  attributes to the operator (operator-actor events and operator-created
+  tasks), failing closed everywhere else. Notes render into every fresh run's
+  system prompt through one seam, after the generated capability list, with
+  their ids and usage; the auditors get none. Reflection may route a lesson to
+  a private note instead of the graph (one lesson, one store), at most one per
+  closed session by default, inside a distill call it already makes. The pack
+  is held by every roster agent but the two auditors and the editor.
+- **Enforced:** test: `tests/test_agent_notes.py::test_only_the_executor_writes_a_note`, `tests/test_agent_notes.py::test_the_owner_is_the_gateways_proposer_never_an_argument`, `tests/test_agent_notes.py::test_the_budget_refusal_writes_nothing_and_reads_as_semantic`, `tests/test_agent_notes.py::test_a_swap_retires_and_adds_in_one_approved_action`, `tests/test_agent_notes.py::test_operator_scope_fails_closed_on_world_text`, `tests/test_agent_notes.py::test_operator_scope_fails_closed_on_attachment_text`, `tests/test_agent_notes.py::test_operator_scope_passes_on_a_recorded_chat_turn`, `tests/test_agent_notes.py::test_every_fresh_run_path_renders_the_standing_sections`, `tests/test_agent_notes.py::test_private_notes_render_only_to_their_owner_and_operator_notes_to_all`, `tests/test_agent_notes.py::test_the_widening_is_additive_idempotent_and_never_resurrects`, `tests/test_agent_notes.py::test_reflection_proposes_one_private_note_grounded_in_the_closed_session`; sql: `central_command/db/schema.sql` (the table and the grant block)
+- **Source:** `central_command/runtime/notes.py`; `central_command/runtime/tools.py` (`propose_note`, `propose_note_retire`); `central_command/runtime/packs.py` (`note-propose`); `central_command/runtime/proposals.py`; `central_command/runtime/reflection.py` (`_propose_note`); `central_command/gateway/executor.py` (`_memory_note_add`, `_memory_note_retire`); `central_command/gateway/policy.py` (`check_note_content`); `central_command/db/repo.py` (the note store section); `central_command/api/nerve_gateway.py` (`chat.operator_message`); `central_command/api/routes.py` (`GET /api/agents/{agent_id}/notes`); PRD FR-53; `docs/ARCHITECTURE.md` "The note store"; DL-150; DL-173.

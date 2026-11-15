@@ -89,8 +89,8 @@ async def test_the_ea_is_hired_as_a_full_roster_member():
     # is re-derived from the record, never from memory.
     assert grants == ["activity-read", "ask-operator", "calendar-propose",
                       "calendar-read", "consult", "graph-propose", "graph-read",
-                      "loe-read", "mail-read", "record-read", "session-recall", "skill-propose",
-                      "task-create"]
+                      "loe-read", "mail-read", "note-propose", "record-read", "session-recall",
+                      "skill-propose", "task-create"]
     assert "jira-propose" not in grants
 
     current = await repo.current_charter(AGENT_ID)

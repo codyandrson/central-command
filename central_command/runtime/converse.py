@@ -71,7 +71,7 @@ async def _build(agent_id: str, model, charter: str | None):
     from central_command.runtime import packs as packs_mod
     from central_command.runtime.packs import granted_packs
 
-    from central_command.runtime.roster import team_section as team_section_fn
+    from central_command.runtime.notes import standing_sections as team_section_fn
 
     packs = _conversational_packs(agent_id, await granted_packs(agent_id))
     caps, catalog = await skills_mod.loadout(agent_id)

@@ -351,6 +351,32 @@ async def revoke_mcp_override(agent_id: str, server_id: str, tool_name: str) -> 
     return {"overrides": await repo.list_agent_mcp_overrides(agent_id)}
 
 
+@router.get("/agents/{agent_id}/notes")
+async def list_agent_notes(agent_id: str) -> dict:
+    """The note store as this agent sees it (DL-216), read-only: its own
+    private notes and every operator-scope note, active AND retired, each with
+    the proposal that wrote it (`proposal_id`) and the one that retired it
+    (`retired_by`), plus both budgets and the current usage. Writes happen
+    only through approved `memory.note_add` / `memory.note_retire` proposals —
+    there is no write route here by design."""
+    from central_command.runtime import notes as notes_mod
+
+    if await repo.get_agent(agent_id) is None:
+        raise HTTPException(404, f"unknown agent {agent_id!r}")
+    private = await repo.list_agent_notes(agent_id, scope="private", active_only=False)
+    operator = await repo.list_agent_notes(scope="operator", active_only=False)
+    limits = await notes_mod.budgets()
+    return {
+        "agent_id": agent_id,
+        "rendered": agent_id not in notes_mod.NO_NOTES_AGENTS,
+        "private": private,
+        "operator": operator,
+        "budgets": limits,
+        "usage": {"private": notes_mod.usage(private),
+                  "operator": notes_mod.usage(operator)},
+    }
+
+
 @router.get("/agents/{agent_id}/charter")
 async def get_charter(agent_id: str) -> dict:
     from central_command.runtime.agent import builtin_charter
@@ -2476,6 +2502,12 @@ async def get_proposal(proposal_id: str) -> dict:
                 row["policy_flags"] += policy.check_charter_content(
                     str((a.get("arguments") or {}).get("content", ""))
                 )
+            # A note's TEXT too (DL-216): a capability that does not exist,
+            # and a note phrased as a standing order rather than a fact.
+            if a.get("capability", "").split("@")[0] == "memory.note_add":
+                row["policy_flags"] += policy.check_note_content(
+                    str((a.get("arguments") or {}).get("text", ""))
+                )
 
         # A charter edit is reviewed as a DIFF against the CURRENT charter —
         # the reviewer sees the change itself, never a wall of replacement
@@ -3967,6 +3999,11 @@ class ContextSettingsIn(BaseModel):
     output_headroom_tokens: int | None = Field(default=None, ge=0, le=200_000)
     summarize: bool | None = None
     summarize_threshold: float | None = Field(default=None, ge=0.5, le=1.0)
+    # The note budgets (DL-216): STRICT positive integers — a bool, a float or
+    # a numeric string is refused (422) rather than coerced, because a budget
+    # of `true` would read as 1 and refuse every note.
+    note_budget_private_chars: int | None = Field(default=None, strict=True, ge=1, le=100_000)
+    note_budget_operator_chars: int | None = Field(default=None, strict=True, ge=1, le=100_000)
 
 
 @router.get("/context/settings")

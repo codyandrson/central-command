@@ -357,14 +357,14 @@ async def ingest_and_propose(
     from central_command.runtime import skills as skills_mod
     from central_command.runtime.packs import granted_packs
 
-    from central_command.runtime.roster import team_section
+    from central_command.runtime.notes import standing_sections
 
     caps, catalog = await skills_mod.loadout(AGENT_ID)
     agent = await build_agent(
         model=model, charter=await load_charter(AGENT_ID),
         packs=await granted_packs(AGENT_ID),
         capabilities=caps, skills_catalog=catalog,
-        team_section=await team_section(AGENT_ID),
+        team_section=await standing_sections(AGENT_ID),
     )
     result = await _run_live(
         agent, email_text, model=model, deps=deps, agent_id=AGENT_ID, session_id=session_id,
@@ -815,7 +815,7 @@ async def coach_loadout() -> dict:
 
     from central_command.runtime import packs as packs_mod
 
-    from central_command.runtime.roster import team_section
+    from central_command.runtime.notes import standing_sections
 
     charter = await load_charter(COACH_ID) or builtin_charter(COACH_ID)
     packs = await granted_packs(COACH_ID)
@@ -824,7 +824,7 @@ async def coach_loadout() -> dict:
             "skills_catalog": catalog,
             "mcp_toolsets": await packs_mod.mcp_toolsets_for(COACH_ID, packs),
             "mcp_section": await packs_mod.mcp_charter_section(COACH_ID, packs),
-            "team_section": await team_section(COACH_ID)}
+            "team_section": await standing_sections(COACH_ID)}
 
 
 async def build_coach_agent(loadout: dict, model=None):
@@ -1009,7 +1009,7 @@ async def run_task(
     from central_command.runtime import packs as packs_mod
     from central_command.runtime.packs import granted_packs
 
-    from central_command.runtime.roster import team_section as team_section_fn
+    from central_command.runtime.notes import standing_sections as team_section_fn
 
     packs = await granted_packs(agent_id)
     caps, catalog = await skills_mod.loadout(agent_id)

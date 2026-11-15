@@ -502,7 +502,8 @@ async def _granted_capabilities(agent_id: str) -> set[str]:
 async def review_flags(proposal_row: dict, granted: set[str] | None = None) -> str:
     """Why a reviewer would have seen this proposal flagged, as the park
     reason, or "" when it is clean. Calls the SAME checks the Inbox shows
-    (`policy.check_actions`, `check_grants`, `check_charter_content`), the
+    (`policy.check_actions`, `check_grants`, `check_charter_content`,
+    `check_note_content`), the
     contract's shape check, and the evidence's RECORDED quote verdict:
     `claim_matches_source` False parks, None (not checked) does not."""
     from central_command.gateway import policy
@@ -515,6 +516,9 @@ async def review_flags(proposal_row: dict, granted: set[str] | None = None) -> s
         if _capability(a) == "charter.update":
             flags += policy.check_charter_content(
                 str((a.get("arguments") or {}).get("content", "")))
+        if _capability(a) == "memory.note_add":
+            flags += policy.check_note_content(
+                str((a.get("arguments") or {}).get("text", "")))
     if flags:
         f = flags[0]
         return f"policy flag {f['policy']}: {f['problem']}"
@@ -1054,6 +1058,10 @@ PARK_SITES: dict[str, tuple[str, str]] = {
         "the episode's case: the skill correction is parked by the same "
         "background reflection off close_session, with no API-tier landing; "
         "its proposal is evaluated by the startup override_sweep"),
+    "runtime/reflection.py:_propose_note": (SWEEP_ONLY,
+        "the episode's case: a standing note is parked by the same background "
+        "reflection off close_session, with no API-tier landing; its proposal "
+        "is evaluated by the startup override_sweep"),
     "gateway/gateway.py:_park_redraft": (EXEMPT,
         "a redraft is recorded unevaluated at the park (story 16)"),
     "gateway/gateway.py:finish_decision_resume": (EXEMPT,

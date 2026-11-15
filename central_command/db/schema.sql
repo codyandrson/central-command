@@ -1808,3 +1808,63 @@ update agent set deviations = replace(deviations,
         'Holds no propose tools but skill-propose (DL-215: a gated correction to a skill it used) and no write path')
  where id = 'orchestrator'
    and deviations like '%Holds NO propose tools and no write path%';
+
+-- The note store (DL-216, FR-53; the operator's rulings of 2026-11-03 and
+-- 2026-11-15): a small, always-in-context store beside the knowledge graph,
+-- rendered into every fresh run's system prompt (`runtime/notes.py`). Two scopes
+-- only: `private` (the drafting agent's own notes, rendered only to it) and
+-- `operator` (a preference or standing fact about how the operator wants things,
+-- rendered to every agent but the auditors). EVERY write is a gated proposal
+-- (`memory.note_add`, `memory.note_retire`) executed by the Executor after
+-- approval, so the class is REVERSIBLE by construction: a note is never edited
+-- and never deleted — retirement is a timestamp plus the retiring proposal.
+-- `agent_id` is the DRAFTER (the gateway's proposer, never an argument); for
+-- `private` it is also the only reader. `origin` is server-set: `agent` today;
+-- a later operator-direct origin needs no migration (no check constraint).
+create table if not exists agent_note (
+    id                text primary key,              -- note_ + hex
+    agent_id          text not null,
+    scope             text not null check (scope in ('private', 'operator')),
+    text              text not null,
+    origin            text not null default 'agent',
+    proposal_id       text,
+    source_session_id text,
+    source_quote      text,
+    created_at        timestamptz not null default now(),
+    retired_at        timestamptz,
+    retired_by        text                           -- the retiring proposal
+);
+create index if not exists agent_note_owner_idx on agent_note (agent_id, scope)
+    where retired_at is null;
+create index if not exists agent_note_scope_idx on agent_note (scope)
+    where retired_at is null;
+
+-- note-propose for every roster agent but the auditors and the editor (DL-216,
+-- the operator's ruling of 2026-11-15). The skill-propose widening's shape
+-- exactly (DL-215, after the story 4.9 task-create block): "the roster" =
+-- ACTIVE, `role <> ''`, holding at least one ACTIVE grant; the auditor and the
+-- graph auditor are excluded by name (they re-derive decisions independently
+-- and must not anchor on standing notes), and so is the editor (its charter
+-- says it holds no propose capability of any kind). A revoked note-propose row
+-- is never resurrected (`on conflict do nothing` meets it), a re-run finds
+-- nothing new, and an agent hired after this runs gets the pack from its
+-- template. Both members of the pack are gated proposals. Applied by the
+-- updater's schema phase at release; nothing in the app process runs it.
+insert into agent_grant (agent_id, pack, granted_by)
+select distinct g.agent_id, 'note-propose', 'seed:note-propose-all'
+  from agent_grant g
+  join agent a on a.id = g.agent_id
+ where g.revoked_at is null
+   and a.status = 'ACTIVE'
+   and a.role <> ''
+   and a.id not in ('auditor', 'graph-auditor', 'editor')
+on conflict (agent_id, pack) do nothing;
+
+-- The orchestrator's deviation text names the propose packs it holds since
+-- DL-215; it holds one more since DL-216. Rewritten in place on a row that
+-- carries the DL-215 wording; a re-run matches nothing.
+update agent set deviations = replace(deviations,
+        'but skill-propose (DL-215: a gated correction to a skill it used) and no write path',
+        'but skill-propose (DL-215: a gated correction to a skill it used) and note-propose (DL-216: a gated standing note) and no write path')
+ where id = 'orchestrator'
+   and deviations like '%a skill it used) and no write path%';

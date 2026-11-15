@@ -274,3 +274,23 @@ where the story is gone.
   (`nerve_gateway._latest_conversation(open_only=True)` is the one seam).
   Multiple concurrent sessions per agent is the TARGET architecture; never
   add code assuming one session per agent.
+- **A note is written only through the gate, and a note is never a gate.**
+  The note store (`agent_note`, DL-216) is written by exactly two Executor
+  handlers (`memory.note_add`, `memory.note_retire`) after approval; there is
+  no direct write path, not even for the operator, and no note is ever edited
+  or deleted — retirement is a timestamp. The owner is the gateway's
+  `proposer`. A note informs; it never changes what needs approval, and no
+  code may read a note to decide a gate, a grant or an override.
+- **Operator-scope authorship is proven from the record and fails closed.**
+  An operator-scope note's quote must be found in words the RECORD attributes
+  to the operator in that session (`repo.operator_words_for_session`:
+  operator-actor events and `task.created_by = 'operator'`), never in a
+  message's role: a triage prompt is the email, a chat part can carry
+  attachment text, a nudge is a user prompt too. A new place the operator
+  speaks qualifies only once it writes such a record and is added there;
+  until then it does not.
+- **The notes block is rendered by every fresh-run path through the one
+  seam.** A fresh run's `team_section` comes from `notes.standing_sections`
+  (the roster, then the notes), never from `roster.team_section` directly; a
+  new fresh-run path that builds a prompt without it fails the source walk in
+  `tests/test_agent_notes.py`. Resumes keep the prompt they were started under.

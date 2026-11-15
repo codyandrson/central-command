@@ -140,7 +140,7 @@ async def run_document(
     session_id = "sess_" + uuid.uuid4().hex[:12]
     deps = TriageDeps(agent_id=AGENT_ID, session_id=session_id)
 
-    from central_command.runtime.roster import team_section
+    from central_command.runtime.notes import standing_sections
 
     resolved = await _resolve_model(model)
     packs = await granted_packs(AGENT_ID)
@@ -156,7 +156,7 @@ async def run_document(
         skills_catalog=catalog,
         extra_toolsets=await packs_mod.mcp_toolsets_for(AGENT_ID, packs),
         mcp_section=await packs_mod.mcp_charter_section(AGENT_ID, packs),
-        team_section=await team_section(AGENT_ID),
+        team_section=await standing_sections(AGENT_ID),
     )
 
     result = await _run_live(

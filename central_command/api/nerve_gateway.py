@@ -799,6 +799,23 @@ async def _chat_send(params: dict, notify) -> dict:
         )
         raise HTTPException(422, exc.message) from exc
 
+    # The operator's TYPED words, on the record before the turn they start
+    # (DL-216). This event is the one place the record attributes a chat turn
+    # to the operator: the transcript cannot, because a user-prompt part may
+    # also carry extracted attachment text (appended just below) or a system
+    # nudge (`heartbeat/actions._nudge_discussion`). An operator-scope note's
+    # quote is checked against it (`repo.operator_words_for_session`). A fresh
+    # lane gets its id here so the event can name it.
+    if opener_agent:
+        target_session = "sess_" + uuid.uuid4().hex[:12]
+    if text:
+        await events.emit(
+            "chat.operator_message",
+            ref_id=target_session,
+            payload={"agent_id": agent_for_model, "text": text},
+            actor="operator",
+        )
+
     if attached:
         text = f"{text}\n\n{attached}" if text else attached
         # Provenance on the AUDIT surface, not just inside the transcript: the
@@ -834,7 +851,8 @@ async def _chat_send(params: dict, notify) -> dict:
         await lifecycle("start")
         try:
             if opener_agent:
-                out = await start_conversation(opener_agent, message=text)
+                out = await start_conversation(
+                    opener_agent, message=text, session_id=target_session)
             else:
                 out = await conversation_turn(target_session, text)
         except Exception as exc:  # surfaced to this cockpit, never swallowed
@@ -858,7 +876,8 @@ async def _chat_send(params: dict, notify) -> dict:
             await overrides.decide_landed(out)
 
     asyncio.create_task(_run())
-    return {"runId": target_session or f"new:{opener_agent}", "status": "started"}
+    return {"runId": f"new:{opener_agent}" if opener_agent else target_session,
+            "status": "started"}
 
 
 async def _chat_abort(params: dict, notify) -> dict:

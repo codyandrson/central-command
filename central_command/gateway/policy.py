@@ -234,3 +234,67 @@ def check_charter_content(content: str) -> list[dict]:
                 ),
             })
     return flags
+
+
+# --- the note store (DL-216) ---------------------------------------------------
+# A note is a FACT, never an instruction to oneself: an imperative note is
+# re-read at the start of every later session as a standing order that
+# overrides the current request. Simple on purpose — it informs the reviewer
+# (and parks an override), it never blocks.
+_ORDER_OPENERS = ("always", "never", "you must", "do not", "don't")
+_SENTENCE_SPLIT = re.compile(r"[.!?;\n]+")
+_DOTTED_NAME_RE = re.compile(r"\b([a-z]+)\.([a-z_]+)\b")
+
+
+def _is_order(sentence: str) -> bool:
+    s = re.sub(r"^[\s\-*•>\"'(]+", "", sentence.lower())
+    return any(s == o or s.startswith(o + " ") for o in _ORDER_OPENERS)
+
+
+def note_is_a_standing_order(text: str) -> bool:
+    """Does the note START with, or consist mostly of, an order ("always",
+    "never", "you must", "do not")?"""
+    sentences = [x for x in _SENTENCE_SPLIT.split(text or "") if x.strip()]
+    if not sentences:
+        return False
+    orders = sum(1 for x in sentences if _is_order(x))
+    return _is_order(sentences[0]) or orders * 2 > len(sentences)
+
+
+def check_note_content(text: str) -> list[dict]:
+    """Review-time flags on a proposed note (DL-216), applied wherever
+    `check_charter_content` is: a capability the note names that the registry
+    does not have — quoted in the charter shape, or written bare under a real
+    capability namespace (`jira.dismiss`) — and a note phrased as a standing
+    order. Advisory, like every flag."""
+    from central_command.gateway.capabilities import REGISTRY
+
+    flags: list[dict] = []
+    names = {c.name for c in REGISTRY}
+    namespaces = {n.split(".", 1)[0] for n in names}
+    cited = list(CHARTER_CAPABILITY_RE.findall(text or ""))
+    cited += [f"{a}.{b}" for a, b in _DOTTED_NAME_RE.findall((text or "").lower())
+              if a in namespaces]
+    for name in dict.fromkeys(cited):
+        if name not in names:
+            flags.append({
+                "policy": "note-references-real-capabilities",
+                "capability": name,
+                "problem": (
+                    f"the note names capability {name!r}, which is not in the "
+                    "capability registry — an agent following it would propose "
+                    "an action that cannot execute"
+                ),
+            })
+    if note_is_a_standing_order(text):
+        flags.append({
+            "policy": "note-is-a-fact-not-an-instruction",
+            "problem": (
+                "a note is a fact, not an instruction: this one reads as a "
+                "standing order (\"always\", \"never\", \"you must\", \"do "
+                "not\"), and every later session would re-read it as an order "
+                "overriding the request in front of it — restate it as a fact "
+                "(\"The operator prefers …\")"
+            ),
+        })
+    return flags

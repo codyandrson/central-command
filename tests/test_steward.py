@@ -131,8 +131,8 @@ async def test_ensure_registered_is_idempotent_and_hires_a_full_roster_member():
     # which lineage a new one supersedes — gated like everything else.
     # task-create added at story 4.9 (every active agent but the auditor).
     assert sorted(grants) == ["ask-operator", "catalog-propose", "consult",
-                              "graph-propose", "graph-read", "session-recall",
-                              "skill-propose", "task-create", "web-read",
+                              "graph-propose", "graph-read", "note-propose",
+                              "session-recall", "skill-propose", "task-create", "web-read",
                               "web-search"]
     # Slice 1 grants no task-propose and no jira packs.
     assert "task-propose" not in grants

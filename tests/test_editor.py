@@ -54,11 +54,12 @@ async def test_it_is_not_seeded_in_the_schema():
     from pathlib import Path
 
     schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
-    # The one mention allowed is an EXCLUSION, not a seed: DL-215's
-    # skill-propose widening leaves the editor out by name (it holds no
-    # propose pack by design), which writes nothing about the editor's row.
+    # The only mentions allowed are EXCLUSIONS, not seeds: DL-215's
+    # skill-propose and DL-216's note-propose widenings leave the editor out by
+    # name (it holds no propose pack by design), which writes nothing about the
+    # editor's row.
     exclusion = "and a.id not in ('auditor', 'graph-auditor', 'editor')"
-    assert schema.count(exclusion) == 1
+    assert schema.count(exclusion) == 2
     assert f"'{AGENT_ID}'" not in schema.replace(exclusion, "")
 
 

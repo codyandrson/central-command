@@ -212,7 +212,7 @@ def stamped_dependencies(exc: BaseException | None) -> tuple[str, ...]:
 # - `mail.*` and `email.*` ride the n8n façade;
 # - `autodiscovery.skip` reads the proxy's catalog;
 # - `mcp.*` runs in the sandbox pod;
-# - `catalog`, `charter`, `skill`, `loe`, `work` write Postgres only (`local`);
+# - `catalog`, `charter`, `skill`, `memory`, `loe`, `work` write Postgres only (`local`);
 # - `web.fetch` is the open web, not a dependency (`()`).
 
 
@@ -266,6 +266,7 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
             "mcp.server_remove mcp.tool_call"),
     **_each((LOCAL,),
             "catalog.tag charter.update skill.create skill.doc_add "
+            "memory.note_add memory.note_retire "
             "loe.record_checkin loe.create loe.update loe.list work.bulk_dismiss"),
 }
 

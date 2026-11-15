@@ -152,7 +152,7 @@ async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dic
     )
     from central_command.runtime.packs import granted_packs
     from central_command.runtime.proposals import park_proposal
-    from central_command.runtime.roster import team_section
+    from central_command.runtime.notes import standing_sections
     from central_command.runtime.run import _run_live, _total_tokens
 
     await ensure_registered()
@@ -171,7 +171,7 @@ async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dic
         skills_catalog=catalog,
         extra_toolsets=await packs_mod.mcp_toolsets_for(AGENT_ID, packs),
         mcp_section=await packs_mod.mcp_charter_section(AGENT_ID, packs),
-        team_section=await team_section(AGENT_ID),
+        team_section=await standing_sections(AGENT_ID),
     )
 
     result = await _run_live(

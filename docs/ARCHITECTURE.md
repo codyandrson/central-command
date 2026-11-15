@@ -128,8 +128,8 @@ Rows for the same package are grouped by what the modules are for.
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py` (the cap is `settings.attachment_max_bytes`, `CC_ATTACHMENT_MAX_BYTES`, default 50 MiB, read at call time; a validator refuses a cap whose base64 size would pass the transport ceiling `config.WS_MAX_SIZE_BYTES`, the `--ws-max-size` both API launchers, the k3s unit and the single-node `boot.sh`, pass uvicorn), `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (98 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `rerun.py` (`rerun_session`, `eligibility`), `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
-| `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `session_recall.py` (the episodic-recall index and `search_my_sessions`' four shapes), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic per-agent doubles `resolve_model` swaps in under `settings.test_model`, which only the test suite sets; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
+| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (100 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `rerun.py` (`rerun_session`, `eligibility`), `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
+| `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `session_recall.py` (the episodic-recall index and `search_my_sessions`' four shapes), `notes.py` (the note store's one rendering seam `standing_sections` and the `propose_note` / `propose_note_retire` builders, DL-216), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic per-agent doubles `resolve_model` swaps in under `settings.test_model`, which only the test suite sets; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The agents, one module per entry point and one per built-in charter ("v0"). Several agents have no run path of their own: they are tasked (`run_task`), conversed with or consulted. Agents: EA, knowledge steward, editor, Jira expert, Confluence expert, LiteLLM manager, MCP manager, wiki agent, coach, orchestrator (a router; holds no `propose_*` tools), and the two auditors and the graph curator (charters only) | `ea.py`, `ea_profile.py`, `steward.py`, `steward_profile.py`, `editor.py`, `editor_profile.py`, `jira_expert.py`, `confluence_expert.py`, `litellm_manager.py`, `litellm_manager_profile.py`, `mcp_manager.py`, `mcp_manager_profile.py`, `wiki_agent.py`, `coach_profile.py`, `orchestrator.py`, `orchestrator_profile.py`, `auditor_profile.py`, `graph_auditor_profile.py`, `graph_curator_profile.py` | [models](../.claude/rules/models.md) |
@@ -416,6 +416,102 @@ process's environ.
   same as the episodes': reflection reads the agent's grants first, and the
   parked capability is one the agent holds, so the Inbox raises no
   outside-the-grants flag.
+- **The note store: a few approved notes in every fresh prompt** (DL-216, FR-53).
+  The graph is query-driven, so a standing fact nobody queries is never seen,
+  and the operator is never its subject (FR-31); the note store is the small,
+  always-loaded complement. One table, `agent_note` (`note_` + hex id; `agent_id`
+  the DRAFTER and, for `private`, the only reader; `scope` `private` |
+  `operator`, a check constraint; `text`; server-set `origin`, `agent` today;
+  `proposal_id`, `source_session_id`, `source_quote`; `created_at`; `retired_at`
+  and `retired_by`, the retiring proposal). Append-only: no update of `text`, no
+  delete; retirement is a timestamp, so the class is reversible and an override
+  or a graduated auditor may later decide it like any other.
+  - **Two capabilities, both `human`, both reversible:** `memory.note_add`
+    (`scope`, `text`, optional `retire_ids`, plus the stamp below) and
+    `memory.note_retire` (`note_id`, `reason`), with `ARG_SPECS` rows, `local`
+    dependencies and Executor handlers that are the store's only writers
+    (`repo.add_agent_note`, `repo.retire_agent_note`; a source walk pins it).
+    The owner is the gateway's `proposer`, never an argument. `note_add` retires
+    the named notes and inserts the new one in ONE transaction under one
+    advisory lock, and refuses, nothing written, when the scope's usage would
+    pass its budget — the Executor is the authority, because the store can
+    change between propose and approve. The refusal is a plain `ExecutorError`
+    (semantic: FAILED, the drafter redrafts); counts are written `<n>chars` so
+    the text classifier can never read a 429. A `retire_id` must be an ACTIVE
+    note the proposer may retire: its own private note or any operator note.
+  - **Budgets** are two keys of the `context_settings` app setting, beside
+    compaction: `note_budget_private_chars` (2,000, per agent) and
+    `note_budget_operator_chars` (1,500, all operator notes together),
+    accepted by `PUT /api/context/settings` only as strict positive integers.
+  - **The tools** (`note-propose`: `propose_note(scope, text, source_quote,
+    retire_ids)`, `propose_note_retire(note_id, reason)`) build the proposal in
+    code (`runtime/notes.py`). `source_quote` is one contiguous span, checked
+    with `claim_supported` per part of THIS session's record (persisted plus
+    `ctx.messages`), excluding the system prompt, a compaction summary and the
+    agent's own words (text, thinking, tool-call arguments — the `propose_note`
+    call itself included). An ellipsis is refused outright. A failure is handed
+    back in-run and nothing parks. The tool stamps `source_quote`,
+    `source_session_id` and `quote_source` on the action and checks the budget
+    for the reviewer's arithmetic in `expected_effect`; `park_proposal` keeps
+    the stamp only on a tool-built proposal and records the quote's verdict
+    (`_note_quote_verdicts`, a redraft included), `propose_action` hands a
+    hand-built `memory.*` action back, and the Executor refuses an unstamped
+    note.
+  - **Operator authorship is read from the record and fails closed.** An
+    operator-scope quote must be found in ONE text that
+    `repo.operator_words_for_session` attributes to the operator in this
+    session: a `chat.operator_message` event (actor `operator`, emitted by
+    `nerve_gateway._chat_send` with the TYPED words only, before attachment
+    text is appended), an `orchestration.item_answered` answer of an ask of
+    this session or that ask's discussion-lane chat messages, the feedback of
+    a `proposal.decided` rejection of this session's proposal, the note of a
+    `work.reopened` on a work item this session handled, or the instructions of
+    a task this session ran whose `created_by` is exactly `operator`. A message
+    role proves nothing (a triage prompt IS the email; a chat part can carry
+    `<operator-attachment>` text; a heartbeat nudge and a re-run's copied
+    opening are user prompts too), so everything else — mail, documents,
+    attachments, tool results, another agent's task prompt, the agent's own
+    words, legacy tasks with no `created_by` — is refused with a sentence that
+    says to use `private` or ask the operator.
+  - **Rendering: one seam.** `notes.standing_sections(agent_id)` returns the
+    roster (`roster.team_section`) followed by the notes block, and every
+    fresh-run path passes it as `build_charter`'s `team_section`, so the block
+    lands after the generated capability list: the operator notes (oldest
+    first), then the agent's own private notes, each line `- [note_id] text`,
+    each group headed with its usage (`[1,474 of 1,500 chars]`), under one
+    framing line (approved facts and preferences that do not override the
+    operator's current request, the charter, or any gate). An empty store
+    renders nothing; the auditors get no block (`NO_NOTES_AGENTS`); a resume
+    keeps the prompt its session was started under. The routing classifier
+    (`orchestrator.build_orchestrator`) and the reflection distiller are not
+    agent sessions and build no charter. `tests/test_agent_notes.py` walks the
+    source: nothing but `runtime/notes.py` may reach `roster.team_section`,
+    and every call to a prompt builder must pass the standing sections unless
+    it is the resume factory `build_agent_for`.
+  - **Review flags** (`policy.check_note_content`, in the Inbox review and
+    `overrides.review_flags`, advisory): a note naming a capability the
+    registry does not have, and a note that starts with or consists mostly of
+    "always", "never", "you must", "do not" ("a note is a fact, not an
+    instruction").
+  - **Who holds the pack:** every roster agent but the auditor, the graph
+    auditor and the editor (the skill-propose widening's shape, at the end of
+    `schema.sql`; never resurrects a revoked grant), and every hiring loadout
+    but the editor's. The orchestrator's project rounds drop it and a consult
+    sub-run never offers it (`NON_ADVISORY_TOOLS`).
+  - **Reflection** asks a `note-propose` holder for at most
+    `CC_REFLECTION_MAX_NOTES` (default 1; 0 is off) PRIVATE notes inside the
+    distill call it already makes — notes never buy one. A lesson is a world
+    fact (an episode) or a standing convention (a note), never both: a note
+    whose text repeats an episode of the same reflection is dropped. Each note
+    goes through `build_note_proposal` grounded in the closed session
+    (`TriageDeps.quote_session_id`, server-set), and a failure is recorded as
+    `reflection.note_dropped` `{agent_id, text, reason}`; a passing one is
+    drafted by `_propose_note` in its own session and parked only if it is the
+    note distilled at close.
+  - **Read API:** `GET /api/agents/{agent_id}/notes` — the agent's private
+    notes and every operator note, active and retired, with `proposal_id`,
+    `retired_by` and timestamps, plus both budgets and the usage. No write
+    route exists. Events: `note.added`, `note.retired` (actor the approver).
 - **The Executor replays by cursor.** The completed-actions list is the
   cursor, so a half-landed non-idempotent write may be applied twice on retry;
   façade idempotency keys are the owed fix (PRD §6.2).
@@ -746,6 +842,7 @@ stateDiagram-v2
   | `api/orchestration.py` `_settle_consult_resume` | `orchestration.resume_consult_wait` and `resume_parked_session` (`after=consulted`) |
   | `runtime/reflection.py` `_propose_episode` | none inline (a background task off `close_session` with no API-tier landing): the startup sweep |
   | `runtime/reflection.py` `_propose_skill_correction` | the same: the startup sweep |
+  | `runtime/reflection.py` `_propose_note` | the same: the startup sweep |
   | `gateway/gateway.py` `_park_redraft` | exempt: recorded unevaluated (`redraft`) |
   | `gateway/gateway.py` `finish_decision_resume` | exempt: recorded unevaluated (`follow_on`) |
 
@@ -1062,7 +1159,7 @@ draft step, no separate invitation step and no mail trash.
 - **Event log.** `events.emit()` writes the row to Postgres, then fans out to
   in-process subscribers; the SSE stream (`GET` stream route in
   `api/routes.py`) and the cockpit's `/ws` push frames are projections of the
-  table, never a parallel channel. 180 distinct event types are emitted today
+  table, never a parallel channel. 184 distinct event types are emitted today
   (recounted from `emit(...)` call sites by the guard; dynamic kinds such as
   bridged log records are not counted). Ordering rule: an event that
   *authorises* something is written before the thing it authorises.
@@ -1251,6 +1348,7 @@ Runs with no landing tail keep their unit-level DOWN path:
 | Reflection | `reflection._reflect` | the next closed conversation reflects again |
 | Reflection episode | `reflection._propose_episode` | the startup audit/reflection sweep |
 | Reflection skill correction | `reflection._propose_skill_correction` | the startup audit/reflection sweep |
+| Reflection standing note | `reflection._propose_note` | the startup audit/reflection sweep |
 | Routing recommendation | `orchestrator.recommend` | the operator asks again; nothing is lost |
 | Consult sub-run | `tools.consult_agent` | not a `_run_live` run: the outage re-raises and the ASKER parks |
 
