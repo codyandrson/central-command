@@ -1674,3 +1674,75 @@ alter table work_item add column if not exists parked_at timestamptz;
 update work_item
    set parked_at = coalesce(claimed_at, enrolled_at)
  where state = 'DISMISS_PENDING' and parked_at is null;
+
+-- Episodic recall (FR-52, DL-214, 2026-11-15): a full-text index over an agent's
+-- OWN past sessions, kept beside the record and DERIVED from it. The transcript
+-- stays in `session.run_state` (append-only, never altered); these two tables
+-- are a rebuildable projection of it, so dropping both loses nothing — the
+-- next `search_my_sessions` call re-indexes lazily from `run_state`.
+--
+-- `session_recall` holds one row per message PART worth recalling: prompt text,
+-- the agent's own text, tool calls (name + compact arguments) and tool returns.
+-- The system prompt and thinking parts are never indexed. `msg_idx` is the
+-- message's position in `durable.full_messages` (archived + live window), so
+-- it names the same message for as long as the record is append-only.
+--
+-- The text-search configuration is `simple` on purpose, over text whose
+-- identifier separators (- _ / . @ :) are turned into spaces: transcripts are
+-- full of issue keys (DEMO-12), uuids, order numbers and e-mail addresses, and
+-- the `english` configuration stems and drops words while the stock parser
+-- reads `DEMO-12` as `demo` and `-12` (a signed number), so a search for `12`
+-- or `0042` of `ORD-2026-0042` found nothing. The tool applies the same
+-- substitution to a query and phrase-matches the pieces. Change the expression
+-- here and `recall_sep` in runtime/session_recall.py together: the table is
+-- derived, so a change means dropping `session_recall` and
+-- `session_recall_mark` (the next call re-indexes). A generated column is
+-- never altered in place by `create table if not exists`.
+create table if not exists session_recall (
+    session_id  text not null references session (id) on delete cascade,
+    msg_idx     int  not null,
+    part_idx    int  not null,
+    agent_id    text not null,
+    -- prompt | agent | tool_call | tool_return
+    kind        text not null,
+    tool_name   text,
+    body        text not null,
+    at          timestamptz,
+    tsv         tsvector generated always as
+                  (to_tsvector('simple', regexp_replace(body, '[-_/.@:]+', ' ', 'g'))) stored,
+    primary key (session_id, msg_idx, part_idx)
+);
+create index if not exists session_recall_tsv_idx on session_recall using gin (tsv);
+create index if not exists session_recall_agent_idx on session_recall (agent_id, session_id);
+
+-- The per-session watermark: how many messages of the record are indexed, and
+-- the `session.updated_at` the indexer last read, so a session that has not
+-- changed since costs one comparison and no read of its transcript.
+create table if not exists session_recall_mark (
+    session_id          text primary key references session (id) on delete cascade,
+    agent_id            text not null,
+    indexed_messages    int  not null default 0,
+    source_updated_at   timestamptz,
+    indexed_at          timestamptz not null default now()
+);
+create index if not exists session_recall_mark_agent_idx on session_recall_mark (agent_id);
+
+-- session-recall for every active agent but the auditors (FR-52, DL-214). The
+-- shape is the task-create block above (story 4.9): it reads only rows the
+-- seeds above produced — "takes toolsets" = holds at least one ACTIVE grant,
+-- so an agent with none is skipped by construction — and `role <> ''` admits
+-- exactly the roster. The auditor and the graph auditor are named anyway: they
+-- re-derive a decision independently and must not anchor on their own past
+-- verdicts. A revoked row is never resurrected (`on conflict do nothing` meets
+-- it), a re-run finds nothing new, and a hired agent born after this runs gets
+-- the pack from its template (and `runtime/packs.DEFAULT_PACKS` mirrors the
+-- founding seeds). Applied by the updater's schema phase at release.
+insert into agent_grant (agent_id, pack, granted_by)
+select distinct g.agent_id, 'session-recall', 'seed:session-recall'
+  from agent_grant g
+  join agent a on a.id = g.agent_id
+ where g.revoked_at is null
+   and a.status = 'ACTIVE'
+   and a.role <> ''
+   and a.id not in ('auditor', 'graph-auditor')
+on conflict (agent_id, pack) do nothing;

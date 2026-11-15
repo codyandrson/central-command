@@ -189,7 +189,7 @@ TEMPLATES: dict[str, HireTemplate] = {
         charter=HIRED_AGENT_CHARTER,
         default_packs=("jira-read", "jira-propose", "graph-read",
                        "graph-propose", "consult", "task-create",
-                       "ask-operator"),
+                       "ask-operator", "session-recall"),
     ),
     "analyst": HireTemplate(
         id="analyst",
@@ -201,7 +201,8 @@ TEMPLATES: dict[str, HireTemplate] = {
             "still wait for your approval. Taskable and conversational."
         ),
         charter=HIRED_AGENT_CHARTER,
-        default_packs=("jira-read", "graph-read", "task-create", "ask-operator"),
+        default_packs=("jira-read", "graph-read", "task-create", "ask-operator",
+                       "session-recall"),
     ),
 }
 
@@ -228,7 +229,8 @@ GRAPH_CURATOR_TEMPLATE = HireTemplate(
         "never re-ingestion."
     ),
     charter="",  # unused: the curator's charter is a finished document
-    default_packs=("graph-read", "graph-curate", "ask-operator", "task-create"),
+    default_packs=("graph-read", "graph-curate", "ask-operator", "task-create",
+                   "session-recall"),
     taskable=True,
     conversational=True,
 )
@@ -257,7 +259,7 @@ STEWARD_TEMPLATE = HireTemplate(
     # later, on evidence.
     default_packs=("graph-read", "graph-propose", "consult", "ask-operator",
                    "web-read", "web-search", "skill-propose", "catalog-propose",
-                   "task-create"),
+                   "task-create", "session-recall"),
     taskable=False,
     conversational=True,
 )
@@ -295,7 +297,7 @@ EA_TEMPLATE = HireTemplate(
     # mail must be re-derived from the record, not from memory of the brief.
     default_packs=("record-read", "activity-read", "graph-read", "graph-propose",
                    "ask-operator", "consult", "calendar-read", "calendar-propose",
-                   "loe-read", "task-create", "mail-read"),
+                   "loe-read", "task-create", "mail-read", "session-recall"),
     taskable=True,
     conversational=True,
 )
@@ -318,7 +320,7 @@ MCP_MANAGER_TEMPLATE = HireTemplate(
     ),
     charter="",  # unused: the MCP manager's charter is a finished document
     default_packs=("sandbox", "mcp-propose", "ask-operator", "web-read", "consult",
-                   "task-create"),
+                   "task-create", "session-recall"),
     taskable=True,
     conversational=True,
 )
@@ -346,7 +348,7 @@ EDITOR_TEMPLATE = HireTemplate(
     ),
     charter="",  # unused: the editor's charter is a finished document
     default_packs=("jira-read", "graph-read", "record-read", "ask-operator",
-                   "task-create"),
+                   "task-create", "session-recall"),
     taskable=True,
     conversational=True,
 )
@@ -379,7 +381,7 @@ ACCOUNTABILITY_TEMPLATE = HireTemplate(
     # The operator): the agent reads what the calendar and the board actually show for
     # a line before asking, and cites it — ungated reads, no new writes.
     default_packs=("loe-propose", "ask-operator", "task-create", "consult",
-                   "jira-read", "calendar-read"),
+                   "jira-read", "calendar-read", "session-recall"),
     taskable=True,
     conversational=True,
 )

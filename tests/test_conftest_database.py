@@ -96,3 +96,45 @@ async def test_the_suite_holds_the_embedder_check_open():
     verdict = await embedder_record.check()
     assert verdict.status == embedder_record.OK
     await embedder_record.require_open()
+
+
+# --- the sweep of idle test databases ------------------------------------------
+
+
+def test_the_sweep_selects_only_idle_aged_databases_of_other_checkouts():
+    """The predicate behind `_sweep_idle_test_databases`, pure: no database is
+    created and nothing waits for it to age."""
+    from datetime import datetime, timedelta, timezone
+
+    from .conftest import sweepable_test_databases
+
+    now = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
+    old, fresh = now - timedelta(hours=7), now - timedelta(hours=5)
+    own = "central_command_test_aaaaaaaa"
+    rows = [
+        (own, 0, old),                                   # this checkout's own
+        (own + "_gw0", 0, old),                          # ...and its xdist workers
+        ("central_command_test_bbbbbbbb", 0, old),       # another checkout, idle, aged
+        ("central_command_test_bbbbbbbb_gw3", 0, old),
+        ("central_command_test_cccccccc", 2, old),       # connected
+        ("central_command_test_dddddddd", 0, fresh),     # younger than 6 hours
+        ("central_command_test_eeeeeeee", 0, None),      # age unreadable: leave it
+        ("central_command_test_ffffffff", 0, now - timedelta(hours=6)),  # not MORE than 6
+        ("central_command", 0, old),                     # the live database, never
+        ("central_command_testing_x", 0, old),           # not the test prefix
+        ("postgres", 0, old),
+    ]
+    assert sweepable_test_databases(rows, now=now, own=own) == [
+        "central_command_test_bbbbbbbb", "central_command_test_bbbbbbbb_gw3"]
+
+
+def test_the_sweep_runs_in_the_main_process_only_and_never_raises(monkeypatch):
+    from . import conftest
+
+    # An xdist worker returns at once, before touching the database.
+    monkeypatch.setattr(conftest, "_WORKER", "gw1")
+    monkeypatch.setattr(conftest.settings, "database_url", "postgresql://nobody@127.0.0.1:1/x")
+    conftest._sweep_idle_test_databases()
+    # The main process with an unreachable server swallows the error.
+    monkeypatch.setattr(conftest, "_WORKER", "")
+    conftest._sweep_idle_test_databases()

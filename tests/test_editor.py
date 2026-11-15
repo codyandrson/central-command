@@ -35,7 +35,7 @@ async def test_it_is_hired_as_a_full_roster_member():
     # No propose packs, no consult, no web-read — a read-only critic (design
     # doc 2026-08-06).
     assert grants == ["ask-operator", "graph-read", "jira-read", "record-read",
-                      "task-create"]
+                      "session-recall", "task-create"]
 
     current = await repo.current_charter(AGENT_ID)
     assert current and current["content"].strip()

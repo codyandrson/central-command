@@ -8215,3 +8215,234 @@ async def pull_queued_units_due(dependency: str) -> dict[str, int]:
         return {"work_items": items, "ingest_jobs": jobs}
     finally:
         await conn.close()
+
+
+# --- Episodic recall (FR-52, DL-214) -------------------------------------------
+#
+# SQL for the derived full-text index over an agent's OWN past sessions
+# (`session_recall`, `session_recall_mark`; schema.sql). The text extraction and
+# the rendering live in `runtime/session_recall.py`; this section only moves
+# rows. Every read here takes the CALLING agent's id and filters on it in SQL:
+# scope is a WHERE clause, not a check a caller may forget.
+
+# The same substitution schema.sql applies before `to_tsvector`: a query term is
+# normalised in SQL with it, so index and query can never use two spellings.
+RECALL_SEP_SQL = "'[-_/.@:]+'"
+
+# Where a session came from, as columns: the task that ran it (and whether a
+# heartbeat schedule created that task), the mail item it drained, or neither.
+_RECALL_ORIGIN_SQL = """
+    (select t.title from task t where t.session_id = s.id
+      order by t.created_at desc limit 1) as task_title,
+    exists (select 1 from task t where t.session_id = s.id) as has_task,
+    exists (select 1 from task t where t.session_id = s.id
+             and t.created_by like 'heartbeat:%') as from_heartbeat,
+    (select w.subject from work_item w where w.session_id = s.id
+      order by w.enrolled_at limit 1) as mail_subject,
+    exists (select 1 from work_item w where w.session_id = s.id) as has_mail
+"""
+
+
+async def recall_pending_sessions(agent_id: str, first: str | None,
+                                  limit: int) -> tuple[list[dict], int]:
+    """The agent's sessions whose index is missing or older than the record,
+    newest first (`first` — the caller's current session — ahead of all), and
+    how many there are in all. A session never indexed has no mark; one the
+    indexer has read since its last write has `source_updated_at >=
+    updated_at` and is skipped without touching its transcript."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select s.id, s.updated_at, count(*) over () as total
+              from session s left join session_recall_mark m on m.session_id = s.id
+             where s.agent_id = $1
+               and (m.session_id is null or m.source_updated_at is null
+                    or s.updated_at > m.source_updated_at)
+             order by (s.id = $2) desc, s.created_at desc, s.id desc
+             limit $3
+            """,
+            agent_id, first or "", limit,
+        )
+        return [dict(r) for r in rows], (rows[0]["total"] if rows else 0)
+    finally:
+        await conn.close()
+
+
+async def recall_sync_session(session_id: str, extract) -> int:
+    """Bring ONE session's index up to its record; returns the rows written.
+
+    `extract(run_state, start)` returns `(total_messages, parts)` for the
+    messages from position `start`; a part is `(msg_idx, part_idx, kind,
+    tool_name, body, at)`. Everything runs in one transaction
+    under a per-session advisory lock, so two calls racing on the same session
+    serialise: the second reads the watermark the first advanced and writes
+    nothing. The insert is `on conflict do nothing` as well, for the same
+    reason belt and braces. A record SHORTER than its watermark (it should
+    never be: the record is append-only) is re-indexed from the start."""
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"session-recall:{session_id}")
+            row = await conn.fetchrow(
+                "select agent_id, run_state, updated_at from session where id = $1",
+                session_id)
+            if row is None:
+                return 0
+            rs = row["run_state"]
+            run_state = (json.loads(rs) if isinstance(rs, str) else rs) or {}
+            mark = await conn.fetchrow(
+                "select indexed_messages from session_recall_mark where session_id = $1",
+                session_id)
+            start = mark["indexed_messages"] if mark else 0
+            total, rows = extract(run_state, start)
+            if total < start:
+                await conn.execute(
+                    "delete from session_recall where session_id = $1", session_id)
+                total, rows = extract(run_state, 0)
+            if rows:
+                await conn.executemany(
+                    """
+                    insert into session_recall
+                        (session_id, msg_idx, part_idx, agent_id, kind, tool_name, body, at)
+                    values ($1, $2, $3, $4, $5, $6, $7, $8)
+                    on conflict (session_id, msg_idx, part_idx) do nothing
+                    """,
+                    [(session_id, m, pi, row["agent_id"], k, tn, b, at)
+                     for (m, pi, k, tn, b, at) in rows])
+            await conn.execute(
+                """
+                insert into session_recall_mark
+                    (session_id, agent_id, indexed_messages, source_updated_at, indexed_at)
+                values ($1, $2, $3, $4, now())
+                on conflict (session_id) do update
+                   set indexed_messages = excluded.indexed_messages,
+                       source_updated_at = excluded.source_updated_at,
+                       indexed_at = now()
+                """,
+                session_id, row["agent_id"], total, row["updated_at"])
+            return len(rows)
+    finally:
+        await conn.close()
+
+
+def _recall_tsquery(terms: list[tuple[str, bool]], joiner: str, first_arg: int
+                    ) -> tuple[str, list[str]]:
+    """A tsquery expression over `terms` ((text, negated) pairs): each term is a
+    PHRASE over its normalised words (`DEMO-12` is `demo <-> 12`), positives
+    joined by `joiner` (`&&` or `||`), negated terms excluded."""
+    args: list[str] = []
+
+    def frag(term: str) -> str:
+        args.append(term)
+        return (f"phraseto_tsquery('simple', "
+                f"regexp_replace(${first_arg + len(args) - 1}::text, "
+                f"{RECALL_SEP_SQL}, ' ', 'g'))")
+
+    pos = [frag(text) for text, negated in terms if not negated]
+    excluded = [f"!!({frag(text)})" for text, negated in terms if negated]
+    expr = f" {joiner} ".join(f"({p})" for p in pos) or "''::tsquery"
+    for e in excluded:
+        expr = f"({expr}) && {e}"
+    return expr, args
+
+
+async def recall_search(agent_id: str, terms: list[tuple[str, bool]], joiner: str,
+                        heartbeat_weight: float, limit: int) -> list[dict]:
+    """Matching parts of the agent's own sessions, best first. The score is
+    `ts_rank_cd` times `heartbeat_weight` when a heartbeat schedule created the
+    task that ran the session — a multiplier, so such a session still ranks
+    when nothing else matches."""
+    expr, args = _recall_tsquery(terms, joiner, 4)
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            f"""
+            with q as (select ({expr}) as q)
+            select r.session_id, r.msg_idx, r.part_idx, r.kind, r.tool_name, r.body,
+                   ts_rank_cd(r.tsv, q.q, 33) * (case when exists (
+                       select 1 from task t where t.session_id = r.session_id
+                          and t.created_by like 'heartbeat:%') then $2::float8
+                       else 1.0 end) as score,
+                   s.created_at, s.status, s.mode, {_RECALL_ORIGIN_SQL}
+              from q cross join session_recall r
+                   join session s on s.id = r.session_id
+             where r.agent_id = $1 and numnode(q.q) > 0 and r.tsv @@ q.q
+             order by score desc, s.created_at desc, r.msg_idx
+             limit $3
+            """,
+            agent_id, heartbeat_weight, limit, *args,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def recall_browse(agent_id: str, limit: int) -> list[dict]:
+    """The agent's most recent sessions, newest first, with their origin and
+    how many messages the index holds for each."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            f"""
+            select s.id, s.status, s.mode, s.created_at, s.updated_at,
+                   s.closed_reason, coalesce(m.indexed_messages, 0) as messages,
+                   {_RECALL_ORIGIN_SQL}
+              from session s left join session_recall_mark m on m.session_id = s.id
+             where s.agent_id = $1
+             order by s.created_at desc, s.id desc
+             limit $2
+            """,
+            agent_id, limit,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def recall_session(agent_id: str, session_id: str) -> dict | None:
+    """One session's header — only if it is the agent's OWN; None otherwise,
+    whether the id is another agent's or no session at all."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            f"""
+            select s.id, s.status, s.mode, s.created_at, s.updated_at,
+                   s.closed_reason, s.exec_failure,
+                   coalesce(m.indexed_messages, 0) as messages,
+                   {_RECALL_ORIGIN_SQL}
+              from session s left join session_recall_mark m on m.session_id = s.id
+             where s.id = $1 and s.agent_id = $2
+            """,
+            session_id, agent_id,
+        )
+        return dict(row) if row else None
+    finally:
+        await conn.close()
+
+
+async def recall_message_indices(session_id: str) -> list[int]:
+    """The message positions of a session that carry indexed text, ascending."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select distinct msg_idx from session_recall where session_id = $1 "
+            "order by msg_idx", session_id)
+        return [r["msg_idx"] for r in rows]
+    finally:
+        await conn.close()
+
+
+async def recall_parts(session_id: str, msg_indices: list[int]) -> list[dict]:
+    """Every indexed part of the named messages of one session, in order."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select msg_idx, part_idx, kind, tool_name, body, at from session_recall "
+            "where session_id = $1 and msg_idx = any($2::int[]) "
+            "order by msg_idx, part_idx", session_id, msg_indices)
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()

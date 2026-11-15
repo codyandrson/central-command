@@ -411,14 +411,18 @@ async def test_a_death_before_the_drafter_resumes_is_resumed_once_by_the_startup
     assert armed["proposal_id"] == first["id"] and armed["redraft_cause"] == "world_moved"
     assert await _redrafts_of(first["id"]) == []
     turns = len(drafter.seen)
-    # An armed resume reads as dead (not in flight) only once it is older than
-    # `dispatch_stale_claim_seconds` (`repo.sessions_with_orphaned_resume`):
-    # age the record past it, as the time a real restart takes would.
+    # An armed resume reads as dead (not in flight) only when it was armed
+    # BEFORE this process started (`orchestration.PROCESS_STARTED_AT`, DL-204:
+    # never by age). Put the record a minute before that instant, as a real
+    # restart would find it. Backdating by a fixed age instead (this used to
+    # be `dispatch_stale_claim_seconds + 60`, 16 minutes) only predates the
+    # process while the suite reaches this test inside that age: a slow run
+    # found the resume "in flight" and never drove it (2026-11-15).
     conn = await repo._conn()
     try:
         await conn.execute(
-            "update session set updated_at = now() - ($2 || ' seconds')::interval "
-            "where id = $1", sid, str(settings.dispatch_stale_claim_seconds + 60))
+            "update session set updated_at = $2::timestamptz - interval '60 seconds' "
+            "where id = $1", sid, orchestration.PROCESS_STARTED_AT)
     finally:
         await conn.close()
 

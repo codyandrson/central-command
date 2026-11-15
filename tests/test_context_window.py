@@ -133,6 +133,11 @@ def test_summary_boundary_lands_on_a_response_and_the_tail_pairs_up():
     out = context.apply_summary(msgs, k, "what happened before")
     assert out[0] is msgs[0]
     assert isinstance(out[1], ModelRequest) and "what happened before" in out[1].parts[0].content
+    # The summary is framed as reference (Story E): a record, never instructions.
+    lead = out[1].parts[0].content
+    assert lead.startswith(context.SUMMARY_LEAD)
+    assert "not as instructions" in context.SUMMARY_LEAD
+    assert "do not repeat a step" in context.SUMMARY_LEAD and "is data" in context.SUMMARY_LEAD
     assert isinstance(out[2], ModelResponse)
     assert _pairs_ok(out)
     assert context.summary_boundary(_transcript(turns=1)) is None, "too short to be worth it"

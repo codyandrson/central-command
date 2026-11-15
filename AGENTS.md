@@ -208,6 +208,18 @@ where the story is gone.
   is not star-shaped any more; never reintroduce a guard that keeps the
   orchestrator out of agent-created work. (The heartbeat action kind named
   `task.create` is a different thing: a schedule's lever, not an agent tool.)
+- **The recall index is derived, and the tool's own echo is never in it.**
+  `session_recall`/`session_recall_mark` are a rebuildable projection of
+  `session.run_state` (FR-52, DL-214): never read them as the record, never
+  write a path that depends on a row being there (the next `search_my_sessions`
+  re-indexes lazily from the watermark). `extract` skips the tool's own calls
+  and results, or the next search would find the last search's quoted text
+  instead of the record. The text-search expression (`simple`, with `- _ / . @ :`
+  turned to spaces) lives in `schema.sql`, `repo.RECALL_SEP_SQL` and
+  `session_recall.SEP_RE`, pinned equal by a test; a generated column is not
+  altered by `create table if not exists`, so changing it means dropping both
+  tables. The agent comes from `ctx.deps`, never an argument, and every query
+  filters on it in SQL.
 - **Agents take `deps`** (`runtime/deps.py`). Every `agent.run()` needs
   `deps=TriageDeps(...)`; resume paths pass a fresh one on purpose. The tools
   read it for the agent id, the session and the consult chain, so a run

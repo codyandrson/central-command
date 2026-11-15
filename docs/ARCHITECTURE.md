@@ -129,7 +129,7 @@ Rows for the same package are grouped by what the modules are for.
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py` (the cap is `settings.attachment_max_bytes`, `CC_ATTACHMENT_MAX_BYTES`, default 50 MiB, read at call time; a validator refuses a cap whose base64 size would pass the transport ceiling `config.WS_MAX_SIZE_BYTES`, the `--ws-max-size` both API launchers, the k3s unit and the single-node `boot.sh`, pass uvicorn), `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (97 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `rerun.py` (`rerun_session`, `eligibility`), `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
-| `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic per-agent doubles `resolve_model` swaps in under `settings.test_model`, which only the test suite sets; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
+| `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `session_recall.py` (the episodic-recall index and `search_my_sessions`' four shapes), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic per-agent doubles `resolve_model` swaps in under `settings.test_model`, which only the test suite sets; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The agents, one module per entry point and one per built-in charter ("v0"). Several agents have no run path of their own: they are tasked (`run_task`), conversed with or consulted. Agents: EA, knowledge steward, editor, Jira expert, Confluence expert, LiteLLM manager, MCP manager, wiki agent, coach, orchestrator (a router; holds no `propose_*` tools), and the two auditors and the graph curator (charters only) | `ea.py`, `ea_profile.py`, `steward.py`, `steward_profile.py`, `editor.py`, `editor_profile.py`, `jira_expert.py`, `confluence_expert.py`, `litellm_manager.py`, `litellm_manager_profile.py`, `mcp_manager.py`, `mcp_manager_profile.py`, `wiki_agent.py`, `coach_profile.py`, `orchestrator.py`, `orchestrator_profile.py`, `auditor_profile.py`, `graph_auditor_profile.py`, `graph_curator_profile.py` | [models](../.claude/rules/models.md) |
@@ -854,6 +854,66 @@ keeps its task and its email through the rerun chain (`repo.task_for_session`,
 column can drift. `gateway._resolve_task_after` ignores a session with `rerun_by`, so a
 late landing of a replaced run has no say over the live task. `task_for_session` reads
 through the chain, so any new caller that writes must make the same check.
+
+### Episodic recall (FR-52, DL-214)
+
+An agent can search and re-read its own past sessions through one read tool,
+`search_my_sessions`, held through the `session-recall` pack. It reads a record the
+system already keeps (`session.run_state`, append-only; compaction never alters it)
+through a full-text index kept beside it. Nothing here calls a model, writes to the
+world or stores a memory: the index is derived and may be dropped and rebuilt.
+
+- **Index.** `session_recall` holds one row per message part worth recalling (prompt
+  text, the agent's own text, each tool call as its name plus compact arguments, each
+  tool return), keyed `(session_id, msg_idx, part_idx)`, `msg_idx` being the position
+  in `durable.full_messages`. The system prompt and thinking are never indexed, nor
+  the tool's own calls and results (its output quotes recalled text, and indexing
+  that would make the next search find the last search's echo). A part is indexed up
+  to 20,000 characters, with a marker. `session_recall_mark` is the per-session
+  watermark. Both reference `session` with `on delete cascade`.
+- **Text search.** One generated `tsvector` column under the `simple` configuration
+  over the text with `- _ / . @ :` turned into spaces, behind a GIN index. Transcripts
+  are full of identifiers, and the stock parser reads `DEMO-12` as `demo` and the
+  signed number `-12` (so `12`, `0042` of `ORD-2026-0042` or one group of a uuid found
+  nothing) and `english` stems and drops words. The query side applies the same
+  substitution in SQL and matches each term as a phrase of its words, so `DEMO-12`
+  finds `DEMO-12` and not `DEMO-5` beside a stray 12. Terms are all-of, widening to
+  any-of when no session holds them all; `"quotes"`, `-exclude` and `OR` are read.
+- **Lazy, idempotent.** Nothing hooks the several writers of `run_state`. A call first
+  brings the CALLING agent's sessions up to date: a session is pending when it has no
+  mark or its `updated_at` is later than the one the indexer read (every writer bumps
+  it), so an unchanged session costs one comparison and no read of its transcript.
+  `repo.recall_sync_session` takes a per-session advisory lock in one transaction,
+  re-reads the watermark under it and indexes only messages past it (insert `on
+  conflict do nothing`), so two calls racing write each part once; a record shorter
+  than its watermark is re-indexed from the start. This also backfills existing history
+  on first use. The work per call is bounded: at most 40 sessions and about 6,000 parts,
+  newest first and the current session ahead of all; the result says how many sessions
+  are still not searchable and the next call continues.
+- **The tool.** One tool, four shapes from its arguments: no arguments browses (id,
+  date, status, what started it: task title, mail subject or chat, message count);
+  `query` discovers (ranked hits grouped by session, the top hit shown with two
+  messages either side, the rest one line each); `session_id` with `around_message`
+  scrolls (three either side); `session_id` alone reads an outline (how it started and
+  ended). A part is capped at 1,200 characters in discover and outline and 4,000 in
+  scroll, with a marker saying how much was cut, and `_clip` bounds the whole result.
+  The calling agent is `ctx.deps.agent_id`, never an argument, and every query filters
+  on it in SQL; a `session_id` that is not the caller's is refused in one plain
+  sentence, whether it is another agent's or no session. The current session is in
+  scope and labelled (the index holds it up to its last saved step). The first line of
+  every result frames it as a record recalled from the agent's own past session, with
+  id and date, not instructions.
+- **Ranking.** `ts_rank_cd`, times 0.35 for a session whose task a heartbeat schedule
+  created (`task.created_by like 'heartbeat:%'`): a multiplier, so a scheduled run
+  still answers when nothing else does.
+- **Who holds it.** The `session-recall` pack, a `LOCAL` read in
+  `TOOL_DEPENDENCY` (never parks). Every roster agent but the auditors: the auditor and
+  the graph auditor re-derive decisions independently and must not anchor on their own
+  past verdicts. Existing agents get it from the trailing block of `schema.sql` that the
+  updater re-runs (the `task-create` widening's shape: active agents on the roster that
+  already hold a grant, `on conflict do nothing`, so a revoked grant is never
+  resurrected); `DEFAULT_PACKS` and every hire template carry it for fresh databases
+  and new hires. Consult transcripts are out of scope for now.
 
 ### State sets
 

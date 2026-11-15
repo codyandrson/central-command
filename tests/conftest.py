@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import asyncpg
@@ -69,12 +70,70 @@ PARKED = "PARKED_FOR_TEST"
 # worker additionally gets its own (`…_gw0`), because the suite's isolation
 # model — park all foreign UNPROCESSED rows, assert on rows you created — is
 # per-DATABASE, not per-row. A deleted worktree leaves its database behind;
-# `drop database` it by hand (listed by `\l central_command_test_*`).
+# `_sweep_idle_test_databases` below drops them: once per pytest session, in
+# the main process only.
 import hashlib
 
 _CHECKOUT = hashlib.sha1(str(Path(__file__).resolve().parents[1]).encode()).hexdigest()[:8]
 _WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
 TEST_DB = f"central_command_test_{_CHECKOUT}" + (f"_{_WORKER}" if _WORKER else "")
+_TEST_DB_PREFIX = "central_command_test_"
+_OWN_TEST_DBS = f"{_TEST_DB_PREFIX}{_CHECKOUT}"   # this checkout's set: itself and `_gw<N>`
+_SWEEP_MIN_AGE = timedelta(hours=6)
+
+
+def sweepable_test_databases(rows, *, now: datetime, own: str = _OWN_TEST_DBS,
+                             min_age: timedelta = _SWEEP_MIN_AGE) -> list[str]:
+    """Which test databases the sweep may drop, from `(name, connections,
+    created)` rows: a `central_command_test_*` name that is not this checkout's
+    own set (`own` itself or `own_gw<N>`), has no connection at all, and was
+    created more than `min_age` ago. A pure function, so the selection is
+    testable without creating and waiting on aged databases."""
+    out = []
+    for name, connections, created in rows:
+        if not name.startswith(_TEST_DB_PREFIX):
+            continue
+        if name == own or name.startswith(own + "_"):
+            continue
+        if connections or created is None or now - created <= min_age:
+            continue
+        out.append(name)
+    return out
+
+
+def _sweep_idle_test_databases() -> None:
+    """Drop the idle test databases other checkouts left behind (126 had piled
+    up). Runs once per pytest session in the MAIN process only (an xdist worker
+    imports this module too and must not sweep), with plain `drop database` and
+    no `force`: one that somebody connected to in the meantime is refused and
+    the refusal swallowed. It must never fail or slow a run, so any error at all
+    is ignored and the whole thing is bounded at 20 seconds."""
+    if _WORKER:
+        return
+    try:
+        admin_url = settings.database_url.rsplit("/", 1)[0] + "/postgres"
+
+        async def sweep() -> None:
+            conn = await asyncpg.connect(admin_url, timeout=5)
+            try:
+                rows = await conn.fetch(
+                    "select d.datname, (select count(*) from pg_stat_activity a "
+                    "where a.datname = d.datname) as n, "
+                    "(pg_stat_file('base/' || d.oid || '/PG_VERSION')).modification as created "
+                    "from pg_database d where d.datname like 'central\\_command\\_test\\_%'")
+                for name in sweepable_test_databases(
+                        [(r["datname"], r["n"], r["created"]) for r in rows],
+                        now=datetime.now(timezone.utc)):
+                    try:
+                        await conn.execute('drop database "%s"' % name.replace('"', '""'))
+                    except Exception:  # noqa: BLE001 — connected since: refused, fine
+                        pass
+            finally:
+                await conn.close()
+
+        asyncio.run(asyncio.wait_for(sweep(), 20))
+    except Exception:  # noqa: BLE001 — a sweep never fails or blocks a run
+        pass
 
 
 @pytest.fixture(autouse=True)
@@ -528,6 +587,7 @@ def _switch_to_test_database() -> None:
         settings.database_url = test_url
 
 
+_sweep_idle_test_databases()
 _switch_to_test_database()
 
 

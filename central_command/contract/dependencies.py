@@ -135,6 +135,9 @@ TOOL_DEPENDENCY: dict[str, tuple[str, ...]] = {
     "read_agent_record": (LOCAL,),
     "read_record_event": (LOCAL,),
     "read_team_activity": (LOCAL,),
+    # The agent's own past sessions, through a full-text index kept beside the
+    # record: Postgres only, no model call (FR-52, DL-214).
+    "search_my_sessions": (LOCAL,),
     "catalog_list_documents": (LOCAL,),
     "catalog_get_document": (LOCAL,),
     "loe_list": (LOCAL,),
