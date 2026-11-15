@@ -28,8 +28,8 @@ import transcribeRoutes from './routes/transcribe.js';
 import agentLogRoutes from './routes/agent-log.js';
 // Central Command: usage numbers come from LiteLLM (the system of record).
 import tokensRoutes from './routes/cc-tokens.js';
-// Central Command: memory panel reads the shared knowledge graph (D11).
-import memoriesRoutes from './routes/cc-memories.js';
+// Central Command: the workspace Memory tab's note store and learned aggregate.
+import learnedRoutes from './routes/cc-learned.js';
 import eventsRoutes from './routes/events.js';
 import serverInfoRoutes from './routes/server-info.js';
 import codexLimitsRoutes from './routes/codex-limits.js';
@@ -42,8 +42,8 @@ import gatewayRoutes from './routes/gateway.js';
 import connectDefaultsRoutes from './routes/connect-defaults.js';
 import workspaceRoutes from './routes/workspace.js';
 // The Config tab's per-agent config is the governed charter, not a filesystem
-// workspace. workspaceRoutes stays registered: SessionContext (identity),
-// App.tsx (chatPathLinks) and useDashboardData still call /api/workspace.
+// workspace. workspaceRoutes stays registered: SessionContext (identity) and
+// App.tsx (chatPathLinks) still call /api/workspace.
 import charterRoutes from './routes/cc-charter.js';
 import mailRulesRoutes from './routes/cc-mail-rules.js';
 // D27: /api/crons served by the Central Command heartbeat adapter (cc-crons), not
@@ -116,7 +116,7 @@ app.use('*', cacheHeaders);
 
 const routes = [
   healthRoutes, authRoutes, ttsRoutes, transcribeRoutes, agentLogRoutes,
-  tokensRoutes, memoriesRoutes, eventsRoutes, serverInfoRoutes,
+  tokensRoutes, learnedRoutes, eventsRoutes, serverInfoRoutes,
   codexLimitsRoutes, claudeCodeLimitsRoutes, versionRoutes, versionCheckRoutes,
   gatewayRoutes, connectDefaultsRoutes,
   workspaceRoutes, charterRoutes, mailRulesRoutes, cronsRoutes, sessionsRoutes, filesRoutes, apiKeysRoutes,

@@ -377,6 +377,63 @@ async def list_agent_notes(agent_id: str) -> dict:
     }
 
 
+# The capabilities whose pending proposals the cockpit's Memory tab lists for
+# one agent: what the agent is trying to learn, awaiting the operator.
+_LEARNED_CAPABILITIES = (
+    "memory.note_add", "memory.note_retire", "skill.create", "skill.doc_add",
+    "graph.add_episode",
+)
+
+
+def _learned_label(base: str, args: dict) -> str:
+    """One short line naming what a pending learned-thing proposal would write,
+    from the action's own arguments (the operator reads the full text in the
+    Inbox)."""
+    def clip(v: object, n: int = 140) -> str:
+        t = " ".join(str(v or "").split())
+        return t if len(t) <= n else t[: n - 1] + "…"
+
+    if base == "memory.note_add":
+        return f"{args.get('scope') or 'private'} note: {clip(args.get('text'))}"
+    if base == "memory.note_retire":
+        return f"retire note {args.get('note_id') or '?'}: {clip(args.get('reason'))}"
+    if base == "skill.create":
+        return f"new skill: {clip(args.get('title'))}"
+    if base == "skill.doc_add":
+        return f"skill {args.get('skill_id') or '?'} / {args.get('doc_key') or '?'}"
+    return f"{args.get('scope') or 'shared'} episode: {clip(args.get('name'))}"
+
+
+@router.get("/agents/{agent_id}/learned")
+async def list_agent_learned(agent_id: str) -> dict:
+    """What an agent has learned, for the one-agent Memory tab — the two
+    sections no other endpoint returns for ONE agent. Read-only; the notes
+    (`/agents/{id}/notes`), the private graph episodes (`/graph/episodes`) and
+    the charter versions (`/agents/{id}/charter`) keep their own routes.
+
+    `skill_docs` — every skill document version the Executor wrote from this
+    agent's approved `skill.create` / `skill.doc_add` (corrections included),
+    newest first, without content. `pending` — this agent's proposals of the
+    learning kinds still awaiting a decision, each with one `label` per
+    matching action."""
+    if await repo.get_agent(agent_id) is None:
+        raise HTTPException(404, f"unknown agent {agent_id!r}")
+    docs = await repo.list_skill_docs_added_by(f"agent:{agent_id}")
+    rows = await repo.list_open_proposals_with_capabilities(agent_id, list(_LEARNED_CAPABILITIES))
+    pending = []
+    for p in rows:
+        matching = []
+        for a in p["actions"] or []:
+            base = str(a.get("capability", "")).split("@", 1)[0]
+            if base in _LEARNED_CAPABILITIES:
+                matching.append({"capability": base,
+                                 "label": _learned_label(base, a.get("arguments") or {})})
+        pending.append({"id": p["id"], "session_id": p["session_id"], "intent": p["intent"],
+                        "status": p["status"], "created_at": p["created_at"],
+                        "actions": matching})
+    return {"agent_id": agent_id, "skill_docs": docs, "pending": pending}
+
+
 @router.get("/agents/{agent_id}/charter")
 async def get_charter(agent_id: str) -> dict:
     from central_command.runtime.agent import builtin_charter

@@ -89,3 +89,42 @@ describe('cc-graph adapter: episode deletion', () => {
     expect(await res.json()).toEqual({ ok: false, error: reason, dependency: 'embedder' });
   });
 });
+
+describe('cc-graph adapter: the episode page (workspace Memory tab)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  async function buildApp() {
+    vi.doMock('../lib/config.js', () => ({ config: { gatewayUrl: 'http://cc.test' } }));
+    vi.doMock('../middleware/rate-limit.js', () => ({
+      rateLimitGeneral: vi.fn((_c: unknown, next: () => Promise<void>) => next()),
+    }));
+    const mod = await import('./cc-graph.js');
+    return mod.default;
+  }
+
+  it('forwards agent_id, scope and limit verbatim and wraps the page', async () => {
+    const page = { episodes: [{ uuid: 'ep-1', name: 'Doe visit' }], total: 7, has_more: true };
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(page), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }));
+    const app = await buildApp();
+    const res = await app.request('/api/graph/episodes?agent_id=jira-expert&scope=private&limit=20');
+    const url = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(url.origin + url.pathname).toBe('http://cc.test/api/graph/episodes');
+    expect(url.searchParams.get('agent_id')).toBe('jira-expert');
+    expect(url.searchParams.get('scope')).toBe('private');
+    expect(url.searchParams.get('limit')).toBe('20');
+    expect(await res.json()).toEqual({ ok: true, result: page });
+  });
+});

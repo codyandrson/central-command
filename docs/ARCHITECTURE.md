@@ -548,6 +548,10 @@ process's environ.
     notes and every operator note, active and retired, with `proposal_id`,
     `retired_by` and timestamps, plus both budgets and the usage. No write
     route exists. Events: `note.added`, `note.retired` (actor the approver).
+    The cockpit shows the store, with the agent's other learned things, in the
+    workspace Memory tab (§5); `GET /api/agents/{agent_id}/learned` is the
+    companion read for that view (approved skill documents the agent proposed,
+    and its pending learning proposals).
 - **The Executor replays by cursor.** The completed-actions list is the
   cursor, so a half-landed non-idempotent write may be applied twice on retry;
   façade idempotency keys are the owed fix (PRD §6.2).
@@ -1671,9 +1675,31 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
   `attention`, `auth`, `beads`, `charts`, `chat`, `command-palette`, `connect`,
   `dashboard`, `decisions`, `file-browser`, `gates` (the gate-override hooks and
   the capabilities view), `graph`, `graph-verifications`,
-  `kanban`, `loe`, `markdown`, `memory`, `notifications`, `outages` (the
+  `kanban`, `loe`, `markdown`, `notifications`, `outages` (the
   outage banners, see [The outage doctrine](#the-outage-doctrine)), `sessions`,
   `settings`, `skills`, `sources`, `systems`, `tts`, `voice`, `workspace`.
+- **The workspace Memory tab is "what this agent has learned", read-only.** On
+  the chat page each agent's workspace panel has Memory, Tasks and Config tabs;
+  Memory (`web/src/features/workspace/tabs/MemoryTab.tsx`) replaced upstream's
+  MEMORY.md editor and has no write control, because every note, skill document,
+  graph episode and charter version arrives through a proposal decided in the
+  Decisions Inbox. Five sections, each from its own read so one failing shows
+  its own error and leaves the rest: **waiting for your decision** (this agent's
+  open proposals of `memory.note_add`, `memory.note_retire`, `skill.create`,
+  `skill.doc_add`, `graph.add_episode`), **notes** (operator preferences, then
+  the agent's own, each with a usage meter against its budget; retired notes
+  collapsed; the auditors are shown none, `rendered: false`), **private graph
+  episodes** (`GET /api/graph/episodes?agent_id=…&scope=private`, paged with
+  the real total), **skill documents it proposed** and **charter versions**
+  (`GET /api/agents/{id}/charter`). The one read that exists for this view,
+  `GET /api/agents/{agent_id}/learned` (404 for an unknown agent, read-only),
+  returns the two sections nothing else returns per agent: `skill_docs` (every
+  `skill_doc` version written under `added_by = agent:<id>`, which the Executor
+  stamps from the proposal row, content left out) and `pending` (the agent's
+  `AWAITING_HUMAN`/`PROPOSED` proposals carrying one of those capabilities,
+  each with a one-line `label` per matching action). The note budgets are two
+  fields in Settings › Context (`note_budget_private_chars`,
+  `note_budget_operator_chars`).
 - **Two channels to the API.** (1) Every `cc-*` route is a thin HTTP proxy:
   `fetch(config.gatewayUrl + "/api" + path)`. (2) Chat, sessions and all live
   push ride a WebSocket: the browser connects to the cockpit server's `/ws`
@@ -1697,11 +1723,11 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 |---|---|
 | `cc-kanban` | tasks (`/api/kanban/*`); each card carries `createdBy` (operator, `heartbeat:<schedule>` or the creating agent), `approvedBy`, `parentTaskId`/`parentTaskTitle` and `refusals` (count, latest reason and time of the `task.refused` events on that task) |
 | `cc-crons` | heartbeat schedules (`/api/crons*`) |
-| `cc-memories` | graph episodes |
+| `cc-learned` | the workspace Memory tab's reads: the note store (`/api/cc/notes/:agentId` → `/api/agents/{id}/notes`) and the learned aggregate (`/api/cc/learned/:agentId` → `/api/agents/{id}/learned`); read-only, no write route |
 | `cc-tokens` | usage |
 | `cc-activity` | activity overview, sessions, events, work-item requeue |
 | `cc-charter` | agent charters |
-| `cc-graph` | graph search / neighbourhood / provenance / status |
+| `cc-graph` | graph search / neighbourhood / provenance / status, and the episode page (`/api/graph/episodes`) |
 | `cc-loe` | level-of-effort |
 | `cc-skills` | skills import (doc, file, site); the bundled-skill update review (compute, read, resolve, apply) |
 | `cc-decisions` | bulk dismissal preview and submit |
@@ -1709,7 +1735,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | `cc-systems` | systems launchpad, API docs, the self-check (`/api/selfcheck`) |
 | `cc-mail-rules` | standing mail rules and their preview (`/api/cc/mail-rules`) |
 | `cc-update`, `cc-update-proxy` | update status / stage / apply / hold |
-| `cc-context` | context-window settings |
+| `cc-context` | context-window settings, including the two note budgets |
 | `cc-file-browser-guard` | not a proxy: middleware inside the vendored file browser; its mutations (write, rename, move, trash, restore) answer 403 unless `FILE_BROWSER_WRITABLE=1` |
 
 ## 6. Deploy surfaces

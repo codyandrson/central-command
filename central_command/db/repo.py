@@ -1883,6 +1883,39 @@ async def list_decided_proposals(limit: int, offset: int) -> tuple[list[dict], b
         await conn.close()
 
 
+async def list_open_proposals_with_capabilities(
+    agent_id: str, capabilities: list[str],
+) -> list[dict]:
+    """One agent's proposals still awaiting a decision (AWAITING_HUMAN or
+    PROPOSED — the same pair `withdraw_proposals_for_session` treats as open)
+    that carry at least one action of a named capability (the `@version`
+    suffix ignored), newest first. Scoped and filtered in SQL, for the
+    cockpit's per-agent "what has this agent learned" view."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """select p.id, p.session_id, p.agent_id, p.intent, p.status,
+                      p.created_at, p.actions
+                 from proposal p
+                where p.agent_id = $1
+                  and p.status in ('AWAITING_HUMAN', 'PROPOSED')
+                  and exists (
+                      select 1 from jsonb_array_elements(p.actions) a
+                       where split_part(a ->> 'capability', '@', 1) = any($2::text[]))
+                order by p.created_at desc""",
+            agent_id, list(capabilities),
+        )
+        out = []
+        for r in rows:
+            d = dict(r)
+            a = d.get("actions")
+            d["actions"] = json.loads(a) if isinstance(a, str) else a
+            out.append(d)
+        return out
+    finally:
+        await conn.close()
+
+
 async def list_proposals_for(agent_id: str) -> list[dict]:
     """One agent's proposals, newest first — scoped in SQL rather than fetched
     whole and filtered in Python. The unscoped `list_proposals()` used to cap
@@ -5177,6 +5210,28 @@ async def _insert_skill_doc(
                 doc_id, ord_, chunk,
             )
     return row
+
+
+async def list_skill_docs_added_by(added_by: str, limit: int = 200) -> list[dict]:
+    """Every skill document version written under `added_by` (`agent:<id>` for
+    one the Executor wrote from that agent's approved proposal), newest first,
+    WITHOUT the content (a list row, not a reader), joined to its skill's title
+    and status. Includes superseded versions — each was a decision."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """select d.id, d.skill_id, s.title as skill_title, s.status as skill_status,
+                      d.doc_key, d.kind, d.title, d.version, d.is_current,
+                      d.describes, d.created_at, d.retired_at
+                 from skill_doc d join skill s on s.id = d.skill_id
+                where d.added_by = $1
+                order by d.created_at desc, d.id
+                limit $2""",
+            added_by, limit,
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
 
 
 async def list_skill_docs(

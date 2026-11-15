@@ -55,6 +55,9 @@ app.get('/api/graph/neighborhood', rateLimitGeneral, (c) => proxyGet(c, '/graph/
 app.get('/api/graph/provenance', rateLimitGeneral, (c) => proxyGet(c, '/graph/provenance'));
 app.get('/api/graph/status', rateLimitGeneral, (c) => proxyGet(c, '/graph/status'));
 app.get('/api/graph/audit', rateLimitGeneral, (c) => proxyGet(c, '/graph/audit'));
+// A page of recent episodes: with `agent_id` and the default `scope=private`, that
+// agent's own partition (the workspace Memory tab's graph section).
+app.get('/api/graph/episodes', rateLimitGeneral, (c) => proxyGet(c, '/graph/episodes'));
 app.get('/api/graph/episodes/index', rateLimitGeneral, (c) => proxyGet(c, '/graph/episodes/index'));
 app.get('/api/graph/episodes/subgraph', rateLimitGeneral, (c) => proxyGet(c, '/graph/episodes/subgraph'));
 app.get('/api/graph/episodes/delete-preview', rateLimitGeneral, (c) => proxyGet(c, '/graph/episodes/delete-preview'));

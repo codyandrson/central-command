@@ -18,16 +18,6 @@ function jsonResponse(data: unknown, init: { ok?: boolean; status?: number } = {
   };
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (error?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
-
 const subscribeMock = vi.fn(() => () => {});
 let sseHandler: ((event: ServerEvent) => void) | undefined;
 
@@ -77,81 +67,47 @@ describe('useDashboardData', () => {
     vi.restoreAllMocks();
   });
 
-  it('threads scoped memory fetches and ignores stale responses from the previous agent', async () => {
-    const alphaMemories = deferred<FetchResponse>();
-    const bravoMemories = deferred<FetchResponse>();
-
+  it('fetches the token usage once on mount and again on a tokens.updated event', async () => {
     globalThis.fetch = vi.fn((input: string | URL | Request) => {
       const url = String(input);
-      if (url === '/api/tokens') {
-        return Promise.resolve(jsonResponse({ totalTokens: 0 }));
-      }
-      if (url === '/api/memories?agentId=alpha&limit=50') {
-        return alphaMemories.promise;
-      }
-      if (url === '/api/memories?agentId=bravo&limit=50') {
-        return bravoMemories.promise;
-      }
-      if (url.startsWith('/api/workspace')) {
-        return Promise.resolve(jsonResponse({ ok: true, files: [], remoteWorkspace: false }));
-      }
+      if (url === '/api/tokens') return Promise.resolve(jsonResponse({ totalTokens: 12 }));
       throw new Error(`Unexpected fetch: ${url}`);
     }) as typeof globalThis.fetch;
 
-    const { result, rerender } = renderHook(
-      ({ agentId }) => useDashboardData({ agentId }),
-      { initialProps: { agentId: 'alpha' } },
-    );
+    const { result } = renderHook(() => useDashboardData({ agentId: 'alpha' }));
 
-    await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
-    });
+    await waitFor(() => expect(result.current.tokenData).toEqual({ totalTokens: 12 }));
+    const fetchMock = vi.mocked(globalThis.fetch);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    rerender({ agentId: 'bravo' });
+    act(() => { sseHandler?.({ event: 'tokens.updated', data: {}, ts: Date.now() }); });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
 
-    await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=bravo&limit=50', expect.any(Object));
-    });
+  it('no longer reads the memory list: memory.changed refreshes nothing', async () => {
+    globalThis.fetch = vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tokens') return Promise.resolve(jsonResponse({ totalTokens: 0 }));
+      throw new Error(`Unexpected fetch: ${url}`);
+    }) as typeof globalThis.fetch;
 
-    await act(async () => {
-      bravoMemories.resolve(jsonResponse({ memories: [{ type: 'section', text: 'Bravo memory' }], total: 1, hasMore: false }));
-    });
+    renderHook(() => useDashboardData({ agentId: 'alpha' }));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+    const fetchMock = vi.mocked(globalThis.fetch);
+    fetchMock.mockClear();
 
-    await waitFor(() => {
-      expect(result.current.memories).toEqual([{ type: 'section', text: 'Bravo memory' }]);
-      expect(result.current.memoriesLoading).toBe(false);
-    });
+    act(() => { sseHandler?.({ event: 'memory.changed', data: { agentId: 'alpha' }, ts: Date.now() }); });
 
-    await act(async () => {
-      alphaMemories.resolve(jsonResponse({ memories: [{ type: 'section', text: 'Alpha memory' }], total: 1, hasMore: false }));
-    });
-
-    await waitFor(() => {
-      expect(result.current.memories).toEqual([{ type: 'section', text: 'Bravo memory' }]);
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('drops old-agent file.changed events that arrive during the workspace switch render gap', async () => {
     const alphaOnFileChanged = vi.fn();
     const bravoOnFileChanged = vi.fn();
-    const tokens = deferred<FetchResponse>();
-    const alphaMemories = deferred<FetchResponse>();
-    const bravoMemories = deferred<FetchResponse>();
 
     globalThis.fetch = vi.fn((input: string | URL | Request) => {
       const url = String(input);
-      if (url === '/api/tokens') {
-        return tokens.promise;
-      }
-      if (url === '/api/memories?agentId=alpha&limit=50') {
-        return alphaMemories.promise;
-      }
-      if (url === '/api/memories?agentId=bravo&limit=50') {
-        return bravoMemories.promise;
-      }
-      if (url.startsWith('/api/workspace')) {
-        return Promise.resolve(jsonResponse({ ok: true, files: [], remoteWorkspace: false }));
-      }
+      if (url === '/api/tokens') return Promise.resolve(jsonResponse({ totalTokens: 0 }));
       throw new Error(`Unexpected fetch: ${url}`);
     }) as typeof globalThis.fetch;
 
@@ -159,10 +115,6 @@ describe('useDashboardData', () => {
       agentId: 'alpha',
       onFileChanged: alphaOnFileChanged,
     }));
-
-    await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
-    });
 
     alphaOnFileChanged.mockClear();
     bravoOnFileChanged.mockClear();
@@ -181,50 +133,26 @@ describe('useDashboardData', () => {
     expect(bravoOnFileChanged).not.toHaveBeenCalled();
   });
 
-  it('refreshes memories only for matching SSE agent scopes and forwards file.changed with its agent id', async () => {
+  it('forwards file.changed only for the active agent, with its agent id', async () => {
     const onFileChanged = vi.fn();
 
     globalThis.fetch = vi.fn((input: string | URL | Request) => {
       const url = String(input);
-      if (url === '/api/tokens') {
-        return Promise.resolve(jsonResponse({ totalTokens: 0 }));
-      }
-      if (url === '/api/memories?agentId=alpha&limit=50') {
-        return Promise.resolve(jsonResponse({ memories: [{ type: 'section', text: 'Alpha memory' }], total: 1, hasMore: false }));
-      }
-      if (url.startsWith('/api/workspace')) {
-        return Promise.resolve(jsonResponse({ ok: true, files: [], remoteWorkspace: false }));
-      }
+      if (url === '/api/tokens') return Promise.resolve(jsonResponse({ totalTokens: 0 }));
       throw new Error(`Unexpected fetch: ${url}`);
     }) as typeof globalThis.fetch;
 
     renderHook(() => useDashboardData({ agentId: 'alpha', onFileChanged }));
 
-    await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
-    });
-
-    const fetchMock = vi.mocked(globalThis.fetch);
-    fetchMock.mockClear();
-    onFileChanged.mockClear();
-
     act(() => {
-      sseHandler?.({ event: 'memory.changed', data: { agentId: 'bravo' }, ts: Date.now() });
-      sseHandler?.({ event: 'file.changed', data: { path: 'memory/2026-03-19.md', agentId: 'bravo' }, ts: Date.now() });
-      sseHandler?.({ event: 'file.changed', data: { path: 'memory/2026-03-19.md' }, ts: Date.now() });
+      sseHandler?.({ event: 'file.changed', data: { path: 'notes/a.md', agentId: 'bravo' }, ts: Date.now() });
+      sseHandler?.({ event: 'file.changed', data: { path: 'notes/a.md' }, ts: Date.now() });
     });
-
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
     expect(onFileChanged).not.toHaveBeenCalled();
 
     act(() => {
-      sseHandler?.({ event: 'memory.changed', data: { agentId: 'alpha' }, ts: Date.now() });
-      sseHandler?.({ event: 'file.changed', data: { path: 'memory/2026-03-19.md', agentId: 'alpha' }, ts: Date.now() });
+      sseHandler?.({ event: 'file.changed', data: { path: 'notes/a.md', agentId: 'alpha' }, ts: Date.now() });
     });
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/memories?agentId=alpha&limit=50', expect.any(Object));
-    });
-    expect(onFileChanged).toHaveBeenCalledWith('memory/2026-03-19.md', 'alpha');
+    expect(onFileChanged).toHaveBeenCalledWith('notes/a.md', 'alpha');
   });
 });

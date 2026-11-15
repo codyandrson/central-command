@@ -1,6 +1,6 @@
 /**
- * WorkspacePanel — Tabbed container replacing the standalone MemoryList.
- * Tabs: Memory, Kanban, Config (with Files/Skills sub-views)
+ * WorkspacePanel — Tabbed container for the chat page's per-agent workspace.
+ * Tabs: Memory (what the agent has learned), Kanban, Config (with Files/Skills sub-views)
  * Active tab persisted in localStorage. Content lazy-loaded per tab.
  * Tab action buttons (add, refresh) render in the tab bar header.
  * Crons moved to its own top-level view (2026-08-21) — it is a global
@@ -8,15 +8,13 @@
  * belonged here.
  */
 
-import { useState, useCallback, lazy, Suspense, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { WorkspaceTabs, type TabId } from './WorkspaceTabs';
-import { ConfigTab, SkillsTab } from './tabs';
+import { ConfigTab, MemoryTab, SkillsTab } from './tabs';
+import type { LearnedTarget } from './tabs/MemoryTab';
 import { KanbanQuickView } from '@/features/kanban';
 import { getWorkspaceStorageKey } from './workspaceScope';
 import { useSettings } from '@/contexts/SettingsContext';
-import type { Memory } from '@/types';
-
-const MemoryList = lazy(() => import('@/features/dashboard/MemoryList').then(m => ({ default: m.MemoryList })));
 
 const CONFIG_VIEW_KEY = 'nerve-config-view';
 
@@ -109,34 +107,25 @@ function getInitialTab(canShowKanban: boolean): TabId {
 
 interface WorkspacePanelProps {
   workspaceAgentId: string;
-  memories: Memory[];
-  onRefreshMemories: (signal?: AbortSignal) => void | Promise<void>;
-  memoriesLoading?: boolean;
-  memoriesTotal?: number;
-  memoriesHasMore?: boolean;
-  onLoadMoreMemories?: () => void;
-  /** True when the workspace lives in a remote sandbox (gateway RPC mode). */
-  remoteWorkspace?: boolean;
   /** Render in compact dropdown mode (chat-first topbar panel). */
   compact?: boolean;
   /** Switch the app to full kanban board view. */
   onOpenBoard?: () => void;
   /** Open a specific task in the full board view. */
   onOpenTask?: (taskId: string) => void;
+  /** Memory tab links: the screen that owns a section's detail (Decisions Inbox, graph, skills, agents). */
+  onNavigate?: (target: LearnedTarget) => void;
+  /** Memory tab link: open the session a note was grounded in. */
+  onOpenSession?: (sessionId: string, agentId: string) => void;
 }
 
 export function WorkspacePanel({
   workspaceAgentId,
-  memories,
-  onRefreshMemories,
-  memoriesLoading,
-  memoriesTotal,
-  memoriesHasMore,
-  onLoadMoreMemories,
-  remoteWorkspace = false,
   compact = false,
   onOpenBoard,
   onOpenTask,
+  onNavigate,
+  onOpenSession,
 }: WorkspacePanelProps) {
   const { kanbanVisible } = useSettings();
   const [activeTab, setActiveTab] = useState<TabId>(() => getInitialTab(kanbanVisible));
@@ -184,21 +173,12 @@ export function WorkspacePanel({
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className={activeTab === 'memory' ? 'h-full' : 'hidden'} hidden={activeTab !== 'memory'} role="tabpanel" id="workspace-tabpanel-memory" aria-labelledby="workspace-tab-memory">
           {visitedTabs.has('memory') && (
-            <Suspense fallback={<div className="flex items-center justify-center text-muted-foreground text-xs p-4">Loading…</div>}>
-              <MemoryList
-                key={workspaceAgentId}
-                agentId={workspaceAgentId}
-                memories={memories}
-                onRefresh={onRefreshMemories}
-                isLoading={memoriesLoading}
-                total={memoriesTotal}
-                hasMore={memoriesHasMore}
-                onLoadMore={onLoadMoreMemories}
-                remoteWorkspace={remoteWorkspace}
-                hideHeader
-                compact={compact}
-              />
-            </Suspense>
+            <MemoryTab
+              key={workspaceAgentId}
+              agentId={workspaceAgentId}
+              onNavigate={onNavigate}
+              onOpenSession={onOpenSession}
+            />
           )}
         </div>
         <div className={activeTab === 'config' ? 'h-full' : 'hidden'} hidden={activeTab !== 'config'} role="tabpanel" id="workspace-tabpanel-config" aria-labelledby="workspace-tab-config">

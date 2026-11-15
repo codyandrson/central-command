@@ -207,10 +207,7 @@ vi.mock('@/hooks/useConnectionManager', () => ({
 
 vi.mock('@/hooks/useDashboardData', () => ({
   useDashboardData: () => ({
-    memories: [],
-    memoriesLoading: false,
     tokenData: null,
-    refreshMemories: vi.fn(),
   }),
 }));
 

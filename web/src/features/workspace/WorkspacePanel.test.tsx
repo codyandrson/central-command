@@ -18,6 +18,7 @@ vi.mock('./WorkspaceTabs', () => ({
 }));
 
 vi.mock('./tabs', () => ({
+  MemoryTab: ({ agentId }: { agentId: string }) => <div data-testid="memory-tab">memory:{agentId}</div>,
   ConfigTab: ({ agentId }: { agentId: string }) => {
     configTabRenderLog.push(agentId);
     return <div data-testid="config-tab">config:{agentId}</div>;
@@ -49,11 +50,7 @@ describe('WorkspacePanel', () => {
     localStorage.setItem('nerve-workspace-tab', 'config');
     localStorage.setItem('nerve-config-view', 'skills');
 
-    const props = {
-      workspaceAgentId: 'alpha',
-      memories: [],
-      onRefreshMemories: vi.fn(),
-    };
+    const props = { workspaceAgentId: 'alpha' };
 
     const { rerender } = render(<WorkspacePanel {...props} />);
 
@@ -76,7 +73,7 @@ describe('WorkspacePanel', () => {
     kanbanVisible = false;
 
     render(
-      <WorkspacePanel workspaceAgentId="alpha" memories={[]} onRefreshMemories={vi.fn()} />,
+      <WorkspacePanel workspaceAgentId="alpha" />,
     );
 
     expect(screen.getByTestId('active-tab')).toHaveTextContent('memory');
@@ -87,7 +84,7 @@ describe('WorkspacePanel', () => {
     localStorage.setItem('nerve-workspace-tab', 'kanban');
 
     render(
-      <WorkspacePanel workspaceAgentId="alpha" memories={[]} onRefreshMemories={vi.fn()} />,
+      <WorkspacePanel workspaceAgentId="alpha" />,
     );
 
     expect(screen.getByTestId('active-tab')).toHaveTextContent('kanban');
@@ -100,9 +97,20 @@ describe('WorkspacePanel', () => {
     localStorage.setItem('nerve-workspace-tab', 'crons');
 
     render(
-      <WorkspacePanel workspaceAgentId="alpha" memories={[]} onRefreshMemories={vi.fn()} />,
+      <WorkspacePanel workspaceAgentId="alpha" />,
     );
 
     expect(screen.getByTestId('active-tab')).toHaveTextContent('memory');
+  });
+
+  it('shows the Memory tab for the workspace agent and remounts it on an agent switch', () => {
+    const { rerender } = render(<WorkspacePanel workspaceAgentId="alpha" />);
+
+    expect(screen.getByTestId('active-tab')).toHaveTextContent('memory');
+    expect(screen.getByTestId('memory-tab')).toHaveTextContent('memory:alpha');
+
+    rerender(<WorkspacePanel workspaceAgentId="bravo" />);
+
+    expect(screen.getByTestId('memory-tab')).toHaveTextContent('memory:bravo');
   });
 });

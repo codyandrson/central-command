@@ -101,39 +101,6 @@ export interface EventEntry {
   ts: Date;
 }
 
-export interface Memory {
-  type: 'section' | 'item' | 'daily';
-  text: string;
-  date?: string;
-  /** Temporary ID for optimistic updates */
-  tempId?: string;
-  /** True while the operation is pending confirmation */
-  pending?: boolean;
-  /** True if the operation failed (for error display before removal) */
-  failed?: boolean;
-  /** True if this memory is being deleted (fade out animation) */
-  deleting?: boolean;
-  /** D11-r1: agent-scoped memories carry 'shared'|'private'; absent/dashboard memories are shared. */
-  scope?: 'shared' | 'private';
-}
-
-/** Memory category types for storing new memories */
-export type MemoryCategory = 'preference' | 'fact' | 'decision' | 'entity' | 'other';
-
-/** API response for memory operations */
-export interface MemoryApiResponse {
-  ok: boolean;
-  error?: string;
-  result?: unknown;
-}
-
-/** GET /api/memories response (2026-08-29): paged, never silently truncated. */
-export interface MemoriesListResponse {
-  memories: Memory[];
-  total: number;
-  hasMore: boolean;
-}
-
 /** Aggregated token usage and cost data from the gateway. */
 export interface TokenData {
   entries?: TokenEntry[];

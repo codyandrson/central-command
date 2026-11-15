@@ -20,6 +20,8 @@ export interface ContextSettingsShape {
   output_headroom_tokens: number;
   summarize: boolean;
   summarize_threshold: number;
+  note_budget_private_chars: number;
+  note_budget_operator_chars: number;
 }
 
 const TOGGLES: Array<{ key: keyof ContextSettingsShape; label: string; help: string }> = [
@@ -122,6 +124,31 @@ export function ContextSettings() {
           <Input id="ctx-summarize-at" type="number" min={0.5} max={1} step={0.05} disabled={!loaded || !form?.summarize}
             value={form?.summarize_threshold ?? ''}
             onChange={(e) => set('summarize_threshold', Number(e.target.value))} />
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-[0.8rem] font-semibold text-foreground">Agent notes</h3>
+          <p className="mt-1 text-[0.7rem] text-muted-foreground">
+            How many characters of notes an agent is shown at the start of a run. A note over its
+            budget is refused when you approve it, so an agent at its limit proposes a swap instead.
+            Lowering a budget below what is in use keeps the notes, but no new one fits until some are retired.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <label htmlFor="ctx-note-private" className="text-[0.75rem] text-foreground">Private notes per agent (characters)</label>
+            <Input id="ctx-note-private" type="number" min={1} max={100000} step={100} disabled={!loaded}
+              value={form?.note_budget_private_chars ?? ''}
+              onChange={(e) => set('note_budget_private_chars', Number(e.target.value))} />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="ctx-note-operator" className="text-[0.75rem] text-foreground">Operator preferences, all agents (characters)</label>
+            <Input id="ctx-note-operator" type="number" min={1} max={100000} step={100} disabled={!loaded}
+              value={form?.note_budget_operator_chars ?? ''}
+              onChange={(e) => set('note_budget_operator_chars', Number(e.target.value))} />
+          </div>
         </div>
       </div>
 

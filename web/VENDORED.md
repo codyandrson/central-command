@@ -9,9 +9,10 @@ them. The cost is that a lot of this tree describes, tests, and documents a
 ## Central Command's own code
 
 - **`server/routes/cc-*.ts`** — the routes Central Command actually serves:
-  `cc-kanban`, `cc-crons`, `cc-memories`, `cc-tokens` (each replacing an
+  `cc-kanban`, `cc-crons`, `cc-tokens` (each replacing an
   upstream route of the same name minus the prefix), plus the Central Command-only
-  `cc-activity`, `cc-charter`, `cc-graph`, `cc-loe` and `cc-skills` (proxies
+  `cc-activity`, `cc-charter`, `cc-graph`, `cc-learned` (the workspace Memory
+  tab's note-store and aggregate reads), `cc-loe` and `cc-skills` (proxies
   for the three Skills-page import routes; the upstream `skills.ts` was
   deleted outright rather than quarantined — it had no `cc-` twin to point
   at). **`server/app.ts` is the authority** on what is live: if a route module
@@ -27,7 +28,10 @@ them. The cost is that a lot of this tree describes, tests, and documents a
   protocol the upstream client already speaks — that module is the boundary the
   pivot was designed around.
 - **`src/features/decisions`, `agents`, `workspace`, `skills`, `attention`** —
-  the Central Command screens.
+  the Central Command screens. The workspace panel's Memory tab
+  (`workspace/tabs/MemoryTab.tsx`, `MemorySections.tsx`,
+  `workspace/hooks/useAgentLearned.ts`) is ours end to end: upstream's MEMORY.md
+  editor (`features/memory/`, `features/dashboard/MemoryList.tsx`) is gone.
 
 ## `vendor-unused/` — upstream code that never runs
 
@@ -39,7 +43,7 @@ Quarantined 2026-07-29. ~9,900 lines of upstream route and store modules that
 | `server/routes/kanban.ts` (+ test) | `server/routes/cc-kanban.ts` |
 | `server/lib/kanban-store.ts`, `kanban-assignee.ts`, `kanban-subagent-fallback.ts` (+ tests) | — reachable only from the above |
 | `server/routes/crons.ts` (+ test) | `server/routes/cc-crons.ts` |
-| `server/routes/memories.ts` (+ test) | `server/routes/cc-memories.ts` |
+| `server/routes/memories.ts` (+ test) | the workspace Memory tab: `server/routes/cc-learned.ts` + `cc-graph.ts`'s `/api/graph/episodes` (`cc-memories.ts` itself was removed with the MEMORY.md editor) |
 | `server/routes/tokens.ts` | `server/routes/cc-tokens.ts` |
 
 None had been modified since the vendoring commit. They are **quarantined, not

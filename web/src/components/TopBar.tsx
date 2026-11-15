@@ -241,7 +241,7 @@ export function TopBar({
 
       const targetElement = e.target instanceof Element ? e.target : null;
       // Keep topbar panel open while interacting with modal/portal content
-      // launched from inside the panel (e.g., Spawn Agent, Add Memory dialogs).
+      // launched from inside the panel (e.g., the Spawn Agent dialog).
       if (
         targetElement?.closest(
           '[data-slot="dialog-content"], [data-slot="dialog-overlay"], [role="dialog"], [data-radix-popper-content-wrapper]',

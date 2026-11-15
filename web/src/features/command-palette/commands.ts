@@ -21,7 +21,6 @@ export interface CommandActions {
   onToggleTelemetry: () => void;
   onOpenSettings: () => void;
   onRefreshSessions: () => void;
-  onRefreshMemory: () => void;
   onSetViewMode?: (mode: ViewMode) => void;
   canShowKanban?: boolean;
 }
@@ -104,13 +103,6 @@ export function createCommands(actions: CommandActions): Command[] {
       action: actions.onRefreshSessions,
       category: 'actions',
       keywords: ['refresh', 'reload', 'sessions'],
-    },
-    {
-      id: 'refresh-memory',
-      label: 'Refresh Memory',
-      action: actions.onRefreshMemory,
-      category: 'actions',
-      keywords: ['refresh', 'reload', 'memory'],
     },
     {
       id: 'toggle-events',

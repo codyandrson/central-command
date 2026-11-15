@@ -1,25 +1,27 @@
 /**
- * useDashboardData - Handles dashboard data fetching (memories, tokens)
+ * useDashboardData - Handles dashboard data fetching (tokens) and routes
+ * file.changed events to the app.
  * 
  * Extracted from App.tsx to separate data fetching concerns from layout.
  * Includes AbortController support for proper cleanup on unmount.
  * 
  * Real-time updates via:
  * 1. SSE (Server-Sent Events) - for local file/API changes
- * 2. WebSocket (Gateway) - for gateway memory/token events
+ * 2. WebSocket (Gateway) - for gateway token events
+ *
+ * What an agent has learned (the workspace Memory tab) is not fetched here:
+ * that tab owns its reads (`workspace/hooks/useAgentLearned`).
  * 
  * Polling is now much slower, serving only as a safety net.
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useGateway } from '@/contexts/GatewayContext';
 import { useServerEvents, type ServerEvent } from '@/hooks/useServerEvents';
-import type { Memory, MemoriesListResponse, TokenData, GatewayEvent } from '@/types';
+import type { TokenData, GatewayEvent } from '@/types';
 
 // Polling intervals - much longer now since SSE/WS provide real-time updates
 // These are just safety nets for edge cases
-const MEMORY_POLL_INTERVAL = 60000; // 60s fallback (was 10s)
 const TOKEN_POLL_INTERVAL = 60000;  // 60s fallback (was 30s)
-const DEFAULT_MEMORY_LIMIT = 50;
 
 export type FileChangedHandler = (path: string, agentId: string) => void;
 
@@ -30,19 +32,8 @@ export interface DashboardDataOptions {
 }
 
 export interface DashboardDataState {
-  memories: Memory[];
-  memoriesLoading: boolean;
-  memoriesTotal: number;
-  memoriesHasMore: boolean;
   tokenData: TokenData | null;
-  remoteWorkspace: boolean;
-  refreshMemories: (signal?: AbortSignal) => Promise<void>;
-  loadMoreMemories: () => void;
   refreshTokens: (signal?: AbortSignal) => Promise<void>;
-}
-
-interface MemoryChangedEventData {
-  agentId?: string;
 }
 
 interface FileChangedEventData {
@@ -53,48 +44,12 @@ interface FileChangedEventData {
 export function useDashboardData(options: DashboardDataOptions = {}): DashboardDataState {
   const { subscribe, connectionState } = useGateway();
   const activeAgentId = options.agentId ?? 'main';
-  const [memories, setMemories] = useState<Memory[]>([]);
-  const [memoriesLoading, setMemoriesLoading] = useState(true);
-  const [memoriesTotal, setMemoriesTotal] = useState(0);
-  const [memoriesHasMore, setMemoriesHasMore] = useState(false);
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
-  const [remoteWorkspace, setRemoteWorkspace] = useState(false);
 
   // Refs for callbacks (to avoid stale closures in subscriptions)
-  const refreshMemoriesRef = useRef<((signal?: AbortSignal) => Promise<void>) | undefined>(undefined);
   const refreshTokensRef = useRef<((signal?: AbortSignal) => Promise<void>) | undefined>(undefined);
   const onFileChangedRef = useRef(options.onFileChanged);
   const agentIdRef = useRef(activeAgentId);
-  // How many rows to ask for — bumped by loadMoreMemories, reset on agent switch.
-  const memoryLimitRef = useRef(DEFAULT_MEMORY_LIMIT);
-
-  const refreshMemories = useCallback(async (signal?: AbortSignal) => {
-    const requestAgentId = activeAgentId;
-    const params = new URLSearchParams({ agentId: requestAgentId, limit: String(memoryLimitRef.current) });
-
-    try {
-      const res = await fetch(`/api/memories?${params.toString()}`, { signal });
-      if (!signal?.aborted && res.ok && agentIdRef.current === requestAgentId) {
-        const data: MemoriesListResponse = await res.json();
-        setMemories(data.memories);
-        setMemoriesTotal(data.total);
-        setMemoriesHasMore(data.hasMore);
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name !== 'AbortError') {
-        console.debug('[DashboardData] Failed to refresh memories:', err.message);
-      }
-    } finally {
-      if (!signal?.aborted && agentIdRef.current === requestAgentId) {
-        setMemoriesLoading(false);
-      }
-    }
-  }, [activeAgentId]);
-
-  const loadMoreMemories = useCallback(() => {
-    memoryLimitRef.current *= 2;
-    void refreshMemories();
-  }, [refreshMemories]);
 
   const refreshTokens = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -112,28 +67,12 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
   // These refs back long-lived SSE/WS handlers and must update during render.
   // Waiting for a passive effect leaves a switch-gap where an old agent event can
   // be accepted under stale refs after the UI already rerendered.
-  refreshMemoriesRef.current = refreshMemories;
   refreshTokensRef.current = refreshTokens;
   onFileChangedRef.current = options.onFileChanged;
   agentIdRef.current = activeAgentId;
 
-  useEffect(() => {
-    memoryLimitRef.current = DEFAULT_MEMORY_LIMIT;
-    setMemories([]);
-    setMemoriesLoading(true);
-  }, [activeAgentId]);
-
   // SSE event handler for real-time updates from backend
   const handleSSEEvent = useCallback((event: ServerEvent) => {
-    if (event.event === 'memory.changed') {
-      const data = event.data as MemoryChangedEventData | undefined;
-      const eventAgentId = typeof data?.agentId === 'string' ? data.agentId : undefined;
-
-      if (!eventAgentId || eventAgentId === agentIdRef.current) {
-        console.debug('[DashboardData] SSE memory.changed, refreshing...');
-        refreshMemoriesRef.current?.();
-      }
-    }
     if (event.event === 'tokens.updated') {
       console.debug('[DashboardData] SSE tokens.updated, refreshing...');
       refreshTokensRef.current?.();
@@ -152,7 +91,7 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
   // This catches local file changes and API-triggered updates
   useServerEvents(handleSSEEvent);
 
-  // Subscribe to WebSocket events for real-time memory and token updates
+  // Subscribe to WebSocket events for real-time token updates
   useEffect(() => {
     if (connectionState !== 'connected') return;
     
@@ -174,46 +113,19 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
     const controller = new AbortController();
     
     // Initial fetch
-    refreshMemories(controller.signal);
     refreshTokens(controller.signal);
 
-    // Check if workspace is remote (one-time per agent switch)
-    const params = new URLSearchParams({ agentId: activeAgentId });
-    fetch(`/api/workspace?${params.toString()}`, { signal: controller.signal })
-      .then(res => {
-        if (res.ok) return res.json();
-        if (!controller.signal.aborted) setRemoteWorkspace(false);
-        return null;
-      })
-      .then(data => {
-        if (data && !controller.signal.aborted) {
-          setRemoteWorkspace(data?.remoteWorkspace === true);
-        }
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setRemoteWorkspace(false);
-      });
-    
     // Polling as safety net — SSE/WS provide real-time updates
-    const memIv = setInterval(() => refreshMemories(controller.signal), MEMORY_POLL_INTERVAL);
     const tokIv = setInterval(() => refreshTokens(controller.signal), TOKEN_POLL_INTERVAL);
-    
+
     return () => {
       controller.abort();
-      clearInterval(memIv);
       clearInterval(tokIv);
     };
-  }, [activeAgentId, refreshMemories, refreshTokens]);
+  }, [refreshTokens]);
 
   return {
-    memories,
-    memoriesLoading,
-    memoriesTotal,
-    memoriesHasMore,
     tokenData,
-    remoteWorkspace,
-    refreshMemories,
-    loadMoreMemories,
     refreshTokens,
   };
 }

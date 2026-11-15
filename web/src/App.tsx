@@ -325,7 +325,7 @@ export default function App({ onLogout }: AppProps) {
   }, [handleFileChanged]);
 
   // Dashboard data (extracted hook) — single SSE connection handles all events
-  const { memories, memoriesLoading, memoriesTotal, memoriesHasMore, tokenData, remoteWorkspace, refreshMemories, loadMoreMemories } = useDashboardData({
+  const { tokenData } = useDashboardData({
     agentId: workspaceAgentId,
     onFileChanged,
   });
@@ -576,12 +576,11 @@ export default function App({ onLogout }: AppProps) {
     onToggleTelemetry: toggleTelemetry,
     onOpenSettings: openSettings,
     onRefreshSessions: refreshSessions,
-    onRefreshMemory: refreshMemories,
     onSetViewMode: setViewMode,
     canShowKanban: kanbanVisible,
   }), [openSpawnDialog, handleReset, toggleSound, handleAbort, openSettings, openSearch,
     setTheme, setFont, setTtsProvider, handleToggleWakeWord, toggleEvents, toggleLog, toggleTelemetry,
-    refreshSessions, refreshMemories, setViewMode, kanbanVisible]);
+    refreshSessions, setViewMode, kanbanVisible]);
 
   // Keyboard shortcut handlers with useCallback
   const handleOpenPalette = useCallback(() => setPaletteOpen(true), []);
@@ -721,6 +720,12 @@ export default function App({ onLogout }: AppProps) {
       setCurrentSession(key);
     });
   }, [getWorkspaceSwitchLabel, requestWorkspaceTransition, setCurrentSession]);
+
+  /** The Memory tab's "Open source session": the same key shape the Activity screen builds. */
+  const openSessionFromWorkspace = useCallback((sessionId: string, agentId: string) => {
+    setViewMode('chat');
+    handleSessionChange(`agent:${agentId}:${sessionId}`);
+  }, [handleSessionChange, setViewMode]);
 
   const handleSpawnSession = useCallback((opts: SpawnSessionOpts) => {
     const targetSessionKey = opts.kind === 'root'
@@ -913,15 +918,10 @@ export default function App({ onLogout }: AppProps) {
           <PanelErrorBoundary name="Workspace">
             <WorkspacePanel
               workspaceAgentId={workspaceAgentId}
-              memories={memories}
-              onRefreshMemories={refreshMemories}
-              memoriesLoading={memoriesLoading}
-              memoriesTotal={memoriesTotal}
-              memoriesHasMore={memoriesHasMore}
-              onLoadMoreMemories={loadMoreMemories}
-              remoteWorkspace={remoteWorkspace}
               onOpenBoard={() => setViewMode('kanban')}
               onOpenTask={openTaskInBoard}
+              onNavigate={setViewMode}
+              onOpenSession={openSessionFromWorkspace}
             />
           </PanelErrorBoundary>
         </Panel>
@@ -959,16 +959,11 @@ export default function App({ onLogout }: AppProps) {
       <PanelErrorBoundary name="Workspace">
         <WorkspacePanel
           workspaceAgentId={workspaceAgentId}
-          memories={memories}
-          onRefreshMemories={refreshMemories}
-          memoriesLoading={memoriesLoading}
-          memoriesTotal={memoriesTotal}
-          memoriesHasMore={memoriesHasMore}
-          onLoadMoreMemories={loadMoreMemories}
-          remoteWorkspace={remoteWorkspace}
           compact
           onOpenBoard={() => setViewMode('kanban')}
           onOpenTask={openTaskInBoard}
+          onNavigate={setViewMode}
+          onOpenSession={openSessionFromWorkspace}
         />
       </PanelErrorBoundary>
     </Suspense>
