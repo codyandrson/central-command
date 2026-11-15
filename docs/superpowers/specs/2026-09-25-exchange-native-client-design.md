@@ -187,4 +187,6 @@ and its captures become the next fixtures.
   extra round trips the air gap may not answer. `autodiscover=False` always.
 - Kerberos/SSPI. NTLM is what the site proved; the extras stay uninstalled.
 - Attachments. The Gmail façade refuses them (D13, text only); Exchange
-  follows the same rule.
+  follows the same rule. (Superseded 2026-11-15, DL-216: both providers list
+  a message's attachments and return one by id; the Exchange half is coded to
+  exchangelib's source and is verify-on-site.)

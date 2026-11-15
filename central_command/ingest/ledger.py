@@ -358,12 +358,22 @@ async def enroll_provider_message(msg: dict) -> dict:
     source=`provider_source()` — 'gmail' or 'exchange'). The provider's
     conversation_id becomes the thread id, so M9 thread folding works on real
     mail unchanged."""
+    from central_command.ingest import mail_attachments
+
     parsed = _provider_parsed(msg)
     item_id = "wi_" + uuid.uuid4().hex[:12]
+    payload = {"text": agent_input(parsed), "from": parsed["from"], "provider_uuid": msg["uuid"]}
+    if mail_attachments.pending(msg):
+        # Read at claim time (`hydrate_attachments`), like a backlog body: the
+        # poll enrolls, the dispatcher's valves pace the provider reads. The
+        # list (names, sizes, ids) is kept so the claim needs no second read
+        # of the message to make progress.
+        payload["attachments_pending"] = True
+        payload["attachment_refs"] = mail_attachments.refs(msg)
     created = await repo.enroll_work_item(
         item_id,
         parsed["message_id"],
-        {"text": agent_input(parsed), "from": parsed["from"], "provider_uuid": msg["uuid"]},
+        payload,
         thread_id=parsed["thread_id"],
         feed="live",
         source=provider_source(),
@@ -420,6 +430,11 @@ async def hydrate_work_item(item: dict) -> None:
     payload["text"] = agent_input(parsed)
     payload["from"] = parsed["from"]
     payload.pop("deferred_fetch", None)
+    from central_command.ingest import mail_attachments
+
+    if mail_attachments.pending(msg):
+        payload["attachments_pending"] = True
+        payload["attachment_refs"] = mail_attachments.refs(msg)
     item["payload"] = payload
     item["subject"] = item.get("subject") or parsed["subject"]
     # The in-memory item is what the dispatcher frames the prompt from, and a
@@ -429,3 +444,51 @@ async def hydrate_work_item(item: dict) -> None:
     # sessions after the v2.82.7 restart had no line).
     item["received_at"] = item.get("received_at") or parsed["received_at"]
     await repo.hydrate_work_item(item["id"], payload, parsed["subject"], parsed["received_at"])
+
+
+async def hydrate_attachments(item: dict) -> None:
+    """Read a mail's attachments into its stored text, in place and persisted
+    (DL-216). Called at claim time AFTER the standing rules and the
+    relatedness checks, so a mail a rule folds or a busy relative freezes
+    costs no attachment fetch. No-op unless enrollment or hydration marked the
+    row `attachments_pending` (rows enrolled before v2.88.0 are not marked and
+    are processed from their body as before).
+
+    The attachment list stored at enrollment (`attachment_refs`) is what is
+    read; `mail_attachments.gather` re-reads the message only when an id has
+    gone stale, and a message that is gone by then costs its attachments, never
+    the mail.
+
+    After it: `payload.text` is the body plus the attachment block the agent
+    reads, `payload.text_body` is the body alone (what the standing rules and
+    the entity extraction match on), and `payload.attachments` holds each
+    record with its whole extracted text. A mailbox that is DOWN raises and
+    the claim's release path retries; the mark stays until a pass completes."""
+    from central_command import events
+    from central_command.ingest import mail_attachments
+
+    payload = item.get("payload") or {}
+    if not payload.get("attachments_pending"):
+        return
+    provider_uuid = payload.get("provider_uuid")
+    refs = payload.get("attachment_refs") or []
+    if not provider_uuid or not refs:
+        return
+    records = await mail_attachments.gather({"uuid": provider_uuid, "attachments": refs})
+    body = payload.get("text") or ""
+    block = mail_attachments.section(records, work_item_id=item.get("id"))
+    if block:
+        payload["text_body"] = body
+        payload["text"] = f"{body.rstrip()}\n\n{block}"
+        payload["attachments"] = records
+    payload.pop("attachments_pending", None)
+    payload.pop("attachment_refs", None)
+    item["payload"] = payload
+    await repo.hydrate_work_item(item["id"], payload, None, None)
+    if records:
+        await events.emit(
+            "work.attachments_read",
+            ref_id=item["id"],
+            payload={"attachments": mail_attachments.manifest(records)},
+            actor="dispatcher",
+        )

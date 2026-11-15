@@ -41,6 +41,14 @@ warning per process is `client_kwargs()`'s, not this module's. Mechanically that
 precedent); NTLM stays the `auth_type` and `autodiscover` is always False — the
 site knows its endpoint and the air gap may not answer DNS.
 
+**Attachments (DL-216) follow the Gmail façade's contract.** Every record from
+`get_message` carries `attachments` (a list of `{filename, mime_type, size,
+attachment_id, is_inline}`) and `has_attachments`; `get_attachment(uuid,
+attachment_id)` returns one file's bytes. A meeting message (request,
+cancellation, response) also gets a synthesised `invite.ics` entry built from
+the item's own fields, carrying its text inline because EWS has no attachment to
+fetch. None of this has been run against a real server — verify on site.
+
 **exchangelib is synchronous** (`requests`), so every public function here is
 `async` and runs the library in `asyncio.to_thread`. One `Account` is built
 lazily per process under a lock and rebuilt when the settings fingerprint
@@ -469,6 +477,182 @@ def _headers(item) -> dict[str, list[str]]:
     return out
 
 
+# --- attachments (DL-216; verify on site) --------------------------------------
+
+# exchangelib resolves a fetched item's class from the EWS element name
+# (`GetItem._elem_to_obj` -> `BaseFolder.item_model_from_tag`, services/get_item.py
+# line 36, folders/base.py lines 76 and 298), so a meeting message comes back as
+# its own class and `type(item).__name__` is the discriminator. `acct.fetch`
+# without `only_fields` asks for EVERY field the item classes support
+# (account.py lines 724-728, "Default to all fields"), so `attachments` is
+# included — only `list_refs`'s `.only(...)` restriction leaves it out.
+# `Item.attachments` is `AttachmentField(field_uri="item:Attachments")`
+# (items/item.py line 67); the GetItem response lists attachment METADATA
+# (id, name, content type, size), and the bytes are fetched lazily later.
+_MEETING_METHODS = {
+    "MeetingRequest": "REQUEST",
+    "MeetingCancellation": "CANCEL",
+    "MeetingResponse": "REPLY",
+}
+
+
+def _attachment_entry(att) -> dict:
+    """One exchangelib attachment -> the contract's metadata dict.
+
+    Attribute names are `Attachment`'s own (attachments.py lines 40-47):
+    `attachment_id` (an `AttachmentId`, whose `.id` is the string, lines 23-32),
+    `name`, `content_type`, `size` (bytes, read-only, line 45) and `is_inline`.
+    An `ItemAttachment` (attachments.py line 179) is an attached Outlook item
+    such as a forwarded message; it has no content type of its own worth trusting,
+    so it is reported as `message/rfc822`, with `get_attachment` returning its
+    MIME content.
+    """
+    from exchangelib.attachments import ItemAttachment
+
+    attachment_id = getattr(getattr(att, "attachment_id", None), "id", "") or ""
+    name = getattr(att, "name", "") or ""
+    if isinstance(att, ItemAttachment):
+        if not name:
+            # `ItemAttachment.item` (attachments.py line 191) is a lazy
+            # GetAttachment round trip when only the id was fetched. The name
+            # is cosmetic, so a failure there must not fail the whole read.
+            try:
+                name = getattr(att.item, "subject", "") or ""
+            except Exception:  # noqa: BLE001
+                name = ""
+        mime_type = "message/rfc822"
+        name = name or "attached item"
+    else:
+        mime_type = getattr(att, "content_type", "") or "application/octet-stream"
+    size = getattr(att, "size", None)
+    return {
+        "filename": name,
+        "mime_type": mime_type,
+        "size": size if isinstance(size, int) else None,
+        "attachment_id": attachment_id,
+        "is_inline": bool(getattr(att, "is_inline", False)),
+    }
+
+
+def _ics_text(value) -> str:
+    """RFC 5545 section 3.3.11 TEXT escaping: backslash, semicolon, comma and
+    newline (CRLF, CR or LF -> the two characters `\\n`)."""
+    escapes = {"\\": "\\\\", ";": "\\;", ",": "\\,", "\r\n": "\\n", "\r": "\\n", "\n": "\\n"}
+    return re.sub(r"\r\n|[\\;,\r\n]", lambda m: escapes[m.group(0)], str(value))
+
+
+def _ics_param(value) -> str:
+    """A parameter value (`CN=`), always double-quoted so `:` `;` `,` inside a
+    display name cannot end the parameter. A double quote cannot appear in a
+    quoted value, and control characters would break the line, so both go."""
+    cleaned = re.sub(r'["\x00-\x1f\x7f]', "", str(value)).strip()
+    return f'"{cleaned}"'
+
+
+def _ics_when(value, all_day: bool) -> tuple[str, str] | None:
+    """`(parameter suffix, value)` for a DTSTART/DTEND, or None when missing.
+    UTC `YYYYMMDDTHHMMSSZ`, or `;VALUE=DATE` + `YYYYMMDD` for an all-day event
+    (the date as the event states it, in its own zone, never shifted)."""
+    if value is None:
+        return None
+    if all_day or not isinstance(value, datetime):
+        try:
+            return ";VALUE=DATE", value.strftime("%Y%m%d")
+        except (AttributeError, ValueError):
+            return None
+    try:
+        aware = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        return "", aware.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    except (AttributeError, ValueError, TypeError):
+        return None
+
+
+def _ics_person(prop: str, who) -> str | None:
+    """`ORGANIZER`/`ATTENDEE` line from a `Mailbox` (properties.py lines
+    632-633: `name`, `email_address`). No address, no line — `mailto:` is the
+    value, and an invented one would be worse than none."""
+    mailbox = getattr(who, "mailbox", who)  # `Attendee.mailbox`, properties.py line 805
+    address = re.sub(r"[\x00-\x20\x7f]", "", getattr(mailbox, "email_address", "") or "")
+    if not address:
+        return None
+    name = getattr(mailbox, "name", "") or ""
+    cn = f";CN={_ics_param(name)}" if name.strip() else ""
+    return f"{prop}{cn}:mailto:{address}"
+
+
+def _meeting_entry(item) -> dict | None:
+    """A synthesised `invite.ics` attachment for a meeting message, or None.
+
+    The class names are `MeetingRequest`, `MeetingCancellation` and
+    `MeetingResponse` (items/calendar_item.py lines 328, 378, 369). The fields
+    come from the item itself: `start`, `end`, `is_all_day`, `location`,
+    `organizer`, `required_attendees`, `optional_attendees` are
+    `CalendarItem` fields that `MeetingRequest` copies (lines 77-103 and the
+    `FIELDS` slice at line 356). A cancellation or a response is a
+    `BaseMeetingItem` (line 290) with only message fields, so on the real
+    classes it has no `start` and yields no entry — verify on site; the design
+    does not invent a date. `MeetingRequest` has no `uid` (it starts the slice
+    at `start`), so the UID is normally the RFC 822 `message_id`
+    (items/message.py line 40). Recurrence is not rendered.
+    """
+    method = _MEETING_METHODS.get(type(item).__name__)
+    if method is None:
+        return None
+    all_day = bool(getattr(item, "is_all_day", False))
+    start = _ics_when(getattr(item, "start", None), all_day)
+    if start is None:
+        return None
+    end = _ics_when(getattr(item, "end", None), all_day)
+
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Central Command//Exchange meeting//EN",
+        f"METHOD:{method}",
+        "BEGIN:VEVENT",
+    ]
+    uid = (getattr(item, "uid", "") or getattr(item, "message_id", "") or "").strip()
+    if uid:
+        lines.append(f"UID:{_ics_text(uid)}")
+    subject = getattr(item, "subject", "") or ""
+    if subject:
+        lines.append(f"SUMMARY:{_ics_text(subject)}")
+    lines.append(f"DTSTART{start[0]}:{start[1]}")
+    if end is not None:
+        lines.append(f"DTEND{end[0]}:{end[1]}")
+    location = getattr(item, "location", "") or ""
+    if location:
+        lines.append(f"LOCATION:{_ics_text(location)}")
+    organizer = getattr(item, "organizer", None)
+    if organizer is not None:
+        line = _ics_person("ORGANIZER", organizer)
+        if line:
+            lines.append(line)
+    for field in ("required_attendees", "optional_attendees"):
+        for attendee in getattr(item, field, None) or []:
+            line = _ics_person("ATTENDEE", attendee)
+            if line:
+                lines.append(line)
+    lines += ["END:VEVENT", "END:VCALENDAR"]
+    text = "\r\n".join(lines) + "\r\n"
+    return {
+        "filename": "invite.ics",
+        "mime_type": "text/calendar",
+        "size": len(text),
+        "attachment_id": "",
+        "is_inline": False,
+        "inline_text": text,
+    }
+
+
+def _attachments(item) -> list[dict]:
+    out = [_attachment_entry(a) for a in getattr(item, "attachments", None) or []]
+    invite = _meeting_entry(item)
+    if invite is not None:
+        out.append(invite)
+    return out
+
+
 def _record(item) -> dict:
     """One EWS `Message` → the SAME normalised record the Gmail façade returns.
 
@@ -486,6 +670,7 @@ def _record(item) -> dict:
     body = getattr(item, "body", None)
     text = getattr(item, "text_body", None) or ""
     html = str(body) if body is not None else ""
+    attachments = _attachments(item)
     return {
         "uuid": getattr(getattr(item, "id", None), "id", None) or getattr(item, "id", "") or "",
         "message_id": (getattr(item, "message_id", "") or "").strip(),
@@ -501,6 +686,8 @@ def _record(item) -> dict:
         "list_unsubscribe_post": (headers.get("list-unsubscribe-post") or [""])[0],
         "authentication_results": headers.get("authentication-results", []),
         "dkim_signatures": headers.get("dkim-signature", []),
+        "attachments": attachments,
+        "has_attachments": bool(attachments),
     }
 
 
@@ -570,6 +757,50 @@ async def get_message(uuid: str) -> dict:
     """
     def run():
         return _record(_fetch(account(), uuid))
+
+    return await _thread(run)
+
+
+async def get_attachment(uuid: str, attachment_id: str) -> bytes:
+    """The bytes of one attachment of message `uuid`, named by the
+    `attachment_id` its record listed. Verify on site — nothing here has met a
+    real server.
+
+    `FileAttachment.content` loads lazily on first access: with an
+    `attachment_id` and no stored bytes it opens a `FileAttachmentIO` and issues
+    `GetAttachment` (attachments.py lines 135-146), which needs the parent item's
+    account — `Item.__init__` sets `parent_item` (items/item.py lines 124-130)
+    and `BaseItem.from_xml` sets the account (items/base.py lines 169-172).
+    An `ItemAttachment` (a forwarded or attached Outlook item) is read through
+    its `.item`, whose lazy `GetAttachment` asks for `include_mime_content=True`
+    (attachments.py lines 191-212), so `item.mime_content` (items/item.py line
+    54) is the attached item's MIME bytes.
+
+    The "not found" wording carries no transient marker word on purpose
+    (`contract.failures.classify_failure_text`): an unknown id is a NO, not an
+    outage.
+    """
+    def run():
+        from exchangelib.attachments import ItemAttachment
+
+        if not (attachment_id or "").strip():
+            raise ExchangeError(f"message {uuid}: attachment not found")
+        item = _fetch(account(), uuid)
+        for att in getattr(item, "attachments", None) or []:
+            if (getattr(getattr(att, "attachment_id", None), "id", "") or "") != attachment_id:
+                continue
+            if isinstance(att, ItemAttachment):
+                data = getattr(att.item, "mime_content", None)
+                if not data:
+                    raise ExchangeError(
+                        f"message {uuid}: an attached Outlook item cannot be read as a file"
+                    )
+                return bytes(data)
+            data = att.content
+            if data is None:
+                raise ExchangeError(f"message {uuid}: attachment has no content")
+            return bytes(data)
+        raise ExchangeError(f"message {uuid}: attachment not found")
 
     return await _thread(run)
 

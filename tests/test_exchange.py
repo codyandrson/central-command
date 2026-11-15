@@ -34,8 +34,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from exchangelib.attachments import AttachmentId, FileAttachment, ItemAttachment
+from icalendar import Calendar
 
 from central_command.config import settings
+from central_command.contract.failures import SEMANTIC, classify_failure_text
 from central_command.integrations import exchange
 
 
@@ -86,6 +89,65 @@ class FakeMessage:
 
     def send(self, save_copy=True, copy_to_folder=None):
         self.sent = True
+
+
+class FakeAttachment(FileAttachment):
+    """A REAL `FileAttachment` (so the attribute names are exchangelib's own),
+    built the way the library builds one: an `AttachmentId` plus bytes."""
+
+    def __init__(self, attachment_id="ATT1", name="invoice.pdf",
+                 content_type="application/pdf", content=b"%PDF-1.7 fake",
+                 is_inline=False, size=None):
+        super().__init__(
+            attachment_id=AttachmentId(id=attachment_id), name=name,
+            content_type=content_type, content=content, is_inline=is_inline,
+            size=len(content) if size is None else size,
+        )
+
+
+class FakeAttachedItem:
+    def __init__(self, subject="Fwd: Budget", mime_content=b"Subject: Budget\r\n\r\nbody"):
+        self.subject = subject
+        self.mime_content = mime_content
+
+
+class FakeItemAttachment(ItemAttachment):
+    """A REAL `ItemAttachment` carrying a stand-in attached item."""
+
+    def __init__(self, attachment_id="ATT9", name="Fwd: Budget", item=None):
+        super().__init__(attachment_id=AttachmentId(id=attachment_id), name=name,
+                         item=item if item is not None else FakeAttachedItem())
+
+
+class FakeAttendee:
+    """exchangelib `Attendee`: the address sits on `.mailbox` (properties.py)."""
+
+    def __init__(self, email, name=""):
+        self.mailbox = FakeMailbox(email, name)
+
+
+class MeetingRequest(FakeMessage):
+    """Named like exchangelib's own class: the record keys the invite on
+    `type(item).__name__`, which is what a real fetch returns."""
+
+    def __init__(self, start=None, end=None, location="Room 4", organizer=None,
+                 required=(), optional=(), is_all_day=False, **kwargs):
+        super().__init__(**kwargs)
+        self.start = start if start is not None else datetime(2026, 11, 20, 15, 0, tzinfo=timezone.utc)
+        self.end = end if end is not None else datetime(2026, 11, 20, 16, 0, tzinfo=timezone.utc)
+        self.location = location
+        self.organizer = organizer if organizer is not None else FakeMailbox(
+            "jane.doe@example.com", "Jane Doe")
+        self.required_attendees = list(required)
+        self.optional_attendees = list(optional)
+        self.is_all_day = is_all_day
+
+
+class MeetingCancellation(MeetingRequest):
+    pass
+
+
+FakeMeetingRequest = MeetingRequest
 
 
 class FakeQuery:
@@ -292,6 +354,7 @@ async def test_get_message_returns_the_gmail_facade_record_shape(mailbox):
         "uuid", "message_id", "conversation_id", "from", "subject", "date",
         "body_text", "body_html", "snippet", "list_unsubscribe",
         "list_unsubscribe_post", "authentication_results", "dkim_signatures",
+        "attachments", "has_attachments",
     }
     assert record["from"] == "Dana Rivers <dana.rivers@example.com>"
     assert record["subject"] == "Budget"
@@ -340,6 +403,184 @@ async def test_missing_headers_read_as_absent_never_as_eligible(mailbox):
 async def test_a_missing_message_is_an_exchange_error(mailbox):
     with pytest.raises(exchange.ExchangeError, match="not found"):
         await exchange.get_message("NOPE=")
+
+
+# --- attachments (DL-216) -----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_message_without_attachments_lists_none(mailbox):
+    record = await exchange.get_message("AAA=")
+    assert record["attachments"] == []
+    assert record["has_attachments"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_file_attachment_is_listed_with_all_five_keys(mailbox):
+    mailbox.inbox.items[0].attachments = [FakeAttachment()]
+    record = await exchange.get_message("AAA=")
+    assert record["has_attachments"] is True
+    assert record["attachments"] == [{
+        "filename": "invoice.pdf",
+        "mime_type": "application/pdf",
+        "size": len(b"%PDF-1.7 fake"),
+        "attachment_id": "ATT1",
+        "is_inline": False,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_an_inline_image_is_reported_inline(mailbox):
+    mailbox.inbox.items[0].attachments = [
+        FakeAttachment("IMG1", "logo.png", "image/png", b"\x89PNG", is_inline=True),
+        FakeAttachment("ATT1"),
+    ]
+    record = await exchange.get_message("AAA=")
+    by_id = {a["attachment_id"]: a for a in record["attachments"]}
+    assert by_id["IMG1"]["is_inline"] is True and by_id["IMG1"]["mime_type"] == "image/png"
+    assert by_id["ATT1"]["is_inline"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_attached_outlook_item_is_listed_as_rfc822(mailbox):
+    mailbox.inbox.items[0].attachments = [FakeItemAttachment()]
+    (entry,) = (await exchange.get_message("AAA="))["attachments"]
+    assert entry["mime_type"] == "message/rfc822"
+    assert entry["filename"] == "Fwd: Budget" and entry["attachment_id"] == "ATT9"
+    assert entry["size"] is None and entry["is_inline"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_unnamed_attached_item_falls_back_to_its_subject_then_a_label(mailbox):
+    mailbox.inbox.items[0].attachments = [
+        FakeItemAttachment("A1", name=None, item=FakeAttachedItem(subject="Re: Lease")),
+        FakeItemAttachment("A2", name=None, item=FakeAttachedItem(subject="")),
+    ]
+    names = [a["filename"] for a in (await exchange.get_message("AAA="))["attachments"]]
+    assert names == ["Re: Lease", "attached item"]
+
+
+@pytest.mark.asyncio
+async def test_get_attachment_returns_the_bytes_of_the_named_attachment(mailbox):
+    mailbox.inbox.items[0].attachments = [
+        FakeAttachment("ATT1", content=b"first"),
+        FakeAttachment("ATT2", "b.txt", "text/plain", b"second"),
+    ]
+    assert await exchange.get_attachment("AAA=", "ATT2") == b"second"
+    assert await exchange.get_attachment("AAA=", "ATT1") == b"first"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_attachment_id_is_a_plain_no_not_an_outage(mailbox):
+    mailbox.inbox.items[0].attachments = [FakeAttachment("ATT1")]
+    with pytest.raises(exchange.ExchangeError, match="attachment not found") as caught:
+        await exchange.get_attachment("AAA=", "NOPE")
+    assert classify_failure_text(str(caught.value)) == SEMANTIC
+    with pytest.raises(exchange.ExchangeError, match="not found"):
+        await exchange.get_attachment("MISSING=", "ATT1")
+
+
+@pytest.mark.asyncio
+async def test_an_attached_outlook_item_reads_as_its_mime_content(mailbox):
+    mailbox.inbox.items[0].attachments = [FakeItemAttachment("ATT9")]
+    assert (await exchange.get_attachment("AAA=", "ATT9")).startswith(b"Subject: Budget")
+
+
+@pytest.mark.asyncio
+async def test_an_attached_item_without_mime_content_cannot_be_read_as_a_file(mailbox):
+    mailbox.inbox.items[0].attachments = [
+        FakeItemAttachment("ATT9", item=FakeAttachedItem(mime_content=None))]
+    with pytest.raises(exchange.ExchangeError, match="cannot be read as a file"):
+        await exchange.get_attachment("AAA=", "ATT9")
+
+
+def _invite(record):
+    (entry,) = [a for a in record["attachments"] if a["filename"] == "invite.ics"]
+    return entry
+
+
+def _event(text):
+    (event,) = Calendar.from_ical(text).walk("VEVENT")
+    return event
+
+
+@pytest.mark.asyncio
+async def test_a_meeting_request_gets_a_parseable_invite(mailbox):
+    mailbox.inbox.items = [MeetingRequest(
+        item_id="MTG=", subject="Quarterly review",
+        required=[FakeAttendee("sam@example.com", "Sam Lee")],
+        optional=[FakeAttendee("ana@example.com")],
+    )]
+    record = await exchange.get_message("MTG=")
+    entry = _invite(record)
+    assert record["has_attachments"] is True
+    assert entry["mime_type"] == "text/calendar" and entry["attachment_id"] == ""
+    assert entry["is_inline"] is False and entry["size"] == len(entry["inline_text"])
+    text = entry["inline_text"]
+    assert text.startswith("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n")
+    assert text.endswith("END:VCALENDAR\r\n") and "\n" not in text.replace("\r\n", "")
+    cal = Calendar.from_ical(text)
+    assert str(cal["METHOD"]) == "REQUEST"
+    assert str(cal["PRODID"]) == "-//Central Command//Exchange meeting//EN"
+    event = _event(text)
+    assert str(event["SUMMARY"]) == "Quarterly review"
+    assert event["DTSTART"].dt == datetime(2026, 11, 20, 15, 0, tzinfo=timezone.utc)
+    assert event["DTEND"].dt == datetime(2026, 11, 20, 16, 0, tzinfo=timezone.utc)
+    assert "DTSTART:20261120T150000Z" in text
+    assert str(event["LOCATION"]) == "Room 4"
+    assert str(event["ORGANIZER"]) == "mailto:jane.doe@example.com"
+    assert event["ORGANIZER"].params["CN"] == "Jane Doe"
+    assert [str(a) for a in event["ATTENDEE"]] == ["mailto:sam@example.com", "mailto:ana@example.com"]
+    assert str(event["UID"]) == "<a@corp.example>"  # no `uid` on a MeetingRequest: the message id
+
+
+@pytest.mark.asyncio
+async def test_a_meeting_cancellation_is_method_cancel(mailbox):
+    mailbox.inbox.items = [MeetingCancellation(item_id="CXL=", subject="Cancelled: Review")]
+    entry = _invite(await exchange.get_message("CXL="))
+    assert str(Calendar.from_ical(entry["inline_text"])["METHOD"]) == "CANCEL"
+    assert "METHOD:CANCEL\r\n" in entry["inline_text"]
+
+
+@pytest.mark.asyncio
+async def test_a_meeting_without_a_start_yields_no_invite_and_missing_values_are_left_out(mailbox):
+    mailbox.inbox.items = [MeetingRequest(item_id="M1=", subject="x")]
+    mailbox.inbox.items[0].start = None
+    assert (await exchange.get_message("M1="))["attachments"] == []
+
+    bare = MeetingRequest(item_id="M2=", subject="", location="")
+    bare.end = None
+    bare.organizer = FakeMailbox("")  # no address, so no ORGANIZER line
+    bare.message_id = ""
+    mailbox.inbox.items = [bare]
+    text = _invite(await exchange.get_message("M2="))["inline_text"]
+    for absent in ("SUMMARY", "DTEND", "LOCATION", "ORGANIZER", "ATTENDEE", "UID"):
+        assert f"\r\n{absent}" not in text, absent
+
+
+@pytest.mark.asyncio
+async def test_an_all_day_meeting_uses_the_date_form(mailbox):
+    mailbox.inbox.items = [MeetingRequest(
+        item_id="M3=", is_all_day=True,
+        start=datetime(2026, 12, 1, tzinfo=timezone.utc), end=datetime(2026, 12, 2, tzinfo=timezone.utc))]
+    text = _invite(await exchange.get_message("M3="))["inline_text"]
+    assert "DTSTART;VALUE=DATE:20261201\r\n" in text and "DTEND;VALUE=DATE:20261202\r\n" in text
+    event = _event(text)
+    assert str(event["DTSTART"].dt) == "2026-12-01"
+
+
+@pytest.mark.asyncio
+async def test_text_values_are_escaped_and_round_trip(mailbox):
+    subject = "Plan, budget; and \\more\nsecond line"
+    mailbox.inbox.items = [MeetingRequest(
+        item_id="M4=", subject=subject, location="Hall A, floor 2; east\r\nwing",
+        organizer=FakeMailbox("jane.doe@example.com", 'Doe, Jane; "J"'))]
+    text = _invite(await exchange.get_message("M4="))["inline_text"]
+    assert "SUMMARY:Plan\\, budget\\; and \\\\more\\nsecond line\r\n" in text
+    event = _event(text)
+    assert str(event["SUMMARY"]) == subject
+    assert str(event["LOCATION"]) == "Hall A, floor 2; east\nwing"
+    assert event["ORGANIZER"].params["CN"] == "Doe, Jane; J"
 
 
 # --- list_refs ----------------------------------------------------------------

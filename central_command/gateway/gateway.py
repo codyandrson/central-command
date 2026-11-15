@@ -100,9 +100,13 @@ async def _recheck_against_session_sources(
         (i.get("payload") or {}).get("text") or ""
         for i in items if i.get("kind") == "document"
     ]
+    from central_command.ingest import mail_attachments
+
+    # A mail's stored text and each read attachment's whole text (DL-216).
     mail_texts = [
-        (i.get("payload") or {}).get("text") or ""
+        t
         for i in items if (i.get("kind") or "email") == "email"
+        for t in mail_attachments.source_texts(i.get("payload") or {})
     ]
     doc_texts = [t for t in doc_texts if t]
     mail_texts = [t for t in mail_texts if t]

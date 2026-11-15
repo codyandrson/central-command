@@ -284,3 +284,180 @@ def test_everything_else_stays_an_outage_503(tmp_path, message):
 def test_the_classifier_reads_an_error_object_too(tmp_path):
     out = _run_facade_classifier(tmp_path, {"message": "lib-email-provider: list pagination cap hit (5 pages fetched, more remain)", "name": "NodeOperationError"})
     assert out["status"] == 422 and out["message"].startswith("lib-email-provider: list pagination cap hit")
+
+
+# --- mail attachments (DL-216, v2.88.0) --------------------------------------
+# One attachment's bytes by id (mode 'attachment'), and a calendar invite that
+# Gmail delivers inline listed with its text. The bulk include_attachments
+# flag stays refused at the façade.
+
+
+def _run_provider_node(tmp_path, name, request, response, *, expect_error=False):
+    """A shipped lib-email-provider Code node under node, with the trigger's
+    request and the previous node's item stubbed."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node needed")
+    code = _node(_load("lib-email-provider.json"), name)["parameters"]["jsCode"]
+    script = tmp_path / "provider_node.js"
+    item = f"{{ json: {json.dumps(response)} }}"
+    script.write_text(
+        f"const $ = () => ({{ first: () => ({{ json: {json.dumps(request)} }}) }});\n"
+        f"const $input = {{ first: () => ({item}), all: () => [{item}] }};\n"
+        "let out;\n"
+        f"try {{ out = (function () {{\n{code}\n}})(); }}\n"
+        "catch (e) { process.stderr.write(JSON.stringify({ thrown: String(e.message) })); process.exit(0); }\n"
+        "process.stderr.write(JSON.stringify(out));\n",
+        encoding="utf-8",
+    )
+    done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30, check=False)
+    assert done.returncode == 0, done.stderr
+    result = json.loads(done.stderr)
+    if expect_error:
+        assert isinstance(result, dict) and "thrown" in result, result
+        return result["thrown"]
+    assert isinstance(result, list), result
+    return result[0]["json"]
+
+
+def _b64url(data: bytes) -> str:
+    import base64
+
+    return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+
+def test_the_control_plane_sends_attachment_mode_and_the_provider_routes_it():
+    provider = _load("lib-email-provider.json")
+    routed = [r["outputKey"] for r in _node(provider, "Route (mode)")["parameters"]["rules"]["values"]]
+    assert "attachment" in routed
+    out = provider["connections"]["Route (mode)"]["main"][routed.index("attachment")]
+    assert out == [{"node": "Get attachment (Gmail API)", "type": "main", "index": 0}]
+    get = _node(provider, "Get attachment (Gmail API)")["parameters"]
+    assert get["method"] == "GET", "attachment mode is a read"
+    assert get["url"].endswith(
+        "/messages/{{ $json.source_ref.uuid }}/attachments/{{ $json.source_ref.attachment_id }}")
+    chain = provider["connections"]
+    assert chain["Get attachment (Gmail API)"]["main"][0][0]["node"] == "Build attachment envelope"
+    assert chain["Build attachment envelope"]["main"][0][0]["node"] == "Return envelope"
+
+
+def test_the_facade_still_refuses_the_bulk_attachment_flag():
+    code = _node(_load("cc-email-facade.json"), "Auth + unwrap")["parameters"]["jsCode"]
+    assert "if (body.include_attachments) { throw new Error(" in code
+
+
+@pytest.mark.parametrize("ref, ok", [
+    ({"uuid": "18c0ffee00aa11bb", "attachment_id": "ATT_abc-123"}, True),
+    ({"uuid": "18c0ffee00aa11bb"}, False),
+    ({"uuid": "18c0ffee00aa11bb", "attachment_id": "a/../../drafts"}, False),
+    ({"attachment_id": "ATT_abc"}, False),
+])
+def test_attachment_mode_needs_both_ids_in_the_provider_alphabet(tmp_path, ref, ok):
+    """Both ids are URL path segments of the Gmail call."""
+    request = {"mode": "attachment", "source_ref": ref}
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node needed")
+    code = _node(_load("lib-email-provider.json"), "Validate request")["parameters"]["jsCode"]
+    script = tmp_path / "validate.js"
+    item = f"{{ json: {json.dumps(request)} }}"
+    script.write_text(
+        f"const $input = {{ first: () => ({item}), all: () => [{item}] }};\n"
+        f"try {{ (function () {{\n{code}\n}})(); process.stderr.write('ok'); }}\n"
+        "catch (e) { process.stderr.write('thrown: ' + e.message); }\n",
+        encoding="utf-8",
+    )
+    done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30, check=False)
+    if ok:
+        assert done.stderr == "ok", done.stderr
+    else:
+        assert "requires source_ref" in done.stderr, done.stderr
+
+
+def test_the_attachment_envelope_carries_standard_padded_base64(tmp_path):
+    """Gmail answers base64url without padding; the caller decodes strictly."""
+    import base64
+
+    data = b"\xfb\xff\xfe invite bytes ?>"
+    assert "-" in _b64url(data) or "_" in _b64url(data)
+    request = {"mode": "attachment", "source_ref": {"uuid": "m1", "attachment_id": "A1"}}
+    env = _run_provider_node(tmp_path, "Build attachment envelope", request,
+                             {"statusCode": 200, "body": {"size": len(data), "data": _b64url(data)}})
+    assert env["mode"] == "attachment" and env["size"] == len(data)
+    assert base64.b64decode(env["data_b64"], validate=True) == data
+
+
+@pytest.mark.parametrize("status", [400, 404])
+def test_an_attachment_the_provider_does_not_know_is_a_refusal_the_facade_answers_422(tmp_path, status):
+    """Attachment ids go stale; that is a NO, never an outage that parks the mail."""
+    request = {"mode": "attachment", "source_ref": {"uuid": "m1", "attachment_id": "A1"}}
+    thrown = _run_provider_node(tmp_path, "Build attachment envelope", request,
+                                {"statusCode": status, "body": {}}, expect_error=True)
+    assert "attachment not found for the given reference" in thrown
+    assert _run_facade_classifier(tmp_path, thrown)["status"] == 422
+
+
+@pytest.mark.parametrize("response", [
+    {"statusCode": 500, "body": {}},
+    {"statusCode": 429, "body": {}},
+    {"statusCode": 200, "body": {}},
+    {},
+])
+def test_any_other_attachment_failure_stays_an_outage(tmp_path, response):
+    request = {"mode": "attachment", "source_ref": {"uuid": "m1", "attachment_id": "A1"}}
+    thrown = _run_provider_node(tmp_path, "Build attachment envelope", request, response, expect_error=True)
+    assert _run_facade_classifier(tmp_path, thrown)["status"] == 503
+
+
+def _gmail_invite_message() -> dict:
+    """The shape Gmail gives an Outlook invite: an empty text body, the invite
+    inline as text/calendar, and the same invite again as invite.ics."""
+    ics = b"BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nSUMMARY:Planning review\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+    return {"statusCode": 200, "body": {
+        "id": "m1", "threadId": "t1", "internalDate": "1772474400000", "snippet": "",
+        "payload": {"mimeType": "multipart/mixed", "headers": [
+            {"name": "From", "value": "Jane Doe <jane.doe@example.com>"},
+            {"name": "Subject", "value": "Planning review"}],
+            "parts": [
+                {"mimeType": "multipart/alternative", "parts": [
+                    {"mimeType": "text/plain", "body": {"size": 2, "data": _b64url(b"\r\n")}},
+                    {"mimeType": "text/calendar", "filename": "",
+                     "headers": [{"name": "Content-Type", "value": "text/calendar; charset=\"utf-8\"; method=REQUEST"}],
+                     "body": {"size": len(ics), "data": _b64url(ics)}},
+                ]},
+                {"mimeType": "application/ics", "filename": "invite.ics",
+                 "headers": [{"name": "Content-Disposition", "value": "attachment; filename=\"invite.ics\""}],
+                 "body": {"size": len(ics), "attachmentId": "ATT1"}},
+                {"mimeType": "image/png", "filename": "logo.png",
+                 "headers": [{"name": "Content-ID", "value": "<logo>"}],
+                 "body": {"size": 300, "attachmentId": "ATT2"}},
+            ]}}}
+
+
+def test_an_invite_delivered_inline_is_listed_with_its_text(tmp_path):
+    """Before DL-216 the inline text/calendar part was neither body slot and was
+    dropped: the mail reached the agent as a subject line and nothing else."""
+    request = {"mode": "message", "source_ref": {"uuid": "m1"}}
+    env = _run_provider_node(tmp_path, "Normalize response", request, _gmail_invite_message())
+    msg = env["messages"][0]
+    by_name = {(a["filename"], a["attachment_id"]): a for a in msg["attachments"]}
+    inline = by_name[("invite.ics", "")]
+    assert inline["mime_type"] == "text/calendar" and inline["is_inline"] is False
+    assert "SUMMARY:Planning review" in inline["inline_text"]
+    assert by_name[("invite.ics", "ATT1")]["mime_type"] == "application/ics"
+    assert "inline_text" not in by_name[("invite.ics", "ATT1")]
+    assert by_name[("logo.png", "ATT2")]["is_inline"] is True
+    assert msg["has_attachments"] is True
+    assert env["__downloads"] == [], "a message read plans no download"
+
+
+def test_an_inline_invite_over_the_cap_is_listed_without_its_text(tmp_path):
+    """Too large to carry is still LISTED: named to the agent, never dropped."""
+    message = _gmail_invite_message()
+    big = b"BEGIN:VCALENDAR\r\n" + b"X-PAD:" + b"a" * 200_100 + b"\r\nEND:VCALENDAR\r\n"
+    part = message["body"]["payload"]["parts"][0]["parts"][1]
+    part["body"] = {"size": len(big), "data": _b64url(big)}
+    env = _run_provider_node(tmp_path, "Normalize response",
+                             {"mode": "message", "source_ref": {"uuid": "m1"}}, message)
+    inline = next(a for a in env["messages"][0]["attachments"] if a["attachment_id"] == "")
+    assert inline["too_large"] is True and "inline_text" not in inline

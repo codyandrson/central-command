@@ -2427,3 +2427,42 @@ hygiene, and how the test suite itself must be written. See
   captured. `CC_REFLECTION_SKILL_CORRECTIONS=false` turns reflection's part off.
 - **Enforced:** test: `tests/test_skill_corrections.py::test_the_widening_is_additive_idempotent_and_respects_history`, `tests/test_skill_corrections.py::test_the_tool_refuses_a_span_that_is_not_exactly_once`, `tests/test_skill_corrections.py::test_a_moved_document_is_world_moved_and_nothing_is_written`, `tests/test_skill_corrections.py::test_a_loaded_skill_and_a_correction_yield_one_gated_proposal`, `tests/test_skill_corrections.py::test_a_span_or_quote_that_fails_is_dropped_and_recorded`, `tests/test_packs.py` (seeds and defaults agree). Whether agents propose useful corrections, and how often, is measured from the live record, not asserted.
 - **Source:** `central_command/runtime/skill_corrections.py`; `central_command/runtime/tools.py`; `central_command/runtime/reflection.py`; `central_command/runtime/proposals.py`; `central_command/gateway/executor.py`; `central_command/db/repo.py`; `central_command/db/schema.sql`; `central_command/runtime/templates.py`.
+
+### DL-216 — A mail attachment reaches the agent as text or is named with why not; each file type has a measured reader
+
+- **Status:** active
+- **Date:** 2026-11-15
+- **Rule:** [.claude/rules/integrations.md](../../.claude/rules/integrations.md) — "**A mail attachment reaches the agent as text, or is NAMED with the reason it was not read. There is no third state**"
+- **Why:** A calendar invite reached the triage agent as a subject line over
+  an empty body, and the agent asked the operator what a "subject-line-only
+  email" meant (2026-11-14). The mail was an Exchange invite carried as
+  `invite.ics`. Three gaps stacked: the provider workflow read only
+  `text/plain` and `text/html` parts, the ledger dropped the attachment list
+  the façade did return, and the façade refused attachment bytes under a label
+  ("D13: text only") that cited a decision about storing mail bodies, reversed
+  by DL-044, which had never been about attachments. Inbound attachment
+  handling was an open roadmap item, not a ruling.
+  The operator asked for the readers to be chosen on evidence, recalling that
+  markitdown had lost a bake-off before (that one was for mail bodies; documents
+  had never been measured). Research against current sources, then a bake-off
+  on a Pi 5 over 42 public files with ground-truth probes, found markitdown
+  corrupting PDFs (two-column prose interleaved into junk tables, 1 of 5 probe
+  facts on one paper; receipt prices split from their items; watermark letters
+  inside amounts), unbounded on spreadsheets (one 84,000-row sheet: 2.5
+  million tokens, 50 s, 1 GB), and passing calendar, attached-mail and RTF
+  files through raw. PDFium's text layer found 46 of 47 PDF probe facts in
+  under 1.5 s a file; calamine read every workbook, including the legacy and
+  OpenDocument ones markitdown could not open, with a stated cut; an icalendar
+  renderer found 36 of 36 invite facts against 21. markitdown matched or beat
+  the alternative on Word and PowerPoint and stays there.
+  A layout model (Docling) produced the best tables, including which column a
+  statement amount sits in, which a text layer loses when a cell is empty. It
+  cost 20 s to 5 min a document and up to 1.9 GB on the Pi and timed out past
+  an hour on a 100-page booklet, so it is not in this decision: it and local
+  OCR for scans belong to an optional extractor service on the compute node.
+  Parser stacks had a run of advisories for hostile input in 2026, so a mail
+  attachment, a file a stranger chose, is parsed in a child process with CPU
+  and address-space limits and never in the API process.
+- **Enforced:** test: `tests/test_mail_attachments.py`, test: `tests/test_mail_attachments_claim.py`, test: `tests/test_n8n_workflows.py::test_an_invite_delivered_inline_is_listed_with_its_text`, test: `tests/test_n8n_workflows.py::test_the_facade_still_refuses_the_bulk_attachment_flag`, test: `tests/test_exchange.py`
+- **Supersedes:** the "D13: text only" label on the mail façade and the Exchange design's "Attachments … follows the same rule" non-goal (`docs/superpowers/specs/2026-09-25-exchange-native-client-design.md`)
+- **Source:** the 2026-11-14 investigation and bake-off; the operator's rulings of 2026-11-15

@@ -367,7 +367,9 @@ async def prepare(
                     name,
                 )
 
-        extractor = "markitdown"
+        from central_command.ingest.extract import reader_for
+
+        extractor = reader_for(name, data)
         try:
             text, truncated = _extract(name, data)
         except AttachmentRefused as refusal:

@@ -10,7 +10,7 @@ touches them. Edit the JSON, not the canvas.
 | file | id | role |
 |---|---|---|
 | `workflows/cc-email-facade.json` | `kC81tDmXwPb25Nsj` | the webhook (`POST /webhook/cc-email-facade`): checks `x-cc-token`, refuses attachments, calls the provider. Holds no credential. |
-| `workflows/lib-email-provider.json` | `tfoEVgB8uHHIokWQ` | the Gmail REST calls under the `Gmail account` credential: `message`, `thread`, `list`, and the one write, `report_spam` (`messages.modify`, +SPAM −INBOX). |
+| `workflows/lib-email-provider.json` | `tfoEVgB8uHHIokWQ` | the Gmail REST calls under the `Gmail account` credential: `message`, `thread`, `list`, `attachment` (one attachment's bytes by the id a message read listed, DL-216), and the one write, `report_spam` (`messages.modify`, +SPAM −INBOX). |
 | `workflows/cc-calendar-facade.json` | `gMh57mcPQJ2gfLa7` | the calendar webhook (`POST /webhook/cc-calendar-facade`): checks `x-cc-token`, allows exactly `list` (the EA's ungated read), `get_event` (the Executor's read before a delete) plus `create_event` / `update_event` / `delete_event` (reachable only from the Executor, after approval), calls the provider. Holds no credential. **Optional** — shipped only when `CC_CALENDAR_FACADE_TOKEN` is set. |
 | `workflows/lib-google-calendar.json` | `GSyOmRlOCoyc9Nrh` | the Google Calendar REST calls under the `Google Calendar account` credential; raw `httpRequest` nodes on purpose (the `googleCalendar` node cannot address `primary` and hides the HTTP status). |
 
@@ -58,6 +58,14 @@ name).
   `list_unsubscribe_post`, `authentication_results[]` (in header order — Gmail
   prepends its own, so index 0 is Gmail's verdict) and `dkim_signatures[]`.
 - `report_spam` returns `{ok: true, label_ids: [...]}` or an error.
+- `message` mode also lists `attachments[]` (`filename`, `mime_type`, `size`,
+  `attachment_id`, `is_inline`). A calendar invite Gmail delivers inline has
+  no `attachment_id` and carries its text as `inline_text`.
+- `attachment` mode takes `source_ref.uuid` and `source_ref.attachment_id` and
+  returns `{size, data_b64}` (standard, padded base64). Gmail mints a new
+  attachment id on every message read, so the id must come from a `message`
+  answer of the same pass; a stale one is answered 422 ("attachment not found
+  for the given reference"). The bulk `include_attachments` flag stays refused.
 - A failure inside `lib-email-provider` reaches the client with its own
   sentence in the body, `{"message": "lib-email-provider: ..."}`, and a status
   that says whose problem it is (DL-205): **422** for a refusal the provider

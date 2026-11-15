@@ -3902,7 +3902,8 @@ async def mail_item(ref: str) -> dict | None:
     try:
         row = await conn.fetchrow(
             f"""select {_MAIL_ITEM_COLUMNS}, payload->>'text' as text,
-                       payload->'audit' as audit
+                       payload->'audit' as audit,
+                       payload->'attachments' as attachments
                   from work_item
                  where id = $1 or message_id = $1 or payload->>'provider_uuid' = $1
                  limit 1""",
@@ -3912,6 +3913,7 @@ async def mail_item(ref: str) -> dict | None:
             return None
         out = dict(row)
         out["audit"] = _payload(out["audit"])
+        out["attachments"] = _payload(out["attachments"]) if out.get("attachments") else []
         return out
     finally:
         await conn.close()
@@ -7724,7 +7726,10 @@ _RULE_ADDR = (
     "w.payload->>'from', '')))"
 )
 _RULE_BODY = (
-    "lower(regexp_replace(coalesce(w.payload->>'text', ''), E'^.*?\\n\\n', '', 's'))"
+    # `text_body` once attachments are read (DL-216): `text` then also holds
+    # their extracted text, which a body rule was never written against.
+    "lower(regexp_replace(coalesce(w.payload->>'text_body', w.payload->>'text', ''), "
+    "E'^.*?\\n\\n', '', 's'))"
 )
 
 

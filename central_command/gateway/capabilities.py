@@ -1756,11 +1756,27 @@ REGISTRY: list[Capability] = [
         kind="read",
         gate="ungated read",
         default_gate="none",
-        risk="none to the world — the façade refuses attachments (D13: text only)",
+        risk="none to the world — a read; the record lists attachments by name, type and size",
         holder="dispatcher (hydrate at claim)",
         route=f"n8n façade cc-email-facade → lib-email-provider or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set",
         arguments=["uuid"],
         description="Fetch one email's content, at claim time, inside the retry machinery.",
+    ),
+    Capability(
+        name="email.get_attachment",
+        kind="read",
+        gate="ungated read",
+        default_gate="none",
+        risk=(
+            "none to the world — a read. The bytes are a stranger's file: they go "
+            "only to the isolated reader (ingest/extract_worker.py) and only "
+            "extracted text is kept (DL-216). The façade's bulk include_attachments "
+            "flag stays refused"
+        ),
+        holder="dispatcher (hydrate_attachments at claim)",
+        route=f"n8n façade cc-email-facade → lib-email-provider (mode attachment) or integrations/exchange.py when CC_EXCHANGE_* is set",
+        arguments=["uuid", "attachment_id"],
+        description="Fetch one attachment's bytes by the id a message record lists, at claim time, inside the retry machinery.",
     ),
 
     # --- in-sandbox activity (D-sandbox, slice 1): ungated, no exit ----------

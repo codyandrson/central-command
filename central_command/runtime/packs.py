@@ -1230,8 +1230,11 @@ PACKS: dict[str, Pack] = {
             "`propose_bulk_dismiss` it — the same query pins the same set, so "
             "what you read is what the operator will be asked to approve. "
             "When you report on mail, cite the work-item ids and sessions you "
-            "actually read; attachment metadata does not cross the façade, so "
-            "say when you could not see one rather than describing it. These "
+            "actually read. A mail's record lists each attachment as read "
+            "(its text follows the body) or NOT READ with the reason; "
+            "`mail_read(ref, attachment=name, offset=n)` reads on through a "
+            "long one. Describe an attachment only from text you were shown, "
+            "and say so when one was not read. These "
             "tools change nothing: no mail is read-marked, moved or deleted."
         ),
     ),

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from central_command import events
 from central_command.db import repo
-from central_command.ingest.extract import extract_text
+from central_command.ingest.extract import extract_text, reader_for
 
 # A 5,000-file backfill must not read a single ISO into memory. No measured
 # document has needed more; raise this when one does.
@@ -88,7 +88,7 @@ async def _walk_filesystem(source: dict) -> dict:
 
         result = await repo.record_observation(
             source["id"], rel, uri, path.name, content_hash, text,
-            "markitdown", meta,
+            reader_for(rel, data), meta,
         )
         if result["new_lineage"]:
             new_lineages += 1

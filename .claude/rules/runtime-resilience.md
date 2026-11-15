@@ -27,8 +27,9 @@ when a matching file is read.
   no third state** (`api/attachments.py`). Attachments are extracted to text
   at the GATEWAY (model-agnostic); nothing sends native multimodal blocks,
   because a text-only model silently drops a `document` block and answers
-  anyway. **The empty-output check is the load-bearing one:** markitdown
-  converts an image-only PDF *without raising* and returns zero characters —
+  anyway. **The empty-output check is the load-bearing one:** an image-only
+  PDF converts *without raising* and returns zero characters (PDFium's text
+  layer since v2.88.0, markitdown before it; the trap is the same) —
   check the OUTPUT, never the exception. Scanned/image-only PDFs go through
   `_ocr_scanned_pdf` (vision model, capped at `MAX_OCR_PAGES`) and the
   empty check guards the OCR result. Validate BEFORE the turn exists: a

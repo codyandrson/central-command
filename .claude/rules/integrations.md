@@ -130,6 +130,47 @@ when a matching file is read.
   **the first prompt sits outside every window guard** — `clip_tool_results`
   only cuts tool returns — so a fresh-run path that puts unbounded content
   in its prompt must bound it itself (`dispatcher._bound_prompt`).
+- **A mail attachment reaches the agent as text, or is NAMED with the reason
+  it was not read. There is no third state** (DL-216, `ingest/mail_attachments.py`).
+  Until v2.88.0 the attachment list was dropped before the agent, and a
+  calendar invite arrived as a subject line over an empty body (2026-11-14: the
+  agent asked the operator what a "subject-line-only email" meant). The claim
+  reads attachments AFTER the standing rules and the relatedness freezes
+  (`ledger.hydrate_attachments`), so a mail that folds or waits costs no fetch.
+  Attachment ids go stale (Gmail mints new ones on a message read, an Exchange
+  item id changes when the mail is filed): the ids stored at enrollment are
+  tried first, a NO triggers ONE re-read of the message for fresh ids, and a
+  re-read that fails right after the mailbox answered the attachment call is a
+  GONE message, not an outage — the façade answers an unknown message 503 by
+  design, and raising there would release and re-claim the mail forever. A
+  stranger's file is parsed only in the child process
+  (`ingest/extract_worker.py`: CPU and address-space limits set before any
+  parser loads, a minimal environment with none of the API's credentials, its
+  own output cut before it crosses the pipe); a child that dies is "not read",
+  never an exception in the API process. A DOWN mailbox raises and the claim
+  retries — judged with `is_down`, never `is_transient` alone, because a façade
+  error around a timeout stringifies to nothing. A mailbox NO (the façade's
+  422) and an unreadable file are records. The block's markers carry a tag
+  minted per mail, so a file whose text imitates a marker cannot close its own
+  block. A thread sibling's files are NAMED in the bundle, not read: they are
+  read when the sibling gets its own turn. After the
+  read `payload.text` is the body plus the attachment block, `payload.text_body`
+  is the body alone, and the standing rules and the entity extraction match on
+  the body alone (the SQL twin `repo._RULE_BODY` too). A quote is checked against the whole stored attachment text
+  (`mail_attachments.source_texts`), not the prompt's cut of it. The façade's
+  bulk `include_attachments` flag stays refused; mode `attachment` returns one
+  file. Pictures, scans, archives and media are named, not read.
+- **Which reader reads which file is `ingest/extract.py`'s table, and it was
+  measured** (DL-216, bake-off 2026-11-14, 42 files on a Pi 5). markitdown lost
+  PDF (two-column prose interleaved into junk tables, receipt prices split from
+  their items, watermark letters inside amounts: "E1,134.50"), spreadsheets (no
+  size limit: one 84,000-row sheet became 2.5 million tokens) and calendar,
+  attached-mail and RTF files (the raw file passed through). It keeps Word,
+  PowerPoint, HTML, CSV and EPUB, where nothing measured against it. PDFium's
+  text layer keeps a table row on one line but an empty cell leaves no gap, so
+  a statement row does not say which column an amount sits in: that is the
+  known cost, and the reason a layout model is a later, optional pass. Don't
+  route a type back to markitdown, or to a new library, without a measurement.
 - **An unsubscribe URL is derived from the MAILBOX, never from the
   proposal.** `mail.unsubscribe` pins the URL at propose time for review, and
   the Executor re-reads the message's `List-Unsubscribe` headers and refuses

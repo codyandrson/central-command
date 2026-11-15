@@ -29,7 +29,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "// lib-email-provider - validate the request. Fail fast, provider-agnostic.\nconst items = $input.all();\nif (items.length > 1) throw new Error('lib-email-provider: expects exactly one input item, got ' + items.length);\nconst inp = (items[0] && items[0].json) || {};\nconst mode = inp.mode;\nif (!['message', 'thread', 'list', 'report_spam'].includes(mode)) throw new Error(`lib-email-provider: bad or missing mode '${mode}' (must be 'message', 'thread', 'list', or 'report_spam')`);\nconst ref = inp.source_ref || {};\n// Ids are URL path segments: restrict to the provider id alphabet so a crafted\n// reference cannot rewrite the request path/query (by-reference boundary).\nconst ID_RE = /^[A-Za-z0-9_-]+$/;\nif ((mode === 'message' || mode === 'report_spam') && !ID_RE.test(String(ref.uuid ?? ''))) throw new Error(`lib-email-provider: mode \"${mode}\" requires source_ref.uuid (non-empty, [A-Za-z0-9_-] only)`);\n// list mode: scope_query is a Gmail search string, required non-empty.\nif (mode === 'list' && (typeof inp.scope_query !== 'string' || inp.scope_query.trim() === '')) throw new Error('lib-email-provider: mode \"list\" requires scope_query (non-empty Gmail search string)');\nif (mode === 'thread' && !ID_RE.test(String(ref.conversation_id ?? ''))) throw new Error('lib-email-provider: mode \"thread\" requires source_ref.conversation_id (non-empty, [A-Za-z0-9_-] only)');\nif (inp.include_attachments !== undefined && typeof inp.include_attachments !== 'boolean') throw new Error('lib-email-provider: include_attachments must be boolean when present, got ' + JSON.stringify(inp.include_attachments));\n// Optional pre-download ceiling: over-cap or unknown-size\n// attachments are skipped BEFORE the bytes transit Gmail + Code-node memory.\nif (inp.max_attachment_bytes !== undefined && (typeof inp.max_attachment_bytes !== 'number' || !Number.isFinite(inp.max_attachment_bytes) || inp.max_attachment_bytes <= 0)) throw new Error('lib-email-provider: max_attachment_bytes must be a positive number when present, got ' + JSON.stringify(inp.max_attachment_bytes));\nreturn [{ json: { ...inp, source_ref: ref, include_attachments: inp.include_attachments === true, max_attachment_bytes: inp.max_attachment_bytes ?? null } }];\n"
+        "jsCode": "// lib-email-provider - validate the request. Fail fast, provider-agnostic.\nconst items = $input.all();\nif (items.length > 1) throw new Error('lib-email-provider: expects exactly one input item, got ' + items.length);\nconst inp = (items[0] && items[0].json) || {};\nconst mode = inp.mode;\nif (!['message', 'thread', 'list', 'report_spam', 'attachment'].includes(mode)) throw new Error(`lib-email-provider: bad or missing mode '${mode}' (must be 'message', 'thread', 'list', 'report_spam', or 'attachment')`);\nconst ref = inp.source_ref || {};\n// Ids are URL path segments: restrict to the provider id alphabet so a crafted\n// reference cannot rewrite the request path/query (by-reference boundary).\nconst ID_RE = /^[A-Za-z0-9_-]+$/;\nif ((mode === 'message' || mode === 'report_spam' || mode === 'attachment') && !ID_RE.test(String(ref.uuid ?? ''))) throw new Error(`lib-email-provider: mode \"${mode}\" requires source_ref.uuid (non-empty, [A-Za-z0-9_-] only)`);\n// attachment mode: ONE attachment's bytes, by the attachment_id a message read listed.\n// The id is a URL path segment too - same alphabet guard.\nif (mode === 'attachment' && !ID_RE.test(String(ref.attachment_id ?? ''))) throw new Error('lib-email-provider: mode \"attachment\" requires source_ref.attachment_id (non-empty, [A-Za-z0-9_-] only)');\n// list mode: scope_query is a Gmail search string, required non-empty.\nif (mode === 'list' && (typeof inp.scope_query !== 'string' || inp.scope_query.trim() === '')) throw new Error('lib-email-provider: mode \"list\" requires scope_query (non-empty Gmail search string)');\nif (mode === 'thread' && !ID_RE.test(String(ref.conversation_id ?? ''))) throw new Error('lib-email-provider: mode \"thread\" requires source_ref.conversation_id (non-empty, [A-Za-z0-9_-] only)');\nif (inp.include_attachments !== undefined && typeof inp.include_attachments !== 'boolean') throw new Error('lib-email-provider: include_attachments must be boolean when present, got ' + JSON.stringify(inp.include_attachments));\n// Optional pre-download ceiling: over-cap or unknown-size\n// attachments are skipped BEFORE the bytes transit Gmail + Code-node memory.\nif (inp.max_attachment_bytes !== undefined && (typeof inp.max_attachment_bytes !== 'number' || !Number.isFinite(inp.max_attachment_bytes) || inp.max_attachment_bytes <= 0)) throw new Error('lib-email-provider: max_attachment_bytes must be a positive number when present, got ' + JSON.stringify(inp.max_attachment_bytes));\nreturn [{ json: { ...inp, source_ref: ref, include_attachments: inp.include_attachments === true, max_attachment_bytes: inp.max_attachment_bytes ?? null } }];\n"
       }
     },
     {
@@ -142,6 +142,30 @@
                 }
               },
               "outputKey": "report_spam",
+              "renameOutput": true
+            },
+            {
+              "conditions": {
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "attachment",
+                    "leftValue": "={{ $json.mode }}",
+                    "operator": {
+                      "operation": "equals",
+                      "type": "string"
+                    },
+                    "rightValue": "attachment"
+                  }
+                ],
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                }
+              },
+              "outputKey": "attachment",
               "renameOutput": true
             }
           ]
@@ -267,7 +291,7 @@
         220
       ],
       "parameters": {
-        "jsCode": "\n// Normalize (raw Gmail REST -> canonical messages[]). The ONLY Gmail-shape-aware\n// code: the provider swap point.\nconst req = $('When Called (source ref + mode)').first().json;\nconst includeAttachments = req.include_attachments === true;\nconst capBytes = (typeof req.max_attachment_bytes === 'number' && req.max_attachment_bytes > 0) ? req.max_attachment_bytes : null;   // pre-download ceiling\nconst mode = req.mode;\n\n// HTTP node runs with fullResponse+neverError: unwrap the body and map provider\n// failures to the lib's provider-agnostic error contract.\nfunction httpBody(resp, what) {\n  const r = resp || {};\n  if (r.statusCode === undefined) return r; // defensive: plain body shape\n  const s = r.statusCode;\n  if (s >= 200 && s < 300) return r.body || {};\n  if (s === 404) throw new Error('lib-email-provider: ' + what + ' not found for the given reference');\n  if (s === 401 || s === 403) throw new Error('lib-email-provider: provider auth failed (' + s + ') - check the shared email credential');\n  if (s === 429) throw new Error('lib-email-provider: provider rate limit hit - retry later');\n  throw new Error('lib-email-provider: provider fetch failed (' + s + ')');\n}\nfunction headerMap(payload) {\n  const m = {};\n  const hs = (payload && Array.isArray(payload.headers)) ? payload.headers : [];\n  for (const h of hs) { if (h && h.name) m[h.name.toLowerCase()] = h.value; }\n  return m;\n}\nfunction headerAll(payload, name) {\n  const hs = (payload && Array.isArray(payload.headers)) ? payload.headers : [];\n  return hs.filter(h => h && h.name && h.name.toLowerCase() === name).map(h => String(h.value || ''));\n}\nfunction charsetOf(part) {\n  const hs = (part && Array.isArray(part.headers)) ? part.headers : [];\n  for (const h of hs) {\n    if (h && h.name && h.name.toLowerCase() === 'content-type') {\n      const m = /charset\\s*=\\s*\"?([\\w.:-]+)\"?/i.exec(String(h.value || ''));\n      if (m) return m[1].toLowerCase();\n    }\n  }\n  return '';\n}\nfunction decode(data, charset) {\n  if (!data) return '';\n  try {\n    const buf = Buffer.from(String(data).replace(/-/g, '+').replace(/_/g, '/'), 'base64');\n    const cs = (charset || 'utf-8').toLowerCase();\n    if (['utf-8', 'utf8', 'us-ascii', 'ascii'].includes(cs)) return buf.toString('utf-8');\n    if (typeof TextDecoder !== 'undefined') { try { return new TextDecoder(cs).decode(buf); } catch (e) { /* unknown label - fall through */ } }\n    if (['iso-8859-1', 'latin1', 'windows-1252', 'cp1252'].includes(cs)) return buf.toString('latin1');\n    return buf.toString('utf-8');\n  } catch (e) { return ''; }\n}\nfunction dispositionOf(part) {\n  const hs = (part && Array.isArray(part.headers)) ? part.headers : [];\n  let disp = '', cid = '';\n  for (const h of hs) {\n    if (!h || !h.name) continue;\n    const n = h.name.toLowerCase();\n    if (n === 'content-disposition') disp = String(h.value || '').toLowerCase();\n    else if (n === 'content-id') cid = String(h.value || '');\n  }\n  // An explicit `attachment` disposition WINS over a\n  // Content-ID — Gmail attaches cid headers to real attachments on forwards,\n  // which made the 1.4 heuristic (`inline-disposition OR cid`) misclassify\n  // them as inline (live-caught on fixture 19f019f83c19f815).\n  const isAttachment = disp.startsWith('attachment');\n  return { isAttachment, isInline: !isAttachment && (disp.startsWith('inline') || !!cid) };\n}\nfunction walk(part, acc) {\n  if (!part) return;\n  const mime = (part.mimeType || '').toLowerCase();\n  const body = part.body || {};\n  const d = dispositionOf(part);\n  if (body.attachmentId) {\n    // Presence keys on attachmentId (a filename-less part is still an attachment);\n    // is_inline lets the bridge filter embedded signature images from surface-or-flag.\n    acc.attachments.push({ filename: part.filename || '', mime_type: part.mimeType || '', size: (body.size === undefined ? null : body.size), attachment_id: body.attachmentId, is_inline: d.isInline });\n    // A body-role text part delivered by reference only: signal, don't return '' silently.\n    if ((mime === 'text/plain' || mime === 'text/html') && !d.isAttachment && !body.data) acc.body_truncated = true;\n  } else if (mime === 'text/plain' && body.data && !d.isAttachment && !acc.body_text) {\n    acc.body_text = decode(body.data, charsetOf(part));\n  } else if (mime === 'text/html' && body.data && !d.isAttachment && !acc.body_html) {\n    acc.body_html = decode(body.data, charsetOf(part));\n  }\n  if (mime === 'message/rfc822') return; // a forwarded message's body must not win the outer slots\n  if (Array.isArray(part.parts)) for (const p of part.parts) walk(p, acc);\n}\nfunction normalizeOne(msg) {\n  const acc = { body_text: '', body_html: '', attachments: [], body_truncated: false };\n  const payload = msg.payload;\n  const hdr = headerMap(payload);\n  if (payload) {\n    walk(payload, acc);\n    if (!acc.body_text && !acc.body_html && payload.body && payload.body.data) {\n      const d = decode(payload.body.data, charsetOf(payload));\n      if ((payload.mimeType || '').includes('html')) acc.body_html = d; else acc.body_text = d;\n    }\n  }\n  let date = null;\n  if (msg.internalDate) date = new Date(Number(msg.internalDate)).toISOString();\n  else { const t = Date.parse(hdr['date'] || ''); if (!Number.isNaN(t)) date = new Date(t).toISOString(); }\n  return {\n    uuid: msg.id,\n    conversation_id: msg.threadId,\n    from: hdr['from'] || '',\n    to: hdr['to'] || '',\n    cc: hdr['cc'] || '',\n    subject: hdr['subject'] || '',\n    // Unsubscribe facts (RFC 8058) — reported, never decided here. headerMap keeps\n    // the LAST header of a name; these are collected in order (Gmail prepends its\n    // own Authentication-Results, so index 0 is Gmail's verdict).\n    list_unsubscribe: hdr['list-unsubscribe'] || '',\n    list_unsubscribe_post: hdr['list-unsubscribe-post'] || '',\n    authentication_results: headerAll(payload, 'authentication-results'),\n    dkim_signatures: headerAll(payload, 'dkim-signature'),\n    date,\n    snippet: msg.snippet || '',\n    body_text: acc.body_text,\n    body_html: acc.body_html,\n    body_truncated: acc.body_truncated,\n    has_attachments: acc.attachments.length > 0,\n    attachments: acc.attachments,\n  };\n}let messages;\nif (mode === 'message') {\n  messages = [normalizeOne(httpBody($input.first().json, 'message'))];\n} else {\n  const top = httpBody($input.first().json, 'thread');\n  if (!Array.isArray(top.messages) || top.messages.length === 0) {\n    throw new Error('lib-email-provider: thread fetch returned no messages for the given reference');\n  }\n  // oldest -> newest; fall back to the RFC2822 Date header when internalDate is absent.\n  function sortKey(msg) {\n    if (msg.internalDate) return Number(msg.internalDate);\n    const hs = (msg.payload && Array.isArray(msg.payload.headers)) ? msg.payload.headers : [];\n    const dh = hs.find(h => h && h.name && h.name.toLowerCase() === 'date');\n    const t = dh ? Date.parse(String(dh.value || '')) : NaN;\n    return Number.isNaN(t) ? 0 : t;\n  }\n  messages = top.messages.slice().sort((a, b) => sortKey(a) - sortKey(b)).map(m => normalizeOne(m));\n}\n\n// include_attachments:true -> plan REAL byte downloads. Non-inline parts only: inline parts (signature images\n// etc.) stay metadata-only, marked bytes_skipped:'inline'.\nconst downloads = [];\nif (includeAttachments) {\n  messages.forEach((m, mi) => m.attachments.forEach((a, ai) => {\n    if (a.is_inline) { a.bytes_skipped = 'inline'; return; }\n    if (capBytes != null && a.size != null && a.size > capBytes) { a.bytes_skipped = 'size ' + a.size + ' B exceeds max_attachment_bytes ' + capBytes + ' — not downloaded'; return; }\n    if (capBytes != null && a.size == null) { a.bytes_skipped = 'size unknown — not downloaded while max_attachment_bytes is set'; return; }\n    downloads.push({ message_uuid: m.uuid, attachment_id: a.attachment_id,\n      binary_key: 'att_' + downloads.length, filename: a.filename || ('attachment-' + downloads.length),\n      mime_type: a.mime_type || 'application/octet-stream', size: a.size, msg_index: mi, att_index: ai });\n  }));\n}\nreturn [{ json: { kind: 'email', mode, source_ref: req.source_ref || {}, messages, __downloads: downloads } }];"
+        "jsCode": "\n// Normalize (raw Gmail REST -> canonical messages[]). The ONLY Gmail-shape-aware\n// code: the provider swap point.\nconst req = $('When Called (source ref + mode)').first().json;\nconst includeAttachments = req.include_attachments === true;\nconst capBytes = (typeof req.max_attachment_bytes === 'number' && req.max_attachment_bytes > 0) ? req.max_attachment_bytes : null;   // pre-download ceiling\nconst mode = req.mode;\n\n// HTTP node runs with fullResponse+neverError: unwrap the body and map provider\n// failures to the lib's provider-agnostic error contract.\nfunction httpBody(resp, what) {\n  const r = resp || {};\n  if (r.statusCode === undefined) return r; // defensive: plain body shape\n  const s = r.statusCode;\n  if (s >= 200 && s < 300) return r.body || {};\n  if (s === 404) throw new Error('lib-email-provider: ' + what + ' not found for the given reference');\n  if (s === 401 || s === 403) throw new Error('lib-email-provider: provider auth failed (' + s + ') - check the shared email credential');\n  if (s === 429) throw new Error('lib-email-provider: provider rate limit hit - retry later');\n  throw new Error('lib-email-provider: provider fetch failed (' + s + ')');\n}\nfunction headerMap(payload) {\n  const m = {};\n  const hs = (payload && Array.isArray(payload.headers)) ? payload.headers : [];\n  for (const h of hs) { if (h && h.name) m[h.name.toLowerCase()] = h.value; }\n  return m;\n}\nfunction headerAll(payload, name) {\n  const hs = (payload && Array.isArray(payload.headers)) ? payload.headers : [];\n  return hs.filter(h => h && h.name && h.name.toLowerCase() === name).map(h => String(h.value || ''));\n}\nfunction charsetOf(part) {\n  const hs = (part && Array.isArray(part.headers)) ? part.headers : [];\n  for (const h of hs) {\n    if (h && h.name && h.name.toLowerCase() === 'content-type') {\n      const m = /charset\\s*=\\s*\"?([\\w.:-]+)\"?/i.exec(String(h.value || ''));\n      if (m) return m[1].toLowerCase();\n    }\n  }\n  return '';\n}\nfunction decode(data, charset) {\n  if (!data) return '';\n  try {\n    const buf = Buffer.from(String(data).replace(/-/g, '+').replace(/_/g, '/'), 'base64');\n    const cs = (charset || 'utf-8').toLowerCase();\n    if (['utf-8', 'utf8', 'us-ascii', 'ascii'].includes(cs)) return buf.toString('utf-8');\n    if (typeof TextDecoder !== 'undefined') { try { return new TextDecoder(cs).decode(buf); } catch (e) { /* unknown label - fall through */ } }\n    if (['iso-8859-1', 'latin1', 'windows-1252', 'cp1252'].includes(cs)) return buf.toString('latin1');\n    return buf.toString('utf-8');\n  } catch (e) { return ''; }\n}\nfunction dispositionOf(part) {\n  const hs = (part && Array.isArray(part.headers)) ? part.headers : [];\n  let disp = '', cid = '';\n  for (const h of hs) {\n    if (!h || !h.name) continue;\n    const n = h.name.toLowerCase();\n    if (n === 'content-disposition') disp = String(h.value || '').toLowerCase();\n    else if (n === 'content-id') cid = String(h.value || '');\n  }\n  // An explicit `attachment` disposition WINS over a\n  // Content-ID — Gmail attaches cid headers to real attachments on forwards,\n  // which made the 1.4 heuristic (`inline-disposition OR cid`) misclassify\n  // them as inline (live-caught on fixture 19f019f83c19f815).\n  const isAttachment = disp.startsWith('attachment');\n  return { isAttachment, isInline: !isAttachment && (disp.startsWith('inline') || !!cid) };\n}\nfunction walk(part, acc) {\n  if (!part) return;\n  const mime = (part.mimeType || '').toLowerCase();\n  const body = part.body || {};\n  const d = dispositionOf(part);\n  if (body.attachmentId) {\n    // Presence keys on attachmentId (a filename-less part is still an attachment);\n    // is_inline lets the bridge filter embedded signature images from surface-or-flag.\n    acc.attachments.push({ filename: part.filename || '', mime_type: part.mimeType || '', size: (body.size === undefined ? null : body.size), attachment_id: body.attachmentId, is_inline: d.isInline });\n    // A body-role text part delivered by reference only: signal, don't return '' silently.\n    if ((mime === 'text/plain' || mime === 'text/html') && !d.isAttachment && !body.data) acc.body_truncated = true;\n  } else if (mime === 'text/plain' && body.data && !d.isAttachment && !acc.body_text) {\n    acc.body_text = decode(body.data, charsetOf(part));\n  } else if (mime === 'text/html' && body.data && !d.isAttachment && !acc.body_html) {\n    acc.body_html = decode(body.data, charsetOf(part));\n  } else if (mime === 'text/calendar' && body.data) {\n    // A calendar invite delivered INLINE (no attachmentId; Gmail usually sends the\n    // same invite again as invite.ics): it is neither body slot, and before DL-216\n    // it was dropped. Listed with its text so the caller reads it without a fetch.\n    const t = decode(body.data, charsetOf(part));\n    // Over the cap it is still LISTED (too_large), never silently dropped.\n    if (t) acc.attachments.push(Object.assign({ filename: part.filename || 'invite.ics', mime_type: 'text/calendar', size: (body.size === undefined ? t.length : body.size), attachment_id: '', is_inline: false }, t.length <= 200000 ? { inline_text: t } : { too_large: true }));\n  }\n  if (mime === 'message/rfc822') return; // a forwarded message's body must not win the outer slots\n  if (Array.isArray(part.parts)) for (const p of part.parts) walk(p, acc);\n}\nfunction normalizeOne(msg) {\n  const acc = { body_text: '', body_html: '', attachments: [], body_truncated: false };\n  const payload = msg.payload;\n  const hdr = headerMap(payload);\n  if (payload) {\n    walk(payload, acc);\n    if (!acc.body_text && !acc.body_html && payload.body && payload.body.data) {\n      const d = decode(payload.body.data, charsetOf(payload));\n      if ((payload.mimeType || '').includes('html')) acc.body_html = d; else acc.body_text = d;\n    }\n  }\n  let date = null;\n  if (msg.internalDate) date = new Date(Number(msg.internalDate)).toISOString();\n  else { const t = Date.parse(hdr['date'] || ''); if (!Number.isNaN(t)) date = new Date(t).toISOString(); }\n  return {\n    uuid: msg.id,\n    conversation_id: msg.threadId,\n    from: hdr['from'] || '',\n    to: hdr['to'] || '',\n    cc: hdr['cc'] || '',\n    subject: hdr['subject'] || '',\n    // Unsubscribe facts (RFC 8058) — reported, never decided here. headerMap keeps\n    // the LAST header of a name; these are collected in order (Gmail prepends its\n    // own Authentication-Results, so index 0 is Gmail's verdict).\n    list_unsubscribe: hdr['list-unsubscribe'] || '',\n    list_unsubscribe_post: hdr['list-unsubscribe-post'] || '',\n    authentication_results: headerAll(payload, 'authentication-results'),\n    dkim_signatures: headerAll(payload, 'dkim-signature'),\n    date,\n    snippet: msg.snippet || '',\n    body_text: acc.body_text,\n    body_html: acc.body_html,\n    body_truncated: acc.body_truncated,\n    has_attachments: acc.attachments.length > 0,\n    attachments: acc.attachments,\n  };\n}let messages;\nif (mode === 'message') {\n  messages = [normalizeOne(httpBody($input.first().json, 'message'))];\n} else {\n  const top = httpBody($input.first().json, 'thread');\n  if (!Array.isArray(top.messages) || top.messages.length === 0) {\n    throw new Error('lib-email-provider: thread fetch returned no messages for the given reference');\n  }\n  // oldest -> newest; fall back to the RFC2822 Date header when internalDate is absent.\n  function sortKey(msg) {\n    if (msg.internalDate) return Number(msg.internalDate);\n    const hs = (msg.payload && Array.isArray(msg.payload.headers)) ? msg.payload.headers : [];\n    const dh = hs.find(h => h && h.name && h.name.toLowerCase() === 'date');\n    const t = dh ? Date.parse(String(dh.value || '')) : NaN;\n    return Number.isNaN(t) ? 0 : t;\n  }\n  messages = top.messages.slice().sort((a, b) => sortKey(a) - sortKey(b)).map(m => normalizeOne(m));\n}\n\n// include_attachments:true -> plan REAL byte downloads. Non-inline parts only: inline parts (signature images\n// etc.) stay metadata-only, marked bytes_skipped:'inline'.\nconst downloads = [];\nif (includeAttachments) {\n  messages.forEach((m, mi) => m.attachments.forEach((a, ai) => {\n    if (a.is_inline) { a.bytes_skipped = 'inline'; return; }\n    if (!a.attachment_id) return; // delivered inline with its text - nothing to download\n    if (capBytes != null && a.size != null && a.size > capBytes) { a.bytes_skipped = 'size ' + a.size + ' B exceeds max_attachment_bytes ' + capBytes + ' — not downloaded'; return; }\n    if (capBytes != null && a.size == null) { a.bytes_skipped = 'size unknown — not downloaded while max_attachment_bytes is set'; return; }\n    downloads.push({ message_uuid: m.uuid, attachment_id: a.attachment_id,\n      binary_key: 'att_' + downloads.length, filename: a.filename || ('attachment-' + downloads.length),\n      mime_type: a.mime_type || 'application/octet-stream', size: a.size, msg_index: mi, att_index: ai });\n  }));\n}\nreturn [{ json: { kind: 'email', mode, source_ref: req.source_ref || {}, messages, __downloads: downloads } }];"
       }
     },
     {
@@ -528,6 +552,51 @@
       "parameters": {
         "jsCode": "// report_spam: the one write this provider performs. Same status mapping as\n// Normalize's httpBody(); the envelope carries ok + the labels Gmail reports.\nconst req = $('When Called (source ref + mode)').first().json;\nconst r = $input.first().json || {};\nconst s = r.statusCode;\nlet body = r;\nif (s !== undefined) {\n  if (s === 404) throw new Error('lib-email-provider: message not found for the given reference');\n  if (s === 401 || s === 403) throw new Error('lib-email-provider: provider auth failed (' + s + ') - check the shared email credential');\n  if (s === 429) throw new Error('lib-email-provider: provider rate limit hit - retry later');\n  if (s < 200 || s >= 300) throw new Error('lib-email-provider: report_spam failed (' + s + ')');\n  body = r.body || {};\n}\nreturn [{ json: { kind: 'email', mode: 'report_spam', source_ref: req.source_ref || {}, ok: true, label_ids: body.labelIds || [] } }];\n"
       }
+    },
+    {
+      "id": "gmail_att",
+      "name": "Get attachment (Gmail API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        820
+      ],
+      "alwaysOutputData": false,
+      "parameters": {
+        "method": "GET",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.source_ref.uuid }}/attachments/{{ $json.source_ref.attachment_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json",
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": null,
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "id": "att_envelope",
+      "name": "Build attachment envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        820
+      ],
+      "parameters": {
+        "jsCode": "// attachment mode: ONE attachment's bytes for the caller that asked for it by id\n// (DL-216). Same status mapping as Normalize's httpBody(). Gmail answers\n// base64url; the envelope carries standard, padded base64 so the caller's\n// strict decoder accepts it. A 400 or 404 is the provider saying it does not\n// know this id (ids are minted per message read and go stale): a NO, stated in\n// words the facade's classifier answers with 422, never an outage.\nconst req = $('When Called (source ref + mode)').first().json;\nconst r = $input.first().json || {};\nconst s = r.statusCode;\nif (s === 400 || s === 404) throw new Error('lib-email-provider: attachment not found for the given reference (' + s + ')');\nif (s === 401 || s === 403) throw new Error('lib-email-provider: provider auth failed (' + s + ') - check the shared email credential');\nif (s === 429) throw new Error('lib-email-provider: provider rate limit hit - retry later');\nif (s === undefined || s < 200 || s >= 300) throw new Error('lib-email-provider: attachment fetch failed (' + (s ?? 'no response') + ')');\nconst body = r.body || {};\nif (typeof body.data !== 'string' || body.data === '') throw new Error('lib-email-provider: attachment fetch failed (the provider answered without data)');\nlet b64 = body.data.replace(/-/g, '+').replace(/_/g, '/');\nwhile (b64.length % 4) b64 += '=';\nreturn [{ json: { kind: 'email', mode: 'attachment', source_ref: req.source_ref || {}, size: (body.size === undefined ? null : body.size), data_b64: b64 } }];"
+      }
     }
   ],
   "connections": {
@@ -579,6 +648,13 @@
         [
           {
             "node": "Report spam (Gmail API)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get attachment (Gmail API)",
             "type": "main",
             "index": 0
           }
@@ -710,6 +786,28 @@
       ]
     },
     "Build spam envelope": {
+      "main": [
+        [
+          {
+            "node": "Return envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get attachment (Gmail API)": {
+      "main": [
+        [
+          {
+            "node": "Build attachment envelope",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build attachment envelope": {
       "main": [
         [
           {

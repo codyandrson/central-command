@@ -4,6 +4,62 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-15 — v2.88.0: Mail attachments are read, and each file type has a reader chosen by measurement
+
+A calendar invite reached the triage agent as a subject line over an empty body, and the agent asked
+the operator what a "subject-line-only email" meant. The mail carried `invite.ics`. The provider
+workflow read only the text and HTML parts, the ledger dropped the attachment list the façade did
+return, and the façade refused attachment bytes. Attachment handling had been an open roadmap item
+since the first real-mail milestone; the "text only" label on the façade cited a decision about
+storing mail bodies that never covered attachments.
+
+- Every attachment reaches the agent as text, or is named with the reason it was not read. The claim
+  reads attachments after the standing rules and the relatedness checks, so a mail that folds or
+  waits costs no fetch. The mail's stored text gains an attachment block (each file's name, type,
+  size and reader, its text cut at `CC_MAIL_ATTACHMENT_PROMPT_CHARS`, default 20,000, with the way to
+  read on); the whole extracted text is kept and `mail_read(ref, attachment=name, offset=n)` pages
+  through it. The reviewer's source pane, the auditor and the quote check read the same text, and a
+  quote from an attachment is verified against the whole stored attachment. The standing rules and
+  the entity extraction still match on the body alone (`payload.text_body`).
+- Not read, and said so: pictures, scanned PDFs with no text layer, archives, audio and video,
+  anything over `CC_MAIL_ATTACHMENT_MAX_BYTES` (default 10 MiB), unsupported types, and attachments
+  past the tenth of one message. Inline pictures are counted on one line. A thread sibling shown
+  beside the mail being handled has its files named, not read; they are read when it gets its own
+  turn. Mail already processed is not re-read, a row enrolled before this release is processed from
+  its body as before, and the hand-fed path reads no attachments.
+- Attachment ids go stale, so the ids stored at enrollment are tried first and a refusal triggers
+  one re-read of the message. A message deleted or filed before its turn costs its attachments,
+  which are named as no longer readable, and the mail is still processed from its stored body.
+- A stranger's file is parsed in a child process (`ingest/extract_worker.py`) with CPU and
+  address-space limits set before any parser loads, a minimal environment that holds none of the
+  API's credentials, and its own output cut before it reaches the parent. A child that dies is an
+  attachment "not read"; the API process never parses a mail attachment. The attachment block's
+  markers carry a tag minted per mail, so text inside a file cannot pose as a marker. Native Windows has no such limits, so there the
+  child is isolation only.
+- The extraction seam (`ingest/extract.py`) now picks a reader per type, for chat uploads and the
+  catalog as well as mail: PDFium's text layer for PDF, calamine for xlsx/xlsm/xlsb/xls/ods (every
+  sheet named with its size and visibility, merged cells filled, the cut stated in the heading),
+  icalendar for calendar files (what it is, title, time in its own zone and UTC, recurrence stated
+  not expanded, place, people), the standard library for attached mail and striprtf for RTF.
+  markitdown keeps Word, PowerPoint, HTML, CSV and EPUB. Measured on a Pi 5 over 42 public files:
+  markitdown interleaved two-column PDFs into junk tables, split receipt prices from their items,
+  put watermark letters inside amounts, turned one 84,000-row sheet into 2.5 million tokens, and
+  passed calendar, mail and RTF files through raw. A scanned PDF still yields no text from the
+  reader, and a chat upload still goes to the vision-model transcription as before.
+- Known cost of the PDF text layer: a table row stays on one line, but an empty cell leaves no gap,
+  so a statement row does not say which column an amount sits in. A layout model that keeps columns,
+  and local OCR for scans and pictures, are a later optional extractor service.
+- The mail façade: `lib-email-provider` gains mode `attachment` (one file's bytes by the id a
+  message read listed; a stale id is answered 422, never an outage) and lists a calendar invite that
+  Gmail delivers inline, with its text. `cc-email-facade` still refuses the bulk
+  `include_attachments` flag. The update applies both workflows.
+- Exchange offers the same contract (`attachments[]` on every record, `get_attachment`, and an
+  `invite.ics` synthesised from a meeting request's own fields). It is coded to exchangelib's source
+  and has not met a real server: verify on site. A meeting cancellation or response carries no start
+  time in EWS and yields no invite.
+- Three dependencies, all with wheels for the supported platforms: `icalendar`, `python-calamine`,
+  `striprtf`. `requirements.lock` gains exactly those three pins and moves no other.
+- Why and the measurements: DL-216.
 ## 2026-11-15 — v2.87.0: The agent that used a skill proposes its correction, and so may its session's reflection, always through the gate
 
 The skills library grew only when the operator imported a document: the gated skill proposals existed,

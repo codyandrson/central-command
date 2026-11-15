@@ -157,7 +157,9 @@ def item_fields(item: dict) -> dict:
     body BELOW the header block `ledger.agent_input` prepends (a body match on
     "From:" would otherwise hit every row)."""
     payload = item.get("payload") or {}
-    text = payload.get("text") or ""
+    # The body alone: once attachments are read, `text` also holds their
+    # extracted text, which a body rule was never written against (DL-216).
+    text = payload.get("text_body") or payload.get("text") or ""
     head, sep, body = text.partition("\n\n")
     body = body if sep else text
     return {

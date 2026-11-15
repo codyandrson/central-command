@@ -247,7 +247,7 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
             "calendar.list_events"),
     **_each((N8N,),
             "mail.create_rule mail.report_spam mail.unsubscribe mail.send "
-            "mail.move email.list_refs email.get_message"),
+            "mail.move email.list_refs email.get_message email.get_attachment"),
     **_each((LITELLM,),
             "litellm.add_model litellm.update_model litellm.delete_model "
             "litellm.create_key litellm.update_key litellm.create_team "

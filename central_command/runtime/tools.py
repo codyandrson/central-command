@@ -2413,18 +2413,76 @@ async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
     return _clip("\n".join([head, *lines]))
 
 
-@parkable_read
-async def mail_read(ctx: RunContext, ref: str) -> str:
-    """Read one mail record from the queue: the email exactly as it was fed to
-    the agent that handled it (headers and body), its current state, the
-    session and covering proposal that decided it, the recorded dismissal
-    reason, the auditor's verdict and any operator note. `ref` is a work-item
-    id (`wi_…`) from `mail_search`, a ledger message id, or a Gmail message
-    uuid. A message not enrolled in the queue is read from the mailbox instead
-    and says so.
+def _attachment_brief(rec: dict) -> str:
+    """One attachment of a stored mail record, in a line."""
+    if rec.get("status") == "read":
+        return f"{rec.get('name')} (read, {len(rec.get('text') or ''):,} characters)"
+    return f"{rec.get('name')} (NOT READ: {rec.get('reason') or 'no reason recorded'})"
 
-    Attachment metadata does not cross the email façade — if an attachment
-    matters, say that you could not see it rather than describing it. Read-only.
+
+def _unread_attachment_lines(msg: dict) -> str:
+    """The attachment list of a message read straight from the mailbox: names
+    only, because attachments are read when the queue processes the mail."""
+    atts = [a for a in (msg.get("attachments") or []) if not a.get("is_inline")]
+    if not atts:
+        return ""
+    lines = "\n".join(
+        f"- {a.get('filename') or '(unnamed)'} ({a.get('mime_type') or 'type unknown'}, "
+        f"{a.get('size') if a.get('size') is not None else '?'} bytes)"
+        for a in atts
+    )
+    return ("\n\nATTACHMENTS, listed but not read here (they are read when the "
+            "queue processes this mail):\n" + lines)
+
+
+def _mail_attachment_page(row: dict, name: str, offset: int) -> str:
+    """One page of one attachment's stored text, with where the next begins."""
+    records = row.get("attachments") or []
+    match = next((r for r in records if r.get("name") == name), None) or next(
+        (r for r in records if str(r.get("name") or "").lower() == name.lower()), None
+    )
+    if match is None:
+        have = "; ".join(_attachment_brief(r) for r in records) or "none recorded"
+        return f"{row['id']} has no attachment named {name!r}. Its attachments: {have}"
+    if match.get("status") != "read":
+        return f"{match['name']!r} of {row['id']} was NOT READ: {match.get('reason') or 'no reason recorded'}"
+    text = match.get("text") or ""
+    start = min(max(int(offset or 0), 0), len(text))
+    # The page must survive the tool-result clip whole, or the "next page"
+    # offset in the header would skip what the clip cut.
+    from central_command.runtime import context
+
+    size = max(500, min(_MAIL_BODY_CEILING, context.tool_result_ceiling() - 400))
+    page = text[start:start + size]
+    end = start + len(page)
+    head = (f"attachment {match['name']!r} of {row['id']} — characters {start + 1:,}-{end:,} "
+            f"of {len(text):,}, read with {match.get('reader')}")
+    if end < len(text):
+        head += f"; next page: offset={end}"
+    elif match.get("stored_truncated"):
+        head += "; END of what was stored (the file itself is longer and the rest was not kept)"
+    else:
+        head += "; END of the attachment"
+    return f"{head}\n{page}"
+
+
+@parkable_read
+async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int = 0) -> str:
+    """Read one mail record from the queue: the email exactly as it was fed to
+    the agent that handled it (headers, body and the text of its attachments),
+    its current state, the session and covering proposal that decided it, the
+    recorded dismissal reason, the auditor's verdict and any operator note.
+    `ref` is a work-item id (`wi_…`) from `mail_search`, a ledger message id,
+    or a Gmail message uuid. A message not enrolled in the queue is read from
+    the mailbox instead and says so.
+
+    Attachments: the record lists each one as read, or NOT READ with the
+    reason (a picture, a scan, an archive, too large, an unsupported type).
+    To read on through a long attachment pass its name as `attachment` and
+    the character `offset` to start from; the answer says where the next page
+    starts. Attachments are read when the queue processes a mail, so a mail
+    not yet processed lists them by name only. Describe an attachment only
+    from text you were shown. Read-only.
     """
     from central_command.db import repo
     from central_command.ingest import ledger
@@ -2438,12 +2496,19 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
         except email_facade.EmailFacadeError as e:
             _raise_if_down(e)
             return f"{ref!r} is not in the queue and the mailbox could not return it ({e})"
+        if (attachment or "").strip():
+            return (f"{ref!r} is not in the queue, so its attachments have not been read: "
+                    "they are read when the queue processes a mail."
+                    + _unread_attachment_lines(msg))
         return _clip(
             f"NOT ENROLLED in the queue (read from the mailbox)\n"
             f"From: {msg.get('from')}\nSubject: {msg.get('subject')}\n"
             f"Date: {msg.get('date')}\n\n"
             + _clip(ledger.provider_body(msg), _MAIL_BODY_CEILING)
+            + _unread_attachment_lines(msg)
         )
+    if (attachment or "").strip():
+        return _clip(_mail_attachment_page(row, attachment.strip(), offset))
     audit = row.get("audit") or {}
     parts = [
         _mail_line(row),
@@ -2456,6 +2521,8 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
         parts.append(f"audit: {audit.get('verdict')} — {audit.get('rationale')}")
     if row.get("operator_note"):
         parts.append(f"operator note: {row['operator_note']}")
+    if row.get("attachments"):
+        parts.append("attachments: " + "; ".join(_attachment_brief(a) for a in row["attachments"]))
     parts.append("")
     text = row.get("text")
     if not text and row.get("provider_uuid"):
@@ -2465,7 +2532,8 @@ async def mail_read(ctx: RunContext, ref: str) -> str:
         try:
             msg = await email_facade.get_message(row["provider_uuid"])
             text = ("ENROLLED, not yet fetched by the queue (read from the mailbox)\n"
-                    + ledger.agent_input(ledger._provider_parsed(msg)))
+                    + ledger.agent_input(ledger._provider_parsed(msg))
+                    + _unread_attachment_lines(msg))
         except email_facade.EmailFacadeError as e:
             _raise_if_down(e)
             text = f"(not yet fetched by the queue, and the mailbox could not return it: {e})"

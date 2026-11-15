@@ -39,7 +39,7 @@ from central_command.contract import (
     retry_not_before,
 )
 from central_command.db import repo
-from central_command.ingest import entities, ledger
+from central_command.ingest import entities, ledger, mail_attachments
 from central_command.runtime import context
 from central_command.runtime.deps import ThreadContext
 from central_command.runtime.models import resolve_model
@@ -322,7 +322,11 @@ async def _handle_email(item, siblings, siblings_capped, note, model) -> dict:
         # What an email quote is checked against: each message's STORED text on
         # its own (whole, where `_bound_prompt` may have cut the prompt), never
         # the framed prompt with its context notes around the mail.
-        source_texts=[item["payload"]["text"], *(s["payload"]["text"] for s in siblings)],
+        # An attachment's whole stored text is a source too: the prompt shows
+        # only its head, and `mail_read` reads the rest.
+        source_texts=[
+            t for i in (item, *siblings) for t in mail_attachments.source_texts(i["payload"])
+        ],
         **({"session_id": rerun["session_id"], "rerun_of": rerun["rerun_of"]}
            if rerun else {}),
         # `proposal.created` is emitted by the one park path now; the email
@@ -668,8 +672,18 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             log.info("dispatch: froze %s — %s", item["id"], freeze["reason"])
             return {"item_id": item["id"], "ok": True, "frozen": True, **freeze}
 
+        # Attachments last among the reads (DL-216): after the standing rules
+        # and the freezes, so a mail that folds or waits costs no fetch.
+        await ledger.hydrate_attachments(item)
         for s in siblings:
             await ledger.hydrate_work_item(s)
+            # A sibling's files are read when it gets its own turn: reading
+            # them here would put every thread member's fetches and readers
+            # inside this claim. They are NAMED, in this prompt only, so the
+            # fold decision can see that a sibling carries something unread.
+            listed = mail_attachments.listed_only(s.get("payload") or {})
+            if listed:
+                s["payload"] = {**s["payload"], "text": f"{s['payload']['text'].rstrip()}\n\n{listed}"}
 
         # A reopened item carries the operator's note — trusted input, same
         # standing as rejection feedback.

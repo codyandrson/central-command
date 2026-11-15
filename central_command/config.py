@@ -486,6 +486,15 @@ class Settings(BaseSettings):
     # read this one; only the defaults are pinned equal.
     attachment_max_bytes: int = 50 * 1024 * 1024
 
+    # Mail attachments (DL-216). The largest one fetched and read, in bytes:
+    # a bigger file is named to the agent as not read. 10 MiB is under Gmail's
+    # own 25 MB message limit on purpose: the bytes cross n8n as one base64
+    # JSON answer. And how much of one attachment's text the first prompt
+    # shows; the whole text (to `mail_attachments.STORED_CHARS`) is kept and
+    # `mail_read` pages through it.
+    mail_attachment_max_bytes: int = 10 * 1024 * 1024
+    mail_attachment_prompt_chars: int = 20_000
+
     @field_validator("tls_insecure", mode="before")
     @classmethod
     def _empty_tls_flag_is_false(cls, value):

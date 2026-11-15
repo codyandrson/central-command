@@ -76,16 +76,27 @@ runtime = [
     "trafilatura>=1.12",
     "markdownify>=0.13",
     # File->markdown conversion for the skills-library file-upload import
-    # (POST /api/skills/import-file). pdf/docx/pptx/xlsx extras cover the
-    # document types operators actually hand over; the audio-transcription
-    # and Azure content-understanding extras are skipped on purpose (heavy,
-    # unused).
+    # (POST /api/skills/import-file) and, behind the extraction seam
+    # (ingest/extract.py), for Word, PowerPoint, HTML, CSV and EPUB. The
+    # pdf/xlsx extras stay for the skills import, which calls markitdown
+    # directly; the seam reads PDFs and spreadsheets with the readers below
+    # (DL-216). The audio-transcription and Azure content-understanding
+    # extras are skipped on purpose (heavy, unused).
     "markitdown[pdf,docx,pptx,xlsx]>=0.1.7",
-    # Page rendering for the scanned-PDF OCR fallback (api/attachments.py):
-    # markitdown finds no text -> pypdfium2 renders pages -> the session's
-    # vision model transcribes them. Was already in the venv transitively;
-    # declared here because attachments.py imports it directly.
+    # The PDF text layer behind the extraction seam (ingest/readers.py), and
+    # page rendering for the scanned-PDF OCR fallback (api/attachments.py):
+    # no text layer -> pypdfium2 renders pages -> the session's vision model
+    # transcribes them.
     "pypdfium2>=4",
+    # Purpose-built readers behind the extraction seam, chosen by bake-off on
+    # 2026-11-14 over markitdown for these types (DL-216): spreadsheets
+    # (xlsx/xlsm/xlsb/xls/ods, with sheet visibility, merged ranges and a
+    # stated cut where markitdown had no size limit), calendar files (an
+    # invite as what/when/where/who where markitdown passed the raw file
+    # through; >=7.1.3 for CVE-2026-55099) and RTF.
+    "python-calamine>=0.9.1",
+    "icalendar>=7.3",
+    "striprtf>=0.0.35",
 ]
 dev = [
     "pytest>=8",

@@ -1,8 +1,9 @@
 """Client for the n8n email tool façade (cc-email-facade → lib-email-provider).
 
 Gmail credentials live only inside n8n — Central Command never sees them. The
-façade refuses attachment downloads and the provider's list mode returns
-references only. One write mode exists (`report_spam`, 2026-09-12) and it is
+provider's list mode returns references only, a message record lists its
+attachments by name, type and size, and one attachment's bytes are read with
+`get_attachment` (DL-216; the bulk `include_attachments` flag stays refused). One write mode exists (`report_spam`, 2026-09-12) and it is
 called from the Executor alone, after approval — the runtime tier only reads.
 Untrusted email content passes through here as data; the callers
 (ledger/agent prompts) own the data-not-commands discipline.
@@ -19,6 +20,9 @@ covers both providers.
 """
 
 from __future__ import annotations
+
+import base64
+import binascii
 
 import httpx
 
@@ -97,7 +101,9 @@ async def get_message(uuid: str) -> dict:
     plus the unsubscribe headers and DKIM facts `contract.mail` reads:
     list_unsubscribe, list_unsubscribe_post, authentication_results[],
     dkim_signatures[] — a façade predating 2026-09-12 omits them, which reads
-    as "not eligible", never as "eligible")."""
+    as "not eligible", never as "eligible"). `attachments[]` lists each
+    attached file ({filename, mime_type, size, attachment_id, is_inline}); a
+    calendar part delivered inline carries its text as `inline_text`."""
     provider = _exchange()
     if provider is not None:
         try:
@@ -109,6 +115,37 @@ async def get_message(uuid: str) -> dict:
     if not messages:
         raise EmailFacadeError(f"message {uuid}: empty envelope from provider")
     return messages[0]
+
+
+async def get_attachment(uuid: str, attachment_id: str) -> bytes:
+    """One attachment's bytes, by the `attachment_id` a `get_message` record
+    lists. Ids go stale (Gmail mints new ones on a message read), so a NO
+    here is answered by ONE re-read of the message for fresh ids
+    (`ingest/mail_attachments.py`), never by trusting a stored id twice.
+
+    A read, called by the dispatcher at claim time and nowhere in `runtime/`:
+    the bytes go straight to the isolated reader
+    (`ingest/mail_attachments.py`) and only extracted text is kept. The
+    façade's old `include_attachments` flag (every attachment of a message in
+    one answer) stays refused; this mode returns one file the caller chose
+    after reading its size."""
+    provider = _exchange()
+    if provider is not None:
+        try:
+            return await provider.get_attachment(uuid, attachment_id)
+        except provider.ExchangeError as e:
+            raise EmailFacadeError(str(e)) from e
+    out = await _call(
+        {"mode": "attachment", "source_ref": {"uuid": uuid, "attachment_id": attachment_id}},
+        timeout=180.0,
+    )
+    data = out.get("data_b64")
+    if not isinstance(data, str):
+        raise EmailFacadeError(f"message {uuid}: attachment answer carried no data")
+    try:
+        return base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise EmailFacadeError(f"message {uuid}: attachment data is not base64 ({e})") from e
 
 
 async def report_spam(uuid: str) -> dict:

@@ -257,6 +257,7 @@ async def entity_keys(item: dict, agent_id: str = EXTRACTOR_AGENT) -> list[str]:
     """The keys to store for a claimed, hydrated item, extracted by the model
     of the agent that will handle it and grounded in the item's own text."""
     payload = item.get("payload") or {}
-    subject, text = item.get("subject"), payload.get("text")
+    # The body alone, never the attachment text appended after it (DL-216).
+    subject, text = item.get("subject"), payload.get("text_body") or payload.get("text")
     entities = await extract(subject, text, agent_id=agent_id)
     return keys_for(entities, source=f"{subject or ''}\n{text or ''}")
