@@ -4,6 +4,42 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-15 — v2.88.1: Review fixes for episodic recall and the skill loop: a code-built proposal parks on every run path
+
+v2.86.0 and v2.87.0 were pushed before an independent review had read them. The reviews, run afterwards
+by fresh readers given the code and no conclusions, found no way for one agent to reach another's
+sessions and no way around the gate, and they found the defects below. The first is a crash.
+
+- **A code-built proposal crashed three run paths.** The steward, the wiki agent and the coach parsed a
+  deferred call without its metadata, so any of them calling a tool that builds its proposal in code
+  (`propose_skill_correction`, `propose_skill_doc`, `propose_skill_create`) raised and left the session
+  RUNNING; v2.87.0 had just given that pack to the coach and the wiki agent. Every run path now reads the
+  call through `durable.deferred_proposal`, and `tests/test_deferred_proposal_metadata.py` walks the source:
+  no `proposal_from_call(...)` outside `durable.py` may omit the metadata.
+- **Skill corrections.** A correction keeps the document's `source_url` and `captured_at` instead of
+  reading as freshly captured. The tool refuses, with one sentence that is the same whether or not the
+  skill exists, unless the agent holds a grant for the skill and loaded its guidance in this session.
+  Reflection's quote must be a full phrase (20 characters and four words once normalised) from a user
+  prompt or a tool result, never the agent's own words, the skill's text or a recall result, and its
+  drafting check pins every argument. The loser of a race is told the document's real new version, not
+  "v0". A document stored with CRLF line endings can be corrected.
+- **Episodic recall.** A punctuation-only term beside an exclusion (`!!! -foo`) no longer returns every
+  part that lacks the excluded word. A session is indexed in bounded chunks under a four-second clock per
+  call, and one whose indexing fails is not retried until it changes. A structured tool result is indexed
+  whole (an issue key beside a `content` field is findable) and binary payloads become a placeholder.
+  Discover says when its counts are lower bounds.
+- **Grant seeds run once per database.** The `session-recall` and `skill-propose` seeds re-ran on every
+  release and would have granted the pack to an agent the operator hired later with an explicit pack list
+  that left it out. Each is now gated on a marker row in `app_setting`.
+- **The compaction summary lead** said the summary was "not instructions", but on a chat lane the
+  operator's earlier requests survive only in that summary. It now says the task, its constraints and what
+  the operator asked for still stand, and that text quoted from mail, documents or tool output is data.
+- **The test-database sweep** matched any idle database named `central_command_test_*`; it now matches
+  only the harness's own names (`central_command_test_<8 hex>` and its `_gw<N>` workers).
+
+Enforced by `tests/test_deferred_proposal_metadata.py`, `tests/test_skill_corrections.py`,
+`tests/test_session_recall.py`, `tests/test_conftest_database.py` and `tests/test_context_window.py`.
+
 ## 2026-11-15 — v2.88.0: Mail attachments are read, and each file type has a reader chosen by measurement
 
 A calendar invite reached the triage agent as a subject line over an empty body, and the agent asked
