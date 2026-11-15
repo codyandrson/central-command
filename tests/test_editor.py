@@ -54,7 +54,12 @@ async def test_it_is_not_seeded_in_the_schema():
     from pathlib import Path
 
     schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
-    assert f"'{AGENT_ID}'" not in schema
+    # The one mention allowed is an EXCLUSION, not a seed: DL-215's
+    # skill-propose widening leaves the editor out by name (it holds no
+    # propose pack by design), which writes nothing about the editor's row.
+    exclusion = "and a.id not in ('auditor', 'graph-auditor', 'editor')"
+    assert schema.count(exclusion) == 1
+    assert f"'{AGENT_ID}'" not in schema.replace(exclusion, "")
 
 
 def test_the_charter_holds_the_rubric_and_the_output_contract():

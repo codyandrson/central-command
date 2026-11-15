@@ -3870,3 +3870,39 @@ async def propose_skill_doc(
         expected_effect=f"skill {skill_id} carries a new version of '{doc_key}'",
     )
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
+
+
+async def propose_skill_correction(
+    ctx: RunContext,
+    skill_id: str,
+    find: str,
+    replace: str,
+    why: str,
+    doc_key: str = "guidance",
+) -> str:
+    """Propose a small correction to a skill document you have READ in this
+    session: one exact span of its current text and what it should say.
+
+    `find` is copied character for character from the document's CURRENT text
+    and must occur in it exactly once; `replace` is its new wording. To add a
+    missing step or pitfall, quote the line it belongs after as `find` and give
+    that same line followed by the new text as `replace`. `why` states the rule
+    or pitfall the correction teaches, in a sentence or two. `doc_key` is
+    'guidance' (the document `load_capability` gave you) or a reference
+    document's key.
+
+    The control plane applies the span to the current document now and puts the
+    whole corrected document, and the diff, into the proposal; if the span does
+    not match exactly once nothing is proposed and you are told why. The
+    operator reviews the change itself; if the document moves before they
+    approve, the correction is refused and you are asked to redraft.
+    """
+    from central_command.runtime.skill_corrections import build_correction
+
+    out = await build_correction(
+        agent_id=getattr(ctx.deps, "agent_id", "unknown"), skill_id=skill_id,
+        doc_key=doc_key, find=find, replace=replace, why=why,
+    )
+    if isinstance(out, str):
+        return out
+    raise CallDeferred(metadata={"proposal": out.model_dump(mode="json")})

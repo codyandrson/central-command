@@ -1050,6 +1050,10 @@ PARK_SITES: dict[str, tuple[str, str]] = {
         "a reflection runs as a background task off runtime's close_session "
         "with no API-tier landing; its proposal is evaluated by the startup "
         "override_sweep"),
+    "runtime/reflection.py:_propose_skill_correction": (SWEEP_ONLY,
+        "the episode's case: the skill correction is parked by the same "
+        "background reflection off close_session, with no API-tier landing; "
+        "its proposal is evaluated by the startup override_sweep"),
     "gateway/gateway.py:_park_redraft": (EXEMPT,
         "a redraft is recorded unevaluated at the park (story 16)"),
     "gateway/gateway.py:finish_decision_resume": (EXEMPT,

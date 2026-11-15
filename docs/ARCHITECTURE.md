@@ -356,6 +356,51 @@ process's environ.
   while bundled docs were not refreshed, with the reasons and a Retry; a row whose
   text moved needs a recompute and a fresh verdict in the dialog instead. The updaters
   are below.
+- **Agents correct the skills they use, through the gate** (DL-215). The
+  `skill-propose` pack (`propose_skill_create`, `propose_skill_doc`,
+  `propose_skill_correction`; capabilities `skill.create`, `skill.doc_add`) is
+  held by every roster agent but the auditor, the graph auditor and the editor:
+  seeded by the widening at the end of `schema.sql` (the story 4.9 precedent; a
+  revoked grant is never resurrected) and carried by every hiring loadout but
+  the editor's. A project run of the orchestrator drops it, as it drops
+  `task-create`. `skill.doc_add` on an existing `doc_key` appends a new version
+  (`is_current` moves, the old version stays readable), and the Inbox diffs the
+  proposed content against the current version (`skill_diff`). A correction
+  (`runtime/skill_corrections.py`, `build_correction`, shared by the tool and
+  reflection) is one span of the document's CURRENT text that must occur
+  exactly once, and its replacement, applied at propose time: the proposal is
+  an ordinary `skill.doc_add` carrying the whole corrected document as
+  `content`, the span as `correction`, the unified diff in `expected_effect`
+  and `base_version`, the version the span was applied to. A span found zero
+  or several times returns a refusal the model can act on and proposes
+  nothing. `park_proposal` keeps `base_version` only on a tool-built proposal
+  (one the model wrote is stripped), and the Executor re-checks it
+  (`WORLD_CHECKS["skill.doc_add"]`, target `skill_doc:<skill>/<doc_key>`, and
+  again inside the write's transaction with the current row locked,
+  `repo.StaleSkillDoc`): a moved document is `world_moved`, nothing is written,
+  and the drafter is resumed to redraft. An unstamped `skill.doc_add` is not
+  re-checked.
+- **Session-close reflection proposes at most one skill correction**
+  (`runtime/reflection.py`, beside its three lessons and one self-nomination,
+  `CC_REFLECTION_SKILL_CORRECTIONS`, default on). The distill prompt carries
+  the current guidance text of each skill the session loaded (a
+  `load_capability` call AND its return, read off the persisted record), the
+  preference ladder and the do-not-capture list. A returned correction is
+  checked in code before any proposal: the skill was loaded, the quote is one
+  verbatim span of a single turn of the session other than the charter and the
+  skill text (`claim_supported`), and the span applies to the current text
+  exactly once. A failure is recorded as `reflection.skill_correction_dropped`
+  `{agent_id, skill_id, doc_key, reason}` and nothing parks. A passing one is
+  drafted in its own session by `_propose_skill_correction` (packs narrowed to
+  `skill-propose`), parked through `park_proposal` with the drafter as
+  `agent_id` only if the drafted content equals the content computed at close,
+  and carries the quote as a `record` evidence entry with
+  `claim_matches_source: true`. Reflection runs for a `graph-propose` holder as
+  before; a `skill-propose` holder without it reflects only when its session
+  loaded a skill, and then only for the correction. The grant check is the
+  same as the episodes': reflection reads the agent's grants first, and the
+  parked capability is one the agent holds, so the Inbox raises no
+  outside-the-grants flag.
 - **The Executor replays by cursor.** The completed-actions list is the
   cursor, so a half-landed non-idempotent write may be applied twice on retry;
   façade idempotency keys are the owed fix (PRD §6.2).
@@ -685,6 +730,7 @@ stateDiagram-v2
   | `runtime/consult.py` `consult` | the asker's own landing: the consult-wait result carries the specialist's `proposal_id`, decided once the asker is parked |
   | `api/orchestration.py` `_settle_consult_resume` | `orchestration.resume_consult_wait` and `resume_parked_session` (`after=consulted`) |
   | `runtime/reflection.py` `_propose_episode` | none inline (a background task off `close_session` with no API-tier landing): the startup sweep |
+  | `runtime/reflection.py` `_propose_skill_correction` | the same: the startup sweep |
   | `gateway/gateway.py` `_park_redraft` | exempt: recorded unevaluated (`redraft`) |
   | `gateway/gateway.py` `finish_decision_resume` | exempt: recorded unevaluated (`follow_on`) |
 
@@ -1169,6 +1215,7 @@ Runs with no landing tail keep their unit-level DOWN path:
 | Wiki repair | `wiki_agent.run_repair` | the heartbeat's next occurrence |
 | Reflection | `reflection._reflect` | the next closed conversation reflects again |
 | Reflection episode | `reflection._propose_episode` | the startup audit/reflection sweep |
+| Reflection skill correction | `reflection._propose_skill_correction` | the startup audit/reflection sweep |
 | Routing recommendation | `orchestrator.recommend` | the operator asks again; nothing is lost |
 | Consult sub-run | `tools.consult_agent` | not a `_run_live` run: the outage re-raises and the ASKER parks |
 

@@ -1011,6 +1011,40 @@ async def _skill_create(args: dict, approver: str, proposer: str | None) -> str:
     return f"skill {skill_id} created with its guidance document (v{doc['version']})"
 
 
+def _skill_doc_moved(skill_id: str, doc_key: str, expected: int, actual: int) -> WorldMoved:
+    """The typed verdict for a skill correction whose document moved past the
+    version its span was applied to — one wording for the re-check and the
+    in-transaction refusal."""
+    return WorldMoved(
+        f"skill.doc_add: {skill_id}/{doc_key} moved from v{expected} (the version "
+        f"this correction was applied to) to v{actual} — nothing was written",
+        target=f"skill_doc:{skill_id}/{doc_key}", expected=expected, actual=actual,
+        what_moved=f"{skill_id}/{doc_key} moved v{expected} -> v{actual}",
+    )
+
+
+async def _check_skill_doc_add(args: dict) -> None:
+    """skill.doc_add's world check (a `WORLD_CHECKS` row; DL-215): when the
+    action carries a `base_version` — a correction, stamped by
+    `propose_skill_correction` from the document it applied the span to —
+    the CURRENT version of that document (0 when it has none) must still be
+    it. No stamp, no check: a whole-document doc_add replaces what is there
+    and the Inbox diffs it against the current version at review time."""
+    from central_command.db import repo
+
+    base = args.get("base_version")
+    if base is None:
+        return
+    skill_id, doc_key = args.get("skill_id") or "", (args.get("doc_key") or "").strip()
+    current = next(
+        (d for d in await repo.list_skill_docs(skill_id) if d["doc_key"] == doc_key),
+        None,
+    )
+    actual = current["version"] if current else 0
+    if actual != int(base):
+        raise _skill_doc_moved(skill_id, doc_key, int(base), actual)
+
+
 async def _skill_doc_add(args: dict, approver: str, proposer: str | None) -> str:
     """One more document on an EXISTING skill, as a new version.
 
@@ -1038,15 +1072,24 @@ async def _skill_doc_add(args: dict, approver: str, proposer: str | None) -> str
     if not doc_key:
         raise ExecutorError("skill.doc_add: a doc_key is required")
     kind = "guidance" if doc_key == "guidance" else "reference"
-    doc = await repo.add_skill_doc(
-        skill_id, doc_key, kind, args.get("title") or doc_key, args.get("content") or "",
-        source_url=args.get("source_url"), describes=args.get("describes"),
-        # `captured_at` is when the CONTENT was taken, which for a URL-sourced
-        # document is propose time (the tool fetched it then and embedded the
-        # text) — not now. Falling back to now covers agent-authored text.
-        captured_at=_captured_at(args.get("captured_at")),
-        added_by=f"agent:{proposer}" if proposer else approver,
-    )
+    # A correction's world re-check (DL-215): the version its span was applied
+    # to, stamped by `propose_skill_correction`, compared before the write and
+    # again inside its transaction. An unstamped doc_add is not checked.
+    await _check_skill_doc_add(args)
+    base = args.get("base_version")
+    try:
+        doc = await repo.add_skill_doc(
+            skill_id, doc_key, kind, args.get("title") or doc_key, args.get("content") or "",
+            source_url=args.get("source_url"), describes=args.get("describes"),
+            # `captured_at` is when the CONTENT was taken, which for a URL-sourced
+            # document is propose time (the tool fetched it then and embedded the
+            # text) — not now. Falling back to now covers agent-authored text.
+            captured_at=_captured_at(args.get("captured_at")),
+            added_by=f"agent:{proposer}" if proposer else approver,
+            expected_version=int(base) if base is not None else None,
+        )
+    except repo.StaleSkillDoc as e:
+        raise _skill_doc_moved(skill_id, doc_key, e.expected, e.actual) from e
     await _skill_doc_added(
         skill_id, doc, args.get("describes"), approver, args.get("source_url"),
     )
@@ -2483,20 +2526,23 @@ async def _execute_action(action: Action, approver: str, proposer: str | None) -
 # before writing, so the re-check and the write can never disagree. Only
 # capabilities whose target carries state to compare are here (a page version,
 # a transition list against the issue's `updated`, a deletion's preview, a
-# charter's version against the one its drafter was shown);
+# charter's version against the one its drafter was shown, a skill document's
+# version against the one a correction was applied to);
 # creates, sends and the rest are not re-checked.
 WORLD_CHECKS = {
     "confluence.update_page": _check_confluence_update_page,
     "jira.transition_issue": _check_jira_transition_issue,
     "graph.delete_episode": _check_graph_delete_episode,
     "charter.update": _check_charter_update,
+    "skill.doc_add": _check_skill_doc_add,
 }
 
 
 def _targets_of(action: Action) -> set[tuple[str, str]]:
     """The existing objects an action names, as `(system, id)`: Jira issues
     (`_jira_keys_of`), a Confluence `page_id`, a graph `episode_uuid`, the
-    target agent of a `charter.update`. A `WORLD_CHECKS` row whose action
+    target agent of a `charter.update`, the `skill_id/doc_key` of a
+    `skill.doc_add`. A `WORLD_CHECKS` row whose action
     names no target here is silently never run."""
     capability = action.capability.split("@", 1)[0]
     args = action.arguments or {}
@@ -2505,6 +2551,10 @@ def _targets_of(action: Action) -> set[tuple[str, str]]:
         v = args.get("agent_id")
         if isinstance(v, str) and v.strip():
             out.add(("charter", v.strip()))
+    if capability == "skill.doc_add":
+        sid, key = args.get("skill_id"), args.get("doc_key")
+        if isinstance(sid, str) and sid.strip() and isinstance(key, str) and key.strip():
+            out.add(("skill_doc", f"{sid.strip()}/{key.strip()}"))
     for prefix, system, key in (("confluence.", "confluence", "page_id"),
                                 ("graph.", "graph", "episode_uuid")):
         v = args.get(key)

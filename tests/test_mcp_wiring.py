@@ -44,7 +44,8 @@ EXEMPT = {
     ),
     "reflection.py": (
         "the distiller is tool-free by design; _propose_episode deliberately "
-        'narrows packs to ("graph-propose",)'
+        'narrows packs to ("graph-propose",), and _propose_skill_correction to '
+        '("skill-propose",)'
     ),
     "orchestrator.py": (
         "holds no propose_*/write path by its own module docstring; routing "

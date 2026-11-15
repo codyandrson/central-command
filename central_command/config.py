@@ -280,6 +280,12 @@ class Settings(BaseSettings):
     # Scope limit (2026-08-05): a transcript below this many characters skips
     # reflection entirely — trivial sessions were the bulk of the review load.
     reflection_min_transcript_chars: int = 2000
+    # The skill correction (DL-215): at most ONE exact-span correction per
+    # closed session, only for a skill the session loaded, with a quote the
+    # code re-checks against the transcript — still an ordinary gated
+    # `skill.doc_add` proposal. Off turns that part alone off; the lessons and
+    # the self-nomination are unaffected.
+    reflection_skill_corrections: bool = True
 
     # Native Jira client (D23; the n8n façade fallback was removed in v2.50.0 —
     # an unconfigured client now raises instead of routing to a webhook).

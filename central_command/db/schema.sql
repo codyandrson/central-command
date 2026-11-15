@@ -1746,3 +1746,38 @@ select distinct g.agent_id, 'session-recall', 'seed:session-recall'
    and a.role <> ''
    and a.id not in ('auditor', 'graph-auditor')
 on conflict (agent_id, pack) do nothing;
+
+-- skill-propose for every roster agent but the auditors and the editor (DL-215,
+-- the operator's ruling of 2026-11-15): the agent that used a skill proposes
+-- the correction it learned, and session-close reflection may propose one on
+-- its behalf, always through the human gate. Follows the story 4.9 task-create
+-- widening exactly: "the roster" = ACTIVE, `role <> ''`, holding at least one
+-- ACTIVE grant (an agent that takes toolsets); the auditor and the graph
+-- auditor are excluded by name (gate independence: neither takes toolsets),
+-- and so is the editor, whose design holds no propose packs at all (a critic
+-- that could propose could become the drafter it reviews; its charter says it
+-- holds none). A revoked skill-propose row is never resurrected (`on conflict
+-- do nothing` meets it), a re-run finds nothing new, and an agent hired after
+-- this runs gets the pack from its template. Every member of the pack is a
+-- gated proposal (skill.create, skill.doc_add); its URL capture is a read at
+-- propose time whose text the operator reviews. Applied by the updater's schema
+-- phase at release; nothing in the app process runs it.
+insert into agent_grant (agent_id, pack, granted_by)
+select distinct g.agent_id, 'skill-propose', 'seed:skill-propose-all'
+  from agent_grant g
+  join agent a on a.id = g.agent_id
+ where g.revoked_at is null
+   and a.status = 'ACTIVE'
+   and a.role <> ''
+   and a.id not in ('auditor', 'graph-auditor', 'editor')
+on conflict (agent_id, pack) do nothing;
+
+-- The orchestrator's deviation text said it holds NO propose tools; since the
+-- widening above it holds one pack of them. Rewritten in place on a row that
+-- carries the old wording (both seeded wordings share the phrase); a re-run
+-- matches nothing.
+update agent set deviations = replace(deviations,
+        'Holds NO propose tools and no write path',
+        'Holds no propose tools but skill-propose (DL-215: a gated correction to a skill it used) and no write path')
+ where id = 'orchestrator'
+   and deviations like '%Holds NO propose tools and no write path%';

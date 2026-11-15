@@ -5004,6 +5004,17 @@ async def get_skill(skill_id: str) -> dict | None:
         await conn.close()
 
 
+class StaleSkillDoc(Exception):
+    """`add_skill_doc` refused: the CURRENT version of the document is not the
+    one a correction was applied to. The Executor turns it into its typed
+    world-moved verdict (`executor._skill_doc_moved`)."""
+
+    def __init__(self, skill_id: str, doc_key: str, expected: int, actual: int):
+        super().__init__(f"{skill_id}/{doc_key} is at v{actual}, not v{expected}")
+        self.skill_id, self.doc_key = skill_id, doc_key
+        self.expected, self.actual = expected, actual
+
+
 async def add_skill_doc(
     skill_id: str,
     doc_key: str,
@@ -5019,8 +5030,15 @@ async def add_skill_doc(
     bundled_path: str | None = None,
     bundled_hash: str | None = None,
     bundled_text: str | None = None,
+    expected_version: int | None = None,
 ) -> dict:
     """Add a NEW version of one document, superseding the prior current one.
+
+    `expected_version` (a correction's `base_version`, DL-215) makes the write
+    refuse with `StaleSkillDoc` when the CURRENT version of the key (0 when it
+    has none) is not that one — checked inside the transaction, with the
+    current row locked, so two approvals cannot both pass the Executor's
+    pre-check and land on top of each other.
 
     Supersede-then-insert runs in a transaction: the partial unique index makes a
     half-applied version impossible rather than merely unlikely. Chunks are
@@ -5050,6 +5068,17 @@ async def add_skill_doc(
     conn = await _conn()
     try:
         async with conn.transaction():
+            if expected_version is not None:
+                current = await conn.fetchval(
+                    """
+                    select version from skill_doc
+                     where skill_id = $1 and doc_key = $2 and is_current
+                     for update
+                    """,
+                    skill_id, doc_key,
+                ) or 0
+                if current != expected_version:
+                    raise StaleSkillDoc(skill_id, doc_key, expected_version, current)
             row = await _insert_skill_doc(
                 conn, skill_id, doc_key, kind, title, content,
                 source_url=source_url, describes=describes, captured_at=captured_at,

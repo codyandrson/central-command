@@ -4,6 +4,39 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-15 — v2.87.0: The agent that used a skill proposes its correction, and so may its session's reflection, always through the gate
+
+The skills library grew only when the operator imported a document: the gated skill proposals existed,
+but one agent held the pack, and a correction meant re-submitting a whole document. Comparable agent
+frameworks grow procedural memory from use; here the same loop runs through the gate (DL-215, FR-23).
+
+- `skill-propose` is held by every roster agent but the auditor, the graph auditor and the editor (its
+  charter holds no propose capability of any kind). Existing agents get it from an idempotent schema
+  seed that never resurrects a revoked grant, new hires from their template. The orchestrator's project
+  rounds drop it, as they drop `task-create`: a round lands only its own calls.
+- `propose_skill_correction(skill_id, find, replace, why)` is a correction the operator can read: code
+  applies the exact span to the document's CURRENT text at propose time and refuses, in words the agent
+  can act on, when the span occurs zero or several times (read-before-write, mechanically). The proposal
+  is an ordinary `skill.doc_add` holding the full corrected document, which the Executor writes byte for
+  byte, a unified diff in its expected effect, and the version the span was applied to.
+- A correction is re-checked against a moved world: the Executor compares the stamped version before the
+  write and again inside its transaction, and a document that moved fails as world-moved, writes nothing
+  and sends the drafter to redraft. Only the tool may stamp that version; one a model wrote into a
+  hand-built action is discarded at the park seam.
+- Session-close reflection may propose at most ONE correction per closed session, each condition checked
+  in code: the session loaded that skill, the span matches the current text exactly once, and the quote
+  that shows why is one verbatim span of a single turn (not the charter, not the skill's own text). A
+  correction that fails a condition is dropped and recorded (`reflection.skill_correction_dropped`),
+  never repaired. `CC_REFLECTION_SKILL_CORRECTIONS=false` turns reflection's part off. An agent that
+  holds `skill-propose` but not `graph-propose` now gets a distill call when its closed session loaded
+  a skill, for the correction only.
+- The pack guidance and the reflection prompt carry one ladder (correct the loaded skill, then an
+  existing broader skill, then a reference document, a new skill only for a reusable class of work) and
+  one list of what is never captured (a failure of today's environment, a transient error, a negative
+  claim about a tool, a one-off story, an unresolved failure dressed up as a workflow).
+
+Enforced by `tests/test_skill_corrections.py`.
+
 ## 2026-11-15 — v2.86.0: An agent can search and re-read its own past sessions, and a compaction summary is framed as a record
 
 A comparison with other agent frameworks (2026-11-03) found one kind of memory this product had no

@@ -1413,11 +1413,12 @@ PACKS: dict[str, Pack] = {
     "skill-propose": Pack(
         name="skill-propose",
         description=(
-            "Draft a skill for the team's skills library — a new skill or one "
-            "more document on an existing one, written to the library only "
-            "after the operator approves it."
+            "Draft a skill for the team's skills library — a new skill, one "
+            "more document on an existing one, or a correction to one you used, "
+            "written to the library only after the operator approves it."
         ),
-        tool_names=("propose_skill_create", "propose_skill_doc"),
+        tool_names=("propose_skill_create", "propose_skill_doc",
+                    "propose_skill_correction"),
         guidance=(
             "SKILL AUTHORING: a skill is standing knowledge the team keeps — "
             "every agent granted it loads the guidance document in full, so "
@@ -1432,7 +1433,31 @@ PACKS: dict[str, Pack] = {
             "pass `source_url` and let the tool capture it: the fetch happens "
             "at propose time and the operator reviews the exact text that will "
             "be written — never retype a page from memory. Creating a skill "
-            "grants it to nobody; who holds it is the operator's decision."
+            "grants it to nobody; who holds it is the operator's decision.\n"
+            "CORRECTING A SKILL YOU USED: when a skill you loaded in this "
+            "session turned out to be wrong, or to be missing a step you had "
+            "to work out, propose the correction while you still have the "
+            "evidence, with `propose_skill_correction`: one exact span of the "
+            "document's current text and what it should say. Reach for the "
+            "smallest change that would have saved you: correct the skill you "
+            "actually loaded first; if the lesson is broader than that skill, "
+            "add it to the existing skill that covers the broader subject; if "
+            "it is detail a reader looks up rather than guidance everyone "
+            "needs, add a reference document under an existing skill; and "
+            "create a new skill only for a reusable CLASS of work, never for "
+            "one incident. Change only a document whose current text you have "
+            "loaded in this session — the span you quote is checked against "
+            "it and a span that does not match exactly once is refused. Write "
+            "the lesson, not the log: the rule or the pitfall in a sentence or "
+            "two, with no ticket numbers, dates or quoted chat, because the "
+            "next reader needs what to do, not what happened to you. Some "
+            "things do not belong in a skill at all: a failure that depends "
+            "on today's environment or an outage, a transient error, a "
+            "one-off story, a failure you did not resolve written up as if it "
+            "were a workflow, and a negative claim about a tool ('X does not "
+            "work') — those harden into refusals long after the cause is "
+            "gone. Most sessions need no skill change; propose one only when "
+            "the next agent would otherwise repeat your mistake."
         ),
         capabilities=(
             GatedCapability(
@@ -1459,7 +1484,10 @@ PACKS: dict[str, Pack] = {
                        "those bytes without re-fetching. doc_key 'guidance' "
                        "replaces the skill's guidance document; any other key "
                        "is a searchable reference. An unknown or retired skill "
-                       "is refused."),
+                       "is refused. `propose_skill_correction` drafts the same "
+                       "capability from an exact span: it fills `content`, "
+                       "`correction` and `base_version` for you, and the write "
+                       "is refused if the document moved past `base_version`."),
             ),
         ),
     ),
@@ -1873,12 +1901,15 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
                      # DL-213: a time on a day goes on the calendar (seeded too)
                      "calendar-propose",
                      # DL-214: episodic recall of its own sessions (migrated too)
-                     "session-recall"),
+                     "session-recall",
+                     # DL-215: every roster agent but the auditors and the
+                     # editor proposes corrections to the skills it uses
+                     "skill-propose"),
     "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
                     "jira-delete-propose",
                     "graph-read", "graph-propose",
                     "consult", "task-create", "ask-operator", "web-read",
-                    "loe-read", "session-recall"),
+                    "loe-read", "session-recall", "skill-propose"),
     "litellm-manager": ("litellm-read", "litellm-admin-propose", "consult",
                         "graph-read", "graph-propose", "task-create",
                         "ask-operator", "web-read", "skill-propose",
@@ -1889,13 +1920,13 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     "confluence-expert": ("confluence-read", "confluence-propose",
                           "confluence-space-propose", "graph-read",
                           "graph-propose", "task-create", "ask-operator",
-                          "consult", "web-read", "session-recall"),
+                          "consult", "web-read", "session-recall", "skill-propose"),
     # catalog-read added 2026-08-30 (sources-catalog slice 7): the catalog is
     # the system of record and a Confluence index page is a rendered VIEW of
     # it (Decision 3) — the producer could not see the library it renders.
     "wiki-agent": ("confluence-read", "confluence-propose", "jira-read",
                    "graph-read", "graph-propose", "task-create",
-                   "ask-operator", "consult", "catalog-read", "session-recall"),
+                   "ask-operator", "consult", "catalog-read", "session-recall", "skill-propose"),
     # The orchestrator holds task-create like every active agent but the
     # auditor (the operator's 2026-10-22 ruling, story 4.9), and gains nothing
     # else: its PROJECT runs drop the pack (api/orchestration._build_agent) so
@@ -1913,7 +1944,7 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     # guidance a mechanism. Consult is advice, assign_work is work — the pack
     # guidance keeps them distinct in project runs.
     "orchestrator": ("orchestrate", "graph-read", "loe-read", "record-read",
-                     "consult", "task-create", "session-recall"),
+                     "consult", "task-create", "session-recall", "skill-propose"),
 }
 
 
@@ -2126,6 +2157,10 @@ ADVISORY_DEFERRAL_TOOLS = frozenset({
     # mid-answer parks like any other proposal; the operator still decides.
     "propose_skill_create",
     "propose_skill_doc",
+    # A correction is the same case: the span is applied and the corrected
+    # document captured at propose time, and its base version is stamped by
+    # the tool's code from the document it read, not by the run.
+    "propose_skill_correction",
     # A line-of-effort proposal is the calendar case: everything it carries is
     # in the proposal itself (the loe_id, the light, the summary), the semantic
     # version is stamped by the Executor, and nothing about it is specific to

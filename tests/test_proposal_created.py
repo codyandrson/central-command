@@ -167,7 +167,7 @@ def test_the_park_site_table_equals_the_source_walk():
         "park_proposal call sites and overrides.PARK_SITES disagree — map the "
         f"new site to the caller that runs the decide hook: {found}")
     assert all(kind in (HOOK, EXEMPT, SWEEP_ONLY) and why for kind, why in PARK_SITES.values())
-    assert len(found) == 12
+    assert len(found) == 13  # + reflection._propose_skill_correction (DL-215)
 
 
 def test_an_unmapped_park_site_fails_the_walk():

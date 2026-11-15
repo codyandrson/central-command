@@ -15,6 +15,15 @@ governed data in two vocabularies, and NOTHING here changes the world —
     and its quote is re-checked against the transcript like every other agent
     claim.
 
+  * at most ONE skill correction per closed session (DL-215): an exact-span
+    change to a skill document the session LOADED, grounded in one verbatim
+    quote from the session, parked as an ordinary gated `skill.doc_add`. Each
+    condition is checked here in code — the loaded skill from the transcript's
+    `load_capability` calls, the span against the document's CURRENT text, the
+    quote with `claim_supported` — and a correction that fails one is dropped
+    and recorded (`reflection.skill_correction_dropped`), never guessed into
+    shape.
+
 The one-per-session nomination cap is structural (the schema field is
 `SelfNomination | None`), not charter prose: it is what keeps the operator's
 queue bounded by session count rather than by agent enthusiasm.
@@ -31,6 +40,7 @@ must load the charter" rule is protecting here.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from typing import Literal
@@ -44,6 +54,7 @@ from central_command.runtime.deps import TriageDeps
 from central_command.runtime.durable import (
     classify_deferred,
     extract_deferred,
+    full_messages,
     proposal_from_call,
     simplify_messages,
 )
@@ -67,9 +78,20 @@ class SelfNomination(BaseModel):
     source_session_id: str
 
 
+class SkillCorrection(BaseModel):
+    skill_id: str
+    doc_key: str = "guidance"
+    find: str
+    replace: str
+    why: str
+    quote: str
+
+
 class Reflection(BaseModel):
     episodes: list[ReflectedEpisode]
     nomination: SelfNomination | None = None
+    # Its own cap of one, structural like the nomination's (DL-215).
+    skill_correction: SkillCorrection | None = None
 
 
 def bound_episodes(
@@ -99,6 +121,64 @@ def _transcript_text(run_state: dict | None) -> str:
     )
 
 
+def _call_args(part: dict) -> dict:
+    args = part.get("args")
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            return {}
+    return args if isinstance(args, dict) else {}
+
+
+def loaded_skills(run_state: dict | None) -> list[str]:
+    """The skills whose guidance this session actually LOADED: a
+    `load_capability` call with an `id` AND its tool return (the pydantic-ai
+    rule, `parse_loaded_capabilities`, read off the persisted record so an
+    archived turn counts too). A call that never returned loaded nothing."""
+    if not run_state:
+        return []
+    calls: dict[str, str] = {}
+    loaded: list[str] = []
+    for message in full_messages(run_state):
+        for part in message.get("parts", []):
+            if part.get("tool_name") != "load_capability":
+                continue
+            kind = part.get("part_kind")
+            if kind == "tool-call":
+                cap = _call_args(part).get("id")
+                if isinstance(cap, str) and cap:
+                    calls[part.get("tool_call_id") or ""] = cap
+            elif kind == "tool-return":
+                cap = calls.get(part.get("tool_call_id") or "")
+                if cap and cap not in loaded:
+                    loaded.append(cap)
+    return loaded
+
+
+def _quote_corpus(run_state: dict | None) -> list[str]:
+    """What a skill correction's quote may come from: every turn of the
+    session EXCEPT the charter and the skill text itself (a `load_capability`
+    return, a reference search hit). A quote is grounding only if it shows
+    what happened — the operator's correction, the tool error and the fix —
+    and the document being corrected is not evidence that it was wrong. One
+    string per turn, so a quote cannot be stitched across two."""
+    if not run_state:
+        return []
+    out = []
+    for t in simplify_messages(run_state):
+        if t["kind"] == "system-prompt":
+            continue
+        tool = t["tool"] or ""
+        if t["kind"] == "tool-return" and (
+            tool == "load_capability"
+            or (tool.startswith("search_") and tool.endswith("_reference"))
+        ):
+            continue
+        out.append(t["content"])
+    return out
+
+
 async def _charter_context(agent_id: str) -> str:
     from central_command.runtime.agent import builtin_charter, load_charter
 
@@ -117,7 +197,62 @@ def _session_close_time() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _distill_prompt(charter: str, transcript: str) -> str:
+def _correction_section(skill_texts: dict[str, str]) -> str:
+    """The skill-correction part of the distill prompt: the ladder, the
+    do-not-capture list, the exact-span and quote rules, and the CURRENT text
+    of every skill the session loaded (the only documents a span may come
+    from)."""
+    docs = "\n\n".join(
+        f"=== skill_id {sid!r}, doc_key 'guidance' — CURRENT TEXT ===\n{text}\n=== end ==="
+        for sid, text in skill_texts.items()
+    )
+    return (
+        "\n\nSKILL CORRECTION — AT MOST ONE, AND USUALLY NONE. This session "
+        "loaded the skills shown below. If one of them was wrong, or missing a "
+        "step you had to work out, you may return ONE `skill_correction`; most "
+        "sessions produce none, and null is the right answer then. Prefer, in "
+        "order: correcting the skill you actually loaded; adding the lesson to "
+        "an existing broader skill; adding a reference document under an "
+        "existing skill; and only for a reusable class of work, never for one "
+        "incident, a new skill — but HERE you may only correct a loaded skill, "
+        "so if the lesson belongs anywhere else, return null. Write the lesson, "
+        "not the log: the rule or the pitfall, with no ticket numbers, dates or "
+        "quoted chat in `replace`. Do NOT capture: a failure that depends on "
+        "today's environment or an outage; a transient error; a negative claim "
+        "about a tool ('X does not work'), which hardens into refusals; a "
+        "one-off story; a failure you did not resolve, dressed up as a "
+        "workflow.\n"
+        "  skill_id, doc_key — the loaded skill and 'guidance'.\n"
+        "  find — an EXACT span copied character for character from the "
+        "CURRENT TEXT below; it must occur in it exactly once, or the "
+        "correction is dropped. To add a step, quote the line it follows and "
+        "repeat that line at the start of `replace`.\n"
+        "  replace — what the span should say instead.\n"
+        "  why — the rule or pitfall, one or two sentences.\n"
+        "  quote — ONE contiguous span copied verbatim from the transcript "
+        "that shows why: the operator's correction, or the tool error and the "
+        "fix. It is re-checked mechanically against the transcript (not "
+        "against the skill text); a paraphrase, an ellipsis or fragments "
+        "joined together fail the check, and the correction is dropped.\n\n"
+        f"{docs}"
+    )
+
+
+def _distill_prompt(
+    charter: str, transcript: str, skill_texts: dict[str, str] | None = None,
+    lessons: bool = True,
+) -> str:
+    """`lessons=False` is an agent that cannot propose episodes (no
+    graph-propose): it is asked only for the skill correction."""
+    if not lessons:
+        return (
+            "YOUR SESSION JUST CLOSED. You cannot record lessons in the team's "
+            "memory, so return an empty `episodes` list and no nomination; the "
+            "only thing you may return is the skill correction described below."
+            + _correction_section(skill_texts or {})
+            + f"\n\nYOUR CHARTER:\n---\n{charter}\n---\n\n"
+            f"THE TRANSCRIPT:\n---\n{transcript}\n---"
+        )
     return (
         "YOUR SESSION JUST CLOSED. Read the transcript below and distill 0 to a "
         "few DURABLE lessons worth keeping — things that would make you or the "
@@ -140,7 +275,9 @@ def _distill_prompt(charter: str, transcript: str) -> str:
         "character for character out of the transcript, and `source_session_id` "
         "the id of this session. The quote is re-checked mechanically; a "
         "reworded one is flagged. \"I was right to do X\" is as valid as \"I "
-        "should stop doing Y\". No nomination is fine.\n\n"
+        "should stop doing Y\". No nomination is fine."
+        + (_correction_section(skill_texts) if skill_texts else "")
+        + "\n\n"
         f"YOUR CHARTER, for judging what is role-specific:\n---\n{charter}\n---\n\n"
         f"THE TRANSCRIPT:\n---\n{transcript}\n---"
     )
@@ -239,6 +376,127 @@ async def _propose_episode(
     return None
 
 
+def _correction_prompt(c: SkillCorrection, source_session_id: str) -> str:
+    return (
+        "You already decided on this skill correction when your session "
+        "closed. Record it now, exactly as given — do not re-word it.\n\n"
+        "Call propose_skill_correction with EXACTLY these arguments:\n"
+        f"  skill_id = {c.skill_id!r}\n"
+        f"  doc_key  = {c.doc_key!r}\n"
+        f"  find     = {c.find!r}\n"
+        f"  replace  = {c.replace!r}\n"
+        f"  why      = {c.why!r}\n\n"
+        f"It comes from session {source_session_id!r}. If the operator REJECTS "
+        "it, their feedback overrides 'exactly as given' — redraft with it "
+        "incorporated, or close out in text if they say it is not needed."
+    )
+
+
+async def _dropped(session_id: str, agent_id: str, c: SkillCorrection, reason: str) -> None:
+    """A correction that failed a condition is recorded, never guessed into
+    shape. It authorises nothing, so emitting it is bookkeeping."""
+    await events.emit(
+        "reflection.skill_correction_dropped",
+        ref_id=session_id,
+        payload={"agent_id": agent_id, "skill_id": c.skill_id,
+                 "doc_key": c.doc_key, "reason": reason},
+        actor="system",
+    )
+
+
+async def _propose_skill_correction(
+    agent_id: str,
+    source_session_id: str,
+    c: SkillCorrection,
+    loaded: list[str],
+    corpus: list[str],
+    charter: str,
+    caps,
+    catalog: str,
+    model,
+) -> str | None:
+    """The one skill correction -> one gated proposal in its OWN session.
+    Returns a note when the run itself produced nothing usable (recorded with
+    the episode notes as `reflection.failed`), None otherwise.
+
+    Every condition is code, checked before a model is asked to draft:
+    the skill was loaded in this session; the quote is one verbatim span of
+    the session (`claim_supported`, per turn); the span applies to the
+    document's CURRENT text exactly once (`build_correction`, the same code
+    the agent-facing tool runs). The drafted proposal must then carry exactly
+    the content computed here, or it is not parked."""
+    from pydantic_ai import DeferredToolRequests
+
+    from central_command.runtime.agent import build_hired_agent
+    from central_command.runtime.converse import land_session
+    from central_command.runtime.roster import team_section
+    from central_command.runtime.run import _run_live
+    from central_command.runtime.skill_corrections import build_correction
+
+    if c.skill_id not in loaded:
+        await _dropped(source_session_id, agent_id, c,
+                       f"the session did not load the skill {c.skill_id!r}")
+        return None
+    if not any(claim_supported(c.quote, t) for t in corpus if t):
+        await _dropped(source_session_id, agent_id, c,
+                       "the quote is not one verbatim span of the session")
+        return None
+    expected = await build_correction(
+        agent_id=agent_id, skill_id=c.skill_id, doc_key=c.doc_key,
+        find=c.find, replace=c.replace, why=c.why,
+    )
+    if isinstance(expected, str):
+        await _dropped(source_session_id, agent_id, c, expected)
+        return None
+    content = expected.actions[0].arguments["content"]
+
+    session_id = "sess_" + uuid.uuid4().hex[:12]
+    agent = await build_hired_agent(
+        agent_id, model=model, charter=charter, packs=("skill-propose",),
+        capabilities=caps, skills_catalog=catalog,
+        team_section=await team_section(agent_id),
+    )
+    result = await _run_live(
+        agent, _correction_prompt(c, source_session_id), model=model,
+        deps=TriageDeps(agent_id=agent_id, session_id=session_id),
+        agent_id=agent_id, session_id=session_id,
+    )
+    call = extract_deferred(result)
+    if call is None or classify_deferred(call) != "proposal":
+        await land_session(session_id, agent_id=agent_id)
+        return f"skill correction of {c.skill_id}: the run produced no proposal"
+    metadata = (result.output.metadata.get(call.tool_call_id)
+                if isinstance(result.output, DeferredToolRequests) else None)
+    proposal = proposal_from_call(call, metadata=metadata)
+    matches = (
+        call.tool_name == "propose_skill_correction"
+        and len(proposal.actions) == 1
+        and proposal.actions[0].capability.split("@", 1)[0] == "skill.doc_add"
+        and proposal.actions[0].arguments.get("skill_id") == c.skill_id
+        and proposal.actions[0].arguments.get("content") == content
+    )
+    if not matches:
+        await land_session(session_id, agent_id=agent_id)
+        return (f"skill correction of {c.skill_id}: the drafted proposal is not "
+                "the correction distilled at close")
+
+    evidence = [e.model_dump() for e in proposal.evidence] + [{
+        "kind": "record",
+        "source_ref": f"session:{source_session_id}",
+        "locator": "the closed session's transcript",
+        "claim": c.quote,
+        # Checked above against the session itself — never None here.
+        "claim_matches_source": True,
+    }]
+    await park_proposal(
+        session_id=session_id, agent_id=agent_id, result=result, call=call,
+        evidence=evidence,
+        context={"reflection": True, "source_session_id": source_session_id,
+                 "skill_correction": True},
+    )
+    return None
+
+
 async def _nominate(
     agent_id: str, session_id: str, transcript: str, nomination: SelfNomination
 ) -> None:
@@ -276,17 +534,30 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
     from central_command.runtime.packs import granted_packs
     from central_command.runtime.run import _run_live
 
-    transcript = _transcript_text(await repo.get_session_run_state(session_id))
+    run_state = await repo.get_session_run_state(session_id)
+    transcript = _transcript_text(run_state)
     if not transcript.strip():
         return  # nothing to learn from, so nothing is written
     # Scope limits (The operator, 2026-08-05, re-enabling after the review-load
     # shutdown): a trivial session teaches nothing durable, and an agent that
     # cannot propose episodes anyway no longer buys a distill call — that also
     # skips its nominations, a deliberate narrowing to the graph-propose
-    # holders until observed volume says otherwise.
+    # holders until observed volume says otherwise. The one widening (DL-215):
+    # a skill-propose holder whose session LOADED a skill buys the call for the
+    # skill correction alone — no lessons, no nomination.
     if len(transcript) < settings.reflection_min_transcript_chars:
         return
-    if "graph-propose" not in await granted_packs(agent_id):
+    granted = await granted_packs(agent_id)
+    lessons = "graph-propose" in granted
+    loaded: list[str] = []
+    skill_texts: dict[str, str] = {}
+    if settings.reflection_skill_corrections and "skill-propose" in granted:
+        loaded = loaded_skills(run_state)
+        for sid in loaded:
+            for d in await repo.list_skill_docs(sid):
+                if d["doc_key"] == "guidance":
+                    skill_texts[sid] = d["content"]
+    if not lessons and not skill_texts:
         return
 
     charter = await _charter_context(agent_id)
@@ -298,13 +569,15 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
         system_prompt=(
             "You are reflecting on a session of your own that just closed. You "
             "hold no tools here: you return distilled lessons and, optionally, "
-            "one observation about your own working. Be sparing — a lesson that "
-            "is not durable is noise in the team's memory."
+            "one observation about your own working and, rarely, one correction "
+            "to a skill you loaded. Be sparing — a lesson that is not durable "
+            "is noise in the team's memory."
         ),
     )
     run_session = "sess_" + uuid.uuid4().hex[:12]
     result = await _run_live(
-        distiller, _distill_prompt(charter, transcript), model=model,
+        distiller, _distill_prompt(charter, transcript, skill_texts, lessons=lessons),
+        model=model,
         deps=TriageDeps(agent_id=agent_id, session_id=run_session),
         agent_id=agent_id, session_id=run_session,
     )
@@ -314,11 +587,15 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
     reflection: Reflection = result.output
 
     notes: list[str] = []
-    episodes = bound_episodes(list(reflection.episodes), settings.reflection_max_episodes)
+    episodes = (bound_episodes(list(reflection.episodes), settings.reflection_max_episodes)
+                if lessons else [])
     # The graph-propose grant was already checked before the distill call — an
-    # agent without it never reaches this point.
-    if episodes:
+    # agent without it proposes no episode and no nomination here.
+    correction = reflection.skill_correction if skill_texts else None
+    caps = catalog = None
+    if episodes or correction is not None:
         caps, catalog = await skills_mod.loadout(agent_id)
+    if episodes:
         for episode in episodes:
             try:
                 note = await _propose_episode(
@@ -329,7 +606,18 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
             if note:
                 notes.append(note)
 
-    if reflection.nomination is not None:
+    if correction is not None:
+        try:
+            note = await _propose_skill_correction(
+                agent_id, session_id, correction, loaded, _quote_corpus(run_state),
+                charter, caps, catalog, model,
+            )
+        except Exception as exc:  # noqa: BLE001 — recorded with the episode notes
+            note = f"skill correction of {correction.skill_id}: {type(exc).__name__}: {exc}"
+        if note:
+            notes.append(note)
+
+    if lessons and reflection.nomination is not None:
         await _nominate(agent_id, session_id, transcript, reflection.nomination)
 
     if notes:

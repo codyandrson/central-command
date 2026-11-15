@@ -54,9 +54,10 @@ def test_skill_writes_are_registered_and_dispatched():
     assert executor.HANDLERS["skill.doc_add"] is executor._skill_doc_add
 
 
-def test_skill_propose_pack_carries_both_tools_and_both_capabilities():
+def test_skill_propose_pack_carries_its_tools_and_both_capabilities():
     pack = packs.PACKS["skill-propose"]
-    assert set(pack.tool_names) == {"propose_skill_create", "propose_skill_doc"}
+    assert set(pack.tool_names) == {"propose_skill_create", "propose_skill_doc",
+                                    "propose_skill_correction"}
     assert {c.name for c in pack.capabilities} == {"skill.create", "skill.doc_add"}
 
 

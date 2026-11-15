@@ -2387,3 +2387,43 @@ hygiene, and how the test suite itself must be written. See
 - **Why:** Every comparable agent system has episodic recall, and ours had none: an agent that needs what an earlier session learned must ask the operator to repeat it or redo the work, and cannot re-read a tool result that compaction cleared from its window. The graph holds facts and never state (the follow-ups rule), so it is the wrong home for "what did I do in that session". The transcript already exists, forever, so this is a read with no governance cost: no write, no model call, no new store of truth. The scope is the agent's own sessions because another's transcript is that agent's record and its charter's business; the auditors are excluded because they re-derive decisions independently and must not anchor on their own past verdicts.
 - **Enforced:** test: `tests/test_session_recall.py` (scope isolation by every shape and the refusal sentence; the watermark, a race and an unchanged session; identifiers findable; the four shapes; the heartbeat demotion; the caps; system prompt, thinking and the tool's own echo not indexed; the auditors never hold the pack, and the migration never resurrects a revoked grant), `tests/test_packs.py`; sql: `central_command/db/schema.sql` (the two tables and the grant block)
 - **Source:** `central_command/runtime/session_recall.py`; `central_command/runtime/tools.py` (`search_my_sessions`); `central_command/runtime/packs.py` (`session-recall`); `central_command/db/schema.sql`; `central_command/db/repo.py` (the recall section); PRD FR-52; `docs/ARCHITECTURE.md` "Episodic recall".
+
+### DL-215 — A skill is corrected by the agent that used it, or by its session's reflection, always through the gate
+
+- **Status:** active
+- **Date:** 2026-11-15
+- **Rule:** `central_command/runtime/packs.py` (the `skill-propose` pack: `propose_skill_correction` and its guidance); `central_command/runtime/skill_corrections.py` (`build_correction`); `central_command/runtime/reflection.py` (`_propose_skill_correction`); `central_command/gateway/executor.py` (`_check_skill_doc_add`); `central_command/db/schema.sql` (the skill-propose widening)
+- **Why:** Every comparable agent system grows procedural memory from use: the
+  agent that hit the missing step is the one that knows it, at the moment it
+  knows it. Here the library had a door (`skill.create`, `skill.doc_add`) that
+  one agent held, and a correction meant re-proposing a whole document the
+  operator then re-read in full. The same loop is wanted, but run through the
+  gate, and kept small enough to review: an exact-span correction shows the
+  operator what changed and nothing else.
+- **Decision:** Skill corrections are proposed by the agent that used the
+  skill, or by session-close reflection on its behalf, and every one is an
+  ordinary gated `skill.doc_add`. The `skill-propose` pack is held by every
+  roster agent but the auditors (the auditor and the graph auditor) and the
+  editor, whose design holds no propose pack at all and whose charter says so;
+  the widening follows the story 4.9 task-create precedent, and a revoked grant
+  is never resurrected. A correction is one span of the document's CURRENT
+  text that must occur exactly once, and its replacement: code applies it at
+  propose time, captures the whole resulting document (the bytes the Executor
+  writes), puts the unified diff in the expected effect, and stamps the
+  version it was applied to; a `base_version` the model wrote itself is
+  dropped at the park. The Executor re-checks that version before the write and
+  inside its transaction, so a correction approved after the document moved is
+  world-moved and the drafter redrafts against the new text. Reflection
+  proposes at most ONE correction per closed session, its own cap beside the
+  three lessons and the one nomination, and only when code confirms each
+  condition: the session loaded the skill (a `load_capability` call and its
+  return), the span matches the current text exactly once, and the quote is one
+  contiguous verbatim span of the session outside the skill text itself
+  (`claim_supported`). A correction that fails one is dropped and recorded
+  (`reflection.skill_correction_dropped`), never repaired. The pack guidance
+  and the reflection prompt carry the same ladder (correct the loaded skill,
+  then an existing broader skill, then a reference document, and a new skill
+  only for a reusable class of work) and the same list of what is never
+  captured. `CC_REFLECTION_SKILL_CORRECTIONS=false` turns reflection's part off.
+- **Enforced:** test: `tests/test_skill_corrections.py::test_the_widening_is_additive_idempotent_and_respects_history`, `tests/test_skill_corrections.py::test_the_tool_refuses_a_span_that_is_not_exactly_once`, `tests/test_skill_corrections.py::test_a_moved_document_is_world_moved_and_nothing_is_written`, `tests/test_skill_corrections.py::test_a_loaded_skill_and_a_correction_yield_one_gated_proposal`, `tests/test_skill_corrections.py::test_a_span_or_quote_that_fails_is_dropped_and_recorded`, `tests/test_packs.py` (seeds and defaults agree). Whether agents propose useful corrections, and how often, is measured from the live record, not asserted.
+- **Source:** `central_command/runtime/skill_corrections.py`; `central_command/runtime/tools.py`; `central_command/runtime/reflection.py`; `central_command/runtime/proposals.py`; `central_command/gateway/executor.py`; `central_command/db/repo.py`; `central_command/db/schema.sql`; `central_command/runtime/templates.py`.

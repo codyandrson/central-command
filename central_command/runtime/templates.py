@@ -189,20 +189,21 @@ TEMPLATES: dict[str, HireTemplate] = {
         charter=HIRED_AGENT_CHARTER,
         default_packs=("jira-read", "jira-propose", "graph-read",
                        "graph-propose", "consult", "task-create",
-                       "ask-operator", "session-recall"),
+                       "ask-operator", "session-recall", "skill-propose"),
     ),
     "analyst": HireTemplate(
         id="analyst",
         label="Analyst (read-only)",
         description=(
             "A read-only starting loadout: reads Jira and the knowledge "
-            "graph and answers in text. It changes nothing itself — the one "
-            "thing it may start is a task for a teammate, whose gated changes "
-            "still wait for your approval. Taskable and conversational."
+            "graph and answers in text. It changes nothing itself — it may "
+            "start a task for a teammate and propose a correction to a skill "
+            "it used, and both still wait for your approval before anything "
+            "changes. Taskable and conversational."
         ),
         charter=HIRED_AGENT_CHARTER,
         default_packs=("jira-read", "graph-read", "task-create", "ask-operator",
-                       "session-recall"),
+                       "session-recall", "skill-propose"),
     ),
 }
 
@@ -216,7 +217,7 @@ TEMPLATES: dict[str, HireTemplate] = {
 # It deliberately does NOT live in TEMPLATES above. That dict is the operator's
 # hire menu, and every entry in it is a general starting loadout: the parity
 # tests require task-create on each, and so does every purpose-built loadout
-# below since story 4.9; the charter here is a finished document rather than a {name}/{mission} skeleton,
+# below since story 4.9 (and skill-propose on each but the editor's, DL-215); the charter here is a finished document rather than a {name}/{mission} skeleton,
 # and hiring a SECOND steward under an operator-chosen name would be a
 # different agent id doing the one job the ledger routes to a fixed one.
 GRAPH_CURATOR_TEMPLATE = HireTemplate(
@@ -230,7 +231,7 @@ GRAPH_CURATOR_TEMPLATE = HireTemplate(
     ),
     charter="",  # unused: the curator's charter is a finished document
     default_packs=("graph-read", "graph-curate", "ask-operator", "task-create",
-                   "session-recall"),
+                   "session-recall", "skill-propose"),
     taskable=True,
     conversational=True,
 )
@@ -297,7 +298,7 @@ EA_TEMPLATE = HireTemplate(
     # mail must be re-derived from the record, not from memory of the brief.
     default_packs=("record-read", "activity-read", "graph-read", "graph-propose",
                    "ask-operator", "consult", "calendar-read", "calendar-propose",
-                   "loe-read", "task-create", "mail-read", "session-recall"),
+                   "loe-read", "task-create", "mail-read", "session-recall", "skill-propose"),
     taskable=True,
     conversational=True,
 )
@@ -320,7 +321,7 @@ MCP_MANAGER_TEMPLATE = HireTemplate(
     ),
     charter="",  # unused: the MCP manager's charter is a finished document
     default_packs=("sandbox", "mcp-propose", "ask-operator", "web-read", "consult",
-                   "task-create", "session-recall"),
+                   "task-create", "session-recall", "skill-propose"),
     taskable=True,
     conversational=True,
 )
@@ -336,7 +337,9 @@ MCP_MANAGER_TEMPLATE = HireTemplate(
 # it critiques). No web-read in v1 (operator decision 2026-08-06).
 # task-create added at story 4.9 (the operator, 2026-10-22: every active agent
 # but the auditor): creating a task changes nothing and writes no draft, so it
-# does not break the editor's independence.
+# does not break the editor's independence. skill-propose is NOT added at
+# DL-215 (2026-11-15), unlike every other loadout here: it is a propose pack,
+# and the editor's charter says it holds none.
 EDITOR_TEMPLATE = HireTemplate(
     id="editor",
     label="Editor",
@@ -381,7 +384,7 @@ ACCOUNTABILITY_TEMPLATE = HireTemplate(
     # The operator): the agent reads what the calendar and the board actually show for
     # a line before asking, and cites it — ungated reads, no new writes.
     default_packs=("loe-propose", "ask-operator", "task-create", "consult",
-                   "jira-read", "calendar-read", "session-recall"),
+                   "jira-read", "calendar-read", "session-recall", "skill-propose"),
     taskable=True,
     conversational=True,
 )

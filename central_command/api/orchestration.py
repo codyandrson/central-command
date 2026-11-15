@@ -88,7 +88,12 @@ async def _build_agent(model=None):
     # after an approved plan and nothing else: its assignment loop is unchanged.
     # The chat lane, which has no assign_work, is where create_task is offered
     # (converse._conversational_packs).
-    packs = tuple(p for p in packs if p != "task-create")
+    # skill-propose (DL-215) is dropped here too: a project round lands only
+    # submit_plan / assign_work / ask_operator, and any other deferral is an
+    # "unexpected deferred call" the batch validation hands back. The
+    # orchestrator proposes a skill correction from its chat lane, which parks
+    # proposals, or through session-close reflection.
+    packs = tuple(p for p in packs if p not in ("task-create", "skill-propose"))
     governed = await repo.current_charter(AGENT_ID)
     caps, catalog = await skills_mod.loadout(AGENT_ID)
     from central_command.runtime.roster import team_section

@@ -63,6 +63,11 @@ async def park_proposal(
     version the drafting session was last shown goes into the action's
     `base_version`, which the Executor re-checks (epic-small-fixes R24).
 
+    A `skill.doc_add`'s `base_version` survives only when the TOOL built the
+    proposal (`_keep_only_server_skill_base`): `propose_skill_correction`
+    stamps the version its span was applied to, and a `base_version` the model
+    wrote into a hand-built action is discarded (DL-215).
+
     `charter.update` gets its evidence checked here REGARDLESS of which door
     the agent came through. The coach's charter and the charter-propose pack
     both promise the quote-and-event-id check "re-checked mechanically against
@@ -84,6 +89,7 @@ async def park_proposal(
     proposal = proposal_from_call(call, metadata=metadata)
     proposal_id = "prop_" + uuid.uuid4().hex[:12]
     await _stamp_charter_base(session_id, proposal)
+    _keep_only_server_skill_base(proposal, server_built=_server_built(metadata))
 
     if evidence is None and any(
         a.capability.split("@", 1)[0] == "charter.update" for a in proposal.actions
@@ -171,6 +177,32 @@ def verified_email_evidence(evidence, source_texts: list[str]) -> list[dict]:
             )
         out.append(d)
     return out
+
+
+def _server_built(metadata) -> bool:
+    """Did a tool's CODE build this proposal (`CallDeferred(metadata=
+    {'proposal': ...})`), rather than the model writing it as call args?"""
+    return isinstance(metadata, dict) and "proposal" in metadata
+
+
+def _keep_only_server_skill_base(proposal, *, server_built: bool) -> None:
+    """A `skill.doc_add`'s `base_version` is the Executor's world check
+    (`executor._check_skill_doc_add`): the version of the document a
+    correction's span was applied to. Only `propose_skill_correction`'s code
+    may set it — it read that version itself — so on a proposal the model
+    authored (a hand-built `skill.doc_add` through `propose_action`) any
+    `base_version` is dropped, the charter rule: a drafter that could name its
+    own base could approve its way past the check. An unstamped `skill.doc_add`
+    is not re-checked, as before."""
+    if server_built:
+        return
+    for action in proposal.actions:
+        if action.capability.split("@", 1)[0] != "skill.doc_add":
+            continue
+        if "base_version" in (action.arguments or {}):
+            action.arguments = {
+                k: v for k, v in action.arguments.items() if k != "base_version"
+            }
 
 
 async def _stamp_charter_base(session_id: str, proposal) -> None:

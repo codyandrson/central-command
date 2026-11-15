@@ -53,7 +53,7 @@ PROPOSE_TOOLS = frozenset(
         "propose_mcp_sync_source",
         "propose_mcp_build", "propose_mcp_deploy", "propose_mcp_register",
         "propose_mcp_remove", "propose_mcp_tool_call",
-        "propose_skill_create", "propose_skill_doc",
+        "propose_skill_create", "propose_skill_doc", "propose_skill_correction",
         "propose_loe",
         "propose_bulk_dismiss", "propose_mail_rule",
         "propose_report_spam", "propose_unsubscribe",

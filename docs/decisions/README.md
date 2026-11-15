@@ -303,3 +303,4 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-212 | The triage agent confirms an assumption from a stating source or asks; it does not act on one | active | 2026-11-13 | test: `tests/test_triage_charter_assumptions.py` | [process.md](process.md) |
 | DL-213 | The graph is not the tracker's shadow: work in flight has one home, and the agent is asked once when a draft says otherwise | active | 2026-11-13 | test: `tests/test_route_check.py`, `tests/test_packs.py` | [process.md](process.md) |
 | DL-214 | An agent may read its own past sessions through a full-text index kept beside the record; never another agent's | active | 2026-11-15 | test: `tests/test_session_recall.py` | [process.md](process.md) |
+| DL-215 | A skill is corrected by the agent that used it, or by its session's reflection, always through the gate | active | 2026-11-15 | test: `tests/test_skill_corrections.py` | [process.md](process.md) |
