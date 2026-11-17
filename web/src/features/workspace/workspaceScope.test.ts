@@ -1,11 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   getWorkspaceAgentId,
+  isPlaceholderWorkspaceAgent,
   getWorkspaceRootSessionKey,
   getWorkspaceStorageKey,
 } from './workspaceScope';
 
 describe('workspaceScope', () => {
+  it('treats the no-session fallback id as a placeholder, never a real agent', () => {
+    expect(isPlaceholderWorkspaceAgent(getWorkspaceAgentId(''))).toBe(true);
+    expect(isPlaceholderWorkspaceAgent(getWorkspaceAgentId('weird-session-key'))).toBe(true);
+    expect(isPlaceholderWorkspaceAgent(' ')).toBe(true);
+    expect(isPlaceholderWorkspaceAgent(getWorkspaceAgentId('agent:jira-expert:sess_0123abcd'))).toBe(false);
+    expect(isPlaceholderWorkspaceAgent('test')).toBe(false);
+  });
+
   it('uses the top-level agent for a root session', () => {
     expect(getWorkspaceAgentId('agent:test:main')).toBe('test');
     expect(getWorkspaceRootSessionKey('agent:test:main')).toBe('agent:test:main');

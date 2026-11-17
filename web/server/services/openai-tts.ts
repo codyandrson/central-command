@@ -7,7 +7,7 @@
  */
 
 import { config } from '../lib/config.js';
-import { getTTSConfig } from '../lib/tts-config.js';
+import { getTTSConfig, getDeploymentSpeech } from '../lib/tts-config.js';
 import { OPENAI_TTS_URL } from '../lib/constants.js';
 
 export interface OpenAITTSResult {
@@ -35,8 +35,11 @@ export async function synthesizeOpenAI(
   }
 
   const ttsConfig = getTTSConfig().openai;
-  const effectiveModel = model || ttsConfig.model;
-  const effectiveVoice = voice || ttsConfig.voice;
+  // Deployment speech mode (OPENAI_TTS_MODEL set): the deployment owns the model
+  // and, unless the caller names one, the voice — see getDeploymentSpeech().
+  const deployment = getDeploymentSpeech();
+  const effectiveModel = deployment ? deployment.model : model || ttsConfig.model;
+  const effectiveVoice = deployment ? voice || deployment.voice : voice || ttsConfig.voice;
 
   const resp = await fetch(OPENAI_TTS_URL, {
     method: 'POST',
@@ -49,8 +52,8 @@ export async function synthesizeOpenAI(
       voice: effectiveVoice,
       input: text,
       response_format: 'mp3',
-      // instructions only supported by gpt-4o-mini-tts
-      ...(effectiveModel === 'gpt-4o-mini-tts' && {
+      // instructions only supported by gpt-4o-mini-tts (never sent to the deployment's service)
+      ...(!deployment && effectiveModel === 'gpt-4o-mini-tts' && {
         instructions: ttsConfig.instructions,
       }),
     }),

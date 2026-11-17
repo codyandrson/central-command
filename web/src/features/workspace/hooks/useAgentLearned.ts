@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useGateway } from '@/contexts/GatewayContext';
 import { apiFetch } from '@/lib/apiFetch';
+import { isPlaceholderWorkspaceAgent } from '../workspaceScope';
 
 export interface AgentNote {
   id: string;
@@ -136,15 +137,18 @@ interface SectionState<T> {
  * the SAME key (a wider episode page) keeps what is on screen until the new
  * answer lands. A late answer for an old request is ignored. `follow` lists
  * the gateway event prefixes (`cc.<kind>`) that make the section refetch
- * silently, debounced.
+ * silently, debounced. A `null` url means "no real agent yet" (see
+ * `isPlaceholderWorkspaceAgent`): nothing is requested and the section stays in
+ * its loading state until a real agent id arrives.
  */
-function useSection<T>(key: string, url: string, follow: string[]): Section<T> {
+function useSection<T>(key: string, url: string | null, follow: string[]): Section<T> {
   const { subscribe } = useGateway();
   const [state, setState] = useState<SectionState<T>>({ key: null, data: null, error: null, loading: true });
   const seq = useRef(0);
   const followKey = follow.join('|');
 
   const load = useCallback(async (silent: boolean) => {
+    if (url === null) return;
     const id = ++seq.current;
     if (!silent) {
       setState((s) => (s.key === key ? { ...s, loading: true } : { key, data: null, error: null, loading: true }));
@@ -188,17 +192,24 @@ function useSection<T>(key: string, url: string, follow: string[]): Section<T> {
 
 const enc = encodeURIComponent;
 
+/** The agent-scoped URL, or null while the id is only the "no session yet" placeholder. */
+function agentUrl(agentId: string, path: string): string | null {
+  return isPlaceholderWorkspaceAgent(agentId) ? null : path;
+}
+
 export function useNotes(agentId: string): Section<NotesPayload> {
-  return useSection<NotesPayload>(agentId, `/api/cc/notes/${enc(agentId)}`, ['cc.note.']);
+  return useSection<NotesPayload>(agentId, agentUrl(agentId, `/api/cc/notes/${enc(agentId)}`), ['cc.note.']);
 }
 
 /** Skill documents the agent proposed and its pending proposals. */
 export function useLearned(agentId: string): Section<LearnedPayload> {
-  return useSection<LearnedPayload>(agentId, `/api/cc/learned/${enc(agentId)}`, ['cc.proposal.', 'cc.skill.']);
+  return useSection<LearnedPayload>(
+    agentId, agentUrl(agentId, `/api/cc/learned/${enc(agentId)}`), ['cc.proposal.', 'cc.skill.'],
+  );
 }
 
 export function useCharterHistory(agentId: string): Section<CharterHistory> {
-  return useSection<CharterHistory>(agentId, `/api/cc/charter/${enc(agentId)}`, ['cc.charter.']);
+  return useSection<CharterHistory>(agentId, agentUrl(agentId, `/api/cc/charter/${enc(agentId)}`), ['cc.charter.']);
 }
 
 export const EPISODE_PAGE = 20;
@@ -210,7 +221,7 @@ export function useEpisodes(agentId: string): Section<EpisodesPayload> & { loadM
   const limit = wide.key === agentId ? wide.limit : EPISODE_PAGE;
   const params = new URLSearchParams({ agent_id: agentId, scope: 'private', limit: String(limit) });
   const section = useSection<EpisodesPayload>(
-    agentId, `/api/graph/episodes?${params.toString()}`, ['cc.proposal.', 'cc.graph.'],
+    agentId, agentUrl(agentId, `/api/graph/episodes?${params.toString()}`), ['cc.proposal.', 'cc.graph.'],
   );
   const loadMore = useCallback(() => {
     setWide((w) => ({ key: agentId, limit: (w.key === agentId ? w.limit : EPISODE_PAGE) * 2 }));

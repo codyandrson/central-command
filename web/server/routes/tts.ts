@@ -20,7 +20,13 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import crypto from 'node:crypto';
 import { config } from '../lib/config.js';
-import { getTTSConfig, updateTTSConfig } from '../lib/tts-config.js';
+import {
+  getTTSConfig,
+  updateTTSConfig,
+  getDeploymentSpeech,
+  deploymentVoiceFromEnv,
+  DEPLOYMENT_VOICE_PATTERN,
+} from '../lib/tts-config.js';
 import { getTtsCache, setTtsCache } from '../services/tts-cache.js';
 import { synthesizeOpenAI } from '../services/openai-tts.js';
 import { synthesizeReplicate } from '../services/replicate-tts.js';
@@ -91,10 +97,16 @@ app.post(
 
       const xiaomiStyle = effectiveProvider === 'xiaomi' ? getTTSConfig().xiaomi.style : '';
 
+      // In deployment speech mode the server decides the model (and the default
+      // voice), so the cache key carries those, not a stale browser `model`.
+      const deployment = effectiveProvider === 'openai' ? getDeploymentSpeech() : null;
+      const keyModel = deployment ? deployment.model : model || '';
+      const keyVoice = deployment ? voice || deployment.voice : voice || '';
+
       // Cache key includes provider + model + voice and Xiaomi style for proper isolation
       const hash = crypto
         .createHash('md5')
-        .update(`${effectiveProvider}:${model || ''}:${voice || ''}:${xiaomiStyle}:${text}`)
+        .update(`${effectiveProvider}:${keyModel}:${keyVoice}:${xiaomiStyle}:${text}`)
         .digest('hex');
 
       const cached = getTtsCache(hash);
@@ -135,16 +147,23 @@ app.post(
 
 /** GET /api/tts/config — return current TTS voice config */
 app.get('/api/tts/config', rateLimitGeneral, (c) => {
+  // deploymentSpeech: non-null when OPENAI_TTS_MODEL is set — the deployment owns
+  // the model and the voice (see getDeploymentSpeech); the UI shows these, not
+  // the stored OpenAI model/voice, which are not sent in that mode.
   // defaultProvider: what a browser with no saved preference should use. With a
   // key configured, prefer the OpenAI-shaped endpoint (a proxy or self-hosted
   // TTS in a Central Command deployment) over Edge, which phones Microsoft.
-  return c.json({ ...getTTSConfig(), defaultProvider: config.openaiApiKey ? 'openai' : 'edge' });
+  return c.json({
+    ...getTTSConfig(),
+    defaultProvider: config.openaiApiKey ? 'openai' : 'edge',
+    deploymentSpeech: getDeploymentSpeech(),
+  });
 });
 
 /** Allowed top-level keys and their allowed child keys (all must be strings) */
 const TTS_CONFIG_SCHEMA: Record<string, string[]> = {
   qwen: ['mode', 'language', 'speaker', 'voiceDescription', 'styleInstruction'],
-  openai: ['model', 'voice', 'instructions'],
+  openai: ['model', 'voice', 'instructions', 'deploymentVoice'],
   edge: ['voice'],
   xiaomi: ['model', 'voice', 'style'],
 };
@@ -164,6 +183,9 @@ function validateTTSPatch(patch: unknown): string | null {
       if (!allowed.includes(subKey)) return `Unknown key: "${key}.${subKey}"`;
       if (typeof subVal !== 'string') return `"${key}.${subKey}" must be a string`;
       if (subVal.length > 2000) return `"${key}.${subKey}" exceeds max length (2000)`;
+      if (key === 'openai' && subKey === 'deploymentVoice' && !DEPLOYMENT_VOICE_PATTERN.test(subVal)) {
+        return '"openai.deploymentVoice" must be 1-64 characters: letters, digits, underscore or hyphen';
+      }
     }
   }
   return null;
@@ -175,8 +197,16 @@ app.put('/api/tts/config', rateLimitGeneral, async (c) => {
     const patch = await c.req.json();
     const err = validateTTSPatch(patch);
     if (err) return c.text(err, 400);
+    // The environment's voice wins and is the operator's deployment setting:
+    // a saved value would be silently ignored, so say so instead.
+    if (patch.openai && 'deploymentVoice' in patch.openai && deploymentVoiceFromEnv()) {
+      return c.text(
+        'The deployment voice is set by OPENAI_TTS_VOICE in the environment and cannot be changed here',
+        409,
+      );
+    }
     const updated = updateTTSConfig(patch);
-    return c.json(updated);
+    return c.json({ ...updated, deploymentSpeech: getDeploymentSpeech() });
   } catch (err) {
     console.error('[tts-config] update error:', (err as Error).message);
     return c.text('Invalid config', 400);

@@ -6,6 +6,7 @@ import {
 import { useGateway } from '@/contexts/GatewayContext';
 import { classifyEvent, isErrorKind } from './tiers';
 import { loadSeen, loadToastMode, saveSeen, type SeenSet } from './seen';
+import { CLIENT_ERROR_EVENT, type ClientErrorDetail } from './clientToast';
 
 /**
  * The interrupt tier: what is BLOCKED ON THE OPERATOR right now, and what is new about
@@ -153,6 +154,17 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       return [...prev, t].slice(-MAX_TOASTS);
     });
   }, []);
+
+  // Errors raised by client code outside this tree (see clientToast.ts).
+  useEffect(() => {
+    const onClientError = (e: Event) => {
+      const d = (e as CustomEvent<ClientErrorDetail>).detail;
+      if (!d || typeof d.id !== 'string' || typeof d.title !== 'string') return;
+      push({ id: `client:${d.id}`, title: d.title, body: d.body, severity: 'error', target: null, at: Date.now() });
+    };
+    window.addEventListener(CLIENT_ERROR_EVENT, onClientError);
+    return () => window.removeEventListener(CLIENT_ERROR_EVENT, onClientError);
+  }, [push]);
 
   const dismiss = useCallback((id: string) => {
     setToasts((prev) => (prev.some((t) => t.id === id) ? prev.filter((t) => t.id !== id) : prev));

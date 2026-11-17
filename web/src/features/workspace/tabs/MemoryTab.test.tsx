@@ -122,6 +122,22 @@ describe('MemoryTab', () => {
     expect(episodes.searchParams.get('scope')).toBe('private');
   });
 
+  it('asks about no agent while the id is the "no session yet" placeholder, then reads once a real one arrives', async () => {
+    const mock = stubFetch();
+    const { rerender } = render(<MemoryTab agentId="main" />);
+
+    // The existing loading state, and not one request (each would answer 404).
+    expect(screen.getAllByText('Loading…').length).toBeGreaterThanOrEqual(4);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(mock).not.toHaveBeenCalled();
+
+    rerender(<MemoryTab agentId="jira-expert" />);
+    await screen.findByText('Doe onboarding');
+    const paths = mock.mock.calls.map((c) => new URL(String(c[0]), 'http://cockpit.test').pathname);
+    expect(paths.every((p) => !p.endsWith('/main'))).toBe(true);
+    expect(paths).toContain('/api/cc/notes/jira-expert');
+  });
+
   it('shows a loading line in every section before the first answers', () => {
     globalThis.fetch = vi.fn(() => new Promise<Response>(() => {})) as unknown as typeof fetch;
     render(<MemoryTab agentId="jira-expert" />);

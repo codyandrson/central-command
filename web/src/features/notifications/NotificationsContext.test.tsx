@@ -44,6 +44,7 @@ vi.mock('@/features/voice/audio-feedback', () => ({
 // Imported after the mocks so the provider picks them up.
 const { NotificationsProvider } = await import('./NotificationsContext');
 const { ToastHost, AUTO_DISMISS_MS } = await import('./ToastHost');
+const { reportClientError } = await import('./clientToast');
 
 const PROPOSAL = { id: 'prop_1', agent_id: 'jira-expert', intent: 'Create JIRA-9' };
 const ASK = {
@@ -241,6 +242,20 @@ describe('errors', () => {
     });
 
     await waitFor(() => expect(screen.getByText('jira 401')).toBeInTheDocument());
+  });
+
+  it('toasts an error that client code outside the tree reports (read-aloud), once while it stands', async () => {
+    wire({ proposals: [] }, { sessions: [] });
+    renderHost();
+    await settle();
+
+    await act(async () => {
+      reportClientError({ id: 'read-aloud', title: 'Read-aloud failed', body: 'TTS failed: 403 key not allowed' });
+      reportClientError({ id: 'read-aloud', title: 'Read-aloud failed', body: 'TTS failed: 403 key not allowed' });
+    });
+
+    expect(await screen.findByText('TTS failed: 403 key not allowed')).toBeInTheDocument();
+    expect(screen.getAllByTestId('cc-toast')).toHaveLength(1);
   });
 
   it('ignores digest-tier chatter entirely', async () => {

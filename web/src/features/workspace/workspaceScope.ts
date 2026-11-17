@@ -13,6 +13,18 @@ function laneAgentId(sessionKey: string): string | null {
   return sessionKey.match(AGENT_LANE_RE)?.[1] ?? null;
 }
 
+/**
+ * True for the id `getWorkspaceAgentId` falls back to when no session is
+ * selected yet (the upstream placeholder behind the `agent:main:main` alias).
+ * It is not a Central Command agent, so a panel that reads agent-scoped data
+ * (notes, learned, charter, graph episodes) must wait for a real id instead of
+ * asking the API about it and showing the 404.
+ */
+export function isPlaceholderWorkspaceAgent(agentId: string): boolean {
+  const id = agentId.trim();
+  return id === '' || id === DEFAULT_WORKSPACE_AGENT_ID;
+}
+
 export function getWorkspaceAgentId(sessionKey: string): string {
   return getRootAgentId(sessionKey) ?? laneAgentId(sessionKey) ?? DEFAULT_WORKSPACE_AGENT_ID;
 }

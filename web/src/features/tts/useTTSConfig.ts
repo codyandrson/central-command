@@ -12,6 +12,8 @@ export interface TTSVoiceConfig {
     model: string;
     voice: string;
     instructions: string;
+    /** Voice saved for the deployment's speech service (deployment speech mode). */
+    deploymentVoice?: string;
   };
   edge: {
     voice: string;
@@ -21,14 +23,28 @@ export interface TTSVoiceConfig {
     voice: string;
     style: string;
   };
+  /**
+   * Set by the server when OPENAI_TTS_MODEL is configured: the deployment owns
+   * the TTS model and the voice sent when a request names none. null otherwise.
+   */
+  deploymentSpeech?: DeploymentSpeech | null;
 }
+
+export interface DeploymentSpeech {
+  model: string;
+  voice: string;
+  voiceSource: 'env' | 'saved' | 'default';
+}
+
+/** The sections a field can be saved in (everything but the server-computed deploymentSpeech). */
+type ConfigSection = Exclude<keyof TTSVoiceConfig, 'deploymentSpeech'>;
 
 interface UseTTSConfigReturn {
   config: TTSVoiceConfig | null;
   loading: boolean;
   error: string | null;
   saved: boolean;
-  updateField: (provider: keyof TTSVoiceConfig, field: string, value: string) => void;
+  updateField: (provider: ConfigSection, field: string, value: string) => void;
 }
 
 /**
@@ -75,7 +91,7 @@ export function useTTSConfig(): UseTTSConfigReturn {
   }, []);
 
   const updateField = useCallback(
-    (provider: keyof TTSVoiceConfig, field: string, value: string) => {
+    (provider: ConfigSection, field: string, value: string) => {
       // Optimistic update
       setConfig((prev) => {
         if (!prev) return prev;

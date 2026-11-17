@@ -16,6 +16,7 @@ import { RefreshCw, Pencil, Save, X, CheckCircle, AlertCircle } from 'lucide-rea
 import { Button } from '@/components/ui/button';
 import { clearPersistedDraft, readPersistedDraft, writePersistedDraft } from '../persistedDrafts';
 import { apiFetch } from '@/lib/apiFetch';
+import { isPlaceholderWorkspaceAgent } from '../workspaceScope';
 import { CapabilitiesView, McpToolsView } from '../../gates';
 
 const DRAFT_KIND = 'charter-editor';
@@ -62,7 +63,11 @@ export function ConfigTab({ agentId }: ConfigTabProps) {
 
   useEffect(() => () => clearTimeout(feedbackTimer.current), []);
 
+  // No session selected yet: the id is the placeholder, not an agent. Ask nothing.
+  const awaitingAgent = isPlaceholderWorkspaceAgent(agentId);
+
   const load = useCallback(async () => {
+    if (isPlaceholderWorkspaceAgent(agentId)) return;
     const requestAgentId = agentId;
     const requestVersion = ++requestVersionRef.current;
     setIsLoading(true);
@@ -183,12 +188,12 @@ export function ConfigTab({ agentId }: ConfigTabProps) {
         </div>
         <button
           onClick={() => void load()}
-          disabled={isLoading}
+          disabled={isLoading || awaitingAgent}
           className="shell-icon-button size-10 shrink-0 px-0 disabled:cursor-not-allowed disabled:opacity-50"
           title="Refresh"
           aria-label="Refresh charter"
         >
-          <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+          <RefreshCw size={16} className={isLoading || awaitingAgent ? 'animate-spin' : ''} />
         </button>
       </div>
 
@@ -209,7 +214,7 @@ export function ConfigTab({ agentId }: ConfigTabProps) {
       )}
 
       <div className="flex-1 overflow-y-auto">
-        {!charter && !isLoading && !error && (
+        {!charter && !isLoading && !awaitingAgent && !error && (
           <div className="text-muted-foreground px-3 py-4 text-[0.733rem] text-center">
             No charter for this agent.
           </div>

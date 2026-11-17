@@ -4,6 +4,31 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-17 — v2.93.1: Read-aloud works on a deployment that serves its own speech
+
+Found while verifying v2.93.0 on a live install: read-aloud had been failing there, silently, for
+weeks. Setup points the cockpit at the deployment's speech service (`OPENAI_TTS_MODEL`), but the cockpit
+treated that as a first-run default only, so an install whose `web/tts-config.json` predated the speech
+service kept asking the proxy for an OpenAI model (refused: the cockpit's key reaches only the speech
+aliases) with an OpenAI voice name (which the bundled engine answers with an error).
+
+- **The deployment owns the model.** When `OPENAI_TTS_MODEL` is set, that alias is always the model: a
+  stored value and a model sent by a browser no longer override it.
+- **A voice the engine provides.** In that mode the voice is `OPENAI_TTS_VOICE` if set, else one the
+  operator saved in Audio settings, else `af_heart`, the bundled engine's first voice and the API's own
+  default. The stored OpenAI voice name is never sent and is not destroyed. k3s setup writes
+  `OPENAI_TTS_VOICE` from `CC_TTS_VOICE` when that is set.
+- **Audio settings say what is used.** The model is a label showing the alias; the OpenAI voice list is
+  replaced by one "Voice" field (read-only when the environment sets it); "Voice Instructions" is hidden.
+  Without `OPENAI_TTS_MODEL` the screen and the provider behave as before.
+- **A failed read-aloud is no longer silent.** The cockpit raises one "Read-aloud failed" notice per
+  failure streak, with the server's reason.
+- **No requests for a placeholder agent.** Before sessions load, the workspace panel asked for the notes,
+  learned items and charter of an agent called `main` and drew three 404s on every cockpit load. Those
+  panels now wait for the real agent.
+
+Cockpit only. No schema, unit or manifest change.
+
 ## 2026-11-17 — v2.93.0: A retried create lands once for Google Calendar events, graph nodes and facts, and LOE check-ins
 
 After v2.91.0 one double-apply was left: the single action that was in flight when its call failed or its

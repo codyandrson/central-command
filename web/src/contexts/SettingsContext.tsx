@@ -126,6 +126,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [soundEnabled, setSoundEnabled] = useState(localStorage.getItem('oc-sound') === 'true');
   const [ttsProvider, setTtsProvider] = useState<TTSProvider>(() => coerceTTSProvider(localStorage.getItem('oc-tts-provider') || 'openai'));
   const [ttsModel, setTtsModelState] = useState(() => localStorage.getItem('oc-tts-model') || '');
+  // True when the server reports deployment speech mode (OPENAI_TTS_MODEL set):
+  // the deployment owns the TTS model, so a saved `oc-tts-model` is never sent.
+  const [deploymentSpeech, setDeploymentSpeech] = useState(false);
   const [sttProvider, setSttProviderState] = useState<STTProvider>(() => {
     return coerceSTTProvider(localStorage.getItem('oc-stt-provider'));
   });
@@ -176,7 +179,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const saved = localStorage.getItem(TOAST_MODE_STORAGE_KEY);
     return saved === 'errors' || saved === 'off' ? saved : 'all';
   });
-  const { speak, speakNow, stop: stopSpeaking, speaking } = useTTS(soundEnabled, ttsProvider, ttsModel || undefined);
+  const { speak, speakNow, stop: stopSpeaking, speaking } = useTTS(soundEnabled, ttsProvider, deploymentSpeech ? undefined : ttsModel || undefined);
   const wakeWordToggleRef = useRef<(() => void) | null>(null);
 
   // Apply theme on mount and when it changes
@@ -272,12 +275,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   // Same for TTS: no saved preference → the server's defaultProvider, which
   // is 'openai' whenever a key is configured (a proxy/self-hosted endpoint in
   // a Central Command deployment) and only falls back to Edge without one.
+  // The same read also tells us whether the deployment owns the TTS model.
   useEffect(() => {
-    if (localStorage.getItem('oc-tts-provider') !== null) return;
+    const hasSavedProvider = localStorage.getItem('oc-tts-provider') !== null;
     fetch('/api/tts/config')
       .then(resp => resp.ok ? resp.json() : null)
       .then(data => {
-        if (typeof data?.defaultProvider === 'string') setTtsProvider(coerceTTSProvider(data.defaultProvider));
+        setDeploymentSpeech(!!data?.deploymentSpeech);
+        if (!hasSavedProvider && typeof data?.defaultProvider === 'string') {
+          setTtsProvider(coerceTTSProvider(data.defaultProvider));
+        }
       })
       .catch(() => {});
   }, []);

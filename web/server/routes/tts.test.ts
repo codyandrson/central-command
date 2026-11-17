@@ -19,6 +19,10 @@ describe('TTS routes', () => {
     openaiResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number };
     replicateResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number };
     xiaomiResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number; contentType?: string };
+    /** Deployment speech mode as getDeploymentSpeech() would report it (null = not in the mode). */
+    deployment?: { model: string; voice: string; voiceSource: 'env' | 'saved' | 'default' } | null;
+    /** OPENAI_TTS_VOICE as the environment holds it. */
+    envVoice?: string;
   } = {}) {
     vi.doMock('../lib/config.js', () => ({
       config: {
@@ -65,6 +69,9 @@ describe('TTS routes', () => {
         xiaomi: { model: 'mimo-v2-tts', voice: 'mimo_default', style: 'Happy' },
       })),
       updateTTSConfig: vi.fn((patch: unknown) => patch),
+      getDeploymentSpeech: vi.fn(() => overrides.deployment ?? null),
+      deploymentVoiceFromEnv: vi.fn(() => overrides.envVoice ?? ''),
+      DEPLOYMENT_VOICE_PATTERN: /^[A-Za-z0-9_-]{1,64}$/,
     }));
   }
 
@@ -200,6 +207,23 @@ describe('TTS routes', () => {
       expect(json).toHaveProperty('openai');
       expect(json).toHaveProperty('edge');
     });
+
+    it('reports deploymentSpeech as null outside deployment speech mode', async () => {
+      mockDeps();
+      const app = await buildApp();
+      const json = (await (await app.request('/api/tts/config')).json()) as Record<string, unknown>;
+      expect(json.deploymentSpeech).toBeNull();
+    });
+
+    it('reports the deployment model, voice and where the voice came from, keeping the existing keys', async () => {
+      mockDeps({ openaiKey: 'sk-test', deployment: { model: 'cc-tts', voice: 'af_heart', voiceSource: 'default' } });
+      const app = await buildApp();
+      const json = (await (await app.request('/api/tts/config')).json()) as Record<string, unknown>;
+      expect(json.deploymentSpeech).toEqual({ model: 'cc-tts', voice: 'af_heart', voiceSource: 'default' });
+      expect(json).toHaveProperty('openai');
+      expect(json).toHaveProperty('edge');
+      expect(json.defaultProvider).toBe('openai');
+    });
   });
 
   describe('PUT /api/tts/config', () => {
@@ -234,6 +258,54 @@ describe('TTS routes', () => {
         body: JSON.stringify({ xiaomi: { model: 'mimo-v2-tts', voice: 'default_en', style: 'Happy' } }),
       });
       expect(res.status).toBe(200);
+    });
+
+    function putConfig(app: Hono, body: unknown) {
+      return app.request('/api/tts/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+
+    it('accepts a deployment voice and returns the effective deploymentSpeech', async () => {
+      mockDeps({ deployment: { model: 'cc-tts', voice: 'bf_emma', voiceSource: 'saved' } });
+      const app = await buildApp();
+      const res = await putConfig(app, { openai: { deploymentVoice: 'bf_emma' } });
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json.deploymentSpeech).toEqual({ model: 'cc-tts', voice: 'bf_emma', voiceSource: 'saved' });
+    });
+
+    it.each(['', 'nova voice', 'af/heart', 'voice;rm', 'a'.repeat(65), 'café'])(
+      'rejects the deployment voice %j with 400',
+      async (voice) => {
+        mockDeps();
+        const app = await buildApp();
+        const res = await putConfig(app, { openai: { deploymentVoice: voice } });
+        expect(res.status).toBe(400);
+      },
+    );
+
+    it('accepts a 64-character deployment voice and the token characters _ and -', async () => {
+      mockDeps();
+      const app = await buildApp();
+      expect((await putConfig(app, { openai: { deploymentVoice: 'a'.repeat(64) } })).status).toBe(200);
+      expect((await putConfig(app, { openai: { deploymentVoice: 'af_heart-2' } })).status).toBe(200);
+    });
+
+    it('refuses to change the deployment voice when OPENAI_TTS_VOICE is set, and says why', async () => {
+      mockDeps({ envVoice: 'am_adam', deployment: { model: 'cc-tts', voice: 'am_adam', voiceSource: 'env' } });
+      const app = await buildApp();
+      const res = await putConfig(app, { openai: { deploymentVoice: 'bf_emma' } });
+      expect(res.status).toBe(409);
+      expect(await res.text()).toContain('OPENAI_TTS_VOICE');
+    });
+
+    it('still saves other openai settings when OPENAI_TTS_VOICE is set', async () => {
+      mockDeps({ envVoice: 'am_adam' });
+      const app = await buildApp();
+      expect((await putConfig(app, { openai: { instructions: 'Calm.' } })).status).toBe(200);
     });
 
     it('rejects non-string values', async () => {

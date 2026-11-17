@@ -51,6 +51,18 @@ describe('ConfigTab', () => {
     vi.restoreAllMocks();
   });
 
+  it('requests no charter while the id is the "no session yet" placeholder, and shows no error or empty claim', async () => {
+    const fetchMock = vi.fn(() => { throw new Error('no request expected'); });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    render(<ConfigTab agentId="main" />);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('No charter for this agent.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh charter' })).toBeDisabled();
+  });
+
   it('shows the current charter and its version metadata', async () => {
     globalThis.fetch = vi.fn((input: string | URL | Request) => {
       const url = String(input);

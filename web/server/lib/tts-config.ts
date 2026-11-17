@@ -40,6 +40,12 @@ export interface TTSVoiceConfig {
     voice: string;
     /** Natural language instructions for how the voice should sound */
     instructions: string;
+    /**
+     * Voice the operator saved FOR the deployment's own speech service (see
+     * {@link getDeploymentSpeech}). Kept apart from `voice`, which holds an
+     * OpenAI voice name that the deployment's engine does not know; '' = unset.
+     */
+    deploymentVoice: string;
   };
   /** Edge TTS settings */
   edge: {
@@ -71,6 +77,7 @@ const DEFAULTS: TTSVoiceConfig = {
     voice: process.env.OPENAI_TTS_VOICE || 'nova',
     instructions:
       'Speak naturally and conversationally, like a real person. Warm, friendly tone with a slight British accent. Keep it casual and relaxed, not robotic or overly formal.',
+    deploymentVoice: '',
   },
   edge: {
     voice: 'en-US-AriaNeural',
@@ -122,6 +129,58 @@ export function updateTTSConfig(patch: Record<string, any>): TTSVoiceConfig {
   saveTTSConfig(updated);
   return updated;
 }
+
+// ─── Deployment speech mode ──────────────────────────────────────────────────
+
+/**
+ * The voice used for the deployment's speech service when neither the
+ * environment nor the operator names one. It is the first voice of the bundled
+ * engine (Kokoro) and the same default as the API's own speech route
+ * (`tts_voice` in central_command/config.py, `CC_TTS_VOICE` in deploy/).
+ */
+export const DEFAULT_DEPLOYMENT_VOICE = 'af_heart';
+
+/** A deployment voice is a short token: letters, digits, underscore, hyphen. */
+export const DEPLOYMENT_VOICE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+export interface DeploymentSpeech {
+  /** The model alias the deployment serves; always the environment's value. */
+  model: string;
+  /** The voice that will be sent when a request names none. */
+  voice: string;
+  /** Where `voice` came from. */
+  voiceSource: 'env' | 'saved' | 'default';
+}
+
+/** The operator-set voice in the environment, or '' (read at call time). */
+export function deploymentVoiceFromEnv(): string {
+  return (process.env.OPENAI_TTS_VOICE || '').trim();
+}
+
+/**
+ * DEPLOYMENT SPEECH MODE — the one definition: OPENAI_TTS_MODEL is set.
+ *
+ * Setup points the 'openai' provider at the deployment's own speech service
+ * (through the LiteLLM proxy) and writes that alias here. In this mode the
+ * deployment owns the model: a stale `openai.model` in tts-config.json (written
+ * before the service existed) and a `model` sent by a browser never override
+ * it. The OpenAI voice name in `openai.voice` is never sent either — the
+ * engine behind the alias answers 500 to a name it does not provide.
+ * Outside the mode this returns null and the provider behaves as before.
+ */
+export function getDeploymentSpeech(): DeploymentSpeech | null {
+  const model = (process.env.OPENAI_TTS_MODEL || '').trim();
+  if (!model) return null;
+
+  const envVoice = deploymentVoiceFromEnv();
+  if (envVoice) return { model, voice: envVoice, voiceSource: 'env' };
+
+  const saved = (getTTSConfig().openai.deploymentVoice || '').trim();
+  if (DEPLOYMENT_VOICE_PATTERN.test(saved)) return { model, voice: saved, voiceSource: 'saved' };
+
+  return { model, voice: DEFAULT_DEPLOYMENT_VOICE, voiceSource: 'default' };
+}
+
 /** Simple deep merge (target ← source). Only merges plain objects, overwrites everything else. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function deepMerge(target: any, source: any): any {

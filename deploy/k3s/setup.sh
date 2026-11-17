@@ -1174,6 +1174,13 @@ phase_app() {
   set_kv_if_unset "$wenv" OPENAI_TTS_MODEL "cc-tts"                   "web-speech-tts"
   set_kv_if_unset "$wenv" OPENAI_STT_MODEL "cc-stt"                   "web-speech-stt"
   set_kv_if_unset "$wenv" STT_PROVIDER     "openai"                   "web-speech-provider"
+  # Optional: the voice the speech engine is asked for, the same CC_TTS_VOICE the
+  # API's own speech route reads. Left unset when the app env has none — the
+  # cockpit then uses the engine's first voice (af_heart), as the API does.
+  local tts_voice; tts_voice="$(get_kv "$APP_ENV" CC_TTS_VOICE)"
+  if [[ -n "$tts_voice" ]]; then
+    set_kv_if_unset "$wenv" OPENAI_TTS_VOICE "$tts_voice" "web-speech-voice"
+  fi
   if [[ -z "$(get_kv "$wenv" OPENAI_API_KEY)" ]]; then
     step "web-speech-key" "cockpit virtual key minted into web/.env (OPENAI_API_KEY, scope cc-tts + cc-stt)" \
       "$HERE/mint-keys.sh" || return 1

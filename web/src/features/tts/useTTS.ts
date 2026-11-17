@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { ensureAudioContext } from '@/features/voice/audio-feedback';
+import { reportClientError } from '@/features/notifications/clientToast';
 
 // ─── Audio autoplay unlock ─────────────────────────────────────────────────────
 // Browsers block audio.play() until the user has interacted with the page.
@@ -64,7 +65,12 @@ async function fetchTTS(text: string, provider: TTSProvider = 'openai', model?: 
     credentials: 'include',
     body: JSON.stringify(body),
   });
-  if (!resp.ok) throw new Error(`TTS failed: ${resp.status}`);
+  if (!resp.ok) {
+    // The server relays the speech service's own refusal text; keep it so the
+    // operator can see why (a refused model, an unknown voice) and not just a status.
+    const detail = (await resp.text().catch(() => '')).trim().slice(0, 300);
+    throw new Error(detail ? `TTS failed: ${resp.status} ${detail}` : `TTS failed: ${resp.status}`);
+  }
   // Use the server's content type (audio/mpeg for MP3, audio/wav for WAV)
   const arrayBuffer = await resp.arrayBuffer();
   const ct = resp.headers.get('Content-Type') || 'audio/mpeg';
@@ -81,6 +87,8 @@ async function fetchTTS(text: string, provider: TTSProvider = 'openai', model?: 
 export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model?: string) {
   const currentAudio = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
   const generationRef = useRef(0);
+  /** True while read-aloud is failing: one notice per streak, cleared when audio plays. */
+  const failingRef = useRef(false);
   /** Text of the utterance currently fetching or playing — null when idle. */
   const [speaking, setSpeaking] = useState<string | null>(null);
 
@@ -134,13 +142,19 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
       audio.addEventListener('error', () => revoke(), { once: true });
       try {
         await audio.play();
+        failingRef.current = false;
       } catch (err) {
         revoke();
         throw err;
       }
     } catch (err: unknown) {
       done();
-      console.error('[TTS] play failed:', err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[TTS] play failed:', message);
+      if (!failingRef.current) {
+        failingRef.current = true;
+        reportClientError({ id: 'read-aloud', title: 'Read-aloud failed', body: message });
+      }
     }
   }, [provider, model, cleanupAudio]);
 
