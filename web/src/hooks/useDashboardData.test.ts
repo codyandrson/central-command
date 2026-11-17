@@ -67,7 +67,7 @@ describe('useDashboardData', () => {
     vi.restoreAllMocks();
   });
 
-  it('fetches the token usage once on mount and again on a tokens.updated event', async () => {
+  it('fetches the token usage once on mount', async () => {
     globalThis.fetch = vi.fn((input: string | URL | Request) => {
       const url = String(input);
       if (url === '/api/tokens') return Promise.resolve(jsonResponse({ totalTokens: 12 }));
@@ -79,9 +79,6 @@ describe('useDashboardData', () => {
     await waitFor(() => expect(result.current.tokenData).toEqual({ totalTokens: 12 }));
     const fetchMock = vi.mocked(globalThis.fetch);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    act(() => { sseHandler?.({ event: 'tokens.updated', data: {}, ts: Date.now() }); });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
 
   it('no longer reads the memory list: memory.changed refreshes nothing', async () => {

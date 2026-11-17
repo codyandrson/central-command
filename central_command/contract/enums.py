@@ -58,7 +58,5 @@ class SessionStatus(str, Enum):
 
     running = "RUNNING"
     awaiting_human = "AWAITING_HUMAN"
-    awaiting_input = "AWAITING_INPUT"
     done = "DONE"
     failed = "FAILED"
-    aborted = "ABORTED"

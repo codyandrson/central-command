@@ -181,6 +181,7 @@ resilience, and the runtime's context/window handling. See
   the window step itself breaks: a known violation of this rule (PRD FR-43),
   owed a fix.
 - **Enforced:** test: `tests/test_context_overflow.py::test_a_dead_summarizer_still_ends_in_the_clip_not_raw_history` pins the summary-failure path; the outer-guard fallback has no test
+- **Note (2026-11-16):** the outer-guard violation above was fixed: `prepare_window` now falls back to a clip computed from the static window setting and the density table, and `tests/test_context_overflow.py::test_a_step_that_raises_still_sends_a_clipped_window` pins it. Raw history is sent only if that clip also fails, which is logged.
 - **Source:** CHANGELOG v2.37.2; .claude/rules/runtime-resilience.md
 
 ### DL-034 — A status-code sniff must match a token, not a substring

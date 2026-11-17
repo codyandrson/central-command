@@ -9,6 +9,8 @@ vi.mock('@/components/skeletons', () => ({
   ),
 }));
 
+vi.mock('./SpawnAgentDialog', () => ({ SpawnAgentDialog: () => null }));
+
 function renderSessionList(props: Partial<React.ComponentProps<typeof SessionList>> = {}) {
   return render(
     <SessionList

@@ -57,7 +57,6 @@ const {
     refreshSessions: vi.fn(),
     deleteSession: vi.fn(),
     abortSession: vi.fn(),
-    spawnSession: vi.fn(),
     agentLogEntries: [],
     eventEntries: [],
     agentName: 'Nerve',
@@ -336,42 +335,12 @@ vi.mock('@/features/command-palette/CommandPalette', () => ({
 }));
 
 vi.mock('@/features/sessions/SessionList', () => ({
-  SessionList: ({ onSelect, onSpawn }: {
+  SessionList: ({ onSelect }: {
     onSelect: (key: string) => void;
-    onSpawn?: (opts: { kind: 'root' | 'subagent'; agentName?: string; parentSessionKey?: string; task: string; model: string; thinking: string; cleanup?: string }) => Promise<void>;
   }) => (
     <div>
       <button type="button" onClick={() => onSelect('agent:bravo:main')}>Select Bravo</button>
       <button type="button" onClick={() => onSelect('agent:alpha:subagent:abc')}>Select Alpha Subagent</button>
-      {onSpawn && (
-        <button
-          type="button"
-          onClick={() => onSpawn({
-            kind: 'root',
-            agentName: 'Charlie',
-            task: 'Investigate workspace guard',
-            model: 'test-model',
-            thinking: 'medium',
-          })}
-        >
-          Spawn Root Charlie
-        </button>
-      )}
-      {onSpawn && (
-        <button
-          type="button"
-          onClick={() => onSpawn({
-            kind: 'subagent',
-            parentSessionKey: 'agent:bravo:main',
-            task: 'Help bravo',
-            model: 'test-model',
-            thinking: 'medium',
-            cleanup: 'keep',
-          })}
-        >
-          Spawn Bravo Subagent
-        </button>
-      )}
     </div>
   ),
 }));
@@ -431,7 +400,6 @@ describe('App save toast workspace scoping', () => {
     localStorage.clear();
     sessionContext.currentSession = 'agent:alpha:main';
     sessionContext.setCurrentSession.mockReset();
-    sessionContext.spawnSession.mockReset();
     Object.values(saveFileByAgent).forEach((mockFn) => mockFn.mockReset());
     Object.values(saveAllDirtyFilesByAgent).forEach((mockFn) => mockFn.mockReset());
     Object.values(discardAllDirtyFilesByAgent).forEach((mockFn) => mockFn.mockReset());
@@ -706,7 +674,6 @@ describe('App workspace switch guard', () => {
     sessionContext.currentSession = 'agent:alpha:main';
     uploadConfigState.fileReferenceEnabled = true;
     sessionContext.setCurrentSession.mockReset();
-    sessionContext.spawnSession.mockReset();
     Object.values(saveAllDirtyFilesByAgent).forEach((mockFn) => mockFn.mockReset());
     Object.values(discardAllDirtyFilesByAgent).forEach((mockFn) => mockFn.mockReset());
     dirtyStateByAgent.alpha = true;
@@ -777,51 +744,6 @@ describe('App workspace switch guard', () => {
 
     expect(sessionContext.setCurrentSession).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent('shared.md');
-  });
-
-  it('guards root-agent creation until the user confirms the switch', async () => {
-    render(<App />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Spawn Root Charlie' }));
-
-    expect(sessionContext.spawnSession).not.toHaveBeenCalled();
-    expect(screen.getByText('Unsaved workspace edits')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Discard and switch' }));
-
-    await waitFor(() => {
-      expect(discardAllDirtyFilesByAgent.alpha).toHaveBeenCalledTimes(1);
-      expect(sessionContext.spawnSession).toHaveBeenCalledWith({
-        kind: 'root',
-        agentName: 'Charlie',
-        task: 'Investigate workspace guard',
-        model: 'test-model',
-        thinking: 'medium',
-      });
-    });
-  });
-
-  it('guards cross-agent subagent creation too', async () => {
-    render(<App />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Spawn Bravo Subagent' }));
-
-    expect(sessionContext.spawnSession).not.toHaveBeenCalled();
-    expect(screen.getByText('Unsaved workspace edits')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save and switch' }));
-
-    await waitFor(() => {
-      expect(saveAllDirtyFilesByAgent.alpha).toHaveBeenCalledTimes(1);
-      expect(sessionContext.spawnSession).toHaveBeenCalledWith({
-        kind: 'subagent',
-        parentSessionKey: 'agent:bravo:main',
-        task: 'Help bravo',
-        model: 'test-model',
-        thinking: 'medium',
-        cleanup: 'keep',
-      });
-    });
   });
 });
 

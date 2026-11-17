@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { InlineSelect } from '@/components/ui/InlineSelect';
 import type { InlineSelectOption } from '@/components/ui/InlineSelect';
 import { useGateway } from '@/contexts/GatewayContext';
-import { useSessionContext, type SpawnSessionOpts } from '@/contexts/SessionContext';
+import { useSessionContext } from '@/contexts/SessionContext';
 
 type RosterAgent = {
   id: string;
@@ -26,8 +26,6 @@ type NewSessionResponse = { sessionId?: string; sessionKey?: string };
 interface SpawnAgentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Kept for call-site compatibility. */
-  onSpawn?: (opts: SpawnSessionOpts) => Promise<void | boolean>;
 }
 
 /**

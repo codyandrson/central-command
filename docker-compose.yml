@@ -1,6 +1,6 @@
-# Phase-1 infra. Postgres is the framework spine (state, ledger, event log, DBOS).
-# Graphiti/Neo4j and n8n are assumed to already run in the homelab and are reached
-# over MCP (see .env); they are not started here.
+# The DEV database only: Postgres, the framework spine (state, ledger, event log).
+# graphiti-core runs inside the API process; Neo4j, n8n and LiteLLM come from the
+# deploy profiles (deploy/single, deploy/k3s), not from this file.
 services:
   postgres:
     image: postgres:16

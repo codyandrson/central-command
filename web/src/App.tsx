@@ -17,7 +17,7 @@ import {
 } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useGateway } from '@/contexts/GatewayContext';
-import { useSessionContext, type SpawnSessionOpts } from '@/contexts/SessionContext';
+import { useSessionContext } from '@/contexts/SessionContext';
 import { useChat } from '@/contexts/ChatContext';
 import { useSettings, type STTInputMode } from '@/contexts/SettingsContext';
 import { getSessionKey } from '@/types';
@@ -44,10 +44,10 @@ import { DEFAULT_CHAT_PATH_LINKS_CONFIG, parseChatPathLinksConfig } from '@/feat
 import { FileTreePanel, TabbedContentArea, useOpenFiles, type FileTreeChangeEvent } from '@/features/file-browser';
 import { type BeadLinkTarget, type OpenBeadTab, buildBeadTabId } from '@/features/beads';
 import { isImageFile } from '@/features/file-browser/utils/fileTypes';
-import { buildAgentRootSessionKey, getSessionDisplayLabel, isTopLevelAgentSessionKey, TERMINAL_SESSION_STATUSES } from '@/features/sessions/sessionKeys';
+import { getSessionDisplayLabel, isTopLevelAgentSessionKey, TERMINAL_SESSION_STATUSES } from '@/features/sessions/sessionKeys';
 import { useStalledDiscussions } from '@/features/sessions/useStalledDiscussions';
 import { shouldGuardWorkspaceSwitch } from '@/features/workspace/workspaceSwitchGuard';
-import { getWorkspaceAgentId, getWorkspaceRootSessionKey } from '@/features/workspace/workspaceScope';
+import { getWorkspaceAgentId } from '@/features/workspace/workspaceScope';
 
 // Lazy-loaded features (not needed in initial bundle)
 const SettingsDrawer = lazy(() => import('@/features/settings/SettingsDrawer').then(m => ({ default: m.SettingsDrawer })));
@@ -127,7 +127,7 @@ export default function App({ onLogout }: AppProps) {
   // Session state
   const {
     sessions, sessionsLoading, currentSession, setCurrentSession, setViewingChat,
-    busyState, agentStatus, unreadSessions, refreshSessions, deleteSession, openNewSession, abortSession, spawnSession,
+    busyState, agentStatus, unreadSessions, refreshSessions, deleteSession, openNewSession, abortSession,
     agentLogEntries, eventEntries,
     agentName,
   } = useSessionContext();
@@ -603,7 +603,6 @@ export default function App({ onLogout }: AppProps) {
   // Global keyboard shortcuts
   useKeyboardShortcuts([
     { key: 'k', meta: true, handler: handleOpenPalette },
-    { key: 'b', meta: true, handler: handleToggleFileBrowser },  // Cmd+B → toggle file browser
     { key: 'f', meta: true, handler: toggleSearch, skipInEditor: true },  // Cmd+F → chat search (yields to CodeMirror search in editor)
     { key: 'c', ctrl: true, handler: handleCtrlC, preventDefault: false },  // Ctrl+C → abort (when generating), allow copy to still work
     { key: 'Escape', handler: handleEscape, skipInEditor: true },
@@ -726,19 +725,6 @@ export default function App({ onLogout }: AppProps) {
     setViewMode('chat');
     handleSessionChange(`agent:${agentId}:${sessionId}`);
   }, [handleSessionChange, setViewMode]);
-
-  const handleSpawnSession = useCallback((opts: SpawnSessionOpts) => {
-    const targetSessionKey = opts.kind === 'root'
-      ? buildAgentRootSessionKey(opts.agentName?.trim() || 'agent', sessions.map(getSessionKey))
-      : opts.parentSessionKey?.trim() || getWorkspaceRootSessionKey(currentSession) || currentSession;
-    const targetLabel = opts.kind === 'root'
-      ? opts.agentName?.trim() || 'New agent'
-      : getWorkspaceSwitchLabel(targetSessionKey);
-
-    return requestWorkspaceTransition(targetSessionKey, targetLabel, async () => {
-      await spawnSession(opts);
-    });
-  }, [currentSession, getWorkspaceSwitchLabel, requestWorkspaceTransition, sessions, spawnSession]);
 
   // Boot sequence: fade in panels when connected
   useEffect(() => {
@@ -905,7 +891,6 @@ export default function App({ onLogout }: AppProps) {
               onRefresh={refreshSessions}
               onDelete={deleteSession}
               onNewSession={openNewSession}
-              onSpawn={handleSpawnSession}
               onAbort={abortSession}
               isLoading={sessionsLoading}
               agentName={agentName}
@@ -943,7 +928,6 @@ export default function App({ onLogout }: AppProps) {
           onRefresh={refreshSessions}
           onDelete={deleteSession}
           onNewSession={openNewSession}
-          onSpawn={handleSpawnSession}
           onAbort={abortSession}
           isLoading={sessionsLoading}
           agentName={agentName}
@@ -1338,7 +1322,6 @@ export default function App({ onLogout }: AppProps) {
       <SpawnAgentDialog
         open={spawnDialogOpen}
         onOpenChange={setSpawnDialogOpen}
-        onSpawn={handleSpawnSession}
       />
     </div>
   );

@@ -73,10 +73,6 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
 
   // SSE event handler for real-time updates from backend
   const handleSSEEvent = useCallback((event: ServerEvent) => {
-    if (event.event === 'tokens.updated') {
-      console.debug('[DashboardData] SSE tokens.updated, refreshing...');
-      refreshTokensRef.current?.();
-    }
     if (event.event === 'file.changed') {
       const data = event.data as FileChangedEventData | undefined;
       const eventAgentId = typeof data?.agentId === 'string' ? data.agentId : undefined;

@@ -524,11 +524,14 @@ bare 404.
 
 ### What this profile does NOT install
 
-The `verify` phase ends by printing the capability manifest; the one
-deliberate omission is the **vlogs log console**. Fluent Bit's container input
+The `verify` phase ends by printing the capability manifest; three things
+are deliberately absent. The **vlogs log console**: Fluent Bit's container input
 tails CRI-format `/var/log/containers/*.log`, which podman does not produce, so
 the collector would need a redesign rather than a port. Use `podman compose -f
 deploy/single/compose.yaml logs <service>` and `./setup.sh report` instead.
+The **pgweb database UI** is not part of this profile either (`CC_DB_UI_URL` stays empty).
+The **MCP server deploy/remove pipeline** is absent: `mcp.server_deploy` and
+`mcp.server_remove` refuse while `CC_MCP_DEPLOY_KUBECONFIG` is empty, and only `deploy/k3s` provides it.
 
 **When a `--proxy` probe fails, re-run it direct** (`./discover-llm.sh chat
 <upstream-model-id>`): a bad upstream URL/key and a broken

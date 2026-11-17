@@ -6,14 +6,14 @@ context window, and which ones?** A `session.context_pressure` event per
 crossing is the whole output; the threshold that fires it should be sized from
 those events, not from a guess.
 
-The compaction that slice 2 will add lives on the split this slice prepares:
+The compaction that slice 2 added lives on the split slice 1 prepared:
 `run_state.archived` (moved out of the window, kept forever) +
 `run_state.messages` (the live window, what gets sent). See
 `durable.full_messages`.
 
 Why an estimate and not `count_tokens`: the proxy does serve
 `/v1/messages/count_tokens` for the local model, but an exact count is a network
-round trip per check and this check runs on every node of every run. Slice 2 can
+round trip per check and this check runs on every node of every run. Slice 2 could
 buy exactness where it matters — a measurement that is ~15% off still tells you
 whether sessions reach 60% of the window.
 """

@@ -1,7 +1,6 @@
 import { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import type { Session } from '@/types';
 import { getSessionKey } from '@/types';
-import type { SpawnSessionOpts } from '@/contexts/SessionContext';
 import { SessionSkeletonGroup } from '@/components/skeletons';
 import { buildAgentSidebarTree, buildSessionTree, flattenTree, getSessionType } from './sessionTree';
 import { getSessionDisplayLabel, isTopLevelAgentSessionKey, TERMINAL_SESSION_STATUSES } from './sessionKeys';
@@ -35,7 +34,6 @@ interface SessionListProps {
   onRefresh: () => void;
   onDelete?: (sessionKey: string) => Promise<void>;
   onNewSession?: (sessionKey: string) => Promise<void>;
-  onSpawn?: (opts: SpawnSessionOpts) => Promise<void | boolean>;
   onRename?: (sessionKey: string, label: string) => Promise<void>;
   onAbort?: (sessionKey: string) => Promise<void>;
   isLoading?: boolean;
@@ -84,7 +82,7 @@ function findNodeByKey(nodes: ReturnType<typeof buildSessionTree>, key: string):
 }
 
 /** Sidebar list of agent sessions with tree structure and context menus. */
-export function SessionList({ sessions, currentSession, isViewingChat = true, busyState, agentStatus, unreadSessions, onSelect, onRefresh, onDelete, onNewSession, onSpawn, onRename, onAbort, isLoading, agentName = 'Agent', compact = false, stalledDiscussions }: SessionListProps) {
+export function SessionList({ sessions, currentSession, isViewingChat = true, busyState, agentStatus, unreadSessions, onSelect, onRefresh, onDelete, onNewSession, onRename, onAbort, isLoading, agentName = 'Agent', compact = false, stalledDiscussions }: SessionListProps) {
   const [deleteTarget, setDeleteTarget] = useState<{ key: string; label: string; descendantCount: number; isRootAgent: boolean } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -233,17 +231,15 @@ export function SessionList({ sessions, currentSession, isViewingChat = true, bu
           AGENTS
         </span>
         <div className="ml-auto flex items-center gap-2">
-          {onSpawn && (
-            <button
-              type="button"
-              onClick={() => setSpawnOpen(true)}
-              aria-label="Hire an agent or assign work"
-              title="Hire an agent or assign work"
-              className="shell-icon-button size-10 px-0"
-            >
-              <Plus size={16} />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setSpawnOpen(true)}
+            aria-label="Hire an agent or assign work"
+            title="Hire an agent or assign work"
+            className="shell-icon-button size-10 px-0"
+          >
+            <Plus size={16} />
+          </button>
           <button
             type="button"
             onClick={toggleHistory}
@@ -411,13 +407,10 @@ export function SessionList({ sessions, currentSession, isViewingChat = true, bu
       </Dialog>
 
       {/* Session creation dialog */}
-      {onSpawn && (
-        <SpawnAgentDialog
-          open={spawnOpen}
-          onOpenChange={setSpawnOpen}
-          onSpawn={onSpawn}
-        />
-      )}
+      <SpawnAgentDialog
+        open={spawnOpen}
+        onOpenChange={setSpawnOpen}
+      />
     </div>
   );
 }

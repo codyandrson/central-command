@@ -1002,9 +1002,8 @@ stateDiagram-v2
     FAILED --> [*]
 ```
 
-`contract/enums.py::SessionStatus` is a narrower, older list (it still names
-`AWAITING_INPUT` and `ABORTED`, which nothing sets); the schema comment is the
-authority. Sessions are never deleted, and one agent may hold several at once.
+`contract/enums.py::SessionStatus` is a narrower, older list (it names only
+the states the code sets); the schema comment is the authority. Sessions are never deleted, and one agent may hold several at once.
 
 Every session row carries `charter_version`, the version of its agent's charter
 current when the session started, stamped by the insert itself in

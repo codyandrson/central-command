@@ -858,7 +858,7 @@ class Settings(BaseSettings):
     sandbox_docs_url: str = ""
     crawler_docs_url: str = ""
 
-    # Browser-reachable database UI (e.g. Adminer, deploy/k3s/85-adminer.yaml)
+    # Browser-reachable database UI (e.g. pgweb, deploy/k3s/85-pgweb.yaml)
     # — display-only, for the Systems view. Unset = no link.
     db_ui_url: str = ""
 

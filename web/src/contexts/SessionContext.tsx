@@ -6,10 +6,7 @@ import { getSessionKey, type Session, type AgentLogEntry, type EventEntry, type 
 import { playPing } from '@/features/voice/audio-feedback';
 import { describeToolUse } from '@/utils/helpers';
 import {
-  buildAgentRootSessionKey,
   extractIdentityName,
-  getAgentRegistrationName,
-  getRootAgentSessionKey,
   getSessionDisplayLabel,
   getTopLevelAgentSessions,
   isSubagentSessionKey,
@@ -26,19 +23,6 @@ const IDLE_STATES = new Set(['idle', 'done', 'error', 'final', 'aborted', 'compl
 const FULL_SESSIONS_LIMIT = 1000;
 const MAIN_SESSION_KEY = 'agent:main:main';
 const SESSIONS_SPAWNED_LIMIT = 500;
-
-export type SubagentCleanupMode = 'keep' | 'delete';
-
-export interface SpawnSessionOpts {
-  kind: 'root' | 'subagent';
-  task: string;
-  model?: string;
-  thinking?: string;
-  label?: string;
-  cleanup?: SubagentCleanupMode;
-  agentName?: string;
-  parentSessionKey?: string;
-}
 
 interface SessionContextValue {
   sessions: Session[];
@@ -58,7 +42,6 @@ interface SessionContextValue {
   refreshSessions: () => Promise<void>;
   deleteSession: (sessionKey: string) => Promise<void>;
   openNewSession: (rootOrAgentKey: string) => Promise<void>;
-  spawnSession: (opts: SpawnSessionOpts) => Promise<void>;
   updateSession: (sessionKey: string, updates: Partial<Session>) => void;
   agentLogEntries: AgentLogEntry[];
   eventEntries: EventEntry[];
@@ -98,7 +81,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [eventEntries, setEventEntries] = useState<EventEntry[]>([]);
   const [agentStatus, setAgentStatus] = useState<Record<string, GranularAgentState>>({});
   const [agentName, setAgentName] = useState('Agent');
-  const [defaultAgentWorkspaceRoot, setDefaultAgentWorkspaceRoot] = useState<string | null>(null);
   const [rootIdentityNames, setRootIdentityNames] = useState<Record<string, string>>({});
   const [rootIdentityMisses, setRootIdentityMisses] = useState<Record<string, true>>({});
   const [unreadSessionKeys, setUnreadSessionKeys] = useState<Set<string>>(new Set());
@@ -184,15 +166,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       try {
         const res = await fetch('/api/server-info', { signal: controller.signal });
         if (!res.ok) return;
-        const data = await res.json() as { agentName?: string; defaultAgentWorkspaceRoot?: string | null };
+        const data = await res.json() as { agentName?: string };
         if (data.agentName) {
           setAgentName(data.agentName);
         }
-        setDefaultAgentWorkspaceRoot(
-          typeof data.defaultAgentWorkspaceRoot === 'string' && data.defaultAgentWorkspaceRoot.trim()
-            ? data.defaultAgentWorkspaceRoot
-            : null,
-        );
       } catch (err) {
         if (err instanceof Error && err.name !== 'AbortError') {
           // silent fail - use default
@@ -927,81 +904,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (res?.sessionKey) setCurrentSession(res.sessionKey);
   }, [rpc, setCurrentSession]);
 
-  const spawnSession = useCallback(async (opts: SpawnSessionOpts) => {
-    const authoritativeSessions = await listAuthoritativeSessions();
-
-    if (opts.kind === 'root') {
-      const rootName = opts.agentName?.trim();
-      if (!rootName) throw new Error('Agent name is required');
-
-      const sessionKey = buildAgentRootSessionKey(
-        rootName,
-        authoritativeSessions.map(getSessionKey),
-      );
-      // Register agent in config (ignore if already registered)
-      const agentId = getRootAgentId(sessionKey);
-      const registrationName = getAgentRegistrationName(rootName, sessionKey);
-      const workspacePath = defaultAgentWorkspaceRoot
-        ? `${defaultAgentWorkspaceRoot.replace(/\/+$/, '')}/${agentId}`
-        : `~/.openclaw/workspace-${agentId}`;
-      try {
-        await rpc('agents.create', { name: registrationName, workspace: workspacePath });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!msg.includes('already exists')) throw err;
-      }
-      const thinkingLevel = opts.thinking ?? null;
-
-      await rpc('sessions.patch', {
-        key: sessionKey,
-        label: rootName,
-        model: opts.model,
-        thinkingLevel,
-      });
-
-      const idempotencyKey = `spawn-root-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await rpc('chat.send', {
-        sessionKey,
-        message: opts.task,
-        deliver: false,
-        idempotencyKey,
-      });
-
-      await refreshSessions();
-      setCurrentSession(sessionKey);
-      return;
-    }
-
-    const fallbackRootSession = getTopLevelAgentSessions(sessionsRef.current)[0];
-    const parentSessionKey = opts.parentSessionKey
-      || getRootAgentSessionKey(currentSessionRef.current)
-      || (fallbackRootSession ? getSessionKey(fallbackRootSession) : '');
-    if (!parentSessionKey) {
-      throw new Error('Create a top-level agent before launching a subagent');
-    }
-
-    const res = await fetch('/api/sessions/spawn-subagent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parentSessionKey,
-        task: opts.task,
-        label: opts.label,
-        model: opts.model,
-        thinking: opts.thinking,
-        cleanup: opts.cleanup ?? 'keep',
-      }),
-    });
-
-    const data = await res.json() as { ok: boolean; sessionKey?: string; error?: string };
-    if (!data.ok || !data.sessionKey) {
-      throw new Error(data.error ?? 'Failed to spawn subagent');
-    }
-
-    await refreshSessions();
-    setCurrentSession(data.sessionKey);
-  }, [defaultAgentWorkspaceRoot, listAuthoritativeSessions, rpc, refreshSessions, setCurrentSession]);
-
   const abortSession = useCallback(async (sessionKey: string) => {
     try {
       await rpc('chat.abort', { sessionKey });
@@ -1025,7 +927,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     refreshSessions,
     deleteSession,
     openNewSession,
-    spawnSession,
     updateSession: updateSessionFromEvent,
     agentLogEntries,
     eventEntries,
@@ -1033,7 +934,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }), [
     displaySessions, sessionsLoading, currentSession, setCurrentSession, isViewingChat, setViewingChat, busyState, agentStatus,
     unreadSessions, markSessionRead,
-    abortSession, refreshSessions, deleteSession, openNewSession, spawnSession,
+    abortSession, refreshSessions, deleteSession, openNewSession,
     updateSessionFromEvent, agentLogEntries, eventEntries, agentName,
   ]);
 

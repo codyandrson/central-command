@@ -22,19 +22,3 @@ export interface AgentLogEntry {
   /** Arbitrary additional fields. */
   [key: string]: unknown;
 }
-
-/**
- * Parsed memory item returned by GET /api/memories.
- *
- * - `section` — a `## Heading` from MEMORY.md
- * - `item`    — a bullet point under a section in MEMORY.md
- * - `daily`   — a `## Heading` from a daily file (memory/YYYY-MM-DD.md)
- */
-export interface MemoryItem {
-  /** Discriminator for the memory source. */
-  type: 'section' | 'item' | 'daily';
-  /** The text content (section title or bullet text, markdown stripped). */
-  text: string;
-  /** Date string (YYYY-MM-DD) — present only for `daily` items. */
-  date?: string;
-}

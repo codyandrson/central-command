@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-16 — v2.89.1: Dead cockpit code and stale statements removed after a review of unfinished features
+
+A review of features that were started and never finished found a set of leftovers with one sensible
+fix each. This release removes them and corrects the documents that described something the code no
+longer does. Nothing an operator uses changes.
+
+- **Cockpit.** The vendored session-spawn path is gone: `spawnSession`, its App handler and the `onSpawn`
+  prop reached no control (the "+" dialog opens a conversation through `sessions.new`), and the path called
+  gateway methods this deployment never had. The Cmd+B shortcut toggled a file browser that is switched
+  off, and the `tokens.updated` listener waited for an event nothing emits; both are removed, with the
+  type that documented the deleted `GET /api/memories` route.
+- **Contract.** `SessionStatus.awaiting_input` and `SessionStatus.aborted` are removed: no code ever set
+  either, and no stored row can hold one.
+- **Deployment.** `OLLAMA_BASE_URL` leaves `deploy/k3s/.env.example` (nothing read it). The single-node
+  README now names all three things that profile does not install: the log console, the pgweb database
+  UI, and the MCP server deploy/remove pipeline, which refuses without the k3s-only kubeconfig.
+- **Documents.** PRD FR-43 and DL-033 say the compaction fallback was fixed and name its test; ROADMAP
+  row 10 is narrowed to what mail attachments still lack since v2.88.0 (image bytes, OCR for scans,
+  table layout); the `docker-compose.yml` header, a `config.py` comment and the `context.py` docstring
+  describe the tree as it is.
+
+No schema, unit, manifest or skill-doc change.
+
 ## 2026-11-15 — v2.89.0: A small note store beside the graph, written only through the gate, and a Memory tab that shows what an agent has learned
 
 The knowledge graph is query-driven: a standing fact nobody queries is never seen, and the operator's
