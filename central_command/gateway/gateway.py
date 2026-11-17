@@ -1376,12 +1376,16 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
     it can duplicate is the single in-flight action — one whose call timed out
     AFTER the façade may have applied it (a `jira.add_comment` whose HTTP read
     timed out post-write), or the one a stopped process had in flight, which an
-    interrupted retry-now resumes AT: that action is retried and MAY
-    double-apply for a non-idempotent capability. v1 accepts this rather than
-    guessing — the owed fix is provider-side idempotency keys
-    (`proposal.idempotency_key` exists and is unused end-to-end), deferred until
-    a façade can actually honour one. Do not substitute a client-side dedup
-    guess: guessing wrong drops a real write.
+    interrupted retry-now resumes AT: that action is retried. Since DL-219 the
+    retry is safe for four creates, each keyed on `executor.action_key()`
+    (proposal id + absolute action index, identical on every retry):
+    `calendar.create_event` on Google (a client-chosen event id; Google's 409
+    on a second insert reads the first event back), `graph.create_node`,
+    `graph.create_edge` (the key stamped on the element and looked up inside
+    the creating transaction) and `loe.record_checkin` (a unique key column).
+    Every other capability — Exchange mail and calendar, Jira, Confluence,
+    LiteLLM, MCP tool calls among them — MAY still double-apply. Do not
+    substitute a client-side dedup guess: guessing wrong drops a real write.
     """
     row = await repo.claim_proposal_retry(proposal_id)
     if row is None:

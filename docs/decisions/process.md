@@ -2553,3 +2553,39 @@ hygiene, and how the test suite itself must be written. See
   keys are the owed fix, and reconciliation (DL-188) the end state.
 - **Enforced:** test: `tests/test_execution_cursor.py::test_a_cancel_during_action_three_parks_interrupted_and_retry_now_runs_only_it`, `tests/test_execution_cursor.py::test_a_stop_after_a_completed_action_is_never_handed_back_for_approval`, `tests/test_execution_cursor.py::test_a_process_death_after_action_two_lands_from_the_stored_cursor`, `tests/test_execution_cursor.py::test_a_stop_before_any_action_started_is_handed_back_as_before`, `tests/test_execution_cursor.py::test_a_completion_that_cannot_be_recorded_leaves_its_action_in_flight`, `tests/test_execution_cursor.py::test_a_row_withdrawn_mid_execution_is_not_written_or_moved`, `tests/test_execution_cursor.py::test_the_cursor_writes_are_idempotent_by_index_and_guarded`
 - **Source:** `central_command/gateway/executor.py` (`execute`, `ExecutionCursorError`); `central_command/gateway/gateway.py` (`_land_stopped_execution`, `_settle_stopped_execution`, `retry_execution`); `central_command/db/repo.py` (the execution cursor section, `park_interrupted_executions`); `docs/ARCHITECTURE.md` "The Executor replays by cursor"; DL-188.
+
+### DL-219 — Each action carries a control-plane key, and a retried create lands once only where the service enforces it or our own marker records it
+
+- **Status:** active
+- **Date:** 2026-11-16
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**A retried create lands once only by the service's own answer or our own
+  stored marker, never by a guess**"
+- **Why:** After DL-218 the only double-apply left was the ONE action in
+  flight when its call failed or its process stopped: a retry ran it again,
+  so a create whose HTTP answer was lost after it landed was made twice. The
+  operator approved step 2 of the "façade idempotency keys" roadmap row on
+  2026-11-16 for exactly three kinds of create, the ones whose service (or our
+  own store) can answer "this already exists" without a guess; Exchange, Jira
+  and Confluence were left for a later step.
+- **Decision:** `execute()` sets the action's absolute index beside the
+  proposal id, and `executor.action_key()` is `<proposal_id>:<index>` while
+  the action runs (None otherwise) — stable across every retry by
+  construction, never an argument, never shown to an agent (no `ARG_SPECS`
+  entry, no `propose_*` parameter, stripped from graph results and LOE
+  history), and not `proposal.idempotency_key`, which stays unused. A create
+  is made idempotent only by a service-enforced id or our own stored marker,
+  never by a similarity guess. Covered: `calendar.create_event` on Google
+  (the event id is the SHA-256 hex of `cc-event:<key>`, inside Google's
+  base32hex alphabet; Google answers a second insert 409, the workflow reads
+  the event back and answers `already_existed`, and an event since cancelled
+  fails as a NO, never recreated); `graph.create_node` / `graph.create_edge`
+  (the key in `cc_action_key`, looked up under an exclusive lock on one
+  constrained `CCGraphMeta` node inside the creating transaction, so the
+  embedding and the provenance episode are written once); `loe.record_checkin`
+  (a nullable `action_key` column with a partial unique index, `on conflict
+  do nothing`). With no key each behaves as before. Open: Exchange mail and
+  calendar, Jira, Confluence, LiteLLM creates, MCP tool calls, mail send and
+  the other non-idempotent writes — each needs an operator decision on what
+  its service can enforce and a test at the work site before it is keyed.
+- **Enforced:** test: `tests/test_action_key.py::test_the_key_names_the_action_by_its_absolute_index_and_only_while_it_runs`, `tests/test_action_key.py::test_no_agent_facing_argument_or_tool_carries_the_key`, `tests/test_action_key.py::test_an_id_google_already_holds_completes_and_says_so`, `tests/test_action_key.py::test_an_id_whose_event_was_cancelled_fails_and_is_not_transient`, `tests/test_action_key.py::test_the_look_up_runs_again_under_the_lock_and_a_racing_create_wins`, `tests/test_action_key.py::test_the_same_action_key_writes_one_checkin`, `tests/test_action_key.py::test_a_calendar_create_that_landed_before_its_timeout_is_retried_into_one_event`, `tests/test_action_key.py::test_a_graph_create_that_landed_before_its_failure_is_retried_into_one_node`, `tests/test_n8n_workflows.py::test_only_a_409_on_a_client_id_is_read_back`
+- **Source:** `central_command/gateway/executor.py` (`action_key`, `google_event_id`, `_calendar_create_event`, `_graph_curation_handler`, `_loe_record_checkin`); `central_command/integrations/calendar_facade.py` (`create_event`); `deploy/n8n/workflows/lib-google-calendar.json` ("Route (create answer)", "Get existing event (GCal REST)", "Return: create_event (existing)"); `central_command/integrations/neo4j_writer.py` (`ACTION_KEY_PROPERTY`, `_keyed_create`); `central_command/db/repo.py` (`record_loe_checkin`); `docs/ARCHITECTURE.md` "The Executor replays by cursor"; DL-218.

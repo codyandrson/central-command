@@ -101,7 +101,9 @@ def test_calendar_facade_token_is_a_placeholder_and_only_x_cc_token_is_read():
 def test_calendar_credential_is_resolved_by_name_never_by_an_instance_id():
     provider = _load("lib-google-calendar.json")
     creds = [n["credentials"] for n in provider["nodes"] if n.get("credentials")]
-    assert len(creds) == 5, "the five REST nodes each carry the credential"
+    # Six since DL-219: the create's read-back of an id already taken
+    # ("Get existing event (GCal REST)") is a REST node like the other five.
+    assert len(creds) == 6, "the six REST nodes each carry the credential"
     for c in creds:
         assert c == {"googleCalendarOAuth2Api": {"id": None, "name": "Google Calendar account"}}
 
@@ -116,7 +118,9 @@ def test_every_calendar_mode_is_validated_and_routed_and_the_writes_are_the_thre
     # what central_command/integrations/calendar_facade.py sends
     methods = {n["name"]: n["parameters"].get("method", "GET")
                for n in provider["nodes"] if n["type"].endswith("httpRequest")}
-    assert sorted(v for v in methods.values()) == ["DELETE", "GET", "GET", "PATCH", "POST"]
+    # The third GET is the create's read-back of an id already taken (DL-219).
+    assert sorted(v for v in methods.values()) == ["DELETE", "GET", "GET", "GET", "PATCH", "POST"]
+    assert methods["Get existing event (GCal REST)"] == "GET"
     assert methods["Get event (GCal REST)"] == "GET"
     assert "sendUpdates=all" in _node(provider, "Delete event (GCal REST)")["parameters"]["url"]
 
@@ -461,3 +465,172 @@ def test_an_inline_invite_over_the_cap_is_listed_without_its_text(tmp_path):
                              {"mode": "message", "source_ref": {"uuid": "m1"}}, message)
     inline = next(a for a in env["messages"][0]["attachments"] if a["attachment_id"] == "")
     assert inline["too_large"] is True and "inline_text" not in inline
+
+
+# --- DL-219: a client-chosen event id makes a retried create land once ------------
+# The Executor derives a base32hex id from the approved action (proposal id +
+# action index) and sends it as `client_event_id`. Google answers a second insert
+# of that id with 409; the lib then reads the event back and answers it with
+# `already_existed: true`, or refuses (ok:false) when it was since cancelled. With
+# no client id nothing about the create changed.
+
+_CAL_REQUEST = {"mode": "create_event", "title": "Budget review",
+                "start": "2026-11-20T10:00:00Z", "end": "2026-11-20T10:30:00Z",
+                "description": "", "attendees": [], "calendar_id": "primary"}
+
+
+def _run_calendar_node(tmp_path, name, response, validated=None):
+    """A lib-google-calendar Code node under node; `$('Validate request')` answers
+    `validated`. A thrown fail() comes back as {"thrown": message}."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node needed")
+    code = _node(_load("lib-google-calendar.json"), name)["parameters"]["jsCode"]
+    validated = validated or {"mode": "create_event", "calendar_id": "primary", "__body": {}}
+    script = tmp_path / "calendar_node.js"
+    item = f"{{ json: {json.dumps(response)} }}"
+    script.write_text(
+        f"const $ = () => ({{ first: () => ({{ json: {json.dumps(validated)} }}) }});\n"
+        f"const $input = {{ first: () => ({item}), all: () => [{item}] }};\n"
+        "let out;\n"
+        f"try {{ out = (function () {{\n{code}\n}})(); }}\n"
+        "catch (e) { process.stderr.write(JSON.stringify({ thrown: String(e.message) })); process.exit(0); }\n"
+        "console.log = () => {};\n"
+        "process.stderr.write(JSON.stringify(out[0].json));\n",
+        encoding="utf-8",
+    )
+    done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30, check=False)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stderr)
+
+
+def test_a_create_without_a_client_id_validates_to_exactly_the_old_body(tmp_path):
+    out = _run_calendar_node(tmp_path, "Validate request", _CAL_REQUEST)
+    # Byte-for-byte the pre-DL-219 shape, key order included: no `id` key at all.
+    assert json.dumps(out) == json.dumps({"mode": "create_event", "calendar_id": "primary", "__body": {
+        "summary": "Budget review", "start": {"dateTime": "2026-11-20T10:00:00Z"},
+        "end": {"dateTime": "2026-11-20T10:30:00Z"}, "description": "", "attendees": []}})
+
+
+def test_a_client_id_goes_into_the_insert_body_as_id(tmp_path):
+    client_id = "0123456789abcdefghijklmnopqrstuv" * 2
+    out = _run_calendar_node(tmp_path, "Validate request", {**_CAL_REQUEST, "client_event_id": client_id})
+    assert out["__body"]["id"] == client_id
+    assert {k: v for k, v in out["__body"].items() if k != "id"} == _run_calendar_node(
+        tmp_path, "Validate request", _CAL_REQUEST)["__body"]
+
+
+@pytest.mark.parametrize("bad", [
+    "", "abcd", "ABCDEF12345", "abcdw12345", "abc-def-123", "a" * 1025, 12345, None, ["abcde"],
+])
+def test_a_client_id_outside_googles_alphabet_or_length_is_refused(tmp_path, bad):
+    out = _run_calendar_node(tmp_path, "Validate request", {**_CAL_REQUEST, "client_event_id": bad})
+    if bad is None:
+        assert "id" not in out["__body"], "an absent (null) id is no id"
+        return
+    assert "thrown" in out and "client_event_id" in out["thrown"], out
+
+
+def test_the_create_answer_routes_a_taken_client_id_to_the_read_back():
+    wf = _load("lib-google-calendar.json")
+    c = wf["connections"]
+    assert c["Create event (GCal REST)"]["main"] == [
+        [{"node": "Route (create answer)", "type": "main", "index": 0}]]
+    assert c["Route (create answer)"]["main"] == [
+        [{"node": "Get existing event (GCal REST)", "type": "main", "index": 0}],
+        [{"node": "Return: create_event", "type": "main", "index": 0}],
+    ]
+    assert c["Get existing event (GCal REST)"]["main"] == [
+        [{"node": "Return: create_event (existing)", "type": "main", "index": 0}]]
+    route = _node(wf, "Route (create answer)")
+    assert route["type"] == "n8n-nodes-base.switch" and route["typeVersion"] == 3.4
+    assert [r["outputKey"] for r in route["parameters"]["rules"]["values"]] == ["existing", "answer"]
+    # The read-back is built like every other REST node: same credential, same
+    # full-response classification, same transport-failure handling.
+    get, like = _node(wf, "Get existing event (GCal REST)"), _node(wf, "Get event (GCal REST)")
+    for key in ("type", "typeVersion", "credentials", "onError", "alwaysOutputData"):
+        assert get[key] == like[key], key
+    assert get["parameters"]["options"] == like["parameters"]["options"]
+    assert get["parameters"].get("method", "GET") == "GET"
+    assert "$('Validate request').first().json.__body.id" in get["parameters"]["url"]
+    assert "$('Validate request').first().json.calendar_id" in get["parameters"]["url"]
+    ids = [n["id"] for n in wf["nodes"]]
+    names = [n["name"] for n in wf["nodes"]]
+    assert len(ids) == len(set(ids)) and len(names) == len(set(names))
+    for source, outs in c.items():
+        assert source in names
+        for branch in outs["main"]:
+            assert all(t["node"] in names for t in branch)
+
+
+def _route_create(response, body):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node needed")
+    expr = _node(_load("lib-google-calendar.json"), "Route (create answer)")[
+        "parameters"]["rules"]["values"][0]["conditions"]["conditions"][0]["leftValue"]
+    assert expr.startswith("={{") and expr.endswith("}}")
+    js = (f"const $json = {json.dumps(response)};\n"
+          f"const $ = () => ({{ first: () => ({{ json: {{ __body: {json.dumps(body)} }} }}) }});\n"
+          f"process.stdout.write(String({expr[3:-2]}));\n")
+    done = subprocess.run([node, "-e", js], capture_output=True, text=True, timeout=30, check=False)
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+@pytest.mark.parametrize("response, body, route", [
+    ({"statusCode": 409, "body": {}}, {"id": "abcde12345"}, "existing"),
+    ({"statusCode": 409, "body": {}}, {}, "answer"),            # no client id: today's 409
+    ({"statusCode": 200, "body": {"id": "x"}}, {"id": "abcde12345"}, "answer"),
+    ({"error": {"message": "socket hang up"}}, {"id": "abcde12345"}, "answer"),
+])
+def test_only_a_409_on_a_client_id_is_read_back(response, body, route):
+    assert _route_create(response, body) == route
+
+
+def test_a_409_with_no_client_id_still_fails_as_before(tmp_path):
+    out = _run_calendar_node(tmp_path, "Return: create_event", {"statusCode": 409, "body": {}})
+    assert "thrown" in out and "(409)" in out["thrown"]
+
+
+def test_a_taken_id_is_answered_as_the_event_it_names(tmp_path):
+    ev = {"id": "abcde12345", "status": "confirmed", "summary": "Budget review",
+          "htmlLink": "https://calendar.example.com/e", "start": {"dateTime": "2026-11-20T10:00:00Z"},
+          "end": {"dateTime": "2026-11-20T10:30:00Z"}}
+    out = _run_calendar_node(tmp_path, "Return: create_event (existing)", {"statusCode": 200, "body": ev})
+    fresh = _run_calendar_node(tmp_path, "Return: create_event", {"statusCode": 200, "body": ev})
+    assert out == {**fresh, "already_existed": True}
+    assert out["event"]["event_id"] == "abcde12345"
+
+
+def test_a_taken_id_whose_event_was_cancelled_is_refused_not_recreated(tmp_path):
+    from central_command.contract.failures import SEMANTIC, classify_failure_text
+
+    out = _run_calendar_node(tmp_path, "Return: create_event (existing)", {"statusCode": 200, "body": {
+        "id": "abcde12345", "status": "cancelled"}})
+    assert out["ok"] is False and "event" not in out
+    assert "cancelled" in out["message"] and "earlier attempt" in out["message"]
+    # Reaches Python as a "refused" NO: nothing in it may read as an outage.
+    assert classify_failure_text(out["message"]) == SEMANTIC
+
+
+@pytest.mark.parametrize("response", [
+    {"statusCode": 404, "body": {}}, {"statusCode": 410, "body": {}}, {"statusCode": 200, "body": {}},
+])
+def test_a_taken_id_with_no_readable_event_is_a_no(tmp_path, response):
+    from central_command.contract.failures import SEMANTIC, classify_failure_text
+
+    out = _run_calendar_node(tmp_path, "Return: create_event (existing)", response)
+    assert out["ok"] is False and out["message"]
+    assert classify_failure_text(out["message"]) == SEMANTIC
+
+
+@pytest.mark.parametrize("response", [
+    {"error": {"message": "ETIMEDOUT"}}, {"statusCode": 500, "body": {}},
+    {"statusCode": 503, "body": {}}, {"statusCode": 429, "body": {}}, {"statusCode": 401, "body": {}},
+])
+def test_a_failed_read_back_fails_like_every_other_provider_call(tmp_path, response):
+    """fail() reaches Central Command as HTTP 500: transient, retried later —
+    the same taxonomy the other Return nodes use."""
+    out = _run_calendar_node(tmp_path, "Return: create_event (existing)", response)
+    assert "thrown" in out and out["thrown"].startswith("lib-google-calendar: create - ")

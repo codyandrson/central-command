@@ -163,7 +163,9 @@ async def _graph_proposal(spy: list[str], landed: list[str], monkeypatch,
     the graph is down."""
     from tests.test_gate_overrides import _run
 
-    async def create_node(name, labels, summary, group_id):
+    # `action_key`: the Executor's per-action key (DL-219), passed on every
+    # execution of a proposal; this stand-in has no graph to look it up in.
+    async def create_node(name, labels, summary, group_id, action_key=None):
         spy.append(name)
         if not health.up:
             raise ServiceUnavailable("Couldn't connect to graph:7687")

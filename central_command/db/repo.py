@@ -3742,14 +3742,25 @@ async def retire_loe(loe_id: str, reason: str) -> bool:
 
 async def record_loe_checkin(
     loe_id: str, light: str, confidence: int, summary: str,
-    proposal_id: str | None = None,
+    proposal_id: str | None = None, action_key: str | None = None,
 ) -> dict:
     """Append one check-in, stamped with the LOE's CURRENT semantic version.
 
     The stamp is read here rather than passed in: what a light means is a
     property of the LOE at the moment it was scored, not something the caller
     (ultimately an agent's proposal) may assert about itself.
+
+    `action_key` (the Executor's, DL-219) makes a repeat of the SAME action a
+    no-op: the row already written under it is returned with
+    `already_existed: True`, before any other check (a retry must land on what
+    its first attempt wrote, whatever changed since). The insert is
+    `on conflict do nothing` against the partial unique index, so two attempts
+    racing cannot both append. With no key a check-in appends as it always did.
     """
+    if action_key:
+        existing = await _loe_checkin_by_key(action_key)
+        if existing is not None:
+            return existing
     row = await get_loe(loe_id)
     if row is None:
         raise ValueError(f"no such line of effort: {loe_id!r}")
@@ -3760,15 +3771,39 @@ async def record_loe_checkin(
         out = await conn.fetchrow(
             """
             insert into loe_checkin
-                (loe_id, semantic_version, light, confidence, summary, proposal_id)
-            values ($1, $2, $3, $4, $5, $6)
+                (loe_id, semantic_version, light, confidence, summary, proposal_id,
+                 action_key)
+            values ($1, $2, $3, $4, $5, $6, $7)
+            on conflict (action_key) where action_key is not null do nothing
             returning *
             """,
             loe_id, row["semantic_version"], light, confidence, summary, proposal_id,
+            action_key,
         )
-        return dict(out)
     finally:
         await conn.close()
+    if out is None:
+        # Another attempt of this action committed between the look-up and the
+        # insert: its row is the record.
+        existing = await _loe_checkin_by_key(action_key)
+        if existing is None:
+            raise RuntimeError(
+                f"loe_checkin: the insert under action key {action_key!r} conflicted "
+                "but no row carries that key"
+            )
+        return existing
+    return {**dict(out), "already_existed": False}
+
+
+async def _loe_checkin_by_key(action_key: str) -> dict | None:
+    conn = await _conn()
+    try:
+        out = await conn.fetchrow(
+            "select * from loe_checkin where action_key = $1", action_key,
+        )
+    finally:
+        await conn.close()
+    return {**dict(out), "already_existed": True} if out is not None else None
 
 
 async def list_loe_semantic_versions(loe_id: str) -> list[dict]:
@@ -3800,7 +3835,8 @@ async def list_loe_checkins(loe_id: str, limit: int = 12) -> list[dict]:
             "order by created_at desc, id desc limit $2",
             loe_id, limit,
         )
-        return [dict(r) for r in rows]
+        # `action_key` is control-plane (DL-219): agents read this list.
+        return [{k: v for k, v in dict(r).items() if k != "action_key"} for r in rows]
     finally:
         await conn.close()
 

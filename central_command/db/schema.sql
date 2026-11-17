@@ -1196,6 +1196,16 @@ create table if not exists loe_checkin (
 create index if not exists loe_checkin_loe_idx
     on loe_checkin (loe_id, created_at desc);
 
+-- The Executor's per-action key (DL-219, `executor.action_key()`: the proposal
+-- id and the action's absolute index, the same on every retry of that action).
+-- A retry of a check-in whose first attempt landed finds its row here instead
+-- of appending a twin. Null for a check-in written with no action key; the
+-- partial unique index ignores those, so they append exactly as before.
+-- Control-plane: never an argument, and not part of the rows agents read.
+alter table loe_checkin add column if not exists action_key text;
+create unique index if not exists loe_checkin_action_key_uq
+    on loe_checkin (action_key) where action_key is not null;
+
 -- Superseded semantic versions (2026-08-18, the Goals detail panel). The
 -- current `semantic` lives on the LOE row and a recalibration overwrote the
 -- old one IN PLACE — so the version a past check-in's stamp points at had no

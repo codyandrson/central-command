@@ -107,8 +107,17 @@ def _no_embedding(attributes: dict | None) -> dict:
     ATTRIBUTE, so the `embedding_model`/`embedding_dimensions` stamps the
     curation writer wrote until v2.61.0 (and that the retired re-embed script
     wrote) would ride into agents' results. Any key containing 'embedding' is
-    dropped, as the retired server dropped it."""
-    return {k: v for k, v in (attributes or {}).items() if "embedding" not in k.lower()}
+    dropped, as the retired server dropped it — and so is every control-plane
+    property (`CONTROL_PLANE_PROPERTIES`), which agents must never see."""
+    return {k: v for k, v in (attributes or {}).items()
+            if "embedding" not in k.lower() and k not in CONTROL_PLANE_PROPERTIES}
+
+
+# Properties the curation writer stamps for the control plane alone: the
+# Executor's per-action key (DL-219, `neo4j_writer.ACTION_KEY_PROPERTY` —
+# spelled here because `runtime/` reads this module and may not import the
+# writer; tests/test_action_key.py pins the two equal).
+CONTROL_PLANE_PROPERTIES = frozenset({"cc_action_key"})
 
 
 def node_result(node) -> dict:

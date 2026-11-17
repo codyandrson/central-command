@@ -30,6 +30,8 @@ able to tell which one answered — and `ExchangeError` is mapped to
 
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from central_command.config import settings
@@ -38,6 +40,11 @@ from central_command.contract.failures import ProviderStatusError
 
 class CalendarFacadeError(ProviderStatusError):
     pass
+
+
+# Google's rule for a client-chosen event id (base32hex), the same pattern the
+# lib-google-calendar workflow's Validate request applies (DL-219).
+_CLIENT_EVENT_ID = re.compile(r"[a-v0-9]{5,1024}")
 
 
 def _exchange():
@@ -166,8 +173,18 @@ async def create_event(
     description: str | None = None,
     attendees: list[str] | None = None,
     calendar_id: str = "primary",
+    client_event_id: str | None = None,
 ) -> dict:
-    """Create an event. `start`/`end` are RFC3339 with an explicit offset or Z."""
+    """Create an event. `start`/`end` are RFC3339 with an explicit offset or Z.
+
+    `client_event_id` (Google only, DL-219) is the event id to create it under:
+    base32hex (a-v, 0-9), 5 to 1024 characters, derived by the Executor from the
+    action key so a retry of the same action asks for the same id. Google
+    refuses a second insert of an id with 409, and the workflow then reads that
+    event back: the return carries `already_existed: True` and the event's real
+    fields. An event created under the id and since cancelled is refused, never
+    recreated. Without it the request is exactly what it always was. Exchange
+    has no client-chosen id: it is never forwarded there."""
     provider = _exchange()
     if provider is not None:
         try:
@@ -176,7 +193,7 @@ async def create_event(
                 calendar_id=calendar_id)
         except provider.ExchangeError as e:
             raise CalendarFacadeError(str(e)) from e
-    out = await _call({
+    payload = {
         "mode": "create_event",
         "title": title,
         "start": start,
@@ -184,8 +201,21 @@ async def create_event(
         "description": description or "",
         "attendees": attendees or [],
         "calendar_id": calendar_id,
-    })
-    return out.get("event") or {}
+    }
+    if client_event_id is not None:
+        # The workflow refuses the same shapes; refusing here first keeps a bad
+        # id from ever leaving the process (a semantic NO, no transient word).
+        if not isinstance(client_event_id, str) or not _CLIENT_EVENT_ID.fullmatch(client_event_id):
+            raise CalendarFacadeError(
+                "calendar façade create_event refused: client_event_id must be 5 to "
+                f"1024 characters of a-v and 0-9, got {str(client_event_id)[:80]!r}"
+            )
+        payload["client_event_id"] = client_event_id
+    out = await _call(payload)
+    event = dict(out.get("event") or {})
+    if out.get("already_existed") is True:
+        event["already_existed"] = True
+    return event
 
 
 async def update_event(

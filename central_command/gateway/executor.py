@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import hashlib
 import ipaddress
 import json
 import logging
@@ -170,14 +171,38 @@ async def _jira_set_fields(args: dict, approver: str, proposer: str | None) -> s
 # tests/test_ea_calendar.py::test_only_the_executor_calls_the_calendar_write_helpers.
 
 
+def google_event_id(key: str) -> str:
+    """The Google Calendar event id for the create keyed `key` (DL-219).
+
+    Google's events.insert takes a client-chosen `id` of base32hex characters
+    (a-v, 0-9), 5 to 1024 long, unique per calendar, and answers 409 to a
+    second insert of the same id — the service-enforced answer to "did my
+    first attempt land?". Lowercase hex is inside that alphabet, so the id is
+    the SHA-256 hex (64 chars) of `"cc-event:" + key`. The key holds the
+    proposal id — unique within a deployment (the primary key) and random
+    across deployments (`prop_` + 48 random bits, minted at park) — so two
+    deployments sharing a calendar derive the same id only if two of their
+    proposals drew the same 48 bits AND share an action index; the namespace
+    keeps it apart from any other hash of the same key. Nothing secret goes
+    in, and nothing an agent wrote."""
+    return hashlib.sha256(f"cc-event:{key}".encode("utf-8")).hexdigest()
+
+
 async def _calendar_create_event(args: dict, approver: str, proposer: str | None) -> str:
+    # The client id only on the Google path: Exchange has no client-chosen item
+    # id, and its create stays exactly what it was (a later step, DL-219).
+    key = action_key()
+    client_event_id = (google_event_id(key)
+                       if key and calendar_facade._exchange() is None else None)
+    extra = {"client_event_id": client_event_id} if client_event_id else {}
     ev = await calendar_facade.create_event(
         args["title"], args["start"], args["end"],
         description=args.get("description"), attendees=args.get("attendees"),
-        calendar_id=args.get("calendar_id", "primary"),
+        calendar_id=args.get("calendar_id", "primary"), **extra,
     )
+    earlier = " (already created by an earlier attempt)" if ev.get("already_existed") else ""
     return (f"calendar event '{args['title']}' created {args['start']} → "
-            f"{args['end']} (id {ev.get('event_id')})")
+            f"{args['end']} (id {ev.get('event_id')}){earlier}")
 
 
 async def _calendar_update_event(args: dict, approver: str, proposer: str | None) -> str:
@@ -569,12 +594,17 @@ async def _check_graph_delete_episode(args: dict) -> dict:
 UNBOUNDED = "unbounded"
 
 
-def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, ...]):
+def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, ...],
+                            keyed: bool = False):
     """One handler per writer primitive, built from the same recipe: the
     required args come from `contract.ARG_SPECS` (already enforced by
     `execute()` before any action runs, and by the runtime at propose time),
     pass through only the DECLARED optionals (an undeclared arg is dropped,
-    never forwarded), apply, then queue the re-check."""
+    never forwarded), apply, then queue the re-check.
+
+    `keyed` (the two creates, DL-219): the writer gets `action_key()` — never
+    an argument — so a retry of an action whose first attempt landed returns
+    that node or fact, and the result says so."""
     required = ARG_SPECS[capability].required
 
     async def handler(args: dict, approver: str, proposer: str | None) -> str:
@@ -592,11 +622,19 @@ def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, 
         for k in ("valid_at", "invalid_at"):
             if str(kwargs.get(k) or "").strip().lower() == UNBOUNDED:
                 kwargs[k] = None
+        if keyed:
+            key = action_key()
+            if key:
+                kwargs["action_key"] = key
         try:
             result = await getattr(neo4j_writer, fn_name)(**kwargs)
         except neo4j_writer.WriteError as e:
             raise ExecutorError(f"{fn_name}: {e}")
         await _reverify_after_curation(args)
+        if isinstance(result, dict) and result.get("already_existed"):
+            shown = {k: v for k, v in result.items() if k != "already_existed"}
+            return (f"graph curation {fn_name} applied: {shown} "
+                    "(already created by an earlier attempt)")
         return f"graph curation {fn_name} applied: {result}"
 
     return handler
@@ -611,9 +649,10 @@ _GRAPH_CURATION_HANDLERS = {
     # words, not a re-ingestion. The writer records its own provenance episode
     # for every created node/edge, so pedigree stays queryable.
     "graph.create_node": _graph_curation_handler(
-        "graph.create_node", "create_node", optional=("labels",)),
+        "graph.create_node", "create_node", optional=("labels",), keyed=True),
     "graph.create_edge": _graph_curation_handler(
-        "graph.create_edge", "create_edge", optional=("valid_at", "invalid_at")),
+        "graph.create_edge", "create_edge", optional=("valid_at", "invalid_at"),
+        keyed=True),
     "graph.merge_nodes": _graph_curation_handler(
         "graph.merge_nodes", "merge_nodes", optional=()),
     "graph.update_node": _graph_curation_handler(
@@ -661,10 +700,17 @@ async def _loe_record_checkin(args: dict, approver: str, proposer: str | None) -
     try:
         row = await repo.record_loe_checkin(
             loe_id, light, confidence, summary,
-            proposal_id=_current_proposal_id.get(),
+            proposal_id=_current_proposal_id.get(), action_key=action_key(),
         )
     except ValueError as e:
         raise ExecutorError(f"loe.record_checkin: {e}") from e
+    if row.get("already_existed"):
+        # The record is the row the earlier attempt wrote, so it states that row.
+        return (
+            f"{loe_id} check-in recorded: {row['light']} ({row['confidence']}% "
+            f"confidence, semantic v{row['semantic_version']}) "
+            "(already recorded by an earlier attempt)"
+        )
     return (
         f"{loe_id} check-in recorded: {light} ({confidence}% confidence, "
         f"semantic v{row['semantic_version']})"
@@ -1667,6 +1713,36 @@ _current_proposal_id: contextvars.ContextVar[str | None] = contextvars.ContextVa
 _touched_issues: contextvars.ContextVar[set[str]] = contextvars.ContextVar(
     "_touched_issues", default=frozenset()  # type: ignore[arg-type]
 )
+# The ABSOLUTE index (`action_offset + n`) of the action `execute()` is running,
+# set around each handler call and reset in the same finally discipline as the
+# proposal id. With it, `action_key()` names one action of one proposal (DL-219).
+_current_action_index: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "_current_action_index", default=None
+)
+
+
+def action_key() -> str | None:
+    """`"<proposal_id>:<index>"` for the action `execute()` is running now, else
+    None (a direct handler call, a test that runs a handler with no proposal).
+
+    Stable across every retry of the same action BY CONSTRUCTION: a retry
+    re-runs the same proposal's action at the same absolute index (the DL-218
+    cursor), so the key a create stamps on its first attempt is the key its
+    retry looks for. It is CONTROL-PLANE: derived here from the claimed row and
+    the cursor, never an argument, so an agent can neither choose nor see it
+    (no `ARG_SPECS` entry, no `propose_*` parameter carries it). The handlers
+    that use it (DL-219) make a re-run of their create land on what the first
+    attempt made — by a service-enforced id or our own stored marker, never a
+    similarity guess — and with None every one of them behaves exactly as it
+    did before: a plain create, no marker.
+
+    Not `proposal.idempotency_key`: that is a per-PROPOSAL value written at park
+    (it ends in a constant ":0") and read by nothing; this one is per ACTION."""
+    proposal_id = _current_proposal_id.get()
+    index = _current_action_index.get()
+    if not proposal_id or index is None:
+        return None
+    return f"{proposal_id}:{index}"
 
 
 def _litellm_server_name(server_id: str) -> str:
@@ -2799,10 +2875,15 @@ async def execute(
     stated where it lives: the ONE action whose call failed, or that was in
     flight when the process stopped, may already have been applied by the
     façade (an HTTP read timing out after the write landed) — that action is
-    retried and MAY double-apply for a non-idempotent capability. The owed fix
-    is provider-side idempotency keys (`proposal.idempotency_key` exists and is
-    unused end-to-end), deferred until a façade can honour one; a client-side
-    dedup guess would be worse, because guessing wrong drops a real write.
+    retried. Each action runs with `action_key()` set (DL-219), and four
+    creates use it so the re-run lands on what the first attempt made:
+    `calendar.create_event` on Google (a client-chosen event id; a 409 reads
+    the event back), `graph.create_node` / `graph.create_edge` (a stamped key
+    looked up in the creating transaction) and `loe.record_checkin` (a unique
+    key column). Every other capability — Exchange mail and calendar, Jira,
+    Confluence, LiteLLM, MCP tool calls and the rest — MAY still double-apply
+    when retried; a client-side dedup guess would be worse, because guessing
+    wrong drops a real write.
 
     **An override approver is checked again here — the BACKSTOP** (safeguard 1).
     After the shape pass and before the first action, an `override:<id>`
@@ -2881,12 +2962,15 @@ async def execute(
             index = action_offset + n
             if record_progress:
                 await _cursor_started(proposal_id, index, a.capability)
+            index_token = _current_action_index.set(index)
             try:
                 result = await _execute_action(
                     a, covering.get(index, approver), proposer)
                 touched |= _jira_keys_of(a)
             except Exception as e:  # noqa: BLE001 — every failure becomes the honest record
                 raise _execution_failed(a, e, results) from e
+            finally:
+                _current_action_index.reset(index_token)
             results.append(result)
             if record_progress:
                 await _cursor_completed(proposal_id, index, a.capability, result)

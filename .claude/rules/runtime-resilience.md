@@ -110,6 +110,16 @@ when a matching file is read.
   (in flight before, result after; DL-218), and a live-process stop with no
   verdict parks the same record instead of handing the claim back, unless
   nothing completed and nothing was in flight.
+- **A retried create lands once only by the service's own answer or our own
+  stored marker, never by a guess** (DL-219). Each action runs under
+  `executor.action_key()` (proposal id + absolute index, the same on every
+  retry; control-plane, never an argument or agent-visible): the Google
+  calendar create sends an event id derived from it and reads Google's 409
+  back, the graph's node and fact creates stamp it and look it up under a lock
+  in the creating transaction, the LOE check-in writes it to a unique column.
+  A "probably the same" match (same title and time, same text) is forbidden:
+  guessing wrong drops a real write. Every other capability may still apply
+  twice on a retry; a new keyed create needs what its service can enforce.
 - **A live read parks under a landing tail; it never degrades to "proceed
   without it".** A DOWN read raises `CallDeferred` (below) when its run's entry
   set `TriageDeps.park_reads`, and the session resumes in place when the

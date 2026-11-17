@@ -565,10 +565,19 @@ process's environ.
   completed action therefore never re-runs, whatever stopped the execution,
   and an execution stopped with no verdict after an action may have landed
   parks `interrupted` instead of going back for a fresh approval. A finished
-  proposal keeps its cursor (every result, nothing in flight). What remains
-  open is the ONE action in flight — failed on a timeout, or cut off by a stop
-  — which a retry runs again and a non-idempotent façade may apply twice;
-  provider-side idempotency keys are the owed fix (PRD §6.2).
+  proposal keeps its cursor (every result, nothing in flight). The ONE action
+  in flight — failed on a timeout, or cut off by a stop — is run again by a
+  retry, under the same per-action key (`executor.action_key()`: proposal id
+  and absolute action index, control-plane, never an argument; DL-219). Four
+  creates use it so the re-run lands on what the first attempt made:
+  `calendar.create_event` on Google sends a client event id derived from it
+  (Google's 409 on a second insert is read back as "already created"; an
+  event cancelled since is refused, not recreated), `graph.create_node` and
+  `graph.create_edge` stamp it and look it up under a lock in the creating
+  transaction, and `loe.record_checkin` writes it to a unique column. Every
+  other capability (Exchange mail and calendar, Jira, Confluence, LiteLLM,
+  MCP tool calls, mail send and the rest) may still apply twice; that is open
+  (PRD §6.2).
 
 ## 3. Lifecycles, as built
 

@@ -4,6 +4,34 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-17 — v2.93.0: A retried create lands once for Google Calendar events, graph nodes and facts, and LOE check-ins
+
+After v2.91.0 one double-apply was left: the single action that was in flight when its call failed or its
+process stopped is run again on a retry. For four creates the service, or our own store, can now answer
+"did it land?", so the re-run is safe (DL-219). Nothing is guessed: a create is made idempotent only by a
+service-enforced id or by a marker we stored ourselves, never by matching on similar content.
+
+- **A per-action key.** While an action runs, the Executor exposes `<proposal id>:<action index>`, the
+  same on every retry. It is control-plane only: no agent can supply or read it, and no `ARG_SPECS` entry
+  changed.
+- **Google Calendar.** `calendar.create_event` sends an event id derived from the key (Google enforces
+  uniqueness per calendar). If the insert answers 409, the façade reads that event back and returns it as
+  already created. If the event has since been cancelled, or cannot be read, the action fails for the
+  operator to decide; it is never created a second time. The Exchange path is unchanged.
+- **Graph.** `graph.create_node` and `graph.create_edge` stamp the key on what they create and look for
+  it first, in the creating transaction and under a lock, so a retry returns the first attempt's element
+  and writes no second vector or provenance episode. The property is stripped from every agent-facing
+  read and is not copied onto a split or rescoped twin.
+- **LOE.** `loe.record_checkin` stores the key (a new nullable column with a partial unique index) and a
+  repeat returns the existing row.
+- **The record says so.** A result that came from an earlier attempt reads "(already created by an
+  earlier attempt)".
+
+Still able to double-apply on a retried in-flight action: Exchange mail and calendar creates, Jira,
+Confluence and LiteLLM creates, and MCP tool calls. Not seen against live services: the calendar
+workflow's new 409 branch (the tests parse the workflow; the first calendar proposal after the update is
+the first real run). Schema: one additive column and one index on `loe_checkin`, applied by the updater.
+
 ## 2026-11-16 — v2.92.0: MCP tool gates are set in the cockpit, and ungating takes an acknowledgement
 
 The operator's per-tool default gate and per-agent override for MCP tools had API routes and no screen,

@@ -248,17 +248,94 @@ _OPERATOR_SOURCE = (
 )
 
 
+# --- the action key (DL-219) ----------------------------------------------------
+# A create the Executor runs for an approved proposal is keyed on the action
+# (`executor.action_key()`: proposal id + absolute action index, identical on
+# every retry). The created entity or fact carries the key in ONE property,
+# and the create first looks for an element already carrying it, INSIDE the
+# creating transaction, so a retry of an action whose first attempt landed
+# returns that element instead of a twin. Control-plane only: the property is
+# stripped from every agent-facing result (`graphiti.CONTROL_PLANE_PROPERTIES`), never
+# copied onto a split twin (`_copy_entity`, a rescope split), and never set by
+# the operator's direct path, which passes no key.
+ACTION_KEY_PROPERTY = "cc_action_key"
+
+# Two retries of one action (or a retry racing a first attempt the server is
+# still committing) must not both find nothing and both create. Neo4j's MERGE
+# guarantees uniqueness only under a uniqueness constraint, and a relationship
+# property constraint is not something every edition offers — so a keyed create
+# first takes an exclusive lock on ONE node, `(:CCGraphMeta {key:
+# 'action-key-lock'})`, MERGEd under the `cc_graph_meta_key` uniqueness
+# constraint the embedder record already relies on (so the lock node itself is
+# never duplicated). The lock is a property WRITE, held until the transaction
+# ends; the look-up runs after it, so a second transaction waits for the first
+# to commit and then sees its element. Only keyed creates take it, always
+# first, so it cannot deadlock against anything.
+_ACTION_LOCK_KEY = "action-key-lock"
+_TAKE_ACTION_LOCK = (
+    "MERGE (m:CCGraphMeta {key: $lock}) SET m.last_keyed_create_at = $now"
+)
+
+
+async def _keyed_node(run, key: str) -> dict | None:
+    rows = await run(
+        f"""
+        MATCH (n:Entity {{{ACTION_KEY_PROPERTY}: $key}})
+        WITH n ORDER BY n.created_at LIMIT 1
+        OPTIONAL MATCH (ep:Episodic {{name: 'operator manual entry'}})-[:MENTIONS]->(n)
+        WITH n, ep ORDER BY ep.created_at
+        RETURN n.uuid AS uuid, head(collect(ep.uuid)) AS episode
+        """,
+        key=key,
+    )
+    if not rows:
+        return None
+    return {"uuid": rows[0]["uuid"], "episode": rows[0]["episode"], "already_existed": True}
+
+
+async def _keyed_edge(run, key: str) -> dict | None:
+    rows = await run(
+        f"""
+        MATCH ()-[e:RELATES_TO {{{ACTION_KEY_PROPERTY}: $key}}]->()
+        WITH e ORDER BY e.created_at LIMIT 1
+        RETURN e.uuid AS uuid, head(coalesce(e.episodes, [])) AS episode
+        """,
+        key=key,
+    )
+    if not rows:
+        return None
+    return {"uuid": rows[0]["uuid"], "episode": rows[0]["episode"], "already_existed": True}
+
+
+async def _keyed_create(key: str, find, create) -> dict:
+    """One managed transaction: take the action lock, look for the element the
+    key names, create only when there is none. `create(run)` writes everything
+    the create owes (the element, its vector, its provenance episode) on the
+    same transaction, so the "already there" branch writes none of it."""
+    await embedder_record.ensure_constraint()
+
+    async def work(run):
+        await run(_TAKE_ACTION_LOCK, lock=_ACTION_LOCK_KEY, now=_now())
+        found = await find(run, key)
+        if found is not None:
+            return found
+        return await create(run)
+
+    return await _write_tx(work)
+
+
 async def _record_operator_episode(
     content: str, group_id: str, mentions: list[str], entity_edges: list[str],
-    now: datetime | None = None,
+    now: datetime | None = None, run=None,
 ) -> str:
     """Provenance for a hand-made fact: an Episodic node saying WHO (the
     operator), WHEN (now) and WHAT was entered, MENTIONS-linked to the entities
     involved — the same shape extraction writes, so the Provenance drawer and
-    Graphiti's own reads treat it as a first-class episode."""
+    Graphiti's own reads treat it as a first-class episode. `run` is a keyed
+    create's transaction (DL-219); without it the write is its own."""
     ep_uuid = str(_uuid.uuid4())
     now = now or _now()
-    await _write(
+    await (run or _write)(
         """
         CREATE (ep:Episodic)
         SET ep.uuid = $uuid, ep.name = 'operator manual entry',
@@ -279,7 +356,16 @@ async def _record_operator_episode(
 
 async def create_node(
     name: str, labels: list[str] | None, summary: str, group_id: str,
+    action_key: str | None = None,
 ) -> dict:
+    """With `action_key` (the Executor's, DL-219) the node carries it and a
+    node already carrying it is returned (`already_existed: True`) instead of
+    a second one being made — its vector and provenance episode are not
+    written again. The look-up runs only inside the creating transaction,
+    after the embedding (which writes nothing): a read before it would be a
+    second, unlocked look-up, and under an embedder outage the retry parks
+    exactly like a first attempt. Without a key, exactly the plain create it
+    always was."""
     if not name.strip():
         raise WriteError("a node needs a name")
     extra = _validated_labels(labels)
@@ -288,21 +374,28 @@ async def create_node(
     node_uuid = str(_uuid.uuid4())
     label_clause = "".join(f":{l}" for l in extra)
     vec_tail, vec_params = _vector("n", "name_embedding", "node", vector)
-    await _write(
-        f"""
+    key_set = f", n.{ACTION_KEY_PROPERTY} = $action_key" if action_key else ""
+    key_params = {"action_key": action_key} if action_key else {}
+    query = f"""
         CREATE (n:Entity{label_clause})
         SET n.uuid = $uuid, n.name = $name, n.summary = $summary,
             n.group_id = $group_id, n.created_at = $created_at,
-            n.labels = $labels
-        """ + vec_tail,
-        uuid=node_uuid, name=name, summary=summary, group_id=group_id,
-        created_at=_now(), labels=extra + ["Entity"], **vec_params,
-    )
-    episode = await _record_operator_episode(
-        f"{name}: {summary}" if summary else name, group_id,
-        mentions=[node_uuid], entity_edges=[],
-    )
-    return {"uuid": node_uuid, "episode": episode}
+            n.labels = $labels{key_set}
+        """ + vec_tail
+    params = dict(uuid=node_uuid, name=name, summary=summary, group_id=group_id,
+                  created_at=_now(), labels=extra + ["Entity"], **vec_params, **key_params)
+    content = f"{name}: {summary}" if summary else name
+
+    async def create(run) -> dict:
+        await run(query, **params)
+        episode = await _record_operator_episode(
+            content, group_id, mentions=[node_uuid], entity_edges=[], run=run,
+        )
+        return {"uuid": node_uuid, "episode": episode}
+
+    if action_key:
+        return await _keyed_create(action_key, _keyed_node, create)
+    return await create(_write)
 
 
 async def update_node(
@@ -382,12 +475,19 @@ async def delete_node(uuid: str) -> dict:
 async def create_edge(
     source_uuid: str, target_uuid: str, name: str, fact: str,
     valid_at: str | None = None, invalid_at: str | None = None,
+    action_key: str | None = None,
 ) -> dict:
     """A None `valid_at` is stored as null — an UNBOUNDED start (2026-09-19).
     It used to be stamped with the creation instant, which recorded newly-
     LEARNED as newly-TRUE; the gated path now requires the argument and spells
     the unknown case `unbounded`, and the operator's direct path (cockpit,
-    API) records exactly what was given and nothing more."""
+    API) records exactly what was given and nothing more.
+
+    With `action_key` (the Executor's, DL-219) the fact carries it and a fact
+    already carrying it is returned (`already_existed: True`) instead of a
+    second one — its vector and provenance episode are not written again (the
+    look-up is inside the creating transaction, as for `create_node`).
+    Without a key, exactly the plain create it always was."""
     if not name.strip() or not fact.strip():
         raise WriteError("an edge needs both a name and a fact")
     ends = await _write(
@@ -403,13 +503,10 @@ async def create_edge(
     await embedder_record.require_open_for_write()
     edge_uuid = str(_uuid.uuid4())
     now = _now()
-    episode = await _record_operator_episode(
-        fact, ends[0]["group_id"],
-        mentions=[source_uuid, target_uuid], entity_edges=[edge_uuid], now=now,
-    )
     vec_tail, vec_params = _vector("e", "fact_embedding", "edge", vector)
-    await _write(
-        """
+    key_set = f", e.{ACTION_KEY_PROPERTY} = $action_key" if action_key else ""
+    key_params = {"action_key": action_key} if action_key else {}
+    query = """
         MATCH (a:Entity {uuid: $source}), (b:Entity {uuid: $target})
         CREATE (a)-[e:RELATES_TO]->(b)
         SET e.uuid = $uuid, e.name = $name, e.fact = $fact,
@@ -420,13 +517,27 @@ async def create_edge(
                                 ELSE datetime($invalid_at) END,
             e.source_node_uuid = $source, e.target_node_uuid = $target,
             e.episodes = [$episode],
-            e.expired_at = null, e.reference_time = $created_at
-        """ + vec_tail,
-        source=source_uuid, target=target_uuid, uuid=edge_uuid, name=name,
-        fact=fact, group_id=ends[0]["group_id"], created_at=now,
-        valid_at=valid_at, invalid_at=invalid_at, episode=episode, **vec_params,
-    )
-    return {"uuid": edge_uuid, "episode": episode}
+            e.expired_at = null, e.reference_time = $created_at""" + key_set + """
+        """ + vec_tail
+
+    async def create(run) -> dict:
+        episode = await _record_operator_episode(
+            fact, ends[0]["group_id"],
+            mentions=[source_uuid, target_uuid], entity_edges=[edge_uuid], now=now,
+            run=run,
+        )
+        await run(
+            query,
+            source=source_uuid, target=target_uuid, uuid=edge_uuid, name=name,
+            fact=fact, group_id=ends[0]["group_id"], created_at=now,
+            valid_at=valid_at, invalid_at=invalid_at, episode=episode,
+            **vec_params, **key_params,
+        )
+        return {"uuid": edge_uuid, "episode": episode}
+
+    if action_key:
+        return await _keyed_create(action_key, _keyed_edge, create)
+    return await create(_write)
 
 
 async def update_edge(
@@ -696,7 +807,10 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
             SET e2 = properties(e), e2.uuid = $new_uuid, e2.group_id = $group_id,
                 e2.source_node_uuid = $src, e2.target_node_uuid = $dst,
                 e2.episodes = [$episode]
-            """ + ("DELETE e" if exclusive else ""),
+            """ + ("DELETE e" if exclusive
+                   # A split twin is a new fact, not the one an action created
+                   # (DL-219): the key stays on the original only.
+                   else f"REMOVE e2.{ACTION_KEY_PROPERTY}"),
             uuid=e["uuid"], src=src, dst=dst, new_uuid=new_uuid,
             group_id=group_id, episode=episode_uuid,
         )
@@ -757,6 +871,7 @@ async def _copy_entity(uuid: str, labels: list[str], group_id: str) -> str:
         CREATE (n2:Entity{label_clause})
         SET n2 = properties(n), n2.uuid = $new_uuid, n2.group_id = $group_id,
             n2.created_at = $now
+        REMOVE n2.{ACTION_KEY_PROPERTY}
         """,
         uuid=uuid, new_uuid=new_uuid, group_id=group_id, now=_now(),
     )
