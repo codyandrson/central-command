@@ -4,6 +4,36 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-16 — v2.90.0: The cockpit's Restart button restarts the API, through the updater's own seam
+
+Settings > Connection carried a "Restart the local gateway" card marked under construction: the vendored
+route behind it shells out to an upstream binary this deployment does not have. On the k3s profile it now
+works, and it adds no new privileged surface.
+
+- **One seam, one more word.** The cockpit still asks root for exactly one thing: the trigger file
+  `cc-update.path` watches. A request may now carry `"action": "restart"`; `cc-update.sh` then runs
+  only its busy gate, `systemctl restart cc-uvicorn` and its health poll, before any update-only step
+  (no compute-node ssh, fetch, checkpoint, dump or build). No new unit, sudoers or polkit rule. An absent
+  action is an update, unchanged; any other value dies and changes nothing.
+- **The team pauses as it does for an update.** The API hold gains a kind. A restart hold stops the
+  loops, asks every run to pause at its next step, waits until nothing is running and then writes the
+  trigger; the next process resumes what was parked. "Restart now" forces it, as "Update anyway" does.
+  The two kinds exclude each other at every tier: the API answers 409, the cockpit route refuses, and the
+  script yields to an update in flight. New event kinds: `restart.hold`, `restart.triggered`,
+  `restart.hold_released`.
+- **Its own record.** The outcome goes to `/var/lib/cc-update/restart.json` (running, restarted, failed
+  or refused), never to `status.json`, which stays the last update's result. There is nothing to roll
+  back: an API that does not answer `/health` in two minutes is reported, with the pointer to
+  `journalctl -u cc-uvicorn`.
+- **The card.** Confirm, a wait panel listing the runs still landing with "Restart now" and "Cancel", then
+  the outcome with its time. It polls the cockpit's own server, which stays up while the API is down, and
+  picks up a restart hold started in another tab. Where no root updater exists (the single-node profile)
+  the card stays disabled and says why.
+
+The first restart is possible only after this release is applied: the installed copy of `cc-update.sh`
+serves the request. Nothing in the test suite can exercise real systemd; the script's restart branch is
+tested with `systemctl` and `curl` stubbed. No schema, unit or manifest change.
+
 ## 2026-11-16 — v2.89.2: The cockpit stops offering speech providers and a cron delivery it cannot serve
 
 Two controls came with the vendored cockpit and never worked in a Central Command deployment. Both now

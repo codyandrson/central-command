@@ -447,10 +447,12 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
     from central_command.runtime import hold
 
     if hold.active:
+        cancel = ("cancel the restart in Settings, Connection" if hold.kind == "restart"
+                  else "cancel the update from the update dialog")
         return (
             "update_hold",
-            "an update is waiting for the agents to finish — chat resumes after "
-            "the restart (or cancel the update from the update dialog)",
+            f"{hold.waiting_for()} is waiting for the agents to finish — chat resumes "
+            f"after the restart (or {cancel})",
         )
     session_id = session.get("id")
     if session.get("closed_reason") == "rerun":

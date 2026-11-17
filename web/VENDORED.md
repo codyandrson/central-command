@@ -98,6 +98,9 @@ kept as-is rather than quarantined:
   `useGatewayRestart`) was removed 2026-08-31 since it could never open and
   the route just 500s; the route itself is left mounted (same "degrade
   honestly, don't quarantine a live route" call as the two above).
+  Settings > Connection's restart card no longer uses it: it
+  restarts the API process through the updater's trigger seam
+  (`routes/cc-update.ts`, `/api/restart/*`), and this route stays inert.
 
 ## The file browser — live-mounted upstream code, UI off by decision
 

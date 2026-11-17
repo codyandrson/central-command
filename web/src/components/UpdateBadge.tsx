@@ -44,6 +44,8 @@ const PROGRESS_POLL_MS = 3000;
 /** GET /api/update/hold — the API-tier pause that waits for the agents. */
 interface HoldStatus {
   active: boolean;
+  /** Absent on older servers (= update); "restart" is Settings > Connection's hold. */
+  kind?: 'update' | 'restart' | null;
   target: string;
   since: string | null;
   running: Array<{
@@ -133,7 +135,11 @@ export function UpdateDialog({ versionInfo, open, onOpenChange }: UpdateDialogPr
       }
       try {
         const res = await fetch('/api/update/hold');
-        if (res.ok) setHold(await res.json() as HoldStatus);
+        if (res.ok) {
+          const h = await res.json() as HoldStatus;
+          // A restart hold belongs to its own card; it is no update to wait on.
+          setHold(h.kind === 'restart' ? null : h);
+        }
       } catch {
         // the API is down mid-update: the hold is over by definition
         setHold(null);

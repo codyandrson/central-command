@@ -241,7 +241,12 @@ process's environ.
   HTTP routes call.
 - **`api/hold.py`** is the update hold: pause the team, wait for in-flight
   agent work to land, then trigger the updater. The flag the runtime reads is
-  `runtime/hold.py`, in memory on purpose.
+  `runtime/hold.py`, in memory on purpose. The hold has a `kind`: `update`
+  (events `update.hold`, `update.triggered`, `update.hold_released`) or `restart`
+  (Settings > Connection; the trigger carries `"action": "restart"`, and the
+  events are `restart.hold`, `restart.triggered`, `restart.hold_released`). The
+  kinds exclude each other (a 409), and both park runs under the stored reason
+  `update_hold`, so the next process resumes either's.
 - **`api/update.py`** serves the single-node profile's version check and
   upload/apply/status routes; the k3s profile's updater is driven from the
   cockpit server (`web/server/routes/cc-update.ts`) through systemd path units.

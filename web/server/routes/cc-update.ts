@@ -21,6 +21,13 @@
  *                  own restart, since both records outlive every process
  *                  involved (the Portainer schedule-record pattern).
  *
+ * The same trigger seam carries a RESTART of the API process (Settings >
+ * Connection): the trigger gains `"action": "restart"`, the root updater
+ * restarts cc-uvicorn only and records the outcome in restart.json — its own
+ * file, because status.json is the last UPDATE's result. The `/api/restart/*`
+ * routes below proxy the same API hold (kind restart) and read that file; they
+ * are served by this Node process, which stays up while the API restarts.
+ *
  * Double-click guard is SERVER-SIDE (research: a UI-disabled button is not a
  * guard): apply refuses while a trigger is pending, while a run is in
  * flight, and for a target that equals the installed version (the stale-
@@ -28,6 +35,7 @@
  */
 import { Hono, type Context } from 'hono';
 import { readFileSync, writeFileSync, existsSync, renameSync, statSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { readProductVersion } from '../lib/release-source.js';
 import { config } from '../lib/config.js';
@@ -50,6 +58,7 @@ const TRIGGER = process.env.CC_UPDATE_TRIGGER || '/run/cc-update/trigger';
 const STATUS = process.env.CC_UPDATE_STATUS || '/var/lib/cc-update/status.json';
 const STAGE_TRIGGER = process.env.CC_UPDATE_STAGE_TRIGGER || '/run/cc-update/stage-trigger';
 const STAGE_STATUS = process.env.CC_UPDATE_STAGE_STATUS || '/var/lib/cc-update/stage.json';
+const RESTART_STATUS = process.env.CC_UPDATE_RESTART_STATUS || '/var/lib/cc-update/restart.json';
 
 interface UpdateStatus {
   state: 'running' | 'success' | 'failed' | 'rolled_back';
@@ -79,6 +88,59 @@ function inFlight(status: UpdateStatus | null): boolean {
   if (!status || status.state !== 'running') return false;
   const seen = Date.parse(status.updated_at ?? status.started_at ?? '');
   return Number.isFinite(seen) && Date.now() - seen < STALE_RUNNING_MS;
+}
+
+/** restart.json, as cc-update.sh's restart_main writes it; `none` = never restarted. */
+interface RestartStatus {
+  state: 'none' | 'running' | 'restarted' | 'failed' | 'refused';
+  message?: string;
+  requested_at?: string;
+  started_at?: string;
+  updated_at?: string;
+  finished_at?: string;
+  forced?: boolean;
+}
+
+function readRestartStatus(): RestartStatus {
+  try {
+    return JSON.parse(readFileSync(RESTART_STATUS, 'utf-8')) as RestartStatus;
+  } catch {
+    return { state: 'none' };
+  }
+}
+
+function restartInFlight(status: RestartStatus): boolean {
+  if (status.state !== 'running') return false;
+  const seen = Date.parse(status.updated_at ?? status.started_at ?? '');
+  return Number.isFinite(seen) && Date.now() - seen < STALE_RUNNING_MS;
+}
+
+/** What the pending trigger asks for: null = no trigger. */
+function triggerAction(): 'update' | 'restart' | null {
+  if (!existsSync(TRIGGER)) return null;
+  try {
+    return JSON.parse(readFileSync(TRIGGER, 'utf-8')).action === 'restart' ? 'restart' : 'update';
+  } catch {
+    return 'update';
+  }
+}
+
+/**
+ * Whether a restart can be served here at all. The single-node profile
+ * (CC_UPDATE_BACKEND=api) has no root updater, and a k3s install whose tmpfiles
+ * directory is missing has not installed the units; both say so plainly.
+ */
+function restartSeam(): { available: boolean; reason?: string } {
+  if (config.updateBackend === 'api') {
+    return { available: false, reason: 'this install has no root updater unit to restart the API (single-node profile)' };
+  }
+  if (!existsSync(dirname(TRIGGER))) {
+    return {
+      available: false,
+      reason: `the updater is not installed (${dirname(TRIGGER)} is missing) — see deploy/k3s/README.md §6`,
+    };
+  }
+  return { available: true };
 }
 
 // A stage trigger nothing consumed (units not installed / not enabled) must
@@ -195,6 +257,9 @@ app.post('/api/update/apply', rateLimitGeneral, async (c) => {
   if (inFlight(status)) {
     return c.json({ error: `an update is already running (phase: ${status?.phase})` }, 409);
   }
+  if (restartInFlight(readRestartStatus())) {
+    return c.json({ error: 'a restart of the API is running — apply once it has finished' }, 409);
+  }
   const body = await c.req.json().catch(() => ({})) as { target?: string; force?: boolean };
   // The stale-button trap: after a successful update the UI's version info
   // lags until its next check — a re-click must not re-run the whole
@@ -224,6 +289,11 @@ app.post('/api/update/apply', rateLimitGeneral, async (c) => {
   if (body.force !== true) {
     try {
       const res = await holdProxy('POST', '', { target: body.target ?? '' });
+      if (res.status === 409) {
+        // The other kind of hold (a restart) stands; its own detail says so.
+        const refusal = await res.json().catch(() => ({})) as { detail?: string };
+        return c.json({ error: refusal.detail ?? 'a restart hold is engaged' }, 409);
+      }
       if (!res.ok) return c.json({ error: `could not engage the update hold (HTTP ${res.status})` }, 502);
       return c.json({ triggered: false, held: true }, 202);
     } catch (err) {
@@ -257,5 +327,49 @@ function holdRoute(method: string, sub = '') {
 app.get('/api/update/hold', rateLimitGeneral, holdRoute('GET'));
 app.post('/api/update/hold/now', rateLimitGeneral, holdRoute('POST', '/now'));
 app.post('/api/update/hold/cancel', rateLimitGeneral, holdRoute('DELETE'));
+
+// ── restart the API process (Settings > Connection) ──────────────────────────
+// The hold is the API's, kind "restart" (the API refuses the other kind's
+// engage, force and cancel with a 409). Everything the card reads that must
+// survive the API being down comes from restart.json, served from here.
+
+app.get('/api/restart/status', rateLimitGeneral, (c) => {
+  const status = readRestartStatus();
+  const update = readStatusFile(STATUS);
+  const action = triggerAction();
+  return c.json({
+    ...status,
+    ...restartSeam(),
+    inFlight: restartInFlight(status),
+    pending: action === 'restart',
+    // An update run or trigger is what a restart must not start beside.
+    updateBusy: inFlight(update) || action === 'update',
+  });
+});
+
+app.post('/api/restart/hold', rateLimitGeneral, async (c) => {
+  const seam = restartSeam();
+  if (!seam.available) return c.json({ error: seam.reason }, 501);
+  if (inFlight(readStatusFile(STATUS)) || triggerAction() === 'update') {
+    return c.json({ error: 'an update is running or pending — restart after it has finished' }, 409);
+  }
+  if (restartInFlight(readRestartStatus()) || triggerAction() === 'restart') {
+    return c.json({ error: 'a restart is already running' }, 409);
+  }
+  try {
+    const res = await holdProxy('POST', '', { kind: 'restart', target: '' });
+    if (res.status === 409 || res.status === 501) {
+      const refusal = await res.json().catch(() => ({})) as { detail?: string };
+      return c.json({ error: refusal.detail ?? `the API refused the restart hold (HTTP ${res.status})` }, res.status);
+    }
+    if (!res.ok) return c.json({ error: `could not engage the restart hold (HTTP ${res.status})` }, 502);
+    return c.json({ held: true }, 202);
+  } catch (err) {
+    return c.json({ error: `could not reach the API to engage the restart hold [${err instanceof Error ? err.message : String(err)}]` }, 502);
+  }
+});
+app.get('/api/restart/hold', rateLimitGeneral, holdRoute('GET'));
+app.post('/api/restart/hold/now', rateLimitGeneral, holdRoute('POST', '/now?kind=restart'));
+app.post('/api/restart/hold/cancel', rateLimitGeneral, holdRoute('DELETE', '?kind=restart'));
 
 export default app;

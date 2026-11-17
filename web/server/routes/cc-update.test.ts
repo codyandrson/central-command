@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 
 let dir: string;
 
-async function buildApp() {
-  vi.doMock('../lib/config.js', () => ({ config: { gatewayUrl: 'http://cc.test' } }));
+async function buildApp(config: Record<string, unknown> = {}) {
+  vi.doMock('../lib/config.js', () => ({ config: { gatewayUrl: 'http://cc.test', ...config } }));
   vi.doMock('../middleware/rate-limit.js', () => ({
     rateLimitGeneral: vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   }));
@@ -47,6 +47,7 @@ describe('cc-update routes', () => {
     process.env.CC_UPDATE_STATUS = join(dir, 'status.json');
     process.env.CC_UPDATE_STAGE_TRIGGER = join(dir, 'stage-trigger');
     process.env.CC_UPDATE_STAGE_STATUS = join(dir, 'stage.json');
+    process.env.CC_UPDATE_RESTART_STATUS = join(dir, 'restart.json');
   });
 
   afterEach(() => {
@@ -57,6 +58,7 @@ describe('cc-update routes', () => {
     delete process.env.CC_UPDATE_STATUS;
     delete process.env.CC_UPDATE_STAGE_TRIGGER;
     delete process.env.CC_UPDATE_STAGE_STATUS;
+    delete process.env.CC_UPDATE_RESTART_STATUS;
   });
 
   it('apply engages the API hold instead of writing the trigger (the API triggers when the agents land)', async () => {
@@ -283,5 +285,123 @@ describe('cc-update routes', () => {
     expect(json.pending).toBe(true);
     expect(json.inFlight).toBe(false);
     expect(json.status.state).toBe('rolled_back');
+  });
+
+  describe('restart of the API process', () => {
+    const post = (app: Hono, path: string) => app.request(path, { method: 'POST' });
+
+    it('status is restart.json as written, `none` when absent, plus what the card gates on', async () => {
+      const app = await buildApp();
+      let json = await (await app.request('/api/restart/status')).json() as Record<string, unknown>;
+      expect(json).toEqual({
+        state: 'none', available: true, inFlight: false, pending: false, updateBusy: false,
+      });
+
+      writeFileSync(join(dir, 'restart.json'), JSON.stringify({
+        state: 'restarted', message: 'cc-uvicorn restarted and healthy',
+        requested_at: '2026-11-16T10:00:00+00:00', finished_at: '2026-11-16T10:00:40+00:00', forced: false,
+      }));
+      json = await (await app.request('/api/restart/status')).json() as Record<string, unknown>;
+      expect(json).toMatchObject({
+        state: 'restarted', finished_at: '2026-11-16T10:00:40+00:00', available: true, inFlight: false,
+      });
+    });
+
+    it('is unavailable, with a reason, on the single-node profile and where the updater is not installed', async () => {
+      let json = await (await (await buildApp({ updateBackend: 'api' })).request('/api/restart/status')).json() as {
+        available: boolean; reason: string;
+      };
+      expect(json.available).toBe(false);
+      expect(json.reason).toMatch(/single-node/);
+
+      vi.resetModules();
+      process.env.CC_UPDATE_TRIGGER = join(dir, 'no-such-dir', 'trigger');
+      const app = await buildApp();
+      json = await (await app.request('/api/restart/status')).json() as typeof json;
+      expect(json.available).toBe(false);
+      expect(json.reason).toMatch(/not installed/);
+      expect((await post(app, '/api/restart/hold')).status).toBe(501);
+    });
+
+    it('engages the API hold with kind restart and writes no trigger itself', async () => {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ active: true, kind: 'restart' }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const app = await buildApp();
+      const res = await post(app, '/api/restart/hold');
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ held: true });
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe('http://cc.test/api/update/hold');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(String(init.body))).toEqual({ kind: 'restart', target: '' });
+      expect(existsSync(join(dir, 'trigger'))).toBe(false);
+    });
+
+    it('refuses while an update is running or pending, or a restart already is, and never reaches the API', async () => {
+      const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const app = await buildApp();
+
+      writeFileSync(join(dir, 'status.json'), JSON.stringify({
+        state: 'running', phase: 'rebuild', updated_at: new Date().toISOString(),
+      }));
+      expect((await post(app, '/api/restart/hold')).status).toBe(409);
+      expect((await (await app.request('/api/restart/status')).json() as { updateBusy: boolean }).updateBusy).toBe(true);
+      rmSync(join(dir, 'status.json'));
+
+      writeFileSync(join(dir, 'trigger'), JSON.stringify({ target: '1.2.3', force: false }));
+      expect((await post(app, '/api/restart/hold')).status).toBe(409);
+      writeFileSync(join(dir, 'trigger'), JSON.stringify({ target: '', force: false, action: 'restart' }));
+      const pending = await (await app.request('/api/restart/status')).json() as { pending: boolean; updateBusy: boolean };
+      expect(pending).toMatchObject({ pending: true, updateBusy: false });
+      expect((await post(app, '/api/restart/hold')).status).toBe(409);
+      rmSync(join(dir, 'trigger'));
+
+      writeFileSync(join(dir, 'restart.json'), JSON.stringify({
+        state: 'running', message: 'x', updated_at: new Date().toISOString(),
+      }));
+      expect((await post(app, '/api/restart/hold')).status).toBe(409);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('relays the API refusal when an update hold stands', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(
+        JSON.stringify({ detail: 'an update hold is engaged — finish or cancel it before the restart' }),
+        { status: 409 })));
+      const res = await post(await buildApp(), '/api/restart/hold');
+      expect(res.status).toBe(409);
+      expect((await res.json() as { error: string }).error).toMatch(/update hold is engaged/);
+    });
+
+    it('an update apply is refused while a restart runs, and relays a restart hold\'s 409', async () => {
+      const app = await buildApp();
+      writeFileSync(join(dir, 'restart.json'), JSON.stringify({
+        state: 'running', updated_at: new Date().toISOString(),
+      }));
+      expect((await apply(app, { target: '1.2.3' })).status).toBe(409);
+      rmSync(join(dir, 'restart.json'));
+
+      vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => String(url).includes('/api/skills/')
+        ? reviewWith(0)
+        : new Response(JSON.stringify({ detail: 'a restart hold is engaged' }), { status: 409 })));
+      const res = await apply(app, { target: '1.2.3' });
+      expect(res.status).toBe(409);
+      expect((await res.json() as { error: string }).error).toBe('a restart hold is engaged');
+    });
+
+    it('proxies status, now and cancel to the API hold, always naming the restart kind', async () => {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({ active: true }), { status: 200 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const app = await buildApp();
+      expect((await app.request('/api/restart/hold')).status).toBe(200);
+      expect((await post(app, '/api/restart/hold/now')).status).toBe(200);
+      expect((await post(app, '/api/restart/hold/cancel')).status).toBe(200);
+      const calls = fetchMock.mock.calls.map((c) => [String((c as unknown[])[0]), ((c as unknown[])[1] as RequestInit).method]);
+      expect(calls).toEqual([
+        ['http://cc.test/api/update/hold', 'GET'],
+        ['http://cc.test/api/update/hold/now?kind=restart', 'POST'],
+        ['http://cc.test/api/update/hold?kind=restart', 'DELETE'],
+      ]);
+    });
   });
 });

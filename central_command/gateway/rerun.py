@@ -218,7 +218,7 @@ async def eligibility(session: dict) -> dict:
     from central_command.runtime import hold
 
     if hold.active:
-        return _not("an update is waiting for the agents to finish")
+        return _not(f"{hold.waiting_for()} is waiting for the agents to finish")
     if session.get("rerun_by"):
         return _not(f"already re-run as {session['rerun_by']}")
     if session.get("status") == "RUNNING":

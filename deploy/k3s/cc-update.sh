@@ -39,12 +39,27 @@
 #   every phase change — the UI re-reads it after its own restart; the full
 #   detail channel is `journalctl -u cc-update`. Files live OUTSIDE the repo
 #   tree on purpose: rollback's reset --hard would clobber anything inside.
+#
+#   Restart (Settings > Connection): the same trigger seam carries an optional
+#   "action" in request.json — absent or "update" is everything above, unchanged;
+#   "restart" runs restart_main INSTEAD of main, before any update-only step (no compute
+#   ssh, fetch, tag, checkpoint, dump or build): the busy gate (honouring force),
+#   a restart of the cc-uvicorn unit — that unit only — the health poll, and an
+#   outcome in /var/lib/cc-update/restart.json. There is no code change to roll
+#   back, so an unhealthy result is reported, never reversed; status.json is
+#   never written (it is the last UPDATE's result). Any other action dies at once
+#   and changes nothing. Mutual exclusion with an update: cc-update.service is
+#   one oneshot, so systemd never runs two copies (a trigger written meanwhile
+#   re-runs once after), and restart_main also yields to a fresh `running`
+#   status.json (apply_in_flight) for a copy started outside systemd. Like every
+#   step here, it is the INSTALLED release's copy that runs a request.
 # ============================================================================
 set -uo pipefail
 
 RUNDIR=/run/cc-update
 STATEDIR=/var/lib/cc-update
 STATUS="$STATEDIR/status.json"
+RESTART_STATUS="$STATEDIR/restart.json"   # a restart's own record; never status.json
 REQUEST="$RUNDIR/request.json"
 STAGE_REQUEST="$RUNDIR/stage-request.json"
 STAGE_MODE=0   # 1 = `cc-update.sh stage`: prebuild caches only, never mutate
@@ -62,6 +77,7 @@ SSHQ=(ssh -o BatchMode=yes -o ConnectTimeout=10)
 
 STOPPED=0   # set the moment services are stopped; die() restarts them only then
 FORCE=0     # request.json force:true — the operator chose "update anyway"
+RESTART_MODE=0   # 1 = request.json action:"restart" — die() then reports in restart.json
 # What the forward pass actually touched — rollback reverses only these.
 RETAGGED=()          # "<node>|<ref>" per node whose running image we preserved
 IMAGE_DEPLOYS=()     # deployments whose image bytes changed under the same tag
@@ -326,7 +342,12 @@ remove_worktree() {
 
 die() { # <phase> <message> — best-effort recovery: services back up, honest status
   note "FAILED at $1: $2"
-  write_status failed "$1" "$2"
+  if [[ $RESTART_MODE -eq 1 ]]; then
+    # A restart's outcome is its own record; status.json stays the last update's.
+    if [[ "$1" == busy ]]; then write_restart refused "$2"; else write_restart failed "$2"; fi
+  else
+    write_status failed "$1" "$2"
+  fi
   # Nothing before the stop phase (and nothing in stage mode) stopped a
   # service — restarting cc-nerve there would blip the cockpit for no reason.
   [[ $STAGE_MODE -eq 1 || $STOPPED -eq 0 ]] || start_services || true
@@ -368,6 +389,9 @@ refuse_if_busy() { # <phase> — the request's force:true is the operator's "upd
   local out n
   out="$(running_sessions)"; n="${out%% *}"
   if [[ "$n" != 0 && $FORCE -ne 1 ]]; then
+    if [[ $RESTART_MODE -eq 1 ]]; then
+      die "$1" "$n agent run(s) in flight (${out#* }) — wait for them to land, or choose 'Restart now'"
+    fi
     die "$1" "$n agent run(s) in flight (${out#* }) — wait for them to land, or apply again with 'Update anyway'"
   fi
   [[ "$n" == 0 ]] || note "WARNING: forced — $n in-flight run(s) will be killed and swept FAILED at startup (${out#* })"
@@ -456,6 +480,69 @@ trap 'write_status failed "${PHASE_NOW:-unknown}" "terminated (timeout or stop)"
 # The build worktree must not survive ANY exit path, TERM included (the TERM
 # handler exits, so this runs after it).
 trap 'remove_worktree' EXIT
+
+# ── restart: the API process only (request.json action:"restart") ───────────
+# What the cockpit's Settings > Connection card asks for, through the same
+# trigger seam as an update. Nothing here needs the compute node, git, the
+# build or the cluster, so main() hands over to it before any of that.
+# An absent action is "update", and so is a request file that cannot be read (as
+# it always was); anything else but "restart" prints as invalid:<json>.
+request_action() {
+  [[ -f "$REQUEST" ]] || { echo update; return 0; }
+  python3 - "$REQUEST" <<'PY' 2>/dev/null || echo update
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print("update"); sys.exit(0)
+a = d.get("action", "update") if isinstance(d, dict) else "update"
+print(a if a in ("update", "restart") else "invalid:" + json.dumps(a)[:80])
+PY
+}
+
+write_restart() { # write_restart <running|restarted|failed|refused> <message>
+  local tmp
+  tmp="$(mktemp "$STATEDIR/.restart.XXXXXX")" || return 0
+  python3 - "$1" "$2" "${RESTART_REQUESTED_AT:-$STARTED_AT}" "$STARTED_AT" "$FORCE" >"$tmp" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+state, message, requested, started, forced = sys.argv[1:6]
+now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+out = {"state": state, "message": message, "requested_at": requested,
+       "started_at": started, "updated_at": now, "forced": forced == "1"}
+if state != "running": out["finished_at"] = now
+print(json.dumps(out))
+PY
+  chmod 644 "$tmp" && mv -f "$tmp" "$RESTART_STATUS"
+}
+
+restart_main() {
+  RESTART_MODE=1
+  RESTART_REQUESTED_AT="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("requested_at") or "")' "$REQUEST" 2>/dev/null)"
+  [[ -f "$REQUEST" ]] && [[ "$(python3 -c 'import json,sys;print(bool(json.load(open(sys.argv[1])).get("force")))' "$REQUEST" 2>/dev/null)" == True ]] && FORCE=1
+  # Consumed: a run started by hand later must not replay this restart.
+  rm -f "$REQUEST"
+  trap 'write_restart failed "terminated (timeout or stop) — see journalctl -u cc-update"; exit 143' TERM
+
+  PHASE_NOW=restart; note "== restart requested (force=$FORCE)"
+  write_restart running "restart requested"
+  if apply_in_flight; then
+    note "an update is in flight — the restart yields"
+    write_restart refused "an update is in flight — nothing was restarted"
+    exit 1
+  fi
+  refuse_if_busy busy
+  write_restart running "restarting cc-uvicorn"
+  systemctl restart cc-uvicorn \
+    || die restart "restarting cc-uvicorn failed — see journalctl -u cc-uvicorn"
+  write_restart running "waiting for the API to answer /health"
+  if healthy; then
+    note "cc-uvicorn restarted and healthy"
+    write_restart restarted "cc-uvicorn restarted and healthy"
+    exit 0
+  fi
+  die health "cc-uvicorn restarted but did not answer /health within 2 minutes — see journalctl -u cc-uvicorn"
+}
 
 main() {
   mkdir -p "$STATEDIR"
@@ -919,8 +1006,22 @@ stage_main() {
   exit 0
 }
 
+# The request's action is read HERE, before main: a restart needs none of
+# main's preconditions (main's first act is the compute-node answer), and an
+# unknown action must change nothing.
+dispatch() {
+  local action
+  action="$(request_action)"
+  case "$action" in
+    update) main "$@" ;;
+    restart) mkdir -p "$STATEDIR"; restart_main ;;   # never returns
+    *) mkdir -p "$STATEDIR"
+       die resolve "request.json carries an unknown action (${action#invalid:}); expected \"update\" or \"restart\" — nothing was changed" ;;
+  esac
+}
+
 if [[ "${1:-}" == stage ]]; then
   stage_main
 else
-  main "$@"
+  dispatch "$@"
 fi

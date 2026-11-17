@@ -30,6 +30,14 @@ the operator: the flag is in memory (`runtime/hold.py`) and the next process
 starts unheld, resuming what this one parked (`resume_held_sessions`, called
 from the lifespan).
 
+A RESTART hold (kind "restart", from Settings > Connection) is the same hold
+with the same flag, loops, stop reason and poller; the only differences are the
+`"action": "restart"` the trigger carries (the root updater then restarts the
+API process and does nothing else), the `restart.*` event kinds, and that the
+two kinds exclude each other: engaging, forcing or cancelling the other kind's
+hold is a 409. The stored stop reason stays `update_hold`, so the next process
+resumes what a restart hold parked exactly as it does after an update.
+
 Root never waits: the updater is a systemd oneshot with a start timeout, and
 the cockpit reads a run as dead after ~95 minutes of silence. All the waiting
 happens here, in the process that owns the loops and the run gate.
@@ -73,10 +81,13 @@ def _write_trigger(force: bool) -> None:
     global _triggered_at, _trigger_error
     path = _trigger_path()
     tmp = f"{path}.tmp"
+    body = {"target": hold.target, "force": force,
+            "requested_at": datetime.now(timezone.utc).isoformat()}
+    if hold.kind == "restart":
+        body["action"] = "restart"  # an update's trigger never carries the key
     try:
         with open(tmp, "w") as f:
-            json.dump({"target": hold.target, "force": force,
-                       "requested_at": datetime.now(timezone.utc).isoformat()}, f)
+            json.dump(body, f)
         os.replace(tmp, path)  # atomic: the path unit never sees a half-written file
         _triggered_at, _trigger_error = datetime.now(timezone.utc), None
     except OSError as e:
@@ -123,17 +134,30 @@ async def _poll() -> None:
                 or (datetime.now(timezone.utc) - _triggered_at).total_seconds() > _RETRIGGER_S
             ):
                 _write_trigger(force=False)
-                await events.emit("update.triggered", payload={"target": hold.target},
-                                  actor="system")
+                await events.emit(f"{hold.kind}.triggered", payload=_payload(), actor="system")
         except Exception:  # noqa: BLE001 — the hold outlives one bad tick
             log.exception("update hold: tick failed")
         await asyncio.sleep(_TICK_S)
+
+
+def _payload(**extra) -> dict:
+    # An update's events carry its target, as they always did; a restart has none.
+    return {**({"target": hold.target} if hold.kind == "update" else {}), **extra}
+
+
+def _refuse_other_kind(kind: str) -> None:
+    if kind not in hold.KINDS:
+        raise HTTPException(422, f"unknown hold kind {kind!r}")
+    if hold.active and hold.kind != kind:
+        raise HTTPException(
+            409, f"a {hold.kind} hold is engaged — finish or cancel it before the {kind}")
 
 
 async def status() -> dict:
     running = await repo.running_sessions_for_hold() if hold.active else []
     return {
         "active": hold.active,
+        "kind": hold.kind if hold.active else None,
         "target": hold.target,
         "since": hold.since.isoformat() if hold.since else None,
         "running": running,
@@ -142,41 +166,47 @@ async def status() -> dict:
     }
 
 
-async def engage(target: str) -> dict:
+async def engage(target: str, kind: str = "update") -> dict:
     global _poller, _triggered_at, _trigger_error
+    _refuse_other_kind(kind)
     if not hold.active:
-        hold.active, hold.target, hold.since = True, target, datetime.now(timezone.utc)
+        if kind == "restart" and not os.path.isdir(os.path.dirname(_trigger_path())):
+            # No updater seam (the single-node profile has no root unit): a
+            # trigger nothing consumes would pause the team for nothing.
+            raise HTTPException(501, "restart is only available where the root updater is installed")
+        hold.active, hold.kind = True, kind
+        hold.target, hold.since = target, datetime.now(timezone.utc)
         _triggered_at = _trigger_error = None
-        await events.emit("update.hold", payload={"target": target}, actor="operator")
+        await events.emit(f"{kind}.hold", payload=_payload(), actor="operator")
         _poller = asyncio.create_task(_poll())
     return await status()
 
 
-async def release() -> dict:
+async def release(kind: str = "update") -> dict:
     global _poller
+    _refuse_other_kind(kind)
     if not hold.active:
         return await status()
     hold.active = False
     if _poller is not None:
         _poller.cancel()
         _poller = None
-    await events.emit("update.hold_released", payload={"target": hold.target},
-                      actor="operator")
+    await events.emit(f"{hold.kind}.hold_released", payload=_payload(), actor="operator")
     await _restart_loops()
     await resume_held_sessions()
     return await status()
 
 
-async def update_now() -> dict:
+async def update_now(kind: str = "update") -> dict:
+    _refuse_other_kind(kind)
     if not hold.active:
-        raise HTTPException(409, "no update hold is engaged")
+        raise HTTPException(409, f"no {kind} hold is engaged")
     _write_trigger(force=True)
     if _trigger_error:
         raise HTTPException(503, _trigger_error)
     running = await repo.running_sessions_for_hold()
-    await events.emit("update.triggered",
-                      payload={"target": hold.target, "force": True,
-                               "killed": [r["id"] for r in running]},
+    await events.emit(f"{hold.kind}.triggered",
+                      payload=_payload(force=True, killed=[r["id"] for r in running]),
                       actor="operator")
     return await status()
 
@@ -198,6 +228,8 @@ async def resume_held_sessions() -> list[str]:
 
 class HoldIn(BaseModel):
     target: str = ""
+    # Absent = "update", so every existing caller behaves as it always did.
+    kind: str = "update"
 
 
 @router.get("")
@@ -207,14 +239,14 @@ async def get_hold() -> dict:
 
 @router.post("")
 async def post_hold(body: HoldIn) -> dict:
-    return await engage(body.target)
+    return await engage(body.target, body.kind)
 
 
 @router.post("/now")
-async def post_now() -> dict:
-    return await update_now()
+async def post_now(kind: str = "update") -> dict:
+    return await update_now(kind)
 
 
 @router.delete("")
-async def delete_hold() -> dict:
-    return await release()
+async def delete_hold(kind: str = "update") -> dict:
+    return await release(kind)

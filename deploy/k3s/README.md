@@ -503,6 +503,12 @@ sudo systemctl enable --now cc-backup.timer cc-update.path cc-update-stage.path
   `rolled_back`, so an undone update never reads as succeeded. Status: `/var/lib/cc-update/status.json` (what
   the UI polls); full log: `journalctl -u cc-update`. No sudoers/polkit —
   the web process's only privileged act is writing a file in a tmpfs dir.
+  **Restart** (Settings > Connection) rides the same seam: the trigger carries
+  `"action": "restart"`, and `cc-update.sh` restarts `cc-uvicorn` only — busy
+  gate (honouring `force`), health poll, no rollback — recording the outcome in
+  `/var/lib/cc-update/restart.json` (never `status.json`); any other action dies
+  at resolve. Like every step here it runs from the INSTALLED release's copy, so
+  it works from the first update after the release that ships it.
 - **cc-update-stage** (v2.19.0) — the automatic PREPARE step. The moment a
   version check sees a newer release, the cockpit server writes
   `/run/cc-update/stage-trigger`; `cc-update-stage.path` starts the root

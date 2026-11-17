@@ -48,6 +48,34 @@ describe('UpdateBadge', () => {
     expect(screen.getByText(/update\.sh ~\/Downloads\/central-command-1\.5\.3\.zip/)).toBeInTheDocument();
   });
 
+  it('does not show the update wait panel for a restart hold (that is the Connection card\'s)', async () => {
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('/api/update/status')) {
+        return createMockResponse({
+          mode: 'systemd', pending: false, inFlight: false, status: null,
+          stage: { pending: false, inFlight: false,
+                   status: { state: 'success', phase: 'staged', current: '1.5.2', target: '1.5.3' } },
+        });
+      }
+      if (url.includes('/api/update/hold')) {
+        return createMockResponse({
+          active: true, kind: 'restart', target: '', since: null, running: [],
+          triggered_at: null, trigger_error: null,
+        });
+      }
+      return createMockResponse({
+        current: '1.5.2', latest: '1.5.3', updateAvailable: true, projectDir: '/tmp/nerve repo',
+      });
+    });
+    const user = userEvent.setup();
+    render(<UpdateBadge />);
+    await user.click(await screen.findByRole('button', { name: /update available: version 1.5.3/i }));
+    await screen.findByRole('button', { name: /apply update now/i });
+    expect(screen.queryByText(/paused for the update/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /cancel update/i })).not.toBeInTheDocument();
+  });
+
   it('does not read the previous run\'s success record as this update\'s completion', async () => {
     // The durable status record still says the LAST update (to the version now
     // installed) succeeded. That is not "v1.5.3 is running": the dialog must

@@ -16,11 +16,21 @@ from datetime import datetime
 active: bool = False
 target: str = ""
 since: datetime | None = None
+# What the hold is for: "update" (the updater applies a release) or "restart"
+# (the updater only restarts the API process). The stop reason below is the
+# same for both, so the next process resumes what either parked.
+kind: str = "update"
+KINDS = ("update", "restart")
 
 REASON = "update_hold"
 
 
+def waiting_for() -> str:
+    """The phrase refusals use for what the held team is waiting on."""
+    return "a restart" if kind == "restart" else "an update"
+
+
 class RunHeld(Exception):
-    """A fresh run was refused because an update is waiting for the agents to
-    finish. Not a failure: the work stays exactly where it was (an ASSIGNED
+    """A fresh run was refused because an update (or a restart) is waiting for
+    the agents to finish. Not a failure: the work stays exactly where it was (an ASSIGNED
     task, an unsent message) and starts after the restart."""

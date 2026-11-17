@@ -671,7 +671,7 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
     # IN_PROGRESS with no session — the shape that sweep FAILS.
     if hold.active:
         raise hold.RunHeld(
-            f"task {task_id} not started: an update is waiting for the agents "
+            f"task {task_id} not started: {hold.waiting_for()} is waiting for the agents "
             "to finish — it starts after the restart")
     # The row this starter was handed is as old as its wait on the lane. If the
     # task has moved since (cancelled, re-run, or started by the other starter),

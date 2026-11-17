@@ -1,4 +1,5 @@
-import { RefreshCw, RotateCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
+import { GatewayRestartCard } from './GatewayRestartCard';
 
 interface ConnectionSettingsProps {
   url: string;
@@ -57,33 +58,10 @@ export function ConnectionSettings({
         </button>
       </div>
 
-      {/* Gateway Service — under construction: the vendored Nerve route shells
-          out to an `openclaw` binary that does not exist in this deployment
-          (the gateway is cc-uvicorn/FastAPI). Disabled (not hidden) until a
-          real restart seam exists. */}
+      {/* Gateway Service: restarts the API process through the root updater
+          (k3s profile); the card disables itself, with the reason, elsewhere. */}
       <div className="cockpit-divider my-2" />
-      <div className="cockpit-row">
-        <div className="min-w-0 flex-1">
-          <span className="cockpit-kicker text-[0.6rem]">
-            <span className="text-primary">◆</span>
-            Gateway Service 🚧
-          </span>
-          <p className="mt-2 text-sm font-medium text-foreground">Restart the local gateway</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Under construction — not wired to this deployment&apos;s gateway yet.
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled
-          className="cockpit-toolbar-button w-full justify-center sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Restart 🚧 under construction — no restart seam for cc-uvicorn yet"
-          aria-label="Restart the local gateway (under construction)"
-        >
-          <RotateCw size={14} aria-hidden="true" />
-          Restart
-        </button>
-      </div>
+      <GatewayRestartCard />
     </div>
   );
 }
