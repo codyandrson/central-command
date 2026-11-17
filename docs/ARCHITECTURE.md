@@ -958,6 +958,20 @@ separate, older form that governs a DIRECT tool call; it is unchanged, and
 `mcp.tool_call`, the proposal capability, is overridable like any other under
 its acknowledgement tick and shadow floor.
 
+**Where the MCP tool gate is set.** In the cockpit, in two places: the Config
+tab's "MCP tools" section (the same tab as "Capabilities and gate overrides")
+lists each registered server's tools with their default gate and the active
+per-agent overrides, and the Agents page's "MCP tools" section shows, for the
+servers that agent holds an `mcp:<server>` grant for, each tool's effective gate
+and whether it comes from the default or the agent's own override. Making a
+tool ungated, by default or for one agent, names the server, the tool and who is
+affected and needs an explicit acknowledgement, and so does a revoke that would
+widen (an agent's "human approval" override over an ungated default, which
+returns that agent to ungated); narrowing to human approval and any other revoke
+are one click. Each write re-reads from the API; the screens add no
+rule of their own (`GET /mcp/servers`, `GET`/`PUT`/`DELETE
+/agents/{id}/mcp-overrides`, `PATCH /mcp/servers/{id}/tools/{tool}`).
+
 **The inbox mark.** The Decisions Inbox shows, per action of a proposal, the
 capability registry's server-held `reversibility` mark and whether the capability
 requires an acknowledgement, joined at read time on `proposals.get`
@@ -1754,6 +1768,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | `cc-sources` | sources and the catalog |
 | `cc-systems` | systems launchpad, API docs, the self-check (`/api/selfcheck`) |
 | `cc-mail-rules` | standing mail rules and their preview (`/api/cc/mail-rules`) |
+| `cc-mcp` | the MCP tool gates (`/api/cc/mcp/servers`, `/api/cc/mcp-overrides/:agentId`): the server list with default gates, active overrides and holders; the default-gate change; one agent's effective gates and override history; setting and revoking an override |
 | `cc-update`, `cc-update-proxy` | update status / stage / apply / hold |
 | `cc-context` | context-window settings, including the two note budgets |
 | `cc-file-browser-guard` | not a proxy: middleware inside the vendored file browser; its mutations (write, rename, move, trash, restore) answer 403 unless `FILE_BROWSER_WRITABLE=1` |

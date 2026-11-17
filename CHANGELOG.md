@@ -4,6 +4,32 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-16 — v2.92.0: MCP tool gates are set in the cockpit, and ungating takes an acknowledgement
+
+The operator's per-tool default gate and per-agent override for MCP tools had API routes and no screen,
+so a standing decision the policy says is made in the cockpit could only be made by a raw API call.
+
+- **A server view.** Workspace panel, Config tab, the "MCP tools" button beneath "Capabilities and gate
+  overrides": one block per MCP server with each tool's description and default gate, a control to change
+  the default, and under each tool the agents whose own override deviates from it, each with Revoke. With
+  no server registered it says so in one sentence.
+- **An agent block.** On the Agents page, below "Gate overrides": for each server the agent holds, every
+  tool with its effective gate and whether that comes from the default or from the agent's override;
+  set or revoke an override there. An override on a server the agent no longer holds is listed too, so a
+  dormant standing decision is not hidden. Revoked overrides are a collapsed count; rows are never deleted.
+- **Every move to ungated is acknowledged.** Changing a default to ungated, setting an ungated override,
+  and revoking a "human approval" override over an ungated default all open a dialog that names the
+  server, the tool and the agents affected, states that ungated means the agent calls the tool directly
+  with no proposal and no approval, and keeps its confirm button disabled until a box is ticked.
+  Narrowing, and any other revoke, is one click. Every write is followed by a re-read from the server.
+- **Read routes only.** `GET /agents/{id}/mcp-overrides` (override rows, held servers, effective gate per
+  tool with its source) and two additive keys on `GET /mcp/servers` (`holders` per server, active
+  `overrides` per tool). The two write routes, their events and how the runtime resolves a gate are
+  unchanged. The cockpit reaches them through a new proxy, `cc-mcp`.
+
+Not seen against a registered server: the tests seed rows named after the bundled demo server. No schema
+change.
+
 ## 2026-11-16 — v2.91.0: An execution's progress is saved after every action, and a stopped one is never re-run from the start
 
 An approved proposal's actions run in order. Which of them had completed was recorded only when a

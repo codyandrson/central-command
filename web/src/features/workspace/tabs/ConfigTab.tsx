@@ -16,7 +16,7 @@ import { RefreshCw, Pencil, Save, X, CheckCircle, AlertCircle } from 'lucide-rea
 import { Button } from '@/components/ui/button';
 import { clearPersistedDraft, readPersistedDraft, writePersistedDraft } from '../persistedDrafts';
 import { apiFetch } from '@/lib/apiFetch';
-import { CapabilitiesView } from '../../gates';
+import { CapabilitiesView, McpToolsView } from '../../gates';
 
 const DRAFT_KIND = 'charter-editor';
 
@@ -54,6 +54,7 @@ export function ConfigTab({ agentId }: ConfigTabProps) {
   const agentIdRef = useRef(agentId);
 
   const [showCaps, setShowCaps] = useState(false);
+  const [showMcp, setShowMcp] = useState(false);
 
   const content = charter?.current.content ?? null;
 
@@ -276,6 +277,12 @@ export function ConfigTab({ agentId }: ConfigTabProps) {
           {showCaps ? 'Hide capabilities' : 'Capabilities and gate overrides'}
         </Button>
         {showCaps && <CapabilitiesView />}
+      </div>
+      <div className="border-t border-border/40">
+        <Button variant="ghost" size="sm" onClick={() => setShowMcp((v) => !v)}>
+          {showMcp ? 'Hide MCP tools' : 'MCP tools'}
+        </Button>
+        {showMcp && <McpToolsView />}
       </div>
     </div>
   );

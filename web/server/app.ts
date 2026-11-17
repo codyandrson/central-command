@@ -46,6 +46,7 @@ import workspaceRoutes from './routes/workspace.js';
 // App.tsx (chatPathLinks) still call /api/workspace.
 import charterRoutes from './routes/cc-charter.js';
 import mailRulesRoutes from './routes/cc-mail-rules.js';
+import mcpRoutes from './routes/cc-mcp.js';
 // D27: /api/crons served by the Central Command heartbeat adapter (cc-crons), not
 // the OpenClaw gateway cron tool — same replacement pattern as cc-kanban.
 import cronsRoutes from './routes/cc-crons.js';
@@ -119,7 +120,7 @@ const routes = [
   tokensRoutes, learnedRoutes, eventsRoutes, serverInfoRoutes,
   codexLimitsRoutes, claudeCodeLimitsRoutes, versionRoutes, versionCheckRoutes,
   gatewayRoutes, connectDefaultsRoutes,
-  workspaceRoutes, charterRoutes, mailRulesRoutes, cronsRoutes, sessionsRoutes, filesRoutes, apiKeysRoutes,
+  workspaceRoutes, charterRoutes, mailRulesRoutes, mcpRoutes, cronsRoutes, sessionsRoutes, filesRoutes, apiKeysRoutes,
   voicePhrasesRoutes, fileBrowserRoutes, uploadConfigRoutes, uploadReferenceRoutes, channelsRoutes, kanbanRoutes, beadsRoutes,
   graphRoutes, activityRoutes, loeRoutes, skillsRoutes, decisionsRoutes, sourcesRoutes,
   updateRoutes, systemsRoutes, contextRoutes,

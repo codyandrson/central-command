@@ -6359,6 +6359,46 @@ async def list_agent_mcp_overrides(agent_id: str) -> list[dict]:
         await conn.close()
 
 
+async def list_active_mcp_overrides() -> list[dict]:
+    """Every UNREVOKED override across agents — the server view's "who
+    deviates from the default" list. Revoked rows stay out (they are history,
+    read per agent through `list_agent_mcp_overrides`)."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select agent_id, server_id, tool_name, gate, granted_at
+            from agent_mcp_gate_override where revoked_at is null
+            order by server_id, tool_name, agent_id
+            """
+        )
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def list_mcp_server_holders() -> dict[str, list[str]]:
+    """server_id -> the agents holding an UNREVOKED `mcp:<server_id>` grant:
+    the agents a default-gate change on that server reaches (those without an
+    override of their own on the tool)."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select substr(pack, 5) as server_id, agent_id
+            from agent_grant
+            where pack like 'mcp:%' and revoked_at is null
+            order by pack, agent_id
+            """
+        )
+        out: dict[str, list[str]] = {}
+        for r in rows:
+            out.setdefault(r["server_id"], []).append(r["agent_id"])
+        return out
+    finally:
+        await conn.close()
+
+
 # --- gate overrides (epic-gate-overrides, FR-4) -------------------------------
 # The operator's per-agent relaxation of a capability's default gate. Read by
 # `gateway/overrides.resolve`; a row is never deleted or edited in place

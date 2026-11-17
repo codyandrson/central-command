@@ -11,6 +11,8 @@ import {
   CoachDialog, SkillGrantDialog, SkillRevokeDialog, AuthorOverrideDialog,
 } from './AgentDialogs';
 import { useOverrides, useCapabilityCatalog, overrideStateLabel } from '../gates/useOverrides';
+import { useAgentMcp } from '../gates/useMcpTools';
+import { AgentMcpPanel } from './AgentMcpPanel';
 import { AgentModelEffort } from './AgentModelEffort';
 import type {
   GateOverride,
@@ -679,6 +681,7 @@ export function AgentsView({ onOpenDecisions, onOpenTask }: {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const overridesApi = useOverrides({ agentId: selectedId ?? undefined });
+  const mcpApi = useAgentMcp(selectedId ?? undefined);
   const catalog = useCapabilityCatalog(dialog?.kind === 'authorOverride');
   const closeDialog = useCallback(() => setDialog(null), []);
 
@@ -774,6 +777,19 @@ export function AgentsView({ onOpenDecisions, onOpenTask }: {
               overrides={overridesApi.overrides}
               onAuthor={() => setDialog({ kind: 'authorOverride' })}
               onRevoke={(id) => overridesApi.revoke(detail.agent.id, id)}
+            />
+            <SectionLabel
+              icon={<ShieldCheck size={11} />}
+              count={(mcpApi.data?.overrides ?? []).filter((o) => !o.revoked_at).length}
+            >
+              MCP tools
+            </SectionLabel>
+            <AgentMcpPanel
+              agentId={detail.agent.id}
+              data={mcpApi.data?.agent_id === detail.agent.id ? mcpApi.data : null}
+              error={mcpApi.error}
+              onSetOverride={(server, tool, gate) => mcpApi.setOverride(detail.agent.id, server, tool, gate)}
+              onRevoke={(server, tool) => mcpApi.revokeOverride(detail.agent.id, server, tool)}
             />
             <SectionLabel
               icon={<BookOpen size={11} />}

@@ -579,6 +579,158 @@ async def test_list_mcp_servers_route_groups_tools_by_server():
         await _cleanup_mcp_server(server_id)
 
 
+# --- the cockpit's MCP tools screen: read routes (WIRE shape) -----------------
+# The cockpit hand-declares these interfaces over untyped JSON, so the shape
+# is pinned here, through the same encoder FastAPI applies on the wire.
+
+
+@needs_pg
+async def test_agent_mcp_overrides_route_404s_an_unknown_agent():
+    with pytest.raises(HTTPException) as exc:
+        await routes.get_agent_mcp_overrides("no-such-agent-mcp-read")
+    assert exc.value.status_code == 404
+
+
+@needs_pg
+async def test_agent_mcp_overrides_route_wire_shape_override_over_default_and_history():
+    from fastapi.encoders import jsonable_encoder
+
+    server_id, agent_id, other = "echo-demo", "mg-agent-read", "mg-agent-nogrant"
+    await _insert_mcp_server(server_id)
+    await repo.upsert_agent(agent_id, "MCP Read Test", "mg", "test")
+    await repo.upsert_agent(other, "MCP Read Test 2", "mg", "test")
+    try:
+        await repo.upsert_mcp_tools(server_id, [
+            {"name": "echo", "description": "Echo back the input text"},
+            {"name": "shout", "description": "Upper-case it"},
+        ])
+        await repo.grant_pack(agent_id, f"mcp:{server_id}")
+        # An agent with no mcp: grant: held servers are empty, whatever overrides exist.
+        none = jsonable_encoder(await routes.get_agent_mcp_overrides(other))
+        assert none == {"agent_id": other, "mcp_grants": [], "overrides": [], "servers": []}
+
+        # Override on `echo` -> that tool's effective gate comes from the override.
+        await repo.set_agent_mcp_gate_override(agent_id, server_id, "echo", "ungated")
+        out = jsonable_encoder(await routes.get_agent_mcp_overrides(agent_id))
+        assert set(out) == {"agent_id", "mcp_grants", "overrides", "servers"}
+        assert out["mcp_grants"] == [f"mcp:{server_id}"]
+        [srv] = out["servers"]
+        assert set(srv) == {"server_id", "status", "retired_at", "tools"}
+        assert (srv["server_id"], srv["status"], srv["retired_at"]) == (server_id, "registered", None)
+        tools = {t["tool_name"]: t for t in srv["tools"]}
+        assert set(tools["echo"]) == {
+            "tool_name", "description", "default_gate", "effective_gate", "source"}
+        assert tools["echo"]["default_gate"] == "human approval"
+        assert tools["echo"]["effective_gate"] == "ungated"
+        assert tools["echo"]["source"] == "override"
+        assert tools["shout"]["effective_gate"] == "human approval"
+        assert tools["shout"]["source"] == "default"
+        [ov] = out["overrides"]
+        assert set(ov) == {"agent_id", "server_id", "tool_name", "gate", "granted_by",
+                           "granted_at", "revoked_at", "default_gate"}
+        assert ov["revoked_at"] is None and ov["gate"] == "ungated"
+        assert ov["default_gate"] == "human approval"
+
+        # Revoked: the row is still returned (history) with revoked_at, and the
+        # default takes back over.
+        assert await repo.revoke_agent_mcp_gate_override(agent_id, server_id, "echo")
+        out = jsonable_encoder(await routes.get_agent_mcp_overrides(agent_id))
+        [ov] = out["overrides"]
+        assert ov["revoked_at"] is not None
+        tools = {t["tool_name"]: t for t in out["servers"][0]["tools"]}
+        assert tools["echo"]["effective_gate"] == "human approval"
+        assert tools["echo"]["source"] == "default"
+
+        # A changed DEFAULT shows through where no override decides.
+        assert await repo.set_mcp_tool_default_gate(server_id, "shout", "ungated")
+        out = jsonable_encoder(await routes.get_agent_mcp_overrides(agent_id))
+        tools = {t["tool_name"]: t for t in out["servers"][0]["tools"]}
+        assert (tools["shout"]["default_gate"], tools["shout"]["effective_gate"]) == (
+            "ungated", "ungated")
+
+        # A revoked mcp: grant: the server is no longer held.
+        assert await repo.revoke_pack(agent_id, f"mcp:{server_id}", None)
+        out = jsonable_encoder(await routes.get_agent_mcp_overrides(agent_id))
+        assert out["mcp_grants"] == [] and out["servers"] == []
+        assert len(out["overrides"]) == 1  # history survives
+    finally:
+        await _cleanup_mcp_server(server_id)
+        await _cleanup_agent(agent_id)
+        await _cleanup_agent(other)
+
+
+@needs_pg
+async def test_list_mcp_servers_route_adds_active_overrides_and_holders_keeps_old_keys():
+    from fastapi.encoders import jsonable_encoder
+
+    server_id, a, b, c = "echo-demo", "mg-agent-s1", "mg-agent-s2", "mg-agent-s3"
+    await _insert_mcp_server(server_id)
+    for ag in (a, b, c):
+        await repo.upsert_agent(ag, "MCP Srv Test", "mg", "test")
+    try:
+        await repo.upsert_mcp_tools(server_id, [{"name": "echo", "description": "Echo"}])
+        await repo.grant_pack(a, f"mcp:{server_id}")
+        await repo.grant_pack(b, f"mcp:{server_id}")
+        await repo.set_agent_mcp_gate_override(a, server_id, "echo", "ungated")
+        await repo.set_agent_mcp_gate_override(b, server_id, "echo", "ungated")
+        assert await repo.revoke_agent_mcp_gate_override(b, server_id, "echo")
+        await repo.set_agent_mcp_gate_override(c, server_id, "echo", "ungated")  # no grant
+
+        out = jsonable_encoder(await routes.list_mcp_servers_and_tools())
+        row = next(s for s in out["servers"] if s["id"] == server_id)
+        # Existing keys unchanged.
+        assert {"id", "status", "image_ref", "digest", "namespace", "litellm_alias",
+                "created_by", "created_at", "retired_at", "tools"} <= set(row)
+        [tool] = row["tools"]
+        assert {"server_id", "tool_name", "default_gate", "description"} <= set(tool)
+        assert tool["default_gate"] == "human approval"
+        # New: ACTIVE overrides only (b's is revoked), each {agent_id, gate, granted_at}.
+        assert sorted(o["agent_id"] for o in tool["overrides"]) == [a, c]
+        assert all(set(o) == {"agent_id", "gate", "granted_at"} for o in tool["overrides"])
+        # New: holders = unrevoked mcp: grants (c holds none).
+        assert row["holders"] == [a, b]
+        assert await repo.revoke_pack(b, f"mcp:{server_id}", None)
+        out = jsonable_encoder(await routes.list_mcp_servers_and_tools())
+        row = next(s for s in out["servers"] if s["id"] == server_id)
+        assert row["holders"] == [a]
+    finally:
+        await _cleanup_mcp_server(server_id)
+        for ag in (a, b, c):
+            await _cleanup_agent(ag)
+
+
+@needs_pg
+async def test_the_read_routes_are_get_only_and_the_write_routes_keep_their_events(monkeypatch):
+    """No write method was added beside the two existing ones, and the
+    existing writes still emit exactly their events (the cockpit reads back
+    after each write rather than trusting a reply)."""
+    got = {(r.path.removeprefix("/api"), m)
+           for r in routes.router.routes for m in getattr(r, "methods", ())}
+    assert {m for p, m in got if p == "/agents/{agent_id}/mcp-overrides"} == {"GET", "PUT", "DELETE"}
+    assert {m for p, m in got if p == "/mcp/servers"} == {"GET"}
+    assert {m for p, m in got if p == "/mcp/servers/{server_id}/tools/{tool_name}"} == {"PATCH"}
+
+    server_id, agent_id = "echo-demo", "mg-agent-ev"
+    await _insert_mcp_server(server_id)
+    await repo.upsert_agent(agent_id, "MCP Ev Test", "mg", "test")
+    try:
+        await repo.upsert_mcp_tools(server_id, [{"name": "echo", "description": ""}])
+        seen: list[str] = []
+
+        async def fake_emit(kind, ref_id=None, payload=None, actor=None):
+            seen.append(kind)
+
+        monkeypatch.setattr(events, "emit", fake_emit)
+        await routes.set_mcp_tool_gate(server_id, "echo", routes.MCPToolGateIn(default_gate="ungated"))
+        await routes.set_mcp_override(
+            agent_id, routes.MCPOverrideIn(server_id=server_id, tool_name="echo", gate="human approval"))
+        await routes.revoke_mcp_override(agent_id, server_id, "echo")
+        assert seen == ["mcp.gate_changed", "mcp.override_set", "mcp.override_revoked"]
+    finally:
+        await _cleanup_mcp_server(server_id)
+        await _cleanup_agent(agent_id)
+
+
 async def test_gated_tool_call_addresses_the_registered_proxy_name(monkeypatch):
     """A gated MCP tool call must reach the proxy under the name the Executor
     REGISTERED (underscored — LiteLLM forbids '-'), not our k8s canonical id.

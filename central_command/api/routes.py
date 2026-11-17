@@ -279,13 +279,25 @@ _MCP_GATES = {"human approval", "ungated"}
 @router.get("/mcp/servers")
 async def list_mcp_servers_and_tools() -> dict:
     """Every known mcp_server row, with its discovered tools and default
-    gates — the operator's view for deciding what to widen."""
+    gates — the operator's view for deciding what to widen. Additive keys for
+    the cockpit's "MCP tools" screen: per tool, `overrides` (the ACTIVE
+    per-agent overrides: agent_id, gate, granted_at — revoked rows are
+    history, read per agent); per server, `holders` (the agents holding an
+    unrevoked `mcp:<id>` grant, i.e. who a default-gate change reaches)."""
     tools = await repo.list_mcp_tools()
+    active: dict[tuple[str, str], list[dict]] = {}
+    for o in await repo.list_active_mcp_overrides():
+        active.setdefault((o["server_id"], o["tool_name"]), []).append(
+            {"agent_id": o["agent_id"], "gate": o["gate"], "granted_at": o["granted_at"]}
+        )
     by_server: dict[str, list[dict]] = {}
     for t in tools:
-        by_server.setdefault(t["server_id"], []).append(t)
+        by_server.setdefault(t["server_id"], []).append(
+            {**t, "overrides": active.get((t["server_id"], t["tool_name"]), [])}
+        )
+    holders = await repo.list_mcp_server_holders()
     return {"servers": [
-        {**row, "tools": by_server.get(row["id"], [])}
+        {**row, "tools": by_server.get(row["id"], []), "holders": holders.get(row["id"], [])}
         for row in await repo.list_mcp_servers()
     ]}
 
@@ -315,6 +327,60 @@ class MCPOverrideIn(BaseModel):
     server_id: str
     tool_name: str
     gate: str
+
+
+@router.get("/agents/{agent_id}/mcp-overrides")
+async def get_agent_mcp_overrides(agent_id: str) -> dict:
+    """What the cockpit's agent page shows for MCP tools, read-only: every
+    override row this agent has (active AND revoked — rows are never deleted),
+    the servers it holds an unrevoked `mcp:<id>` grant for, and per tool of
+    each such server the EFFECTIVE gate (`repo.effective_mcp_gates`, the same
+    resolution the runtime attaches toolsets by) with its `source`: `override`
+    when an unrevoked override of this agent decides it, else `default`.
+    An override on a server the agent does not hold is listed under
+    `overrides` but has no effect, and no `servers` entry. Each override row
+    also carries the tool's current `default_gate`, so the cockpit can tell
+    that revoking it would widen the tool (override "human approval" over a
+    default of "ungated") without a second read."""
+    from central_command.runtime import packs
+
+    if await repo.get_agent(agent_id) is None:
+        raise HTTPException(404, f"unknown agent {agent_id!r}")
+    defaults = {(t["server_id"], t["tool_name"]): t["default_gate"]
+                for t in await repo.list_mcp_tools()}
+    overrides = [
+        {**o, "default_gate": defaults.get((o["server_id"], o["tool_name"]))}
+        for o in await repo.list_agent_mcp_overrides(agent_id)
+    ]
+    decided = {(o["server_id"], o["tool_name"]) for o in overrides if o["revoked_at"] is None}
+    gates = await repo.effective_mcp_gates(agent_id)
+    held = packs.mcp_server_ids_from_grants(await packs.granted_packs(agent_id))
+    servers = []
+    for server_id in held:
+        server = await repo.get_mcp_server(server_id)
+        if server is None:
+            continue
+        servers.append({
+            "server_id": server_id,
+            "status": server["status"],
+            "retired_at": server["retired_at"],
+            "tools": [
+                {
+                    "tool_name": t["tool_name"],
+                    "description": t["description"],
+                    "default_gate": t["default_gate"],
+                    "effective_gate": gates.get((server_id, t["tool_name"]), t["default_gate"]),
+                    "source": "override" if (server_id, t["tool_name"]) in decided else "default",
+                }
+                for t in await repo.list_mcp_tools(server_id)
+            ],
+        })
+    return {
+        "agent_id": agent_id,
+        "mcp_grants": [f"mcp:{s}" for s in held],
+        "overrides": overrides,
+        "servers": servers,
+    }
 
 
 @router.put("/agents/{agent_id}/mcp-overrides")
