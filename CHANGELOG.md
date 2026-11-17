@@ -4,6 +4,27 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-16 — v2.89.2: The cockpit stops offering speech providers and a cron delivery it cannot serve
+
+Two controls came with the vendored cockpit and never worked in a Central Command deployment. Both now
+say so, or are gone from view.
+
+- **Scheduled tasks: Delivery is under construction.** The cron dialog offered "Send result to a channel".
+  No messaging channel exists here, the server never read the delivery field, and the dialog's workaround
+  appended an instruction to use a message tool no agent holds. The section stays visible, marked 🚧 and
+  disabled; a saved job always keeps its result in the session, and the prompt is never amended. The
+  channel picker and the delivery code remain behind one constant (`DELIVERY_ENABLED` in `CronDialog.tsx`)
+  for a future messaging integration.
+- **Audio: one provider, named for what it is.** Settings and the command palette offered Replicate, Edge
+  and Xiaomi text-to-speech, which send the spoken text to third-party internet services, and a local
+  Whisper engine whose model files nothing installs. They are hidden. The remaining provider is the
+  deployment's own speech service behind the `cc-tts` / `cc-stt` aliases, shown as a label instead of a
+  one-button toggle. A browser that had stored one of the hidden providers, or a fresh browser that used
+  to start on Edge, now resolves to the deployment's service. The server code for the hidden providers is
+  untouched and unreachable from the cockpit.
+
+No schema, unit, manifest or skill-doc change.
+
 ## 2026-11-16 — v2.89.1: Dead cockpit code and stale statements removed after a review of unfinished features
 
 A review of features that were started and never finished found a set of leftovers with one sensible

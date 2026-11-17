@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractTTSMarkers, migrateTTSProvider } from './useTTS';
+import { extractTTSMarkers, migrateTTSProvider, coerceTTSProvider, coerceSTTProvider } from './useTTS';
 
 describe('extractTTSMarkers', () => {
   it('should extract a single TTS marker', () => {
@@ -89,5 +89,18 @@ describe('migrateTTSProvider', () => {
   it('should default unknown values to "openai"', () => {
     expect(migrateTTSProvider('unknown')).toBe('openai');
     expect(migrateTTSProvider('')).toBe('openai');
+  });
+});
+
+describe('provider coercion (only openai is offered in this deployment)', () => {
+  it('resolves a stored or default hidden TTS provider to openai', () => {
+    expect(coerceTTSProvider('edge')).toBe('openai');
+    expect(coerceTTSProvider('qwen')).toBe('openai');
+    expect(coerceTTSProvider('openai')).toBe('openai');
+  });
+
+  it('resolves a stored or default local STT provider to openai', () => {
+    expect(coerceSTTProvider('local')).toBe('openai');
+    expect(coerceSTTProvider(null)).toBe('openai');
   });
 });

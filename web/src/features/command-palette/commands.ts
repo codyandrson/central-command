@@ -1,7 +1,7 @@
 import type { Command } from './types';
 import { themes, type ThemeName } from '@/lib/themes';
 import { fonts, type FontName } from '@/lib/fonts';
-import type { TTSProvider } from '@/features/tts/useTTS';
+import { OFFERED_PROVIDERS, OFFERED_PROVIDER_LABEL, type TTSProvider } from '@/features/tts/useTTS';
 
 export type ViewMode = 'chat' | 'kanban' | 'inbox' | 'agents' | 'skills' | 'graph' | 'graph-verify' | 'activity' | 'loe' | 'crons' | 'systems' | 'sources';
 
@@ -24,6 +24,14 @@ export interface CommandActions {
   onSetViewMode?: (mode: ViewMode) => void;
   canShowKanban?: boolean;
 }
+
+/** Every TTS provider command; only providers in OFFERED_PROVIDERS reach the palette. */
+const TTS_PROVIDER_COMMANDS: { id: string; label: string; provider: TTSProvider; keywords: string[] }[] = [
+  { id: 'tts-openai', label: `TTS: Use ${OFFERED_PROVIDER_LABEL}`, provider: 'openai', keywords: ['tts', 'voice', 'speech', 'openai', 'cc-tts'] },
+  { id: 'tts-replicate', label: 'TTS: Switch to Replicate', provider: 'replicate', keywords: ['tts', 'voice', 'speech', 'replicate', 'qwen'] },
+  { id: 'tts-edge', label: 'TTS: Switch to Edge (Free)', provider: 'edge', keywords: ['tts', 'voice', 'speech', 'edge', 'free'] },
+  { id: 'tts-xiaomi', label: 'TTS: Switch to Xiaomi Mimo', provider: 'xiaomi', keywords: ['tts', 'voice', 'speech', 'xiaomi', 'mimo'] },
+];
 
 const THEME_LABELS: Record<ThemeName, string> = {
   'midnight': 'Midnight',
@@ -146,35 +154,16 @@ export function createCommands(actions: CommandActions): Command[] {
       category: 'settings',
       keywords: ['config', 'connect', 'gateway'],
     },
-    // TTS commands
-    {
-      id: 'tts-openai',
-      label: 'TTS: Switch to OpenAI',
-      action: () => actions.onTtsProviderChange('openai' as TTSProvider),
-      category: 'voice',
-      keywords: ['tts', 'voice', 'speech', 'openai'],
-    },
-    {
-      id: 'tts-replicate',
-      label: 'TTS: Switch to Replicate',
-      action: () => actions.onTtsProviderChange('replicate' as TTSProvider),
-      category: 'voice',
-      keywords: ['tts', 'voice', 'speech', 'replicate', 'qwen'],
-    },
-    {
-      id: 'tts-edge',
-      label: 'TTS: Switch to Edge (Free)',
-      action: () => actions.onTtsProviderChange('edge' as TTSProvider),
-      category: 'voice',
-      keywords: ['tts', 'voice', 'speech', 'edge', 'free'],
-    },
-    {
-      id: 'tts-xiaomi',
-      label: 'TTS: Switch to Xiaomi Mimo',
-      action: () => actions.onTtsProviderChange('xiaomi' as TTSProvider),
-      category: 'voice',
-      keywords: ['tts', 'voice', 'speech', 'xiaomi', 'mimo'],
-    },
+    // TTS commands — only the providers this deployment offers
+    ...TTS_PROVIDER_COMMANDS
+      .filter(({ provider }) => (OFFERED_PROVIDERS.tts as readonly string[]).includes(provider))
+      .map(({ id, label, provider, keywords }) => ({
+        id,
+        label,
+        action: () => actions.onTtsProviderChange(provider),
+        category: 'voice' as const,
+        keywords,
+      })),
     {
       id: 'toggle-wake-word',
       label: 'Toggle Wake Word',

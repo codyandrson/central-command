@@ -172,17 +172,14 @@ describe('AudioSettings', () => {
     });
   });
 
-  describe('Xiaomi Mimo output settings', () => {
-    it('renders a Xiaomi Mimo provider button', async () => {
-      render(<AudioSettings {...baseProps} section="output" ttsProvider="xiaomi" ttsModel="" />);
-      expect(await screen.findByRole('button', { name: 'Xiaomi Mimo' })).toBeInTheDocument();
-    });
+  describe('output provider settings', () => {
+    it('hides the providers this deployment cannot serve and shows the one remaining as a label', async () => {
+      render(<AudioSettings {...baseProps} section="output" ttsProvider="openai" ttsModel="" />);
 
-    it('shows the Xiaomi API key prompt when Xiaomi is selected and the key is missing', async () => {
-      apiKeyState.xiaomiKeySet = false;
-      render(<AudioSettings {...baseProps} section="output" ttsProvider="xiaomi" ttsModel="" />);
-
-      expect(await screen.findByText(/MIMO_API_KEY required for Xiaomi Mimo/i)).toBeInTheDocument();
+      expect(await screen.findByText('Deployment speech service (cc-tts / cc-stt)')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Replicate' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Edge (Free)' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Xiaomi Mimo' })).not.toBeInTheDocument();
     });
 
     it('renders Xiaomi model and voice selectors', async () => {

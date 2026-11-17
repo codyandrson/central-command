@@ -2,7 +2,10 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Volume2, VolumeX, Mic, MicOff, Download, AlertTriangle, KeyRound, Globe } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { InlineSelect } from '@/components/ui/InlineSelect';
-import type { TTSProvider } from '@/features/tts/useTTS';
+import { OFFERED_PROVIDERS, OFFERED_PROVIDER_LABEL, type TTSProvider } from '@/features/tts/useTTS';
+
+const offeredTts: readonly string[] = OFFERED_PROVIDERS.tts;
+const offeredStt: readonly string[] = OFFERED_PROVIDERS.stt;
 import type { STTInputMode, STTProvider } from '@/contexts/SettingsContext';
 import { useTTSConfig } from '@/features/tts/useTTSConfig';
 import { VoicePhrasesModal } from './VoicePhrasesModal';
@@ -723,40 +726,52 @@ export function AudioSettings({
       {showOutput && (
         <div className="space-y-2">
           <span className="cockpit-field-label">TTS Provider</span>
+          {offeredTts.length === 1 ? (
+            <p className="text-sm font-medium text-foreground">{OFFERED_PROVIDER_LABEL}</p>
+          ) : (
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => onTtsProviderChange('openai')}
-              data-active={ttsProvider === 'openai'}
-              className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
-            >
-              OpenAI
-            </button>
-            <button
-              type="button"
-              onClick={() => onTtsProviderChange('replicate')}
-              data-active={ttsProvider === 'replicate'}
-              className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
-            >
-              Replicate
-            </button>
-            <button
-              type="button"
-              onClick={() => onTtsProviderChange('edge')}
-              data-active={ttsProvider === 'edge'}
-              className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
-            >
-              Edge (Free)
-            </button>
-            <button
-              type="button"
-              onClick={() => onTtsProviderChange('xiaomi')}
-              data-active={ttsProvider === 'xiaomi'}
-              className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
-            >
-              Xiaomi Mimo
-            </button>
+            {offeredTts.includes('openai') && (
+              <button
+                type="button"
+                onClick={() => onTtsProviderChange('openai')}
+                data-active={ttsProvider === 'openai'}
+                className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
+              >
+                {OFFERED_PROVIDER_LABEL}
+              </button>
+            )}
+            {offeredTts.includes('replicate') && (
+              <button
+                type="button"
+                onClick={() => onTtsProviderChange('replicate')}
+                data-active={ttsProvider === 'replicate'}
+                className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
+              >
+                Replicate
+              </button>
+            )}
+            {offeredTts.includes('edge') && (
+              <button
+                type="button"
+                onClick={() => onTtsProviderChange('edge')}
+                data-active={ttsProvider === 'edge'}
+                className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
+              >
+                Edge (Free)
+              </button>
+            )}
+            {offeredTts.includes('xiaomi') && (
+              <button
+                type="button"
+                onClick={() => onTtsProviderChange('xiaomi')}
+                data-active={ttsProvider === 'xiaomi'}
+                className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
+              >
+                Xiaomi Mimo
+              </button>
+            )}
           </div>
+          )}
           <p className="cockpit-field-hint px-1">Choose the voice engine first, then tune the model and speaking style below.</p>
 
           {langState?.language && langState.language !== 'en' && ttsProvider === 'replicate' && !langState.providers.qwen3 && (
@@ -775,12 +790,12 @@ export function AudioSettings({
 
       {/* TTS API key input */}
       {showOutput && ttsProvider === 'openai' && !apiKeys.openai && (
-        <ApiKeyInput keyName="OPENAI_API_KEY" provider="OpenAI TTS" fieldName="openaiKey" onSaved={() => setApiKeys(k => ({ ...k, openai: true }))} />
+        <ApiKeyInput keyName="OPENAI_API_KEY" provider="the deployment speech service (TTS)" fieldName="openaiKey" onSaved={() => setApiKeys(k => ({ ...k, openai: true }))} />
       )}
-      {showOutput && ttsProvider === 'replicate' && !apiKeys.replicate && (
+      {showOutput && offeredTts.includes('replicate') && ttsProvider === 'replicate' && !apiKeys.replicate && (
         <ApiKeyInput keyName="REPLICATE_API_TOKEN" provider="Replicate TTS" fieldName="replicateToken" onSaved={() => setApiKeys(k => ({ ...k, replicate: true }))} />
       )}
-      {showOutput && ttsProvider === 'xiaomi' && !apiKeys.xiaomi && (
+      {showOutput && offeredTts.includes('xiaomi') && ttsProvider === 'xiaomi' && !apiKeys.xiaomi && (
         <ApiKeyInput keyName="MIMO_API_KEY" provider="Xiaomi Mimo" fieldName="mimoApiKey" onSaved={() => setApiKeys(k => ({ ...k, xiaomi: true }))} />
       )}
 
@@ -947,40 +962,48 @@ export function AudioSettings({
       {showInput && (
         <div className="space-y-2">
           <span className="cockpit-field-label">STT Provider</span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => onSttProviderChange('local')}
-              data-active={sttProvider === 'local'}
-              className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
-            >
-              Local (Free)
-            </button>
-            <button
-              type="button"
-              onClick={() => onSttProviderChange('openai')}
-              data-active={sttProvider === 'openai'}
-              className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
-            >
-              OpenAI
-            </button>
-          </div>
+          {offeredStt.length === 1 ? (
+            <p className="text-sm font-medium text-foreground">{OFFERED_PROVIDER_LABEL}</p>
+          ) : (
+            <div className="flex gap-2">
+              {offeredStt.includes('local') && (
+                <button
+                  type="button"
+                  onClick={() => onSttProviderChange('local')}
+                  data-active={sttProvider === 'local'}
+                  className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
+                >
+                  Local (Free)
+                </button>
+              )}
+              {offeredStt.includes('openai') && (
+                <button
+                  type="button"
+                  onClick={() => onSttProviderChange('openai')}
+                  data-active={sttProvider === 'openai'}
+                  className="shell-chip min-h-11 flex-1 justify-center rounded-2xl px-3 py-2 text-sm font-medium"
+                >
+                  {OFFERED_PROVIDER_LABEL}
+                </button>
+              )}
+            </div>
+          )}
           <span className="cockpit-field-hint px-1">
             {sttProvider === 'local'
               ? 'Using built-in Whisper model — no API key needed'
               : apiKeys.openai
-                ? 'Using OpenAI Whisper API'
-                : 'OpenAI Whisper API — enter your API key below'}
+                ? 'Using the deployment speech service (cc-stt)'
+                : 'Deployment speech service (cc-stt) — enter your API key below'}
           </span>
         </div>
       )}
 
       {/* STT Model selector (only for local provider) */}
-      {showInput && sttProvider === 'local' && (
+      {showInput && offeredStt.includes('local') && sttProvider === 'local' && (
         <SttModelSelector model={sttModel} onModelChange={onSttModelChange} />
       )}
 
-      {showInput && sttProvider === 'local' && (
+      {showInput && offeredStt.includes('local') && sttProvider === 'local' && (
         <div className="space-y-2">
           <div className="cockpit-row items-start justify-between">
             <div className="flex min-w-0 flex-1 flex-col">
@@ -1029,7 +1052,7 @@ export function AudioSettings({
 
       {/* STT API key input */}
       {showInput && sttProvider === 'openai' && !apiKeys.openai && (
-        <ApiKeyInput keyName="OPENAI_API_KEY" provider="OpenAI Whisper" fieldName="openaiKey" onSaved={() => setApiKeys(k => ({ ...k, openai: true }))} />
+        <ApiKeyInput keyName="OPENAI_API_KEY" provider="the deployment speech service (STT)" fieldName="openaiKey" onSaved={() => setApiKeys(k => ({ ...k, openai: true }))} />
       )}
 
       {/* Voice Phrases Modal — shown when switching to non-English language */}

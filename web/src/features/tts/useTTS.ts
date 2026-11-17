@@ -16,6 +16,35 @@ if (typeof document !== 'undefined') {
 
 export type TTSProvider = 'openai' | 'replicate' | 'edge' | 'xiaomi';
 
+/**
+ * The speech providers this deployment offers. Deploy setup points the
+ * 'openai' provider at the deployment's own speech service through the
+ * LiteLLM proxy (cc-tts / cc-stt). Replicate, Edge and Xiaomi TTS call
+ * third-party internet services, and 'local' STT needs whisper model files
+ * nothing installs, so the settings UI and command palette hide them; their
+ * server code stays. Internal ids are unchanged.
+ */
+export const OFFERED_PROVIDERS = {
+  tts: ['openai'],
+  stt: ['openai'],
+} as const satisfies { tts: readonly TTSProvider[]; stt: readonly string[] };
+
+/** Label for the one remaining provider, wherever the UI names it. */
+export const OFFERED_PROVIDER_LABEL = 'Deployment speech service (cc-tts / cc-stt)';
+
+/** A stored or default TTS provider that is not offered resolves to 'openai'. */
+export function coerceTTSProvider(provider: string): TTSProvider {
+  const migrated = migrateTTSProvider(provider);
+  return (OFFERED_PROVIDERS.tts as readonly string[]).includes(migrated) ? migrated : 'openai';
+}
+
+/** A stored or default STT provider that is not offered resolves to 'openai'. */
+export function coerceSTTProvider(provider: string | null | undefined): 'local' | 'openai' {
+  return provider !== null && provider !== undefined && (OFFERED_PROVIDERS.stt as readonly string[]).includes(provider)
+    ? (provider as 'local' | 'openai')
+    : 'openai';
+}
+
 /** @deprecated Use 'replicate' instead. Kept for migration. */
 export type LegacyTTSProvider = 'qwen';
 

@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- hook intentionally co-located with provider */
 import { createContext, useContext, useCallback, useRef, useState, useEffect, useMemo, type ReactNode } from 'react';
-import { useTTS, migrateTTSProvider, type TTSProvider } from '@/features/tts/useTTS';
+import { useTTS, coerceTTSProvider, coerceSTTProvider, OFFERED_PROVIDERS, type TTSProvider } from '@/features/tts/useTTS';
 import { type ThemeName, applyTheme, themeNames } from '@/lib/themes';
 import { type FontName, applyFont, fontNames } from '@/lib/fonts';
 import { TOAST_MODE_KEY } from '@/features/notifications/seen';
@@ -124,11 +124,10 @@ function resolveInitialFont(): FontName {
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [soundEnabled, setSoundEnabled] = useState(localStorage.getItem('oc-sound') === 'true');
-  const [ttsProvider, setTtsProvider] = useState<TTSProvider>(() => migrateTTSProvider(localStorage.getItem('oc-tts-provider') || 'edge'));
+  const [ttsProvider, setTtsProvider] = useState<TTSProvider>(() => coerceTTSProvider(localStorage.getItem('oc-tts-provider') || 'openai'));
   const [ttsModel, setTtsModelState] = useState(() => localStorage.getItem('oc-tts-model') || '');
   const [sttProvider, setSttProviderState] = useState<STTProvider>(() => {
-    const saved = localStorage.getItem('oc-stt-provider') as STTProvider | null;
-    return saved === 'openai' ? 'openai' : 'local';
+    return coerceSTTProvider(localStorage.getItem('oc-stt-provider'));
   });
   const [sttInputMode, setSttInputModeState] = useState<STTInputMode>(() => {
     const saved = localStorage.getItem('nerve:sttInputMode') as STTInputMode | null;
@@ -248,9 +247,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
         // Provider: a browser with NO saved preference adopts the server's
         // (STT_PROVIDER env — a deployment's choice); a saved one is pushed.
+        // A provider this deployment does not offer resolves to 'openai'.
         if (serverProvider && localStorage.getItem('oc-stt-provider') === null) {
-          setSttProviderState(serverProvider);
-          return;
+          const adopted = coerceSTTProvider(serverProvider);
+          setSttProviderState(adopted);
+          if (adopted === serverProvider) return;
+          return fetch('/api/transcribe/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider: adopted }),
+          });
         }
         if (serverProvider !== sttProvider) {
           return fetch('/api/transcribe/config', {
@@ -271,7 +277,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     fetch('/api/tts/config')
       .then(resp => resp.ok ? resp.json() : null)
       .then(data => {
-        if (typeof data?.defaultProvider === 'string') setTtsProvider(migrateTTSProvider(data.defaultProvider));
+        if (typeof data?.defaultProvider === 'string') setTtsProvider(coerceTTSProvider(data.defaultProvider));
       })
       .catch(() => {});
   }, []);
@@ -305,7 +311,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const toggleTtsProvider = useCallback(() => {
     setTtsProvider(prev => {
-      const order: TTSProvider[] = ['openai', 'replicate', 'xiaomi', 'edge'];
+      const order: TTSProvider[] = [...OFFERED_PROVIDERS.tts];
       const next = order[(order.indexOf(prev) + 1) % order.length]!;
       localStorage.setItem('oc-tts-provider', next);
       return next;
