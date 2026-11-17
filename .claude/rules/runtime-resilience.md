@@ -105,7 +105,11 @@ when a matching file is read.
   whoever waits on it. An EXECUTING proposal parks RETRY_PENDING
   `interrupted`, its retry_state MERGED (the known-complete prefix kept), and
   no sweep moves it — an INTERIM hold until reconciliation can ask the
-  service whether the in-flight action landed.
+  service whether the in-flight action landed. The prefix is there for a
+  first execution too: the Executor writes the cursor around every action
+  (in flight before, result after; DL-218), and a live-process stop with no
+  verdict parks the same record instead of handing the claim back, unless
+  nothing completed and nothing was in flight.
 - **A live read parks under a landing tail; it never degrades to "proceed
   without it".** A DOWN read raises `CallDeferred` (below) when its run's entry
   set `TriageDeps.park_reads`, and the session resumes in place when the

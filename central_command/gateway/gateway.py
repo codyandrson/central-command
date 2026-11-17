@@ -8,6 +8,8 @@ returns the feedback into the agent's run for a redraft.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, timezone
 
 from pydantic_ai import DeferredToolRequests
@@ -41,6 +43,8 @@ from central_command.runtime.durable import (
 from central_command.runtime.proposals import park_proposal, verified_email_evidence
 from pydantic_ai import ToolDenied
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+log = logging.getLogger(__name__)
 
 
 class GatewayError(Exception):
@@ -758,6 +762,7 @@ async def approve_and_execute(
         outcome = await executor.execute(
             proposal.actions, approver=approver, source_refs=source_refs,
             proposer=prop_row["agent_id"], proposal_id=proposal_id,
+            record_progress=True,
         )
     except overrides.OverrideRefused as refused:
         # The Executor's backstop refused before the first action ran — a
@@ -784,11 +789,15 @@ async def approve_and_execute(
             session_id, proposal_id, prop_row["agent_id"], failure, model,
             detach=detach,
         )
-    except BaseException:
-        # Not the Executor's verdict — a crash on the way. Every action it
-        # completed is on the log; the claim is handed back so the operator
-        # can decide again instead of the row sitting EXECUTING forever.
-        await repo.set_proposal_status(proposal_id, prop_row["status"])
+    except BaseException as stopped:
+        # Not the Executor's verdict — a crash, a cancellation at shutdown, or
+        # a cursor write that could not be made. The STORED cursor decides
+        # (DL-218): nothing completed and nothing in flight hands the claim
+        # back for the operator to decide again, as before; anything else may
+        # have changed the world, so it parks RETRY_PENDING `interrupted` with
+        # the cursor kept — a fresh approval would re-run what landed. The
+        # bookkeeping is shielded and the exception always re-raised.
+        await _settle_stopped_execution(session_id, proposal_id, prop_row["status"], stopped)
         raise
     return await _record_execution_success(
         session_id, proposal_id, prop_row["agent_id"],
@@ -973,8 +982,11 @@ def _execution_failure_report(
         # A restart killed this execution mid-action and the operator
         # retried it: the re-check cannot tell that action's own write
         # from someone else's, so the report says so.
+        # `interrupted_action` (DL-218), because the live cursor has moved on
+        # with the retry; a park from before it carried only the cursor.
         actions = failed_row.get("actions") or []
-        index = int(state.get("next_action_index") or 0)
+        held = (state.get("interrupted_action") or {}).get("index")
+        index = int(held if held is not None else state.get("next_action_index") or 0)
         in_flight = (actions[index].get("capability")
                      if 0 <= index < len(actions) else None) or "unknown"
         report += (
@@ -1261,6 +1273,86 @@ async def _park_execution_retry(
     }
 
 
+async def emit_execution_interrupted(prop: dict) -> None:
+    """`proposal.execution_interrupted` for a proposal parked `interrupted`
+    (`prop` is what `repo.park_interrupted_execution(s)` returns) — ONE payload
+    for the startup landing and the in-process handback. It authorises nothing,
+    so it follows the park."""
+    state = prop["retry_state"]
+    await events.emit(
+        "proposal.execution_interrupted", ref_id=prop["id"],
+        payload={"session_id": prop["session_id"],
+                 "next_action_index": state.get("next_action_index"),
+                 "completed_actions": state.get("completed_results") or [],
+                 "failed_capability": state.get("failed_capability"),
+                 "dependencies": state.get("dependencies"),
+                 "in_flight_index": state.get("in_flight_index"),
+                 "in_flight_capability": state.get("in_flight_capability"),
+                 "error": state.get("last_error")},
+        actor="system",
+    )
+
+
+async def _land_stopped_execution(proposal_id: str, prior_status: str,
+                                  stopped: BaseException) -> str:
+    """Land an EXECUTING claim whose execution stopped with no Executor verdict,
+    from the STORED cursor (DL-218), never from memory:
+
+    - nothing completed and no action in flight — nothing of this execution can
+      have landed: the claim goes back to `prior_status` (AWAITING_HUMAN for a
+      first approval, RETRY_PENDING for a retry), guarded on EXECUTING;
+    - otherwise the world may be changed: parked RETRY_PENDING `interrupted`
+      with the cursor kept, the record startup writes for a dead process, and
+      `proposal.execution_interrupted` emitted. Only the operator's retry-now
+      (from the cursor) or a dismiss moves it; a fresh approval cannot re-run
+      a completed action, because the status no longer admits one.
+
+    A row no longer EXECUTING is someone else's and is left alone. Returns
+    what it did: `handed_back`, `interrupted` or `untouched`."""
+    row = await repo.load_proposal(proposal_id)
+    if row is None or row["status"] != "EXECUTING":
+        return "untouched"
+    state = row.get("retry_state") or {}
+    if not state.get("completed_results") and state.get("in_flight_index") is None:
+        return "handed_back" if await repo.hand_back_execution(
+            proposal_id, prior_status) else "untouched"
+    parked = await repo.park_interrupted_execution(
+        proposal_id,
+        f"execution stopped without a verdict in this process: "
+        f"{type(stopped).__name__}: {stopped}",
+    )
+    if parked is None:
+        return "untouched"
+    await emit_execution_interrupted(parked)
+    return "interrupted"
+
+
+async def _settle_stopped_execution(session_id: str, proposal_id: str,
+                                    prior_status: str, stopped: BaseException) -> None:
+    """Run `_land_stopped_execution` from a handback arm, safely inside a task
+    that may be being CANCELLED: shielded, so a second cancellation cannot cut
+    the landing in half (the landing carries on as its own task), and never
+    swallowing the caller's exception — the arm re-raises `stopped` after this
+    returns. A landing that itself fails (Postgres gone with the process) is
+    logged and leaves the row EXECUTING with its durable cursor: the next
+    startup's landing parks it `interrupted` from that cursor, which is the
+    honest record, rather than this masking the original exception."""
+    try:
+        await asyncio.shield(_land_stopped_execution(proposal_id, prior_status, stopped))
+    except asyncio.CancelledError:
+        # Cancelled again while the shielded landing runs: it finishes on its
+        # own. A cancellation is never swallowed — if `stopped` is not itself
+        # one, this one propagates instead of it.
+        if not isinstance(stopped, asyncio.CancelledError):
+            raise
+    except Exception:  # noqa: BLE001 — the caller re-raises the original
+        log.exception(
+            "could not land the stopped execution of proposal %s (session %s); "
+            "it stays EXECUTING with its cursor and the next startup parks it "
+            "interrupted", proposal_id, session_id,
+        )
+
+
 async def retry_execution(proposal_id: str, model=None) -> dict | None:
     """Replay a parked execution — the convergence half of outage equivalence.
 
@@ -1270,15 +1362,26 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
     SAME approver the operator's decision recorded — a retry re-executes work,
     never a gate.
 
+    The cursor is the STORED one (DL-218): the Executor writes it around every
+    action, a first execution's included, so `completed_results` /
+    `next_action_index` are exact for a transient park, a re-park and an
+    interrupted execution alike, and the splice below (`completed +
+    failure.completed`) is the same list the Executor stored — the park writes
+    it back unchanged, nothing is counted twice. A retry that stops with no
+    verdict (a crash, a cancellation) lands through the same handback as the
+    approve path (`_land_stopped_execution`).
+
     **The idempotency residual, stated honestly:** completed actions never
     re-run, so a replay cannot duplicate anything the Executor SAW succeed. What
-    it can duplicate is the single in-flight action whose call timed out AFTER
-    the façade may have applied it (a `jira.add_comment` whose HTTP read timed
-    out post-write): that action is retried and MAY double-apply for a
-    non-idempotent capability. v1 accepts this rather than guessing — the fix is
-    façade-level idempotency keys (`proposal.idempotency_key` exists and is
-    unused end-to-end), deferred until a façade can actually honour one. Do not
-    substitute a client-side dedup guess: guessing wrong drops a real write.
+    it can duplicate is the single in-flight action — one whose call timed out
+    AFTER the façade may have applied it (a `jira.add_comment` whose HTTP read
+    timed out post-write), or the one a stopped process had in flight, which an
+    interrupted retry-now resumes AT: that action is retried and MAY
+    double-apply for a non-idempotent capability. v1 accepts this rather than
+    guessing — the owed fix is provider-side idempotency keys
+    (`proposal.idempotency_key` exists and is unused end-to-end), deferred until
+    a façade can actually honour one. Do not substitute a client-side dedup
+    guess: guessing wrong drops a real write.
     """
     row = await repo.claim_proposal_retry(proposal_id)
     if row is None:
@@ -1293,22 +1396,23 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
     proposal = _reconstruct(row)
     remaining = proposal.actions[index:]
 
-    # Resolve per AGENT like the approve route and the resume driver do: a
-    # retried run must come back as the same agent, on the same routing.
-    from central_command.runtime.models import resolve_model
-
-    model = await resolve_model(model, agent_id=agent_id)
-
-    await events.emit(
-        "proposal.execution_retried",
-        ref_id=proposal_id,
-        payload={"attempt": attempts, "next_action_index": index,
-                 "remaining_actions": len(remaining), "session_id": session_id},
-        actor="system",
-    )
-
     source_refs = [e["source_ref"] for e in row["evidence"]]
     try:
+        # Inside the try, so a failure here reaches the handback arm below
+        # instead of leaving the claim EXECUTING until the next restart.
+        # Resolve per AGENT like the approve route and the resume driver do: a
+        # retried run must come back as the same agent, on the same routing.
+        from central_command.runtime.models import resolve_model
+
+        model = await resolve_model(model, agent_id=agent_id)
+
+        await events.emit(
+            "proposal.execution_retried",
+            ref_id=proposal_id,
+            payload={"attempt": attempts, "next_action_index": index,
+                     "remaining_actions": len(remaining), "session_id": session_id},
+            actor="system",
+        )
         if overrides.override_ids_of(approver):
             # The same pre-check an override decision passed, on the REMAINING
             # actions: a retry re-executes work under the stored approver, and
@@ -1320,6 +1424,7 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
         outcome = await executor.execute(
             remaining, approver=approver, source_refs=source_refs,
             proposer=agent_id, proposal_id=proposal_id, action_offset=index,
+            record_progress=True,
         )
     except overrides.OverrideRefused as refused:
         await overrides.emit_refused(proposal_id, approver, refused, "retry")
@@ -1364,6 +1469,13 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
             session_id, proposal_id, agent_id, spliced, model
         )
         return {**out, "attempts": attempts}
+    except BaseException as stopped:
+        # No verdict (a crash, a cancellation at shutdown, a cursor write that
+        # could not be made): the same landing as the approve path's arm, from
+        # the stored cursor. Before it, this left the claim EXECUTING — on
+        # nobody's worklist until a restart.
+        await _settle_stopped_execution(session_id, proposal_id, "RETRY_PENDING", stopped)
+        raise
 
     # Converged. The outcome text is the FULL splice — the agent is told what
     # its proposal did, not what the last attempt did — while the provenance

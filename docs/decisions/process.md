@@ -2520,3 +2520,36 @@ hygiene, and how the test suite itself must be written. See
   is held by every roster agent but the two auditors and the editor.
 - **Enforced:** test: `tests/test_agent_notes.py::test_only_the_executor_writes_a_note`, `tests/test_agent_notes.py::test_the_owner_is_the_gateways_proposer_never_an_argument`, `tests/test_agent_notes.py::test_the_budget_refusal_writes_nothing_and_reads_as_semantic`, `tests/test_agent_notes.py::test_a_swap_retires_and_adds_in_one_approved_action`, `tests/test_agent_notes.py::test_operator_scope_fails_closed_on_world_text`, `tests/test_agent_notes.py::test_operator_scope_fails_closed_on_attachment_text`, `tests/test_agent_notes.py::test_operator_scope_passes_on_a_recorded_chat_turn`, `tests/test_agent_notes.py::test_every_fresh_run_path_renders_the_standing_sections`, `tests/test_agent_notes.py::test_private_notes_render_only_to_their_owner_and_operator_notes_to_all`, `tests/test_agent_notes.py::test_the_widening_is_additive_idempotent_and_never_resurrects`, `tests/test_agent_notes.py::test_reflection_proposes_one_private_note_grounded_in_the_closed_session`; sql: `central_command/db/schema.sql` (the table and the grant block)
 - **Source:** `central_command/runtime/notes.py`; `central_command/runtime/tools.py` (`propose_note`, `propose_note_retire`); `central_command/runtime/packs.py` (`note-propose`); `central_command/runtime/proposals.py`; `central_command/runtime/reflection.py` (`_propose_note`); `central_command/gateway/executor.py` (`_memory_note_add`, `_memory_note_retire`); `central_command/gateway/policy.py` (`check_note_content`); `central_command/db/repo.py` (the note store section); `central_command/api/nerve_gateway.py` (`chat.operator_message`); `central_command/api/routes.py` (`GET /api/agents/{agent_id}/notes`); PRD FR-53; `docs/ARCHITECTURE.md` "The note store"; DL-150; DL-173.
+
+### DL-218 — The Executor writes the execution cursor around every action; an execution that cannot be shown untouched is never handed back for a fresh approval
+
+- **Status:** active
+- **Date:** 2026-11-16
+- **Rule:** [.claude/rules/runtime-resilience.md](../../.claude/rules/runtime-resilience.md) — "**A restart lands nothing FAILED: the startup landing re-parks what each
+  orphan owes, and it lands the TASK, not just the session.**"
+- **Why:** Which actions of an approved proposal had completed was durable
+  only when a handler failure parked it. A process death mid-execution left a
+  first execution's row EXECUTING with no cursor, so the startup landing
+  seeded it at action 0 and the operator's retry-now re-ran actions that had
+  already landed; and a crash or a cancellation inside the Executor handed
+  the claim back to AWAITING_HUMAN, where a second approval re-ran every
+  action from the first. The operator approved the fix on 2026-11-16 as step
+  1 of the "façade idempotency keys" roadmap row (ROADMAP row 3, PRD §6.2).
+- **Decision:** While a proposal executes, `retry_state` carries its cursor at
+  every moment, written by the Executor alone: the action in flight
+  (`in_flight_index`, `in_flight_capability`) BEFORE it starts, its result at
+  `completed_results[index]` and `next_action_index = index + 1` AFTER it
+  returns, each one transaction under the row lock that changes only those
+  keys, guarded on `status = 'EXECUTING'` and idempotent by index. A cursor
+  write that fails or finds the row moved raises, and nothing further runs; a
+  completion that was not recorded leaves its action in flight, so the record
+  reads "uncertain" and never "not started". An execution that stops with no
+  Executor verdict is landed from the stored cursor: handed back only when
+  nothing completed and nothing was in flight, otherwise parked RETRY_PENDING
+  `interrupted` — the record the startup landing writes, with the uncertain
+  action named — so the only ways forward are the operator's retry-now from
+  the cursor or a dismiss. A finished proposal keeps its cursor. Open: the
+  one action in flight, which a retry runs again; provider-side idempotency
+  keys are the owed fix, and reconciliation (DL-188) the end state.
+- **Enforced:** test: `tests/test_execution_cursor.py::test_a_cancel_during_action_three_parks_interrupted_and_retry_now_runs_only_it`, `tests/test_execution_cursor.py::test_a_stop_after_a_completed_action_is_never_handed_back_for_approval`, `tests/test_execution_cursor.py::test_a_process_death_after_action_two_lands_from_the_stored_cursor`, `tests/test_execution_cursor.py::test_a_stop_before_any_action_started_is_handed_back_as_before`, `tests/test_execution_cursor.py::test_a_completion_that_cannot_be_recorded_leaves_its_action_in_flight`, `tests/test_execution_cursor.py::test_a_row_withdrawn_mid_execution_is_not_written_or_moved`, `tests/test_execution_cursor.py::test_the_cursor_writes_are_idempotent_by_index_and_guarded`
+- **Source:** `central_command/gateway/executor.py` (`execute`, `ExecutionCursorError`); `central_command/gateway/gateway.py` (`_land_stopped_execution`, `_settle_stopped_execution`, `retry_execution`); `central_command/db/repo.py` (the execution cursor section, `park_interrupted_executions`); `docs/ARCHITECTURE.md` "The Executor replays by cursor"; DL-188.

@@ -4,6 +4,34 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-16 — v2.91.0: An execution's progress is saved after every action, and a stopped one is never re-run from the start
+
+An approved proposal's actions run in order. Which of them had completed was recorded only when a
+handler failure parked the proposal, so two paths lost it: a process stopped mid-execution was parked at
+action 0, and a crash or a cancellation inside the Executor handed the proposal back for a fresh
+approval. Either way a retry re-ran actions that had already landed. This is step 1 of the "façade
+idempotency keys" roadmap row (DL-218).
+
+- **The Executor writes its cursor around every action.** Before an action starts it is recorded as in
+  flight; after it returns, its result is recorded and the cursor advances. Each write is one
+  transaction that touches only the cursor keys of `retry_state`, only while the row is EXECUTING, and
+  is idempotent by index. A write that fails stops the execution: an action that returned but could not
+  be recorded stays marked in flight (uncertain), never "not started".
+- **A stopped execution is landed from the stored cursor.** If nothing completed and nothing was in
+  flight, the claim goes back where it came from, as before. Otherwise the proposal parks RETRY_PENDING
+  `interrupted` with its progress kept and the uncertain action named: the operator's retry runs only
+  what is left, and no fresh approval can re-run a completed action. A retry that stops without a
+  verdict is landed the same way; it used to stay EXECUTING until the next restart.
+- **The startup landing keeps the prefix of a first execution too.** `park_interrupted_executions` seeds
+  at action 0 only for a row stopped before its first cursor write.
+- **What the cockpit is told.** A waiting proposal's facts gain `in_flight_capability`; the
+  `proposal.execution_interrupted` event gains `in_flight_index`, `in_flight_capability` and `error`.
+
+Still open, and stated where it lives: the one action that was in flight is run again on a retry and
+may double-apply for a non-idempotent capability. The interrupted hold itself is unchanged: only the
+operator's retry or dismiss moves such a proposal. A finished proposal now keeps its cursor in
+`retry_state`. No schema change.
+
 ## 2026-11-16 — v2.90.0: The cockpit's Restart button restarts the API, through the updater's own seam
 
 Settings > Connection carried a "Restart the local gateway" card marked under construction: the vendored

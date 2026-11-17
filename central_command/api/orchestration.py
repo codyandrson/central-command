@@ -809,18 +809,12 @@ async def land_orphans_at_startup() -> dict:
         log.warning("startup: landed %d orphaned RUNNING session(s): %s", len(landed),
                     ", ".join(f"{r['session_id']}={r['outcome']}" for r in landed))
 
+    from central_command.gateway import gateway
+
     interrupted = await repo.park_interrupted_executions()
     for prop in interrupted:
-        state = prop["retry_state"]
-        await events.emit(
-            "proposal.execution_interrupted", ref_id=prop["id"],
-            payload={"session_id": prop["session_id"],
-                     "next_action_index": state.get("next_action_index"),
-                     "completed_actions": state.get("completed_results") or [],
-                     "failed_capability": state.get("failed_capability"),
-                     "dependencies": state.get("dependencies")},
-            actor="system",
-        )
+        # The one payload, shared with the in-process handback.
+        await gateway.emit_execution_interrupted(prop)
     if interrupted:
         log.warning("startup: %d execution(s) interrupted, held for the operator",
                     len(interrupted))

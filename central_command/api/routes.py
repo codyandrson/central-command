@@ -2382,7 +2382,9 @@ def waiting_facts(state: dict, probes: dict, failing: bool) -> dict:
       up, so a unit waiting out its backoff against a healthy probe has none);
     - `attempts`, `next_retry` (`not_before`), `interrupted` (a restart cut the
       execution short — only the operator's retry or a dismiss moves it),
-      `completed_actions` (how many actions had landed), and
+      `completed_actions` (how many actions had landed),
+      `in_flight_capability` (for an interrupted execution, the one action
+      that may or may not have landed; else null — DL-218), and
       `failing_despite_probe` (the loud rule's verdict, passed in)."""
     deps = list(waited_on(state.get("dependencies")))
     downs = [
@@ -2396,6 +2398,8 @@ def waiting_facts(state: dict, probes: dict, failing: bool) -> dict:
         "next_retry": state.get("not_before"),
         "interrupted": bool(state.get("interrupted")),
         "completed_actions": len(state.get("completed_results") or []),
+        "in_flight_capability": ((state.get("interrupted_action") or {}).get("capability")
+                                 if state.get("interrupted") else None),
         "failing_despite_probe": failing,
         "last_error": state.get("last_error"),
     }

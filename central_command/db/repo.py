@@ -1755,6 +1755,191 @@ async def claim_proposal_retry(proposal_id: str) -> dict | None:
         await conn.close()
 
 
+# --- the execution cursor (DL-218) ---------------------------------------------
+#
+# While a proposal is EXECUTING, `retry_state` carries where its execution is,
+# written by the Executor around every action: `in_flight_index` /
+# `in_flight_capability` BEFORE the action starts, then its result at
+# `completed_results[index]`, `next_action_index = index + 1` and the in-flight
+# keys cleared AFTER it returns. Invariant: `next_action_index ==
+# len(completed_results)`, so the action at `next_action_index` is the only one
+# that can be in flight. Every write is one transaction under the row lock that
+# changes only these keys (the park's own keys stay), and only while the row is
+# EXECUTING: a row someone else moved is never written.
+
+
+class ExecutionCursorMismatch(RuntimeError):
+    """A cursor write that does not follow the stored cursor (starting an action
+    other than the next one, or completing one that is not the last started) —
+    a bug or a corrupt record, never a state to write over."""
+
+
+async def _write_execution_cursor(proposal_id: str, change) -> bool:
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "select retry_state from proposal "
+                "where id = $1 and status = 'EXECUTING' for update",
+                proposal_id,
+            )
+            if row is None:
+                return False
+            prior = row["retry_state"]
+            prior = json.loads(prior) if isinstance(prior, str) else prior
+            state = change(dict(prior or {}))
+            await conn.execute(
+                "update proposal set retry_state = $2::jsonb "
+                "where id = $1 and status = 'EXECUTING'",
+                proposal_id, json.dumps(state),
+            )
+            return True
+    finally:
+        await conn.close()
+
+
+async def record_action_started(proposal_id: str, index: int, capability: str) -> bool:
+    """Mark action `index` (absolute, in the proposal) in flight, BEFORE it runs.
+    False when the row is not EXECUTING (nothing written). Writing the same
+    start twice is a no-op; starting any action but the next one raises
+    `ExecutionCursorMismatch` (a completed action is never started again)."""
+    def change(state: dict) -> dict:
+        completed = list(state.get("completed_results") or [])
+        if index != len(completed):
+            raise ExecutionCursorMismatch(
+                f"proposal {proposal_id}: action {index + 1} cannot start, the "
+                f"stored cursor has {len(completed)} action(s) complete")
+        state.update({"completed_results": completed, "next_action_index": index,
+                      "in_flight_index": index, "in_flight_capability": capability})
+        return state
+
+    return await _write_execution_cursor(proposal_id, change)
+
+
+async def record_action_completed(proposal_id: str, index: int, result: str) -> bool:
+    """Record action `index`'s result, AFTER it returned: set at
+    `completed_results[index]` (by index, so a repeated write never appends
+    twice), `next_action_index = index + 1`, the in-flight keys cleared. False
+    when the row is not EXECUTING (nothing written)."""
+    def change(state: dict) -> dict:
+        completed = list(state.get("completed_results") or [])
+        if index == len(completed):
+            completed.append(result)
+        elif index == len(completed) - 1:
+            completed[index] = result
+        else:
+            raise ExecutionCursorMismatch(
+                f"proposal {proposal_id}: action {index + 1} cannot complete, the "
+                f"stored cursor has {len(completed)} action(s) complete")
+        state.update({"completed_results": completed, "next_action_index": index + 1})
+        state.pop("in_flight_index", None)
+        state.pop("in_flight_capability", None)
+        return state
+
+    return await _write_execution_cursor(proposal_id, change)
+
+
+async def hand_back_execution(proposal_id: str, status: str) -> bool:
+    """Give an EXECUTING claim back to the status it was claimed from, guarded:
+    only a row still EXECUTING moves. `decided_at` is touched as
+    `set_proposal_status` touches it, except for a RETRY_PENDING handback, whose
+    decision happened when the operator approved. The caller has established
+    that no action of this claim can have landed (`gateway.
+    _land_stopped_execution`)."""
+    conn = await _conn()
+    try:
+        moved = await conn.fetchval(
+            """
+            update proposal
+               set status = $2,
+                   decided_at = case when $2 = 'RETRY_PENDING' then decided_at
+                                     else now() end
+             where id = $1 and status = 'EXECUTING'
+            returning id
+            """,
+            proposal_id, status,
+        )
+        return moved is not None
+    finally:
+        await conn.close()
+
+
+async def _interrupted_state(conn, proposal_id: str, actions: list, prior: dict | None,
+                             *, now: str, last_error: str) -> dict:
+    """THE record of an execution stopped mid-run with no Executor verdict — one
+    shape for the startup landing and the in-process handback. MERGED into the
+    stored cursor (its completed prefix kept); a row with no retry_state at all
+    (stopped before the first cursor write) is seeded at action 0. The action
+    at the cursor is the one that may or may not have landed: recorded as
+    `in_flight_index` / `in_flight_capability` and, for the record (the cursor
+    keys move again if the operator retries), as `interrupted_action`."""
+    from central_command.contract.dependencies import dependencies_for_capability
+
+    state = dict(prior) if prior else {
+        "next_action_index": 0, "completed_results": [], "attempts": 0,
+    }
+    # A first execution's cursor carries no park bookkeeping: no attempt spent.
+    state.setdefault("attempts", 0)
+    if not state.get("approver"):
+        approver = await conn.fetchval(
+            "select actor from audit_event where kind = 'proposal.decided' "
+            "and ref_id = $1 and payload->>'verdict' = 'approved' "
+            "order by id desc limit 1", proposal_id,
+        )
+        if approver:
+            state["approver"] = approver
+    index = int(state.get("next_action_index") or 0)
+    capability = (actions[index].get("capability")
+                  if 0 <= index < len(actions) else None)
+    state.update({
+        "interrupted": True,
+        "parked_at": now,
+        "dependencies": list(dependencies_for_capability(capability)),
+        "last_error": last_error[:500],
+        "in_flight_index": index,
+        "in_flight_capability": capability,
+        "interrupted_action": {"index": index, "capability": capability},
+    })
+    if capability:
+        state["failed_capability"] = capability
+    return state
+
+
+async def park_interrupted_execution(proposal_id: str, last_error: str) -> dict | None:
+    """Park ONE EXECUTING proposal RETRY_PENDING `interrupted`, in this process:
+    the handback arms' landing when the execution stopped without a verdict
+    after an action may have run (`gateway._land_stopped_execution`). The same
+    record `park_interrupted_executions` writes at startup; guarded, so a row no
+    longer EXECUTING is left alone (None). Returns `{id, session_id, agent_id,
+    retry_state}`."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            r = await conn.fetchrow(
+                "select id, session_id, agent_id, actions, retry_state "
+                "from proposal where id = $1 and status = 'EXECUTING' for update",
+                proposal_id,
+            )
+            if r is None:
+                return None
+            actions = r["actions"]
+            actions = json.loads(actions) if isinstance(actions, str) else (actions or [])
+            prior = r["retry_state"]
+            prior = json.loads(prior) if isinstance(prior, str) else prior
+            state = await _interrupted_state(conn, r["id"], actions, prior,
+                                             now=now, last_error=last_error)
+            await conn.execute(
+                "update proposal set status = 'RETRY_PENDING', "
+                "retry_state = $2::jsonb where id = $1",
+                r["id"], json.dumps(state),
+            )
+            return {"id": r["id"], "session_id": r["session_id"],
+                    "agent_id": r["agent_id"], "retry_state": state}
+    finally:
+        await conn.close()
+
+
 async def withdraw_proposal_if_open(proposal_id: str) -> str | None:
     """The operator dismisses a proposal that has NOT been executed: AWAITING_HUMAN
     (no action needed) or RETRY_PENDING (a waiting approved execution) →
@@ -4767,11 +4952,18 @@ async def park_sessionless_in_progress_tasks() -> list[dict]:
 async def park_interrupted_executions() -> list[dict]:
     """Proposals a dead process left EXECUTING — STARTUP ONLY: nothing executes
     in a process that has not started. Parked RETRY_PENDING with
-    `retry_state.interrupted = true`, MERGED into any existing retry_state: a
-    proposal claimed from RETRY_PENDING already carries `completed_results` and
-    `next_action_index`, the known-complete prefix, and those are kept. A fresh
-    execution (no retry_state) is seeded at action 0 with nothing complete, and
-    the approver its decision event recorded.
+    `retry_state.interrupted = true`, MERGED into the stored cursor
+    (`_interrupted_state`): the Executor writes `completed_results` and
+    `next_action_index` around every action of every execution, a first one
+    included (DL-218), so the known-complete prefix is kept and the one action
+    that may or may not have landed is named (`in_flight_index`,
+    `in_flight_capability`, `interrupted_action`). Only a row with no
+    retry_state at all — killed before its first cursor write — is seeded at
+    action 0 with nothing complete, and the approver its decision event
+    recorded. Where no in-flight marker was written (killed between one
+    action's completion and the next one's start, or a row from before the
+    cursor), the next action is named as the uncertain one: it is the next to
+    run either way.
 
     INTERIM, by the operator's decision of 2026-10-27: an interrupted proposal
     waits for the operator (retry-now or dismiss); no sweep re-runs it, because
@@ -4781,8 +4973,6 @@ async def park_interrupted_executions() -> list[dict]:
     or re-run it with no operator click. Not built here (deferred work).
 
     Returns `{id, session_id, agent_id, retry_state}` per proposal."""
-    from central_command.contract.dependencies import dependencies_for_capability
-
     now = datetime.now(timezone.utc).isoformat()
     out: list[dict] = []
     conn = await _conn()
@@ -4797,28 +4987,10 @@ async def park_interrupted_executions() -> list[dict]:
                 actions = json.loads(actions) if isinstance(actions, str) else (actions or [])
                 prior = r["retry_state"]
                 prior = json.loads(prior) if isinstance(prior, str) else prior
-                state = dict(prior) if prior else {
-                    "next_action_index": 0, "completed_results": [], "attempts": 0,
-                }
-                if not state.get("approver"):
-                    approver = await conn.fetchval(
-                        "select actor from audit_event where kind = 'proposal.decided' "
-                        "and ref_id = $1 and payload->>'verdict' = 'approved' "
-                        "order by id desc limit 1", r["id"],
-                    )
-                    if approver:
-                        state["approver"] = approver
-                index = int(state.get("next_action_index") or 0)
-                capability = (actions[index].get("capability")
-                              if 0 <= index < len(actions) else None)
-                state.update({
-                    "interrupted": True,
-                    "parked_at": now,
-                    "dependencies": list(dependencies_for_capability(capability)),
-                    "last_error": "execution interrupted by a process restart",
-                })
-                if capability:
-                    state["failed_capability"] = capability
+                state = await _interrupted_state(
+                    conn, r["id"], actions, prior, now=now,
+                    last_error="execution interrupted by a process restart",
+                )
                 await conn.execute(
                     "update proposal set status = 'RETRY_PENDING', "
                     "retry_state = $2::jsonb where id = $1",

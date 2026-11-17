@@ -38,7 +38,7 @@ pytestmark = needs_pg
 
 WAITING_FIELDS = {
     "dependencies", "down_since", "attempts", "next_retry", "interrupted",
-    "completed_actions", "failing_despite_probe", "last_error",
+    "completed_actions", "in_flight_capability", "failing_despite_probe", "last_error",
 }
 
 

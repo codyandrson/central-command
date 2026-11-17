@@ -558,8 +558,17 @@ process's environ.
     companion read for that view (approved skill documents the agent proposed,
     and its pending learning proposals).
 - **The Executor replays by cursor.** The completed-actions list is the
-  cursor, so a half-landed non-idempotent write may be applied twice on retry;
-  façade idempotency keys are the owed fix (PRD §6.2).
+  cursor, and the Executor writes it into `proposal.retry_state` around every
+  action of every execution, a first one included (DL-218): the action in
+  flight (`in_flight_index`, `in_flight_capability`) before it starts, its
+  result and `next_action_index` after it returns, guarded on `EXECUTING`. A
+  completed action therefore never re-runs, whatever stopped the execution,
+  and an execution stopped with no verdict after an action may have landed
+  parks `interrupted` instead of going back for a fresh approval. A finished
+  proposal keeps its cursor (every result, nothing in flight). What remains
+  open is the ONE action in flight — failed on a timeout, or cut off by a stop
+  — which a retry runs again and a non-idempotent façade may apply twice;
+  provider-side idempotency keys are the owed fix (PRD §6.2).
 
 ## 3. Lifecycles, as built
 
@@ -1453,10 +1462,17 @@ waits on it. (2) `routes.startup_task_sweep` re-parks a sessionless
 (3) the ledger reclaim (`CLAIMED` → `UNPROCESSED`); then the loops; then the
 background `resume_sweep`. `Dispatcher.start` no longer sweeps sessions at all
 (a run in a live process is alive). Every `EXECUTING` proposal parks
-`RETRY_PENDING` with `retry_state.interrupted` (merged: a retry's
-known-complete prefix is kept; a fresh execution is seeded at action 0) and
-`proposal.execution_interrupted`; no sweep moves it, only the operator's retry
-or a dismiss. **That hold is an INTERIM, not the desired end state** (the
+`RETRY_PENDING` with `retry_state.interrupted` (merged into the cursor the
+Executor wrote, so the known-complete prefix is kept for a first execution and
+a retry alike and the uncertain action is named in `in_flight_*` and
+`interrupted_action`; only a row killed before its first cursor write is seeded
+at action 0) and `proposal.execution_interrupted`; no sweep moves it, only the
+operator's retry or a dismiss. A live process writes the same record when an
+execution stops with no verdict after an action may have run (a cancellation
+at shutdown, a cursor write that failed): the handback arms of
+`approve_and_execute` and `retry_execution` read the stored cursor and park it
+`interrupted`, handing the claim back only when nothing completed and nothing
+was in flight (DL-218). **That hold is an INTERIM, not the desired end state** (the
 operator, 2026-10-27): the end state is reconciliation, where the Executor's
 record of the in-flight action is enough to ask the service whether it landed
 (was the Jira issue created?) and resume past it or re-run it with no operator

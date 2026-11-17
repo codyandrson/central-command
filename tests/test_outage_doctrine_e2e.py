@@ -584,7 +584,9 @@ async def test_a_no_on_every_other_surface_is_terminal_at_once(monkeypatch):
     # An execution: the proposal FAILS on the first attempt.
     parked = await _parked_run(monkeypatch, fail="400 invalid episode body")
     row = await repo.load_proposal(parked["proposal_id"])
-    assert row["status"] == "FAILED" and row["retry_state"] is None
+    # Never parked: only the Executor's cursor (DL-218), no park bookkeeping.
+    assert row["status"] == "FAILED"
+    assert "parked_at" not in row["retry_state"] and "attempts" not in row["retry_state"]
     assert "proposal.execution_parked" not in await event_kinds(parked["proposal_id"])
 
     # A ledger item: semantic, the attempt is spent and there is no backoff.

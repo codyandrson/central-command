@@ -157,7 +157,7 @@ async def test_execution_failure_fails_the_task(monkeypatch):
         TaskCreateIn(instructions="Comment on TASKS-12.", agent_id="jira-expert")
     )
 
-    async def boom(actions, approver, source_refs, proposer=None, proposal_id=None):
+    async def boom(actions, approver, source_refs, proposer=None, proposal_id=None, **_kw):
         raise executor.ExecutionFailed("jira.add_comment", "facade 500", [])
 
     monkeypatch.setattr(gateway.executor, "execute", boom)

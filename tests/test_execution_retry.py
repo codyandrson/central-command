@@ -184,7 +184,11 @@ async def test_a_semantic_execution_failure_keeps_todays_behaviour(monkeypatch):
     assert out["failed_capability"] == "jira.set_due_date"
     row = await repo.load_proposal(run["proposal_id"])
     assert row["status"] == "FAILED"
-    assert row["retry_state"] is None
+    # Never parked: the row holds only the Executor's cursor (DL-218), which
+    # names the action that failed; no park bookkeeping.
+    assert row["retry_state"] == {"completed_results": [], "next_action_index": 0,
+                                  "in_flight_index": 0,
+                                  "in_flight_capability": "jira.set_due_date"}
     kinds = await _kinds(run["proposal_id"])
     assert "proposal.failed" in kinds
     assert "proposal.execution_parked" not in kinds

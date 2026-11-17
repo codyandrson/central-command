@@ -77,6 +77,22 @@ class ExecutionFailed(ExecutorError):
         self.world_moved = world_moved
 
 
+class ExecutionCursorError(ExecutorError):
+    """The execution cursor (DL-218) could not be written, or the row it is
+    written to is no longer EXECUTING. Deliberately NOT an `ExecutionFailed`:
+    no handler gave a verdict, so the gateway's handback arm lands it from the
+    STORED cursor — and a completion that could not be recorded leaves its
+    action marked in flight there, which parks the proposal `interrupted` for
+    the operator, never re-runnable by a sweep. `landed` says whether the
+    action at `index` had returned; the message carries its result when it
+    had, so the record says what the cursor could not."""
+
+    def __init__(self, message: str, *, index: int, landed: bool):
+        super().__init__(message)
+        self.index = index
+        self.landed = landed
+
+
 @dataclass
 class ExecutionOutcome:
     result_text: str          # what the agent is told on resume
@@ -2705,14 +2721,68 @@ def _execution_failed(action: Action, e: Exception, completed: list[str]) -> Exe
     )
 
 
+async def _cursor_started(proposal_id: str, index: int, capability: str) -> None:
+    """Record action `index` in flight BEFORE it runs; raise if that cannot be
+    recorded, so an action is never run without its marker."""
+    from central_command.db import repo
+
+    try:
+        written = await repo.record_action_started(proposal_id, index, capability)
+    except Exception as e:  # noqa: BLE001 — raised as the cursor's own error
+        raise ExecutionCursorError(
+            f"could not record that action {index + 1} ({capability}) is starting, "
+            f"so it was not started: {e}", index=index, landed=False,
+        ) from e
+    if not written:
+        raise ExecutionCursorError(
+            f"proposal {proposal_id} is no longer EXECUTING; action {index + 1} "
+            f"({capability}) was not started", index=index, landed=False,
+        )
+
+
+async def _cursor_completed(proposal_id: str, index: int, capability: str,
+                            result: str) -> None:
+    """Record action `index`'s result AFTER it returned; raise if that cannot be
+    recorded. The action stays marked in flight in the stored cursor, and the
+    message says it returned and with what."""
+    from central_command.db import repo
+
+    try:
+        written = await repo.record_action_completed(proposal_id, index, result)
+    except Exception as e:  # noqa: BLE001 — raised as the cursor's own error
+        raise ExecutionCursorError(
+            f"action {index + 1} ({capability}) returned ({result[:200]}) but its "
+            f"completion could not be recorded: {e}", index=index, landed=True,
+        ) from e
+    if not written:
+        raise ExecutionCursorError(
+            f"action {index + 1} ({capability}) returned ({result[:200]}) but "
+            f"proposal {proposal_id} is no longer EXECUTING; nothing further runs",
+            index=index, landed=True,
+        )
+
+
 async def execute(
     actions: list[Action], approver: str, source_refs: list[str],
     proposer: str | None = None, proposal_id: str | None = None,
-    action_offset: int = 0,
+    action_offset: int = 0, *, record_progress: bool = False,
 ) -> ExecutionOutcome:
     """Execute a proposal's actions in order. Provenance is stamped from the
     approver and the evidence source refs. A failing action raises
     ExecutionFailed carrying every result that completed before it.
+
+    **`record_progress=True` writes the durable cursor (DL-218)** into the
+    claimed row's `retry_state`, around every action: in flight BEFORE it
+    starts (`repo.record_action_started`), its result and the advanced
+    `next_action_index` AFTER it returns (`repo.record_action_completed`),
+    both at the action's absolute index (`action_offset + n`). The gateway
+    passes it on both of its paths, under its EXECUTING claim; it requires a
+    `proposal_id`. Neither write is swallowed: one that fails, or that finds
+    the row no longer EXECUTING, raises `ExecutionCursorError` and nothing
+    further runs. The order makes the stored record honest either way: a start
+    that was not recorded never starts its action, and a completion that was
+    not recorded leaves its action marked IN FLIGHT — uncertain, which parks
+    for the operator — never "not started", which a sweep would re-run.
 
     `proposer` is the agent that DRAFTED the proposal, supplied by the gateway
     from the proposal row. It is not an argument any agent can write: a
@@ -2720,16 +2790,19 @@ async def execute(
     plane, never from the request (stage 5a — a coach drafts for others, so
     drafter and target are no longer the same agent).
 
-    **`ExecutionFailed.completed` is also the REPLAY CURSOR** (outage
-    equivalence slice 3): actions run in order, so on a retry the gateway calls
-    this again with `actions[len(completed):]` and a completed action never
-    re-runs. The residual, stated where it lives: the ONE action whose call
-    failed may already have been applied by the façade (an HTTP read timing out
-    after the write landed) — that action is retried and MAY double-apply for a
-    non-idempotent capability. The fix is façade-level idempotency keys
-    (`proposal.idempotency_key` exists and is unused end-to-end), deferred until
-    a façade can honour one; a client-side dedup guess would be worse, because
-    guessing wrong drops a real write.
+    **`ExecutionFailed.completed` is THIS call's part of the replay cursor**
+    (outage equivalence slice 3): actions run in order, so on a retry the
+    gateway calls this again with `actions[next_action_index:]` and splices
+    the prefix it holds in front; a completed action never re-runs. With
+    `record_progress` the stored `completed_results` is that same splice,
+    written action by action, so the two agree in every path. The residual,
+    stated where it lives: the ONE action whose call failed, or that was in
+    flight when the process stopped, may already have been applied by the
+    façade (an HTTP read timing out after the write landed) — that action is
+    retried and MAY double-apply for a non-idempotent capability. The owed fix
+    is provider-side idempotency keys (`proposal.idempotency_key` exists and is
+    unused end-to-end), deferred until a façade can honour one; a client-side
+    dedup guess would be worse, because guessing wrong drops a real write.
 
     **An override approver is checked again here — the BACKSTOP** (safeguard 1).
     After the shape pass and before the first action, an `override:<id>`
@@ -2752,6 +2825,8 @@ async def execute(
     # path), and checking EVERY action before the FIRST runs means a malformed
     # third action cannot leave the first two half-applied. Same list
     # (`contract.ARG_SPECS`), so a draft that passes there executes here.
+    if record_progress and not proposal_id:
+        raise ValueError("record_progress needs the proposal_id whose row holds the cursor")
     for a in actions:
         problems = validate_action_args(a.capability, a.arguments)
         if problems:
@@ -2803,12 +2878,18 @@ async def execute(
             raise _execution_failed(pre.action, pre.error, []) from pre.error
         results: list[str] = []
         for n, a in enumerate(actions):
+            index = action_offset + n
+            if record_progress:
+                await _cursor_started(proposal_id, index, a.capability)
             try:
-                results.append(await _execute_action(
-                    a, covering.get(action_offset + n, approver), proposer))
+                result = await _execute_action(
+                    a, covering.get(index, approver), proposer)
                 touched |= _jira_keys_of(a)
             except Exception as e:  # noqa: BLE001 — every failure becomes the honest record
                 raise _execution_failed(a, e, results) from e
+            results.append(result)
+            if record_progress:
+                await _cursor_completed(proposal_id, index, a.capability, result)
     finally:
         _current_proposal_id.reset(token)
         _touched_issues.reset(touched_token)

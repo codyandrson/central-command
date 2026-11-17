@@ -169,6 +169,9 @@ export interface WaitingFacts {
    *  dismiss moves it. */
   interrupted: boolean;
   completed_actions: number;
+  /** For an interrupted execution, the one action that may or may not have
+   *  landed (its capability); null otherwise. */
+  in_flight_capability?: string | null;
   /** Failing against a healthy probe — reported by the loud rule. */
   failing_despite_probe: boolean;
   last_error?: string | null;
