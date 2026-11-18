@@ -4,6 +4,32 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.94.0: The speech pod is no longer CPU-capped, and speech requests are taken one at a time
+
+Read-aloud was unusably slow on a live install: 100 characters took 21 s and 1,200 characters 190 s,
+about 2.7 times slower than playback. The cause was the pod's own CPU limit. ONNX Runtime, which runs the
+voice model, ignores a container's CPU quota and starts one spinning thread per physical core of the
+node; under a 2-CPU limit on a 4-core node the pod was throttled in 97% of scheduler periods. When the
+cockpit then sent one long text three times and the proxy retried each, fifteen jobs landed on the pod,
+which pinned its limits, failed its probes and was restarted (DL-220).
+
+- **No CPU limit on the speech pod** (`deploy/k3s/90-speech.yaml`). Its memory limit stays: memory is not
+  compressible, and the pod reached it during the pile-up. The single-node profile carried no CPU cap.
+- **The graph keeps priority.** Without a limit, contended CPU on the compute node is divided by request,
+  so the graph database's CPU request rises from 250m to 500m, twice the speech pod's. This restarts the
+  graph database once, at the update that carries it; the updater waits for the rollout. Requests on the
+  compute node total 1.4 CPU, so a 2-CPU node still schedules everything.
+- **One speech job at a time, never retried, per alias.** `cc-tts` and `cc-stt` declare
+  `max_parallel_requests: 1` and `num_retries: 0`; no global LiteLLM setting changed. The updater's policy
+  step adds the two parameters to the existing rows and re-reads them to prove the operator's model and
+  `api_base` did not move. A fresh install on either profile is created with them.
+
+Not established from documentation, to be read on a live proxy: that the audio routes honour the
+per-deployment concurrency limit and retry count. Not changed here: the cockpit still sends a whole reply
+as one request (speaking sentence by sentence is a later change), and the speech timeouts.
+
+No schema or unit change. Manifests: `40-graph.yaml`, `90-speech.yaml`.
+
 ## 2026-11-18 — v2.93.3: A short name finds the entity it belongs to, and a merge keeps the episode links
 
 Found on a live graph: five separate entities with the same one-word name were created in three days

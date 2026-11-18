@@ -7,6 +7,11 @@
 The declaration is model-preferences.yaml next to this file. Reads the master
 key from deploy/k3s/.env; the key is never printed.
 
+Besides the routed `models:`, it owns the `policy_params:` of the
+`registration_only:` entries that declare them (cc-tts / cc-stt: one job at a
+time, no retries, DL-220): `--apply` PATCHes exactly those litellm_params onto
+the existing rows and `--check` reports a missing or different value as drift.
+
 Why a script and not the LiteLLM UI: the policy is a decision that belongs in a
 diff, and `verify.sh` needs a machine-checkable answer to "does the running
 proxy still match what we committed?".
@@ -116,6 +121,55 @@ def fetch_live() -> tuple[list[dict], dict]:
 
 _MISSING = object()
 
+# What `policy_params:` may never redeclare: the provider identity and the
+# credential are the operator's (register-models.py's OWNED + the key), and
+# `timeout` has its own home.
+_NOT_POLICY_PARAMS = frozenset({"model", "api_base", "api_key", "timeout", "mode"})
+
+
+def declared_policy_params(declared: dict) -> dict[str, dict]:
+    """alias -> `policy_params:` of each `registration_only:` entry that
+    declares one. Pure; refuses a malformed block loudly."""
+    out: dict[str, dict] = {}
+    for alias, spec in (declared.get("registration_only") or {}).items():
+        pp = (spec or {}).get("policy_params")
+        if not pp:
+            continue
+        if not isinstance(pp, dict):
+            sys.exit(f"{alias}: policy_params must be a mapping, got {type(pp).__name__}")
+        clash = sorted(set(pp) & _NOT_POLICY_PARAMS)
+        if clash:
+            sys.exit(f"{alias}: policy_params may not redeclare {clash}")
+        out[alias] = dict(pp)
+    return out
+
+
+def _same_value(got, want) -> bool:
+    """Numbers compare as numbers (LiteLLM may echo 1 as 1.0); None is absent."""
+    if got is None:
+        return False
+    if isinstance(got, (int, float)) and not isinstance(got, bool) \
+            and isinstance(want, (int, float)) and not isinstance(want, bool):
+        return float(got) == float(want)
+    return got == want
+
+
+def policy_params_drift(want: dict[str, dict], live_models: list[dict]) -> list[str]:
+    """Drift lines for the declared `policy_params`, one per row and key. An
+    alias that is not registered is not drift HERE (register-models.py owns
+    existence), and EVERY row of an alias is held to the values."""
+    drift: list[str] = []
+    for alias, params in want.items():
+        for row in (m for m in live_models if m.get("model_name") == alias):
+            live = row.get("litellm_params") or {}
+            for key, value in params.items():
+                got = live.get(key, _MISSING)
+                if got is _MISSING or got is None:
+                    drift.append(f"{alias}: litellm_params.{key} is absent (want {value})")
+                elif not _same_value(got, value):
+                    drift.append(f"{alias}: litellm_params.{key} {got} != declared {value}")
+    return drift
+
 
 def diff_policy(declared: dict, live_models: list[dict], live_fallbacks: dict) -> list[str]:
     """Return human-readable drift lines. Empty list == live matches declared.
@@ -179,6 +233,8 @@ def diff_policy(declared: dict, live_models: list[dict], live_fallbacks: dict) -
                 drift.append(f"{alias}: timeout {got_timeout} set but declaration says none")
         elif got_timeout is None or float(got_timeout) != float(want_timeout):
             drift.append(f"{alias}: timeout {got_timeout} != declared {want_timeout}")
+
+    drift.extend(policy_params_drift(declared_policy_params(declared), live_models))
 
     for alias, targets in (declared.get("fallbacks") or {}).items():
         got = live_fallbacks.get(alias)
@@ -256,6 +312,58 @@ def _declared_upstream_host() -> str:
     return _host(url)
 
 
+def build_policy_params_patch(params: dict) -> dict:
+    """The PATCH body for a row's `policy_params`: litellm_params ONLY, and only
+    the declared keys. The row's model, api_base and key are the operator's and
+    are never re-sent (PATCH keeps what it is not given, the same property
+    `--apply` has relied on for `timeout` since 2026-07-26; apply_policy_params
+    re-reads the row to prove it)."""
+    return {"litellm_params": dict(params)}
+
+
+# What must survive a policy_params PATCH untouched, read back afterwards.
+_IDENTITY_KEYS = ("model", "api_base", "mode", "timeout")
+
+
+def apply_policy_params(declared: dict, live_models: list[dict]) -> list[str]:
+    """PATCH the declared `policy_params` onto every existing row of each alias,
+    then re-read the proxy and CHECK that nothing else on the row moved. Returns
+    the aliases whose row could not be proven intact (also printed); an alias that
+    is not registered is skipped, never created here."""
+    failed: list[str] = []
+    for alias, params in declared_policy_params(declared).items():
+        rows = [m for m in live_models if m.get("model_name") == alias]
+        if not rows:
+            print(f"  skipped  {alias}: not registered on the proxy (register-models.py creates it)")
+            continue
+        for row in rows:
+            model_id = (row.get("model_info") or {}).get("id")
+            if not model_id:
+                sys.exit(f"{alias}: proxy returned no model_info.id")
+            before = row.get("litellm_params") or {}
+            todo = {k: v for k, v in params.items() if not _same_value(before.get(k), v)}
+            if not todo:
+                print(f"  ok       {alias}  policy_params already {params}")
+                continue
+            _request("PATCH", f"/model/{model_id}/update", build_policy_params_patch(todo))
+            after = next((m for m in _request("GET", "/model/info").get("data", [])
+                          if (m.get("model_info") or {}).get("id") == model_id), None)
+            after_params = (after or {}).get("litellm_params") or {}
+            lost = [k for k in _IDENTITY_KEYS if before.get(k) != after_params.get(k)]
+            unset = [k for k in todo if not _same_value(after_params.get(k), todo[k])]
+            if after is None or lost or unset:
+                what = ("the row is gone from /model/info" if after is None else
+                        "; ".join(filter(None, [f"changed {lost}" if lost else "",
+                                                f"did not take {unset}" if unset else ""])))
+                print(f"  FAILED   {alias} ({model_id}): after the PATCH {what} — its model was "
+                      f"{before.get('model')!r} and api_base {before.get('api_base')!r}; "
+                      "check the row in the LiteLLM UI")
+                failed.append(alias)
+            else:
+                print(f"  applied  {alias}  policy_params {todo}")
+    return failed
+
+
 def apply_policy(declared: dict) -> None:
     live_models, _ = fetch_live()
     by_alias = {m.get("model_name"): m for m in live_models if m.get("model_name")}
@@ -291,6 +399,8 @@ def apply_policy(declared: dict) -> None:
         _request("PATCH", f"/model/{model_id}/update", build_patch_body(spec))
         print(f"  applied  {alias}")
 
+    unproven = apply_policy_params(declared, live_models)
+
     for alias, targets in (declared.get("fallbacks") or {}).items():
         _request(
             "POST",
@@ -304,6 +414,8 @@ def apply_policy(declared: dict) -> None:
         "      (router.py:_create_adaptive_router). Restart the proxy, or POST\n"
         "      /config/reload, before /adaptive_router/state reflects this."
     )
+    if unproven:
+        sys.exit(f"policy_params NOT proven on {len(unproven)} alias(es): {', '.join(unproven)}")
     if refused:
         sys.exit(f"policy NOT applied to {len(refused)} alias(es) whose live row is not the "
                  f"local fleet: {', '.join(refused)}")

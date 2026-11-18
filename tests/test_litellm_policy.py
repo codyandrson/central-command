@@ -452,3 +452,164 @@ def test_host_parsing_strips_scheme_path_and_userinfo(policy_mod):
     assert policy_mod._host("HTTPS://LLM.Corp.Example/v1/") == "llm.corp.example"
     assert policy_mod._host("not a url") == ""
     assert policy_mod._host(None) == ""
+
+
+# ── policy_params: one speech job at a time, no proxy retries (DL-220) ─────────
+# The CPU speech engine piled up on 2026-11-17 when the proxy retried a slow
+# synthesis. The two litellm_params that stop that are declared PER ALIAS
+# (`policy_params:` on cc-tts / cc-stt), never as a global router or
+# litellm_settings value, and policy.py owns them on an existing row.
+
+SPEECH_ALIASES = {"cc-tts", "cc-stt"}
+SPEECH_PARAMS = {"max_parallel_requests": 1, "num_retries": 0}
+_SINGLE_MODELS = Path(__file__).resolve().parents[1] / "deploy" / "single" / "models.json"
+
+
+def _keys_anywhere(node, wanted, path=""):
+    """Every path at which a key named in `wanted` appears in a nested value."""
+    hits = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in wanted:
+                hits.append(f"{path}/{k}")
+            hits += _keys_anywhere(v, wanted, f"{path}/{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            hits += _keys_anywhere(v, wanted, f"{path}[{i}]")
+    return hits
+
+
+def test_the_two_speech_aliases_declare_one_job_at_a_time_and_no_retries(policy):
+    for alias in SPEECH_ALIASES:
+        assert policy["registration_only"][alias]["policy_params"] == SPEECH_PARAMS
+
+
+def test_no_other_alias_gained_the_concurrency_or_retry_parameters(policy):
+    import json
+
+    wanted = set(SPEECH_PARAMS)
+    for name, doc in (("model-preferences.yaml", policy),
+                      ("models.json", json.loads(_SINGLE_MODELS.read_text(encoding="utf-8")))):
+        hits = _keys_anywhere(doc, wanted)
+        allowed = {f"/registration_only/{a}/policy_params/{k}" for a in SPEECH_ALIASES for k in wanted}
+        assert set(hits) == allowed, f"{name}: {sorted(set(hits) ^ allowed)}"
+
+
+def test_the_single_node_declaration_mirrors_the_speech_params():
+    import json
+
+    decl = json.loads(_SINGLE_MODELS.read_text(encoding="utf-8"))["registration_only"]
+    for alias in SPEECH_ALIASES:
+        assert decl[alias]["policy_params"] == SPEECH_PARAMS
+
+
+def test_the_proxy_wide_settings_set_neither_parameter(config):
+    """A per-model limit is never fixed with a global setting."""
+    for section in ("general_settings", "litellm_settings", "router_settings"):
+        assert not set(config.get(section) or {}) & {"max_parallel_requests", "num_retries",
+                                                     "default_max_parallel_requests"}, section
+
+
+def _speech_declared():
+    return {"models": {}, "registration_only": {
+        a: {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER", "timeout": 120},
+            "policy_params": dict(SPEECH_PARAMS)} for a in ("cc-tts", "cc-stt")}}
+
+
+def _speech_row(alias, **extra):
+    return {"model_name": alias,
+            "model_info": {"id": f"id-{alias}", "mode": "audio_speech"},
+            "litellm_params": {"model": "openai/operator-chosen", "api_base": "http://engine.example:9/v1",
+                               "timeout": 120, "mode": "audio_speech", **extra}}
+
+
+def test_check_reports_a_speech_row_without_the_params_and_a_wrong_one(policy_mod):
+    rows = [_speech_row("cc-tts"), _speech_row("cc-stt", max_parallel_requests=4, num_retries=0)]
+    drift = policy_mod.diff_policy(_speech_declared(), rows, {})
+    assert any("cc-tts" in d and "max_parallel_requests" in d and "absent" in d for d in drift)
+    assert any("cc-tts" in d and "num_retries" in d for d in drift)
+    assert any("cc-stt" in d and "max_parallel_requests 4 != declared 1" in d for d in drift)
+    assert not any("cc-stt" in d and "num_retries" in d for d in drift)
+
+
+def test_check_is_clean_once_the_params_are_there_and_ignores_an_absent_alias(policy_mod):
+    rows = [_speech_row(a, max_parallel_requests=1.0, num_retries=0) for a in ("cc-tts", "cc-stt")]
+    assert policy_mod.diff_policy(_speech_declared(), rows, {}) == []
+    # not registered: register-models.py's business, not drift here
+    assert policy_mod.diff_policy(_speech_declared(), [], {}) == []
+
+
+class _ProxyStub:
+    """Records every request policy.py makes and answers /model/info from `live`;
+    a PATCH merges litellm_params into the row the way the real route does."""
+
+    def __init__(self, live, drop=()):
+        self.live, self.calls, self.drop = live, [], set(drop)
+
+    def __call__(self, method, path, body=None):
+        self.calls.append((method, path, body))
+        if method == "GET" and path == "/model/info":
+            return {"data": self.live}
+        if method == "PATCH":
+            row = next(m for m in self.live if f"/model/{m['model_info']['id']}/update" == path)
+            for k, v in (body.get("litellm_params") or {}).items():
+                row["litellm_params"][k] = v
+            for k in self.drop:
+                row["litellm_params"].pop(k, None)
+            return {}
+        if method == "GET" and path.startswith("/fallback/"):
+            return {}
+        raise AssertionError(f"unexpected {method} {path}")
+
+
+def test_apply_adds_the_params_to_an_existing_row_and_leaves_model_and_api_base_alone(
+        policy_mod, monkeypatch, capsys):
+    rows = [_speech_row("cc-tts"), _speech_row("cc-stt", num_retries=0)]
+    before = {r["model_name"]: dict(r["litellm_params"]) for r in rows}
+    stub = _ProxyStub(rows)
+    monkeypatch.setattr(policy_mod, "_request", stub)
+    policy_mod.apply_policy(_speech_declared())
+    patches = {p: b for m, p, b in stub.calls if m == "PATCH"}
+    # only the speech rows, only litellm_params, only the keys that were missing
+    assert patches == {
+        "/model/id-cc-tts/update": {"litellm_params": {"max_parallel_requests": 1, "num_retries": 0}},
+        "/model/id-cc-stt/update": {"litellm_params": {"max_parallel_requests": 1}},
+    }
+    for row in rows:
+        got, was = row["litellm_params"], before[row["model_name"]]
+        for k in ("model", "api_base", "timeout", "mode"):
+            assert got[k] == was[k]
+        assert (got["max_parallel_requests"], got["num_retries"]) == (1, 0)
+    assert "applied  cc-tts" in capsys.readouterr().out
+    # and a second apply writes nothing
+    stub.calls.clear()
+    policy_mod.apply_policy(_speech_declared())
+    assert not [c for c in stub.calls if c[0] == "PATCH"]
+
+
+def test_apply_fails_loudly_when_the_patch_did_not_take(policy_mod, monkeypatch, capsys):
+    rows = [_speech_row("cc-tts")]
+    monkeypatch.setattr(policy_mod, "_request", _ProxyStub(rows, drop=("num_retries",)))
+    decl = _speech_declared()
+    del decl["registration_only"]["cc-stt"]
+    with pytest.raises(SystemExit) as exc:
+        policy_mod.apply_policy(decl)
+    assert "cc-tts" in str(exc.value)
+    out = capsys.readouterr().out
+    assert "FAILED   cc-tts" in out and "did not take" in out
+
+
+def test_apply_skips_an_unregistered_speech_alias_without_creating_it(policy_mod, monkeypatch, capsys):
+    stub = _ProxyStub([_speech_row("cc-tts", max_parallel_requests=1, num_retries=0)])
+    monkeypatch.setattr(policy_mod, "_request", stub)
+    policy_mod.apply_policy(_speech_declared())
+    assert "skipped  cc-stt" in capsys.readouterr().out
+    assert not [c for c in stub.calls if c[0] in ("POST", "PATCH")]
+
+
+@pytest.mark.parametrize("bad", [{"model": "x"}, {"api_base": "x"}, {"timeout": 1}, {"api_key": "k"}])
+def test_policy_params_may_not_redeclare_provider_identity(policy_mod, bad):
+    decl = _speech_declared()
+    decl["registration_only"]["cc-tts"]["policy_params"] = bad
+    with pytest.raises(SystemExit):
+        policy_mod.declared_policy_params(decl)

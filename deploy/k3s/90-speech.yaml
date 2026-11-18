@@ -33,6 +33,10 @@
 #
 #   Image is the upstream multi-arch CPU build, pinned by digest (the same
 #   digest deploy/single/images.txt carries — bump both together).
+#
+#   Resources: a memory limit and NO CPU limit (DL-220) — see the comment at
+#   the container's resources block for why. Under node contention the CPU is
+#   divided by request, and cc-neo4j's request is twice this pod's.
 # ============================================================================
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -130,9 +134,27 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
+          # NO CPU LIMIT, on purpose (DL-220, 2026-11-18). ONNX Runtime ignores
+          # the container's CPU quota: it starts one spinning thread per
+          # PHYSICAL core of the node, and Speaches 0.8.3 exposes no thread
+          # setting. Under a 2-CPU limit on a 4-core node the pod was throttled
+          # in 97% of scheduler periods and Kokoro synthesised 2.7x SLOWER than
+          # playback (1,200 characters took 190 s); the retries that followed
+          # piled 15 jobs onto the pod, which pinned its limits, failed its
+          # probes and was restarted. Without a limit contended CPU is shared
+          # in proportion to REQUESTS, and cc-neo4j requests twice this pod's
+          # (40-graph.yaml), so the graph wins a contended moment. The MEMORY
+          # limit stays: memory is not compressible, and the pod reached 4Gi
+          # during that pile-up. Sources:
+          #   https://onnxruntime.ai/docs/performance/tune-performance/threading.html
+          #   https://github.com/Valtora/Nojoin/issues/429
+          #   https://github.com/Archolith/menhir/issues/567
+          # The proxy side is declared in deploy/shared/litellm/
+          # model-preferences.yaml: cc-tts and cc-stt take one job at a time
+          # and are not retried.
           resources:
             requests: {memory: 1Gi, cpu: 250m}
-            limits: {memory: 4Gi, cpu: "2"}
+            limits: {memory: 4Gi}
       volumes:
         - name: models
           persistentVolumeClaim:

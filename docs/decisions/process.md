@@ -2589,3 +2589,48 @@ hygiene, and how the test suite itself must be written. See
   its service can enforce and a test at the work site before it is keyed.
 - **Enforced:** test: `tests/test_action_key.py::test_the_key_names_the_action_by_its_absolute_index_and_only_while_it_runs`, `tests/test_action_key.py::test_no_agent_facing_argument_or_tool_carries_the_key`, `tests/test_action_key.py::test_an_id_google_already_holds_completes_and_says_so`, `tests/test_action_key.py::test_an_id_whose_event_was_cancelled_fails_and_is_not_transient`, `tests/test_action_key.py::test_the_look_up_runs_again_under_the_lock_and_a_racing_create_wins`, `tests/test_action_key.py::test_the_same_action_key_writes_one_checkin`, `tests/test_action_key.py::test_a_calendar_create_that_landed_before_its_timeout_is_retried_into_one_event`, `tests/test_action_key.py::test_a_graph_create_that_landed_before_its_failure_is_retried_into_one_node`, `tests/test_n8n_workflows.py::test_only_a_409_on_a_client_id_is_read_back`
 - **Source:** `central_command/gateway/executor.py` (`action_key`, `google_event_id`, `_calendar_create_event`, `_graph_curation_handler`, `_loe_record_checkin`); `central_command/integrations/calendar_facade.py` (`create_event`); `deploy/n8n/workflows/lib-google-calendar.json` ("Route (create answer)", "Get existing event (GCal REST)", "Return: create_event (existing)"); `central_command/integrations/neo4j_writer.py` (`ACTION_KEY_PROPERTY`, `_keyed_create`); `central_command/db/repo.py` (`record_loe_checkin`); `docs/ARCHITECTURE.md` "The Executor replays by cursor"; DL-218.
+
+### DL-220 — A CPU-inference pod carries a memory limit and no CPU limit; contention is settled by requests, and speech runs one job at a time, unretried, per alias
+
+- **Status:** active
+- **Date:** 2026-11-18
+- **Rule:** (recorded here) The speech pod (`deploy/k3s/90-speech.yaml`) has a
+  memory limit and no CPU limit; CPU on the compute node is divided by
+  request, with the graph database requesting at least twice what speech does;
+  the `cc-tts` and `cc-stt` aliases carry `max_parallel_requests: 1` and
+  `num_retries: 0` as per-alias `policy_params`, never a global LiteLLM
+  setting.
+- **Why:** Measured on a live install on 2026-11-17/18. ONNX Runtime ignores the
+  container's CPU quota and starts one spinning thread per PHYSICAL core of the
+  node, and Speaches 0.8.3 exposes no thread setting, so under a 2-CPU limit on
+  a 4-core node the pod was throttled in 97% of scheduler periods and synthesis
+  ran 2.7 times slower than playback (100 characters 21 s, 400 characters 63 s,
+  1,200 characters 190 s), where a comparable 4-core machine without the
+  mismatch speaks faster than playback. The cockpit then sent one long text
+  three times, the LiteLLM proxy retried each (its default is 3), 15 synthesis
+  jobs landed on the pod, it pinned its CPU and memory limits, failed its probes
+  and was restarted by the kubelet. Mechanism: ONNX Runtime's threading
+  documentation (https://onnxruntime.ai/docs/performance/tune-performance/threading.html),
+  https://github.com/Valtora/Nojoin/issues/429 and
+  https://github.com/Archolith/menhir/issues/567. The operator approved the
+  change on 2026-11-18.
+- **Decision:** A pod that runs CPU inference carries a MEMORY limit (memory is
+  not compressible; the speech pod reached 4Gi in the pile-up) and NO CPU
+  limit; its CPU REQUEST is its claim. With no limit, contended CPU is shared
+  in proportion to requests, so `cc-neo4j` requests 500m against speech's
+  250m and the graph wins a contended moment; the sum of requests the manifests
+  place on the compute node is 1.4 CPU (it was 1.15), inside the 1.5 CPU
+  ceiling that leaves a 2-CPU node room for kube-system (the runbook states no
+  node sizing). Changing Neo4j's request restarts the graph database once, at
+  the update that carries it. On the proxy, `cc-tts` and `cc-stt` (and only
+  those) declare `policy_params: {max_parallel_requests: 1, num_retries: 0}`:
+  one job at a time, no retry at the proxy. `policy.py --apply` PATCHes
+  exactly those two litellm_params onto an existing row (never its model or
+  api_base, which are the operator's) and proves afterwards that the row's
+  identity did not move; `--check` reports a missing or different value as
+  drift; `register-models.py` writes them into a row it creates, on both
+  profiles. The declared timeouts (120 s, 180 s) are unchanged. The cockpit
+  still sends a whole reply as one request: speaking sentence by sentence
+  is a later change.
+- **Enforced:** test: `tests/test_k3s_compute_cpu.py::test_the_speech_container_has_a_memory_limit_and_no_cpu_limit`, `tests/test_k3s_compute_cpu.py::test_neo4j_requests_at_least_twice_the_speech_pods_cpu`, `tests/test_k3s_compute_cpu.py::test_what_the_manifests_place_on_the_compute_node_still_fits_a_two_cpu_node`, `tests/test_litellm_policy.py::test_the_two_speech_aliases_declare_one_job_at_a_time_and_no_retries`, `tests/test_litellm_policy.py::test_no_other_alias_gained_the_concurrency_or_retry_parameters`, `tests/test_litellm_policy.py::test_apply_adds_the_params_to_an_existing_row_and_leaves_model_and_api_base_alone`
+- **Source:** `deploy/k3s/90-speech.yaml` (resources block); `deploy/k3s/40-graph.yaml` (resources block); `deploy/shared/litellm/model-preferences.yaml` (`policy_params:`); `deploy/shared/litellm/policy.py` (`apply_policy_params`, `policy_params_drift`); `deploy/shared/litellm/register-models.py` (`policy_params`); `deploy/single/models.json`

@@ -45,6 +45,19 @@
 #   `registration_only:` entries below carry a timeout inside their block,
 #   because policy.py does not declare them at all.
 #
+#   ── `policy_params:` (added 2026-11-18, DL-220) ──────────────────────────
+#   litellm_params that are POLICY, not provider identity, on an alias the
+#   `registration_only:` block holds — so policy.py, which declares nothing
+#   else for those entries, owns exactly these keys: `--apply` PATCHes them
+#   onto an EXISTING row (and only them: the row's model, api_base and key are
+#   the operator's and are never re-sent), `--check` reports a missing or
+#   different value as DRIFT, and register-models.py writes them into a
+#   skeleton it CREATES (a row it finds is never written by it, and a missing
+#   key is never its drift: policy.py is the one that reads it). Today only
+#   cc-tts and cc-stt carry any: one job at a time and no retries, per alias —
+#   never a global LiteLLM setting. A key here may not be one register-models
+#   owns (model, api_base, api_key, timeout, mode).
+#
 #   No entry carries `chat_template_kwargs`: reasoning control is injected
 #   PER REQUEST from the `thinking_mechanism` / `thinking_levels` declarations
 #   above (runtime/models._thinking_body), never baked into a deployment.
@@ -371,18 +384,38 @@ registration_only:
   # unreachable and the TTS probe times out), key `none`. Either
   # may point elsewhere — hosted Whisper-convention models for cc-stt is the
   # expected case. The mode is LiteLLM's audio mode, an invariant.
+  #
+  # ONE JOB AT A TIME, NO RETRIES (policy_params, DL-220, 2026-11-18). The CPU
+  # engine behind these aliases synthesises slowly under load, and on
+  # 2026-11-17 the cockpit sent one long text three times, the proxy retried
+  # each (num_retries defaults to 3), and 15 synthesis jobs landed on the pod
+  # at once; it pinned its limits, failed its probes and was restarted.
+  # `max_parallel_requests: 1` is LiteLLM's per-deployment concurrency limit
+  # (documented as a router semaphore, so a second request waits for the
+  # first; that the audio routes honour it is UNVERIFIED until read on the
+  # live row) and `num_retries: 0` is the per-deployment retry count (it
+  # outranks the router-wide default of 3; only a request header or body can
+  # override it). Per alias on purpose: the same values on the chat aliases
+  # would be a fleet-wide change. The timeouts below are unchanged in this
+  # release.
   cc-tts:
     registration:
       model: openai/PLACEHOLDER
       api_base: PLACEHOLDER
       mode: audio_speech
       timeout: 120
+    policy_params:
+      max_parallel_requests: 1
+      num_retries: 0
   cc-stt:
     registration:
       model: openai/PLACEHOLDER
       api_base: PLACEHOLDER
       mode: audio_transcription
       timeout: 180
+    policy_params:
+      max_parallel_requests: 1
+      num_retries: 0
 
   # !! THE api_base MUST END IN /v1/rerank !!  Discovered in-pod during the
   # 2026-08-23 clean install and recorded nowhere until now. The `cohere/`

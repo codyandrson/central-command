@@ -123,8 +123,14 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 12
+          # CPU request 500m (was 250m, DL-220, 2026-11-18): the speech pod
+          # (90-speech.yaml) shares this node and carries NO CPU limit, so a
+          # contended moment is divided in proportion to REQUESTS; the graph
+          # must hold at least twice speech's share. Changing a request
+          # restarts this pod: the graph database restarts ONCE, at the update
+          # that carries this change (the updater waits for the rollout).
           resources:
-            requests: {memory: 768Mi, cpu: 250m}
+            requests: {memory: 768Mi, cpu: 500m}
             limits: {memory: 2Gi}
       volumes:
         - name: data

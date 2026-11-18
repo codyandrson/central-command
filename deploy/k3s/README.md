@@ -339,7 +339,7 @@ Expected placement once settled:
 | `cc-vlogs` | compute (pinned) | stateful (`cc-vlogs-data`) | ServiceLB :9428 |
 | `cc-pgweb` | anchor (pinned) | stateless zero-login DB UI for the spine | `hostPort` 127.0.0.1:8092 |
 | `cc-crawler` | compute (**required**) | Chromium stays off the anchor | ServiceLB :8091 |
-| `cc-speech` | compute (**required**) | Speaches (Kokoro TTS + faster-whisper STT) behind the `cc-tts`/`cc-stt` aliases; model cache in `cc-speech-models` | ServiceLB :8093 |
+| `cc-speech` | compute (**required**) | Speaches (Kokoro TTS + faster-whisper STT) behind the `cc-tts`/`cc-stt` aliases; model cache in `cc-speech-models`. A memory limit and **no CPU limit** (the engine spins one thread per physical core whatever the quota, so a quota only throttles it; contended CPU is shared by request, and `cc-neo4j` requests twice as much — DL-220); the two aliases take one job at a time and are not retried (`policy_params`, applied by `policy.py`) | ServiceLB :8093 |
 | `cc-litellm` | **floats** (prefers compute) | stateless, the arm64 memory hog | ServiceLB :4000 |
 | `cc-fluentbit` | DaemonSet, both nodes | log collection | none |
 

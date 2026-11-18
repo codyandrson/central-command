@@ -62,6 +62,12 @@ LiteLLM's Responses->chat bridge, which the graph client does not use (the
 app's in-process graphiti-core speaks chat-completions through
 OpenAIGenericClient) and which 404s against llama-swap.
 
+A `policy_params:` block on an entry (cc-tts / cc-stt: one job at a time, no
+retries — DL-220) is written into the row this script CREATES (or overwrites
+as a skeleton) and nowhere else: it is not an invariant, an existing row is
+never written for it, and a row without it is not drift here. On the k3s
+profile policy.py owns those keys afterwards (`--apply` / `--check`).
+
 The declaration is `.yaml` (PyYAML) or `.json` (stdlib — the single-node
 profile's, so the pre-venv python needs nothing). `models:` entries take
 their timeout from the top-level `timeout:` (policy.py --apply writes it and
@@ -406,6 +412,26 @@ def extra_params(spec: dict) -> dict:
     return dict(extra)
 
 
+def policy_params(policy: dict) -> dict[str, dict]:
+    """alias -> the `policy_params:` litellm_params an entry declares (see the
+    module doc). Written at CREATE (and when a skeleton is overwritten), never
+    compared: policy.py is the one that checks and applies them. A key this
+    script owns (or the credential) may not be declared there."""
+    out: dict[str, dict] = {}
+    for block in ("models", "registration_only"):
+        for alias, spec in (policy.get(block) or {}).items():
+            pp = (spec or {}).get("policy_params")
+            if not pp:
+                continue
+            if not isinstance(pp, dict):
+                raise SystemExit(f"{alias}: policy_params must be a mapping, got {type(pp).__name__}")
+            clash = sorted(set(pp) & (set(OWNED) | {"api_key"}))
+            if clash:
+                raise SystemExit(f"{alias}: policy_params may not redeclare {clash}")
+            out[alias] = dict(pp)
+    return out
+
+
 def declared(policy: dict, upstream: dict[str, dict] | None = None) -> dict[str, dict]:
     """alias -> the litellm_params to register, from BOTH declaration blocks.
 
@@ -604,6 +630,7 @@ def main() -> int:
         print("  declared in .env: " + " ".join(sorted(upstream))
               + f"  (base {UPSTREAM_BASE_KEY}, key {UPSTREAM_API_KEY} — value not printed)")
 
+    pp = policy_params(policy)
     live = _request("GET", "/model/info").get("data", [])
     actions = plan(want, live, invariants)
 
@@ -625,12 +652,13 @@ def main() -> int:
         elif status == "create":
             real = alias in upstream
             kind = "from .env" if real else "skeleton "
-            print(f"  CREATE   {alias}  {kind} {json.dumps(redacted(want[alias]), sort_keys=True)}")
+            row_params = {**want[alias], **pp.get(alias, {})}
+            print(f"  CREATE   {alias}  {kind} {json.dumps(redacted(row_params), sort_keys=True)}")
             if not args.dry_run:
                 stamp = datetime.now(timezone.utc).isoformat()
                 _request("POST", "/model/new",
-                         {"model_name": alias, "litellm_params": want[alias],
-                          "model_info": {**mode_info(want[alias]),
+                         {"model_name": alias, "litellm_params": row_params,
+                          "model_info": {**mode_info(row_params),
                                          "created_by": "register-models.py", "created_at": stamp,
                                          "updated_by": "register-models.py", "updated_at": stamp}})
                 created += 1
@@ -642,13 +670,14 @@ def main() -> int:
         elif status == "update":
             # Only ever a PLACEHOLDER row -> the values .env declares. `id` is
             # how /model/update addresses an existing deployment.
+            row_params = {**want[alias], **pp.get(alias, {})}
             print(f"  UPDATE   {alias}  was a skeleton ({'; '.join(problems)}), "
-                  f"now {json.dumps(redacted(want[alias]), sort_keys=True)}")
+                  f"now {json.dumps(redacted(row_params), sort_keys=True)}")
             if not args.dry_run:
                 live_row = next(m for m in live if m.get("model_name") == alias)
                 stamp = datetime.now(timezone.utc).isoformat()
                 _request("POST", "/model/update",
-                         {"model_name": alias, "litellm_params": want[alias],
+                         {"model_name": alias, "litellm_params": row_params,
                           "model_info": {"id": (live_row.get("model_info") or {}).get("id"),
                                          "updated_by": "register-models.py",
                                          "updated_at": stamp}})

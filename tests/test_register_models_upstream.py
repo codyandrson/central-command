@@ -551,3 +551,44 @@ def test_shape_update_patches_mode_and_same_needs_model_info_mode(rm):
     hand = _live("cc-rerank", model="cohere/their-own", api_base="http://theirs:9/v1/rerank", mode="rerank")
     hand["model_info"].pop("mode")
     assert rm.ensure_shape("cc-rerank", "rerank", shapes, [hand]) == ("operator", None)
+
+
+# ── policy_params (DL-220) ────────────────────────────────────────────────────
+# cc-tts / cc-stt carry one-job-at-a-time and no-retries. register-models.py
+# writes them into a row it CREATES and never reads them back: policy.py owns
+# them on an existing row, so a row without them is not drift here.
+
+K3S_DECLARATION = ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml"
+SPEECH_PARAMS = {"max_parallel_requests": 1, "num_retries": 0}
+
+
+@pytest.mark.parametrize("declaration", [SINGLE / "models.json", K3S_DECLARATION], ids=["single", "k3s"])
+def test_a_created_speech_skeleton_carries_the_policy_params_and_no_other_alias_does(
+        rm, monkeypatch, capsys, declaration):
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={}, argv=("--policy", str(declaration)))
+    created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
+    for alias in ("cc-tts", "cc-stt"):
+        assert {k: created[alias][k] for k in SPEECH_PARAMS} == SPEECH_PARAMS
+        assert created[alias]["model"] == "openai/PLACEHOLDER"
+    for alias, params in created.items():
+        if alias not in ("cc-tts", "cc-stt"):
+            assert not set(SPEECH_PARAMS) & set(params), alias
+
+
+def test_a_row_without_the_policy_params_is_not_drift_here_and_is_never_written(rm, monkeypatch, capsys):
+    live = [_live("cc-tts", model="openai/kokoro", api_base="http://cc-speech:8093/v1",
+                  mode="audio_speech", timeout=120),
+            _live("cc-stt", model="openai/whisper", api_base="http://cc-speech:8093/v1",
+                  mode="audio_transcription", timeout=180)]
+    policy = rm.load_declaration(K3S_DECLARATION)
+    want = rm.declared(policy)
+    assert not set(SPEECH_PARAMS) & set(want["cc-tts"]), "policy_params are not part of the invariants"
+    assert [s for s, *_ in rm.plan({a: want[a] for a in ("cc-tts", "cc-stt")}, live)] == ["ok", "ok"]
+    assert rm.policy_params(policy) == {"cc-tts": SPEECH_PARAMS, "cc-stt": SPEECH_PARAMS}
+
+
+def test_policy_params_may_not_redeclare_an_owned_field(rm):
+    bad = {"registration_only": {"x": {"registration": {"model": "openai/PLACEHOLDER"},
+                                       "policy_params": {"api_base": "http://x"}}}}
+    with pytest.raises(SystemExit):
+        rm.policy_params(bad)
