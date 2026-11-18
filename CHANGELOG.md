@@ -4,6 +4,32 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.95.0: Read-aloud speaks sentence by sentence
+
+With the speech engine no longer throttled (v2.94.0) it synthesises faster than playback, but the cockpit
+still sent a whole reply as one request and waited for the whole file: a 1,500-character reply meant 54
+seconds of silence first, and a long enough one would outlast the speech alias's timeout.
+
+- **One sentence at a time.** A reply is split at sentence ends and line breaks into chunks of at most
+  300 characters (never inside a number, a version or a URL; short fragments are merged). The first chunk
+  is requested alone and played the moment it arrives; while a chunk plays, the next one is already being
+  fetched, never more than one ahead, because the engine takes one job at a time. Chunks play strictly in
+  order; if the next is not ready, playback waits for it.
+- **Stopping stops everything.** Stop, a new read-aloud, the sound setting turning off, and leaving the
+  page abort the request in flight and drop what was queued; a late answer never starts playing.
+- **A bounded reply.** Read-aloud speaks at most 4,000 characters of a reply, ends on a sentence, and says
+  so once: "Read-aloud stopped after the first N characters of a longer reply."
+- **A failed sentence ends the utterance** with the existing "Read-aloud failed" notice; no sentence is
+  skipped in the middle of a reply.
+- **Duplicate requests share one job.** The cockpit server collapses identical speech requests that are
+  in flight at the same moment (several open tabs speaking the same notification), in front of its
+  existing cache of finished audio.
+- The cockpit server's speech rate limit rises from 10 to 60 requests a minute: a reply is now one request
+  per sentence.
+
+Cockpit only. Not heard by anyone before release: playback order and timing are covered by tests with a
+fake audio element; the gaps between sentences on a real engine are not.
+
 ## 2026-11-18 — v2.94.0: The speech pod is no longer CPU-capped, and speech requests are taken one at a time
 
 Read-aloud was unusably slow on a live install: 100 characters took 21 s and 1,200 characters 190 s,

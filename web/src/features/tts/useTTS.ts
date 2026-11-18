@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { ensureAudioContext } from '@/features/voice/audio-feedback';
 import { reportClientError } from '@/features/notifications/clientToast';
+import { planSpeech } from './speechChunks';
 
 // ─── Audio autoplay unlock ─────────────────────────────────────────────────────
 // Browsers block audio.play() until the user has interacted with the page.
@@ -56,7 +57,7 @@ export function migrateTTSProvider(provider: string): TTSProvider {
   return 'openai';
 }
 
-async function fetchTTS(text: string, provider: TTSProvider = 'openai', model?: string): Promise<Blob> {
+async function fetchTTS(text: string, provider: TTSProvider = 'openai', model?: string, signal?: AbortSignal): Promise<Blob> {
   const body: Record<string, string> = { text, provider };
   if (model) body.model = model;
   const resp = await fetch('/api/tts', {
@@ -64,6 +65,7 @@ async function fetchTTS(text: string, provider: TTSProvider = 'openai', model?: 
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify(body),
+    signal,
   });
   if (!resp.ok) {
     // The server relays the speech service's own refusal text; keep it so the
@@ -78,91 +80,163 @@ async function fetchTTS(text: string, provider: TTSProvider = 'openai', model?: 
   return blob;
 }
 
+/** One utterance: a text cut into chunks that are requested and played one after another. */
+interface Utterance {
+  /** The whole text as given; this is what `speaking` carries. */
+  text: string;
+  /** Started by `speak` (the sound toggle governs it) rather than by an explicit press. */
+  auto: boolean;
+  /** Aborts every fetch of this utterance. */
+  controller: AbortController;
+  cancelled: boolean;
+  /** The chunk being played. */
+  audio: { audio: HTMLAudioElement; url: string } | null;
+  /** Releases the wait for the playing chunk to end (used on cancel). */
+  wake: (() => void) | null;
+}
+
+function releaseAudio(utt: Utterance): void {
+  const current = utt.audio;
+  if (!current) return;
+  utt.audio = null;
+  current.audio.pause();
+  current.audio.src = '';
+  URL.revokeObjectURL(current.url);
+}
+
+/** Cancel an utterance for good: abort its fetches, stop its audio, let nothing start late. */
+function cancelUtterance(utt: Utterance): void {
+  if (utt.cancelled) return;
+  utt.cancelled = true;
+  utt.controller.abort();
+  releaseAudio(utt);
+  utt.wake?.();
+}
+
 /**
  * Hook that provides a `speak` function for text-to-speech playback.
  *
- * Audio is fetched from `/api/tts` and played via an `HTMLAudioElement`.
- * Successive calls cancel the previous utterance automatically.
+ * The text is cut into sentence-sized chunks (see speechChunks.ts). Each chunk
+ * is fetched from `/api/tts` and played via an `HTMLAudioElement` as soon as it
+ * arrives, strictly in order; while one plays, the next is already requested
+ * (one ahead only: the speech service does one job at a time). Successive calls
+ * cancel the previous utterance automatically.
  */
 export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model?: string) {
-  const currentAudio = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
-  const generationRef = useRef(0);
+  const currentRef = useRef<Utterance | null>(null);
   /** True while read-aloud is failing: one notice per streak, cleared when audio plays. */
   const failingRef = useRef(false);
   /** Text of the utterance currently fetching or playing — null when idle. */
   const [speaking, setSpeaking] = useState<string | null>(null);
 
-  const cleanupAudio = useCallback(() => {
-    const current = currentAudio.current;
-    if (!current) return;
-    current.audio.pause();
-    current.audio.src = '';
-    URL.revokeObjectURL(current.url);
-    currentAudio.current = null;
-  }, []);
-
   /** Cancel whatever is fetching or playing. */
   const stop = useCallback(() => {
-    generationRef.current++;
-    cleanupAudio();
+    const utt = currentRef.current;
+    currentRef.current = null;
+    if (utt) cancelUtterance(utt);
     setSpeaking(null);
-  }, [cleanupAudio]);
+  }, []);
 
+  // Unmount cancels the utterance: no fetch left running, no chunk started late.
   useEffect(() => {
     return () => {
-      cleanupAudio();
+      const utt = currentRef.current;
+      currentRef.current = null;
+      if (utt) cancelUtterance(utt);
     };
-  }, [cleanupAudio]);
+  }, []);
+
+  // Turning the sound setting off ends an auto-spoken utterance; an utterance the
+  // operator started with the speaker button does not depend on that setting.
+  useEffect(() => {
+    if (enabled) return;
+    const utt = currentRef.current;
+    if (utt?.auto) stop();
+  }, [enabled, stop]);
+
+  /** Speak `text`, replacing any current utterance. Resolves when the first chunk is playing, or the utterance has failed or ended. */
+  const begin = useCallback((text: string, auto: boolean): Promise<void> => {
+    if (!text) return Promise.resolve();
+    const previous = currentRef.current;
+    if (previous) cancelUtterance(previous);
+    const plan = planSpeech(text);
+    if (plan.chunks.length === 0) {
+      currentRef.current = null;
+      setSpeaking(null);
+      return Promise.resolve();
+    }
+    const utt: Utterance = { text, auto, controller: new AbortController(), cancelled: false, audio: null, wake: null };
+    currentRef.current = utt;
+    setSpeaking(text);
+
+    const request = (i: number): Promise<Blob> => {
+      const p = fetchTTS(plan.chunks[i], provider, model, utt.controller.signal);
+      p.catch(() => {}); // a failure is raised when playback reaches this chunk
+      return p;
+    };
+
+    return new Promise<void>((resolveStarted) => {
+      void (async () => {
+        try {
+          let pending: Promise<Blob> | null = request(0);
+          for (let i = 0; i < plan.chunks.length; i++) {
+            const blob = await pending!;
+            // Superseded or stopped while the chunk was being fetched
+            if (utt.cancelled) return;
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            utt.audio = { audio, url };
+            const ended = new Promise<void>((resolve, reject) => {
+              utt.wake = resolve;
+              audio.addEventListener('ended', () => resolve(), { once: true });
+              audio.addEventListener('error', () => reject(new Error('Audio playback failed')), { once: true });
+            });
+            ended.catch(() => {});
+            await audio.play();
+            if (utt.cancelled) return;
+            failingRef.current = false;
+            // One request ahead, issued once this chunk is playing.
+            pending = i + 1 < plan.chunks.length ? request(i + 1) : null;
+            if (i === 0) resolveStarted();
+            await ended;
+            if (utt.cancelled) return;
+            releaseAudio(utt);
+          }
+          if (plan.truncated) {
+            reportClientError({
+              id: 'read-aloud-truncated',
+              title: 'Read-aloud shortened',
+              body: `Read-aloud stopped after the first ${plan.spokenChars.toLocaleString('en-US')} characters of a longer reply.`,
+            });
+          }
+        } catch (err: unknown) {
+          if (utt.cancelled) return;
+          const message = err instanceof Error ? err.message : String(err);
+          console.error('[TTS] play failed:', message);
+          if (!failingRef.current) {
+            failingRef.current = true;
+            reportClientError({ id: 'read-aloud', title: 'Read-aloud failed', body: message });
+          }
+        } finally {
+          resolveStarted();
+          releaseAudio(utt);
+          if (currentRef.current === utt) {
+            currentRef.current = null;
+            setSpeaking(null);
+          }
+        }
+      })();
+    });
+  }, [provider, model]);
 
   /** Speak regardless of the sound toggle — for an explicit operator press. */
-  const speakNow = useCallback(async (text: string) => {
-    if (!text) return;
-    cleanupAudio();
-    const gen = ++generationRef.current;
-    setSpeaking(text);
-    const done = () => { if (gen === generationRef.current) setSpeaking(null); };
-    try {
-      const blob = await fetchTTS(text, provider, model);
-      // Superseded by a newer speak() call during fetch
-      if (gen !== generationRef.current) return;
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      currentAudio.current = { audio, url };
-      let revoked = false;
-      const revoke = () => {
-        if (revoked) return;
-        revoked = true;
-        URL.revokeObjectURL(url);
-        if (currentAudio.current?.audio === audio) {
-          currentAudio.current = null;
-        }
-        done();
-      };
-      audio.addEventListener('ended', revoke, { once: true });
-      audio.addEventListener('error', () => revoke(), { once: true });
-      try {
-        await audio.play();
-        failingRef.current = false;
-      } catch (err) {
-        revoke();
-        throw err;
-      }
-    } catch (err: unknown) {
-      done();
-      const message = err instanceof Error ? err.message : String(err);
-      console.error('[TTS] play failed:', message);
-      if (!failingRef.current) {
-        failingRef.current = true;
-        reportClientError({ id: 'read-aloud', title: 'Read-aloud failed', body: message });
-      }
-    }
-  }, [provider, model, cleanupAudio]);
+  const speakNow = useCallback((text: string) => begin(text, false), [begin]);
 
   /** Auto-speak path: honours the sound toggle. */
   const speak = useCallback(async (text: string) => {
     if (!enabled) return;
-    await speakNow(text);
-  }, [enabled, speakNow]);
+    await begin(text, true);
+  }, [enabled, begin]);
 
   return { speak, speakNow, stop, speaking };
 }

@@ -51,6 +51,13 @@ const ttsSchema = z.object({
   model: z.string().optional(),
 });
 
+type SynthesisOutcome =
+  | { ok: true; buf: Buffer; contentType: string }
+  | { ok: false; status: number; message: string };
+
+/** Syntheses under way, by cache key (see the POST handler). */
+const inflightSyntheses = new Map<string, Promise<SynthesisOutcome>>();
+
 function audioResponse(buf: Buffer, contentType = 'audio/mpeg'): Response {
   return new Response(buf, {
     status: 200,
@@ -116,24 +123,40 @@ app.post(
         return audioResponse(cached, cachedCt);
       }
 
-      let result;
-      if (effectiveProvider === 'xiaomi') {
-        result = await synthesizeXiaomi(text, { model, voice });
-      } else if (effectiveProvider === 'edge') {
-        result = await synthesizeEdge(text, voice);
-      } else if (effectiveProvider === 'replicate') {
-        result = await synthesizeReplicate(text, { model, voice });
+      // One synthesis per key at a time: a request whose key is already being
+      // synthesised (another tab or device speaking the same text, a repeat
+      // click) waits for that job and gets its bytes. The job is not tied to
+      // any one request, so a client that disconnects cancels nothing for the
+      // others. The entry goes when the job settles; a failure reaches every
+      // waiter and is not cached, so the next request tries again.
+      let job = inflightSyntheses.get(hash);
+      if (job) {
+        console.log('[tts] joining an in-flight synthesis');
       } else {
-        result = await synthesizeOpenAI(text, voice, model);
+        job = (async (): Promise<SynthesisOutcome> => {
+          let result;
+          if (effectiveProvider === 'xiaomi') {
+            result = await synthesizeXiaomi(text, { model, voice });
+          } else if (effectiveProvider === 'edge') {
+            result = await synthesizeEdge(text, voice);
+          } else if (effectiveProvider === 'replicate') {
+            result = await synthesizeReplicate(text, { model, voice });
+          } else {
+            result = await synthesizeOpenAI(text, voice, model);
+          }
+          if (!result.ok) return { ok: false, status: result.status, message: result.message };
+          const contentType = 'contentType' in result ? (result as { contentType: string }).contentType : 'audio/mpeg';
+          setTtsCache(hash, result.buf);
+          return { ok: true, buf: result.buf, contentType };
+        })().finally(() => inflightSyntheses.delete(hash));
+        inflightSyntheses.set(hash, job);
       }
 
-      if (!result.ok) {
-        return c.text(result.message, result.status as ContentfulStatusCode);
+      const outcome = await job;
+      if (!outcome.ok) {
+        return c.text(outcome.message, outcome.status as ContentfulStatusCode);
       }
-
-      const ct = 'contentType' in result ? (result as { contentType: string }).contentType : 'audio/mpeg';
-      setTtsCache(hash, result.buf);
-      return audioResponse(result.buf, ct);
+      return audioResponse(outcome.buf, outcome.contentType);
     } catch (err) {
       console.error('[tts] error:', (err as Error).message || err);
       return c.text('TTS failed', 500);

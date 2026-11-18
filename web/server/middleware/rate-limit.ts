@@ -150,8 +150,12 @@ export function rateLimit(config: RateLimitConfig) {
   };
 }
 
-/** Preset: 10 requests per minute (for expensive operations like TTS) */
-export const rateLimitTTS = rateLimit({ maxRequests: 10, windowMs: 60 * 1000 });
+/**
+ * Preset: 60 requests per minute for TTS. The cockpit reads a reply aloud one
+ * sentence-sized request at a time, paced by playback, so a long reply is a few
+ * dozen requests over several minutes; 10 a minute cut such a reply short.
+ */
+export const rateLimitTTS = rateLimit({ maxRequests: 60, windowMs: 60 * 1000 });
 
 /** Preset: 30 requests per minute (for transcription) */
 export const rateLimitTranscribe = rateLimit({ maxRequests: 30, windowMs: 60 * 1000 });

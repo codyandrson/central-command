@@ -17,6 +17,8 @@ describe('TTS routes', () => {
     mimoKey?: string;
     edgeResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number; contentType?: string };
     openaiResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number };
+    /** Replaces the OpenAI synthesiser outright (to hold a job open, or to throw). */
+    openaiImpl?: (text: string) => Promise<{ ok: boolean; buf?: Buffer; message?: string; status?: number }>;
     replicateResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number };
     xiaomiResult?: { ok: boolean; buf?: Buffer; message?: string; status?: number; contentType?: string };
     /** Deployment speech mode as getDeploymentSpeech() would report it (null = not in the mode). */
@@ -47,8 +49,10 @@ describe('TTS routes', () => {
       ),
     }));
     vi.doMock('../services/openai-tts.js', () => ({
-      synthesizeOpenAI: vi.fn(async () =>
-        overrides.openaiResult || { ok: true, buf: Buffer.from('fake-openai-audio') }
+      synthesizeOpenAI: vi.fn(async (text: string) =>
+        overrides.openaiImpl
+          ? overrides.openaiImpl(text)
+          : overrides.openaiResult || { ok: true, buf: Buffer.from('fake-openai-audio') }
       ),
     }));
     vi.doMock('../services/replicate-tts.js', () => ({
@@ -194,6 +198,150 @@ describe('TTS routes', () => {
         body: JSON.stringify({ text: 'a'.repeat(5001) }),
       });
       expect(res.status).toBe(400);
+    });
+  });
+
+  describe('POST /api/tts: identical requests in flight', () => {
+    function post(app: Hono, text: string, extra: Record<string, unknown> = {}) {
+      return app.request('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, provider: 'openai', ...extra }),
+      });
+    }
+
+    /** A synthesiser whose jobs are held open until the test releases them. */
+    function heldSynth() {
+      const jobs: Array<{ text: string; finish: (r: { ok: boolean; buf?: Buffer; message?: string; status?: number }) => void; fail: (e: Error) => void }> = [];
+      const impl = (text: string) =>
+        new Promise<{ ok: boolean; buf?: Buffer; message?: string; status?: number }>((resolve, reject) => {
+          jobs.push({ text, finish: resolve, fail: reject });
+        });
+      return { jobs, impl };
+    }
+
+    async function synthCalls() {
+      const mod = await import('../services/openai-tts.js');
+      return vi.mocked(mod.synthesizeOpenAI);
+    }
+
+    it('runs one synthesis for two concurrent identical requests and gives both the audio', async () => {
+      const held = heldSynth();
+      mockDeps({ openaiKey: 'sk-test', openaiImpl: held.impl });
+      const app = await buildApp();
+      const first = post(app, 'Same sentence.');
+      const second = post(app, 'Same sentence.');
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(1));
+      expect(await synthCalls()).toHaveBeenCalledTimes(1);
+      held.jobs[0].finish({ ok: true, buf: Buffer.from('the-audio') });
+      const [a, b] = await Promise.all([first, second]);
+      expect(a.status).toBe(200);
+      expect(b.status).toBe(200);
+      expect(Buffer.from(await a.arrayBuffer()).toString()).toBe('the-audio');
+      expect(Buffer.from(await b.arrayBuffer()).toString()).toBe('the-audio');
+      expect(await synthCalls()).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs a synthesis per text when the texts differ', async () => {
+      const held = heldSynth();
+      mockDeps({ openaiKey: 'sk-test', openaiImpl: held.impl });
+      const app = await buildApp();
+      const first = post(app, 'One sentence.');
+      const second = post(app, 'Another sentence.');
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(2));
+      held.jobs[0].finish({ ok: true, buf: Buffer.from('a') });
+      held.jobs[1].finish({ ok: true, buf: Buffer.from('b') });
+      await Promise.all([first, second]);
+      expect(await synthCalls()).toHaveBeenCalledTimes(2);
+    });
+
+    it('also separates requests that differ in voice', async () => {
+      const held = heldSynth();
+      mockDeps({ openaiKey: 'sk-test', openaiImpl: held.impl });
+      const app = await buildApp();
+      const first = post(app, 'Same sentence.', { voice: 'nova' });
+      const second = post(app, 'Same sentence.', { voice: 'onyx' });
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(2));
+      held.jobs.forEach((j) => j.finish({ ok: true, buf: Buffer.from('x') }));
+      await Promise.all([first, second]);
+    });
+
+    it('uses the cache key, so a stale browser model does not split requests in deployment speech mode', async () => {
+      const held = heldSynth();
+      mockDeps({
+        openaiKey: 'sk-test',
+        openaiImpl: held.impl,
+        deployment: { model: 'cc-tts', voice: 'af_heart', voiceSource: 'default' },
+      });
+      const app = await buildApp();
+      const first = post(app, 'Same sentence.', { model: 'gpt-4o-mini-tts' });
+      const second = post(app, 'Same sentence.', { model: 'tts-1' });
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(1));
+      held.jobs[0].finish({ ok: true, buf: Buffer.from('x') });
+      await Promise.all([first, second]);
+      expect(await synthCalls()).toHaveBeenCalledTimes(1);
+    });
+
+    it('delivers a refusal to every waiter, and the next request tries again', async () => {
+      const held = heldSynth();
+      mockDeps({ openaiKey: 'sk-test', openaiImpl: held.impl });
+      const app = await buildApp();
+      const first = post(app, 'Same sentence.');
+      const second = post(app, 'Same sentence.');
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(1));
+      held.jobs[0].finish({ ok: false, status: 503, message: 'engine busy' });
+      const [a, b] = await Promise.all([first, second]);
+      expect(a.status).toBe(503);
+      expect(b.status).toBe(503);
+      expect(await a.text()).toBe('engine busy');
+      expect(await b.text()).toBe('engine busy');
+
+      const third = post(app, 'Same sentence.');
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(2));
+      held.jobs[1].finish({ ok: true, buf: Buffer.from('later') });
+      expect((await third).status).toBe(200);
+      expect(await synthCalls()).toHaveBeenCalledTimes(2);
+    });
+
+    it('delivers a thrown failure to every waiter, and the next request tries again', async () => {
+      const held = heldSynth();
+      mockDeps({ openaiKey: 'sk-test', openaiImpl: held.impl });
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const app = await buildApp();
+      const first = post(app, 'Same sentence.');
+      const second = post(app, 'Same sentence.');
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(1));
+      held.jobs[0].fail(new Error('connection reset'));
+      const [a, b] = await Promise.all([first, second]);
+      expect(a.status).toBe(500);
+      expect(b.status).toBe(500);
+
+      const third = post(app, 'Same sentence.');
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(2));
+      held.jobs[1].finish({ ok: true, buf: Buffer.from('later') });
+      expect((await third).status).toBe(200);
+    });
+
+    it('lets the job finish for the others when one client gives up', async () => {
+      const held = heldSynth();
+      mockDeps({ openaiKey: 'sk-test', openaiImpl: held.impl });
+      const app = await buildApp();
+      const controller = new AbortController();
+      const leaving = app.request('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Same sentence.', provider: 'openai' }),
+        signal: controller.signal,
+      });
+      const staying = post(app, 'Same sentence.');
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(1));
+      controller.abort();
+      held.jobs[0].finish({ ok: true, buf: Buffer.from('still-here') });
+      const res = await staying;
+      expect(res.status).toBe(200);
+      expect(Buffer.from(await res.arrayBuffer()).toString()).toBe('still-here');
+      expect(await synthCalls()).toHaveBeenCalledTimes(1);
+      await leaving.catch(() => {});
     });
   });
 
