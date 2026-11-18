@@ -17,6 +17,10 @@ export interface GraphNode {
   labels: string[];
   summary: string;
   group_id: string;
+  /** A Person's single-person values (graph_ontology.Person); [] / null otherwise. */
+  aliases?: string[];
+  birth_date?: string | null;
+  phone?: string | null;
 }
 
 export interface GraphEdge {
@@ -356,7 +360,8 @@ export function useGraph() {
 
   const updateNode = useCallback((body: {
     uuid: string; name?: string; summary?: string; labels?: string[];
-  }) => write<{ uuid: string }>('/api/graph/node', 'PATCH', body), [write]);
+    aliases?: string[]; birth_date?: string; phone?: string;
+  }) => write<{ uuid: string; aliases?: string[] }>('/api/graph/node', 'PATCH', body), [write]);
 
   const deleteNode = useCallback((uuid: string) => write<{ uuid: string; edges_removed: number }>(
     `/api/graph/node?uuid=${encodeURIComponent(uuid)}`, 'DELETE'), [write]);
@@ -376,7 +381,7 @@ export function useGraph() {
     `/api/graph/edge?uuid=${encodeURIComponent(uuid)}`, 'DELETE'), [write]);
 
   const mergeNodes = useCallback((keep_uuid: string, drop_uuid: string) => write<{
-    uuid: string; edges_moved: number; edges_discarded: number;
+    uuid: string; edges_moved: number; edges_discarded: number; aliases_added?: string[];
   }>('/api/graph/merge', 'POST', { keep_uuid, drop_uuid }), [write]);
 
   // --- Episode deletion (v2.61.0) — THROWS, like the writes above: the

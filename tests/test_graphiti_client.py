@@ -262,6 +262,11 @@ def _node(i: int):
                       name_embedding=[0.1], attributes={"role": "lead", "name_embedding": [1.0]})
 
 
+async def _no_exact(*a, **k):
+    # search_nodes' exact name/alias lane is a bolt read (tested below on its own).
+    return []
+
+
 @pytest.mark.parametrize("rerank,kind,edge_recipe,node_recipe", [
     ("", "", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
     ("", "chat", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
@@ -279,6 +284,7 @@ async def test_search_uses_a_deep_copy_with_the_requested_limit(
     monkeypatch.setattr(settings, "graph_rerank_kind", kind)
     fake = _FakeGraphiti(edges=[_edge(i) for i in range(30)], nodes=[_node(i) for i in range(30)])
     monkeypatch.setattr(graphiti_client, "get_graphiti", lambda: fake)
+    monkeypatch.setattr(neo4j_reader, "entities_by_exact_name", _no_exact)
     before = {name: getattr(recipes, name).limit for name in (edge_recipe, node_recipe)}
 
     facts = await graphiti.search_facts("q", max_facts=25, group_ids=["central_command"])
@@ -300,6 +306,7 @@ async def test_search_uses_a_deep_copy_with_the_requested_limit(
 async def test_fact_and_node_results_keep_the_servers_keys(monkeypatch):
     fake = _FakeGraphiti(edges=[_edge(1)], nodes=[_node(1)])
     monkeypatch.setattr(graphiti_client, "get_graphiti", lambda: fake)
+    monkeypatch.setattr(neo4j_reader, "entities_by_exact_name", _no_exact)
     (fact,) = await graphiti.search_facts("q", group_ids=["central_command"])
     (node,) = await graphiti.search_nodes("q", group_ids=["central_command"])
     assert set(fact) == FACT_KEYS
@@ -310,6 +317,71 @@ async def test_fact_and_node_results_keep_the_servers_keys(monkeypatch):
     assert node["labels"] == ["Entity", "Person"]
     assert node["attributes"] == {"role": "lead"}  # no key containing 'embedding'
     json.dumps([fact, node])  # wire-safe
+
+
+async def test_a_persons_values_reach_the_agent_as_attributes(monkeypatch):
+    """graphiti stores Person's three Optional fields as node properties and its
+    reader returns them as `attributes`; node_result passes them through."""
+    _, EntityNode, _ = _lib()
+    node = EntityNode(uuid="p", name="Jane Rivers Doe", group_id="central_command",
+                      labels=["Entity", "Person"], summary="s",
+                      created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                      attributes={"aliases": ["Jane", "JRD"], "birth_date": "1980-02-29",
+                                  "phone": "+1 555 0100", "cc_action_key": "k"})
+    assert graphiti.node_result(node)["attributes"] == {
+        "aliases": ["Jane", "JRD"], "birth_date": "1980-02-29", "phone": "+1 555 0100"}
+
+
+async def test_an_exact_alias_match_is_unioned_ahead_of_the_hybrid_hits(monkeypatch):
+    """The hybrid search covers name and summary; an entity whose alias IS the query
+    comes from the exact lane, first, scoped to the same groups and types, and is
+    not listed twice when the hybrid search found it too."""
+    fake = _FakeGraphiti(edges=[], nodes=[_node(1), _node(2)])
+    monkeypatch.setattr(graphiti_client, "get_graphiti", lambda: fake)
+    seen = {}
+
+    async def exact(name, group_ids, entity_types, limit):
+        seen.update(name=name, group_ids=group_ids, entity_types=entity_types, limit=limit)
+        return [{"uuid": "p", "name": "Jane Rivers Doe", "labels": ["Entity", "Person"],
+                 "created_at": None, "summary": "s", "group_id": "central_command",
+                 "attributes": {"aliases": ["JRD"], "cc_action_key": "k"}},
+                {"uuid": "n2", "name": "Ada 2", "labels": [], "created_at": None,
+                 "summary": "", "group_id": "central_command", "attributes": {}}]
+
+    monkeypatch.setattr(neo4j_reader, "entities_by_exact_name", exact)
+    monkeypatch.setattr(graphiti, "node_filters", lambda types: None)
+    nodes = await graphiti.search_nodes("JRD", max_nodes=2, group_ids=["central_command"],
+                                        entity_types=["Person"])
+    assert [n["uuid"] for n in nodes] == ["p", "n2"]
+    assert nodes[0]["attributes"] == {"aliases": ["JRD"]}, "control-plane keys stripped"
+    assert set(nodes[0]) == NODE_KEYS
+    assert seen == {"name": "JRD", "group_ids": ["central_command"],
+                    "entity_types": ["Person"], "limit": 2}
+
+
+async def test_the_exact_lane_matches_name_or_alias_in_the_groups(monkeypatch):
+    seen = {}
+
+    async def fake_read(query, **params):
+        seen.update(query=query, **params)
+        from neo4j.time import DateTime
+        return [{"uuid": "p", "name": "Jane Rivers Doe",
+                 "labels": ["Entity", "Person", "Entity_centralcommand"],
+                 "created_at": DateTime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+                 "summary": "s", "group_id": "central_command",
+                 "attributes": [["aliases", ["JRD"]], ["phone", "555"]]}]
+
+    monkeypatch.setattr(neo4j_reader, "_read", fake_read)
+    (row,) = await neo4j_reader.entities_by_exact_name("  jrd ", ["central_command"], None, 5)
+    assert seen["key"] == "jrd" and seen["group_ids"] == ["central_command"]
+    assert "n.group_id IN $group_ids" in seen["query"]
+    assert "toLower(trim(alias)) = $key" in seen["query"]
+    assert "toLower(trim(n.name)) = $key" in seen["query"]
+    assert row["labels"] == ["Entity", "Person"]
+    assert row["attributes"] == {"aliases": ["JRD"], "phone": "555"}
+    assert row["created_at"].startswith("2026-01-01T00:00:00")
+    assert await neo4j_reader.entities_by_exact_name("  ", ["g"], None, 5) == []
+    assert await neo4j_reader.entities_by_exact_name("x", [], None, 5) == []
 
 
 async def test_episode_listing_keeps_the_servers_keys_and_orders_by_time(monkeypatch):

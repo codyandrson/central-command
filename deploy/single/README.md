@@ -798,12 +798,13 @@ them, harmlessly.)
 
 ## The graph client's patches
 
-graphiti-core carries four fixes we ship as patch files
+graphiti-core carries five fixes we ship as patch files
 (`deploy/graphiti-patches/`): two upstream ones, a local one that makes an
 entity's vector its name plus summary, shared with the curation writer through
 `embedding_text` (no upstream number; dropped only if graphiti-core embeds the
 summary itself), and a local one that also offers the entity dedupe step
-existing entities by name (it goes with the third). The `app/graphiti-patches` row applies them to
+existing entities by name (it goes with the third), and a local fifth that
+extends that name lane to an entity's aliases (it goes with the fourth). The `app/graphiti-patches` row applies them to
 the installed package right after `app/install`, on every install and every
 update, with the venv's own Python (`scripts/apply_graphiti_patches.py`:
 idempotent, atomic — uv's hardlinked cache is never written through — and

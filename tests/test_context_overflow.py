@@ -242,3 +242,13 @@ def test_graph_propose_notes_tell_the_agent_to_name_the_operator():
     cap = next(c for c in packs.PACKS["graph-propose"].capabilities if c.name == "graph.add_episode")
     assert "NAME THE OPERATOR" in cap.notes
     assert "'the operator is a rewards member there'" not in cap.notes
+
+
+def test_graph_propose_notes_name_each_person_the_way_the_graph_does():
+    """One person, one name (2026-11): the graph's name first, the source's other
+    form in parentheses, and a role word resolved or asked about, never written."""
+    from central_command.runtime import packs
+    cap = next(c for c in packs.PACKS["graph-propose"].capabilities if c.name == "graph.add_episode")
+    assert "NAME EACH PERSON THE WAY THE GRAPH DOES" in cap.notes
+    assert "Jane Doe (written 'Jane R. Doe' in the mail)" in cap.notes
+    assert "A role word ('Mom', 'my boss') is never a name" in cap.notes

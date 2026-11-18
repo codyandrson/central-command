@@ -84,6 +84,9 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "graph.create_edge": ArgSpec(
         required=("source_uuid", "target_uuid", "name", "fact", "valid_at")),
     "graph.merge_nodes": ArgSpec(required=("keep_uuid", "drop_uuid")),
+    # Optional: name, summary, labels, and a Person's aliases / birth_date /
+    # phone (the Executor forwards exactly those; the writer validates them
+    # against the node, which only it can read).
     "graph.update_node": ArgSpec(required=("uuid",)),
     "graph.delete_node": ArgSpec(required=("uuid",)),
     "graph.update_edge": ArgSpec(required=("uuid",)),

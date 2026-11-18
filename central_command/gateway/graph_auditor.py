@@ -135,13 +135,25 @@ def render_delta(delta: dict, include_uuids: bool = False) -> str:
     def _uuid(x: dict) -> str:
         return f" [uuid {x.get('uuid')}]" if include_uuids and x.get("uuid") else ""
 
+    def _person_values(n: dict) -> str:
+        # A single-person value (graph_ontology.Person) lives on the entity, not
+        # on a relationship; absent on deltas read before the fields existed.
+        parts = []
+        if n.get("aliases"):
+            parts.append("also called " + ", ".join(str(a) for a in n["aliases"]))
+        if n.get("birth_date"):
+            parts.append(f"birth date {n['birth_date']}")
+        if n.get("phone"):
+            parts.append(f"phone {n['phone']}")
+        return f"  [attributes: {'; '.join(parts)}]" if parts else ""
+
     lines.append(f"ENTITIES ({len(entities)}):")
     for n in entities:
         labels = [l for l in (n.get("labels") or []) if l != "Entity"]
         embedded = "" if n.get("has_embedding") else "  [NO EMBEDDING — invisible to semantic recall]"
         lines.append(
             f"  - {_newness(n)}{n.get('name')} ({', '.join(labels) or 'Entity'})"
-            f"{_uuid(n)}{embedded}"
+            f"{_uuid(n)}{_person_values(n)}{embedded}"
         )
     lines.append(f"RELATIONSHIPS ({len(edges)}):")
     for e in edges:
@@ -283,7 +295,10 @@ async def _judge(
         "gives an earlier start, and a fact with no end when the text says it "
         "ceased. A present-tense claim with no stated start correctly carries "
         "the reference time; do not flag that. Name the fact and both dates in "
-        "the rationale."
+        "the rationale.\n"
+        "A value about ONE person (a birth date, a phone number, another name "
+        "for them) has no relationship to live on: it is correctly recorded "
+        "when it appears in that entity's [attributes] above."
     )
     try:
         await ensure_registered()

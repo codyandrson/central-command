@@ -24,7 +24,8 @@ import { EpisodeWalk } from './EpisodeWalk';
 import { EpisodeDeleteDialog } from './EpisodeDeleteDialog';
 import { communitiesFrom } from './clustering';
 import { AddEntity } from './AddEntity';
-import { FIELD, scopeLabel } from './graphUi';
+import { FIELD, scopeLabel, isPerson, personForm, personPatch } from './graphUi';
+import { PersonCard, PersonFields } from './PersonDetails';
 
 cytoscape.use(fcose);
 cytoscape.use(expandCollapse);
@@ -198,6 +199,7 @@ function NodeEditor({ node, entityTypes, curate, onDone }: {
   const [name, setName] = useState(node.name);
   const [summary, setSummary] = useState(node.summary || '');
   const [labels, setLabels] = useState<string[]>(node.labels.filter((l) => l !== 'Entity'));
+  const [person, setPerson] = useState(personForm(node));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [mergeFrom, setMergeFrom] = useState('');
@@ -211,6 +213,7 @@ function NodeEditor({ node, entityTypes, curate, onDone }: {
     setName(node.name);
     setSummary(node.summary || '');
     setLabels(node.labels.filter((l) => l !== 'Entity'));
+    setPerson(personForm(node));
     setErr(null);
   }, [node]);
 
@@ -227,8 +230,11 @@ function NodeEditor({ node, entityTypes, curate, onDone }: {
   };
 
   const others = curate.loadedNodes.filter((n) => n.uuid !== node.uuid);
+  // The Person fields show (and are sent) only while the entity is typed Person.
+  const personPart = labels.includes('Person') ? personPatch(node, person) : {};
   const dirty = name !== node.name || summary !== (node.summary || '')
-    || labels.join() !== node.labels.filter((l) => l !== 'Entity').join();
+    || labels.join() !== node.labels.filter((l) => l !== 'Entity').join()
+    || Object.keys(personPart).length > 0;
 
   return (
     <div className="space-y-3 border-t border-border/40 px-4 py-3">
@@ -255,13 +261,20 @@ function NodeEditor({ node, entityTypes, curate, onDone }: {
           </button>
         ))}
       </div>
+      {labels.includes('Person') && <PersonFields form={person} onChange={setPerson} />}
       <div className="flex gap-2">
         <Button
           size="sm"
           disabled={busy || !dirty}
           onClick={() => run(async () => {
-            await curate.updateNode({ uuid: node.uuid, name, summary, labels });
-            onDone({ kind: 'node-updated', node: { ...node, name, summary, labels: [...labels, 'Entity'] } });
+            const result = await curate.updateNode({ uuid: node.uuid, name, summary, labels, ...personPart });
+            onDone({ kind: 'node-updated', node: {
+              ...node, name, summary, labels: [...labels, 'Entity'],
+              ...(personPart.aliases !== undefined ? { aliases: personPart.aliases } : {}),
+              ...(result.aliases !== undefined ? { aliases: result.aliases } : {}),
+              ...(personPart.birth_date !== undefined ? { birth_date: personPart.birth_date || null } : {}),
+              ...(personPart.phone !== undefined ? { phone: personPart.phone || null } : {}),
+            } });
           })}
         >Save</Button>
         <Button
@@ -570,6 +583,7 @@ function DetailDrawer({ selection, episodes, onClose, entityTypes, curate, onCha
           {selection.node.summary && (
             <p className="text-[0.733rem] text-muted-foreground">{selection.node.summary}</p>
           )}
+          {isPerson(selection.node) && <PersonCard node={selection.node} />}
           <div>
             <div className="mb-1 text-[0.667rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
               Provenance

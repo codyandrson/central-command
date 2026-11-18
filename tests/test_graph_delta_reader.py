@@ -73,3 +73,73 @@ async def test_invalidated_entries_carry_when_the_fact_was_first_known(monkeypat
     _script(monkeypatch, window_rows=[row])
     delta = await neo4j_reader.episode_delta(EP)
     assert delta["invalidated"] == [{**row, "attributed_by": "window"}]
+
+
+# --- a Person's single-person values ride every cockpit entity payload ----------------
+
+PERSON_ROW = {"uuid": "p", "name": "Jane Rivers Doe", "labels": ["Entity", "Person"],
+              "summary": "s", "group_id": "g", "aliases": ["Jane", "JRD"],
+              "birth_date": "1980-02-29", "phone": "+1 555 0100"}
+
+
+@pytest.mark.asyncio
+async def test_the_delta_lists_each_entitys_person_values(monkeypatch):
+    """The auditor judges against the delta: a birth date that is in the entity's
+    attributes is recorded, not "in no relationship"."""
+    async def fake_read(query, **params):
+        if "MENTIONS" in query:
+            assert "coalesce(n.aliases, []) AS aliases" in query
+            return [{**PERSON_ROW, "has_embedding": True, "created_at": T0, "new": True}]
+        if "RETURN e.created_at AS created_at, e.group_id" in query:
+            return []
+        return []
+
+    monkeypatch.setattr(neo4j_reader, "_read", fake_read)
+    delta = await neo4j_reader.episode_delta(EP)
+    (entity,) = delta["entities"]
+    assert {k: entity[k] for k in ("aliases", "birth_date", "phone")} == {
+        "aliases": ["Jane", "JRD"], "birth_date": "1980-02-29", "phone": "+1 555 0100"}
+
+
+@pytest.mark.asyncio
+async def test_search_matches_an_alias_and_returns_the_values(monkeypatch):
+    seen: list[str] = []
+
+    async def fake_read(query, **params):
+        seen.append(query)
+        return [PERSON_ROW]
+
+    monkeypatch.setattr(neo4j_reader, "_read", fake_read)
+    rows = await neo4j_reader.search_entities("jrd", None, 10)
+    assert rows[0]["aliases"] == ["Jane", "JRD"]
+    assert "toLower(alias) CONTAINS toLower($q)" in seen[0]
+    assert "n.birth_date AS birth_date" in seen[0] and "n.phone AS phone" in seen[0]
+
+
+@pytest.mark.asyncio
+async def test_every_entity_payload_carries_the_person_values(monkeypatch):
+    neighbor = {"uuid": "e1", "source": "p", "target": "q", "name": "KNOWS",
+                "fact": "f", "valid_at": None, "invalid_at": None, "created_at": None,
+                "neighbor_uuid": "q", "neighbor_name": "Barbara Doe",
+                "neighbor_labels": ["Entity", "Person"], "neighbor_summary": "",
+                "neighbor_group_id": "g", "neighbor_aliases": ["Barb"],
+                "neighbor_birth_date": None, "neighbor_phone": "555"}
+
+    async def fake_read(query, **params):
+        if "RELATES_TO" in query and "neighbor_uuid" in query:
+            return [neighbor]
+        if "RELATES_TO" in query:
+            return []
+        if "MATCH (e:Episodic {uuid: $uuid})\n        RETURN" in query:
+            return [{"uuid": "ep", "name": "n", "source_description": "", "group_id": "g",
+                     "created_at": None, "valid_at": None, "content": ""}]
+        assert "coalesce(n.aliases, []) AS aliases" in query, query
+        return [PERSON_ROW]
+
+    monkeypatch.setattr(neo4j_reader, "_read", fake_read)
+    hood = await neo4j_reader.neighborhood("p", None, 10)
+    by_uuid = {n["uuid"]: n for n in hood["nodes"]}
+    assert by_uuid["p"]["aliases"] == ["Jane", "JRD"] and by_uuid["p"]["phone"] == "+1 555 0100"
+    assert by_uuid["q"]["aliases"] == ["Barb"] and by_uuid["q"]["phone"] == "555"
+    assert (await neo4j_reader.everything(None, 10))["nodes"][0]["birth_date"] == "1980-02-29"
+    assert (await neo4j_reader.episode_subgraph("ep"))["nodes"][0]["aliases"] == ["Jane", "JRD"]

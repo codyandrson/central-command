@@ -1,12 +1,21 @@
 """The graph's ten entity types, as graphiti-core is told about them (D4).
 
-Field-less models carrying the VERBATIM docstrings of graphiti MCP 1.1.0's
-built-in models. The extraction prompt's entity-type block is built from
-`__doc__` alone, and a model with no fields skips the per-entity attribute
-call; that call is what let a required `description` grow without bound on a
-hub node (2026-09-20). The docstrings ARE the guidance: replacing them with
-one-line descriptions made the local model extract nothing from short episodes
-(2026-09-21). See `.claude/rules/graph.md`.
+Models carrying the VERBATIM docstrings of graphiti MCP 1.1.0's built-in
+models. The extraction prompt's entity-type block is built from `__doc__`
+alone. Nine are FIELD-LESS: a model with no fields skips the per-entity
+attribute call, and that call is what let a REQUIRED `description` grow
+without bound on a hub node (2026-09-20) — graphiti-core's 250-char cap
+exempts required fields. `Person` alone carries three single-person values a
+fact (an edge between TWO entities) has nowhere to hold: a birth date, a phone
+number and the other names the text uses for the person. All three are
+Optional with default None, so the cap applies (graphiti 0.30.2 drops an
+Optional value over 250 chars) and an omitted value keeps its prior one
+(overlay merge); the two strings also carry `max_length`. `aliases` carries
+no `max_length`: upstream #2067 misapplies it to a list as a per-string cap.
+The field definitions were measured on the live extraction model (9 of 9,
+about 1 s per entity, 2026-11). The docstrings ARE the guidance: replacing
+them with one-line descriptions made the local model extract nothing from
+short episodes (2026-09-21). See `.claude/rules/graph.md`.
 
 The docstrings are assigned as explicit string constants, not written as class
 docstrings, so the prompt bytes do not depend on how an interpreter treats
@@ -18,7 +27,7 @@ workloads that share the model.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 _PERSON_DOC = """A Person represents an individual human referenced in the content.
 
@@ -153,6 +162,12 @@ _OBJECT_DOC = """An Object represents a physical item, tool, device, or possessi
 
 class Person(BaseModel):
     __doc__ = _PERSON_DOC
+
+    # Measured verbatim on the live extraction model (2026-11); every field is
+    # Optional, so graphiti's 250-char cap applies and none can grow unbounded.
+    birth_date: str | None = Field(None, max_length=10, description="The person's date of birth as an ISO 8601 date (YYYY-MM-DD). Only when the text states this person's own birth date.")
+    phone: str | None = Field(None, max_length=40, description="This person's own current phone number, as written in the text.")
+    aliases: list[str] | None = Field(None, description="Other names the text uses for this same person: nicknames, short names, full legal name, maiden name. Never a role word such as 'Mom' and never another person's name.")
 
 
 class Preference(BaseModel):

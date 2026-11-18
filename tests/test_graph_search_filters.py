@@ -21,7 +21,7 @@ import pytest
 from pydantic_ai import ModelRetry
 
 from central_command.config import settings
-from central_command.integrations import graph_ontology, graphiti, graphiti_client
+from central_command.integrations import graph_ontology, graphiti, graphiti_client, neo4j_reader
 from central_command.runtime import tools
 
 T = datetime(2025, 3, 1, tzinfo=timezone.utc)
@@ -56,10 +56,16 @@ class _Fake:
         return R()
 
 
+async def _no_exact(*a, **k):
+    # search_nodes' exact name/alias lane is a bolt read; these tests are about the library call.
+    return []
+
+
 @pytest.fixture
 def fake(monkeypatch):
     f = _Fake()
     monkeypatch.setattr(graphiti_client, "get_graphiti", lambda: f)
+    monkeypatch.setattr(neo4j_reader, "entities_by_exact_name", _no_exact)
     return f
 
 

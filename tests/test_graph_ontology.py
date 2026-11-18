@@ -1,4 +1,4 @@
-"""The ontology module (D4): ten field-less models carrying MCP 1.1.0's docstrings verbatim.
+"""The ontology module (D4): ten models carrying MCP 1.1.0's docstrings verbatim; only Person has fields.
 
 The docstring is the extraction guidance (the prompt's entity-type block is
 built from `__doc__` alone), so its bytes are pinned. Changing one is a change
@@ -59,11 +59,42 @@ def test_the_docstrings_keep_their_raw_indentation_and_newlines():
     assert onto.Preference.__doc__.startswith("\n    IMPORTANT: Prioritize")
 
 
-def test_every_model_is_field_less():
-    # A field would bring back the per-entity attribute call (and an unbounded
-    # attribute with it).
+PERSON_FIELDS = ("birth_date", "phone", "aliases")
+
+
+def test_only_person_has_fields_and_they_are_the_measured_three():
+    # A field brings back the per-entity attribute call, so every other type
+    # stays field-less; Person carries exactly the three measured fields.
     for name, model in onto.ENTITY_TYPES.items():
-        assert len(model.model_fields) == 0, name
+        if name == "Person":
+            assert tuple(model.model_fields) == PERSON_FIELDS
+        else:
+            assert len(model.model_fields) == 0, name
+
+
+def test_person_fields_are_optional_and_the_strings_are_capped():
+    fields = onto.Person.model_fields
+    for name in PERSON_FIELDS:
+        f = fields[name]
+        assert not f.is_required(), name
+        assert f.default is None, name
+    caps = {
+        name: [m.max_length for m in fields[name].metadata if hasattr(m, "max_length")]
+        for name in PERSON_FIELDS
+    }
+    assert caps["birth_date"] == [10]
+    assert caps["phone"] == [40]
+    # upstream #2067: max_length on a list is misapplied as a per-string cap.
+    assert caps["aliases"] == []
+    assert onto.Person().model_dump() == {"birth_date": None, "phone": None, "aliases": None}
+
+
+def test_no_type_has_a_required_field():
+    # A REQUIRED attribute is exempt from graphiti's 250-char cap and grew
+    # without bound (2026-09-20).
+    for name, model in onto.ENTITY_TYPES.items():
+        for fname, f in model.model_fields.items():
+            assert not f.is_required(), (name, fname)
 
 
 def test_no_model_could_collide_with_an_entity_node_field():

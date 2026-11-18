@@ -1,0 +1,154 @@
+# Central Command local patch (no upstream number): the fourth patch's name lane also
+# matches an existing entity's ALIASES, not only its name.
+#
+# Seam: graphiti_core/utils/maintenance/node_operations.py, the name lane the fourth
+# patch (0004-dedupe-name-candidates) adds to _collect_candidate_nodes. Since the
+# ontology's Person type carries an optional `aliases` list (stored by graphiti on
+# Neo4j as a list property `n.aliases`), one person may be known by several names
+# ("Jane", "Jane Doe", "Jane Rivers Doe"). The fourth patch reads only `n.name`, so an
+# extracted "Jane R. Doe" never met an entity named "Jane Rivers Doe" whose aliases
+# hold "Jane R. Doe".
+#
+# The lane now selects entities whose name OR one of whose aliases contains a word of
+# the extracted name, reads `coalesce(n.aliases, [])` beside the name, and scores each
+# entity by its BEST match over the name and every alias: an exact (case-insensitive,
+# whitespace-normalised) match scores 1.0, as an exact name does; otherwise a form
+# whose words all appear in the other (either way round) scores its word overlap. The
+# limit (NAME_DEDUP_CANDIDATE_LIMIT) is the fourth patch's. The lane embeds nothing
+# and writes nothing.
+#
+# An extracted name that EQUALS an alias is then resolved the way an exact name is:
+# the candidate index graphiti's exact step reads (_build_candidate_indexes) also
+# holds each candidate's aliases, so one match resolves without the model and several
+# go to the dedupe prompt. Measured without that, on the model this was built
+# against: the prompt was shown the aliases (its candidate context spreads the
+# candidate's `attributes`) and still declined two of three names that were listed
+# aliases. So an alias means what a name means: every mention that equals it resolves
+# to that entity. Any other alias-matched candidate still goes to the dedupe prompt.
+#
+# Why a fifth patch and not an edited fourth: the applier recognises a patch as applied
+# only when every hunk's NEW block is present verbatim, so editing lines the fourth
+# patch added would make the fourth unrecognisable on an install that carries both.
+# This patch therefore leaves the fourth's text as shipped, adds the two extended
+# functions after _semantic_candidate_search, and rebinds `_name_candidate_search` to
+# the extended lane and `_build_candidate_indexes` to the alias-aware one (the calls
+# in _collect_candidate_nodes and resolve_extracted_nodes resolve the names at call
+# time). An install carrying the previous fourth patch gets this one applied on top.
+#
+# Goes with the fourth patch, or when the ontology drops `aliases`.
+#
+# Written for graphiti-core 0.30.2 (see PINNED_VERSION in
+# central_command/integrations/graphiti_patches.py).
+--- a/graphiti_core/utils/maintenance/node_operations.py
++++ b/graphiti_core/utils/maintenance/node_operations.py
+@@ -520,6 +520,110 @@
+     )
+ 
+ 
++# Central Command (0005): the name lane also matches an entity's ALIASES. The
++# fourth patch's lane above is left as shipped (the patch applier recognises a
++# patch by its exact text); these two functions extend it and the rebinding at
++# the end makes _collect_candidate_nodes call the extended lane.
++def _rank_name_and_alias_candidates(
++    name: str, rows: list[tuple[str, str, list[str]]], limit: int
++) -> list[str]:
++    """Order `(uuid, name, aliases)` rows for one extracted name by the BEST match over
++    the stored name and each alias: an exact (case-insensitive, whitespace-normalised)
++    match scores as high as an exact name, otherwise only a form whose words all appear
++    in the other (either way round) counts, closest word-overlap first."""
++    wanted = _name_tokens(name)
++    if not wanted:
++        return []
++    exact = ' '.join(name.split()).casefold()
++    scored: list[tuple[float, str]] = []
++    for uuid, other, aliases in rows:
++        best = 0.0
++        for form in [other or '', *(aliases or [])]:
++            if not isinstance(form, str):
++                continue
++            if ' '.join(form.split()).casefold() == exact:
++                best = 1.0
++                break
++            have = _name_tokens(form)
++            if have and (wanted <= have or have <= wanted):
++                best = max(best, len(wanted & have) / len(wanted | have))
++        if best > 0:
++            scored.append((best, uuid))
++    scored.sort(key=lambda pair: (-pair[0], pair[1]))
++    return [uuid for _, uuid in scored[:limit]]
++
++
++async def _name_and_alias_candidate_search(
++    clients: GraphitiClients,
++    extracted_nodes: list[EntityNode],
++) -> list[list[EntityNode]]:
++    """The fourth patch's name lane, with each entity's `aliases` read beside its name:
++    an entity is a candidate when its name OR one of its aliases shares every word with
++    the extracted name ("Jane" and an entity whose aliases hold "Jane"). Read-only; the
++    caller's exact-name and LLM steps still decide."""
++
++    async def for_node(node: EntityNode) -> list[EntityNode]:
++        tokens = sorted(_name_tokens(node.name))
++        if not tokens:
++            return []
++        records, _, _ = await clients.driver.execute_query(
++            """
++            MATCH (n:Entity)
++            WHERE n.group_id = $group_id AND n.uuid <> $uuid
++              AND (any(token IN $tokens WHERE toLower(n.name) CONTAINS token)
++                   OR any(alias IN coalesce(n.aliases, [])
++                          WHERE any(token IN $tokens WHERE toLower(alias) CONTAINS token)))
++            RETURN n.uuid AS uuid, n.name AS name, coalesce(n.aliases, []) AS aliases
++            """,
++            group_id=node.group_id,
++            uuid=node.uuid,
++            tokens=tokens,
++            routing_='r',
++        )
++        ranked = _rank_name_and_alias_candidates(
++            node.name,
++            [(record['uuid'], record['name'], record['aliases']) for record in records],
++            NAME_DEDUP_CANDIDATE_LIMIT,
++        )
++        if not ranked:
++            return []
++        by_uuid = {
++            found.uuid: found for found in await EntityNode.get_by_uuids(clients.driver, ranked)
++        }
++        return [by_uuid[uuid] for uuid in ranked if uuid in by_uuid]
++
++    return list(await semaphore_gather(*[for_node(node) for node in extracted_nodes]))
++
++
++_name_candidate_search = _name_and_alias_candidate_search
++
++
++# An extracted name that EQUALS a candidate's alias is resolved like an exact name
++# match: graphiti's exact step (_resolve_with_similarity) reads this index, takes a
++# single match without asking the model and sends several matches to the dedupe
++# prompt. Measured without it: the model declined "Jane Doe" for an entity whose
++# aliases listed exactly that.
++_upstream_build_candidate_indexes = _build_candidate_indexes
++
++
++def _build_alias_candidate_indexes(existing_nodes: list[EntityNode]) -> DedupCandidateIndexes:
++    indexes = _upstream_build_candidate_indexes(existing_nodes)
++    for candidate in existing_nodes:
++        aliases = (candidate.attributes or {}).get('aliases') or []
++        if not isinstance(aliases, list):
++            continue
++        for alias in aliases:
++            key = _normalize_string_exact(alias) if isinstance(alias, str) else ''
++            if key and all(
++                known.uuid != candidate.uuid for known in indexes.normalized_existing[key]
++            ):
++                indexes.normalized_existing[key].append(candidate)
++    return indexes
++
++
++_build_candidate_indexes = _build_alias_candidate_indexes
++
++
+ def _commit_resolution(
+     state: DedupResolutionState,
+     resolved_node: EntityNode | None,

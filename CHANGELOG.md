@@ -4,6 +4,43 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.96.0: A person's other names, birth date and phone number have a place in the graph
+
+A fact in the graph joins two entities, so a value about one person (a birth date, a phone number)
+was dropped by extraction, and a person who appears under several names was not reliably one entity.
+Both were found on a live graph: an approved "born on" episode left no trace of the date, and two
+phone numbers had gone the same way.
+
+- **`Person` carries three optional values**: `birth_date` (an ISO date as text, capped at 10
+  characters), `phone` (40) and `aliases` (other names for the same person). Every other entity type
+  stays field-less. graphiti-core fills them with one extra model call per person per episode (about a
+  second on the measured local model), keeps a stored value when the text gives none, and drops an
+  over-long value. Measured before building, 13 cases on the live extraction model: every value went
+  to the right person, none to the other person in the sentence, stored values were kept, a role word
+  ("Mom") was not taken as a name; one new spelling beside stored aliases was not added.
+- **Entity dedupe matches aliases** (a fifth carried patch, `0005-dedupe-alias-candidates`, on top
+  of the fourth): an existing entity is offered when the extracted name equals or shares every word
+  with its name or one of its aliases. A name that EQUALS an alias resolves the way an exact name
+  does, with no model call (two entities holding the same alias go to the dedupe prompt): shown the
+  aliases, the model still declined two of three listed names. So an alias means what a name means,
+  and a bare first name as an alias claims every bearer of that name in the group.
+- **Aliases keep themselves.** Merging a duplicate into a Person adds the duplicate's name and aliases
+  to the survivor (and its birth date or phone where the survivor has none); renaming a Person keeps
+  the old name as an alias.
+- **Curation.** `graph.update_node` and the Graph panel's entity form edit the three values on a
+  Person (validated; an empty value clears); the entity card shows them, and the panel search matches
+  an alias.
+- **Agents find a person by any stored name.** The entity search lists an exact name-or-alias match
+  first. The episode-writing rule now says: name each person the way the graph does, put other forms
+  in parentheses on first mention, and resolve a role word to the named person or ask.
+- **The graph auditor is shown the values**, and told that a single-person value is correctly
+  recorded when it is in that entity's attributes, so a birth date is no longer flagged as dropped.
+
+One value, no date: an attribute holds a single undated value, so an older mail ingested later can
+overwrite a newer phone number. "As of" dates stay in the episode text. DL-133 is amended (the
+ontology is no longer wholly field-less). The updater applies the fifth patch with the others; the
+ingest worker refuses to extract until all five are in the installed package. No schema, unit or
+manifest change. Existing entities gain values only as new episodes or the operator supply them.
 ## 2026-11-18 — v2.95.0: Read-aloud speaks sentence by sentence
 
 With the speech engine no longer throttled (v2.94.0) it synthesises faster than playback, but the cockpit

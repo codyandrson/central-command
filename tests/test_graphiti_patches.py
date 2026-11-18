@@ -71,8 +71,20 @@ PATCH_D = """--- a/pkg/delta.py
 +q = 40
  r = 3
 """
-DELTA_OLD = ["p = 1", "q = 2", "r = 3", ""]
-DELTA_NEW = ["p = 1", "q = 40", "r = 3", ""]
+# The fifth stacks on the fourth, as the real 0005 does on 0004: its OLD block holds
+# a line only the fourth writes ("q = 40"), and it adds outside the fourth's block,
+# so both stay recognisable once both are applied.
+PATCH_E = """--- a/pkg/delta.py
++++ b/pkg/delta.py
+@@ -2,3 +2,4 @@
+ q = 40
+ r = 3
++r2 = 35
+ s = 4
+"""
+DELTA_OLD = ["p = 1", "q = 2", "r = 3", "s = 4", ""]
+DELTA_D = ["p = 1", "q = 40", "r = 3", "s = 4", ""]
+DELTA_NEW = ["p = 1", "q = 40", "r = 3", "r2 = 35", "s = 4", ""]
 
 
 def _tree(tmp_path: Path, *, version: str = gp.PINNED_VERSION, beta: list[str] = BETA_OLD):
@@ -92,6 +104,7 @@ def _tree(tmp_path: Path, *, version: str = gp.PINNED_VERSION, beta: list[str] =
     (pdir / gp.PATCH_FILES[1]).write_text(PATCH_B)
     (pdir / gp.PATCH_FILES[2]).write_text(PATCH_C)
     (pdir / gp.PATCH_FILES[3]).write_text(PATCH_D)
+    (pdir / gp.PATCH_FILES[4]).write_text(PATCH_E)
     return site, pdir
 
 
@@ -101,12 +114,12 @@ def _read(site: Path, name: str) -> str:
 
 def test_apply_patches_every_hunk_and_reports_each_file(tmp_path):
     site, pdir = _tree(tmp_path)
-    assert len(gp.PATCH_FILES) == 4
+    assert len(gp.PATCH_FILES) == 5
     assert gp.patch_state(site, pdir) == {n: "pristine" for n in gp.PATCH_FILES}
     lines = gp.apply_patches(site, pdir)
     assert [(f, s) for _, f, s in lines] == [
         ("pkg/alpha.py", "patched"), ("pkg/beta.py", "patched"), ("pkg/gamma.py", "patched"),
-        ("pkg/delta.py", "patched")]
+        ("pkg/delta.py", "patched"), ("pkg/delta.py", "patched")]
     assert _read(site, "alpha.py") == "\n".join(ALPHA_NEW)
     assert _read(site, "beta.py") == "\n".join(BETA_NEW)
     assert _read(site, "gamma.py") == "\n".join(GAMMA_NEW)
@@ -130,6 +143,19 @@ def test_a_half_applied_file_finishes_the_missing_hunk(tmp_path):
     assert gp.patch_state(site, pdir)[gp.PATCH_FILES[0]] == "unknown"
     gp.apply_patches(site, pdir)
     assert _read(site, "alpha.py") == "\n".join(ALPHA_NEW)
+
+
+def test_a_patch_stacked_on_an_earlier_one_applies_over_a_file_that_has_only_the_earlier(tmp_path):
+    """The live install carries the previous fourth patch and not the fifth: the
+    fourth reads as patched, the fifth as pristine, and one run finishes it with
+    both recognisable afterwards."""
+    site, pdir = _tree(tmp_path)
+    (site / "pkg" / "delta.py").write_text("\n".join(DELTA_D))
+    state = gp.patch_state(site, pdir)
+    assert state[gp.PATCH_FILES[3]] == "patched" and state[gp.PATCH_FILES[4]] == "pristine"
+    gp.apply_patches(site, pdir)
+    assert _read(site, "delta.py") == "\n".join(DELTA_NEW)
+    assert gp.patch_state(site, pdir) == {n: "patched" for n in gp.PATCH_FILES}
 
 
 def test_a_mismatch_fails_loudly_and_writes_nothing_anywhere(tmp_path):
@@ -208,7 +234,7 @@ def test_cli_check_and_apply_and_exit_codes(tmp_path):
     assert r.returncode == 1 and "NOT patched" in r.stdout
     assert _read(site, "alpha.py") == "\n".join(ALPHA_OLD)  # --check changes nothing
     r = run("--site-packages", str(site))
-    assert r.returncode == 0 and r.stdout.count("pkg/") == 4 and "patched" in r.stdout
+    assert r.returncode == 0 and r.stdout.count("pkg/") == 5 and "patched" in r.stdout
     r = run("--site-packages", str(site))
     assert r.returncode == 0 and "already patched" in r.stdout
     assert run("--site-packages", str(site), "--check").returncode == 0
@@ -223,6 +249,8 @@ def test_the_real_patches_parse_to_the_expected_files():
         "0003-entity-embedding-name-summary.patch": [("graphiti_core/nodes.py", 1)],
         "0004-dedupe-name-candidates.patch": [
             ("graphiti_core/utils/maintenance/node_operations.py", 2)],
+        "0005-dedupe-alias-candidates.patch": [
+            ("graphiti_core/utils/maintenance/node_operations.py", 1)],
     }
 
 
@@ -357,7 +385,8 @@ def test_the_ingest_gate_refuses_extraction_while_the_third_patch_is_pristine(tm
 
     state = gp.patch_state(site, pdir)
     assert state == {gp.PATCH_FILES[0]: "patched", gp.PATCH_FILES[1]: "patched",
-                     gp.PATCH_FILES[2]: "pristine", gp.PATCH_FILES[3]: "patched"}
+                     gp.PATCH_FILES[2]: "pristine", gp.PATCH_FILES[3]: "patched",
+                     gp.PATCH_FILES[4]: "patched"}
     monkeypatch.setattr(gp, "patch_state", lambda: state)
     assert graphiti_client.patches_ok() is False
     monkeypatch.setattr(gp, "patch_state", lambda: {**state, gp.PATCH_FILES[2]: "patched"})
@@ -474,3 +503,220 @@ def test_the_name_ranking_is_capped_and_ignores_a_possessive(tmp_path):
     ranked = rank("Rivers", rows, scope["NAME_DEDUP_CANDIDATE_LIMIT"])
     assert len(ranked) == scope["NAME_DEDUP_CANDIDATE_LIMIT"] == 10 and ranked[0] == "exact"
     assert rank("", rows, 10) == [] and rank("Rivers", [("x", "Jane Doe"), ("y", None)], 10) == []
+
+
+# --- the fifth patch: the name lane also matches aliases (2026-11) ----------------------
+
+ALIAS_PATCH = "0005-dedupe-alias-candidates.patch"
+_NODE_OPS = "graphiti_core/utils/maintenance/node_operations.py"
+
+
+def _scratch_node_ops(tmp_path: Path) -> Path:
+    """A scratch site holding the files the patches touch, as the install has them."""
+    real = gp.find_site_packages()
+    site = tmp_path / "site"
+    for rel in {f.path for _, files in gp._load_patches(gp.PATCH_DIR) for f in files}:
+        (site / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(real / rel, site / rel)
+    for dist in real.glob("graphiti_core-*.dist-info"):
+        shutil.copytree(dist, site / dist.name)
+    if gp.installed_version(site) != gp.PINNED_VERSION:
+        pytest.skip("installed graphiti-core is not the pinned version")
+    return site
+
+
+def _reverse(site: Path, patch_name: str) -> None:
+    (_, files), = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == patch_name]
+    for fp in files:
+        lines = (site / fp.path).read_text().split("\n")
+        for h in fp.hunks:
+            n = len(h.new)
+            at = next(i for i in range(len(lines) - n + 1) if tuple(lines[i:i + n]) == h.new)
+            lines[at:at + n] = list(h.old)
+        (site / fp.path).write_text("\n".join(lines))
+
+
+def _patched_alias_lane(tmp_path: Path) -> dict:
+    """The fourth and fifth patches' functions and the fifth's rebinding, compiled in
+    source order from the patched TEXT (graphiti_core is never imported)."""
+    import ast
+    import asyncio
+
+    site = _scratch_node_ops(tmp_path)
+    gp.apply_patches(site)
+    tree = ast.parse((site / _NODE_OPS).read_text())
+    wanted = {"_name_tokens", "_rank_name_candidates", "_name_candidate_search",
+              "_collect_candidate_nodes", "_merge_candidate_nodes",
+              "_rank_name_and_alias_candidates", "_name_and_alias_candidate_search"}
+    body = [n for n in tree.body
+            if (isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in wanted)
+            or (isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in {
+                "NAME_DEDUP_CANDIDATE_LIMIT", "_name_candidate_search"})]
+    assert {getattr(n, "name", None) or n.targets[0].id for n in body} == wanted | {
+        "NAME_DEDUP_CANDIDATE_LIMIT"}
+
+    async def gather(*coros):
+        return await asyncio.gather(*coros)
+
+    scope: dict = {"GraphitiClients": object, "EntityNode": object, "semaphore_gather": gather}
+    exec(compile(ast.Module(body, []), "node_operations.py", "exec"), scope)
+    return scope
+
+
+class _AliasEntity(_Entity):
+    def __init__(self, uuid, name, aliases=None, group_id="g"):
+        super().__init__(uuid, name, group_id)
+        self.aliases = aliases
+
+
+class _AliasDriver(_NameDriver):
+    """Answers the extended read the way Neo4j would: a token in the name OR in an alias."""
+
+    async def execute_query(self, query, **params):
+        self.queries.append((query, params))
+        rows = []
+        for e in self.stored:
+            forms = [e.name, *(e.aliases or [])]
+            if e.group_id == params["group_id"] and e.uuid != params["uuid"] and any(
+                    t in f.lower() for t in params["tokens"] for f in forms):
+                rows.append({"uuid": e.uuid, "name": e.name, "aliases": list(e.aliases or [])})
+        return rows, None, None
+
+
+@pytest.mark.skipif(not _INSTALLED, reason="graphiti-core is not installed")
+async def test_the_alias_lane_offers_an_entity_known_by_another_name(tmp_path):
+    """"Jane R. Doe" shares no word-set relation with "Jane Rivers Doe", but the entity's
+    aliases hold it: the extended lane offers it first, ahead of the vector hits."""
+    scope = _patched_alias_lane(tmp_path)
+    assert scope["_name_candidate_search"] is scope["_name_and_alias_candidate_search"]
+    stored = [_AliasEntity("u-jane", "Jane Rivers Doe", ["Jane R. Doe", "JRD"]),
+              _AliasEntity("u-barb", "Barbara Doe", None),
+              _AliasEntity("u-far", "Jane Rivers Doe", ["JRD"], group_id="elsewhere")]
+
+    class _Loaded:
+        @classmethod
+        async def get_by_uuids(cls, driver, uuids):
+            return [e for e in stored if e.uuid in uuids]
+
+    scope["EntityNode"] = _Loaded
+    vector_hit = _Entity("u-vec", "draw.io Diagrams")
+
+    async def vector_lane(clients, nodes):
+        return [[vector_hit] for _ in nodes]
+
+    scope["_semantic_candidate_search"] = vector_lane
+
+    class _Clients:
+        driver = _AliasDriver(stored)
+
+    got = await scope["_collect_candidate_nodes"](
+        _Clients, [_AliasEntity("new-1", "Jane R. Doe"), _AliasEntity("new-2", "jrd"),
+                   _AliasEntity("new-3", "Acme")], None)
+    assert [e.uuid for e in got[0]] == ["u-jane", "u-vec"]
+    assert [e.uuid for e in got[1]] == ["u-jane", "u-vec"]
+    assert [e.uuid for e in got[2]] == ["u-vec"]
+    query, params = _Clients.driver.queries[0]
+    assert "coalesce(n.aliases, [])" in query and "toLower(alias) CONTAINS token" in query
+    assert all(p["routing_"] == "r" for _, p in _Clients.driver.queries), "the lane only reads"
+
+
+@pytest.mark.skipif(not _INSTALLED, reason="graphiti-core is not installed")
+def test_the_alias_ranking_takes_the_best_form_and_an_exact_alias_ties_an_exact_name(tmp_path):
+    scope = _patched_alias_lane(tmp_path)
+    rank, limit = scope["_rank_name_and_alias_candidates"], scope["NAME_DEDUP_CANDIDATE_LIMIT"]
+    rows = [("a-name", "Jane Doe", []), ("b-alias", "Jane Rivers Doe", ["  JANE   doe "]),
+            ("c-part", "Jane Doe Rivers Smith", []), ("d-none", "Barbara Doe", ["Barb"])]
+    # Both exact forms score 1.0 (tie broken by uuid); the partial name scores its overlap.
+    assert rank("Jane Doe", rows, limit) == ["a-name", "b-alias", "c-part"]
+    # The best form wins: a weak name match is lifted by an exact alias.
+    assert rank("Barb", rows, limit) == ["d-none"]
+    many = [(f"u{i:02d}", f"Other {i}", [f"Jane thing {i}"]) for i in range(30)]
+    assert len(rank("Jane", many, limit)) == limit == 10
+    assert rank("", rows, limit) == [] and rank("Acme", [("x", None, None)], limit) == []
+
+
+@pytest.mark.skipif(not _INSTALLED, reason="graphiti-core is not installed")
+def test_the_fifth_patch_applies_over_the_previous_fourth_and_leaves_it_recognisable(tmp_path):
+    """The updater's path: an install carrying the shipped fourth patch only. From
+    pristine and from fourth-only, one run lands on the same text, all five patched."""
+    site = _scratch_node_ops(tmp_path)
+    state = gp.patch_state(site)
+    if state[ALIAS_PATCH] == "patched":
+        _reverse(site, ALIAS_PATCH)
+    if gp.patch_state(site)[NAME_PATCH] == "patched":
+        _reverse(site, NAME_PATCH)
+    assert gp.patch_state(site)[NAME_PATCH] == "pristine"
+    pristine = (site / _NODE_OPS).read_text()
+
+    gp.apply_patches(site)
+    from_pristine = (site / _NODE_OPS).read_text()
+    assert set(gp.patch_state(site).values()) == {"patched"}
+
+    (site / _NODE_OPS).write_text(pristine)
+    original = gp.PATCH_FILES
+    try:
+        gp.PATCH_FILES = original[:-1]
+        gp.apply_patches(site)
+    finally:
+        gp.PATCH_FILES = original
+    assert gp.patch_state(site)[NAME_PATCH] == "patched"
+    assert gp.patch_state(site)[ALIAS_PATCH] == "pristine"
+    gp.apply_patches(site)
+    assert (site / _NODE_OPS).read_text() == from_pristine
+    assert set(gp.patch_state(site).values()) == {"patched"}
+
+
+def test_the_fifth_patch_comes_after_the_fourth_and_its_header_says_why():
+    assert gp.PATCH_FILES.index(ALIAS_PATCH) == gp.PATCH_FILES.index(NAME_PATCH) + 1
+    header = " ".join(ln.lstrip("# ") for ln in (gp.PATCH_DIR / ALIAS_PATCH).read_text().splitlines()
+                      if ln.startswith("#"))
+    assert "aliases" in header and "rebinds" in header and "NEW block" in header
+
+
+@pytest.mark.skipif(not _INSTALLED, reason="graphiti-core is not installed")
+def test_an_exact_alias_is_indexed_like_an_exact_name(tmp_path):
+    """The dedupe prompt, shown a candidate's aliases, still declined names that were
+    listed there (measured on the live model), so the fifth patch puts each alias in
+    the index graphiti's exact-name step reads: one holder resolves without the model,
+    two go to the prompt. Compiled from the patched TEXT; upstream's index builder and
+    its normaliser are stood in for (their behaviour here is one dict and one fold)."""
+    import ast
+    from collections import defaultdict
+    from types import SimpleNamespace
+
+    site = _scratch_node_ops(tmp_path)
+    gp.apply_patches(site)
+    text = (site / _NODE_OPS).read_text()
+    assert "\n_build_candidate_indexes = _build_alias_candidate_indexes\n" in text
+    tree = ast.parse(text)
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+              and n.name == "_build_alias_candidate_indexes")
+
+    def upstream(existing):
+        index = defaultdict(list)
+        for node in existing:
+            index[" ".join(node.name.lower().split())].append(node)
+        return SimpleNamespace(normalized_existing=index)
+
+    scope: dict = {"EntityNode": object, "DedupCandidateIndexes": object,
+                   "_upstream_build_candidate_indexes": upstream,
+                   "_normalize_string_exact": lambda name: " ".join(name.lower().split())}
+    exec(compile(ast.Module([fn], []), "node_operations.py", "exec"), scope)
+
+    def node(uuid, name, aliases):
+        return SimpleNamespace(uuid=uuid, name=name, attributes={"aliases": aliases})
+
+    jane = node("u-jane", "Jane", ["Jane Rivers Doe", "Jane  DOE", "jane", 7, ""])
+    barbara = node("u-barbara", "Barbara Doe", ["Barb"])
+    other_barb = node("u-other", "Barb Lee", ["Barb"])
+    odd = SimpleNamespace(uuid="u-odd", name="Acme", attributes={"aliases": "not a list"})
+    bare = SimpleNamespace(uuid="u-bare", name="Initech", attributes=None)
+
+    index = scope["_build_alias_candidate_indexes"](
+        [jane, barbara, other_barb, odd, bare]).normalized_existing
+    assert [n.uuid for n in index["jane rivers doe"]] == ["u-jane"]
+    assert [n.uuid for n in index["jane doe"]] == ["u-jane"]
+    assert [n.uuid for n in index["jane"]] == ["u-jane"], "an alias equal to the name is not listed twice"
+    assert [n.uuid for n in index["barb"]] == ["u-barbara", "u-other"], "two holders: the prompt decides"
+    assert [n.uuid for n in index["acme"]] == ["u-odd"] and [n.uuid for n in index["initech"]] == ["u-bare"]
+    assert "7" not in index and "" not in index

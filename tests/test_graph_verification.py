@@ -289,6 +289,22 @@ def test_render_delta_explains_window_attribution():
     assert "neighbouring" not in graph_auditor.render_delta(delta)
 
 
+def test_render_delta_shows_a_persons_values_on_the_entity():
+    """A birth date has no relationship to live on; the auditor (and the operator)
+    see it where it is recorded, on the entity (2026-11)."""
+    delta = {"entities": [
+        {"name": "Jane Rivers Doe", "labels": ["Entity", "Person"], "has_embedding": True,
+         "new": True, "aliases": ["Jane", "JRD"], "birth_date": "1980-02-29",
+         "phone": "+1 555 0100"},
+        {"name": "Example Co", "labels": ["Entity", "Organization"], "has_embedding": True,
+         "aliases": [], "birth_date": None, "phone": None}],
+        "edges": [], "invalidated": []}
+    text = graph_auditor.render_delta(delta)
+    assert ("Jane Rivers Doe (Person)  [attributes: also called Jane, JRD; "
+            "birth date 1980-02-29; phone +1 555 0100]") in text
+    assert "Example Co (Organization)\n" in text + "\n", "nothing shown when there is none"
+
+
 
 async def test_shadow_mode_parks_even_an_aligned_clean_row(monkeypatch):
     _graph(monkeypatch)
@@ -849,4 +865,5 @@ async def test_judgment_prompt_checks_every_window_against_the_text(monkeypatch)
     prompt = seen["prompt"]
     assert "Episode reference time" in prompt and "2026-05-12T09:30:00Z" in prompt
     assert "CHECK EVERY FACT'S WINDOW" in prompt
+    assert "correctly recorded when it appears in that entity's [attributes]" in prompt
     assert "valid from 2026-05-12T09:30:00Z" in prompt

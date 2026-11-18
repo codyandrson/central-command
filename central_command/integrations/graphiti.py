@@ -298,12 +298,28 @@ async def search_nodes(
 ) -> list[dict]:
     """Relevant entities (nodes with summaries), up to `max_nodes`. `group_ids`
     as in search_facts; `entity_types` restricts to those ontology types;
-    `center_node_uuid` ranks by graph distance from that entity."""
+    `center_node_uuid` ranks by graph distance from that entity.
+
+    An entity whose name or one of whose ALIASES equals the query exactly
+    (case-insensitive) is listed first, from a bolt read over the same groups
+    and types (`neo4j_reader.entities_by_exact_name`): the hybrid search covers
+    name and summary only, so "Jane R. Doe" never found the Person whose
+    aliases hold it."""
+    groups = group_ids or await groups_for(agent_id)
     results = await _search(
-        "node", query, max_nodes, group_ids or await groups_for(agent_id),
+        "node", query, max_nodes, groups,
         search_filter=node_filters(entity_types), center_node_uuid=center_node_uuid,
     )
-    return [node_result(n) for n in results.nodes][:max_nodes]
+    exact = await neo4j_reader.entities_by_exact_name(query, groups, entity_types, max_nodes)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in [*({**row, "attributes": _no_embedding(row["attributes"])} for row in exact),
+                 *(node_result(n) for n in results.nodes)]:
+        if item["uuid"] in seen:
+            continue
+        seen.add(item["uuid"])
+        out.append(item)
+    return out[:max_nodes]
 
 
 async def episode_delete_preview(episode_uuid: str) -> dict | None:

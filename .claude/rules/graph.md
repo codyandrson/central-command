@@ -156,9 +156,18 @@ when a matching file is read.
   required `description`): on the hub Person (502 edges) that reached 4378
   chars and generations of 41-52k chars into the output cap: ~700 GPU-minutes
   a week, discarded (2026-09-20). `integrations/graph_ontology.py` is the
-  answer: ten FIELD-LESS models, in the declaration order of the ontology, whose
-  docstrings are the stock built-ins' verbatim. A model with no fields skips
-  the per-entity attribute call. **The docstrings are the guidance**: the
+  answer: ten models, in the declaration order of the ontology, whose
+  docstrings are the stock built-ins' verbatim, nine of them FIELD-LESS (a
+  model with no fields skips the per-entity attribute call). Since 2026-11
+  `Person` alone carries three fields — `birth_date` (`max_length=10`), `phone`
+  (`max_length=40`) and `aliases` (a list) — all Optional with default None,
+  measured on the live extraction model (9 of 9, ~1 s per entity). That is
+  safe where the required `description` was not: graphiti 0.30.2 DROPS an
+  Optional value over 250 chars instead of keeping it, so nothing can grow
+  across episodes, and its overlay merge keeps the prior value when an episode
+  omits one. Never put `max_length` on `aliases`: upstream #2067 applies it to
+  each string of a list, not to the list. `tests/test_graph_ontology.py` pins
+  the three fields, their caps and that no type has a REQUIRED field. **The docstrings are the guidance**: the
   extraction prompt's entity-types block is built from `__doc__` alone, and the
   first cut of the fix (v2.38.4) swapped them for one-line descriptions — with
   thinking off, the local model then answered `{"extracted_entities": []}` for
@@ -167,7 +176,7 @@ when a matching file is read.
   `tests/test_graph_ontology.py`; changing one changes what the extraction
   model is told, and the same alias serves another workload, so measure
   against both. If you ever add a real attribute, make it Optional or give it
-  `Field(max_length=…)`. Two things ride along: thinking is switched OFF on
+  `Field(max_length=…)` — and both, as Person's are. Two things ride along: thinking is switched OFF on
   the `graphiti-llm` ALIAS (`chat_template_kwargs: {"enable_thinking": false}`
   in its litellm_params — graphiti-core sends reasoning controls only for
   gpt-5/o1/o3 names, and llama.cpp does not enforce a json_schema grammar
@@ -219,7 +228,21 @@ when a matching file is read.
   long-summary node 19th and five separate `Rivers` entities were created in three
   days (2026-11). The patch offers entities whose NAME shares every word with the
   extracted one ahead of the vector hits and decides nothing; a same-name
-  duplicate of a well-known entity means read that lane first. Before blaming extraction quality on the model, check the
+  duplicate of a well-known entity means read that lane first. **A fifth,
+  local, extends the fourth's lane to `n.aliases`** (`0005-dedupe-alias-candidates`):
+  an entity is also a candidate when one of its aliases shares every word with
+  the extracted name, an exact alias scoring as high as an exact name. It is a
+  separate patch because the applier recognises a patch only by its NEW block
+  verbatim — editing lines the fourth added would make the fourth unreadable on
+  an install carrying both — so it adds two functions after
+  `_semantic_candidate_search` and REBINDS `_name_candidate_search`; it goes
+  with the fourth. It also rebinds `_build_candidate_indexes` so an extracted
+  name that EQUALS an alias resolves like an exact name (one holder: no model
+  call; several: the dedupe prompt), because the prompt, shown the aliases,
+  still declined two of three listed names on the live model. **So an alias
+  means what a name means: every mention equal to it resolves to that entity.**
+  A bare first name as an alias claims every bearer of that name in the group;
+  add one only where it is unambiguous for this graph. Before blaming extraction quality on the model, check the
   invalidation scope, the sampling (unset temperature means the backend
   default, not deterministic — `graph_llm_temperature` is 0), and the field
   ORDER of the schema (with schema-constrained decoding, index arrays before a
@@ -230,6 +253,21 @@ when a matching file is read.
   written "the operator is subscribed to X" lands with no subscriber or
   spawns a bare `operator` entity. The graph-propose pack renders the configured name into
   its rule; keep any new episode-writing pack on the same rule.
+- **An alias is another NAME for the same person, never a role, and an
+  attribute holds ONE undated value.** A Person's `aliases` are written by
+  extraction (the field's description) and by the operator's curation
+  (`update_node`, a rename keeping the old name, a merge folding the dropped
+  node's names in) — a role word ("Mom", "my boss") is never an alias and
+  never a name: the graph-propose pack tells agents to resolve it through a
+  lookup or ask, and to write the graph's own name with the source's other
+  form in parentheses. `birth_date`, `phone` and `aliases` carry no validity
+  window: the last episode to state one sets it, so a later-ingested OLDER
+  mail can overwrite a newer phone number. That is why "as of" dates stay in
+  the EPISODE TEXT, where the facts and the auditor read them, and why a value
+  that changes over time is a fact (an edge with a window) when its history
+  matters. The agents' entity search unions exact name-or-alias matches
+  (`neo4j_reader.entities_by_exact_name`, same groups) ahead of its hybrid
+  hits, because the hybrid search covers name and summary only.
 - **An edge with `expired_at` is not necessarily a retired fact.** Graphiti
   expires a NEW edge at birth whenever the extractor supplied an `invalid_at`
   — a deadline, a "through <date>" range, even a future date — and that is

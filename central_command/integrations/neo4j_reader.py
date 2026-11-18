@@ -105,14 +105,25 @@ async def ping() -> bool:
         return False
 
 
+# A Person's single-person values (graph_ontology.Person), stored by graphiti
+# as plain node properties; every cockpit entity payload carries them (null /
+# [] on anything that has none). `_PERSON_VALUES` is spliced into a RETURN
+# whose node variable is `n`.
+_PERSON_VALUES = """coalesce(n.aliases, []) AS aliases, n.birth_date AS birth_date,
+               n.phone AS phone"""
+
+
 async def search_entities(q: str, group_id: str | None, limit: int) -> list[dict]:
+    """The Graph panel's search: a substring of the name OR of one of the aliases."""
     rows = await _read(
         """
         MATCH (n:Entity)
-        WHERE toLower(n.name) CONTAINS toLower($q)
+        WHERE (toLower(n.name) CONTAINS toLower($q)
+               OR any(alias IN coalesce(n.aliases, []) WHERE toLower(alias) CONTAINS toLower($q)))
           AND ($group_id IS NULL OR n.group_id = $group_id)
         RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
-               n.summary AS summary, n.group_id AS group_id
+               n.summary AS summary, n.group_id AS group_id,
+               """ + _PERSON_VALUES + """
         LIMIT $limit
         """,
         q=q, group_id=group_id, limit=limit,
@@ -120,12 +131,63 @@ async def search_entities(q: str, group_id: str | None, limit: int) -> list[dict
     return rows
 
 
+# The properties every EntityNode carries as a field; the rest are attributes
+# (upstream's `get_entity_node_from_record` pops the same set).
+_NODE_FIELDS = ["uuid", "name", "group_id", "labels", "created_at", "summary", "name_embedding"]
+
+
+async def entities_by_exact_name(
+    name: str, group_ids: list[str], entity_types: list[str] | None, limit: int,
+) -> list[dict]:
+    """Entities of `group_ids` whose name OR one of whose aliases equals `name`,
+    case-insensitively and whitespace-normalised — the exact lane the agents'
+    entity search unions ahead of its hybrid hits (`graphiti.search_nodes`):
+    the hybrid search covers name and summary only, so a person known by an
+    alias was otherwise unfindable by it. Shaped like `graphiti.node_result`
+    (attributes are every non-field property; the caller strips embeddings and
+    control-plane keys). Embeds nothing."""
+    key = " ".join((name or "").split()).lower()
+    if not key or not group_ids or limit <= 0:
+        return []
+    rows = await _read(
+        """
+        MATCH (n:Entity)
+        WHERE n.group_id IN $group_ids
+          AND (toLower(trim(n.name)) = $key
+               OR any(alias IN coalesce(n.aliases, []) WHERE toLower(trim(alias)) = $key))
+          AND (size($types) = 0 OR any(label IN labels(n) WHERE label IN $types))
+        RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
+               n.created_at AS created_at, n.summary AS summary, n.group_id AS group_id,
+               [k IN keys(n) WHERE NOT k IN $fields AND NOT toLower(k) CONTAINS 'embedding'
+                | [k, n[k]]] AS attributes
+        ORDER BY n.name, n.uuid
+        LIMIT $limit
+        """,
+        group_ids=list(group_ids), key=key, types=list(entity_types or []),
+        fields=_NODE_FIELDS, limit=limit,
+    )
+    return [
+        {
+            "uuid": row["uuid"], "name": row["name"],
+            "labels": [l for l in row["labels"] or [] if not l.startswith("Entity_")],
+            "created_at": _iso(row["created_at"]), "summary": row["summary"],
+            "group_id": row["group_id"],
+            "attributes": {
+                k: (_iso(v) if isinstance(v, Neo4jDateTime) else v)
+                for k, v in (row["attributes"] or [])
+            },
+        }
+        for row in rows
+    ]
+
+
 async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
     node_rows = await _read(
         """
         MATCH (n:Entity {uuid: $uuid})
         RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
-               n.summary AS summary, n.group_id AS group_id
+               n.summary AS summary, n.group_id AS group_id,
+               """ + _PERSON_VALUES + """
         """,
         uuid=uuid,
     )
@@ -141,7 +203,9 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
                    e.created_at AS created_at,
                    m.uuid AS neighbor_uuid, m.name AS neighbor_name,
                    labels(m) AS neighbor_labels, m.summary AS neighbor_summary,
-                   m.group_id AS neighbor_group_id
+                   m.group_id AS neighbor_group_id,
+                   coalesce(m.aliases, []) AS neighbor_aliases,
+                   m.birth_date AS neighbor_birth_date, m.phone AS neighbor_phone
             LIMIT $limit
             """,
             uuid=uuid, at=at, limit=limit,
@@ -156,7 +220,9 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
                    e.created_at AS created_at,
                    m.uuid AS neighbor_uuid, m.name AS neighbor_name,
                    labels(m) AS neighbor_labels, m.summary AS neighbor_summary,
-                   m.group_id AS neighbor_group_id
+                   m.group_id AS neighbor_group_id,
+                   coalesce(m.aliases, []) AS neighbor_aliases,
+                   m.birth_date AS neighbor_birth_date, m.phone AS neighbor_phone
             LIMIT $limit
             """,
             uuid=uuid, limit=limit,
@@ -167,6 +233,8 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
         nodes[row["uuid"]] = {
             "uuid": row["uuid"], "name": row["name"], "labels": row["labels"],
             "summary": row["summary"], "group_id": row["group_id"],
+            "aliases": row["aliases"], "birth_date": row["birth_date"],
+            "phone": row["phone"],
         }
     edges = []
     now = datetime.now(timezone.utc)
@@ -175,6 +243,8 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
             "uuid": row["neighbor_uuid"], "name": row["neighbor_name"],
             "labels": row["neighbor_labels"], "summary": row["neighbor_summary"],
             "group_id": row["neighbor_group_id"],
+            "aliases": row["neighbor_aliases"], "birth_date": row["neighbor_birth_date"],
+            "phone": row["neighbor_phone"],
         })
         invalid_at_native = row["invalid_at"].to_native() if isinstance(
             row["invalid_at"], Neo4jDateTime
@@ -216,7 +286,8 @@ async def everything(group_id: str | None, limit: int, at: str | None = None) ->
         MATCH (n:Entity)
         WHERE $group_id IS NULL OR n.group_id = $group_id
         RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
-               n.summary AS summary, n.group_id AS group_id
+               n.summary AS summary, n.group_id AS group_id,
+               """ + _PERSON_VALUES + """
         ORDER BY n.name
         LIMIT $limit
         """,
@@ -327,7 +398,8 @@ async def episode_subgraph(uuid: str) -> dict | None:
         """
         MATCH (:Episodic {uuid: $uuid})-[:MENTIONS]->(n:Entity)
         RETURN DISTINCT n.uuid AS uuid, n.name AS name, labels(n) AS labels,
-               n.summary AS summary, n.group_id AS group_id
+               n.summary AS summary, n.group_id AS group_id,
+               """ + _PERSON_VALUES + """
         ORDER BY n.name
         """,
         uuid=uuid,
@@ -462,7 +534,8 @@ async def episode_delta(episode_uuid: str, window_minutes: int = 30) -> dict:
         MATCH (e:Episodic {uuid: $uuid})-[:MENTIONS]->(n)
         RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
                n.summary AS summary, n.name_embedding IS NOT NULL AS has_embedding,
-               n.created_at AS created_at, n.created_at >= e.created_at AS new
+               n.created_at AS created_at, n.created_at >= e.created_at AS new,
+               """ + _PERSON_VALUES + """
         """,
         uuid=episode_uuid,
     )

@@ -656,7 +656,8 @@ _GRAPH_CURATION_HANDLERS = {
     "graph.merge_nodes": _graph_curation_handler(
         "graph.merge_nodes", "merge_nodes", optional=()),
     "graph.update_node": _graph_curation_handler(
-        "graph.update_node", "update_node", optional=("name", "summary", "labels")),
+        "graph.update_node", "update_node",
+        optional=("name", "summary", "labels", "aliases", "birth_date", "phone")),
     "graph.delete_node": _graph_curation_handler(
         "graph.delete_node", "delete_node", optional=()),
     "graph.update_edge": _graph_curation_handler(

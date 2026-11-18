@@ -65,7 +65,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid as _uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import httpx
 
@@ -242,6 +242,84 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# --- a Person's single-person values (graph_ontology.Person's three Optional
+# fields). graphiti stores each attribute as its own node property (the bulk
+# path's `entity_data[k] = v`), so the operator's hand writes the same plain
+# properties: `aliases` a list of strings, `birth_date` and `phone` strings.
+# None of them is part of the embedded text (name + summary), so changing one
+# never re-embeds.
+PERSON_LABEL = "Person"
+ALIASES_MAX = 20
+ALIAS_MAX_CHARS = 120
+PHONE_MAX_CHARS = 40
+_BIRTH_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _alias_key(value: str) -> str:
+    return " ".join(value.split()).casefold()
+
+
+def _merged_aliases(values, own_name: str) -> list[str]:
+    """Stripped, empties dropped, de-duplicated case-insensitively (the first
+    spelling kept), and none equal to the node's own name. Shape only: the caps
+    are the callers' (an operator edit refuses, a merge skips)."""
+    own = _alias_key(own_name or "")
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise WriteError(f"an alias must be text, not {type(value).__name__}")
+        text = value.strip()
+        key = _alias_key(text)
+        if not text or key == own or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+
+
+def normalise_aliases(values: list[str], own_name: str) -> list[str]:
+    """The operator's (or an approved proposal's) alias list, validated: see
+    `_merged_aliases`, then at most ALIASES_MAX of at most ALIAS_MAX_CHARS each."""
+    if not isinstance(values, list):
+        raise WriteError("aliases must be a list of names")
+    out = _merged_aliases(values, own_name)
+    long = [a for a in out if len(a) > ALIAS_MAX_CHARS]
+    if long:
+        raise WriteError(f"an alias may be at most {ALIAS_MAX_CHARS} characters: {long[0][:40]!r}…")
+    if len(out) > ALIASES_MAX:
+        raise WriteError(f"at most {ALIASES_MAX} aliases ({len(out)} given)")
+    return out
+
+
+def normalise_birth_date(value: str) -> str | None:
+    """`YYYY-MM-DD` and a real date; empty clears (None)."""
+    if not isinstance(value, str):
+        raise WriteError("birth_date must be text (YYYY-MM-DD)")
+    text = value.strip()
+    if not text:
+        return None
+    if not _BIRTH_DATE_RE.match(text):
+        raise WriteError(f"birth_date must be YYYY-MM-DD, not {text!r}")
+    try:
+        date.fromisoformat(text)
+    except ValueError as e:
+        raise WriteError(f"birth_date {text!r} is not a real date") from e
+    return text
+
+
+def normalise_phone(value: str) -> str | None:
+    """At most PHONE_MAX_CHARS, as written; empty clears (None)."""
+    if not isinstance(value, str):
+        raise WriteError("phone must be text")
+    text = value.strip()
+    if not text:
+        return None
+    if len(text) > PHONE_MAX_CHARS:
+        raise WriteError(f"phone may be at most {PHONE_MAX_CHARS} characters")
+    return text
+
+
 _OPERATOR_SOURCE = (
     "Manually entered by the operator in the cockpit Graph panel"
     " | trust=operator-direct"
@@ -400,21 +478,51 @@ async def create_node(
 
 async def update_node(
     uuid: str, name: str | None = None, summary: str | None = None,
-    labels: list[str] | None = None,
+    labels: list[str] | None = None, aliases: list[str] | None = None,
+    birth_date: str | None = None, phone: str | None = None,
 ) -> dict:
-    """Rename / re-summarise / re-type. Re-embeds whenever the embedded text
-    changed, because a stale `name_embedding` keeps matching the OLD name in
-    every semantic search — the failure looks like the rename never happened."""
+    """Rename / re-summarise / re-type, and a Person's `aliases`, `birth_date`
+    and `phone`. Re-embeds whenever the embedded text changed, because a stale
+    `name_embedding` keeps matching the OLD name in every semantic search — the
+    failure looks like the rename never happened. The three Person values are
+    not embedded text, so they never re-embed.
+
+    The Person values are refused on a node that is not (after this update) a
+    `Person`; an empty list or empty string clears one. Renaming a Person adds
+    the OLD name to its aliases, unless this same call passes `aliases`."""
     current = await _write(
-        "MATCH (n:Entity {uuid: $uuid}) RETURN n.name AS name, n.summary AS summary",
+        "MATCH (n:Entity {uuid: $uuid}) RETURN n.name AS name, n.summary AS summary,"
+        " labels(n) AS labels, n.aliases AS aliases",
         uuid=uuid,
     )
     if not current:
         raise WriteError(f"no entity with uuid {uuid}")
-    new_name = current[0]["name"] if name is None else name
+    old_name = current[0]["name"]
+    new_name = old_name if name is None else name
     new_summary = current[0]["summary"] if summary is None else summary
     if not new_name.strip():
         raise WriteError("a node needs a name")
+    if labels is not None:
+        is_person = PERSON_LABEL in _validated_labels(labels)
+    else:
+        is_person = PERSON_LABEL in (current[0].get("labels") or [])
+    person_sets: dict = {}
+    if aliases is not None or birth_date is not None or phone is not None:
+        if not is_person:
+            raise WriteError(
+                "aliases, birth_date and phone belong to a Person; this entity is not one")
+    if aliases is not None:
+        person_sets["aliases"] = normalise_aliases(aliases, new_name) or None
+    elif is_person and new_name != old_name:
+        # A rename keeps the old name findable: it becomes an alias (and a new
+        # name that WAS an alias leaves the list).
+        stored = [a for a in (current[0].get("aliases") or []) if isinstance(a, str)]
+        kept = _merged_aliases([*stored, old_name], new_name)
+        person_sets["aliases"] = kept[:ALIASES_MAX] or None
+    if birth_date is not None:
+        person_sets["birth_date"] = normalise_birth_date(birth_date)
+    if phone is not None:
+        person_sets["phone"] = normalise_phone(phone)
 
     text_changed = new_name != current[0]["name"] or new_summary != current[0]["summary"]
     vector = None
@@ -436,6 +544,11 @@ async def update_node(
         sets.append("n.labels = $labels")
         params["labels"] = extra + ["Entity"]
 
+    for prop, value in person_sets.items():
+        # A closed set of property names (the three above); null clears.
+        sets.append(f"n.{prop} = ${prop}")
+        params[prop] = value
+
     tail = ""
     if text_changed:
         tail, vec_params = _vector("n", "name_embedding", "node", vector)
@@ -443,7 +556,10 @@ async def update_node(
     await _write(
         f"MATCH (n:Entity {{uuid: $uuid}}) SET {', '.join(sets)}{tail}", **params
     )
-    return {"uuid": uuid}
+    result: dict = {"uuid": uuid}
+    if "aliases" in person_sets:
+        result["aliases"] = person_sets["aliases"] or []
+    return result
 
 
 async def delete_node(uuid: str) -> dict:
@@ -638,15 +754,25 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
     The episodes that MENTION the duplicate are linked to the survivor first
     (one link per episode): the delete is DETACH, so without that the survivor's
     provenance stopped listing every episode that had only named the duplicate,
-    and those episodes' own views lost the entity."""
+    and those episodes' own views lost the entity.
+
+    When the survivor is a `Person`, its `aliases` gain the duplicate's name and
+    aliases (normalised as an edit is, skipping the survivor's own name and
+    anything past ALIASES_MAX or ALIAS_MAX_CHARS), reported as `aliases_added`;
+    its `birth_date` / `phone` are copied from the duplicate only where it has
+    none. Whatever the duplicate's labels."""
     if keep_uuid == drop_uuid:
         raise WriteError("cannot merge a node into itself")
     both = await _write(
-        "MATCH (n:Entity) WHERE n.uuid IN [$keep, $drop] RETURN n.uuid AS uuid",
+        "MATCH (n:Entity) WHERE n.uuid IN [$keep, $drop] RETURN n.uuid AS uuid,"
+        " n.name AS name, labels(n) AS labels, n.aliases AS aliases,"
+        " n.birth_date AS birth_date, n.phone AS phone",
         keep=keep_uuid, drop=drop_uuid,
     )
     if len(both) != 2:
         raise WriteError("both entities must exist to merge")
+    keep_row = next(r for r in both if r["uuid"] == keep_uuid)
+    drop_row = next(r for r in both if r["uuid"] == drop_uuid)
 
     out = await _write(
         """
@@ -679,6 +805,7 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
         """,
         keep=keep_uuid, drop=drop_uuid,
     )
+    aliases_added = await _fold_person_values(keep_row, drop_row)
     dropped = await delete_node(drop_uuid)
     moved = (out[0]["moved"] if out else 0) + (incoming[0]["moved"] if incoming else 0)
     return {
@@ -686,7 +813,41 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
         "edges_moved": moved,
         "edges_discarded": dropped["edges_removed"] - moved,
         "mentions_moved": mentions[0]["moved"] if mentions else 0,
+        "aliases_added": aliases_added,
     }
+
+
+async def _fold_person_values(keep: dict, drop: dict) -> list[str]:
+    """A merge's Person values (see `merge_nodes`). Returns the aliases added."""
+    if PERSON_LABEL not in (keep.get("labels") or []):
+        return []
+    existing = [a for a in (keep.get("aliases") or []) if isinstance(a, str)]
+    offered = [drop.get("name") or "", *(a for a in (drop.get("aliases") or [])
+                                         if isinstance(a, str))]
+    merged = _merged_aliases([*existing, *offered], keep.get("name") or "")
+    known = {_alias_key(a) for a in existing}
+    added: list[str] = []
+    final = [a for a in merged if _alias_key(a) in known]
+    for alias in merged:
+        if _alias_key(alias) in known or len(alias) > ALIAS_MAX_CHARS:
+            continue
+        if len(final) >= ALIASES_MAX:
+            break
+        final.append(alias)
+        added.append(alias)
+    sets: dict = {}
+    if added:
+        sets["aliases"] = final
+    for prop in ("birth_date", "phone"):
+        if not keep.get(prop) and drop.get(prop):
+            sets[prop] = drop[prop]
+    if sets:
+        await _write(
+            "MATCH (n:Entity {uuid: $uuid}) SET "
+            + ", ".join(f"n.{prop} = ${prop}" for prop in sets),
+            uuid=keep["uuid"], **sets,
+        )
+    return added
 
 
 _GROUP_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")

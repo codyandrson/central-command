@@ -140,7 +140,7 @@ Rows for the same package are grouped by what the modules are for.
 | `ingest/` | ② | as above | The sources catalog and bulk actions: filesystem watcher, text extraction (one seam shared by chat attachments, the catalog and mail attachments: a reader per file type, markitdown for the rest, DL-216), mail attachments read at claim time in an isolated child process and named to the agent as read or not read, catalog enrollment, bulk dismissal, the wiki freshness sweep | `watcher.py`, `extract.py`, `readers.py`, `extract_worker.py`, `mail_attachments.py`, `catalog_enroll.py`, `bulk_dismiss.py`, `wiki_freshness.py` | [integrations](../.claude/rules/integrations.md) |
 | `heartbeat/` | ② | none | The scheduler for recurring team work: tick loop, action registry, dependency-health probes | `engine.py` (`fire`, one firing path for tick and run-now), `actions.py` (`ActionSpec`, 12 action kinds), `probes.py` | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `integrations/` | ④ | each client holds its own | **Native clients**: Jira, Confluence, the git forge, LiteLLM (proxy) and its credential store, the Exchange (EWS) mail client, Neo4j (reads and the closed curation write set) | `jira.py`, `confluence.py`, `forge.py`, `litellm.py`, `litellm_credstore.py`, `exchange.py`, `neo4j_reader.py`, `neo4j_writer.py` | [integrations](../.claude/rules/integrations.md) |
-| `integrations/` | ④ | as above | **graphiti-core, in-process** (no server): `graphiti.py` reads (the one graph module `runtime/` may import; it imports graphiti-core search modules function-locally, after the client has prepared the environment), `graphiti_client.py` is the one place the library is built and configured, `graphiti_ingest.py` is the durable ingest queue's worker, `graph_ontology.py` holds the ten entity types, `embedder_record.py` holds the record of the graph's embedder and the one check that closes every embedding read on a mismatch, `graphiti_patches.py` applies the four carried graphiti-core fixes | `graphiti.py`, `graphiti_client.py`, `graphiti_ingest.py`, `graph_ontology.py`, `graphiti_patches.py` | [graph](../.claude/rules/graph.md), [models](../.claude/rules/models.md) |
+| `integrations/` | ④ | as above | **graphiti-core, in-process** (no server): `graphiti.py` reads (the one graph module `runtime/` may import; it imports graphiti-core search modules function-locally, after the client has prepared the environment), `graphiti_client.py` is the one place the library is built and configured, `graphiti_ingest.py` is the durable ingest queue's worker, `graph_ontology.py` holds the ten entity types (field-less but for `Person`'s three Optional values), `embedder_record.py` holds the record of the graph's embedder and the one check that closes every embedding read on a mismatch, `graphiti_patches.py` applies the five carried graphiti-core fixes | `graphiti.py`, `graphiti_client.py`, `graphiti_ingest.py`, `graph_ontology.py`, `graphiti_patches.py` | [graph](../.claude/rules/graph.md), [models](../.claude/rules/models.md) |
 | `integrations/` | ④ | n8n holds the OAuth | **n8n façades** for mail and calendar (n8n holds the OAuth; the Jira façade fallback was removed in v2.50.0). **Uncredentialed**: web fetch, the crawler client, the sandbox client. `http.py` is the pluggable-trust httpx factory and the ONE TLS surface: every client built from `client_kwargs()` (the native clients, the agents' web fetch, the Systems probes, the self-check) honours `CC_CA_BUNDLE`, `CC_CLIENT_CERT`/`CC_CLIENT_KEY` and `CC_TLS_INSECURE`, which turns verification off for all of them and wins over the bundle. A façade is `configured()` when its URL and its token are both set; an unconfigured one fails "not configured" as a NO, it never parks; `calendar_facade.provider_configured()` also counts an Exchange-only site as configured | `email_facade.py`, `calendar_facade.py`, `webfetch.py`, `crawler.py`, `sandbox_client.py`, `http.py` | [integrations](../.claude/rules/integrations.md) |
 | `reports/` | ② | none | Deterministic, judgment-free reads composed from the spine: the EA's snapshot, the operator's calendar day (fail-closed: see "Work-site safety defaults"), the EA's open follow-ups; called only from `runtime/tools.py` and `heartbeat/actions.py` | `ea_report.py`, `ea_calendar.py`, `ea_followups.py` | — |
 | `sandbox/` | out-of-process | **none, by design** | A standalone FastAPI service giving agents a disposable workspace. Two backends behind one API: `kubectl` (a gVisor Job+Pod per session) or `podman` (a container per session). Never imported; reached only through `integrations/sandbox_client.py`. Its single exit is the gated `mcp.sync_source`, content captured at propose time | `runner.py` | [AGENTS.md](../AGENTS.md) |
@@ -1697,6 +1697,29 @@ carried graphiti-core patch (one hunk at `create_entity_node_embeddings`) share
 recipe changes what the vectors mean, so it needs a re-embed; the record's
 `text_recipe` names it.
 
+**A Person's single-person values.** A fact is an edge between two entities, so a
+value about one person had nowhere to land. `graph_ontology.Person` alone carries
+three Optional fields, default None — `birth_date` (`max_length=10`), `phone`
+(`max_length=40`) and `aliases` (a list, uncapped per upstream #2067) — measured on
+the extraction model before shipping; every other type stays field-less. Optional
+is what keeps them bounded: graphiti's 250-character cap applies to an Optional
+value (it exempts only required ones), and its overlay merge keeps a prior value
+when an episode omits it. graphiti stores each as a plain node property, and so
+does the curation writer: `update_node` takes the three (validated, refused on a
+non-Person, an empty value clears; a rename adds the old name to `aliases` unless
+the call passes `aliases`), `merge_nodes` folds the duplicate's name and aliases
+into a Person survivor's (`aliases_added`) and fills `birth_date`/`phone` only
+where the survivor has none, and none of the three is embedded text. The fifth
+carried patch lets entity dedupe find a candidate by an alias as well as by name;
+graphiti's exact step resolves on the name only, so an alias-matched candidate
+reaches the dedupe prompt, whose candidate context already carries `attributes`.
+Every cockpit entity payload returns the three (`neo4j_reader`); the Graph panel
+search also matches an alias, and the agents' entity search
+(`graphiti.search_nodes`) unions exact name-or-alias matches from the same groups
+ahead of its hybrid hits. The verification delta lists each entity's values, and
+the graph-auditor's prompt says a single-person value is recorded when it is in
+that entity's attributes.
+
 **The first use after the release that introduced this.** The live graph holds
 vectors and no record, so applying that release closes it (reason (i)) until the
 operator, with a fresh dump, runs `check` and `run` once under the same alias and
@@ -1791,7 +1814,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | `deploy/shared/` | Assets both deployment substrates read: `litellm/` — `register-models.py` (run by both installers), `policy.py`/`checks.sh` and the k3s profile's declared LiteLLM policy (`config.yaml`, `model-preferences.yaml`; the single profile's equivalents are `deploy/single/litellm-config.yaml` and `deploy/single/models.json`). `gateway/executor.py` and `runtime/tools.py` name these files by path | — | [`deploy/shared/README.md`](../deploy/shared/README.md) |
 | `deploy/n8n/` | The mail and calendar façade workflows as code; applied by both updaters | `apply-workflows.sh` | [`deploy/n8n/README.md`](../deploy/n8n/README.md) |
 | `deploy/discover.sh`, `deploy/AIRGAP.md` | Environment discovery and the mirror / CA / proxy seams for restricted networks (`deploy/env-lib.sh` maps the answers to settings). Registry mirrors are per-upstream: `CC_REGISTRY_DOCKERIO`, `CC_REGISTRY_GHCR`, `CC_REGISTRY_MCR` | `discover.sh` | [`deploy/AIRGAP.md`](../deploy/AIRGAP.md) — **first**, for any mirrored or no-egress install |
-| `deploy/graphiti-patches/` | The four graphiti-core fixes the project carries (two upstream, a local one that makes an entity's vector its name plus summary, shared with the curation writer through `embedding_text`, and a local one that also offers the entity dedupe step existing entities by name), as patch files; applied to the installed package by `integrations/graphiti_patches.py` (`scripts/apply_graphiti_patches.py` at install time), pinned and checked at ingest | — | [graph rules](../.claude/rules/graph.md) |
+| `deploy/graphiti-patches/` | The five graphiti-core fixes the project carries (two upstream, a local one that makes an entity's vector its name plus summary, shared with the curation writer through `embedding_text`, a local one that also offers the entity dedupe step existing entities by name, and a local fifth that extends that name lane to an entity's aliases, stacked on the fourth so both stay recognisable to the applier), as patch files; applied to the installed package by `integrations/graphiti_patches.py` (`scripts/apply_graphiti_patches.py` at install time), pinned and checked at ingest | — | [graph rules](../.claude/rules/graph.md) |
 | `docker-compose.yml` (root) | The dev database only: `cc-postgres` on 127.0.0.1:**5442** with the schema auto-loaded | `docker compose up -d postgres` | [AGENTS.md](../AGENTS.md) |
 
 **The k3s updater** (`cc-update.sh`), in order: resolve → version gate

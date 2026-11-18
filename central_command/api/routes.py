@@ -4180,6 +4180,10 @@ class GraphNodePatch(BaseModel):
     name: str | None = None
     summary: str | None = None
     labels: list[str] | None = None
+    # A Person's single-person values; [] or "" clears one (the writer validates).
+    aliases: list[str] | None = None
+    birth_date: str | None = None
+    phone: str | None = None
 
 
 class GraphEdgeIn(BaseModel):
@@ -4275,7 +4279,8 @@ async def graph_node_create(body: GraphNodeIn) -> dict:
 @router.patch("/graph/node")
 async def graph_node_update(body: GraphNodePatch) -> dict:
     return await _curate(neo4j_writer.update_node(
-        body.uuid, body.name, body.summary, body.labels),
+        body.uuid, body.name, body.summary, body.labels,
+        aliases=body.aliases, birth_date=body.birth_date, phone=body.phone),
         "node.update", body.model_dump(exclude_none=True))
 
 

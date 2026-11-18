@@ -643,7 +643,7 @@ hygiene, and how the test suite itself must be written. See
 - **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D7); code comment `central_command/integrations/graphiti_patches.py`
 - **Supersedes:** (the mechanism of DL-056 only — DL-056 stays active; its patches no longer ride in an image)
 
-### DL-133 — The ontology is ten field-less models whose docstrings are pinned by hash
+### DL-133 — The ontology is ten models whose docstrings are pinned by hash; only Person carries fields, all Optional
 
 - **Status:** active
 - **Date:** 2026-10-04
@@ -659,7 +659,14 @@ hygiene, and how the test suite itself must be written. See
   docstring handling) and pinned by SHA-256. The same alias serves a second
   workload, so a change to one is a change to what the model is told:
   measure against both.
-- **Enforced:** test: `tests/test_graph_ontology.py::test_each_docstring_is_byte_identical_to_the_upstream_builtin`, test: `tests/test_graph_ontology.py::test_every_model_is_field_less` and test: `tests/test_graph_ontology.py::test_the_writer_allowlist_names_the_same_types`
+  **Amended 2026-11-18:** `Person` carries three fields — `birth_date` and
+  `phone` (both `max_length`) and `aliases` (a list) — all Optional with
+  default None, measured on the live extraction model (9 of 9) with the
+  docstrings unchanged. The failure above was a REQUIRED attribute, which
+  graphiti's 250-character cap exempts; an Optional one over the cap is
+  dropped, so it cannot grow across episodes. Every other type stays
+  field-less, and no type may carry a required field.
+- **Enforced:** test: `tests/test_graph_ontology.py::test_each_docstring_is_byte_identical_to_the_upstream_builtin`, test: `tests/test_graph_ontology.py::test_only_person_has_fields_and_they_are_the_measured_three`, test: `tests/test_graph_ontology.py::test_no_type_has_a_required_field` and test: `tests/test_graph_ontology.py::test_the_writer_allowlist_names_the_same_types`
 - **Source:** `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md` (D4); code comment `central_command/integrations/graph_ontology.py`
 
 ### DL-134 — runtime/ may import the graph's reads and none of its write modules

@@ -362,3 +362,203 @@ async def test_executor_forwards_an_absent_optional_as_none(monkeypatch):
 
 async def _noop(args):
     return None
+
+
+# --- a Person's single-person values: aliases, birth_date, phone (offline) -------------
+# The graph is a router over `_write`: these pin what the writer VALIDATES and SETS;
+# what Neo4j stores is the live round-trip further down.
+
+
+class _FakeGraph:
+    """Answers the writer's reads from a dict of nodes and records every write."""
+
+    def __init__(self, nodes: dict[str, dict]):
+        self.nodes, self.writes = nodes, []
+        self.embedded: list[str] = []
+
+    async def write(self, query, **params):
+        self.writes.append((query, params))
+        if "RETURN n.name AS name, n.summary AS summary" in query:
+            n = self.nodes.get(params["uuid"])
+            return [] if n is None else [{
+                "name": n["name"], "summary": n.get("summary", ""),
+                "labels": n.get("labels", ["Entity"]), "aliases": n.get("aliases")}]
+        if "WHERE n.uuid IN [$keep, $drop]" in query:
+            return [{"uuid": u, **{k: self.nodes[u].get(k) for k in
+                                   ("name", "labels", "aliases", "birth_date", "phone")}}
+                    for u in (params["keep"], params["drop"]) if u in self.nodes]
+        if "RETURN count(e2) AS moved" in query or "RETURN count(m2) AS moved" in query:
+            return [{"moved": 0}]
+        if "DETACH DELETE n" in query:
+            return [{"edge_uuids": []}]
+        return []
+
+    def last_set(self) -> dict:
+        query, params = [w for w in self.writes if " SET " in w[0]][-1]
+        return {k: params[k] for k in ("aliases", "birth_date", "phone", "name")
+                if f"n.{k} = ${k}" in query}
+
+
+@pytest.fixture
+def fake_graph(monkeypatch):
+    from central_command.integrations import embedder_record
+
+    graph = _FakeGraph({
+        "p": {"name": "Jane Rivers Doe", "labels": ["Entity", "Person"],
+              "aliases": ["Jane", "JRD"]},
+        "o": {"name": "Example Co", "labels": ["Entity", "Organization"]},
+    })
+
+    async def embed(text):
+        graph.embedded.append(text)
+        return [1.0, 0.0]
+
+    async def gate():
+        return None
+
+    monkeypatch.setattr(neo4j_writer, "_write", graph.write)
+    monkeypatch.setattr(neo4j_writer, "embed", embed)
+    monkeypatch.setattr(embedder_record, "require_open_for_write", gate)
+    return graph
+
+
+async def test_aliases_are_normalised_and_do_not_re_embed(fake_graph):
+    result = await neo4j_writer.update_node(
+        "p", aliases=["  Jane  ", "jane", "", "Jane R. Doe", "JANE RIVERS DOE", "Janie"])
+    # Stripped, first spelling kept, empties and the node's own name dropped.
+    assert fake_graph.last_set() == {"name": "Jane Rivers Doe",
+                                     "aliases": ["Jane", "Jane R. Doe", "Janie"]}
+    assert result["aliases"] == ["Jane", "Jane R. Doe", "Janie"]
+    assert fake_graph.embedded == [], "aliases are not embedded text"
+
+
+@pytest.mark.parametrize("aliases,match", [
+    ([f"Name {i}" for i in range(21)], "at most 20"),
+    (["x" * 121], "at most 120"),
+    ("Jane", "list"),
+    ([3], "text"),
+])
+async def test_a_bad_alias_list_is_refused(fake_graph, aliases, match):
+    with pytest.raises(neo4j_writer.WriteError, match=match):
+        await neo4j_writer.update_node("p", aliases=aliases)
+    assert not [w for w in fake_graph.writes if " SET " in w[0]], "nothing was written"
+
+
+async def test_birth_date_and_phone_are_validated_and_empty_clears(fake_graph):
+    await neo4j_writer.update_node("p", birth_date="1980-02-29", phone=" +1 555 0100 ")
+    assert fake_graph.last_set() == {"name": "Jane Rivers Doe", "birth_date": "1980-02-29",
+                                     "phone": "+1 555 0100"}
+    await neo4j_writer.update_node("p", aliases=[], birth_date="", phone="")
+    assert fake_graph.last_set() == {"name": "Jane Rivers Doe", "aliases": None,
+                                     "birth_date": None, "phone": None}
+    for bad, match in (("1981-02-29", "not a real date"), ("29/02/1980", "YYYY-MM-DD"),
+                       ("1980-2-9", "YYYY-MM-DD")):
+        with pytest.raises(neo4j_writer.WriteError, match=match):
+            await neo4j_writer.update_node("p", birth_date=bad)
+    with pytest.raises(neo4j_writer.WriteError, match="at most 40"):
+        await neo4j_writer.update_node("p", phone="1" * 41)
+
+
+@pytest.mark.parametrize("kwargs", [{"aliases": ["Acme"]}, {"birth_date": "2000-01-01"},
+                                    {"phone": "555"}])
+async def test_person_values_are_refused_on_a_non_person(fake_graph, kwargs):
+    with pytest.raises(neo4j_writer.WriteError, match="belong to a Person"):
+        await neo4j_writer.update_node("o", **kwargs)
+    # Re-typed to Person in the same call, they are accepted.
+    await neo4j_writer.update_node("o", labels=["Person"], **kwargs)
+
+
+async def test_renaming_a_person_keeps_the_old_name_as_an_alias(fake_graph):
+    await neo4j_writer.update_node("p", name="Jane")
+    # The new name leaves the list; the old one joins it.
+    assert fake_graph.last_set() == {"name": "Jane", "aliases": ["JRD", "Jane Rivers Doe"]}
+    await neo4j_writer.update_node("p", name="Jane R. Doe", aliases=["JRD"])
+    assert fake_graph.last_set() == {"name": "Jane R. Doe", "aliases": ["JRD"]}, \
+        "explicit aliases in the same call win"
+    await neo4j_writer.update_node("o", name="Example Company")
+    assert "aliases" not in fake_graph.last_set(), "only a Person gains aliases on rename"
+
+
+async def test_merge_folds_the_duplicates_names_into_a_person_survivor(fake_graph):
+    fake_graph.nodes["d"] = {"name": "Jane R. Doe", "labels": ["Entity"],
+                             "aliases": ["jane", "Janie", "Jane Rivers Doe"],
+                             "birth_date": "1980-02-29", "phone": "555-0100"}
+    fake_graph.nodes["p"]["phone"] = "555-0199"
+    result = await neo4j_writer.merge_nodes("p", "d")
+    assert result["aliases_added"] == ["Jane R. Doe", "Janie"]
+    # birth_date filled (the survivor had none), phone kept (it had one).
+    assert fake_graph.last_set() == {"aliases": ["Jane", "JRD", "Jane R. Doe", "Janie"],
+                                     "birth_date": "1980-02-29"}
+
+
+async def test_merge_into_a_non_person_adds_no_aliases(fake_graph):
+    fake_graph.nodes["d"] = {"name": "Example Company", "labels": ["Entity", "Person"],
+                             "phone": "555"}
+    result = await neo4j_writer.merge_nodes("o", "d")
+    assert result["aliases_added"] == []
+    assert not [w for w in fake_graph.writes if "SET n." in w[0]]
+
+
+async def test_the_route_and_the_executor_forward_the_person_values(monkeypatch):
+    from central_command.api import routes
+    from central_command.gateway import executor as ex
+
+    seen: list[dict] = []
+
+    async def fake_update_node(uuid, name=None, summary=None, labels=None, aliases=None,
+                               birth_date=None, phone=None):
+        seen.append(dict(uuid=uuid, aliases=aliases, birth_date=birth_date, phone=phone))
+        return {"uuid": uuid}
+
+    async def no_emit(*a, **k):
+        return None
+
+    monkeypatch.setattr(neo4j_writer, "update_node", fake_update_node)
+    monkeypatch.setattr(routes.events, "emit", no_emit)
+    monkeypatch.setattr(ex, "_reverify_after_curation", _noop)
+    await routes.graph_node_update(routes.GraphNodePatch(
+        uuid="p", aliases=["Jane"], birth_date="1980-02-29", phone=""))
+    handler = ex._GRAPH_CURATION_HANDLERS["graph.update_node"]
+    await handler({"uuid": "p", "aliases": ["JRD"], "phone": "555"}, "op", None)
+    assert seen == [dict(uuid="p", aliases=["Jane"], birth_date="1980-02-29", phone=""),
+                    dict(uuid="p", aliases=["JRD"], birth_date=None, phone="555")]
+
+
+# --- the same, against a real Neo4j (CC_LIVE_GRAPH_TESTS=1) ----------------------------
+
+
+async def test_person_values_round_trip_as_plain_properties(live_graph):
+    uuid = await _node(live_graph, f"ZZ Person {_uuid.uuid4()}", ["Person"])
+    await neo4j_writer.update_node(uuid, aliases=["ZZ Short", "zz short", "ZZ Other"],
+                                   birth_date="1980-02-29", phone="+1 555 0100")
+    rows = await neo4j_reader._read(
+        "MATCH (n:Entity {uuid: $uuid}) RETURN n.aliases AS aliases,"
+        " n.birth_date AS birth_date, n.phone AS phone", uuid=uuid)
+    assert rows[0] == {"aliases": ["ZZ Short", "ZZ Other"], "birth_date": "1980-02-29",
+                       "phone": "+1 555 0100"}
+    await neo4j_writer.update_node(uuid, aliases=[], birth_date="", phone="")
+    rows = await neo4j_reader._read(
+        "MATCH (n:Entity {uuid: $uuid}) RETURN keys(n) AS keys", uuid=uuid)
+    assert not {"aliases", "birth_date", "phone"} & set(rows[0]["keys"]), "cleared"
+
+
+async def test_merging_two_people_keeps_the_dropped_name_as_an_alias(live_graph):
+    keep = await _node(live_graph, f"ZZ keep {_uuid.uuid4()}", ["Person"])
+    drop_name = f"ZZ drop {_uuid.uuid4()}"
+    drop = await _node(live_graph, drop_name, ["Person"])
+    await neo4j_writer.update_node(drop, aliases=["ZZ nick"], birth_date="1970-01-01")
+    result = await neo4j_writer.merge_nodes(keep, drop)
+    assert result["aliases_added"] == [drop_name, "ZZ nick"]
+    rows = await neo4j_reader._read(
+        "MATCH (n:Entity {uuid: $uuid}) RETURN n.aliases AS aliases,"
+        " n.birth_date AS birth_date", uuid=keep)
+    assert rows[0] == {"aliases": [drop_name, "ZZ nick"], "birth_date": "1970-01-01"}
+
+
+async def test_renaming_a_person_keeps_the_old_name_live(live_graph):
+    old = f"ZZ old {_uuid.uuid4()}"
+    uuid = await _node(live_graph, old, ["Person"])
+    await neo4j_writer.update_node(uuid, name=f"ZZ new {_uuid.uuid4()}")
+    rows = await neo4j_reader._read(
+        "MATCH (n:Entity {uuid: $uuid}) RETURN n.aliases AS aliases", uuid=uuid)
+    assert rows[0]["aliases"] == [old]

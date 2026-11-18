@@ -255,8 +255,10 @@ REGISTRY: list[Capability] = [
         risk="reversible — rename/re-summarise/re-type, re-embedded when the text changed",
         holder="Executor",
         route="neo4j_writer.update_node (bolt)",
-        arguments=["uuid", "name", "summary", "labels", "verification_id"],
-        description="Fix an entity's name, summary, or type labels.",
+        arguments=["uuid", "name", "summary", "labels", "aliases", "birth_date", "phone",
+                   "verification_id"],
+        description="Fix an entity's name, summary, or type labels, or a Person's "
+                    "aliases, birth date or phone.",
     ),
     Capability(
         name="graph.delete_node",

@@ -43,6 +43,18 @@ def _operator_naming_rule() -> str:
             "subscriber at all. ")
 
 
+# One person, one name in the graph (2026-11): a person who appears as "Jane",
+# "Jane Doe" and "Jane Rivers Doe" was not reliably resolved to one entity, and
+# a role word ("Mom") written as a name becomes a Person no lookup finds.
+_PERSON_NAMING_RULE = (
+    "NAME EACH PERSON THE WAY THE GRAPH DOES: when an entity search finds the "
+    "person, write the name the graph already uses for them, and put any other "
+    "form the source uses in parentheses on first mention (\"Jane Doe (written "
+    "'Jane R. Doe' in the mail)\"). A role word ('Mom', 'my boss') is never a "
+    "name: resolve it to the named person through a graph lookup, or ask. "
+)
+
+
 # WHERE a thing a source tells you belongs, decided before the graph is
 # considered at all. The briefing used to make the graph a companion write: the
 # charter's knowledge branch listed "a due date" and said "alongside the other
@@ -552,7 +564,8 @@ PACKS: dict[str, Pack] = {
                        "The episode_body is a distilled claim of 1-3 sentences: "
                        "self-contained, naming the people, things, issue keys "
                        "and dates the claim is ABOUT — NEVER pasted source "
-                       "text. " + _operator_naming_rule() + _EPISODE_ROUTING_RULE +
+                       "text. " + _operator_naming_rule() + _PERSON_NAMING_RULE +
+                       _EPISODE_ROUTING_RULE +
                        _EPISODE_SHAPE_RULE +
                        "RETENTION TEST — the graph's "
                        "failure mode is over-inclusion (noise dilutes every "
@@ -801,11 +814,15 @@ PACKS: dict[str, Pack] = {
                 name="graph.update_node",
                 arguments="{'uuid': '<entity>', 'name': '<new name>'?, "
                           "'summary': '<new summary>'?, 'labels': ['<Type>', …]?, "
+                          "'aliases': ['<other name>', …]?, 'birth_date': "
+                          "'<YYYY-MM-DD>'?, 'phone': '<as written>'?, "
                           "'verification_id': '<…>'}",
                 notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>'}, "
                        "reversibility = 'reversible'. "
                        "Rename / re-summarise / re-type; omit fields you are not "
-                       "changing."),
+                       "changing. aliases, birth_date and phone are a Person's only "
+                       "([] or '' clears one); a renamed Person keeps its old name "
+                       "as an alias unless you pass aliases."),
             ),
             GatedCapability(
                 name="graph.delete_node",

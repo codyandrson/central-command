@@ -1,4 +1,4 @@
-"""Apply the four graphiti-core fixes we carry (D7) to the INSTALLED package.
+"""Apply the five graphiti-core fixes we carry (D7) to the INSTALLED package.
 
 The patches are unified diffs under `deploy/graphiti-patches/`; `patch` is not
 guaranteed on every substrate, so this applies them with nothing but the
@@ -37,6 +37,9 @@ PATCH_FILES = (
     "1666-reasoning-first-dedupe.patch",
     "0003-entity-embedding-name-summary.patch",
     "0004-dedupe-name-candidates.patch",
+    # Extends the fourth patch's lane; it must come after it (its OLD block is
+    # validated against the text the fourth leaves).
+    "0005-dedupe-alias-candidates.patch",
 )
 
 # parents[2] is the repo root (central_command/integrations/<this file>). A

@@ -60,8 +60,14 @@ def captured(monkeypatch):
         calls.append(("episodes", {"group_ids": group_ids, "limit": limit}))
         return []
 
+    async def fake_exact(name, group_ids, entity_types, limit):
+        # search_nodes' exact name/alias lane reads the SAME groups as its search.
+        calls.append(("exact", {"group_ids": group_ids, "limit": limit}))
+        return []
+
     monkeypatch.setattr(graphiti, "_search", fake_search)
     monkeypatch.setattr(neo4j_reader, "latest_episodes", fake_latest)
+    monkeypatch.setattr(neo4j_reader, "entities_by_exact_name", fake_exact)
     return calls
 
 
