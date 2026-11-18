@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.93.3: A short name finds the entity it belongs to, and a merge keeps the episode links
+
+Found on a live graph: five separate entities with the same one-word name were created in three days
+beside the well-known entity they all meant, each holding one to three facts.
+
+- **Entity dedupe is offered candidates by name** (a fourth carried graphiti-core patch,
+  `0004-dedupe-name-candidates`). graphiti-core finds dedupe candidates by embedding the bare extracted
+  name and taking the 15 nearest stored vectors. Since v2.80.0's one text recipe a stored vector is the
+  name plus the summary, so a short name sat far from an entity with a long summary: on a 300-entity
+  graph the right entity ranked 19th and was never offered. The patch also offers the entities of the
+  same group whose name shares every word with the extracted one (ten at most, closest first), ahead of
+  the vector hits. It decides nothing, embeds nothing and writes nothing: the exact-name rule and the
+  dedupe prompt still choose. Measured against the live extraction model with the new candidate list:
+  three of four episode texts that say only the short name resolved to the full-name entity; the fourth
+  was still kept as new, so the patch narrows the failure and does not end it.
+- **Merging a duplicate keeps its episode links.** `merge_nodes` moved the facts and then deleted the
+  duplicate with its `MENTIONS` links, so the survivor's provenance stopped listing every episode that
+  had only named the duplicate. Each such episode is now linked to the survivor (once), and the result
+  carries `mentions_moved`.
+
+The updater applies the new patch with the others (`scripts/apply_graphiti_patches.py`); the ingest
+worker refuses to extract until all four are in the installed package, and the `graph-patches`
+self-check row lists them. No schema, unit or manifest change. Existing duplicates are not merged by
+the update: that stays the operator's curation.
 ## 2026-11-17 — v2.93.2: The Voice field in Audio settings is laid out for the drawer it sits in
 
 The Voice row added in v2.93.1 put a fixed-width field beside its hint. In the settings drawer on a

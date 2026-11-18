@@ -63,6 +63,16 @@ PATCH_C = """--- a/pkg/gamma.py
 """
 GAMMA_OLD = ["a = 1", "b = 2", "c = 3", ""]
 GAMMA_NEW = ["a = 1", "b = 30", "c = 3", ""]
+PATCH_D = """--- a/pkg/delta.py
++++ b/pkg/delta.py
+@@ -1,3 +1,3 @@
+ p = 1
+-q = 2
++q = 40
+ r = 3
+"""
+DELTA_OLD = ["p = 1", "q = 2", "r = 3", ""]
+DELTA_NEW = ["p = 1", "q = 40", "r = 3", ""]
 
 
 def _tree(tmp_path: Path, *, version: str = gp.PINNED_VERSION, beta: list[str] = BETA_OLD):
@@ -71,6 +81,7 @@ def _tree(tmp_path: Path, *, version: str = gp.PINNED_VERSION, beta: list[str] =
     (site / "pkg" / "alpha.py").write_text("\n".join(ALPHA_OLD))
     (site / "pkg" / "beta.py").write_text("\n".join(beta))
     (site / "pkg" / "gamma.py").write_text("\n".join(GAMMA_OLD))
+    (site / "pkg" / "delta.py").write_text("\n".join(DELTA_OLD))
     dist = site / f"graphiti_core-{version}.dist-info"
     dist.mkdir()
     (dist / "METADATA").write_text(f"Metadata-Version: 2.4\nName: graphiti-core\nVersion: {version}\n\nbody\n")
@@ -80,6 +91,7 @@ def _tree(tmp_path: Path, *, version: str = gp.PINNED_VERSION, beta: list[str] =
     (pdir / gp.PATCH_FILES[0]).write_text(PATCH_A)
     (pdir / gp.PATCH_FILES[1]).write_text(PATCH_B)
     (pdir / gp.PATCH_FILES[2]).write_text(PATCH_C)
+    (pdir / gp.PATCH_FILES[3]).write_text(PATCH_D)
     return site, pdir
 
 
@@ -89,14 +101,16 @@ def _read(site: Path, name: str) -> str:
 
 def test_apply_patches_every_hunk_and_reports_each_file(tmp_path):
     site, pdir = _tree(tmp_path)
-    assert len(gp.PATCH_FILES) == 3
+    assert len(gp.PATCH_FILES) == 4
     assert gp.patch_state(site, pdir) == {n: "pristine" for n in gp.PATCH_FILES}
     lines = gp.apply_patches(site, pdir)
     assert [(f, s) for _, f, s in lines] == [
-        ("pkg/alpha.py", "patched"), ("pkg/beta.py", "patched"), ("pkg/gamma.py", "patched")]
+        ("pkg/alpha.py", "patched"), ("pkg/beta.py", "patched"), ("pkg/gamma.py", "patched"),
+        ("pkg/delta.py", "patched")]
     assert _read(site, "alpha.py") == "\n".join(ALPHA_NEW)
     assert _read(site, "beta.py") == "\n".join(BETA_NEW)
     assert _read(site, "gamma.py") == "\n".join(GAMMA_NEW)
+    assert _read(site, "delta.py") == "\n".join(DELTA_NEW)
     assert gp.patch_state(site, pdir) == {n: "patched" for n in gp.PATCH_FILES}
 
 
@@ -194,7 +208,7 @@ def test_cli_check_and_apply_and_exit_codes(tmp_path):
     assert r.returncode == 1 and "NOT patched" in r.stdout
     assert _read(site, "alpha.py") == "\n".join(ALPHA_OLD)  # --check changes nothing
     r = run("--site-packages", str(site))
-    assert r.returncode == 0 and r.stdout.count("pkg/") == 3 and "patched" in r.stdout
+    assert r.returncode == 0 and r.stdout.count("pkg/") == 4 and "patched" in r.stdout
     r = run("--site-packages", str(site))
     assert r.returncode == 0 and "already patched" in r.stdout
     assert run("--site-packages", str(site), "--check").returncode == 0
@@ -207,6 +221,8 @@ def test_the_real_patches_parse_to_the_expected_files():
         "1729-invalidation-scope.patch": [("graphiti_core/utils/maintenance/edge_operations.py", 3)],
         "1666-reasoning-first-dedupe.patch": [("graphiti_core/prompts/dedupe_edges.py", 1)],
         "0003-entity-embedding-name-summary.patch": [("graphiti_core/nodes.py", 1)],
+        "0004-dedupe-name-candidates.patch": [
+            ("graphiti_core/utils/maintenance/node_operations.py", 2)],
     }
 
 
@@ -341,7 +357,7 @@ def test_the_ingest_gate_refuses_extraction_while_the_third_patch_is_pristine(tm
 
     state = gp.patch_state(site, pdir)
     assert state == {gp.PATCH_FILES[0]: "patched", gp.PATCH_FILES[1]: "patched",
-                     gp.PATCH_FILES[2]: "pristine"}
+                     gp.PATCH_FILES[2]: "pristine", gp.PATCH_FILES[3]: "patched"}
     monkeypatch.setattr(gp, "patch_state", lambda: state)
     assert graphiti_client.patches_ok() is False
     monkeypatch.setattr(gp, "patch_state", lambda: {**state, gp.PATCH_FILES[2]: "patched"})
@@ -350,3 +366,111 @@ def test_the_ingest_gate_refuses_extraction_while_the_third_patch_is_pristine(tm
     monkeypatch.setattr(gp, "patch_state", lambda: state)
     worker = graphiti_ingest.IngestWorker()
     assert worker._patches_gate() is False
+
+
+# --- the fourth patch: dedupe candidates by name (2026-11) ------------------------------
+
+NAME_PATCH = "0004-dedupe-name-candidates.patch"
+
+
+def _patched_name_lane(tmp_path: Path) -> dict:
+    """The fourth patch's functions, compiled from the patched TEXT of a scratch copy
+    (graphiti_core is never imported). `EntityNode`, `semaphore_gather` and the limit
+    are the only module names they use; the caller supplies stand-ins."""
+    import ast
+    import asyncio
+
+    real = gp.find_site_packages()
+    site = tmp_path / "site"
+    for rel in {f.path for _, files in gp._load_patches(gp.PATCH_DIR) for f in files}:
+        (site / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(real / rel, site / rel)
+    for dist in real.glob("graphiti_core-*.dist-info"):
+        shutil.copytree(dist, site / dist.name)
+    if gp.installed_version(site) != gp.PINNED_VERSION:
+        pytest.skip("installed graphiti-core is not the pinned version")
+    gp.apply_patches(site)
+    text = (site / "graphiti_core/utils/maintenance/node_operations.py").read_text()
+    wanted = {"_name_tokens", "_rank_name_candidates", "_name_candidate_search",
+              "_collect_candidate_nodes", "_merge_candidate_nodes"}
+    tree = ast.parse(text)
+    body = [n for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in wanted]
+    assert {n.name for n in body} == wanted
+    limit = next(n for n in tree.body if isinstance(n, ast.Assign)
+                 and getattr(n.targets[0], "id", "") == "NAME_DEDUP_CANDIDATE_LIMIT")
+
+    async def gather(*coros):
+        return await asyncio.gather(*coros)
+
+    scope: dict = {"GraphitiClients": object, "EntityNode": object, "semaphore_gather": gather}
+    exec(compile(ast.Module([limit, *body], []), "node_operations.py", "exec"), scope)
+    return scope
+
+
+class _Entity:
+    def __init__(self, uuid, name, group_id="g"):
+        self.uuid, self.name, self.group_id = uuid, name, group_id
+
+
+class _NameDriver:
+    """Answers the lane's one read from a list of stored entities, the way Neo4j would."""
+
+    def __init__(self, stored):
+        self.stored, self.queries = stored, []
+
+    async def execute_query(self, query, **params):
+        self.queries.append((query, params))
+        rows = [{"uuid": e.uuid, "name": e.name} for e in self.stored
+                if e.group_id == params["group_id"]
+                and any(t in e.name.lower() for t in params["tokens"])]
+        return rows, None, None
+
+
+@pytest.mark.skipif(not _INSTALLED, reason="graphiti-core is not installed")
+async def test_the_name_lane_offers_the_full_name_for_a_short_one(tmp_path):
+    """The live failure: "Rivers" never met "Jane Rivers Doe" because the vector
+    lane ranked it past its limit. By name it is offered, ahead of the vector hits,
+    and names that merely share a word with other words of their own are not."""
+    scope = _patched_name_lane(tmp_path)
+    stored = [_Entity("u-full", "Jane Rivers Doe"), _Entity("u-poss", "Rivers's work deployment"),
+              _Entity("u-other", "Jane Doe"), _Entity("u-part", "Rivers Lee"),
+              _Entity("u-far", "Jane Rivers Doe", group_id="elsewhere")]
+
+    class _Loaded:
+        @classmethod
+        async def get_by_uuids(cls, driver, uuids):
+            return [e for e in reversed(stored) if e.uuid in uuids]
+
+    scope["EntityNode"] = _Loaded
+    vector_hit = _Entity("u-vec", "draw.io Diagrams")
+
+    async def vector_lane(clients, nodes):
+        return [[vector_hit] for _ in nodes]
+
+    scope["_semantic_candidate_search"] = vector_lane
+
+    class _Clients:
+        driver = _NameDriver(stored)
+
+    got = await scope["_collect_candidate_nodes"](
+        _Clients, [_Entity("new-1", "Rivers"), _Entity("new-2", "Rivers Doe"),
+                   _Entity("new-3", "Acme")], None)
+    # Closest word overlap first ("Rivers Lee" holds every word of "Rivers" too); a tie
+    # is broken by uuid so the order is stable.
+    assert [e.uuid for e in got[0]] == ["u-part", "u-full", "u-poss", "u-vec"]
+    assert [e.uuid for e in got[1]] == ["u-full", "u-vec"]
+    assert [e.uuid for e in got[2]] == ["u-vec"]
+    assert all(p["routing_"] == "r" for _, p in _Clients.driver.queries), "the lane only reads"
+
+
+@pytest.mark.skipif(not _INSTALLED, reason="graphiti-core is not installed")
+def test_the_name_ranking_is_capped_and_ignores_a_possessive(tmp_path):
+    scope = _patched_name_lane(tmp_path)
+    tokens, rank = scope["_name_tokens"], scope["_rank_name_candidates"]
+    assert tokens("Rivers\u2019s  Xcel-Energy account") == {"rivers", "xcel", "energy", "account"}
+    assert tokens("Rivers's") == {"rivers"} and tokens("  ") == frozenset()
+    rows = [(f"u{i:02d}", f"Rivers thing {i}") for i in range(30)] + [("exact", "rivers")]
+    ranked = rank("Rivers", rows, scope["NAME_DEDUP_CANDIDATE_LIMIT"])
+    assert len(ranked) == scope["NAME_DEDUP_CANDIDATE_LIMIT"] == 10 and ranked[0] == "exact"
+    assert rank("", rows, 10) == [] and rank("Rivers", [("x", "Jane Doe"), ("y", None)], 10) == []

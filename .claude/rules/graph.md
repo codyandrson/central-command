@@ -212,7 +212,14 @@ when a matching file is read.
   `graph-patches` row says so — drop the first two when they merge upstream and
   the pin moves; the third has no upstream number and goes only if graphiti-core
   itself embeds the summary (then `embedding_text` and the patch change together,
-  with a re-embed). Before blaming extraction quality on the model, check the
+  with a re-embed). **A fourth, also local, exists because of the third**
+  (`0004-dedupe-name-candidates`): upstream finds dedupe candidates by embedding
+  the bare extracted name and taking the 15 nearest stored vectors, and a stored
+  vector is now name plus summary, so "Rivers" ranked the operator's own
+  long-summary node 19th and five separate `Rivers` entities were created in three
+  days (2026-11). The patch offers entities whose NAME shares every word with the
+  extracted one ahead of the vector hits and decides nothing; a same-name
+  duplicate of a well-known entity means read that lane first. Before blaming extraction quality on the model, check the
   invalidation scope, the sampling (unset temperature means the backend
   default, not deterministic — `graph_llm_temperature` is 0), and the field
   ORDER of the schema (with schema-constrained decoding, index arrays before a

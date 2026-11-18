@@ -167,6 +167,18 @@ async def test_merging_a_duplicate_moves_its_edges_to_the_survivor(live_graph):
     assert await neo4j_reader._read(
         "MATCH (n:Entity {uuid: $uuid}) RETURN n", uuid=drop
     ) == [], "the duplicate survived the merge"
+    # Every episode that mentioned the duplicate now mentions the survivor, once:
+    # the duplicate's own entry record and the fact's (which named both ends of
+    # an edge that the merge moved onto the survivor).
+    assert result["mentions_moved"] >= 1
+    links = await neo4j_reader._read(
+        """
+        MATCH (ep:Episodic)-[m:MENTIONS]->(:Entity {uuid: $keep})
+        RETURN ep.uuid AS episode, count(m) AS links
+        """,
+        keep=keep,
+    )
+    assert len(links) >= 2 and all(row["links"] == 1 for row in links), links
 
 
 async def test_an_unknown_entity_type_is_refused(live_graph):

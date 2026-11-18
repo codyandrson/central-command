@@ -1,0 +1,111 @@
+# Central Command local patch (no upstream number): the entity dedupe step is also
+# offered existing entities by NAME, not only the vector top 15.
+#
+# Seam: graphiti_core/utils/maintenance/node_operations.py _collect_candidate_nodes,
+# the one place resolve_extracted_nodes gets its candidates. Upstream embeds the bare
+# extracted name and takes the 15 nearest stored vectors. Since the third patch a
+# stored vector is name + summary, so a short name sits far from an entity with a
+# long summary: on a 300-entity graph "Rivers" ranked the operator's own node
+# ("Jane Rivers Doe", an 1,800-character summary) 19th, it was never a
+# candidate, and five separate "Rivers" entities were created in three days (2026-11).
+#
+# The added lane reads the names of the group's entities that contain a word of the
+# extracted name, keeps those where one name's words all appear in the other, and
+# offers the closest NAME_DEDUP_CANDIDATE_LIMIT ahead of the vector hits. It decides
+# nothing: the exact-name rule and the dedupe prompt downstream still do. It embeds
+# nothing and writes nothing.
+#
+# Goes when upstream's candidate search no longer depends on the stored vector being
+# the bare name, or when the third patch goes.
+#
+# Written for graphiti-core 0.30.2 (see PINNED_VERSION in
+# central_command/integrations/graphiti_patches.py).
+--- a/graphiti_core/utils/maintenance/node_operations.py
++++ b/graphiti_core/utils/maintenance/node_operations.py
+@@ -63,6 +63,8 @@
+ MAX_NODES = 30
+ NODE_DEDUP_CANDIDATE_LIMIT = 15
+ NODE_DEDUP_COSINE_MIN_SCORE = 0.6
++# Central Command: how many existing entities the name lane may add per extracted name.
++NAME_DEDUP_CANDIDATE_LIMIT = 10
+ 
+ NodeSummaryFilter = Callable[[EntityNode], Awaitable[bool]]
+ 
+@@ -411,8 +413,76 @@
+ ) -> list[list[EntityNode]]:
+     """Search per extracted name and return ordered candidates for each extracted node."""
+     search_results = await _semantic_candidate_search(clients, extracted_nodes)
++    # Central Command: the cosine lane alone misses an entity whose stored vector is
++    # its name plus a long summary, so candidates by NAME are offered first.
++    name_results = await _name_candidate_search(clients, extracted_nodes)
++
++    return [
++        _merge_candidate_nodes(list(by_name) + list(by_vector), existing_nodes_override)
++        for by_name, by_vector in zip(name_results, search_results, strict=True)
++    ]
++
++
++def _name_tokens(name: str) -> frozenset[str]:
++    """The words of a name, lowercased, a possessive's `s` dropped."""
++    import re
++
++    words = re.split(r'[^a-z0-9]+', re.sub(r"['\u2019]s\b", '', name.lower()))
++    return frozenset(word for word in words if word)
++
++
++def _rank_name_candidates(name: str, rows: list[tuple[str, str]], limit: int) -> list[str]:
++    """Order `(uuid, name)` rows for one extracted name: only a name whose words all
++    appear in the other (either way round) counts, closest word-overlap first."""
++    wanted = _name_tokens(name)
++    if not wanted:
++        return []
++    scored: list[tuple[float, str]] = []
++    for uuid, other in rows:
++        have = _name_tokens(other or '')
++        if have and (wanted <= have or have <= wanted):
++            scored.append((len(wanted & have) / len(wanted | have), uuid))
++    scored.sort(key=lambda pair: (-pair[0], pair[1]))
++    return [uuid for _, uuid in scored[:limit]]
++
++
++async def _name_candidate_search(
++    clients: GraphitiClients,
++    extracted_nodes: list[EntityNode],
++) -> list[list[EntityNode]]:
++    """Existing entities of the same group whose NAME shares every word with the
++    extracted name ("Rivers" and "Jane Rivers Doe"). The caller's exact-name
++    and LLM steps still decide; this lane only makes sure they are asked."""
++
++    async def for_node(node: EntityNode) -> list[EntityNode]:
++        tokens = sorted(_name_tokens(node.name))
++        if not tokens:
++            return []
++        records, _, _ = await clients.driver.execute_query(
++            """
++            MATCH (n:Entity)
++            WHERE n.group_id = $group_id AND n.uuid <> $uuid
++              AND any(token IN $tokens WHERE toLower(n.name) CONTAINS token)
++            RETURN n.uuid AS uuid, n.name AS name
++            """,
++            group_id=node.group_id,
++            uuid=node.uuid,
++            tokens=tokens,
++            routing_='r',
++        )
++        ranked = _rank_name_candidates(
++            node.name,
++            [(record['uuid'], record['name']) for record in records],
++            NAME_DEDUP_CANDIDATE_LIMIT,
++        )
++        if not ranked:
++            return []
++        by_uuid = {
++            found.uuid: found for found in await EntityNode.get_by_uuids(clients.driver, ranked)
++        }
++        return [by_uuid[uuid] for uuid in ranked if uuid in by_uuid]
+ 
+-    return [_merge_candidate_nodes(result, existing_nodes_override) for result in search_results]
++    return list(await semaphore_gather(*[for_node(node) for node in extracted_nodes]))
+ 
+ 
+ async def _semantic_candidate_search(

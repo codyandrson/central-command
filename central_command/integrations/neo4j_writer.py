@@ -633,7 +633,12 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
     human appearing twice. Every edge is re-created against the survivor with
     its uuid properties rewritten, then the duplicate is deleted. Self-loops
     that would result (an edge that already joined the two) are dropped rather
-    than kept: "X is the parent of X" is never the fact that was meant."""
+    than kept: "X is the parent of X" is never the fact that was meant.
+
+    The episodes that MENTION the duplicate are linked to the survivor first
+    (one link per episode): the delete is DETACH, so without that the survivor's
+    provenance stopped listing every episode that had only named the duplicate,
+    and those episodes' own views lost the entity."""
     if keep_uuid == drop_uuid:
         raise WriteError("cannot merge a node into itself")
     both = await _write(
@@ -663,12 +668,24 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
         """,
         keep=keep_uuid, drop=drop_uuid,
     )
+    mentions = await _write(
+        """
+        MATCH (keep:Entity {uuid: $keep})
+        MATCH (ep:Episodic)-[m:MENTIONS]->(:Entity {uuid: $drop})
+        WHERE NOT (ep)-[:MENTIONS]->(keep)
+        CREATE (ep)-[m2:MENTIONS]->(keep)
+        SET m2 = properties(m), m2.uuid = randomUUID()
+        RETURN count(m2) AS moved
+        """,
+        keep=keep_uuid, drop=drop_uuid,
+    )
     dropped = await delete_node(drop_uuid)
     moved = (out[0]["moved"] if out else 0) + (incoming[0]["moved"] if incoming else 0)
     return {
         "uuid": keep_uuid,
         "edges_moved": moved,
         "edges_discarded": dropped["edges_removed"] - moved,
+        "mentions_moved": mentions[0]["moved"] if mentions else 0,
     }
 
 
