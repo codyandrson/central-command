@@ -4,6 +4,15 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-17 — v2.93.2: The Voice field in Audio settings is laid out for the drawer it sits in
+
+The Voice row added in v2.93.1 put a fixed-width field beside its hint. In the settings drawer on a
+desktop-width window that left the hint no room: it wrapped one word per line, under the field. The hint
+now sits above a full-width field. The provider line no longer says "choose the voice engine first" when
+there is only one. Seen in a browser at the drawer's width before release, which v2.93.1 was not.
+
+Cockpit only.
+
 ## 2026-11-17 — v2.93.1: Read-aloud works on a deployment that serves its own speech
 
 Found while verifying v2.93.0 on a live install: read-aloud had been failing there, silently, for

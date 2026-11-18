@@ -444,9 +444,11 @@ function DeploymentVoiceField({
     onSave(trimmed);
   };
 
+  // Stacked, not side by side: the settings drawer is narrow, and a fixed-width
+  // field beside this hint squeezed the text to one word per line.
   return (
-    <div className="cockpit-row items-start justify-between">
-      <div className="min-w-0 flex-1">
+    <div className="cockpit-row flex-col items-stretch gap-3">
+      <div className="min-w-0">
         <span className="text-sm font-medium text-foreground">Voice</span>
         <p className="mt-1 text-xs text-muted-foreground">
           {fromEnv
@@ -466,7 +468,7 @@ function DeploymentVoiceField({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
-        className="cockpit-input cockpit-input-mono h-11 min-w-[220px]"
+        className="cockpit-input cockpit-input-mono h-11 w-full"
       />
     </div>
   );
@@ -834,7 +836,11 @@ export function AudioSettings({
             )}
           </div>
           )}
-          <p className="cockpit-field-hint px-1">Choose the voice engine first, then tune the model and speaking style below.</p>
+          <p className="cockpit-field-hint px-1">
+            {offeredTts.length > 1
+              ? 'Choose the voice engine first, then tune the model and speaking style below.'
+              : 'Replies are read aloud by this service.'}
+          </p>
 
           {langState?.language && langState.language !== 'en' && ttsProvider === 'replicate' && !langState.providers.qwen3 && (
             <div className="rounded-[18px] border border-orange/30 bg-orange/6 px-3 py-3 text-orange/85">
