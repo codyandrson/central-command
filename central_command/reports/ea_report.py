@@ -18,8 +18,9 @@ of whoever asked.
 
 `since` is a real window boundary, not a page cursor: events are filtered on
 `created_at`, so a snapshot describes an interval of the operator's day. The
-count reads beside them (queue depths, ledger states) are CURRENT STATE, not
-windowed — the digest needs both, and the block labels which is which.
+count reads beside them (queue depths, ledger states, the lines of effort and
+their last check-ins) are CURRENT STATE, not windowed — the digest needs both,
+and the block labels which is which.
 """
 
 from __future__ import annotations
@@ -162,7 +163,29 @@ async def snapshot(since: datetime) -> dict:
              "last_moved_at": _iso(d.get("session_updated_at"))}
             for d in discussions
         ],
+        # CURRENT STATE — the operator's active lines of effort and each one's
+        # last check-in (the EA planning design, D2). The same reads `loe_list`
+        # makes; the questions and the history stay one tool call away.
+        "lines_of_effort": await _lines_of_effort(),
     }
+
+
+async def _lines_of_effort() -> list[dict]:
+    from central_command.db import repo
+
+    out = []
+    for row in await repo.list_loes():
+        latest = await repo.list_loe_checkins(row["id"], limit=1)
+        last = latest[0] if latest else None
+        out.append({
+            "loe_id": row["id"], "name": row["name"], "cadence": row["cadence"],
+            "last_check_in": None if last is None else {
+                "at": _iso(last.get("created_at")),
+                "light": last.get("light"),
+                "summary": (last.get("summary") or "")[:300],
+            },
+        })
+    return out
 
 
 def _summarise(kind: str, payload: dict) -> str:

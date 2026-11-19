@@ -2694,5 +2694,45 @@ hygiene, and how the test suite itself must be written. See
   6 (the backlog and ranking, the calendar, the review, the weekly and
   quarterly plans, the staffing agent) are not built and not decided here
   beyond the design record.
-- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`
-- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D9, "Build order" 1); `central_command/reports/ea_report.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`); `central_command/runtime/ea_profile.py`; `central_command/config.py` (`ea_contact_budget_per_day`)
+- **Note (2026-11-18, step 2 built):** The backlog and the ranking are built
+  (design record D1, D2's `backlog` and `lines_of_effort`, D3's read side, D4,
+  D9's morning row; PRD FR-54). `reports/ea_backlog.py` reads the backlog with
+  `plan_backlog_jql` (default `assignee = currentUser() AND statusCategory != Done`)
+  and ranks it in a pure `rank()`; the brief carries `backlog` (degraded on an
+  outage, omitted when Jira is not configured) and the snapshot carries
+  `lines_of_effort`; the morning framing is the plan and says the EA blocks no
+  time yet; the built-in charter's opening and "digest first" paragraph are
+  rewritten around the plan; `EA_TEMPLATE` takes `jira-read`, which is not
+  seeded in `schema.sql` (the calendar-propose precedent: the EA is hired from
+  its template), so a database that already hired the EA gets the grant from
+  the operator in the cockpit. The `backlog` block does not depend on the
+  grant: the control plane reads Jira for it, and the pack only lets the
+  assistant open an issue.
+  Decided beyond the design record: the four custom fields are settings by
+  display NAME (`plan_field_stakes`, `plan_field_value`, `plan_field_lateness`,
+  `plan_field_deadline_type`; defaults `Stakes`, `Value`, `Lateness loss`,
+  `Deadline type`), the unit is `plan_value_unit` (`points` or `currency`, a
+  label only), `plan_backlog_limit` (200) bounds the read and `plan_brief_items`
+  (25) the rows in the brief. The latest start uses `plan_hours_per_day` (6)
+  until step 3 brings the calendar's free time: days = ceil(estimate × padding
+  ÷ hours per day), at least 1, and latest start = due date − (days − 1)
+  calendar days, the due date counting as a working day and weekends not
+  skipped; padding is 1.0 until step 4 records estimate against actual.
+  `must_start` needs a lateness loss (it is the tier's ordering number); an
+  issue with value and estimate but no lateness loss ranks in `standard`. An
+  issue with no deadline type is treated as soft (it stays visible in
+  `must_start`) and names the field under `missing`; one past a hard deadline
+  ranks in `standard`. The per-hour scores divide by the estimate as entered
+  (padding moves the date, not the ratio). Ties go to the earlier due date
+  (none last), then the issue key; `unscored` is listed by due date, then key,
+  with no score. Numbers from the tracker are data: a value that is not a
+  finite JSON number, a negative number, an estimate of zero, a due date that
+  is not a date and a deadline type other than hard or soft are treated as
+  absent and named under `missing`, never raised on; a numeric string is not
+  parsed. The Jira client reads the estimate as `estimate_hours` from
+  `timeoriginalestimate` (seconds), falling back to
+  `timetracking.originalEstimateSeconds`, the only spelling the vendored Data
+  Center 9.17 reference shows; search rows also gain `priority`. Steps 3 to 6
+  are not built.
+- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`
+- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D4, D9, "Build order" 1 and 2); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`); `central_command/runtime/ea_profile.py`; `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)

@@ -4,6 +4,40 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.98.0: The executive assistant sees the operator's backlog, ranked in code, and the morning contact proposes a plan
+
+Step 2 of the EA-planning design (DL-221, FR-54; design record
+`docs/superpowers/specs/2026-11-18-ea-planning-design.md`). The assistant's job is now the operator's
+attention and plan. It makes no calendar change yet; that is the next step.
+
+- **The backlog is in the brief.** Every scheduled contact now carries the operator's open Jira issues,
+  read with `CC_PLAN_BACKLOG_JQL` (default: assigned to the configured account and not done) and ranked by
+  the control plane, never by the model. Each issue is in one tier: `must_start` (its latest start has
+  arrived; ordered by lateness loss per estimated hour), `standard` (ordered by value per estimated
+  hour), or `unscored` (no value or no estimate; listed with what it is missing and never guessed into
+  the order). An issue past a hard deadline has already taken its loss and ranks on its value.
+- **Four planning fields, read by name.** Stakes (text), Value and Lateness loss (numbers) and Deadline
+  type (hard or soft) are Jira custom fields whose NAMES are settings (`CC_PLAN_FIELD_STAKES`,
+  `CC_PLAN_FIELD_VALUE`, `CC_PLAN_FIELD_LATENESS`, `CC_PLAN_FIELD_DEADLINE_TYPE`), so a deployment can point
+  them at fields it already has. The estimate is Jira's own original estimate, now read as
+  `estimate_hours`. `CC_PLAN_VALUE_UNIT` labels the numbers as `points` or `currency`. A field the tracker
+  does not have at all is reported in the brief as a setup gap.
+- **The morning contact is the plan.** The assistant proposes a ranked short list of three to five items
+  with the reason for each, shows stakes, value, lateness loss, due date and estimate together on every
+  line, says what could not be ranked, and asks the operator to correct the plan instead of supplying one.
+- **The charter says so.** The built-in charter's opening and its "digest first" paragraph are replaced
+  by the planning doctrine: arrive with a proposal, explain the computed ranking, argue for a different
+  order only with a reason, never invent a number.
+- **Lines of effort are in the brief**, each with its cadence and last check-in.
+- The executive-assistant hire template gains the `jira-read` pack.
+
+For an operator: until the four planning fields exist in Jira and issues carry values and estimates,
+every issue ranks as `unscored`. A deployment that already hired the assistant grants it `jira-read` in
+the cockpit (the schema does not seed grants for it); the backlog block in the brief does not depend on
+that grant. The governed charter of a hired assistant is not rewritten by a release; the new text
+reaches it when the operator saves or approves a charter revision. Other settings:
+`CC_PLAN_HOURS_PER_DAY` (default 6), `CC_PLAN_BACKLOG_LIMIT` (200), `CC_PLAN_BRIEF_ITEMS` (25).
+
 ## 2026-11-18 — v2.97.0: The executive assistant stops re-asking answered questions, and is no longer told to ration its contact
 
 The first of six steps that turn the executive assistant from a reporter on the team's record into a

@@ -52,14 +52,26 @@ LINK_TYPES = ("Blocks", "Relates", "Duplicate")
 # reasons about — and without `issuelinks` it could not check whether a link
 # already existed before proposing `linkIssues`.
 FIELDS = ("summary,description,priority,status,issuetype,labels,duedate,"
-          "created,updated,assignee,parent,issuelinks")
+          "created,updated,assignee,parent,issuelinks,"
+          "timeoriginalestimate,timetracking")
 
 # Search rows are per-issue in a board-wide sweep, so they carry the cheap
 # scalars and only a link COUNT — the full link list would blow the agent's
 # token budget and get string-truncated, which reads as "no more links" and is
 # worse than an honest count. Drill into a specific issue with getIssue.
 SEARCH_FIELDS = ["summary", "status", "issuetype", "labels", "duedate",
-                 "updated", "assignee", "parent", "issuelinks"]
+                 "updated", "assignee", "parent", "issuelinks",
+                 "priority", "timeoriginalestimate", "timetracking"]
+
+# The native ORIGINAL ESTIMATE (2026-11-18, the EA planning design D3), read as
+# `estimate_hours`. Cloud names the system field `timeoriginalestimate`, a
+# number of SECONDS. The vendored Data Center 9.17 reference
+# (docs/vendor/atlassian-dc-rest/jira-9.17.0/.../REST/9.17.0/index.html) never
+# names `timeoriginalestimate`; it documents the `timetracking` object, whose
+# `originalEstimateSeconds` is the same quantity. So both are asked for and the
+# flat field wins, the object's seconds are the fallback, and either flavour
+# that returns neither reads None ("no estimate"), never 0. Which one Data
+# Center really returns is for `scripts/atlassian_probe.py` to show on site.
 
 # An issue with more links than this is pathological; report the overflow
 # honestly rather than silently showing a prefix (the no-silent-caps rule).
@@ -429,6 +441,21 @@ def _assignee(fields: dict) -> str | None:
     return a.get("displayName") or a.get("emailAddress") or None
 
 
+def _estimate_hours(fields: dict) -> float | None:
+    """The original estimate in hours, or None when unset (see SEARCH_FIELDS).
+
+    Seconds from `timeoriginalestimate`, else `timetracking.originalEstimateSeconds`.
+    Anything that is not a non-negative number is treated as unset: it is the
+    provider's data, and a planning rule must not rank on a guess."""
+    raw = fields.get("timeoriginalestimate")
+    if raw is None:
+        raw = (fields.get("timetracking") or {}).get("originalEstimateSeconds") \
+            if isinstance(fields.get("timetracking"), dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 0:
+        return None
+    return round(raw / 3600.0, 4)
+
+
 def _parent(fields: dict) -> dict | None:
     p = fields.get("parent")
     if not isinstance(p, dict) or not p.get("key"):
@@ -597,6 +624,7 @@ async def get_issue(issue_key: str) -> dict:
         "status": (f.get("status") or {}).get("name"),
         "issue_type": (f.get("issuetype") or {}).get("name"),
         "due_date": f.get("duedate"),
+        "estimate_hours": _estimate_hours(f),
         "created": f.get("created"),
         "updated": f.get("updated"),
         "assignee": _assignee(f),   # None == unassigned, not "unknown"
@@ -662,6 +690,8 @@ async def search_issues(jql: str, limit: int | None = None) -> dict:
                 "issue_type": (f.get("issuetype") or {}).get("name"),
                 "labels": f.get("labels") if isinstance(f.get("labels"), list) else [],
                 "due_date": f.get("duedate"),
+                "estimate_hours": _estimate_hours(f),
+                "priority": (f.get("priority") or {}).get("name"),
                 "updated": f.get("updated"),
                 "assignee": _assignee(f),   # None == unassigned
                 "parent": (_parent(f) or {}).get("issue_key"),

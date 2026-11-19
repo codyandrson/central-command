@@ -744,6 +744,36 @@ class Settings(BaseSettings):
     # not a system-wide throttle.
     ea_contact_budget_per_day: int = 20
 
+    # The EA's PLANNING block (docs/superpowers/specs/2026-11-18-ea-planning-design.md
+    # D2-D4; `reports/ea_backlog.py`). The control plane reads the operator's
+    # backlog from Jira and ranks it in code; the EA narrates the ranking.
+    #   plan_backlog_jql      -> the JQL that IS the operator's backlog. The
+    #                            default reads the configured account's open
+    #                            issues; a deployment where every issue is the
+    #                            operator's sets its own (e.g. a project clause).
+    #   plan_field_*          -> the display NAMES of the four planning custom
+    #                            fields, resolved through the client's name-keyed
+    #                            custom-field read. Names, never `customfield_NNNNN`
+    #                            ids: an id means nothing on another instance.
+    #   plan_value_unit       -> "points" or "currency": the label on Value and
+    #                            Lateness loss. The arithmetic is the same.
+    #   plan_hours_per_day    -> working hours a day assumed when a due date and an
+    #                            estimate become a latest start. A stand-in: step 3
+    #                            of the design replaces it with the calendar's real
+    #                            free time.
+    #   plan_backlog_limit    -> the most issues read for ranking (`truncated` says
+    #                            when the read hit it).
+    #   plan_brief_items      -> the most ranked rows written into the brief.
+    plan_backlog_jql: str = "assignee = currentUser() AND statusCategory != Done"
+    plan_field_stakes: str = "Stakes"
+    plan_field_value: str = "Value"
+    plan_field_lateness: str = "Lateness loss"
+    plan_field_deadline_type: str = "Deadline type"
+    plan_value_unit: str = "points"
+    plan_hours_per_day: float = 6.0
+    plan_backlog_limit: int = 200
+    plan_brief_items: int = 25
+
     # Sandbox slice 1 (D-sandbox): the runner is a SEPARATE, credential-free
     # service (central_command/sandbox/runner.py) that drives ephemeral gVisor
     # Jobs on the compute node by shelling out to kubectl — this process talks

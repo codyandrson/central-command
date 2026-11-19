@@ -463,16 +463,23 @@ _EA_FRAMING: dict[str, str] = {
         "and how long they have, and do not ask for attention inside a meeting."
     ),
     "morning_report": (
-        "This is the MORNING REPORT — the first contact of the day. Cover what "
-        "landed overnight and what is already waiting (for questions other "
-        "agents put to the operator, only how many are open in the Decisions "
-        "Inbox and whose they are), then ask what the "
-        "operator wants prioritised today. This is the one contact where asking "
-        "about priorities is the point rather than an interruption. Frame the "
-        "day against the calendar block: what is on it, where the free stretches "
-        "are, and any conflict the operator has not resolved. A block with "
-        "`available: false` has no free stretches to report: say the day is "
-        "unknown and why."
+        "This is the MORNING PLAN — the first contact of the day, and you "
+        "arrive prepared. Propose a ranked short list for today, three to five "
+        "items, taken from the `backlog` block's `must_start` tier first and "
+        "then from `standard`, each with the reason it is on the list and its "
+        "stakes, value, lateness loss, due date and estimate beside it. Frame "
+        "the list against the calendar block's day: what is already on it, "
+        "where the free stretches are, and any conflict the operator has not "
+        "resolved; a block with `available: false` has no free stretches to "
+        "report, so say the day is unknown and why. Say what cannot be ranked "
+        "and why (the `unscored` issues and what each is missing). Give the "
+        "count of questions open in the Decisions Inbox and whose they are, "
+        "and never restate or re-ask one. Then ask the operator to CORRECT the "
+        "plan, not to supply one. You do not block calendar time yet: propose "
+        "no calendar change for the plan, and never imply that any time has "
+        "been blocked, moved or reserved. If the `backlog` block is absent or "
+        "unavailable, say you could not see the backlog and why, and ask what "
+        "matters most today."
     ),
     "week_ahead": (
         "This is the WEEK-AHEAD look — audit the coming week before it starts. "
@@ -545,7 +552,7 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
 
     from central_command import events
     from central_command.db import repo
-    from central_command.reports import ea_calendar, ea_followups, ea_report
+    from central_command.reports import ea_backlog, ea_calendar, ea_followups, ea_report
     from central_command.runtime import attention, ea
 
     kind = str(params.get("kind") or "").strip()
@@ -608,6 +615,16 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     if tracked.get("reason") != "not configured":
         snapshot["tracked_follow_ups"] = tracked
 
+    # The operator's own backlog, ranked in code (the EA planning design, D2
+    # and D4). Same rule and placement as the follow-ups: after the budget
+    # check, degraded on failure, omitted when the tracker is not configured.
+    try:
+        backlog = await ea_backlog.backlog()
+    except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
+        backlog = {"available": False, "error": str(e)}
+    if backlog.get("reason") != "not configured":
+        snapshot["backlog"] = backlog
+
     brief = (
         f"{_EA_FRAMING[kind]}\n\n"
         "The block below is the control plane's own snapshot of the record over "
@@ -638,6 +655,31 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
            "these yourself; when something in the window resolves one, say so "
            "and name the issue.\n"
            if tracked.get("available") else "")
+        + "`lines_of_effort` is the operator's active lines of effort, each with "
+        "its cadence and the time and gist of its last check-in (null when it "
+        "has none yet); `loe_list` reads their questions and history.\n"
+        + ("`backlog` is the operator's OWN open work, read from the issue "
+           "tracker and RANKED BY THE CONTROL PLANE, not by you. Every issue "
+           "is in one tier. `must_start`: its latest start (the due date less "
+           "the estimate in working days at `hours_per_day`) is today or past, "
+           "ordered by lateness loss per estimated hour; an issue past a hard "
+           "deadline has already taken its loss and ranks in `standard` "
+           "instead. `standard`: ordered by value per estimated hour. "
+           "`unscored`: no value or no estimate, so it cannot be ranked; never "
+           "guess it into the order, and say what each is missing (`missing`). "
+           "`score` is the number the tier is ordered by and `unit` labels "
+           "value and lateness loss. The order is GROUND TRUTH: you may argue "
+           "for a different one and must say why, but never change it "
+           "silently. Every line you present shows stakes, value, lateness "
+           "loss, due date and estimate together, so urgency never appears "
+           "without value. `planning_fields.missing` names planning fields the "
+           "tracker does not have AT ALL: that is a setup gap, so tell the "
+           "operator once, plainly, which fields are missing. `truncated` "
+           "means the read hit its limit; `items_omitted` counts ranked rows "
+           "left out of this block. `available: false` means the backlog is "
+           "UNKNOWN (`error` says why): say so, and never present a plan as if "
+           "you had read it.\n"
+           if "backlog" in snapshot else "")
         + "\n"
         "```json\n" + json.dumps(snapshot, indent=2, default=str) + "\n```\n\n"
         "If this is worth the operator's attention AND you have a question only "

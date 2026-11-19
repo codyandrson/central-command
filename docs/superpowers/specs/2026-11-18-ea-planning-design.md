@@ -1,7 +1,7 @@
 # The executive assistant plans the operator's work: a ranked backlog, a blocked calendar, a daily and weekly rhythm
 
-> **Status:** partial — step 1 of six (the brief fix, the budget default, the rationing text) shipped in v2.97.0 (DL-221); steps 2 to 6 not built
-> **As-built:** `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/config.py`
+> **Status:** partial — steps 1 and 2 of six shipped (v2.97.0: the brief fix, the budget default, the rationing text; v2.98.0: the ranked backlog in the brief, the planning charter, the morning plan; DL-221, FR-54); steps 3 to 6 not built
+> **As-built:** `central_command/reports/ea_backlog.py`, `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/config.py`
 
 **Date:** 2026-11-18 · **Decisions:** the operator's, in the design discussion of this date, except where a section says "proposed" or "open".
 
@@ -226,6 +226,22 @@ as entered.
 This is a proposal, not a measured rule. Before it is built it is replayed
 against a real backlog and the order shown to the operator; the tier
 boundaries and the padding change on what that shows.
+
+**As built (step 2).** `reports/ea_backlog.rank()`, pure. Working days =
+ceil(estimate hours × padding ÷ `plan_hours_per_day`), at least 1; latest
+start = due date − (working days − 1) calendar days (the due date counts as a
+working day; weekends are not skipped; padding is 1.0). `must_start` needs a
+due date, a lateness loss and an estimate, and a latest start on or before
+today; its score is lateness loss ÷ estimate hours (as entered). An issue whose
+due date is before today and whose deadline type is `hard` is not in it; an
+issue with no deadline type is treated as soft and names the field under
+`missing`. `standard` is every other issue with a value and an estimate,
+scored value ÷ estimate hours. Both order by score, highest first, then the
+earlier due date (none last), then the issue key. `unscored` is the rest,
+listed by due date (none last), then key, with no score. A number that is not
+a finite non-negative JSON number, an estimate of zero, a due date that is not
+a date, and a deadline type other than hard or soft read as absent and are
+named under `missing`. The replay on a real backlog has not run yet.
 
 ### D5. The calendar: structure placeholders, work blocks, and a ledger that tells them apart
 

@@ -87,9 +87,11 @@ async def test_the_ea_is_hired_as_a_full_roster_member():
     # the accountability agent and its citation duty.
     # mail-read granted 2026-09-02 (declared gap): a digest of dismissed mail
     # is re-derived from the record, never from memory.
+    # jira-read granted 2026-11-18 (the EA planning design, D2): the brief
+    # carries the ranked backlog and the EA opens an issue it only summarises.
     assert grants == ["activity-read", "ask-operator", "calendar-propose",
                       "calendar-read", "consult", "graph-propose", "graph-read",
-                      "loe-read", "mail-read", "note-propose", "record-read", "session-recall",
+                      "jira-read", "loe-read", "mail-read", "note-propose", "record-read", "session-recall",
                       "skill-propose", "task-create"]
     assert "jira-propose" not in grants
 

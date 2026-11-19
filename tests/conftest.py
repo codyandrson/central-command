@@ -182,10 +182,21 @@ def _no_live_tracker_read():
     async def unconfigured(max_issues: int = 15) -> dict:
         return {"available": False, "reason": "not configured"}
 
+    from central_command.reports import ea_backlog
+
+    async def no_backlog() -> dict:
+        return {"available": False, "reason": "not configured"}
+
+    # The ranked backlog is the same kind of read (the EA planning design, D2):
+    # held unconfigured for the same reason; tests/test_ea_backlog.py puts the
+    # real function back.
     real = ea_followups.tracked
+    real_backlog = ea_backlog.backlog
     ea_followups.tracked = unconfigured
+    ea_backlog.backlog = no_backlog
     yield
     ea_followups.tracked = real
+    ea_backlog.backlog = real_backlog
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -282,10 +282,11 @@ EA_TEMPLATE = HireTemplate(
     id="executive-assistant",
     label="Executive assistant",
     description=(
-        "Reads Central Command's own record and the team's activity, delivers a "
-        "digest by opening a conversation with the operator, and proposes a "
-        "gated work-log episode of what was decided. Its contact rate is "
-        "budgeted and enforced."
+        "Plans the operator's work: reads the backlog the control plane ranked "
+        "from the issue tracker, proposes the day's plan for the operator to "
+        "correct, keeps the operator oriented on the team's record in a few "
+        "lines, and proposes a gated work-log episode of what was decided. A "
+        "daily contact budget stops a misfiring schedule."
     ),
     charter="",  # unused: the EA's charter is a finished document
     # calendar-propose added 2026-08-06 (EA widening slice A): the EA reads the
@@ -296,9 +297,15 @@ EA_TEMPLATE = HireTemplate(
     # lines of effort; originating goal work stays with accountability.
     # mail-read added 2026-09-02 (declared gap): a review digest of dismissed
     # mail must be re-derived from the record, not from memory of the brief.
+    # jira-read added 2026-11-18 (the EA planning design, D2): the brief carries
+    # the backlog the control plane ranked, and the assistant opens an issue
+    # the block only summarises. NOT seeded in schema.sql (the calendar-propose
+    # precedent): a database that already hired the assistant gets the grant
+    # from the operator in the cockpit.
     default_packs=("record-read", "activity-read", "graph-read", "graph-propose",
                    "ask-operator", "consult", "calendar-read", "calendar-propose",
-                   "loe-read", "task-create", "mail-read", "session-recall", "skill-propose", "note-propose"),
+                   "loe-read", "task-create", "mail-read", "session-recall", "skill-propose", "note-propose",
+                   "jira-read"),
     taskable=True,
     conversational=True,
 )
