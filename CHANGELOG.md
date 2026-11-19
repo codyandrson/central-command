@@ -4,6 +4,21 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.96.1: Read-aloud starts sooner, and the button shows when audio is being prepared
+
+Two things the operator found on first hearing sentence-by-sentence read-aloud (v2.95.0).
+
+- **A short first sentence.** The first chunk was filled to the 300-character maximum, which the speech
+  engine takes about 9 seconds to produce. The first chunk is now at most 100 characters (the first
+  sentence if it fits, else cut at a comma, colon, dash or space), about 3 seconds at the measured rate;
+  later chunks are unchanged and are fetched while the one before plays. The engine synthesises a request
+  as a whole, so streaming its answer would not bring the first sound any sooner.
+- **Loading is not playing.** The speaker button turned straight into a stop button while nothing was
+  audible. Until audio is actually playing it now shows a spinner ("Preparing audio — press to stop"),
+  and again if a later sentence is more than a quarter of a second late; it stays pressable to cancel.
+
+Cockpit only.
+
 ## 2026-11-18 — v2.96.0: A person's other names, birth date and phone number have a place in the graph
 
 A fact in the graph joins two entities, so a value about one person (a birth date, a phone number)

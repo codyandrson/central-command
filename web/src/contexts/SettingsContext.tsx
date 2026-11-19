@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- hook intentionally co-located with provider */
 import { createContext, useContext, useCallback, useRef, useState, useEffect, useMemo, type ReactNode } from 'react';
-import { useTTS, coerceTTSProvider, coerceSTTProvider, OFFERED_PROVIDERS, type TTSProvider } from '@/features/tts/useTTS';
+import { useTTS, coerceTTSProvider, coerceSTTProvider, OFFERED_PROVIDERS, type TTSProvider, type SpeakingPhase } from '@/features/tts/useTTS';
 import { type ThemeName, applyTheme, themeNames } from '@/lib/themes';
 import { type FontName, applyFont, fontNames } from '@/lib/fonts';
 import { TOAST_MODE_KEY } from '@/features/notifications/seen';
@@ -39,6 +39,8 @@ interface SettingsContextValue {
   stopSpeaking: () => void;
   /** Text currently being spoken, or null. */
   speaking: string | null;
+  /** Whether that utterance is still preparing audio (`loading`) or audible (`playing`); null when idle. */
+  speakingPhase: SpeakingPhase | null;
   telemetryVisible: boolean;
   toggleTelemetry: () => void;
   eventsVisible: boolean;
@@ -179,7 +181,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const saved = localStorage.getItem(TOAST_MODE_STORAGE_KEY);
     return saved === 'errors' || saved === 'off' ? saved : 'all';
   });
-  const { speak, speakNow, stop: stopSpeaking, speaking } = useTTS(soundEnabled, ttsProvider, deploymentSpeech ? undefined : ttsModel || undefined);
+  const { speak, speakNow, stop: stopSpeaking, speaking, speakingPhase } = useTTS(soundEnabled, ttsProvider, deploymentSpeech ? undefined : ttsModel || undefined);
   const wakeWordToggleRef = useRef<(() => void) | null>(null);
 
   // Apply theme on mount and when it changes
@@ -433,6 +435,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     speakNow,
     stopSpeaking,
     speaking,
+    speakingPhase,
     telemetryVisible,
     toggleTelemetry,
     eventsVisible,
@@ -460,7 +463,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     sttProvider, changeSttProvider, sttInputMode, changeSttInputMode, sttModel, changeSttModel,
     wakeWordEnabled, handleToggleWakeWord, handleWakeWordState,
     liveTranscriptionPreview, toggleLiveTranscriptionPreview,
-    speak, speakNow, stopSpeaking, speaking, telemetryVisible, toggleTelemetry,
+    speak, speakNow, stopSpeaking, speaking, speakingPhase, telemetryVisible, toggleTelemetry,
     eventsVisible, toggleEvents, logVisible, toggleLog, showHiddenWorkspaceEntries, toggleShowHiddenWorkspaceEntries,
     commandPaletteButtonVisible, toggleCommandPaletteButtonVisible,
     theme, setTheme, font, setFont,

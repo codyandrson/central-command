@@ -1,4 +1,4 @@
-import { Volume2, Square } from 'lucide-react';
+import { Volume2, Square, Loader2 } from 'lucide-react';
 import { useOptionalSettings } from '@/contexts/SettingsContext';
 import { buildVoiceFallbackText } from '@/hooks/useChatTTS';
 
@@ -19,18 +19,20 @@ export function SpeakButton({ text, className = '' }: { text: string | null | un
   const settings = useOptionalSettings();
   const spoken = speechText(text);
   if (!settings || !spoken) return null;
-  const { speakNow, stopSpeaking, speaking } = settings;
+  const { speakNow, stopSpeaking, speaking, speakingPhase } = settings;
   const active = speaking === spoken;
+  const loading = active && speakingPhase === 'loading';
   return (
     <button
       type="button"
       className={`cockpit-toolbar-button min-h-7 px-2 text-[0.667rem] ${className}`}
-      aria-label={active ? 'Stop reading aloud' : 'Read aloud'}
-      title={active ? 'Stop' : 'Read aloud'}
+      aria-label={loading ? 'Preparing audio — press to stop' : active ? 'Stop reading aloud' : 'Read aloud'}
+      title={loading ? 'Preparing audio — press to stop' : active ? 'Stop' : 'Read aloud'}
       aria-pressed={active}
+      aria-busy={loading ? true : undefined}
       onClick={(e) => { e.stopPropagation(); if (active) stopSpeaking(); else void speakNow(spoken); }}
     >
-      {active ? <Square size={12} /> : <Volume2 size={12} />}
+      {loading ? <Loader2 size={12} className="animate-spin motion-reduce:animate-none" data-testid="speak-spinner" /> : active ? <Square size={12} /> : <Volume2 size={12} />}
     </button>
   );
 }

@@ -80,6 +80,15 @@ async function fetchTTS(text: string, provider: TTSProvider = 'openai', model?: 
   return blob;
 }
 
+/**
+ * After a chunk ends, the phase turns to `loading` only if the next chunk has not
+ * started playing within this long, so a gap-free handover never flickers.
+ */
+export const TTS_LOADING_DELAY_MS = 250;
+
+/** `loading`: nothing audible yet (or between chunks); `playing`: audio is audible. */
+export type SpeakingPhase = 'loading' | 'playing';
+
 /** One utterance: a text cut into chunks that are requested and played one after another. */
 interface Utterance {
   /** The whole text as given; this is what `speaking` carries. */
@@ -93,6 +102,15 @@ interface Utterance {
   audio: { audio: HTMLAudioElement; url: string } | null;
   /** Releases the wait for the playing chunk to end (used on cancel). */
   wake: (() => void) | null;
+  /** Pending switch to `loading` after a chunk ended with the next one not yet playing. */
+  loadingTimer: ReturnType<typeof setTimeout> | null;
+}
+
+function clearLoadingTimer(utt: Utterance): void {
+  if (utt.loadingTimer !== null) {
+    clearTimeout(utt.loadingTimer);
+    utt.loadingTimer = null;
+  }
 }
 
 function releaseAudio(utt: Utterance): void {
@@ -109,6 +127,7 @@ function cancelUtterance(utt: Utterance): void {
   if (utt.cancelled) return;
   utt.cancelled = true;
   utt.controller.abort();
+  clearLoadingTimer(utt);
   releaseAudio(utt);
   utt.wake?.();
 }
@@ -128,6 +147,8 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
   const failingRef = useRef(false);
   /** Text of the utterance currently fetching or playing — null when idle. */
   const [speaking, setSpeaking] = useState<string | null>(null);
+  /** Which phase that utterance is in; null when idle. */
+  const [speakingPhase, setSpeakingPhase] = useState<SpeakingPhase | null>(null);
 
   /** Cancel whatever is fetching or playing. */
   const stop = useCallback(() => {
@@ -135,6 +156,7 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
     currentRef.current = null;
     if (utt) cancelUtterance(utt);
     setSpeaking(null);
+    setSpeakingPhase(null);
   }, []);
 
   // Unmount cancels the utterance: no fetch left running, no chunk started late.
@@ -163,11 +185,13 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
     if (plan.chunks.length === 0) {
       currentRef.current = null;
       setSpeaking(null);
+      setSpeakingPhase(null);
       return Promise.resolve();
     }
-    const utt: Utterance = { text, auto, controller: new AbortController(), cancelled: false, audio: null, wake: null };
+    const utt: Utterance = { text, auto, controller: new AbortController(), cancelled: false, audio: null, wake: null, loadingTimer: null };
     currentRef.current = utt;
     setSpeaking(text);
+    setSpeakingPhase('loading');
 
     const request = (i: number): Promise<Blob> => {
       const p = fetchTTS(plan.chunks[i], provider, model, utt.controller.signal);
@@ -188,6 +212,11 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
             utt.audio = { audio, url };
             const ended = new Promise<void>((resolve, reject) => {
               utt.wake = resolve;
+              audio.addEventListener('playing', () => {
+                if (utt.cancelled) return;
+                clearLoadingTimer(utt);
+                setSpeakingPhase('playing');
+              });
               audio.addEventListener('ended', () => resolve(), { once: true });
               audio.addEventListener('error', () => reject(new Error('Audio playback failed')), { once: true });
             });
@@ -200,6 +229,14 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
             if (i === 0) resolveStarted();
             await ended;
             if (utt.cancelled) return;
+            if (i + 1 < plan.chunks.length) {
+              // Show `loading` only if the next chunk is not audible shortly.
+              clearLoadingTimer(utt);
+              utt.loadingTimer = setTimeout(() => {
+                utt.loadingTimer = null;
+                if (!utt.cancelled && currentRef.current === utt) setSpeakingPhase('loading');
+              }, TTS_LOADING_DELAY_MS);
+            }
             releaseAudio(utt);
           }
           if (plan.truncated) {
@@ -219,10 +256,12 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
           }
         } finally {
           resolveStarted();
+          clearLoadingTimer(utt);
           releaseAudio(utt);
           if (currentRef.current === utt) {
             currentRef.current = null;
             setSpeaking(null);
+            setSpeakingPhase(null);
           }
         }
       })();
@@ -238,7 +277,7 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
     await begin(text, true);
   }, [enabled, begin]);
 
-  return { speak, speakNow, stop, speaking };
+  return { speak, speakNow, stop, speaking, speakingPhase };
 }
 
 /** Strip [tts:...] markers from text, returning cleaned text and the first TTS text found */

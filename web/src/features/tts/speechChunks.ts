@@ -17,6 +17,15 @@ export const SPEECH_CHUNK_MIN_CHARS = 40;
 export const SPEECH_CHUNK_MAX_CHARS = 300;
 
 /**
+ * The first chunk of an utterance is at most this long. The engine synthesises a
+ * request as a whole and cannot deliver the start of a chunk early, and its time
+ * is about a second or two plus 0.023 s per character (100 characters 2.9 s,
+ * 300 characters about 9 s), so a short first chunk means about 3 s to first
+ * sound instead of about 9 s. Later chunks keep {@link SPEECH_CHUNK_MAX_CHARS}.
+ */
+export const SPEECH_FIRST_CHUNK_MAX_CHARS = 100;
+
+/**
  * The most text one utterance speaks. At the measured rate this is about 3 min
  * of synthesis and several minutes of listening: it bounds both the read-aloud
  * time and the work queued on an engine that does one job at a time. A longer
@@ -68,6 +77,17 @@ function cutPoint(s: string): number {
   return SPEECH_CHUNK_MAX_CHARS;
 }
 
+/** Where to cut a first piece longer than the first-chunk maximum: after a comma, semicolon, colon or dash followed by whitespace, else at a space, else hard. */
+function firstCutPoint(s: string): number {
+  for (let i = SPEECH_FIRST_CHUNK_MAX_CHARS - 1; i >= SPEECH_CHUNK_MIN_CHARS - 1; i--) {
+    if (',;:-–—'.includes(s[i]) && isSpace(s[i + 1])) return i + 1;
+  }
+  for (let i = SPEECH_FIRST_CHUNK_MAX_CHARS; i >= SPEECH_CHUNK_MIN_CHARS; i--) {
+    if (isSpace(s[i])) return i;
+  }
+  return SPEECH_FIRST_CHUNK_MAX_CHARS;
+}
+
 function hardSplit(piece: string, out: string[]): void {
   let rest = piece;
   while (rest.length > SPEECH_CHUNK_MAX_CHARS) {
@@ -84,7 +104,9 @@ function hardSplit(piece: string, out: string[]): void {
  * sentence ends separate pieces; pieces with nothing to say (a bare "---" or
  * "**") are dropped; a piece over {@link SPEECH_CHUNK_MAX_CHARS} is cut at a
  * comma, semicolon or space; a piece under {@link SPEECH_CHUNK_MIN_CHARS} is
- * merged into a neighbour while the result still fits.
+ * merged into a neighbour while the result still fits. The first chunk is held to
+ * {@link SPEECH_FIRST_CHUNK_MAX_CHARS}: a longer first sentence is cut at a
+ * comma, semicolon, colon, dash or space and its remainder flows into the chunks after it.
  */
 export function splitForSpeech(text: string): string[] {
   const sentences: string[] = [];
@@ -93,14 +115,24 @@ export function splitForSpeech(text: string): string[] {
   const pieces: string[] = [];
   for (const sentence of sentences) {
     const trimmed = sentence.trim();
-    if (trimmed && isSpeakable(trimmed)) hardSplit(trimmed, pieces);
+    if (!trimmed || !isSpeakable(trimmed)) continue;
+    if (pieces.length === 0 && trimmed.length > SPEECH_FIRST_CHUNK_MAX_CHARS) {
+      // The first chunk is short so the first sound comes sooner; the rest flows on.
+      const cut = firstCutPoint(trimmed);
+      pieces.push(trimmed.slice(0, cut).trim());
+      const rest = trimmed.slice(cut).trim();
+      if (rest) hardSplit(rest, pieces);
+    } else {
+      hardSplit(trimmed, pieces);
+    }
   }
+  const maxFor = (index: number): number => (index === 0 ? SPEECH_FIRST_CHUNK_MAX_CHARS : SPEECH_CHUNK_MAX_CHARS);
 
   const chunks: string[] = [];
   let current = '';
   for (const piece of pieces) {
     if (!current) current = piece;
-    else if (current.length < SPEECH_CHUNK_MIN_CHARS && current.length + 1 + piece.length <= SPEECH_CHUNK_MAX_CHARS) {
+    else if (current.length < SPEECH_CHUNK_MIN_CHARS && current.length + 1 + piece.length <= maxFor(chunks.length)) {
       current += ` ${piece}`;
     } else {
       chunks.push(current);
@@ -109,7 +141,7 @@ export function splitForSpeech(text: string): string[] {
   }
   if (current) {
     const last = chunks.length - 1;
-    if (current.length < SPEECH_CHUNK_MIN_CHARS && last >= 0 && chunks[last].length + 1 + current.length <= SPEECH_CHUNK_MAX_CHARS) {
+    if (current.length < SPEECH_CHUNK_MIN_CHARS && last >= 0 && chunks[last].length + 1 + current.length <= maxFor(last)) {
       chunks[last] += ` ${current}`;
     } else {
       chunks.push(current);

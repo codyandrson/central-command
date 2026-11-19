@@ -7,7 +7,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLIENT_ERROR_EVENT, type ClientErrorDetail } from '@/features/notifications/clientToast';
 import { SPEECH_TOTAL_MAX_CHARS } from './speechChunks';
-import { useTTS } from './useTTS';
+import { TTS_LOADING_DELAY_MS, useTTS } from './useTTS';
 
 interface Call {
   text: string;
@@ -341,5 +341,74 @@ describe('a chunk that fails', () => {
     expect(events).toHaveLength(1);
     expect(result.current.speaking).toBeNull();
     expect(calls).toHaveLength(2); // 2 was already requested; nothing further
+  });
+});
+
+describe('the speaking phase', () => {
+  const startPlaying = async (i: number) => { audios[i].fire('playing'); await settle(); };
+  const pastDelay = () => act(async () => { await new Promise((r) => setTimeout(r, TTS_LOADING_DELAY_MS + 60)); });
+
+  it('is loading from speak until the first playing event, then playing', async () => {
+    const { result } = renderHook(() => useTTS(true, 'openai'));
+    expect(result.current.speakingPhase).toBeNull();
+    act(() => { void result.current.speakNow(THREE); });
+    expect(result.current.speakingPhase).toBe('loading');
+    await answer(0);
+    expect(audios[0].played).toBe(true);
+    expect(result.current.speakingPhase).toBe('loading'); // play() was called, nothing audible yet
+    await startPlaying(0);
+    expect(result.current.speakingPhase).toBe('playing');
+  });
+
+  it('turns loading again when the next chunk is late by more than the delay', async () => {
+    const { result } = renderHook(() => useTTS(true, 'openai'));
+    act(() => { void result.current.speakNow(THREE); });
+    await answer(0);
+    await startPlaying(0);
+    await endAudio(0); // chunk 2 not answered yet
+    expect(result.current.speakingPhase).toBe('playing');
+    await pastDelay();
+    expect(result.current.speakingPhase).toBe('loading');
+    await answer(1);
+    await startPlaying(1);
+    expect(result.current.speakingPhase).toBe('playing');
+  });
+
+  it('never shows loading when the next chunk starts at once', async () => {
+    const { result } = renderHook(() => useTTS(true, 'openai'));
+    const seen: Array<string | null> = [];
+    act(() => { void result.current.speakNow(THREE); });
+    await answer(0);
+    await startPlaying(0);
+    await answer(1); // ready early
+    await endAudio(0);
+    expect(audios).toHaveLength(2);
+    await startPlaying(1);
+    seen.push(result.current.speakingPhase);
+    await pastDelay(); // the pending switch must have been cancelled
+    seen.push(result.current.speakingPhase);
+    expect(seen).toEqual(['playing', 'playing']);
+  });
+
+  it('is null after the end, after stop and after a failure', async () => {
+    const { result } = renderHook(() => useTTS(true, 'openai'));
+    act(() => { void result.current.speakNow(S1); });
+    await answer(0);
+    await startPlaying(0);
+    await endAudio(0);
+    expect(result.current.speakingPhase).toBeNull();
+
+    act(() => { void result.current.speakNow(THREE); });
+    await answer(calls.length - 1);
+    await startPlaying(audios.length - 1);
+    act(() => result.current.stop());
+    expect(result.current.speakingPhase).toBeNull();
+    await pastDelay();
+    expect(result.current.speakingPhase).toBeNull();
+
+    act(() => { void result.current.speakNow(S2); });
+    expect(result.current.speakingPhase).toBe('loading');
+    await answer(calls.length - 1, refused);
+    expect(result.current.speakingPhase).toBeNull();
   });
 });
