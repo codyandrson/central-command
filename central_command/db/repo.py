@@ -9550,6 +9550,81 @@ async def list_day_plan_outcomes(plan_date) -> list[dict]:
         await conn.close()
 
 
+def _as_date_arg(value):
+    from datetime import date as _date
+
+    return _date.fromisoformat(value) if isinstance(value, str) else value
+
+
+async def list_day_plans_between(since, until) -> list[dict]:
+    """The ACTIVE stored plans dated in `[since, until]`, oldest first (the
+    time audit of DL-221 step 5). A read; the writers are above."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select * from day_plan where superseded_at is null "
+            "and plan_date between $1 and $2 order by plan_date",
+            _as_date_arg(since), _as_date_arg(until))
+        return [_plan_row(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def list_day_plan_outcomes_between(since, until) -> list[dict]:
+    """The ACTIVE outcome rows dated in `[since, until]`, by date then issue."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select * from day_plan_outcome where superseded_at is null "
+            "and plan_date between $1 and $2 order by plan_date, issue_key",
+            _as_date_arg(since), _as_date_arg(until))
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def list_active_work_blocks_from(first_date) -> list[dict]:
+    """The ACTIVE ledger work blocks planned for `first_date` or later, by
+    date (the deadline coverage of DL-221 step 5)."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select * from calendar_plan_event where kind = 'work_block' "
+            "and retired_at is null and plan_date >= $1 order by plan_date, created_at, id",
+            _as_date_arg(first_date))
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def list_work_blocks_created_between(start, end) -> list[dict]:
+    """Every ledger work block created in `[start, end)` (timestamps), retired
+    ones included, each with `created_for`: the date its creating proposal's
+    `calendar.create_event` action gave it (`plan.date` for the same issue;
+    the action whose date still matches wins), or null when that proposal is
+    not on record. The time audit compares it with the row's `plan_date`,
+    which a move rewrites (`move_calendar_plan_event_date`)."""
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select e.*,
+                   (select a->'arguments'->'plan'->>'date'
+                      from proposal p, jsonb_array_elements(p.actions) a
+                     where p.id = e.proposal_id
+                       and split_part(a->>'capability', '@', 1) = 'calendar.create_event'
+                       and a->'arguments'->'plan'->>'issue_key' = e.issue_key
+                     order by (a->'arguments'->'plan'->>'date' = e.plan_date::text) desc
+                     limit 1) as created_for
+              from calendar_plan_event e
+             where e.kind = 'work_block' and e.created_at >= $1 and e.created_at < $2
+             order by e.created_at, e.id
+            """, start, end)
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
 async def plan_padding_samples(since, until) -> list[dict]:
     """Estimate against actual, for the padding ratio of D4: every ACTIVE
     outcome with `actual_hours` dated in `[since, until]`, joined to the same

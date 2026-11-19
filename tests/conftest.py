@@ -190,13 +190,23 @@ def _no_live_tracker_read():
     # The ranked backlog is the same kind of read (the EA planning design, D2):
     # held unconfigured for the same reason; tests/test_ea_backlog.py puts the
     # real function back.
+    from central_command.reports import ea_plan
+
+    async def no_deadlines(days: int) -> dict:
+        return {"available": False, "reason": "not configured"}
+
+    # The weekly and quarterly deadlines read the same backlog (DL-221 step 5):
+    # held unconfigured too; tests/test_ea_week_quarter.py puts the real one back.
     real = ea_followups.tracked
     real_backlog = ea_backlog.backlog
+    real_deadlines = ea_plan.deadlines
     ea_followups.tracked = unconfigured
     ea_backlog.backlog = no_backlog
+    ea_plan.deadlines = no_deadlines
     yield
     ea_followups.tracked = real
     ea_backlog.backlog = real_backlog
+    ea_plan.deadlines = real_deadlines
 
 
 @pytest.fixture(scope="session", autouse=True)

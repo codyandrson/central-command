@@ -31,6 +31,15 @@ How the tracker is asked:
   omitted with `unplanned_done_omitted` saying why. An issue whose workflow
   sets no resolution is not found by this search.
 
+Step 5 adds the weekly and quarterly blocks. `deadline_coverage()` is PURE:
+each backlog issue due in the coming days against the minutes of the ledger's
+active work blocks serving it (today through its due date) and its padded
+estimate; `deadlines()` is its read (the backlog, the ledger, and each block's
+length from the calendar, one event at a time). `audit_from()` is PURE: the
+time audit of a window from the stored plans, the recorded outcomes and the
+ledger's work blocks; `audit()` is its Postgres read, with no calendar listing
+of the past.
+
 `padding_ratio()` is PURE: the sum of actual hours over the sum of planned
 estimate hours across the samples that carry both, 1.0 below the minimum
 sample count, clamped to 1.0-3.0. `padding()` is its Postgres read.
@@ -324,3 +333,265 @@ async def review(plan_date) -> dict:
     else:
         out["unplanned_done_omitted"] = "the tracker is not configured"
     return out
+
+
+# --- deadlines with no time serving them (DL-221 step 5) ------------------------------
+
+COVERAGE = ("covered", "partly", "none", "unestimated")
+
+
+def _serves(block: dict, today: date, due: date) -> bool:
+    """A ledger work block serves a deadline when it is active and planned for
+    a day from today through the due date. A block before today has already
+    happened (or not), and one after the due date is too late to serve it."""
+    if block.get("retired_at") is not None:
+        return False
+    planned = block.get("plan_date")
+    planned = _as_date(planned) if planned is not None else None
+    return planned is not None and today <= planned <= due
+
+
+def deadline_coverage(rows: list[dict], blocks: list[dict], today: date, days: int,
+                      padding: float = 1.0) -> dict:
+    """PURE. For each issue in `rows` (`ea_backlog.rank()` rows, any tier) due
+    from `today` through `today + days`, the work-block minutes the plan ledger
+    holds for it against its padded estimate, soonest due first, then key.
+
+    `blocks` are ledger work-block rows (`issue_key`, `plan_date`,
+    `retired_at`) carrying `minutes` (the event's length as the calendar holds
+    it, or None when it could not be read). Only `_serves` blocks count; a
+    block whose minutes are unknown counts as no time and is named in
+    `blocks_unread`. `coverage` is `covered` (the minutes reach the estimate
+    times `padding`), `partly` (some time, not enough), `none` (no time), or
+    `unestimated` (no estimate to measure against: the issue is listed, never
+    judged covered)."""
+    end = today + timedelta(days=max(0, int(days)))
+    pad = float(padding) if isinstance(padding, (int, float)) and padding > 0 else 1.0
+    out = []
+    for r in rows:
+        due = r.get("due_date")
+        due = _as_date(due) if due else None
+        if due is None or not today <= due <= end:
+            continue
+        key = r.get("issue_key")
+        mine = [b for b in blocks if b.get("issue_key") == key and _serves(b, today, due)]
+        minutes = sum(int(b["minutes"]) for b in mine if b.get("minutes") is not None)
+        unread = sum(1 for b in mine if b.get("minutes") is None)
+        estimate = _positive(r.get("estimate_hours"))
+        if not estimate:
+            needed, coverage = None, "unestimated"
+        else:
+            needed = math.ceil(estimate * pad * 60)
+            coverage = ("covered" if minutes >= needed else "partly" if minutes > 0
+                        else "none")
+        out.append({
+            "issue_key": key, "summary": r.get("summary"), "due_date": due.isoformat(),
+            "deadline_type": r.get("deadline_type"), "tier": r.get("tier"),
+            "value": r.get("value"), "lateness_loss": r.get("lateness_loss"),
+            "estimate_hours": estimate or None,
+            "needed_minutes": needed, "block_minutes": minutes, "blocks": len(mine),
+            **({"blocks_unread": unread} if unread else {}),
+            "coverage": coverage,
+        })
+    out.sort(key=lambda i: (i["due_date"], str(i["issue_key"] or "")))
+    return {
+        "window": {"from": today.isoformat(), "to": end.isoformat(), "days": int(days)},
+        "padding": pad,
+        "counts": {c: sum(1 for i in out if i["coverage"] == c) for c in COVERAGE},
+        "issues": out,
+    }
+
+
+async def _block_minutes(row: dict) -> dict:
+    """A ledger block with its length as the calendar holds it now (`minutes`,
+    or None with `unread` saying why). An outage raises."""
+    out = dict(row)
+    if not calendar_facade.provider_configured():
+        return {**out, "minutes": None, "unread": "calendar not configured"}
+    try:
+        ev = await calendar_facade.get_event(row["event_id"],
+                                             calendar_id=row.get("calendar_id") or "primary")
+    except Exception as e:  # noqa: BLE001 — a NO is said, an outage raises
+        if is_down(e):
+            raise
+        return {**out, "minutes": None, "unread": f"not found: {_reason(e)}"}
+    try:
+        start = datetime.fromisoformat(str(ev.get("start")).replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(ev.get("end")).replace("Z", "+00:00"))
+        minutes = int((end - start).total_seconds() // 60)
+    except (TypeError, ValueError):
+        return {**out, "minutes": None, "unread": "the event's times did not parse"}
+    return {**out, "minutes": max(0, minutes)}
+
+
+async def deadlines(days: int) -> dict:
+    """The `deadlines` block: the backlog's issues due in the coming `days`
+    against the work blocks the ledger holds for them (`deadline_coverage`).
+    Reads the backlog (`ea_backlog._read`, every ranked row, not the brief's
+    cut), the ledger from today, and each relevant block's length from the
+    calendar, one event at a time. Raises on an outage; omitted by the caller
+    when the tracker is not configured."""
+    from central_command.db import repo
+    from central_command.reports import ea_backlog
+
+    if not jira.configured():
+        return {"available": False, "reason": "not configured"}
+    read = await ea_backlog._read()
+    rows = [r for t in ea_backlog.TIERS for r in read["ranked"]["tiers"][t]]
+    today = ea_backlog._today()
+    end = today + timedelta(days=max(0, int(days)))
+    due = {r["issue_key"]: _as_date(r["due_date"]) for r in rows
+           if r.get("due_date") and today <= _as_date(r["due_date"]) <= end}
+    blocks = []
+    for b in await repo.list_active_work_blocks_from(today):
+        if b.get("issue_key") in due and _serves(b, today, due[b["issue_key"]]):
+            blocks.append(await _block_minutes(b))     # one read at a time
+    out = deadline_coverage(rows, blocks, today, days, read["padding"]["ratio"])
+    unread = [{"event_id": b["event_id"], "issue_key": b.get("issue_key"),
+               "reason": b["unread"]} for b in blocks if b.get("minutes") is None]
+    return {"available": True, **out, "truncated": read["truncated"],
+            **({"blocks_unread": unread} if unread else {})}
+
+
+# --- the time audit, from the record (DL-221 step 5) -------------------------------------
+
+SLIP_LIMIT = 10
+UNPLANNED_LISTED = 20
+
+
+def audit_from(plans: list[dict], outcomes: list[dict], blocks: list[dict],
+               since: date, until: date, min_samples: int) -> dict:
+    """PURE. The time audit of `[since, until]` from the stored plans, the
+    recorded outcomes and the ledger's work blocks created in the window
+    (`created_for` set from the creating proposal). See `audit()`."""
+    window = {"from": since.isoformat(), "to": until.isoformat(),
+              "days": (until - since).days + 1}
+    created = len(blocks)
+    known = [b for b in blocks if b.get("created_for")]
+    moved = [b for b in known
+             if str(b.get("plan_date")) != str(b.get("created_for"))]
+    retired = [b for b in blocks if b.get("retired_at") is not None]
+    block_part = {
+        "what": ("work blocks the plan ledger recorded as created in the window; "
+                 "`moved_off_day` counts those whose plan date now differs from "
+                 "the date their creating proposal gave them, `retired` those since "
+                 "deleted or released, `origin_unknown` those whose creating "
+                 "proposal is not on record"),
+        "created": created,
+        "moved_off_day": len(moved),
+        "retired": len(retired),
+        "origin_unknown": created - len(known),
+    }
+    unplanned = [o for o in outcomes if not o.get("planned")]
+    unplanned_part = {
+        "what": "outcomes the operator recorded for work that was not on that day's plan",
+        "count": len(unplanned),
+        "issues": [{"date": str(o["plan_date"]), "issue_key": o["issue_key"],
+                    "done": o["done"], "actual_hours": o.get("actual_hours")}
+                   for o in unplanned[:UNPLANNED_LISTED]],
+    }
+    base = {"available": True, "window": window, "days_with_plan": len(plans),
+            "days_without_plan": window["days"] - len(plans),
+            "blocks": block_part, "unplanned_outcomes": unplanned_part}
+    if not plans:
+        return {**base, "no_record": (
+            f"No day plan was stored on any of the {window['days']} days from "
+            f"{window['from']} to {window['to']}, so there is no record of planned "
+            "time to audit. This is an absence of record, not a clean one.")}
+
+    by_day = {(str(o["plan_date"]), o["issue_key"]): o for o in outcomes}
+    items = {"planned": 0, "done": 0, "not_done": 0, "unknown": 0}
+    tiers: dict[str, dict] = {}
+    hours = {"estimated_planned": 0.0, "actual_reported_planned": 0.0}
+    samples = []
+    per_issue: dict[str, dict] = {}
+    for plan in plans:
+        day = str(plan["plan_date"])
+        for item in plan.get("items") or []:
+            key = str(item.get("issue_key"))
+            outcome = by_day.get((day, key))
+            items["planned"] += 1
+            state = ("unknown" if outcome is None else
+                     "done" if outcome["done"] else "not_done")
+            items[state] += 1
+            tier = item.get("tier") or "unread"
+            t = tiers.setdefault(tier, {"planned": 0, "done": 0, "estimated_hours": 0.0,
+                                        "actual_hours": 0.0})
+            t["planned"] += 1
+            t["done"] += state == "done"
+            estimate = _positive(item.get("estimate_hours"))
+            actual = _positive(outcome.get("actual_hours")) if outcome else None
+            if estimate is not None:
+                hours["estimated_planned"] += estimate
+                t["estimated_hours"] += estimate
+            if actual is not None:
+                hours["actual_reported_planned"] += actual
+                t["actual_hours"] += actual
+            samples.append({"actual_hours": actual, "estimate_hours": estimate})
+            issue = per_issue.setdefault(key, {"issue_key": key,
+                                               "summary": item.get("summary"),
+                                               "planned_days": 0, "slipped_days": 0,
+                                               "slipped_on": []})
+            issue["planned_days"] += 1
+            if state != "done":
+                issue["slipped_days"] += 1
+                issue["slipped_on"].append(day)
+
+    both = [(s["actual_hours"], s["estimate_hours"]) for s in samples
+            if s["actual_hours"] is not None and s["estimate_hours"]]
+    matched_actual = sum(a for a, _ in both)
+    matched_estimate = sum(e for _, e in both)
+    slipped = sorted((i for i in per_issue.values() if i["slipped_days"]),
+                     key=lambda i: (-i["slipped_days"], -i["planned_days"], i["issue_key"]))
+    return {
+        **base,
+        "items": {"what": ("planned items across the stored plans (one per issue per "
+                           "day); done and not done are the outcomes the operator "
+                           "recorded, unknown means no outcome was recorded"), **items},
+        "hours": {
+            "what": ("`estimated_planned` sums the estimates stored with the planned "
+                     "items; `actual_reported_planned` sums the actual hours the "
+                     "operator reported for them; the ratio is actual over estimate "
+                     "across the items that carry both"),
+            "estimated_planned": round(hours["estimated_planned"], 2),
+            "actual_reported_planned": round(hours["actual_reported_planned"], 2),
+            "items_with_both": len(both),
+            "estimate_of_those": round(matched_estimate, 2),
+            "actual_of_those": round(matched_actual, 2),
+            "actual_over_estimate": (round(matched_actual / matched_estimate, 4)
+                                     if matched_estimate else None),
+            "padding_from_these": padding_ratio(samples, min_samples)["ratio"],
+        },
+        "by_tier": {"what": ("planned items by the tier they held when the plan was "
+                             "stored (`unread`: the tracker could not read the issue)"),
+                    **{k: {**v, "estimated_hours": round(v["estimated_hours"], 2),
+                           "actual_hours": round(v["actual_hours"], 2)}
+                       for k, v in sorted(tiers.items())}},
+        "slipped": {"what": ("issues planned on a day with no done outcome that day "
+                             "(recorded not done, or nothing recorded), most often "
+                             f"first; at most {SLIP_LIMIT}"),
+                    "issues_slipping": len(slipped),
+                    "issues": slipped[:SLIP_LIMIT]},
+    }
+
+
+async def audit(days_back: int, today: date | None = None) -> dict:
+    """The time audit: what the control plane recorded over the `days_back`
+    local days ending YESTERDAY (today's review is not in yet). Pure Postgres,
+    no calendar listing of the past: the stored plans (`day_plan`), the
+    recorded outcomes (`day_plan_outcome`) and the plan ledger's work blocks
+    created in the window, with the date their creating proposal gave them.
+    A window with no stored plan says so in `no_record` instead of zeros."""
+    from central_command.db import repo
+
+    today = today or _local_today()
+    days_back = max(1, int(days_back))
+    since, until = today - timedelta(days=days_back), today - timedelta(days=1)
+    tz = ZoneInfo(settings.ea_timezone)
+    start = datetime.combine(since, datetime.min.time(), tzinfo=tz)
+    end = datetime.combine(today, datetime.min.time(), tzinfo=tz)
+    plans = await repo.list_day_plans_between(since, until)
+    outcomes = await repo.list_day_plan_outcomes_between(since, until)
+    blocks = await repo.list_work_blocks_created_between(start, end)
+    return audit_from(plans, outcomes, blocks, since, until,
+                      settings.plan_padding_min_samples)

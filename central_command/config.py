@@ -800,6 +800,13 @@ class Settings(BaseSettings):
     #                            (step 4b, D8): one night's enrichment, paced so
     #                            a first pass over a large backlog is not
     #                            hundreds of approvals at once.
+    #   plan_overbooked_free_minutes -> an available day with less free time
+    #                            than this inside the working window is
+    #                            overbooked in the weekly plan's `week` block
+    #                            (step 5, D9).
+    #   plan_quarter_days     -> the quarterly review's reach: its audit reads
+    #                            the last this-many days of the record and its
+    #                            deadlines the coming this-many days (step 5).
     plan_backlog_jql: str = "assignee = currentUser() AND statusCategory != Done"
     plan_field_stakes: str = "Stakes"
     plan_field_value: str = "Value"
@@ -815,6 +822,8 @@ class Settings(BaseSettings):
     plan_padding_window_days: int = 30
     plan_padding_min_samples: int = 5
     plan_enrich_per_run: int = 10
+    plan_overbooked_free_minutes: int = 120
+    plan_quarter_days: int = 90
 
     # Sandbox slice 1 (D-sandbox): the runner is a SEPARATE, credential-free
     # service (central_command/sandbox/runner.py) that drives ephemeral gVisor

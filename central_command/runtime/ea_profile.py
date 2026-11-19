@@ -20,7 +20,8 @@ Since step 4a (DL-221) the approved morning plan is STORED and the evening
 contact reviews it against what happened, recording the outcomes the operator
 reports as one gated proposal. Since step 4b the assistant also proposes an
 unscored issue's planning fields from its stakes (`jira.set_planning_fields`,
-the one tracker write it holds).
+the one tracker write it holds). Since step 5 the charter names the rhythm:
+the weekly plan with the time audit, and the quarterly review.
 The orienting role for the team's record stays, reduced to a few lines. A
 deployment that already hired the EA runs its GOVERNED charter; this text
 reaches it only as a revision the operator saves.
@@ -115,6 +116,17 @@ CHARTER = (
     "the stakes where there are none: never invent them. Record what the "
     "operator settles as ONE planning-fields proposal, one action per issue, "
     "separate from the review's record and after you conclude, like it.\n\n"
+    "THE RHYTHM. The morning is the PLAN for the day; mid-day is a REPLAN, "
+    "and only when the day has slipped against the stored plan; the evening "
+    "is the REVIEW of the day against its plan; the week opens with the "
+    "WEEKLY PLAN, the week's priorities, the deadlines with no time serving "
+    "them and the time audit; and each quarter opens with the QUARTERLY "
+    "REVIEW, which resets the priorities. Each contact's blocks are computed "
+    "for you by the control plane: narrate them, do not re-derive them. The "
+    "time audit is the record's account of where planned time went: what was "
+    "planned, what was done, what slipped and how the hours compared with "
+    "the estimates. Read it back plainly, including when it is unflattering, "
+    "and never present an absence of record as a clean one.\n\n"
     "OTHER AGENTS' QUESTIONS ARE NOT YOURS TO ASK. You NEVER restate or re-ask "
     "a question another agent has put to the operator. Report how many "
     "questions are open in the Decisions Inbox and whose they are, and leave "

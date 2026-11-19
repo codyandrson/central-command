@@ -2952,5 +2952,63 @@ hygiene, and how the test suite itself must be written. See
   never clears; the stakes mark is the literal prefix "Agent's reading:"; an
   issue counts as needing enrichment when ANY planning input is missing, the
   due date included; the minutes unit for the estimate.
-- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`, `tests/test_planning_fields.py`
-- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D3, D4, D5, D6, D8, D9, "Build order" 1 to 4); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`, `_jira_set_planning_fields`); `central_command/integrations/jira.py` (`set_planning_fields`, `create_issue`); `central_command/runtime/packs.py` (`_SET_PLANNING_FIELDS`); `central_command/runtime/tools.py` (`jira_planning_gaps`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`, the `jira-hygiene` seed); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)
+- **Note (2026-11-19, step 5 built):** The weekly plan and the quarterly
+  review are built, with the time audit (design record D9's weekly and
+  quarterly rows; PRD FR-54); the staffing agent and the `delegated` block are
+  not. **The week** is `ea_calendar.week(start_offset=1, days=7)`: each day
+  read through `day()` in turn (never in parallel), so the free-time and
+  conflict rules exist once; a day `day()` answers `available: false` keeps its
+  reason and counts no free time; an outage raises. A known day carries its
+  timed events (split by `heartbeat/actions._annotate_week` against the plan
+  ledger into commitments, work blocks and placeholders), its conflict count,
+  `free_minutes`, its `free_time` stretches and `overbooked` (an available day
+  with less free time than `plan_overbooked_free_minutes`, new, default 120).
+  **Deadlines** are `ea_plan.deadline_coverage()`, pure: each ranked backlog
+  row (any tier) due from today through `days` days on, against the minutes of
+  the ledger's ACTIVE work blocks for it planned from today through its due
+  date (a block before today, after the due date or retired does not count),
+  needed minutes = ceil(estimate × padding × 60): `covered`, `partly`, `none`,
+  or `unestimated` when the issue has no estimate; soonest due first, then
+  key. `ea_plan.deadlines()` is its read: the backlog's whole ranked read
+  (`ea_backlog._read`, not the brief's cut), the ledger from today, and each
+  relevant block's length from the calendar by `get_event`, one at a time; a
+  block the calendar cannot read counts as no time and is named. **The audit**
+  is `ea_plan.audit_from()`, pure, over `ea_plan.audit(days_back)`'s Postgres
+  read of the `days_back` local days ending YESTERDAY (today's review is not in
+  yet): days with a stored plan; items planned, done, not done and unknown (no
+  outcome); estimated against reported hours, their unclamped ratio and the
+  padding rule applied to them; the same by tier; the issues planned on a day
+  without a done outcome that day, most often first (at most 10); work blocks
+  created in the window, moved off their day (the row's `plan_date` against
+  the `plan.date` its creating proposal's `calendar.create_event` gave it,
+  read from the proposal's own actions, since a move rewrites the row's date),
+  retired, and of unknown origin; unplanned outcomes. Every part names what it
+  counts (`what`), and a window with no stored plan carries `no_record` and
+  none of the item, hour, tier or slip counts. No calendar listing of the past
+  is made. **The contacts:** `week_ahead` is framed as the WEEKLY PLAN and
+  carries `week`, `deadlines` (7 days) and `audit` (7 days); it proposes
+  blocks for uncovered deadlines as one `calendar.create_event` proposal with
+  `plan: {kind: work_block, date: <the block's day>}` and no
+  `plan.record_day`, and no longer reads days two to seven with
+  `read_calendar`. A new kind, `quarter_ahead`, the QUARTERLY REVIEW, carries
+  `audit` and `deadlines` over `plan_quarter_days` (new, default 90), the
+  backlog and the lines of effort, and the calendar block for tomorrow only;
+  it records decisions as a graph episode and planning-field proposals and
+  proposes no calendar change the operator did not ask for. Each block is
+  degraded on failure; `week` and `deadlines` are omitted when their
+  integration is not configured. The kind is in `EA_CONTACT_KINDS` (and so in
+  the `ea.contact` row's `choices`), its parameter description, `_CALENDAR_DAY`
+  and the title map ("Quarterly review"). `schema.sql` seeds
+  `ea-quarter-review`, born disabled, cron `0 9 1 1,4,7,10 *` in
+  `America/Denver` like its neighbours, `on conflict do nothing`. The built-in
+  charter gains one paragraph on the rhythm. Open question 6 of the record is
+  answered for now: the review fires at 09:00 on the first day of each
+  quarter, and its categories are the record's own (planned and done, planned
+  and not done, unrecorded, unplanned, and the tier each item held), since
+  issues carry no line of effort to group by. Decided beyond the design
+  record: the audit's window ends yesterday; a block after its issue's due
+  date does not serve it; an unscored issue that has an estimate is measured,
+  one without is `unestimated`; the test suite holds `ea_plan.deadlines`
+  unconfigured like the backlog read.
+- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`, `tests/test_planning_fields.py`, `tests/test_ea_week_quarter.py`
+- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D3, D4, D5, D6, D8, D9, "Build order" 1 to 5); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`, `_jira_set_planning_fields`); `central_command/integrations/jira.py` (`set_planning_fields`, `create_issue`); `central_command/runtime/packs.py` (`_SET_PLANNING_FIELDS`); `central_command/runtime/tools.py` (`jira_planning_gaps`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`, the `jira-hygiene` seed); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)

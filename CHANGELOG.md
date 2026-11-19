@@ -4,6 +4,36 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-19 — v2.102.0: The executive assistant plans the week and reviews the quarter, from blocks the control plane computes
+
+Step 5 of the EA-planning design (DL-221, FR-54; design record
+`docs/superpowers/specs/2026-11-18-ea-planning-design.md`).
+
+- **The weekly contact is the weekly plan.** Its brief now carries three computed blocks. `week`: each of
+  the next seven days with its free time, conflicts, and whether it is overbooked (less than
+  `CC_PLAN_OVERBOOKED_FREE_MINUTES`, default 120, free inside the working window); a day that cannot be
+  read is unknown, never free. `deadlines`: every issue due in the window against the work-block time
+  already on the calendar for it (`covered`, `partly`, `none`, or `unestimated`). `audit`: the last seven
+  days from the record. The assistant proposes the week's top priorities, names every deadline with no
+  or partial time serving it and proposes blocks for those as one proposal, says whether anything serves
+  each line of effort, and reads the audit back. It no longer reads the week's days itself.
+- **The time audit comes from the record, not from the calendar's past.** Days with a stored plan; items
+  planned, done, not done and unknown; hours estimated against hours reported; the issues that slipped
+  most often; work blocks created, moved off their day and retired; unplanned outcomes. A window with no
+  stored plans says so, and is never presented as a clean one.
+- **A quarterly review.** A new contact kind, `quarter_ahead`, carries the audit of the last
+  `CC_PLAN_QUARTER_DAYS` (default 90) and the deadlines of the next: what was finished, what kept
+  slipping and whether to drop, delegate or re-scope it, what the hours say about the estimates, and the
+  priorities for the coming quarter, asked of the operator. A schedule for it, `ea-quarter-review` (09:00
+  on the first day of each quarter), is seeded disabled like every operator-facing schedule.
+- **The charter gains the rhythm:** morning plan, mid-day replan, evening review, weekly plan, quarterly
+  review, each from blocks computed for it.
+
+For an operator: the update's schema phase adds the disabled `ea-quarter-review` schedule; enabling it is
+a click in the Crons tab. The audit has nothing to report until day plans have been stored and reviewed.
+The weekly and quarterly contacts read the tracker twice (once for the backlog, once for the deadlines).
+Not exercised against a live model, tracker or calendar.
+
 ## 2026-11-19 — v2.101.0: Issues get their planning fields when they are filed, in the nightly sweep and in the evening review
 
 The second half of step 4 of the EA-planning design (DL-221, FR-54; design record

@@ -1,6 +1,6 @@
 # The executive assistant plans the operator's work: a ranked backlog, a blocked calendar, a daily and weekly rhythm
 
-> **Status:** partial — steps 1 to 4 of six shipped (v2.97.0 to v2.101.0: the brief fix, the ranked backlog, the planning charter, free time, the calendar ledger and work blocks, the stored day plan, the evening review, estimate against actual, enrichment; DL-221, FR-54); steps 5 and 6 not built
+> **Status:** partial — steps 1 to 5 of six shipped (v2.97.0 to v2.102.0: the brief fix, the ranked backlog, the planning charter, free time, the calendar ledger and work blocks, the stored day plan, the evening review, estimate against actual, enrichment, the weekly plan, the quarterly review and the time audit; DL-221, FR-54); step 6 (the staffing agent) not built
 > **As-built:** `central_command/reports/ea_backlog.py`, `central_command/reports/ea_plan.py`, `central_command/reports/ea_calendar.py`, `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/gateway/executor.py`, `central_command/db/schema.sql`
 
 **Date:** 2026-11-18 · **Decisions:** the operator's, in the design discussion of this date, except where a section says "proposed" or "open".
@@ -447,6 +447,33 @@ operator's.
 The contact budget default rises from 3 to 20. It no longer shapes the EA's
 behaviour; it remains only as a stop on a schedule that misfires.
 
+**As built (step 5).** The weekly and quarterly rows, with the time audit.
+`ea_calendar.week()` reads the coming seven days one after another through
+`day()`, so the free-time and conflict rules exist once: a known day carries
+its timed events (split against the ledger into commitments, work blocks and
+placeholders), its conflict count, free minutes and stretches, and
+`overbooked` (less free time than `plan_overbooked_free_minutes`, 120); an
+unreadable day stays unknown with its reason, and an outage raises.
+`ea_plan.deadline_coverage()` (pure) sets each backlog issue due in the window
+against the minutes of the ledger's active work blocks for it from today
+through its due date, read from the calendar one event at a time, and its
+estimate times the padding: `covered`, `partly`, `none`, or `unestimated`.
+`ea_plan.audit()` is built from the record only (stored plans, recorded
+outcomes, the ledger and the creating proposals' own actions; no calendar
+listing of the past), over the days ending yesterday: days planned; items
+planned, done, not done and unknown; estimated against reported hours and
+their ratio; the same by tier; the issues that slipped most often; blocks
+created, moved off their day and retired; unplanned outcomes. A window with
+no stored plan says so (`no_record`) instead of returning zeros. `week_ahead`
+is the WEEKLY PLAN with `week`, `deadlines` and `audit` over seven days, and
+proposes blocks for uncovered deadlines as one proposal of work-block creates
+with no `plan.record_day`; the new kind `quarter_ahead` is the QUARTERLY
+REVIEW with `audit` and `deadlines` over `plan_quarter_days` (90), the backlog
+and the lines of effort, and tomorrow's calendar only. Its schedule,
+`ea-quarter-review`, is seeded disabled at 09:00 on the first day of each
+quarter. The charter names the rhythm in one paragraph. The weekly plan's
+assignment questions wait for D10 (step 6).
+
 ### D10. Assigning work to people: the staffing agent, built second
 
 The 2026-08-21 staffing record (DL-176) already decided the shape: people are
@@ -511,7 +538,12 @@ needs nothing built beyond what exists.
 3. Whether the evening review's record is gated like a check-in (D6).
 4. The ranking rule's tier boundaries and padding, after the replay (D4).
 5. Who creates the four custom fields in Jira (D3).
-6. When the quarterly review fires, and what its categories are.
+6. ~~When the quarterly review fires, and what its categories are.~~
+   Answered for now (step 5): 09:00 on the first day of each quarter
+   (`ea-quarter-review`, seeded disabled, the operator's to retime), and the
+   categories are the record's own: planned and done, planned and not done,
+   unrecorded, unplanned, and the tier each item held when its plan was
+   stored. Issues carry no line of effort, so time is not grouped by one.
 7. The placeholder convention the EA proposes first, and which existing
    events are adopted.
 8. How a run that started before the day's plan was approved learns of it

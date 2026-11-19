@@ -376,7 +376,8 @@ async def test_the_digest_asks_for_tomorrow_and_the_check_in_for_today(
     await hb_actions._ea_contact("sched_cal_checkin", {"kind": "check_in"})
 
     assert hb_actions._CALENDAR_DAY == {"morning_report": 0, "check_in": 0,
-                                        "digest": 1, "week_ahead": 1}
+                                        "digest": 1, "week_ahead": 1,
+                                        "quarter_ahead": 1}
     digest_min, check_in_min = facade.calls[0][0], facade.calls[1][0]
     assert digest_min[:10] > check_in_min[:10], (
         "the 17:00 digest must look at TOMORROW; today's calendar is spent"

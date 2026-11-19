@@ -601,6 +601,18 @@ insert into heartbeat_schedule
      '{"kind": "week_ahead"}', 'seed:heartbeat')
 on conflict (id) do nothing;
 
+-- The EA's quarterly review (the EA planning design, D9; DL-221 step 5): the
+-- contact that audits the last quarter from the record and resets the
+-- priorities, at 09:00 on the first day of each quarter. Born DISABLED like
+-- every seed that contacts the operator: nothing fires until the operator
+-- clicks enable, and `on conflict do nothing` never overwrites their choice.
+insert into heartbeat_schedule
+    (id, name, schedule_kind, schedule, action_kind, action_params, created_by) values
+    ('ea-quarter-review', 'EA quarterly review', 'cron',
+     '{"expr": "0 9 1 1,4,7,10 *", "tz": "America/Denver"}', 'ea.contact',
+     '{"kind": "quarter_ahead"}', 'seed:heartbeat')
+on conflict (id) do nothing;
+
 -- ---------------------------------------------------------------------------
 -- D7 phase 2 (orchestration, 2026-07-24): the orchestrator runs projects — a
 -- stateful assign→receive→decide loop over roster agents, parked on the same

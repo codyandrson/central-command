@@ -29,6 +29,10 @@ so a day with no events on it is a free day; every other answer is
 truncated window, a provider that answered without a list and an unconfigured
 provider are all a NO. An outage is not: it raises, so `read_calendar` parks
 under the outage doctrine and the EA's brief records the error.
+
+`week()` (DL-221 step 5) is the coming week for the weekly plan: one line per
+day, each read through `day()` in turn, so the week's arithmetic is the day's
+and an unknown day stays unknown.
 """
 
 from __future__ import annotations
@@ -223,4 +227,68 @@ async def day(offset_days: int = 0) -> dict:
         "conflicts": _conflicts(events),
         "free_time": free,
         "free_minutes": sum(s["minutes"] for s in free),
+    }
+
+
+def _timed(events: list[dict]) -> list[dict]:
+    """The timed events `free_time` subtracts (the `_busy` test)."""
+    tz = ZoneInfo(settings.ea_timezone)
+    return [e for e in events if _busy(e, tz) is not None]
+
+
+async def week(start_offset: int = 1, days: int = 7) -> dict:
+    """The coming `days` local days from `start_offset`, one summary line per
+    day, computed from `day()` so the rules exist once (DL-221 step 5).
+
+    Each day is read through `day()`, ONE AFTER ANOTHER (never in parallel
+    against the provider), and fails closed on its own: a day `day()` answers
+    `available: false` keeps that answer and its reason and is never counted as
+    free. An outage raises, like `day()`, and the caller degrades the key.
+
+    A day line: `date`, `day`, `available` (and `reason` when not), and for an
+    available day `timed_events` (the timed, not-declined events free time is
+    computed after), `conflicts` (a count), `free_minutes` inside the working
+    window with its `free_time` stretches (where a block may go), and `overbooked` (less free time than `plan_overbooked_free_minutes`).
+    `busy_event_ids` rides along for the ledger join in the caller, which
+    replaces it with the counts of commitments and of the assistant's own
+    events."""
+    if not calendar_facade.provider_configured():
+        return {"available": False, "reason": "not configured"}
+    threshold = int(settings.plan_overbooked_free_minutes)
+    tz = ZoneInfo(settings.ea_timezone)
+    today = datetime.now(tz).date()
+    lines: list[dict] = []
+    for offset in range(start_offset, start_offset + max(0, int(days))):
+        local = today + timedelta(days=offset)
+        line = {"date": local.isoformat(), "day": local.strftime("%A")}
+        one = await day(offset)       # awaited in turn: sequential by construction
+        if not one.get("available"):
+            lines.append({**line, "available": False,
+                          "reason": one.get("reason") or "unknown"})
+            continue
+        free = int(one.get("free_minutes") or 0)
+        timed = _timed(one.get("events") or [])
+        lines.append({
+            **line, "available": True,
+            "timed_events": len(timed),
+            # The ids the caller joins to the plan ledger to tell commitments
+            # from the assistant's own events (this module holds no database).
+            "busy_event_ids": [str(e["event_id"]) for e in timed if e.get("event_id")],
+            "conflicts": len(one.get("conflicts") or []),
+            "free_minutes": free,
+            "free_time": one.get("free_time") or [],
+            "overbooked": free < threshold,
+        })
+    known = [d for d in lines if d["available"]]
+    return {
+        "available": True,
+        "timezone": settings.ea_timezone,
+        "working_window": f"{settings.plan_day_start}-{settings.plan_day_end}",
+        "overbooked_below_minutes": threshold,
+        "days": lines,
+        "days_available": len(known),
+        "days_unknown": len(lines) - len(known),
+        "free_minutes_known_days": sum(d["free_minutes"] for d in known),
+        "overbooked_days": [d["date"] for d in known if d["overbooked"]],
+        "days_with_conflicts": [d["date"] for d in known if d["conflicts"]],
     }

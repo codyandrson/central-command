@@ -418,7 +418,9 @@ async def _retry_sweep(schedule_id: str, params: dict) -> dict:
 # "digest" KEEPS its kind string for data compat but is framed as the
 # END-OF-DAY WRAP-UP since the 2026-08-21 EA charter (v5) daily arc, and as the
 # EVENING REVIEW of the stored day plan since 2026-11-19 (DL-221 step 4a);
-# "week_ahead" (same change) is the Sunday look-ahead.
+# "week_ahead" (same change) is the Sunday look-ahead, framed as the WEEKLY
+# PLAN since DL-221 step 5, which also added "quarter_ahead", the QUARTERLY
+# REVIEW; both carry blocks computed for them (`week`, `deadlines`, `audit`).
 
 # "onboarding_tour" (2026-08-23) is the odd one out on purpose: it is the ONE
 # kind that is not a windowed report, so it takes none of the snapshot/calendar
@@ -430,7 +432,8 @@ async def _retry_sweep(schedule_id: str, params: dict) -> dict:
 # (v2.51.0 — no installer ever created it before) and the operator fires it
 # once through the run-now button.
 EA_CONTACT_KINDS: tuple[str, ...] = (
-    "digest", "check_in", "morning_report", "week_ahead", "onboarding_tour",
+    "digest", "check_in", "morning_report", "week_ahead", "quarter_ahead",
+    "onboarding_tour",
 )
 
 # The event whose newest occurrence anchors the "since" window. It exists
@@ -548,24 +551,81 @@ _EA_FRAMING: dict[str, str] = {
         "most today."
     ),
     "week_ahead": (
-        "This is the WEEK-AHEAD look — audit the coming week before it starts. "
-        "The calendar block is tomorrow's; read the rest of the week yourself "
-        "with read_calendar (days 2 through 7). Surface what the operator "
-        "should fix before Monday: overbooked days, meetings with no prep or "
-        "travel buffer around them, conflicts, and anything on the board or in "
-        "open follow-ups that has a deadline this week but no time on the "
-        "calendar serving it. Propose the calendar changes that would fix what "
-        "you find rather than only listing problems. A day whose read says "
-        "availability UNKNOWN is not an open day: say you could not see it."
+        "This is the WEEKLY PLAN — plan the coming week before it starts. "
+        "Propose the week's top three to five priorities from the `backlog` "
+        "block's ranking (`must_start` first, then `standard`), each with the "
+        "reason it is a priority and its stakes, value, lateness loss, due date "
+        "and estimate beside it. `deadlines` lists every issue due in the "
+        "window against the work-block time already on the calendar for it: "
+        "name EVERY one whose `coverage` is `none` or `partly`, and say which "
+        "are `unestimated` and what they are missing. Propose blocks for the "
+        "uncovered ones on the days of `week` with free time, as ONE proposal "
+        "through `propose_calendar_change`: one `calendar.create_event` action "
+        "per block, each carrying `plan: {\"kind\": \"work_block\", "
+        "\"issue_key\": \"<KEY>\", \"date\": \"<the day the block sits on, "
+        "YYYY-MM-DD>\"}` and a title that names the issue key and its summary, "
+        "each inside one of that day's `free_time` stretches in `week`, on or "
+        "before the issue's due date, no longer than the time the issue still "
+        "needs and never shorter than the minimum block. `week` is computed for "
+        "you: do not read the week's days yourself. Propose no "
+        "`plan.record_day`: a day's plan is stored by that day's own morning. "
+        "For each line of effort in `lines_of_effort`, say whether anything in "
+        "the week serves it (a priority, a deadline, a block), and say so "
+        "plainly when nothing does. Read `audit` back in a few lines: does the "
+        "time the record shows match the priorities, what kept slipping "
+        "(`slipped`), and what the hours against the estimates say; then ASK "
+        "what should be dropped or delegated. If `audit` has `no_record`, say "
+        "there is no record of planned time for last week, and never present "
+        "that as a clean week. Flag every overbooked day and every day with an "
+        "unresolved conflict. A day whose `available` is false is UNKNOWN, "
+        "with its reason: availability UNKNOWN is not an open day, so say you "
+        "could not see it, never count it as free and propose no block on it. "
+        "Where the week has no shape (no placeholders), offer placeholders, or "
+        "to adopt events the operator already keeps. The proposal carries the "
+        "blocks to the operator: put the priorities and the blocks in its "
+        "intent, say nothing is on the calendar until the operator approves, "
+        "and do not call ask_operator in the same turn. Never propose a change "
+        "to a commitment unless the operator asked for it. Questions other "
+        "agents have put to the operator are theirs: say how many are open in "
+        "the Decisions Inbox and whose they are, and never restate or re-ask "
+        "one."
+    ),
+    "quarter_ahead": (
+        "This is the QUARTERLY REVIEW — the conversation that resets the "
+        "operator's priorities. Read `audit`, the record of the last quarter, "
+        "back plainly, including where it is unflattering: where the planned "
+        "time went against what was planned (`items`, `by_tier`, `hours`), what "
+        "was finished, and what kept slipping (`slipped`); for each issue that "
+        "slipped often, ask whether it should be dropped, delegated or "
+        "re-scoped. Say what the ratio of actual to estimated hours says about "
+        "the estimates. If `audit` has `no_record`, say there is no record of "
+        "planned time for the quarter, and never present that as a clean one. "
+        "Then ASK the operator for the priorities of the coming quarter, "
+        "showing what is already dated in it (`deadlines`, with the time "
+        "already blocked for each) and the top of the `backlog` ranking. Give "
+        "each line of effort in `lines_of_effort` its standing (its last "
+        "check-in and whether the record shows time serving it) and ask "
+        "whether it continues. Ask whether any of the operator's standing "
+        "rules (the standing notes) should change. Record what the operator "
+        "decides the way your charter says: what the team should still know "
+        "next quarter as one graph.add_episode, and the re-scored issues as "
+        "ONE `jira.set_planning_fields` proposal, both after you conclude. "
+        "Propose no calendar change beyond what the operator asks for, and "
+        "never a change to a commitment unless the operator asked. Questions "
+        "other agents have put to the operator are theirs: say how many are "
+        "open in the Decisions Inbox and whose they are, and never restate or "
+        "re-ask one."
     ),
 }
 
 # Which day each contact kind looks at. The wrap-up fires at 17:00, when
 # today's calendar is spent — the useful question then is what tomorrow
-# demands. The week-ahead anchors on tomorrow (Monday) and reads onward
-# itself.
+# demands. The weekly plan anchors on tomorrow (Monday) and carries the rest of
+# the week as the computed `week` block; the quarterly review carries tomorrow
+# only (no ninety-day calendar read).
 _CALENDAR_DAY: dict[str, int] = {
     "morning_report": 0, "check_in": 0, "digest": 1, "week_ahead": 1,
+    "quarter_ahead": 1,
 }
 
 
@@ -606,6 +666,29 @@ async def _annotate_plan_kinds(calendar: dict) -> dict:
         and r["event_id"] not in listed
     ]
     return calendar
+
+
+async def _annotate_week(week: dict) -> dict:
+    """Split each available day's timed events of a `week` block into
+    `commitments` and the assistant's own `work_blocks` and `placeholders`
+    from the plan ledger (the same join `_annotate_plan_kinds` makes for one
+    day), and drop the event ids the report carried for it."""
+    from central_command.db import repo
+
+    if not week.get("available"):
+        return week
+    ids = [i for d in week.get("days") or [] for i in d.get("busy_event_ids") or []]
+    rows = await repo.list_calendar_plan_events(event_ids=ids) if ids else []
+    kind_of = {r["event_id"]: r["kind"] for r in rows}
+    for d in week.get("days") or []:
+        busy = d.pop("busy_event_ids", None)
+        if busy is None:
+            continue
+        kinds = [kind_of.get(i) for i in busy]
+        d["work_blocks"] = sum(1 for k in kinds if k == "work_block")
+        d["placeholders"] = sum(1 for k in kinds if k == "placeholder")
+        d["commitments"] = d.get("timed_events", 0) - d["work_blocks"] - d["placeholders"]
+    return week
 
 
 async def _ea_tour(schedule_id: str) -> dict:
@@ -748,6 +831,34 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
         except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
             snapshot["plan"] = {"available": False, "error": str(e)}
 
+    # The weekly plan and the quarterly review (DL-221 step 5): their blocks are
+    # computed for them, each degraded on failure like the blocks above. The
+    # weekly plan carries the coming week (`week`, read day by day), the
+    # deadlines of the next seven days and the audit of the last seven; the
+    # quarterly review carries the audit of the last `plan_quarter_days` and the
+    # deadlines of the coming ones, and no week (its calendar block is
+    # tomorrow's only). `week` and `deadlines` are omitted when their
+    # integration is not configured; `audit` is Postgres and always present.
+    if kind in ("week_ahead", "quarter_ahead"):
+        reach = 7 if kind == "week_ahead" else max(1, int(settings.plan_quarter_days))
+        if kind == "week_ahead":
+            try:
+                week = await _annotate_week(await ea_calendar.week(1, 7))
+            except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
+                week = {"available": False, "error": str(e)}
+            if week.get("reason") != "not configured":
+                snapshot["week"] = week
+        try:
+            deadlines = await ea_plan.deadlines(reach)
+        except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
+            deadlines = {"available": False, "error": str(e)}
+        if deadlines.get("reason") != "not configured":
+            snapshot["deadlines"] = deadlines
+        try:
+            snapshot["audit"] = await ea_plan.audit(reach, plan_today)
+        except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
+            snapshot["audit"] = {"available": False, "error": str(e)}
+
     brief = (
         f"{_EA_FRAMING[kind]}\n\n"
         "The block below is the control plane's own snapshot of the record over "
@@ -842,6 +953,38 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
            "no plan was stored for today; with `error`, the review could not "
            "be read.\n"
            if "plan_review" in snapshot else "")
+        + ("`week` is the coming week computed for you, one line per day read in "
+           "turn from the calendar: `available` (false with `reason` or `error` "
+           "means that day is UNKNOWN, never free), and for a known day its "
+           "`commitments`, your own `work_blocks` and `placeholders` (from the "
+           "plan ledger), `conflicts` (a count), `free_minutes` and the "
+           "`free_time` stretches inside the working window, and `overbooked` "
+           "(less free time than `overbooked_below_minutes`). `overbooked_days` "
+           "and `days_with_conflicts` list them.\n"
+           if "week" in snapshot else "")
+        + ("`deadlines` is every backlog issue due from today through the end "
+           "of its `window`, soonest first, against the work-block time the plan "
+           "ledger holds for it from today through its due date: `block_minutes` "
+           "against `needed_minutes` (its estimate times `padding`), and "
+           "`coverage` `covered`, `partly`, `none`, or `unestimated` (no "
+           "estimate to measure, never covered). A block the calendar could not "
+           "read counts as no time and is named in `blocks_unread`. "
+           "`available: false` means the deadlines are UNKNOWN (`error` says "
+           "why).\n"
+           if "deadlines" in snapshot else "")
+        + ("`audit` is the record's account of where planned time went over its "
+           "`window` (the days ending yesterday), built from the stored plans, "
+           "the outcomes the operator recorded and the plan ledger, never from a "
+           "listing of the past calendar. Each part says in `what` what it "
+           "counts: `days_with_plan`; `items` planned, done, not done and "
+           "unknown (no outcome recorded); `hours`, the estimates against the "
+           "actual hours reported and their ratio; `by_tier`; `slipped`, the "
+           "issues planned most often without a done outcome; `blocks` created, "
+           "moved off their day and retired; and `unplanned_outcomes`. "
+           "`no_record` means no plan was stored in the window: there is "
+           "nothing to audit, which is not a clean record. Read it back "
+           "plainly, including when it is unflattering.\n"
+           if "audit" in snapshot else "")
         + "\n"
         "```json\n" + json.dumps(snapshot, indent=2, default=str) + "\n```\n\n"
         "If this is worth the operator's attention AND you have a question only "
@@ -854,6 +997,7 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     title = {
         "digest": "Evening review", "check_in": "Check-in",
         "morning_report": "Morning report", "week_ahead": "Week ahead",
+        "quarter_ahead": "Quarterly review",
     }[kind]
 
     # Late import for the same reason `_task_create` has one: routes imports
@@ -1825,11 +1969,11 @@ ACTIONS: dict[str, ActionSpec] = {
             kind="ea.contact",
             description=(
                 "Wake the executive assistant to contact the operator with a "
-                "digest, a check-in, the morning report, the week-ahead look, "
-                "or the onboarding tour of the team."
+                "digest, a check-in, the morning report, the weekly plan, the "
+                "quarterly review, or the onboarding tour of the team."
             ),
             params={"kind": "digest | check_in | morning_report | week_ahead "
-                            "| onboarding_tour"},
+                            "| quarter_ahead | onboarding_tour"},
             required=("kind",),
             runs_as="ea",
             levers=("api.routes.create_and_run_task",),

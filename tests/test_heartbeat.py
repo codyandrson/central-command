@@ -134,7 +134,7 @@ def test_enum_params_are_enforced_mechanically():
     param's prose would be guidance with no mechanism behind it: the schedule
     would be created happily and fail later, inside a background loop, at the
     hour nobody is watching."""
-    for good in ("digest", "check_in", "morning_report", "week_ahead"):
+    for good in ("digest", "check_in", "morning_report", "week_ahead", "quarter_ahead"):
         hb_actions.validate_action("ea.contact", {"kind": good})
     with pytest.raises(ValueError, match="must be one of"):
         hb_actions.validate_action("ea.contact", {"kind": "hourly_nag"})
