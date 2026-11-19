@@ -25,6 +25,29 @@ export const SPEECH_CHUNK_MAX_CHARS = 300;
  */
 export const SPEECH_FIRST_CHUNK_MAX_CHARS = 100;
 
+/*
+ * POSSIBLE FUTURE ENHANCEMENT (not built; the operator judged read-aloud good
+ * enough as it is, 2026-11-18): ramp the maximum over the first few chunks
+ * instead of jumping from SPEECH_FIRST_CHUNK_MAX_CHARS straight to
+ * SPEECH_CHUNK_MAX_CHARS, for example 100, then about 150, then about 220,
+ * then 300.
+ *
+ * Why it would help: read-aloud fetches ahead of playback (useTTS.ts,
+ * TTS_MAX_BUFFERED_CHUNKS), but at the START of a reply no buffer exists yet.
+ * Measured on a live install after v2.96.3, on a reply of about 2,600
+ * characters: every gap between chunks was 23 to 76 ms except one of 1.8 s,
+ * between the second and third chunks, where a full 300-character chunk
+ * (8.9 s to synthesise) followed two short ones (38 and 90 characters) and
+ * playback caught up with the engine. Smaller second and third chunks are
+ * synthesised faster than they play, so the buffer would build before the
+ * first full-size chunk is needed.
+ *
+ * What it would touch: only this file (the per-chunk maximum becomes a
+ * function of the chunk's position) and speechChunks.test.ts. The numbers
+ * above are for one engine on one machine; re-measure before choosing the
+ * steps (the rate is in the comment at the top of this file).
+ */
+
 /**
  * The most text one utterance speaks. At the measured rate this is about 3 min
  * of synthesis and several minutes of listening: it bounds both the read-aloud

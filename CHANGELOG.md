@@ -4,6 +4,15 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.96.4: A possible read-aloud refinement is written down where it would be made
+
+Documentation only; nothing an operator uses changes. Read-aloud was measured after v2.96.3 and left as
+it is: about 2.6 seconds to first sound, gaps between sentences under 80 ms, and one gap of about 1.8
+seconds at the start of a long reply when a full-size third chunk follows two short ones. Ramping the
+chunk size over the first few chunks would close that gap. It is not built; the measurement, the idea and
+what it would touch are recorded in a comment in `web/src/features/tts/speechChunks.ts` and in a dated
+note on DL-220, which also now says that speaking sentence by sentence has shipped.
+
 ## 2026-11-18 — v2.96.3: Read-aloud keeps a few sentences ready, so a long one no longer leaves a gap
 
 Measured on a live cockpit after v2.96.1: the gaps between sentences were 40 to 125 ms, except where a

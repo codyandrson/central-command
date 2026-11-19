@@ -2639,5 +2639,19 @@ hygiene, and how the test suite itself must be written. See
   profiles. The declared timeouts (120 s, 180 s) are unchanged. The cockpit
   still sends a whole reply as one request: speaking sentence by sentence
   is a later change.
+- **Note (2026-11-18):** speaking sentence by sentence has since shipped
+  (v2.95.0: chunks of at most 300 characters, played in order, a 4,000-character
+  cap; v2.96.1: a first chunk of at most 100 characters and a loading state on
+  the button; v2.96.3: chunks fetched back to back, one request in flight, at
+  most three buffered). Measured on a live install after v2.96.3: first sound
+  in about 2.6 s, gaps between chunks of 23 to 76 ms, and one gap of 1.8 s at
+  the start of a reply, where a full-size third chunk followed two short ones
+  before any buffer existed. The operator judged this good enough and left it.
+  A possible future enhancement, not built: ramp the chunk maximum over the
+  first few chunks (about 100, 150, 220, then 300) so the buffer builds before
+  the first full-size chunk; it is described where it would be made,
+  `web/src/features/tts/speechChunks.ts`. If read-aloud is still too slow on
+  some hardware after that, the options researched on 2026-11-18 were a faster
+  engine behind the same endpoint (Piper) or the same engine on a GPU.
 - **Enforced:** test: `tests/test_k3s_compute_cpu.py::test_the_speech_container_has_a_memory_limit_and_no_cpu_limit`, `tests/test_k3s_compute_cpu.py::test_neo4j_requests_at_least_twice_the_speech_pods_cpu`, `tests/test_k3s_compute_cpu.py::test_what_the_manifests_place_on_the_compute_node_still_fits_a_two_cpu_node`, `tests/test_litellm_policy.py::test_the_two_speech_aliases_declare_one_job_at_a_time_and_no_retries`, `tests/test_litellm_policy.py::test_no_other_alias_gained_the_concurrency_or_retry_parameters`, `tests/test_litellm_policy.py::test_apply_adds_the_params_to_an_existing_row_and_leaves_model_and_api_base_alone`
 - **Source:** `deploy/k3s/90-speech.yaml` (resources block); `deploy/k3s/40-graph.yaml` (resources block); `deploy/shared/litellm/model-preferences.yaml` (`policy_params:`); `deploy/shared/litellm/policy.py` (`apply_policy_params`, `policy_params_drift`); `deploy/shared/litellm/register-models.py` (`policy_params`); `deploy/single/models.json`
