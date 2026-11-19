@@ -1,7 +1,7 @@
 # The executive assistant plans the operator's work: a ranked backlog, a blocked calendar, a daily and weekly rhythm
 
-> **Status:** partial — steps 1 and 2 of six shipped (v2.97.0: the brief fix, the budget default, the rationing text; v2.98.0: the ranked backlog in the brief, the planning charter, the morning plan; DL-221, FR-54); steps 3 to 6 not built
-> **As-built:** `central_command/reports/ea_backlog.py`, `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/config.py`
+> **Status:** partial — steps 1 to 3 of six shipped (v2.97.0: the brief fix, the budget default, the rationing text; v2.98.0: the ranked backlog, the planning charter, the morning plan; v2.99.0: free time, the calendar ledger, work blocks, the replan; DL-221, FR-54); steps 4 to 6 not built
+> **As-built:** `central_command/reports/ea_backlog.py`, `central_command/reports/ea_calendar.py`, `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/gateway/executor.py`, `central_command/db/schema.sql`
 
 **Date:** 2026-11-18 · **Decisions:** the operator's, in the design discussion of this date, except where a section says "proposed" or "open".
 
@@ -274,6 +274,33 @@ blocks work into the free time around them; both can be adjusted.
 Every calendar write stays a gated proposal. Whether the operator later
 relaxes that for the EA's own blocks is an override decision made in the
 cockpit, outside this design.
+
+**As built (step 3).** Free time: `reports/ea_calendar.free_time()`, pure; an
+available day carries `free_time` (`from`, `to`, `minutes`) and `free_minutes`
+inside `plan_day_start`–`plan_day_end` (defaults 08:00 and 18:00, local; today
+from now), after every timed event that is not declined, merged and clipped,
+stretches under `plan_min_block_minutes` (30) dropped; an unavailable day has
+no `free_time` key. The ledger is the table `calendar_plan_event` (event id,
+calendar id, kind, issue key and local plan date for a work block, the proposal,
+`created_at`, `retired_at`, `retired_by`), one active row per event. It is
+written by the Executor only: `calendar.create_event`'s optional `plan`
+argument (`{kind: placeholder}` or `{kind: work_block, issue_key, date}`,
+checked in both tiers, never sent to the provider) writes the row from the
+event id in the create's result, and a retried Google create that reads its
+event back ends with one row; the new gated `calendar.adopt_event` reads the
+event and writes a placeholder row without touching the calendar (a missing
+event is refused, an event already in the ledger is refused); a delete retires
+a known event's row, an update leaves it. The brief marks each event
+`plan_kind` (`work_block`, `placeholder`, `commitment`) and lists the day's
+ledger work blocks the window does not show. The morning plan is one
+`propose_calendar_change` proposal with one create per block, and one approval
+executes them in order (checked end to end, partial failure included); the
+mid-day check-in replans only the EA's own blocks and only on a slip. The
+latest start of D4 still uses `plan_hours_per_day`: free time is computed for
+one day, and no future day's free time is forecast. The emergency rule stays
+open (the charter tells the EA to ask until the operator states one), and the
+Exchange ledger case of "What can only be proven at a team deployment" is
+unproven: a retried Exchange create can still make a second event.
 
 ### D6. The plan is a stored object, so the review compares against a record
 

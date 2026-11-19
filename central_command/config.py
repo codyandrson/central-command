@@ -524,6 +524,26 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("plan_day_start", "plan_day_end")
+    @classmethod
+    def _plan_day_is_a_local_clock_time(cls, value: str) -> str:
+        import re
+        from datetime import time as _time
+
+        text = str(value or "").strip()
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", text)
+        if not m:
+            raise ValueError(f"CC_PLAN_DAY_START/END must be a local time HH:MM, got {value!r}")
+        _time(int(m.group(1)), int(m.group(2)))  # raises on 25:00 or 08:61
+        return text
+
+    @field_validator("plan_min_block_minutes")
+    @classmethod
+    def _plan_min_block_is_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("CC_PLAN_MIN_BLOCK_MINUTES must be a positive number of minutes")
+        return value
+
     # Semantic relatedness freeze (2026-08-19) — the fuzzy layer of the
     # relatedness lock. The claim query hard-locks exact keys (thread, subject,
     # sender); this gate catches what no key can — same topic, different
@@ -758,12 +778,18 @@ class Settings(BaseSettings):
     #   plan_value_unit       -> "points" or "currency": the label on Value and
     #                            Lateness loss. The arithmetic is the same.
     #   plan_hours_per_day    -> working hours a day assumed when a due date and an
-    #                            estimate become a latest start. A stand-in: step 3
-    #                            of the design replaces it with the calendar's real
-    #                            free time.
+    #                            estimate become a latest start. Kept as the rule
+    #                            at step 3: free time is computed for ONE day, and
+    #                            no future day's free time is forecast.
     #   plan_backlog_limit    -> the most issues read for ranking (`truncated` says
     #                            when the read hit it).
     #   plan_brief_items      -> the most ranked rows written into the brief.
+    #   plan_day_start/end    -> the working window, local "HH:MM" in
+    #                            `ea_timezone`, inside which the calendar block's
+    #                            `free_time` is computed (step 3, D2/D5). Today's
+    #                            window starts at now.
+    #   plan_min_block_minutes-> a free stretch shorter than this is dropped, and
+    #                            no work block is proposed shorter than it.
     plan_backlog_jql: str = "assignee = currentUser() AND statusCategory != Done"
     plan_field_stakes: str = "Stakes"
     plan_field_value: str = "Value"
@@ -773,6 +799,9 @@ class Settings(BaseSettings):
     plan_hours_per_day: float = 6.0
     plan_backlog_limit: int = 200
     plan_brief_items: int = 25
+    plan_day_start: str = "08:00"
+    plan_day_end: str = "18:00"
+    plan_min_block_minutes: int = 30
 
     # Sandbox slice 1 (D-sandbox): the runner is a SEPARATE, credential-free
     # service (central_command/sandbox/runner.py) that drives ephemeral gVisor

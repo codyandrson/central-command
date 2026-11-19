@@ -1085,9 +1085,9 @@ PACKS: dict[str, Pack] = {
         guidance=(
             "CALENDAR CHANGES: target_ref = {'system': 'calendar', 'id': '<the "
             "event_id, or the calendar_id for a new event>'}. "
-            "reversibility = 'reversible' for create and update, "
-            "'irreversible' for delete. READ BEFORE YOU PROPOSE: an update or a "
-            "delete must name a REAL event_id you have actually seen — from "
+            "reversibility = 'reversible' for create, update and adopt, "
+            "'irreversible' for delete. READ BEFORE YOU PROPOSE: an update, an "
+            "adoption or a delete must name a REAL event_id you have actually seen — from "
             "`read_calendar` or the `calendar` block in your brief — never one "
             "you reconstructed from a description. Times are RFC3339 with an "
             "explicit offset. You never touch the calendar yourself: you "
@@ -1104,10 +1104,19 @@ PACKS: dict[str, Pack] = {
                 name="calendar.create_event",
                 arguments=("{'title': '<summary>', 'start': '<RFC3339>', 'end': "
                            "'<RFC3339>', 'description'?: '<text>', 'attendees'?: "
-                           "['<email>', ...], 'calendar_id'?: 'primary'}"),
+                           "['<email>', ...], 'calendar_id'?: 'primary', 'plan'?: "
+                           "{'kind': 'work_block', 'issue_key': '<KEY>', 'date': "
+                           "'YYYY-MM-DD'} or {'kind': 'placeholder'}}"),
                 notes=("Inviting an attendee sends mail to a real person — list "
                        "them explicitly in the intent, or leave attendees off and "
-                       "let the operator invite."),
+                       "let the operator invite. `plan` marks the event as YOUR "
+                       "OWN in the plan ledger: a work block (time for one issue, "
+                       "on its local plan date; issue_key and date required) or a "
+                       "placeholder (a shape of the operator's week; no issue_key, "
+                       "no date). It is never sent to the calendar, and the ledger "
+                       "row is written only once the create has executed. A plan "
+                       "of several blocks is ONE proposal with one create per "
+                       "block."),
             ),
             GatedCapability(
                 name="calendar.update_event",
@@ -1127,7 +1136,20 @@ PACKS: dict[str, Pack] = {
                        "from Deleted Items or as a cancelled event, but the "
                        "notifications are not: attendees are told and recreating "
                        "the event does not restore their acceptances. "
-                       "The reason is required and is what the operator reviews."),
+                       "The reason is required and is what the operator reviews. "
+                       "Deleting an event the ledger knows retires its ledger row."),
+            ),
+            GatedCapability(
+                name="calendar.adopt_event",
+                arguments=("{'event_id': '<id from a read>', 'kind': 'placeholder', "
+                           "'calendar_id'?: 'primary'}"),
+                notes=("Records an event the operator ALREADY keeps as one of your "
+                       "placeholders, so a structure that exists is not recreated. "
+                       "It changes nothing on the calendar; it only lets you propose "
+                       "moving that event later. Propose it only for an event the "
+                       "operator agreed is part of the week's shape, never for a "
+                       "meeting with other people. An event already in the ledger "
+                       "is refused."),
             ),
         ),
     ),

@@ -4,6 +4,40 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-19 — v2.99.0: The executive assistant blocks time for the day's plan, and the control plane records which calendar events are its own
+
+Step 3 of the EA-planning design (DL-221, FR-54; design record
+`docs/superpowers/specs/2026-11-18-ea-planning-design.md`).
+
+- **Free time is computed in code.** The calendar block in the assistant's brief now carries `free_time`:
+  the free stretches of the day inside a working window (`CC_PLAN_DAY_START`, default 08:00, to
+  `CC_PLAN_DAY_END`, default 18:00, in the assistant's timezone), with stretches shorter than
+  `CC_PLAN_MIN_BLOCK_MINUTES` (default 30) dropped. A day whose calendar could not be read has none.
+- **Three kinds of calendar event, told apart by a ledger.** A new table, `calendar_plan_event`, records
+  which events are WORK BLOCKS (time for one issue) and which are STRUCTURE PLACEHOLDERS (a shape of the
+  operator's week); every other event is a commitment. The Executor writes a row only after an approved
+  action runs, from the event id the calendar returned. Nothing is hidden in an event's text or colour.
+  `calendar.create_event` takes an optional `plan` argument for this; deleting an event the ledger knows
+  retires its row.
+- **A new gated capability, `calendar.adopt_event`,** records an event the operator already keeps as a
+  placeholder. It changes nothing on the calendar. (101 capabilities.)
+- **The morning plan blocks time.** The assistant proposes the day's work blocks as ONE proposal, one
+  calendar action per block, each inside a free stretch and no longer than its issue's estimate. The
+  operator corrects the plan on the proposal: approve, reject with feedback, or dismiss. Nothing is on
+  the calendar until it is approved. An unscored issue gets no block.
+- **The mid-day check-in is a replan,** and only when the day has slipped: a work block whose time has
+  passed or which now overlaps a commitment. It proposes moving its own blocks into free time, asks
+  whether passed work was done rather than assuming, and never proposes a change to a commitment unless
+  the operator asked.
+- **The charter gains the calendar doctrine,** including that what counts as an emergency for moving a
+  protected block is the operator's rule, and that the assistant asks until one is stated.
+
+For an operator: the update's schema phase creates the new table. The morning plan now arrives as a
+proposal in the Decisions Inbox, not as a conversation. There is no capability yet to release an adopted
+placeholder short of deleting the event. As before, a hired assistant's governed charter is not rewritten
+by a release. Not exercised against a live model or a live calendar; an Exchange calendar has no
+client-chosen event id, so a retried create there can still make a second event (the existing limit).
+
 ## 2026-11-18 — v2.98.0: The executive assistant sees the operator's backlog, ranked in code, and the morning contact proposes a plan
 
 Step 2 of the EA-planning design (DL-221, FR-54; design record

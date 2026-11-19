@@ -455,12 +455,25 @@ _EA_FRAMING: dict[str, str] = {
         "morning brief starts warm."
     ),
     "check_in": (
-        "This is a CHECK-IN at a natural breakpoint in the operator's day. Keep "
-        "it short. Only reach for their attention if something in the window "
-        "genuinely needs them now — a decision the queue is stuck behind, an "
-        "error, a teammate blocked. If the window is quiet, say so in a line "
-        "and ask nothing. Use the calendar block for TIMING — say what is next "
-        "and how long they have, and do not ask for attention inside a meeting."
+        "This is the MID-DAY CHECK-IN: a REPLAN only when the day has slipped. "
+        "Compare today's work blocks (the calendar events with `plan_kind: "
+        "work_block` and today's `plan_date`, and `work_blocks_not_listed`) with "
+        "the time now. A block whose time has passed (it is in "
+        "`work_blocks_not_listed`, or it ended before now) or which now overlaps "
+        "a commitment (see `conflicts`) is a SLIP. Whether the work in a passed "
+        "block was actually done is not recorded by the control plane yet: ASK "
+        "the operator, and never assume it was done or that it was missed. Only "
+        "when there is a slip, propose the replan as ONE proposal through "
+        "`propose_calendar_change`: `calendar.update_event` on your OWN work "
+        "blocks (and on a placeholder only when the operator's standing notes "
+        "allow it), each moved into a `free_time` stretch and never shorter than "
+        "the minimum block. Never propose a change to a commitment unless the "
+        "operator asked for it. If nothing slipped, say so in one line and "
+        "propose nothing. Something else that genuinely needs the operator now "
+        "(a decision the queue is stuck behind, an error, a teammate blocked) "
+        "still gets its line. Use the calendar block for TIMING: say what is "
+        "next and how long they have, and do not ask for attention inside a "
+        "meeting."
     ),
     "morning_report": (
         "This is the MORNING PLAN — the first contact of the day, and you "
@@ -474,12 +487,26 @@ _EA_FRAMING: dict[str, str] = {
         "report, so say the day is unknown and why. Say what cannot be ranked "
         "and why (the `unscored` issues and what each is missing). Give the "
         "count of questions open in the Decisions Inbox and whose they are, "
-        "and never restate or re-ask one. Then ask the operator to CORRECT the "
-        "plan, not to supply one. You do not block calendar time yet: propose "
-        "no calendar change for the plan, and never imply that any time has "
-        "been blocked, moved or reserved. If the `backlog` block is absent or "
-        "unavailable, say you could not see the backlog and why, and ask what "
-        "matters most today."
+        "and never restate or re-ask one. Then BLOCK THE TIME: propose the "
+        "day's work blocks as ONE proposal through `propose_calendar_change`, "
+        "one `calendar.create_event` action per block. Each block lies inside a "
+        "`free_time` stretch, is no longer than its issue's estimate and never "
+        "shorter than the minimum block, carries `plan: {\"kind\": "
+        "\"work_block\", \"issue_key\": \"<KEY>\", \"date\": \"<today, "
+        "YYYY-MM-DD>\"}`, and has a title that names the issue key and its "
+        "summary. Block only ranked issues (`must_start`, `standard`): an "
+        "`unscored` issue gets no block; say it is unestimated and ask for what "
+        "it is missing. Leave the rest of the free time free. The proposal "
+        "carries the plan to the operator, who corrects it by approving, "
+        "rejecting with feedback, or dismissing it: put the ranked list and the "
+        "blocks you proposed in its intent, say that nothing is on the calendar "
+        "until the operator approves, and do not call ask_operator in the same "
+        "turn; never imply that any time has been blocked, moved or reserved "
+        "before you are told the change executed. If the day has no "
+        "`free_time` or the calendar is unknown, propose no blocks, say why, "
+        "and ask the operator to CORRECT the plan, not to supply one. If the "
+        "`backlog` block is absent or unavailable, say you could not see the "
+        "backlog and why, propose no blocks, and ask what matters most today."
     ),
     "week_ahead": (
         "This is the WEEK-AHEAD look — audit the coming week before it starts. "
@@ -501,6 +528,45 @@ _EA_FRAMING: dict[str, str] = {
 _CALENDAR_DAY: dict[str, int] = {
     "morning_report": 0, "check_in": 0, "digest": 1, "week_ahead": 1,
 }
+
+
+async def _annotate_plan_kinds(calendar: dict) -> dict:
+    """Mark each event of an available calendar block with what the plan
+    ledger says it is (the EA planning design, D5): `work_block` (with its
+    `issue_key` and `plan_date`) or `placeholder` when the assistant created or
+    adopted it through an approved proposal, else `commitment`. A Postgres
+    read joined here, in the control plane, so `ea_calendar.day()` stays free
+    of database access. `work_blocks_not_listed` is the ledger's work blocks
+    for the block's day that the listed window does not show: on today's
+    block, a block that already ended (the window starts at now), or one moved
+    off the day or deleted outside the control plane."""
+    from central_command.db import repo
+
+    if not calendar.get("available"):
+        return calendar
+    events = calendar.get("events") or []
+    ids = [str(e["event_id"]) for e in events if e.get("event_id")]
+    day = str((calendar.get("window") or {}).get("from") or "")[:10] or None
+    rows = await repo.list_calendar_plan_events(event_ids=ids, plan_date=day)
+    by_id = {r["event_id"]: r for r in rows}
+    for e in events:
+        row = by_id.get(str(e.get("event_id") or ""))
+        if row is None:
+            e["plan_kind"] = "commitment"
+            continue
+        e["plan_kind"] = row["kind"]
+        if row["kind"] == "work_block":
+            e["issue_key"] = row["issue_key"]
+            e["plan_date"] = str(row["plan_date"])
+    listed = set(ids)
+    calendar["work_blocks_not_listed"] = [
+        {"event_id": r["event_id"], "issue_key": r["issue_key"],
+         "plan_date": str(r["plan_date"])}
+        for r in rows
+        if r["kind"] == "work_block" and str(r["plan_date"]) == day
+        and r["event_id"] not in listed
+    ]
+    return calendar
 
 
 async def _ea_tour(schedule_id: str) -> dict:
@@ -551,6 +617,7 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     from datetime import datetime, timedelta, timezone
 
     from central_command import events
+    from central_command.config import settings
     from central_command.db import repo
     from central_command.reports import ea_backlog, ea_calendar, ea_followups, ea_report
     from central_command.runtime import attention, ea
@@ -602,7 +669,7 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
         calendar = {"available": False, "error": str(e)}
     if calendar.get("reason") != "not configured":
-        snapshot["calendar"] = calendar
+        snapshot["calendar"] = await _annotate_plan_kinds(calendar)
 
     # Same rule as the calendar, same placement: AFTER the budget check, so a
     # deferred contact makes no tracker call either. An outage degrades this
@@ -640,7 +707,24 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
            "tell the operator, and never imply anything has already been "
            "created, moved or cancelled. `available: false` means the day is "
            "UNKNOWN (`reason` or `error` says why): say so, and never report it "
-           "as free time.\n" if "calendar" in snapshot else "")
+           "as free time.\n"
+           "Every event carries `plan_kind`: `work_block` (time you blocked for "
+           "one issue, with its `issue_key` and `plan_date`), `placeholder` (a "
+           "shape of the operator's week you created or adopted) or `commitment` "
+           "(everything else). The kinds come from the plan ledger, the control "
+           "plane's record of which events you created or adopted through "
+           "approved proposals; never infer a kind from an event's title. "
+           "`work_blocks_not_listed` names the ledger's work blocks for this day "
+           "that the window does not show (already ended, or moved off the day "
+           "or deleted outside the control plane). `free_time` is computed for "
+           "you: the free stretches inside the operator's working window "
+           f"({settings.plan_day_start}-{settings.plan_day_end} local; today's "
+           "starts now), after every timed event (your own work blocks and "
+           "placeholders included) is subtracted, with stretches shorter than "
+           f"the minimum block of {settings.plan_min_block_minutes} minutes "
+           "dropped; `free_minutes` is their total. It is the ONLY place a work "
+           "block may be proposed. A day that is not available has no "
+           "`free_time`.\n" if "calendar" in snapshot else "")
         + "`open_tasks` is every task not yet finished, and "
         "`open_operator_items` every question still waiting on the operator: "
         "together they are what the team currently owes and is owed inside "

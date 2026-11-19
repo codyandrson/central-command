@@ -195,14 +195,44 @@ async def _calendar_create_event(args: dict, approver: str, proposer: str | None
     client_event_id = (google_event_id(key)
                        if key and calendar_facade._exchange() is None else None)
     extra = {"client_event_id": client_event_id} if client_event_id else {}
+    calendar_id = args.get("calendar_id", "primary")
+    # `plan` is control-plane metadata (the EA planning design, D5): it is never
+    # passed to the façade, which sends exactly the event's own fields.
     ev = await calendar_facade.create_event(
         args["title"], args["start"], args["end"],
         description=args.get("description"), attendees=args.get("attendees"),
-        calendar_id=args.get("calendar_id", "primary"), **extra,
+        calendar_id=calendar_id, **extra,
     )
     earlier = " (already created by an earlier attempt)" if ev.get("already_existed") else ""
-    return (f"calendar event '{args['title']}' created {args['start']} → "
+    line = (f"calendar event '{args['title']}' created {args['start']} → "
             f"{args['end']} (id {ev.get('event_id')}){earlier}")
+    plan = args.get("plan")
+    if plan:
+        line += await _record_plan_event(ev.get("event_id"), calendar_id, plan, line)
+    return line
+
+
+async def _record_plan_event(event_id, calendar_id: str, plan: dict, created: str) -> str:
+    """The plan-ledger row for an event this action just created, from the id
+    IN THE RESULT, never one an agent wrote. After the create on purpose: a
+    ledger write that fails raises, the action is retried, and on Google the
+    retried create reads its own event back (`already_existed`) and lands here
+    again; the active-row unique index makes that one row, not two."""
+    from central_command.db import repo
+
+    if not event_id:
+        raise ExecutorError(
+            f"calendar.create_event: the provider returned no event id, so the plan "
+            f"ledger row could not be written ({created})")
+    row = await repo.record_calendar_plan_event(
+        event_id=str(event_id), calendar_id=calendar_id, kind=plan["kind"],
+        issue_key=plan.get("issue_key"), plan_date=plan.get("date"),
+        proposal_id=_current_proposal_id.get(),
+    )
+    what = (f"work block for {row['issue_key']} on {row['plan_date']}"
+            if row["kind"] == "work_block" else "placeholder")
+    return (f" — ledger: {what}" if row["created"]
+            else f" — ledger: already recorded as {what}")
 
 
 async def _calendar_update_event(args: dict, approver: str, proposer: str | None) -> str:
@@ -231,9 +261,49 @@ async def _calendar_delete_event(args: dict, approver: str, proposer: str | None
     # A title and an organiser are written by whoever sent the invitation, and this
     # line goes back to the drafter: quoted and capped, so they stay visibly data.
     title, organiser = (repr(str(ev.get(k) or "")[:200]) for k in ("summary", "organizer"))
-    return (f"calendar event {deleted} deleted — reason: {reason} — restore record: "
+    line = (f"calendar event {deleted} deleted — reason: {reason} — restore record: "
             f"title {title}, {ev.get('start')} → {ev.get('end')}, "
             f"{ev.get('attendee_count')} attendee(s), organiser {organiser}")
+    # AFTER the delete succeeded: an event the plan ledger knows is no longer
+    # the assistant's to move. Retirement is a timestamp, never a delete.
+    from central_command.db import repo
+
+    retired = await repo.retire_calendar_plan_event(
+        args["event_id"], calendar_id, proposal_id=_current_proposal_id.get())
+    if retired is not None:
+        line += f" — ledger: {retired['kind'].replace('_', ' ')} row retired"
+    return line
+
+
+async def _calendar_adopt_event(args: dict, approver: str, proposer: str | None) -> str:
+    """Adopt an existing event as a placeholder (the EA planning design, D5).
+    Changes nothing on the calendar: it proves the event exists with a read and
+    writes the ledger row. A missing event is the provider's NO (`ok:false`, a
+    semantic failure) and an outage stays an outage; both propagate as raised,
+    and nothing is written."""
+    from central_command.db import repo
+
+    calendar_id = args.get("calendar_id", "primary")
+    event_id = str(args["event_id"])
+    ev = await calendar_facade.get_event(event_id, calendar_id=calendar_id)
+    if ev.get("event_id") and str(ev["event_id"]) != event_id:
+        raise ExecutorError(
+            f"calendar.adopt_event: the read of {event_id} answered event "
+            f"{ev['event_id']}; nothing was adopted")
+    row = await repo.record_calendar_plan_event(
+        event_id=event_id, calendar_id=calendar_id, kind="placeholder",
+        proposal_id=_current_proposal_id.get(),
+    )
+    title = repr(str(ev.get("summary") or "")[:200])
+    if not row["created"]:
+        if row["proposal_id"] is not None and row["proposal_id"] == _current_proposal_id.get():
+            return f"calendar event {event_id} {title} already adopted as a placeholder by this proposal"
+        raise ExecutorError(
+            f"calendar.adopt_event: event {event_id} is already in the plan ledger as "
+            f"a {row['kind'].replace('_', ' ')} (recorded by {row['proposal_id'] or 'an unrecorded proposal'}); "
+            "nothing was written")
+    return (f"calendar event {event_id} {title} ({ev.get('start')} → {ev.get('end')}) "
+            "adopted as a placeholder — ledger row written, calendar unchanged")
 
 
 async def _mail_report_spam(args: dict, approver: str, proposer: str | None) -> str:
@@ -2663,6 +2733,7 @@ HANDLERS = {
     "calendar.create_event": _calendar_create_event,
     "calendar.update_event": _calendar_update_event,
     "calendar.delete_event": _calendar_delete_event,
+    "calendar.adopt_event": _calendar_adopt_event,
     "charter.update": _charter_update,
     "loe.create": _loe_create,
     "loe.record_checkin": _loe_record_checkin,

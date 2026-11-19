@@ -9224,3 +9224,110 @@ async def operator_words_for_session(session_id: str, *,
             continue
         out.append({"source": r["source"], "ref": r["ref"], "text": text})
     return out
+
+
+# --- the calendar plan ledger (the EA planning design, D5; DL-221 step 3) -------
+# Which calendar events the assistant created or adopted, and as what. The ONLY
+# writers are `record_calendar_plan_event` and `retire_calendar_plan_event`, and
+# their only callers are the Executor's calendar handlers, after an approved
+# action ran (a source walk in tests/test_calendar_plan_ledger.py pins that).
+# A row is never deleted; retirement is a timestamp.
+
+PLAN_EVENT_KINDS = ("placeholder", "work_block")
+
+
+async def record_calendar_plan_event(
+    *, event_id: str, calendar_id: str, kind: str, issue_key: str | None = None,
+    plan_date=None, proposal_id: str | None = None,
+) -> dict:
+    """Write the ledger row for one event, idempotently: when the event already
+    has an ACTIVE row (a retried create that read its own event back, a re-run
+    adoption) nothing is written and that row comes back with `created: False`.
+    The caller decides whether an existing row is a replay or a refusal."""
+    from datetime import date as _date
+
+    if kind not in PLAN_EVENT_KINDS:
+        raise ValueError(f"calendar plan kind must be one of {PLAN_EVENT_KINDS}, got {kind!r}")
+    if isinstance(plan_date, str):
+        plan_date = _date.fromisoformat(plan_date)
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            """
+            insert into calendar_plan_event
+                   (event_id, calendar_id, kind, issue_key, plan_date, proposal_id)
+            values ($1, $2, $3, $4, $5, $6)
+            on conflict (calendar_id, event_id) where retired_at is null do nothing
+            returning *
+            """,
+            event_id, calendar_id, kind, issue_key, plan_date, proposal_id,
+        )
+        if row is not None:
+            return {**dict(row), "created": True}
+        existing = await conn.fetchrow(
+            "select * from calendar_plan_event where calendar_id = $1 and event_id = $2 "
+            "and retired_at is null", calendar_id, event_id)
+        return {**dict(existing), "created": False}
+    finally:
+        await conn.close()
+
+
+async def get_calendar_plan_event(event_id: str, calendar_id: str = "primary") -> dict | None:
+    """The ACTIVE ledger row for one event, or None (a commitment)."""
+    conn = await _conn()
+    try:
+        r = await conn.fetchrow(
+            "select * from calendar_plan_event where calendar_id = $1 and event_id = $2 "
+            "and retired_at is null", calendar_id, event_id)
+        return dict(r) if r else None
+    finally:
+        await conn.close()
+
+
+async def list_calendar_plan_events(
+    *, event_ids: list[str] | None = None, plan_date=None,
+    calendar_id: str = "primary",
+) -> list[dict]:
+    """ACTIVE ledger rows of one calendar: those whose event id is in
+    `event_ids`, or (and) the work blocks planned for `plan_date`."""
+    from datetime import date as _date
+
+    if isinstance(plan_date, str):
+        plan_date = _date.fromisoformat(plan_date)
+    clauses, params = ["retired_at is null", "calendar_id = $1"], [calendar_id]
+    either = []
+    if event_ids is not None:
+        params.append(list(event_ids))
+        either.append(f"event_id = any(${len(params)}::text[])")
+    if plan_date is not None:
+        params.append(plan_date)
+        either.append(f"plan_date = ${len(params)}")
+    if either:
+        clauses.append("(" + " or ".join(either) + ")")
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select * from calendar_plan_event where " + " and ".join(clauses)
+            + " order by created_at, id", *params)
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def retire_calendar_plan_event(
+    event_id: str, calendar_id: str = "primary", *, proposal_id: str | None = None,
+) -> dict | None:
+    """Retire the event's ACTIVE row (a timestamp and the retiring proposal);
+    None when the ledger did not know the event."""
+    conn = await _conn()
+    try:
+        r = await conn.fetchrow(
+            """
+            update calendar_plan_event set retired_at = now(), retired_by = $3
+             where calendar_id = $1 and event_id = $2 and retired_at is null
+            returning *
+            """,
+            calendar_id, event_id, proposal_id)
+        return dict(r) if r else None
+    finally:
+        await conn.close()

@@ -21,7 +21,8 @@ nothing looked at arguments before approval.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from datetime import date
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from .models import Proposal
@@ -40,6 +41,10 @@ class ArgSpec:
     # Dotted path → inclusive maximum. A value present at that path must be a
     # number no greater than the ceiling; absent passes.
     ceilings: dict[str, float] = field(default_factory=dict)
+    # Shape checks a flat list cannot say (a nested argument whose required
+    # keys depend on its own `kind`): each takes the capability and the
+    # arguments and returns its problems, one message each. Still SHAPE only.
+    checks: tuple[Callable[[str, dict], list[str]], ...] = ()
 
 
 # LiteLLM's per-token cost fields — the only price vocabulary a proposal may
@@ -63,6 +68,47 @@ _COST_CEILINGS = {
     for parent in ("model_info", "litellm_params", "extra")
     for f in COST_FIELDS
 }
+
+
+PLAN_KINDS = ("placeholder", "work_block")
+
+
+def _calendar_plan_shape(capability: str, args: dict) -> list[str]:
+    """`calendar.create_event`'s optional `plan` (the EA planning design, D5):
+    `{"kind": "placeholder"}` or `{"kind": "work_block", "issue_key": "<KEY>",
+    "date": "YYYY-MM-DD"}`. Control-plane metadata for the ledger row the
+    Executor writes; it is never sent to the calendar provider."""
+    if "plan" not in args or args["plan"] is None:
+        return []
+    plan = args["plan"]
+    where = f"{capability}: plan"
+    if not isinstance(plan, dict):
+        return [f"{where} must be an object {{kind, issue_key?, date?}}, got {type(plan).__name__}"]
+    problems: list[str] = []
+    unknown = sorted(set(plan) - {"kind", "issue_key", "date"})
+    if unknown:
+        problems.append(f"{where} carries unknown key(s) {', '.join(unknown)}")
+    kind = plan.get("kind")
+    if kind not in PLAN_KINDS:
+        problems.append(f"{where}.kind={kind!r} is not one of {', '.join(PLAN_KINDS)}")
+        return problems
+    if kind == "placeholder":
+        for key in ("issue_key", "date"):
+            if key in plan:
+                problems.append(f"{where}.{key} is refused for a placeholder (work blocks only)")
+        return problems
+    key = plan.get("issue_key")
+    if not isinstance(key, str) or not key.strip():
+        problems.append(f"{where}.issue_key is required for a work block")
+    day = plan.get("date")
+    try:
+        if not isinstance(day, str) or len(day) != 10:
+            raise ValueError
+        date.fromisoformat(day)
+    except ValueError:
+        problems.append(f"{where}.date must be the local plan date YYYY-MM-DD for a "
+                        f"work block, got {day!r}")
+    return problems
 
 
 ARG_SPECS: dict[str, ArgSpec] = {
@@ -174,7 +220,12 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "confluence.upload_attachment": ArgSpec(required=("page_id", "filename", "content")),
     "confluence.set_labels": ArgSpec(required=("page_id", "labels")),
     "confluence.create_space": ArgSpec(required=("key", "name")),
-    "calendar.create_event": ArgSpec(required=("title", "start", "end")),
+    "calendar.create_event": ArgSpec(required=("title", "start", "end"),
+                                     checks=(_calendar_plan_shape,)),
+    # Adoption (D5): an existing event becomes a placeholder in the ledger. The
+    # event's existence is world state, checked by the Executor's read.
+    "calendar.adopt_event": ArgSpec(required=("event_id", "kind"),
+                                    enums={"kind": ("placeholder",)}),
     "calendar.update_event": ArgSpec(required=("event_id",)),
     "calendar.delete_event": ArgSpec(required=("event_id", "reason")),
     # The rationale is what the operator weighs a charter edit by, and the
@@ -246,6 +297,8 @@ def validate_action_args(capability: str, arguments: dict | None) -> list[str]:
             problems.append(
                 f"{capability}: {key}={args[key]!r} is not one of {', '.join(allowed)}"
             )
+    for check in spec.checks:
+        problems.extend(check(capability, args))
     for path, ceiling in spec.ceilings.items():
         value = _at_path(args, path)
         if value is None:

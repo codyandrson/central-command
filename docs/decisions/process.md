@@ -2734,5 +2734,66 @@ hygiene, and how the test suite itself must be written. See
   `timetracking.originalEstimateSeconds`, the only spelling the vendored Data
   Center 9.17 reference shows; search rows also gain `priority`. Steps 3 to 6
   are not built.
-- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`
-- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D4, D9, "Build order" 1 and 2); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`); `central_command/runtime/ea_profile.py`; `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)
+- **Note (2026-11-18, step 3 built):** The calendar is built (design record D5,
+  D2's `free_time`, D9's morning and mid-day rows as far as the calendar goes;
+  PRD FR-54). **Free time** is computed in `reports/ea_calendar.py`
+  (`free_time()`, pure; `working_window()`): an available day carries
+  `free_time` (stretches `{from, to, minutes}`) and `free_minutes` inside the
+  working window `plan_day_start`–`plan_day_end` (defaults `08:00`, `18:00`,
+  local in `ea_timezone`; today's window starts at now), after every timed
+  event that is a commitment by the conflict rule (not all-day, not declined)
+  is subtracted, overlapping and touching events merged, stretches shorter
+  than `plan_min_block_minutes` (30) dropped; a day that is not available has
+  no `free_time` key. **The ledger** is one table, `calendar_plan_event`
+  (`event_id` as the provider returned it, `calendar_id`, `kind`
+  `placeholder` | `work_block`, `issue_key` and the local `plan_date` for a
+  work block only, both enforced by check constraints, `proposal_id`,
+  `created_at`, `retired_at` and `retired_by`, the retiring proposal), one
+  ACTIVE row per (calendar, event) by a partial unique index, never deleted.
+  It is written only by the Executor after an approved action ran:
+  `calendar.create_event` takes an optional `plan` (`{kind: placeholder}` or
+  `{kind: work_block, issue_key, date}`; its shape is an `ARG_SPECS` check, so
+  both tiers refuse a bad one; it is never sent to the provider) and writes
+  the row from the event id in the create's RESULT, after the create; a
+  failed ledger write fails the action, its retry asks Google for the same
+  derived id (DL-219), reads its own event back and writes the row then, and
+  the unique index makes a repeat a no-op, so a retried create ends with one
+  row. On Exchange, which has no client-chosen id, a retried create can still
+  create a second event (DL-219's open residual) and then gets its own row.
+  A new gated capability, `calendar.adopt_event` (`event_id`, `kind` fixed to
+  `placeholder`, optional `calendar_id`; `human`, reversible, target
+  `event_id`, dependency `calendar`, in `calendar-propose`), reads the event
+  through the façade (a missing event is the provider's `ok:false`, a semantic
+  NO; an outage parks) and writes the row; it changes nothing on the calendar,
+  is a no-op when re-executed by the same proposal and is refused when the
+  event already has an active row. `calendar.delete_event` retires a known
+  event's row after the delete succeeds; `calendar.update_event` leaves the
+  row as it is. No event kind was added: every ledger write is stated in the
+  action's result line, which `proposal.executed` (or the failed execution's
+  completed list) records. **The brief** marks each event `plan_kind`
+  (`work_block` with `issue_key` and `plan_date`, `placeholder`, else
+  `commitment`) from a Postgres read in `heartbeat/actions._annotate_plan_kinds`
+  (the calendar report stays free of database access), adds
+  `work_blocks_not_listed` (the ledger's work blocks for the day that the
+  window does not show: already ended, since today's window starts at now, or
+  moved or deleted outside the control plane), and explains the kinds, the
+  ledger and `free_time`. The morning framing now proposes the day's work
+  blocks as ONE `propose_calendar_change` proposal, one create per block; the
+  check-in proposes a replan of the assistant's own blocks only on a slip and
+  asks whether passed work was done; the built-in charter gains the calendar
+  doctrine. **One proposal, several calendar actions:** checked end to end
+  (the EA drafts three creates through `propose_calendar_change`, the
+  proposal parks once, one approval executes them in order with the cursor
+  written around each, and the resumed run is handed every result); a
+  refused second create leaves the first event and its ledger row, never runs
+  the third, and lands FAILED with the completed prefix on the record; a
+  transient failure parks and the sweep resumes from the failed action.
+  Nothing needed fixing. Decided beyond the design record: the morning plan
+  proposal is how the plan reaches the operator, so the framing tells the EA
+  not to call `ask_operator` in the same turn (a second deferred call in one
+  turn is a sibling that never parks); adoption of an event already in the
+  ledger is refused rather than relabelled. The latest start keeps
+  `plan_hours_per_day`: free time is computed for one day and no future day's
+  free time is forecast. Steps 4 to 6 are not built.
+- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`
+- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D4, D5, D9, "Build order" 1 to 3); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`); `central_command/db/schema.sql` (`calendar_plan_event`); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)

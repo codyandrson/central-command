@@ -605,12 +605,14 @@ async def test_a_budget_deferred_contact_reads_no_backlog(monkeypatch):
     assert out["delivered"] is False
 
 
-def test_the_morning_framing_is_the_plan_and_blocks_no_time():
+def test_the_morning_framing_is_the_plan():
+    # Step 3 replaced "You do not block calendar time yet": the blocking
+    # sentences are pinned in tests/test_calendar_plan_ledger.py.
     text = hb_actions._EA_FRAMING["morning_report"]
     assert "MORNING PLAN" in text
     assert "three to five" in text and "`must_start`" in text
     assert "CORRECT the plan, not to supply one" in text
-    assert "You do not block calendar time yet" in text
+    assert "You do not block calendar time yet" not in text
     assert "never imply that any time has been blocked" in text
     assert "`unscored`" in text
     assert "Decisions Inbox" in text and "whose they are" in text

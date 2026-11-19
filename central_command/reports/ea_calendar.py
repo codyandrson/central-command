@@ -13,6 +13,16 @@ of a language model. Two events do not conflict if either is all-day (a
 day-long marker is not a meeting) or if the operator DECLINED it — a declined
 invite is not a commitment.
 
+Free time is computed here too (the EA planning design, D2 and D5): the free
+stretches inside the working window (`plan_day_start` to `plan_day_end`, local;
+today's starts at now) after every timed commitment the conflict check counts
+is subtracted. Events the assistant created or adopted (work blocks and
+placeholders) are timed events like any other, so they are occupied time. The
+ledger that says which events those are is Postgres and is joined by the caller
+(`heartbeat/actions._annotate_plan_kinds`); this module stays free of database
+access. Only an `available` day carries `free_time`: an unknown day has no free
+stretches to report, so the key is absent rather than empty.
+
 Availability FAILS CLOSED. `available: True` means a complete, successful list,
 so a day with no events on it is a free day; every other answer is
 `available: False` with a reason, and the callers say "unknown", never "free". A
@@ -62,6 +72,89 @@ def _conflicts(events: list[dict]) -> list[dict]:
                 "overlap_from": following["start"],
                 "until": current["end"],
             })
+    return out
+
+
+def _clock(value: str) -> time:
+    """A configured "HH:MM" as a time; refuses anything else loudly."""
+    hours, _, minutes = str(value).strip().partition(":")
+    try:
+        return time(int(hours), int(minutes))
+    except ValueError as e:
+        raise ValueError(f"working-window time must be HH:MM, got {value!r}") from e
+
+
+def working_window(local_date, now: datetime | None = None) -> tuple[datetime, datetime]:
+    """The working window of one local day, `plan_day_start` to `plan_day_end`
+    in `ea_timezone`; when `now` falls on that day after the start, the window
+    starts at `now`. A window whose start is not before its end is empty, and
+    `free_time` answers no stretch for it."""
+    tz = ZoneInfo(settings.ea_timezone)
+    start = datetime.combine(local_date, _clock(settings.plan_day_start), tzinfo=tz)
+    end = datetime.combine(local_date, _clock(settings.plan_day_end), tzinfo=tz)
+    if end <= start:
+        raise ValueError(
+            f"plan_day_end ({settings.plan_day_end}) must be after plan_day_start "
+            f"({settings.plan_day_start})")
+    if now is not None and now > start:
+        start = now
+    return start, end
+
+
+def _busy(event: dict, tz: ZoneInfo) -> tuple[datetime, datetime] | None:
+    """A timed commitment's interval, or None. Exactly the events `_conflicts`
+    counts: not all-day, not declined, with a start and an end. A stamp without
+    an offset is read as local time rather than dropped, so a malformed event
+    can only make the day look busier, never freer."""
+    if event.get("all_day") or event.get("declined"):
+        return None
+    start, end = _dt(event.get("start")), _dt(event.get("end"))
+    if start is None or end is None:
+        return None
+    start = start if start.tzinfo else start.replace(tzinfo=tz)
+    end = end if end.tzinfo else end.replace(tzinfo=tz)
+    return (start, end) if end > start else None
+
+
+def free_time(events: list[dict], window_from: datetime, window_to: datetime,
+              min_minutes: int) -> list[dict]:
+    """The free stretches of `[window_from, window_to)` after every timed
+    commitment in `events` is subtracted, each `{"from", "to", "minutes"}`,
+    earliest first. Pure.
+
+    Busy intervals are clipped to the window and merged when they overlap or
+    touch (back-to-back meetings leave no gap); a stretch shorter than
+    `min_minutes` is dropped."""
+    if window_to <= window_from:
+        return []
+    tz = window_from.tzinfo or ZoneInfo(settings.ea_timezone)
+    busy = []
+    for e in events:
+        interval = _busy(e, tz)
+        if interval is None:
+            continue
+        # Compared as instants, reported in the window's own offset.
+        start = max(interval[0].astimezone(tz), window_from)
+        end = min(interval[1].astimezone(tz), window_to)
+        if end > start:
+            busy.append((start, end))
+    busy.sort()
+    merged: list[list[datetime]] = []
+    for start, end in busy:
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+
+    out: list[dict] = []
+    cursor = window_from
+    for start, end in [*merged, [window_to, window_to]]:
+        if start > cursor:
+            minutes = int((start - cursor).total_seconds() // 60)
+            if minutes >= min_minutes:
+                out.append({"from": cursor.isoformat(), "to": start.isoformat(),
+                            "minutes": minutes})
+        cursor = max(cursor, end)
     return out
 
 
@@ -116,6 +209,9 @@ async def day(offset_days: int = 0) -> dict:
     # event" means the first timed commitment anyway.
     starts = [s for s in (_dt(e.get("start")) for e in events
                           if not e.get("all_day")) if s]
+    work_from, work_to = working_window(midnight.date(),
+                                        now if offset_days <= 0 else None)
+    free = free_time(events, work_from, work_to, int(settings.plan_min_block_minutes))
     return {
         "available": True,
         "timezone": settings.ea_timezone,
@@ -125,4 +221,6 @@ async def day(offset_days: int = 0) -> dict:
         "truncated": False,
         "events": events,
         "conflicts": _conflicts(events),
+        "free_time": free,
+        "free_minutes": sum(s["minutes"] for s in free),
     }

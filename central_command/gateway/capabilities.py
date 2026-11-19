@@ -1017,12 +1017,18 @@ REGISTRY: list[Capability] = [
         ),
         holder="Executor",
         route=("integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode create_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"),
-        arguments=["title", "start", "end", "description?", "attendees?", "calendar_id?"],
+        arguments=["title", "start", "end", "description?", "attendees?", "calendar_id?",
+                   "plan? ({kind: placeholder} or {kind: work_block, issue_key, date})"],
         description=(
             "Put a new event on the operator's calendar. start/end are RFC3339 "
             "with an explicit offset or Z — the façade compares instants, never "
             "strings. Attendees are email addresses and inviting one sends mail "
-            "to a real person, so the proposal must name them explicitly."
+            "to a real person, so the proposal must name them explicitly. An "
+            "optional `plan` marks the event as the assistant's own (a work block "
+            "for one issue on a local date, or a placeholder): it is never sent to "
+            "the provider; the Executor writes the plan-ledger row from the event "
+            "id in the create's result, once, even when a retry reads its own "
+            "event back."
         ),
     ),
     Capability(
@@ -1073,7 +1079,38 @@ REGISTRY: list[Capability] = [
             "meeting is the one calendar action whose WHY the operator must see "
             "before approving, and it is recorded with the decision afterwards. "
             "Prefer calendar.update_event whenever the meeting is moving rather "
-            "than ending (operator decision 2026-08-06 approved delete into v1)."
+            "than ending (operator decision 2026-08-06 approved delete into v1). "
+            "An event the plan ledger knows (a work block or placeholder) has its "
+            "ledger row retired once the delete succeeds."
+        ),
+    ),
+    Capability(
+        name="calendar.adopt_event",
+        target_args=("event_id",),
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="reversible",
+        risk=(
+            "internal — changes nothing on the calendar; it writes one plan-ledger "
+            "row saying an existing event is the assistant's placeholder, which "
+            "lets it propose moving that event later (every move is still a gated "
+            "proposal). The row is never deleted; it is retired by a timestamp "
+            "when the event is deleted through the gate"
+        ),
+        holder="Executor",
+        route=("integrations/calendar_facade.py get_event (the existence read: n8n "
+               "cc-calendar-facade mode get_event, or integrations/exchange.py) → "
+               "db/repo.py record_calendar_plan_event"),
+        arguments=["event_id", "kind (placeholder)", "calendar_id?"],
+        description=(
+            "Adopt an event the operator already keeps as a STRUCTURE PLACEHOLDER "
+            "in the plan ledger (the EA planning design, D5), so a structure that "
+            "exists is not recreated. The Executor reads the event first: a "
+            "missing event is refused and nothing is written. An event already "
+            "in the ledger is refused unless this same proposal wrote its row (a "
+            "re-execution is a no-op). `kind` is fixed to placeholder; work "
+            "blocks enter the ledger only when the Executor creates them."
         ),
     ),
     # --- lines of effort (2026-08-12) -----------------------------------------

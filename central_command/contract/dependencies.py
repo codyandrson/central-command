@@ -244,7 +244,7 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
             "confluence.set_labels confluence.create_space"),
     **_each((CALENDAR,),
             "calendar.create_event calendar.update_event calendar.delete_event "
-            "calendar.list_events"),
+            "calendar.adopt_event calendar.list_events"),
     **_each((N8N,),
             "mail.create_rule mail.report_spam mail.unsubscribe mail.send "
             "mail.move email.list_refs email.get_message email.get_attachment"),

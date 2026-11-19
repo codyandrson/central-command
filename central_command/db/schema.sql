@@ -1887,3 +1887,36 @@ update agent set deviations = replace(deviations,
         'but skill-propose (DL-215: a gated correction to a skill it used) and note-propose (DL-217: a gated standing note) and no write path')
  where id = 'orchestrator'
    and deviations like '%a skill it used) and no write path%';
+
+-- The calendar plan ledger (the EA planning design, D5; DL-221 step 3): the
+-- control plane's record of which calendar events the assistant CREATED or
+-- ADOPTED, and as what. Every event not here is a real commitment. `kind` is
+-- `placeholder` (a recurring shape of the operator's week) or `work_block`
+-- (time for one issue: `issue_key` and the local `plan_date` it was planned
+-- for). Written ONLY by the Executor after an approved action executes:
+-- `calendar.create_event` with a `plan` argument writes the row from the event
+-- id IN THE CREATE RESULT (never an agent-supplied id), `calendar.adopt_event`
+-- after reading the event back, and `calendar.delete_event` retires a known
+-- event's row. Nothing is hidden in the event's text or colour, so the scheme
+-- is the same on both providers. A row is never deleted: retirement is a
+-- timestamp plus the retiring proposal. One ACTIVE row per (calendar, event):
+-- the partial unique index is what makes a retried create (DL-219: the same
+-- derived Google id, read back `already_existed`) end with exactly one row.
+create table if not exists calendar_plan_event (
+    id           bigserial primary key,
+    event_id     text not null,                 -- as the provider returned it
+    calendar_id  text not null default 'primary',
+    kind         text not null check (kind in ('placeholder', 'work_block')),
+    issue_key    text,
+    plan_date    date,                          -- local, in CC_EA_TIMEZONE
+    proposal_id  text,                          -- the proposal that created or adopted it
+    created_at   timestamptz not null default now(),
+    retired_at   timestamptz,
+    retired_by   text,                          -- the retiring proposal
+    check ((kind = 'work_block') = (issue_key is not null and plan_date is not null)),
+    check (kind = 'work_block' or (issue_key is null and plan_date is null))
+);
+create unique index if not exists calendar_plan_event_active_uq
+    on calendar_plan_event (calendar_id, event_id) where retired_at is null;
+create index if not exists calendar_plan_event_date_idx
+    on calendar_plan_event (plan_date) where retired_at is null;

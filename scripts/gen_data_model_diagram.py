@@ -69,7 +69,9 @@ AREAS: dict[str, str] = {
     ),
     "Goals (lines of effort)": (
         "The operator's goal-tracking substrate: lines of effort, their append-only "
-        "check-ins, and the archived versions of each line's scoring semantics."
+        "check-ins, and the archived versions of each line's scoring semantics; and the "
+        "calendar plan ledger of the work blocks and placeholders the assistant created "
+        "or adopted."
     ),
     "Knowledge graph and notes": (
         "The audit and ingest queue behind approved knowledge-graph episodes, and the "
@@ -112,6 +114,7 @@ TABLE_AREA: dict[str, str] = {
     "line_of_effort": "Goals (lines of effort)",
     "loe_checkin": "Goals (lines of effort)",
     "loe_semantic": "Goals (lines of effort)",
+    "calendar_plan_event": "Goals (lines of effort)",
     "graph_verification": "Knowledge graph and notes",
     "graph_ingest_job": "Knowledge graph and notes",
     "agent_note": "Knowledge graph and notes",
@@ -153,6 +156,7 @@ TABLE_PURPOSE: dict[str, str] = {
     "line_of_effort": "One of the operator's goals, with its versioned scoring semantics and display settings.",
     "loe_checkin": "Append-only check-in recording a light, confidence and summary under a stamped semantic version.",
     "loe_semantic": "Archived superseded semantic versions of a line of effort.",
+    "calendar_plan_event": "Executor-written ledger of the calendar events the assistant created or adopted (work block or placeholder), retired by timestamp.",
     "graph_verification": "Worklist auditing each approved graph episode after extraction, with its verdict and closing state.",
     "graph_ingest_job": "Durable ingest queue: one job per approved episode or episode removal, run in order per group.",
     "agent_note": "Gated, never-edited standing notes (private to an agent or about the operator), retired by timestamp.",
