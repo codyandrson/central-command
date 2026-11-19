@@ -312,16 +312,23 @@ once, in the Jira UI (on Data Center there is no REST call that adds the options
 of a select list, and a field must be on a screen before an edit may set it).
 
 1. Create the fields (Jira settings → Issues → Custom fields → Create custom
-   field), named exactly as the settings say:
+   field), named as the settings say (a name is matched without regard to
+   case, so "Deadline Type" serves the setting `Deadline type`):
    - **Stakes**: multi-line text ("Paragraph" on Cloud, "Text Field
-     (multi-line)" on Data Center; type key `textarea`). A single-line text
-     field works too, but holds less.
+     (multi-line)" on Data Center). Jira reports such a field under the type
+     key `textarea` (rich text) or, for a plain-text paragraph field on Cloud,
+     `longtext`; both are read and written. A single-line text field works
+     too, but holds less.
    - **Value** and **Lateness loss**: Number Field (type key `float`).
    - **Deadline type**: Select List (single choice; type key `select`) with
      exactly two options, `hard` and `soft`, spelled in lower case.
 2. Give each field a context that covers the projects and issue types of your
    backlog (a global context, all projects and all issue types, is simplest).
-3. Put the four fields on the screens of those projects: the EDIT screen (on
+3. Put the four fields on the screens of those projects (in a team-managed
+   Cloud project there are no screens: add each field to each work type under
+   Project settings, or Jira neither lists the field to the API nor accepts an
+   edit of it; `GET /rest/api/3/issue/<key>/editmeta` shows what an issue will
+   take): the EDIT screen (on
    Data Center an edit that names a field missing from the edit screen is
    refused) and the CREATE screen (on both Cloud and Data Center a new issue can
    carry only fields on its create screen, so an issue filed with its planning

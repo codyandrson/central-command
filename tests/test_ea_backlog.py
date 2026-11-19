@@ -399,6 +399,50 @@ async def test_field_names_are_settings_resolved_by_name(monkeypatch, real_backl
     assert item["value"] == 5.0 and item["deadline_type"] == "hard"
 
 
+async def test_a_field_named_in_another_case_is_the_configured_field(monkeypatch, real_backlog):
+    """An operator who creates "Deadline Type" for the setting "Deadline type"
+    has created the field (found live, 2026-11-19): it is declared, and its
+    values are read under the tracker's spelling."""
+    declared = [*_DECLARED[:2],
+                {"id": "customfield_3", "name": "Lateness Loss", "type": "float",
+                 "writable": True},
+                {"id": "customfield_4", "name": " deadline TYPE", "type": "select",
+                 "writable": True}]
+    _fake_jira(monkeypatch, [_row_in("R-9", {"Value": 5, "Lateness Loss": 3,
+                                             " deadline TYPE": "hard"})],
+               declared=declared)
+    out = await ea_backlog.backlog()
+    assert out["planning_fields"] == {
+        "declared": ["Stakes", "Value", "Lateness Loss", " deadline TYPE"], "missing": []}
+    item = out["items"][0]
+    assert item["lateness_loss"] == 3.0 and item["deadline_type"] == "hard"
+    assert await ea_backlog.tracker_field_names() == {
+        "stakes": "Stakes", "value": "Value", "lateness_loss": "Lateness Loss",
+        "deadline_type": " deadline TYPE"}
+
+
+def test_match_field_name_prefers_exact_and_refuses_an_ambiguous_case():
+    from central_command.integrations import jira
+
+    both = [{"name": "Value"}, {"name": "VALUE"}]
+    assert jira.match_field_name("Value", both) == "Value", "exact wins"
+    assert jira.match_field_name("value", both) is None, "two loose matches: no guess"
+    assert jira.match_field_name("value", both[:1]) == "Value"
+    assert jira.match_field_name("Worth", both) is None
+    assert jira.match_field_name("Value", [{"name": None}, {}]) is None
+
+
+def test_a_plain_text_paragraph_field_is_writable_as_text():
+    """Cloud reports a plain-text paragraph field as `longtext`; unmapped, a
+    Stakes field of that type read as unreadable (found live, 2026-11-19)."""
+    from central_command.integrations import jira
+
+    schema = {"type": "string",
+              "custom": "com.atlassian.jira.plugin.system.customfieldtypes:longtext"}
+    assert jira._shape_of(schema) == "text"
+    assert jira._coerce_custom("Stakes", "text", "Roof leaks by spring") == "Roof leaks by spring"
+
+
 async def test_no_planning_field_declared_at_all(monkeypatch, real_backlog):
     _fake_jira(monkeypatch, [_row_in("R-2")], declared=[])
     out = await ea_backlog.backlog()

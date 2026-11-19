@@ -156,7 +156,7 @@ async def planning_numbers(issue_keys: list[str]) -> dict[str, dict]:
     if not jira.configured():
         return {k: {"readable": False, "unreadable_reason": "the tracker is not configured",
                     "summary": None, **nulls} for k in issue_keys}
-    names = ea_backlog._field_names()
+    names = await ea_backlog.tracker_field_names()
     today = ea_backlog._today()
     pad = (await padding(today))["ratio"]
     out: dict[str, dict] = {}

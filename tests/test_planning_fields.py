@@ -235,6 +235,16 @@ async def test_the_custom_fields_are_the_configured_names_not_the_defaults(monke
     assert calls[0][2]["fields"] == {"customfield_299": 8}
 
 
+async def test_a_field_named_in_another_case_is_written(monkeypatch, native):
+    monkeypatch.setattr(settings, "jira_api_flavor", "cloud")
+    declared = [f for f in DECLARED if f["name"] != "Deadline type"] + [
+        {"id": "customfield_399", "name": "Deadline Type", "type": "select", "writable": True}]
+    calls = native([_Resp(status_code=204)], declared=declared)
+    out = await _HANDLER({"issue_key": "DOE-7", "deadline_type": "hard"}, "human:lee", "ea")
+    assert calls[0][2]["fields"] == {"customfield_399": {"value": "hard"}}
+    assert out == "DOE-7 planning fields set: deadline_type"
+
+
 async def test_an_undeclared_planning_field_is_refused_by_name_and_nothing_is_written(
         monkeypatch, native):
     monkeypatch.setattr(settings, "jira_api_flavor", "cloud")

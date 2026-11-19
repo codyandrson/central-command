@@ -216,6 +216,15 @@ def _field_names() -> dict[str, str]:
     }
 
 
+async def tracker_field_names() -> dict[str, str]:
+    """`_field_names()` with each name as the tracker declares it (see
+    `jira.match_field_name`); a field the tracker lacks keeps its configured
+    name. One tracker read, cached by the client."""
+    declared = (await jira.list_fields())["fields"]
+    return {field: jira.match_field_name(name, declared) or name
+            for field, name in _field_names().items()}
+
+
 def _today() -> date:
     """The operator's LOCAL date, the same day the calendar block means."""
     return datetime.now(ZoneInfo(settings.ea_timezone)).date()
@@ -226,9 +235,14 @@ async def _read() -> dict:
     so the two can never disagree: the configured JQL, the four planning
     fields resolved by display NAME, each row normalised for `rank()`, and the
     padding. Raises on an outage. The caller has checked `jira.configured()`."""
-    names = _field_names()
+    configured = _field_names()
     declared = (await jira.list_fields())["fields"]
     by_name = {f.get("name"): f for f in declared}
+    # Each planning input under the name the TRACKER declares for it (the
+    # setting's name, matched without regard to case); an input with no such
+    # field keeps the configured name, which is what `missing` reports.
+    names = {field: jira.match_field_name(name, declared) or name
+             for field, name in configured.items()}
     declared_names = [n for n in names.values() if n in by_name]
     missing_names = [n for n in names.values() if n not in by_name]
     # A declared field of a type the client cannot read in a search row (its

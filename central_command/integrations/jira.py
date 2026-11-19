@@ -104,6 +104,11 @@ _issue_types_cache: dict[str, tuple[float, list[dict]]] = {}
 # silently-ignored write at worst.
 CUSTOM_WRITE_SHAPES = {
     "textarea": "doc",
+    # Cloud's plain-text paragraph field ("longtext for plain text paragraph
+    # fields", Atlassian's custom-field-context reference): a plain string, not
+    # an ADF document. Unmapped until 2026-11-19, when a Stakes field created as
+    # "Paragraph" on a Cloud site came back with this key and read as unwritable.
+    "longtext": "text",
     "textfield": "text",
     "url": "text",
     "float": "number",
@@ -1210,6 +1215,22 @@ def _require_cloud(op: str) -> None:
         raise JiraError(
             f"{op} — not available on Jira Data Center (Cloud-only REST endpoint)"
         )
+
+
+def match_field_name(configured: str, declared: list[dict]) -> str | None:
+    """The name the tracker DECLARES for a field the settings name, or None.
+
+    An exact match wins; otherwise the one declared field whose name differs
+    only by case and surrounding space (an operator who creates "Deadline Type"
+    for the setting "Deadline type" has created the field). Two declared fields
+    that both match that loosely and neither exactly is no match: guessing
+    between them would write one field and read the other."""
+    names = [f.get("name") for f in declared if isinstance(f.get("name"), str)]
+    if configured in names:
+        return configured
+    want = configured.strip().casefold()
+    loose = {n for n in names if n.strip().casefold() == want}
+    return loose.pop() if len(loose) == 1 else None
 
 
 async def list_fields() -> dict:

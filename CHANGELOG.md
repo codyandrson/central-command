@@ -4,6 +4,24 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-19 — v2.103.1: A plain-text paragraph field is readable, and a planning field's name is matched without regard to case
+
+Two defects found by reading a real tracker after the first apply of the EA-planning releases.
+
+- **Jira Cloud's plain-text paragraph field can be read and written.** Jira reports such a field under
+  the type key `longtext`; the client knew only `textarea`, so a Stakes field of that type was listed as
+  unreadable and could not be written. It is written as a plain string, per Atlassian's reference ("longtext
+  for plain text paragraph fields"). No live write of that type has run yet.
+- **A planning field is found whatever the case of its name.** The four planning fields were matched to
+  the `CC_PLAN_FIELD_*` settings exactly, so a field created as "Deadline Type" was reported missing for
+  the setting `Deadline type`. An exact match still wins; otherwise the one field whose name differs only
+  by case and surrounding space is used, in the ranking read, the stored plan's numbers and the gated
+  write. Two fields that differ from the setting only by case, and neither exactly, are not guessed
+  between: the field stays missing.
+- **The runbook says what a team-managed project needs.** `docs/QUEUE.md` now names both type keys and
+  says that in a team-managed Cloud project each field is added to each work type, or Jira neither lists
+  it to the API nor accepts an edit of it.
+
 ## 2026-11-19 — v2.103.0: A staffing agent recommends who takes work, and the executive assistant carries its recommendation into the plan
 
 Step 6, the last, of the EA-planning design (DL-221, FR-54, FR-55; design record

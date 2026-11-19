@@ -184,8 +184,10 @@ async def _jira_set_planning_fields(args: dict, approver: str, proposer: str | N
     wanted = [arg for arg in _PLANNING_CUSTOM_ARGS if args.get(arg) is not None]
     custom: dict = {}
     if wanted:
-        declared = {f.get("name") for f in (await jira.list_fields())["fields"]}
-        missing = [arg for arg in wanted if names[arg] not in declared]
+        declared = (await jira.list_fields())["fields"]
+        # The tracker's own spelling of each configured name (case aside).
+        found = {arg: jira.match_field_name(names[arg], declared) for arg in wanted}
+        missing = [arg for arg in wanted if found[arg] is None]
         if missing:
             raise jira.JiraError(
                 f"jira.set_planning_fields for {args['issue_key']}: the tracker does not "
@@ -194,6 +196,7 @@ async def _jira_set_planning_fields(args: dict, approver: str, proposer: str | N
                             for a in missing)
                 + "; nothing was written. Create the field in Jira, or point the "
                 "setting at the field the tracker has.")
+        names.update(found)
         custom = {names[arg]: args[arg] for arg in wanted}
     out = await jira.set_planning_fields(
         args["issue_key"], custom_fields=custom or None,
