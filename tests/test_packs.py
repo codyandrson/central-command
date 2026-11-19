@@ -87,7 +87,9 @@ def test_toolset_assembly_dedupes_and_fails_loud():
                      "jira_search_issues", "jira_get_transitions",
                      "jira_list_projects", "jira_list_issue_types",
                      "jira_list_fields", "jira_list_filters", "jira_list_dashboards",
-                     "jira_list_gadgets", "jira_find_users"}
+                     "jira_list_gadgets", "jira_find_users",
+                     # The backlog's planning gaps (DL-221 step 4b).
+                     "jira_planning_gaps"}
     with pytest.raises(ValueError, match="unknown capability pack"):
         packs.toolset_for(["jira-read", "no-such-pack"])
     with pytest.raises(ValueError, match="unknown capability pack"):

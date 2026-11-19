@@ -4,6 +4,40 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-19 — v2.101.0: Issues get their planning fields when they are filed, in the nightly sweep and in the evening review
+
+The second half of step 4 of the EA-planning design (DL-221, FR-54; design record
+`docs/superpowers/specs/2026-11-18-ea-planning-design.md`). A backlog with no value or estimate cannot be
+ranked; this release is how the fields get filled. People state the stakes in words and the numbers are
+proposed from them, and every score is a proposal the operator approves.
+
+- **One gated capability sets an issue's planning fields.** `jira.set_planning_fields` takes any of
+  stakes, value, lateness loss, deadline type, estimate hours and due date, resolves the four custom
+  fields by their configured names, and writes them in one tracker call. A field the tracker does not
+  have is refused by name. It is in the `jira-propose` and `plan-propose` packs, so the tracker agent and
+  the executive assistant both hold it.
+- **A read tool says what needs scoring.** `jira_planning_gaps` (in `jira-read`) lists the issues with
+  planning inputs missing, soonest due first, with exactly what each lacks, at most
+  `CC_PLAN_ENRICH_PER_RUN` (default 10) per call.
+- **At creation.** `jira.create_issue` accepts `estimate_hours`, and its guidance tells a filing agent to
+  carry the planning fields in the same action. A filer never invents stakes: with none in the source it
+  writes a sentence that begins "Agent's reading:" for the operator to correct, or leaves the numbers out.
+- **Nightly.** The seeded Jira hygiene sweep gains the enrichment checklist: read the gaps, propose the
+  missing fields, one proposal a night with one action per issue.
+- **In the evening review.** The executive assistant proposes values for the unscored issues tomorrow's
+  plan needs, asks for the stakes where there are none, and records what the operator settles as one
+  proposal. The planning fields are the one tracker change it proposes itself; everything else still goes
+  to the tracker agent as a task.
+
+For an operator: the system does NOT create the four custom fields. Creating them through Jira's API is
+not clean on either product (screens and select options need separate configuration, and on Cloud an
+administrator permission), so the steps are written in `docs/QUEUE.md`, "The planning fields in Jira":
+the field types, a context, the create and edit screens, and time tracking turned on. The select's
+options must be spelled `hard` and `soft`. A running deployment's hygiene schedule keeps its existing
+instructions; the new text is in `docs/QUEUE.md`, "The nightly Jira hygiene sweep", to paste into the
+schedule. 106 capabilities. Not exercised against a live model or tracker; whether an agent scores from
+stakes as the operator would is still unmeasured.
+
 ## 2026-11-19 — v2.100.0: The day's plan is stored when it is approved, and the evening contact reviews the day against it
 
 The first half of step 4 of the EA-planning design (DL-221, FR-54; design record

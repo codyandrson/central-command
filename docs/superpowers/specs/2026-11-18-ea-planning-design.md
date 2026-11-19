@@ -1,6 +1,6 @@
 # The executive assistant plans the operator's work: a ranked backlog, a blocked calendar, a daily and weekly rhythm
 
-> **Status:** partial — steps 1 to 3 and the first half of step 4 shipped (v2.97.0 to v2.100.0: the brief fix, the ranked backlog, the planning charter, free time, the calendar ledger and work blocks, the stored day plan, the evening review, estimate against actual; DL-221, FR-54); enrichment (step 4), steps 5 and 6 not built
+> **Status:** partial — steps 1 to 4 of six shipped (v2.97.0 to v2.101.0: the brief fix, the ranked backlog, the planning charter, free time, the calendar ledger and work blocks, the stored day plan, the evening review, estimate against actual, enrichment; DL-221, FR-54); steps 5 and 6 not built
 > **As-built:** `central_command/reports/ea_backlog.py`, `central_command/reports/ea_plan.py`, `central_command/reports/ea_calendar.py`, `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/gateway/executor.py`, `central_command/db/schema.sql`
 
 **Date:** 2026-11-18 · **Decisions:** the operator's, in the design discussion of this date, except where a section says "proposed" or "open".
@@ -198,6 +198,23 @@ rule needs, was missing. Decided: reduce.
   fields are missing. Whether the system can create them, or the operator's
   Jira administrator must, was not checked for this record.
 
+**As built (step 4b, the write side).** One gated capability,
+`jira.set_planning_fields`, writes an issue's planning fields and nothing
+else: `stakes`, `value`, `lateness_loss`, `deadline_type`, `estimate_hours`,
+`due_date`, at least one, never null (it sets, it never clears), any other
+argument refused by its `ARG_SPECS` check in both tiers. The Executor resolves
+the four custom fields by the same `plan_field_*` names the ranking reads and
+writes them, the native due date and the native original estimate in one
+tracker edit (`update.timetracking` edit, in whole minutes; a select as its
+option value); a configured field the tracker does not declare is refused by
+name and nothing is written. It is in the EA's `plan-propose` pack and in
+`jira-propose`. Open question 5 is answered for now: the system does not
+create the fields. On Data Center an edit needs the field on the edit screen
+and the REST reference has no call that adds a select's options; on Cloud a
+create needs administrator rights and separate context and option calls, and
+an issue create carries only fields on the create screen. The steps for a Jira
+administrator are in `docs/QUEUE.md`.
+
 ### D4. The ranking rule (proposed; to be tuned on a real backlog before it is built)
 
 Computed in `reports/`, never by the model. The EA explains the ranking and
@@ -392,6 +409,26 @@ through the agent that owns the tracker.
 The seeded sweep's instructions change in `schema.sql`, which does not
 rewrite an existing schedule row; a running deployment edits its own schedule
 in the cockpit.
+
+**As built (step 4b).** The queue is a read tool, `jira_planning_gaps`
+(`jira-read`): the backlog's own read and `rank()`'s `missing`, so an issue
+needs enriching when any planning input is absent; soonest due first, at most
+`plan_enrich_per_run` (10) per run, with the totals, the unit (and the points
+scale), and the planning fields the tracker does not declare. At creation,
+`jira.create_issue` takes `estimate_hours` beside `custom_fields`, and its
+capability notes say a new issue carries its planning fields in the same
+action, the stakes in the filer's or the operator's words or, where the source
+gives none, one sentence beginning "Agent's reading:", or no numbers. Nightly,
+the seeded `jira-hygiene` instructions call the tool and propose the returned
+issues' missing fields as ONE proposal with one action per issue (the pacing is
+the tool's cap); a running deployment pastes the same text from
+`docs/QUEUE.md`. In the evening review, the EA proposes the numbers for the
+unscored issues tomorrow needs from the stakes in the conversation, asks for
+stakes where there are none, and records what the operator settles as one
+`jira.set_planning_fields` proposal, separate from the review's record and
+after concluding; the charter's follow-ups paragraph makes the planning fields
+the one tracker change it proposes itself. Whether an agent scores from text as
+the operator would is still unmeasured.
 
 ### D9. The rhythm
 

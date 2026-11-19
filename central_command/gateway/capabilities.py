@@ -116,7 +116,7 @@ REGISTRY: list[Capability] = [
         risk="external, reversible — a wrongly created issue can be closed or deleted in the Jira UI",
         holder="Executor",
         route="integrations/jira.py → Jira REST createIssue (native, D23; native only, no n8n façade fallback)",
-        arguments=["project_key", "summary", "description?", "issue_type (a name from jira_list_issue_types for the project)", "parent?", "due_date?", "labels?", "custom_fields?", "assignee? (user_id from jira.find_users)"],
+        arguments=["project_key", "summary", "description?", "issue_type (a name from jira_list_issue_types for the project)", "parent?", "due_date?", "labels?", "custom_fields?", "assignee? (user_id from jira.find_users)", "estimate_hours? (the native original estimate)"],
         description=(
             "Create a new Jira issue for not-yet-tracked work. Built after the "
             "2026-07-20 charter-v2 incident: the coached charter instructed the "
@@ -177,6 +177,36 @@ REGISTRY: list[Capability] = [
             "are per-instance, so a proposal names the field and the Executor "
             "resolves it; an unknown name is refused rather than sent, because "
             "Jira accepts an unknown field key with a 200 and binds nothing."
+        ),
+    ),
+    Capability(
+        name="jira.set_planning_fields",
+        target_args=("issue_key",),
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="reversible",
+        risk=("external, reversible — the planning fields' previous values can be "
+              "restored in the Jira UI or by a later proposal; a wrong number moves "
+              "the issue in the ranked backlog until it is corrected"),
+        holder="Executor",
+        route=("integrations/jira.py set_planning_fields → Jira REST editIssue, ONE "
+               "edit: the custom fields resolved by the configured plan_field_* names "
+               "through /field, the native due date, and the native original "
+               "estimate as update.timetracking (native only — no façade counterpart)"),
+        arguments=["issue_key", "stakes?", "value?", "lateness_loss?",
+                   "deadline_type? (hard | soft)", "estimate_hours?",
+                   "due_date? (YYYY-MM-DD; at least one of these six)"],
+        description=(
+            "Set an issue's PLANNING fields (the EA planning design, D3 and D8; "
+            "DL-221 step 4b): the stakes in words, value, lateness loss and "
+            "deadline type (custom fields resolved by the names the ranking reads, "
+            "never an id or a name from the proposal), the original estimate in "
+            "hours and the due date, in one tracker edit. Sets, never clears. A "
+            "planning field the tracker does not declare is refused by name and "
+            "nothing is written. No other field of the issue is reachable through "
+            "it, which is why the executive assistant may hold it while every "
+            "other tracker change goes through the agent that owns the tracker."
         ),
     ),
     Capability(
@@ -1581,6 +1611,25 @@ REGISTRY: list[Capability] = [
             "(updated), epic structure (parent) and typed dependencies (links, "
             "each phrased in its stored direction) — the hygiene axes added "
             "2026-07-25 after jira-expert declared them missing."
+        ),
+    ),
+    Capability(
+        name="jira.planning_gaps",
+        kind="read",
+        gate="ungated read",
+        default_gate="none",
+        risk="none to the world",
+        holder="agents (jira_planning_gaps tool)",
+        route=("reports/ea_backlog.py planning_gaps → integrations/jira.py list_fields + "
+               "searchIssues with plan_backlog_jql (the ranked backlog's own read)"),
+        arguments=[],
+        description=(
+            "The backlog issues that lack planning inputs (the EA planning design, "
+            "D8; DL-221 step 4b): each with exactly what it is missing and what it "
+            "has, soonest due first, at most plan_enrich_per_run of them, with the "
+            "totals and the planning fields the tracker does not declare. The "
+            "ranking's own read and rules (`ea_backlog`), never a second copy, so "
+            "an agent told never to guess which issues need scoring can read it."
         ),
     ),
     Capability(

@@ -1200,6 +1200,33 @@ async def jira_list_fields(ctx: RunContext) -> str:
 
 
 @parkable_read
+async def jira_planning_gaps(ctx: RunContext) -> str:
+    """List the backlog issues that need their PLANNING fields filled: every
+    issue the ranking could not score, or that lacks one of stakes, value,
+    lateness loss, deadline type, estimate or due date. Each row says exactly
+    what it is `missing` and what it has (summary, the stakes text if any, due
+    date, estimate, current values, tier), soonest due first, at most the
+    deployment's per-run cap; `totals` says how many need enriching in all.
+
+    This is the answer to "which issues need scoring?" — never guess it from a
+    search. `unit` is the scale value and lateness loss are written in (for
+    `points`, `scale` lists the allowed numbers); `set_argument` maps each
+    `missing` name to the `jira.set_planning_fields` argument that writes it;
+    `planning_fields.cannot_write` names the arguments this tracker cannot take
+    because it does not declare their field — do not propose those. The
+    backlog is the configured backlog JQL, the same read the ranked plan uses.
+    Read-only.
+    """
+    from central_command.reports import ea_backlog
+
+    try:
+        data = await _read_with_retry(ea_backlog.planning_gaps)
+    except Exception as e:  # noqa: BLE001
+        return _read_failed("jira planning gaps read", e)
+    return _clip(json.dumps(data, default=str))
+
+
+@parkable_read
 async def jira_find_users(ctx: RunContext, query: str, project_key: str = "") -> str:
     """Find Jira users by a name or email fragment. Each row carries the
     `user_id` that jira.assign_issue and jira.create_issue's `assignee` take —

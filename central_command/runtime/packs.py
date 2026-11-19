@@ -161,16 +161,52 @@ class Pack:
 _JIRA_TARGET = ("target_ref = {'system': 'jira', 'id': '<the issue or project key>'}, "
                 "reversibility = 'reversible'")
 
+# The planning fields (the EA planning design, D3 and D8; DL-221 step 4b). ONE
+# capability in TWO packs, on purpose: `plan-propose` (the executive assistant,
+# which settles them in the planning conversation and may change no other
+# field of an issue) and `jira-propose` (the agent that owns the tracker, for
+# the nightly enrichment). Every view of a grant set treats capabilities as a
+# set (`granted_capability_names`, `known_capability_names`) and the charter
+# section lists a capability once (`charter_section`'s `caps_seen`), so the
+# SAME object sits in both and an agent holding both packs reads it once.
+_SET_PLANNING_FIELDS = GatedCapability(
+    name="jira.set_planning_fields",
+    arguments=("{'issue_key': '<KEY>', 'stakes'?: '<text>', 'value'?: <number >= 0>, "
+               "'lateness_loss'?: <number >= 0>, 'deadline_type'?: 'hard'|'soft', "
+               "'estimate_hours'?: <hours > 0>, 'due_date'?: 'YYYY-MM-DD'}"),
+    notes=("The PLANNING fields of one issue, and nothing else: name at least one "
+           "of the six, never null (it sets, it never clears). target_ref = "
+           "{'system': 'jira', 'id': '<KEY>'}, reversibility = 'reversible'. The "
+           "control plane writes the four custom fields under the names this "
+           "deployment configured, the estimate to Jira's own original estimate "
+           "and the due date to Jira's own due date, in one edit. Read the issue "
+           "or jira_planning_gaps first, and never propose a field "
+           "jira_planning_gaps lists under cannot_write: the tracker does not "
+           "declare it and the action is refused. People write the STAKES (what "
+           "doing it gets, what happens if it is late or never done): copy the "
+           "operator's or the filer's own words, and where no source gives any, "
+           "write one sentence that begins 'Agent's reading:' for the "
+           "operator to correct, never stakes presented as theirs. VALUE and "
+           "LATENESS LOSS are proposed FROM the stakes, on the deployment's unit "
+           "(jira_planning_gaps reports it; for points use only 1, 2, 3, 5 or 8): "
+           "value is what doing the work is worth, lateness loss what is lost if "
+           "it is done after its due date. DEADLINE TYPE: hard when the loss "
+           "lands once at the date, soft when it grows the longer it is late. "
+           "ESTIMATE is hours of real work. Several issues are ONE proposal with "
+           "one action per issue. A field you cannot reason to from a source is "
+           "left out, never guessed."),
+)
+
 PACKS: dict[str, Pack] = {
     "jira-read": Pack(
         name="jira-read",
         description=("Read live Jira state: projects, a project's issue types, one "
-                     "issue, JQL search, legal transitions, custom fields, users "
-                     "(filters, dashboards, "
+                     "issue, JQL search, legal transitions, custom fields, the "
+                     "backlog's planning gaps, users (filters, dashboards, "
                      "gadgets on Cloud)."),
         tool_names=("jira_get_issue", "jira_search_issues", "jira_get_transitions",
                     "jira_list_projects", "jira_list_issue_types", "jira_list_fields",
-                    "jira_find_users",
+                    "jira_planning_gaps", "jira_find_users",
                     "jira_list_filters",
                     "jira_list_dashboards", "jira_list_gadgets"),
     ),
@@ -196,7 +232,8 @@ PACKS: dict[str, Pack] = {
                            "'parent'?: '<KEY>', "
                            "'due_date'?: 'YYYY-MM-DD', 'labels'?: [...], "
                            "'custom_fields'?: {'<field name>': <value>, ...}, "
-                           "'assignee'?: '<user_id from jira_find_users>'}"),
+                           "'assignee'?: '<user_id from jira_find_users>', "
+                           "'estimate_hours'?: <hours > 0>}"),
                 notes=("Only for genuinely not-yet-tracked work — search for an "
                        "existing issue first when you hold a read tool. "
                        "'project_key' MUST be a key you have seen in "
@@ -219,7 +256,25 @@ PACKS: dict[str, Pack] = {
                        "passes no values between actions, so a follow-up "
                        "set_fields can never name the key this create "
                        "produces — the same reason 'assignee' rides the "
-                       "create rather than a follow-up jira.assign_issue."),
+                       "create rather than a follow-up jira.assign_issue. "
+                       "PLANNING FIELDS RIDE THE CREATE TOO: when the tracker "
+                       "declares them (jira_list_fields, or "
+                       "jira_planning_gaps' planning_fields), a new issue "
+                       "carries in the same action its stakes, value, lateness "
+                       "loss and deadline type in 'custom_fields' under the "
+                       "names the tracker declares, the due date, and "
+                       "'estimate_hours' (Jira's own original estimate, in "
+                       "hours of real work). The STAKES are the filer's or "
+                       "the operator's own words from the source (what doing "
+                       "it gets, what happens if it is late or never done); "
+                       "never invent stakes: where the source gives none, "
+                       "write one sentence that begins 'Agent's "
+                       "reading:' for the operator to correct, or leave the "
+                       "numbers out. Value and lateness loss are proposed "
+                       "from those stakes on the deployment's unit (for "
+                       "points only 1, 2, 3, 5 or 8); deadline type is hard "
+                       "when the loss lands once at the date, soft when it "
+                       "grows."),
             ),
             GatedCapability(
                 name="jira.add_comment",
@@ -254,8 +309,10 @@ PACKS: dict[str, Pack] = {
                        "Fields Jira or a plugin manages (Rank, Development, "
                        "Team, …) report writable: false and are refused. For "
                        "priority, labels and due date use "
-                       "jira.update_attributes instead."),
+                       "jira.update_attributes instead. For the PLANNING "
+                       "fields use jira.set_planning_fields."),
             ),
+            _SET_PLANNING_FIELDS,
             GatedCapability(
                 name="jira.link_issues",
                 arguments="{'from_key': '<KEY>', 'to_key': '<KEY>', 'link_type': 'Blocks|Relates|Duplicate'}",
@@ -1168,11 +1225,13 @@ PACKS: dict[str, Pack] = {
     ),
     # plan-propose (2026-11-19, the EA planning design, D6; DL-221 step 4a): the
     # stored day plan and the review's outcome record. Both write only Central
-    # Command's own tables, through the Executor, after approval.
+    # Command's own tables, through the Executor, after approval. Step 4b adds
+    # jira.set_planning_fields: an issue's planning fields and nothing else.
     "plan-propose": Pack(
         name="plan-propose",
-        description=("Propose storing the day's plan and recording the evening "
-                     "review's outcomes (written by the control plane after approval)."),
+        description=("Propose storing the day's plan, recording the evening "
+                     "review's outcomes and setting an issue's planning fields "
+                     "(written by the control plane after approval)."),
         tool_names=("propose_action",),
         guidance=(
             "THE STORED PLAN: target_ref = {'system': 'central_command', 'id': "
@@ -1186,7 +1245,11 @@ PACKS: dict[str, Pack] = {
             "approval stores the plan and blocks the time; it may ride "
             "`propose_calendar_change` with the blocks, and a plan with no "
             "blocks is a proposal of its own. Never claim a plan is stored, or "
-            "an outcome recorded, before you are told the action executed."
+            "an outcome recorded, before you are told the action executed. "
+            "THE PLANNING FIELDS (jira.set_planning_fields) are the one tracker "
+            "write in this pack: an issue's stakes, value, lateness loss, "
+            "deadline type, estimate and due date, nothing else; its own "
+            "target_ref and reversibility are under its entry."
         ),
         capabilities=(
             GatedCapability(
@@ -1216,6 +1279,9 @@ PACKS: dict[str, Pack] = {
                        "record for the same date and issue replaces the earlier "
                        "one. The actual hours are what pads future estimates."),
             ),
+            # The planning fields (DL-221 step 4b): the one tracker write the
+            # assistant holds. Also in jira-propose (see _SET_PLANNING_FIELDS).
+            _SET_PLANNING_FIELDS,
         ),
     ),
     "web-read": Pack(

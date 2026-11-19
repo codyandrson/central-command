@@ -30,6 +30,7 @@ real instance.
 from __future__ import annotations
 
 import functools
+import math
 import re
 import time
 from datetime import date
@@ -771,6 +772,7 @@ async def create_issue(
     description: str | None = None, due_date: str | None = None,
     labels: list[str] | None = None, parent: str | None = None,
     custom_fields: dict | None = None, assignee: str | None = None,
+    estimate_hours: float | None = None,
 ) -> dict:
     """Create a new issue — the capability the 2026-07-20 charter-v2 incident
     demanded (the coached charter told the agent to propose it before it
@@ -791,7 +793,12 @@ async def create_issue(
     set_fields) rides the create POST — added 2026-08-18 because the executor
     passes no values between a proposal's actions, so a follow-up set_fields
     can never name the key this create produces; one action makes the complete
-    issue one approval."""
+    issue one approval.
+
+    `estimate_hours` (DL-221 step 4b) is the native ORIGINAL ESTIMATE, written
+    in the same POST as `fields.timetracking.originalEstimate` — the create
+    shape both the Cloud v3 reference and the vendored Data Center 9.17
+    reference show (see `_estimate_duration`)."""
     if not isinstance(project_key, str) or not PROJECT_RE.match(project_key or ""):
         raise JiraError(f"createIssue — bad project_key {project_key!r} — must match [A-Z][A-Z0-9_]*")
     if not isinstance(summary, str) or not summary.strip() or len(summary) > 255:
@@ -804,6 +811,8 @@ async def create_issue(
         raise JiraError("createIssue — labels must be a list of strings")
     if parent is not None:
         parent = _key(parent, "parent")
+    estimate = (_estimate_duration(estimate_hours, "createIssue", project_key)
+                if estimate_hours is not None else None)
     custom_payload, custom_applied = {}, {}
     if custom_fields is not None:
         custom_payload, custom_applied = await _resolve_custom_writes(
@@ -827,6 +836,8 @@ async def create_issue(
         # On the create, because the executor passes no values between a
         # proposal's actions — a follow-up assign could never name this key.
         fields["assignee"] = _user_ref(assignee)
+    if estimate:
+        fields["timetracking"] = {"originalEstimate": estimate}
     fields.update(custom_payload)
     resp = await _call("POST", _api("/issue"), {"fields": fields})
     _check(resp, "createIssue", project_key)
@@ -839,6 +850,7 @@ async def create_issue(
         "labels": labels or [],
         "parent": parent,
         **({"assignee": assignee} if assignee is not None else {}),
+        **({"estimate_hours": estimate_hours} if estimate else {}),
         "url": settings.jira_base_url.rstrip("/") + "/browse/" + str(key),
         **({"custom_fields": custom_applied} if custom_applied else {}),
     }}
@@ -1295,6 +1307,63 @@ async def set_fields(issue_key: str, fields: dict) -> dict:
     resp = await _call("PUT", _api(f"/issue/{key}"), {"fields": payload})
     _check(resp, "setFields", key)
     return {"ok": True, "kind": "jira", "operation": "setFields",
+            "issue": {"issue_key": key, "fields": applied}}
+
+
+def _estimate_duration(hours, op: str, ref: str) -> str:
+    """Hours → the duration string Jira's `timetracking.originalEstimate`
+    takes, in whole MINUTES (`"90m"`).
+
+    Minutes on purpose: `d` and `w` are converted by the instance's own
+    time-tracking settings (hours per day, days per week), so `"1d"` is eight
+    hours on one Jira and six on another; minutes mean the same everywhere.
+    Rounded to the nearest minute, never below one."""
+    if (isinstance(hours, bool) or not isinstance(hours, (int, float))
+            or not math.isfinite(hours) or hours <= 0):
+        raise JiraError(f"{op} for {ref} — estimate_hours must be a number of hours "
+                        f"above 0, got {hours!r}")
+    return f"{max(1, round(hours * 60))}m"
+
+
+async def set_planning_fields(
+    issue_key: str, custom_fields: dict | None = None,
+    estimate_hours: float | None = None, due_date: str | None = None,
+) -> dict:
+    """The planning fields of one issue (the EA planning design, D3; DL-221
+    step 4b), in ONE edit: custom fields by NAME (resolved and shape-checked by
+    `_resolve_custom_writes`, the seam under `set_fields`), the native due date
+    and the native original estimate.
+
+    The estimate rides `update.timetracking: [{"edit": {"originalEstimate":
+    "<N>m"}}]`, the edit shape both the Cloud v3 reference (Edit issue) and the
+    vendored Data Center 9.17 reference
+    (docs/vendor/atlassian-dc-rest/jira-9.17.0/.../REST/9.17.0/index.html, Edit
+    issue) show; the custom fields and the due date ride `fields` in the same
+    PUT. Data Center refuses a field named in both `fields` and `update`; none
+    is. A select field's option goes as `{"value": "<option>"}` on both flavours
+    (`_coerce_custom`), a textarea as ADF on Cloud and a string on Data Center."""
+    _require_native("setPlanningFields")
+    key = _key(issue_key)
+    payload: dict = {}
+    applied: dict = {}
+    if custom_fields:
+        payload, applied = await _resolve_custom_writes(
+            custom_fields, "setPlanningFields", key)
+    if due_date is not None:
+        payload["duedate"] = _date(due_date, "setPlanningFields", key)
+        applied["due_date"] = payload["duedate"]
+    body: dict = {}
+    if estimate_hours is not None:
+        body["update"] = {"timetracking": [{"edit": {
+            "originalEstimate": _estimate_duration(estimate_hours, "setPlanningFields", key)}}]}
+        applied["estimate_hours"] = estimate_hours
+    if payload:
+        body["fields"] = payload
+    if not body:
+        raise JiraError(f"setPlanningFields for {key} — name at least one planning field")
+    resp = await _call("PUT", _api(f"/issue/{key}"), body)
+    _check(resp, "setPlanningFields", key)
+    return {"ok": True, "kind": "jira", "operation": "setPlanningFields",
             "issue": {"issue_key": key, "fields": applied}}
 
 

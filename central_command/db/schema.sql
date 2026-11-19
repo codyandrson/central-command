@@ -518,10 +518,15 @@ insert into heartbeat_schedule
     ('drain-window', 'Dispatcher drain window', 'cron',
      '{"expr": "0 * * * *", "tz": "America/Denver"}', 'dispatch.window',
      '{"minutes": 10}', 'seed:heartbeat'),
+    -- jira-hygiene's instructions gained the planning-field enrichment
+    -- checklist on 2026-11-19 (DL-221 step 4b). A FRESH database gets it; a
+    -- running deployment keeps its own row (`on conflict do nothing`, never an
+    -- UPDATE), and docs/QUEUE.md "The nightly Jira hygiene sweep" carries the
+    -- text for the operator to paste into the schedule in the cockpit.
     ('jira-hygiene', 'Nightly Jira hygiene sweep', 'cron',
      '{"expr": "0 2 * * *", "tz": "America/Denver"}', 'task.create',
      '{"agent_id": "jira-expert", "title": "Nightly Jira hygiene sweep",
-       "instructions": "Nightly hygiene sweep: search the project for issues with past-due or missing due dates, stale in-progress issues, and obvious duplicates or missing links. Propose fixes (comments, due-date updates, transitions, links) for anything that needs one; if the board is clean, say so plainly."}',
+       "instructions": "Nightly hygiene sweep: search the project for issues with past-due or missing due dates, stale in-progress issues, and obvious duplicates or missing links. Propose fixes (comments, due-date updates, transitions, links) for anything that needs one. Then enrich the planning fields: (1) call jira_planning_gaps; (2) for each issue it returns, and only those, propose the planning fields it lists as missing with jira.set_planning_fields: where the issue has stakes text, propose value and lateness loss from that text on the unit the tool reports (for points only 1, 2, 3, 5 or 8) and a deadline type, plus an estimate and a due date where the issue gives grounds for them; where it has no stakes at all, also propose a stakes sentence that begins Agent''s reading: (your own reading of the issue, for the operator to correct); leave out any field you cannot reason to, and never propose a field the tool lists under cannot_write; (3) batch the night''s issues into ONE proposal with one jira.set_planning_fields action per issue, never more issues than the tool returned. If the board is clean and nothing needs enriching, say so plainly."}',
      'seed:heartbeat'),
     ('audit-agreement', 'Auditor agreement report', 'cron',
      '{"expr": "0 7 * * *", "tz": "America/Denver"}', 'report.audit_agreement',

@@ -1083,7 +1083,9 @@ def test_each_capability_is_complete(name, target_args, dependency):
 
 def test_the_plan_pack_and_the_release_capability_are_offered():
     pack = packs.PACKS["plan-propose"]
-    assert {c.name for c in pack.capabilities} == {"plan.record_day", "plan.record_review"}
+    # jira.set_planning_fields joined the pack at step 4b (the planning fields).
+    assert {c.name for c in pack.capabilities} == {"plan.record_day", "plan.record_review",
+                                                   "jira.set_planning_fields"}
     assert pack.tool_names == ("propose_action",)
     assert "calendar.release_event" in {c.name for c in packs.PACKS["calendar-propose"].capabilities}
     section = packs.charter_section(("plan-propose", "calendar-propose"))

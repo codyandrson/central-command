@@ -111,6 +111,7 @@ async def _jira_create_issue(args: dict, approver: str, proposer: str | None) ->
         args.get("description"), args.get("due_date"),
         args.get("labels") or [], parent=args.get("parent"),
         custom_fields=args.get("custom_fields"), assignee=args.get("assignee"),
+        estimate_hours=args.get("estimate_hours"),
     )
     key = (out.get("issue") or {}).get("issue_key")
     who = f" (assigned {args.get('assignee')})" if args.get("assignee") else ""
@@ -163,6 +164,43 @@ async def _jira_set_fields(args: dict, approver: str, proposer: str | None) -> s
     out = await jira.set_fields(args["issue_key"], args["fields"])
     names = ", ".join((out.get("issue") or {}).get("fields") or {})
     return f"{args['issue_key']} custom fields set: {names}"
+
+
+# The planning fields (the EA planning design, D3/D8; DL-221 step 4b): the
+# argument each custom planning field is written from, and the setting that
+# NAMES that field in the tracker. The estimate and the due date are native.
+_PLANNING_CUSTOM_ARGS = {"stakes": "plan_field_stakes", "value": "plan_field_value",
+                         "lateness_loss": "plan_field_lateness",
+                         "deadline_type": "plan_field_deadline_type"}
+
+
+async def _jira_set_planning_fields(args: dict, approver: str, proposer: str | None) -> str:
+    """Write an issue's planning fields in one tracker edit. The four custom
+    fields are resolved by the configured NAMES (`plan_field_*`, the names the
+    ranking reads), never an id or a name from the proposal; a planning field
+    the tracker does not declare under its configured name is a refusal that
+    names it, and nothing is written."""
+    names = {arg: getattr(settings, setting) for arg, setting in _PLANNING_CUSTOM_ARGS.items()}
+    wanted = [arg for arg in _PLANNING_CUSTOM_ARGS if args.get(arg) is not None]
+    custom: dict = {}
+    if wanted:
+        declared = {f.get("name") for f in (await jira.list_fields())["fields"]}
+        missing = [arg for arg in wanted if names[arg] not in declared]
+        if missing:
+            raise jira.JiraError(
+                f"jira.set_planning_fields for {args['issue_key']}: the tracker does not "
+                "declare the planning field(s) "
+                + ", ".join(f"{names[a]!r} ({a}, setting {_PLANNING_CUSTOM_ARGS[a]})"
+                            for a in missing)
+                + "; nothing was written. Create the field in Jira, or point the "
+                "setting at the field the tracker has.")
+        custom = {names[arg]: args[arg] for arg in wanted}
+    out = await jira.set_planning_fields(
+        args["issue_key"], custom_fields=custom or None,
+        estimate_hours=args.get("estimate_hours"), due_date=args.get("due_date"))
+    by_name = {v: k for k, v in names.items()}
+    written = [by_name.get(k, k) for k in (out.get("issue") or {}).get("fields") or {}]
+    return f"{args['issue_key']} planning fields set: {', '.join(written)}"
 
 
 # --- calendar writes (EA widening slice A, 2026-08-06) ------------------------
@@ -2845,6 +2883,7 @@ HANDLERS = {
     "jira.add_comment": _jira_add_comment,
     "jira.update_attributes": _jira_update_attributes,
     "jira.set_fields": _jira_set_fields,
+    "jira.set_planning_fields": _jira_set_planning_fields,
     "jira.link_issues": _jira_link_issues,
     "jira.delete_link": _jira_delete_link,
     "jira.assign_issue": _jira_assign_issue,

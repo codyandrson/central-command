@@ -18,7 +18,9 @@ the assistant to arrive with a proposed plan, explain the ranking, argue for a
 different order only with a reason, and yield to the operator's correction.
 Since step 4a (DL-221) the approved morning plan is STORED and the evening
 contact reviews it against what happened, recording the outcomes the operator
-reports as one gated proposal.
+reports as one gated proposal. Since step 4b the assistant also proposes an
+unscored issue's planning fields from its stakes (`jira.set_planning_fields`,
+the one tracker write it holds).
 The orienting role for the team's record stays, reduced to a few lines. A
 deployment that already hired the EA runs its GOVERNED charter; this text
 reaches it only as a revision the operator saves.
@@ -106,6 +108,13 @@ CHARTER = (
     "Never mark work done on your own word: done is what the operator told "
     "you or what the tracker shows, and an item the tracker cannot read is "
     "asked about, never assumed.\n\n"
+    "AN UNSCORED ISSUE IS SCORED FROM ITS STAKES. People state what work is "
+    "worth in words, the STAKES; the numbers are proposed from them. For an "
+    "unscored issue the plan needs, propose its value and lateness loss from "
+    "the stakes the operator gave you, on the deployment's unit, and ask for "
+    "the stakes where there are none: never invent them. Record what the "
+    "operator settles as ONE planning-fields proposal, one action per issue, "
+    "separate from the review's record and after you conclude, like it.\n\n"
     "OTHER AGENTS' QUESTIONS ARE NOT YOURS TO ASK. You NEVER restate or re-ask "
     "a question another agent has put to the operator. Report how many "
     "questions are open in the Decisions Inbox and whose they are, and leave "
@@ -145,7 +154,11 @@ CHARTER = (
     "with create_task for the teammate on YOUR TEAM who files issues there, asking for one "
     f"issue labelled `{FOLLOW_UP_LABEL}` that names the owner and the due "
     "date. If no teammate tracks issues, state the commitment in your report "
-    "and track nothing. Your brief's `open_tasks` and `open_operator_items` "
+    "and track nothing. Every other change to the tracker goes to that "
+    "teammate as a task too, with ONE exception: an issue's PLANNING FIELDS "
+    "(its stakes, value, lateness loss, deadline type, estimate and due "
+    "date), which you propose yourself with jira.set_planning_fields when the "
+    "planning conversation settles them. Your brief's `open_tasks` and `open_operator_items` "
     "blocks, and `tracked_follow_ups` when the tracker is configured, are "
     "GROUND TRUTH for what is currently open: narrate them, never re-derive "
     "them from memory.\n\n"

@@ -204,6 +204,91 @@ def _plan_review_shape(capability: str, args: dict) -> list[str]:
                        limit=PLAN_REVIEW_MAX_OUTCOMES, check_item=_review_item)
 
 
+# The planning fields (the EA planning design, D3 and D8; DL-221 step 4b). The
+# agent names them by MEANING; the Executor resolves the four custom fields by
+# the configured `plan_field_*` NAMES and writes the estimate to the tracker's
+# own original estimate and the due date to its own due date. Nothing here is a
+# field id or a field name: an agent never addresses a field directly.
+PLANNING_FIELD_ARGS = ("stakes", "value", "lateness_loss", "deadline_type",
+                       "estimate_hours", "due_date")
+PLANNING_DEADLINE_TYPES = ("hard", "soft")
+PLANNING_STAKES_CHARS = 2000
+# An estimate is hours of real work that becomes a calendar block; a value far
+# past a working year is a unit error (minutes or seconds written as hours).
+PLANNING_ESTIMATE_MAX_HOURS = 2000.0
+
+
+def _finite_number(v) -> bool:
+    return (not isinstance(v, bool) and isinstance(v, (int, float))
+            and math.isfinite(v))
+
+
+def _estimate_problem(where: str, h) -> str | None:
+    if not _finite_number(h) or h <= 0 or h > PLANNING_ESTIMATE_MAX_HOURS:
+        return (f"{where}: estimate_hours must be a number of hours above 0 and at most "
+                f"{PLANNING_ESTIMATE_MAX_HOURS:g}, got {h!r}")
+    return None
+
+
+def _planning_value_problems(capability: str, args: dict) -> list[str]:
+    """Each planning field the action names, checked for its value's shape."""
+    problems: list[str] = []
+    if "stakes" in args:
+        s = args["stakes"]
+        if not isinstance(s, str) or not s.strip():
+            problems.append(f"{capability}: stakes must be non-empty text, got {s!r}")
+        elif len(s) > PLANNING_STAKES_CHARS:
+            problems.append(f"{capability}: stakes is {len(s)} characters; at most "
+                            f"{PLANNING_STAKES_CHARS}")
+    for key in ("value", "lateness_loss"):
+        if key in args:
+            v = args[key]
+            if not _finite_number(v) or v < 0:
+                problems.append(f"{capability}: {key} must be a number >= 0, got {v!r}")
+    if "deadline_type" in args and args["deadline_type"] not in PLANNING_DEADLINE_TYPES:
+        problems.append(f"{capability}: deadline_type={args['deadline_type']!r} is not one "
+                        f"of {', '.join(PLANNING_DEADLINE_TYPES)}")
+    if "estimate_hours" in args:
+        p = _estimate_problem(capability, args["estimate_hours"])
+        if p:
+            problems.append(p)
+    if "due_date" in args and not _iso_date(args["due_date"]):
+        problems.append(f"{capability}: due_date must be YYYY-MM-DD, got {args['due_date']!r}")
+    return problems
+
+
+def _planning_fields_shape(capability: str, args: dict) -> list[str]:
+    """`jira.set_planning_fields`: an issue key and at least one planning field,
+    nothing else. A null is refused (this capability sets, it never clears):
+    a planning number cleared by an agent is a ranked issue silently dropped to
+    unscored."""
+    problems: list[str] = []
+    unknown = sorted(set(args) - {"issue_key", *PLANNING_FIELD_ARGS})
+    if unknown:
+        problems.append(f"{capability}: unknown argument(s) {', '.join(unknown)} (the "
+                        f"planning fields are {', '.join(PLANNING_FIELD_ARGS)}; any other "
+                        "change to an issue is not this capability's)")
+    named = [k for k in PLANNING_FIELD_ARGS if k in args]
+    if not named:
+        problems.append(f"{capability}: name at least one of "
+                        f"{', '.join(PLANNING_FIELD_ARGS)}")
+    nulls = [k for k in named if args[k] is None]
+    if nulls:
+        problems.append(f"{capability}: {', '.join(nulls)} is null; this capability sets "
+                        "planning fields and never clears one")
+    present = {k: args[k] for k in named if args[k] is not None}
+    return problems + _planning_value_problems(capability, present)
+
+
+def _create_issue_estimate_shape(capability: str, args: dict) -> list[str]:
+    """`jira.create_issue`'s optional `estimate_hours` (DL-221 step 4b): the new
+    issue's original estimate, written in the same create."""
+    if "estimate_hours" not in args or args["estimate_hours"] is None:
+        return []
+    p = _estimate_problem(capability, args["estimate_hours"])
+    return [p] if p else []
+
+
 ARG_SPECS: dict[str, ArgSpec] = {
     # `reference_time` (2026-09-19): the instant the source material is from,
     # REQUIRED. Graphiti anchors every present-tense fact's validity to the
@@ -281,7 +366,11 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # `tests/test_proposal_args.py` now walks the Executor's handlers so a
     # subscripted key without a spec fails the suite, not the operator.
     "jira.set_due_date": ArgSpec(required=("issue_key", "due_date")),
-    "jira.create_issue": ArgSpec(required=("project_key", "summary", "issue_type")),
+    "jira.create_issue": ArgSpec(required=("project_key", "summary", "issue_type"),
+                                 checks=(_create_issue_estimate_shape,)),
+    # The planning fields (DL-221 step 4b): see `_planning_fields_shape`.
+    "jira.set_planning_fields": ArgSpec(required=("issue_key",),
+                                        checks=(_planning_fields_shape,)),
     "jira.create_project": ArgSpec(required=("key", "name")),
     "jira.add_comment": ArgSpec(required=("issue_key", "body")),
     # A PARTIAL edit: only the attributes named are changed. Presence is the

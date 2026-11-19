@@ -244,3 +244,63 @@ Two rules follow from the table:
 Everything downstream — the ledger, dispatcher, valves, retry machinery,
 thread folding, provenance — never knew the provider existed and carries over
 untouched. Prove an Exchange configuration with `python scripts/exchange_smoke.py`.
+
+
+## The nightly Jira hygiene sweep
+
+The seeded schedule `jira-hygiene` (born disabled, 02:00 in the seed) creates a
+task for the agent that owns the tracker. Since the EA planning design's step 4b
+(DL-221) its instructions also ENRICH the planning fields: the agent reads
+`jira_planning_gaps` (the backlog issues the ranking cannot score or that lack a
+planning input, soonest due first, at most `CC_PLAN_ENRICH_PER_RUN`, default 10)
+and proposes the missing fields for those issues as one
+`jira.set_planning_fields` proposal, one action per issue. Every number is a
+proposal you approve or correct.
+
+A release changes the seed for a FRESH database only (`on conflict do
+nothing`). A running deployment keeps the schedule row it has: to give it the
+enrichment, edit the `jira-hygiene` schedule in the cockpit and replace its
+instructions with the text below (the same text `central_command/db/schema.sql`
+seeds, which a test holds equal to this block):
+
+```text
+Nightly hygiene sweep: search the project for issues with past-due or missing due dates, stale in-progress issues, and obvious duplicates or missing links. Propose fixes (comments, due-date updates, transitions, links) for anything that needs one. Then enrich the planning fields: (1) call jira_planning_gaps; (2) for each issue it returns, and only those, propose the planning fields it lists as missing with jira.set_planning_fields: where the issue has stakes text, propose value and lateness loss from that text on the unit the tool reports (for points only 1, 2, 3, 5 or 8) and a deadline type, plus an estimate and a due date where the issue gives grounds for them; where it has no stakes at all, also propose a stakes sentence that begins Agent's reading: (your own reading of the issue, for the operator to correct); leave out any field you cannot reason to, and never propose a field the tool lists under cannot_write; (3) batch the night's issues into ONE proposal with one jira.set_planning_fields action per issue, never more issues than the tool returned. If the board is clean and nothing needs enriching, say so plainly.
+```
+
+The agent needs the `jira-read` pack (for `jira_planning_gaps`) and
+`jira-propose` (which carries `jira.set_planning_fields`); the founding
+tracker agent holds both.
+
+## The planning fields in Jira
+
+The EA's ranking reads four custom fields by their display NAMES
+(`CC_PLAN_FIELD_STAKES`, `CC_PLAN_FIELD_VALUE`, `CC_PLAN_FIELD_LATENESS`,
+`CC_PLAN_FIELD_DEADLINE_TYPE`; defaults `Stakes`, `Value`, `Lateness loss`,
+`Deadline type`) plus Jira's own due date and original estimate.
+`jira_planning_gaps` reports, under `planning_fields.missing`, which of the four
+your Jira does not declare, and `jira.set_planning_fields` refuses a field that
+is not there. Central Command does not create them: a Jira administrator does,
+once, in the Jira UI (on Data Center there is no REST call that adds the options
+of a select list, and a field must be on a screen before an edit may set it).
+
+1. Create the fields (Jira settings → Issues → Custom fields → Create custom
+   field), named exactly as the settings say:
+   - **Stakes**: multi-line text ("Paragraph" on Cloud, "Text Field
+     (multi-line)" on Data Center; type key `textarea`). A single-line text
+     field works too, but holds less.
+   - **Value** and **Lateness loss**: Number Field (type key `float`).
+   - **Deadline type**: Select List (single choice; type key `select`) with
+     exactly two options, `hard` and `soft`, spelled in lower case.
+2. Give each field a context that covers the projects and issue types of your
+   backlog (a global context, all projects and all issue types, is simplest).
+3. Put the four fields on the screens of those projects: the EDIT screen (on
+   Data Center an edit that names a field missing from the edit screen is
+   refused) and the CREATE screen (on both Cloud and Data Center a new issue can
+   carry only fields on its create screen, so an issue filed with its planning
+   fields needs them there).
+4. Turn on time tracking (Jira settings → Issues → Time tracking) so the
+   original estimate can be written, and keep the due date on the same
+   screens.
+
+Within five minutes (the custom-field cache) `jira_planning_gaps` stops listing
+the fields under `missing`; no restart is needed.

@@ -221,11 +221,11 @@ def _today() -> date:
     return datetime.now(ZoneInfo(settings.ea_timezone)).date()
 
 
-async def backlog() -> dict:
-    """The ranked backlog block for the EA's brief. Raises on an outage."""
-    if not jira.configured():
-        return {"available": False, "reason": "not configured"}
-
+async def _read() -> dict:
+    """The backlog's outside read, shared by `backlog()` and `planning_gaps()`
+    so the two can never disagree: the configured JQL, the four planning
+    fields resolved by display NAME, each row normalised for `rank()`, and the
+    padding. Raises on an outage. The caller has checked `jira.configured()`."""
     names = _field_names()
     declared = (await jira.list_fields())["fields"]
     by_name = {f.get("name"): f for f in declared}
@@ -262,20 +262,108 @@ async def backlog() -> dict:
     today = _today()
     pad = await ea_plan.padding(today)
     ranked = rank(rows, today, settings.plan_hours_per_day, pad["ratio"])
+    return {
+        "names": names,
+        "planning_fields": {
+            "declared": declared_names, "missing": missing_names,
+            **({"unreadable": unreadable} if unreadable else {}),
+        },
+        "padding": pad,
+        "ranked": ranked,
+        "truncated": bool(out.get("truncated")),
+    }
+
+
+async def backlog() -> dict:
+    """The ranked backlog block for the EA's brief. Raises on an outage."""
+    if not jira.configured():
+        return {"available": False, "reason": "not configured"}
+
+    read = await _read()
+    ranked = read["ranked"]
     ordered = [r for t in TIERS for r in ranked["tiers"][t]]
     shown = ordered[:max(0, settings.plan_brief_items)]
     return {
         "available": True,
         "unit": settings.plan_value_unit,
         "hours_per_day": settings.plan_hours_per_day,
-        "padding": pad["ratio"],
-        "padding_samples": pad["samples"],
-        "planning_fields": {
-            "declared": declared_names, "missing": missing_names,
-            **({"unreadable": unreadable} if unreadable else {}),
-        },
+        "padding": read["padding"]["ratio"],
+        "padding_samples": read["padding"]["samples"],
+        "planning_fields": read["planning_fields"],
         "counts": ranked["counts"],
-        "truncated": bool(out.get("truncated")),
+        "truncated": read["truncated"],
         "items": shown,
         "items_omitted": len(ordered) - len(shown),
+    }
+
+
+# --- the enrichment queue (the EA planning design, D8; DL-221 step 4b) ---------
+
+# The relative scale a `points` deployment scores on (D3). A `currency`
+# deployment writes amounts; the arithmetic is the same.
+POINTS_SCALE: tuple[int, ...] = (1, 2, 3, 5, 8)
+
+# A planning input as `missing` names it -> the `jira.set_planning_fields`
+# argument that writes it.
+SET_ARGUMENT: dict[str, str] = {
+    "stakes": "stakes", "value": "value", "lateness_loss": "lateness_loss",
+    "deadline_type": "deadline_type", "estimate": "estimate_hours",
+    "due_date": "due_date",
+}
+
+# The custom planning inputs, in `_field_names()` order.
+_CUSTOM_INPUTS: tuple[str, ...] = ("stakes", "value", "lateness_loss", "deadline_type")
+
+
+def gaps(ranked: dict, limit: int) -> dict:
+    """PURE: the ranked rows that lack a planning input (a non-empty
+    `missing`), soonest due first (none last), then issue key; at most `limit`.
+    The rows are `rank()`'s own, so `missing` is the ranking's word for it."""
+    rows = [r for t in TIERS for r in ranked["tiers"][t] if r["missing"]]
+    rows.sort(key=lambda r: (*_due_key(r), str(r["issue_key"] or "")))
+    shown = rows[:max(0, int(limit))]
+    keep = ("issue_key", "summary", "status", "tier", "due_date", "estimate_hours",
+            "stakes", "value", "lateness_loss", "deadline_type", "missing", "url")
+    return {
+        "issues": [{k: r[k] for k in keep if k in r} for r in shown],
+        "needing": len(rows),
+        "unscored": sum(1 for r in rows if r["tier"] == "unscored"),
+        "returned": len(shown),
+        "omitted": len(rows) - len(shown),
+    }
+
+
+async def planning_gaps() -> dict:
+    """What needs enriching, for the `jira_planning_gaps` tool: the backlog
+    issues the ranking could not score or that lack a planning input, each
+    with what it is missing and what it has, at most `plan_enrich_per_run`.
+    Raises on an outage."""
+    if not jira.configured():
+        return {"available": False, "reason": "not configured"}
+    read = await _read()
+    found = gaps(read["ranked"], settings.plan_enrich_per_run)
+    names = read["names"]
+    undeclared = [i for i in _CUSTOM_INPUTS
+                  if names[i] in read["planning_fields"]["missing"]]
+    unit = settings.plan_value_unit
+    return {
+        "available": True,
+        "unit": unit,
+        **({"scale": list(POINTS_SCALE)} if unit == "points" else {}),
+        "planning_fields": {
+            **read["planning_fields"],
+            # The arguments `jira.set_planning_fields` will refuse here: the
+            # tracker does not declare their field under the configured name.
+            "cannot_write": [SET_ARGUMENT[i] for i in undeclared],
+        },
+        "set_argument": SET_ARGUMENT,
+        "totals": {
+            "read": sum(read["ranked"]["counts"].values()),
+            "needing_enrichment": found["needing"],
+            "unscored": found["unscored"],
+            "returned": found["returned"],
+            "omitted": found["omitted"],
+        },
+        "truncated": read["truncated"],
+        "issues": found["issues"],
     }

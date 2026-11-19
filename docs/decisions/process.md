@@ -2875,5 +2875,82 @@ hygiene, and how the test suite itself must be written. See
   the planned value and lateness loss (the morning backlog block carries the
   current ones). Open question 3 of the record (whether the evening record
   stays gated) is answered for now by building it gated, as proposed.
-- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`
-- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D4, D5, D6, D9, "Build order" 1 to 3 and the first half of 4); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)
+- **Note (2026-11-19, step 4b built):** Enrichment and the planning fields'
+  write side are built (design record D3's write side, D8; PRD FR-54); the
+  weekly and quarterly contacts and the staffing agent are not. **The write**
+  is one new gated capability, `jira.set_planning_fields` (`issue_key` and at
+  least one of `stakes` (text, at most 2,000 characters), `value` and
+  `lateness_loss` (numbers >= 0), `deadline_type` (`hard` | `soft`),
+  `estimate_hours` (above 0, at most 2,000) and `due_date` (`YYYY-MM-DD`); its
+  `ARG_SPECS` check refuses any other argument and any null, so it sets and
+  never clears; `human`, reversible, target `issue_key`, dependency `jira`).
+  `executor._jira_set_planning_fields` resolves the four custom fields by the
+  `plan_field_*` NAMES the ranking reads, matched exactly as the ranking matches
+  them (never an id or a name from the proposal); a configured name the tracker
+  does not declare is a `JiraError` that names the field, the argument and the
+  setting, raised before any write (semantic: FAILED, not parked). Then ONE
+  `PUT /issue/{key}` through `jira.set_planning_fields`: the custom fields and
+  `duedate` in `fields` (shapes by `_resolve_custom_writes`/`_coerce_custom`, the
+  seam under `set_fields`: a select is `{"value": "<option>"}` on both
+  flavours, a textarea ADF on Cloud and a string on Data Center, a number a
+  number), and the estimate in `update.timetracking: [{"edit":
+  {"originalEstimate": "<N>m"}}]`, the edit shape the vendored Data Center 9.17
+  reference and the Cloud v3 reference both show; in whole minutes because `d`
+  and `w` are converted by each instance's own time-tracking settings.
+  `jira.create_issue` gains `estimate_hours` (shape-checked in both tiers),
+  written in the create POST as `fields.timetracking.originalEstimate`, the
+  create shape both references show. **Two packs, one capability:** it sits in
+  `plan-propose` (the EA's one tracker write) and in `jira-propose` (the agent
+  that owns the tracker, for the nightly sweep), the same `GatedCapability`
+  object in both. Nothing here forbids it: `granted_capability_names`,
+  `known_capability_names` and the registry parity tests treat capabilities as
+  a set, and `charter_section` lists a capability once (`caps_seen`) for an
+  agent holding both packs. No grant seed was added. **The read** is
+  `jira_planning_gaps` (in `jira-read`; `@parkable_read`, `TOOL_DEPENDENCY`
+  `jira`, so an outage parks the run; registry read row `jira.planning_gaps`):
+  `ea_backlog.planning_gaps()` over `ea_backlog._read()`, the backlog read
+  `backlog()` now shares, so the rules exist once; a pure `gaps()` keeps the
+  ranked rows whose `missing` is not empty (every unscored issue, and every
+  scored one lacking stakes, deadline type or a due date), soonest due first
+  (none last) then key, at most `plan_enrich_per_run` (new, default 10), each
+  with its summary, status, tier, stakes, value, lateness loss, deadline type,
+  estimate, due date and `missing`; plus `totals` (read, needing enrichment,
+  unscored, returned, omitted), `truncated`, `unit` (and `scale` 1, 2, 3, 5, 8
+  for `points`), `set_argument` (each missing name to its argument:
+  `estimate` is `estimate_hours`) and `planning_fields` with `cannot_write`
+  (the arguments whose field the tracker does not declare). **At creation:**
+  `jira.create_issue`'s pack notes say a new issue carries its stakes (the
+  filer's or the operator's words; where the source gives none, one sentence
+  beginning "Agent's reading:", or no numbers), value, lateness loss and
+  deadline type in `custom_fields` and its estimate in `estimate_hours`, in the
+  same action, when the tracker declares the fields. **Nightly:** the seeded
+  `jira-hygiene` instructions carry the checklist (call `jira_planning_gaps`,
+  propose each returned issue's missing fields, value and lateness loss from
+  the stakes on the reported unit, a stakes sentence marked as the agent's
+  reading where there is none, ONE proposal with one action per issue, never
+  more issues than returned). `on conflict do nothing` keeps a running
+  deployment's row, so the text is also in `docs/QUEUE.md` ("The nightly Jira
+  hygiene sweep") for the operator to paste, and a test holds the two equal.
+  **Evening:** the `digest` framing and the built-in charter propose the
+  numbers of the unscored issues tomorrow needs from the stakes in the
+  conversation, ask for stakes where there are none, may settle a due date the
+  same way, and record what the operator settles as ONE
+  `jira.set_planning_fields` proposal (one action per issue), separate from the
+  `plan.record_review` proposal, after concluding and in a turn of its own (a
+  second deferred call in one turn is a bounced sibling); the charter's
+  follow-ups paragraph now makes the planning fields the one tracker change the
+  EA proposes itself. **Creating the fields** was investigated and not built:
+  on Data Center 9.17 an edit is refused for a field that is not on the edit
+  screen, and the REST v2 reference offers no call that creates a select
+  list's options (only `GET /customFields/{id}/options`); on Cloud an edit no
+  longer checks screens, but creating a field takes the Administer Jira global
+  permission, a select's options are added to a field CONTEXT by separate
+  calls, the reference does not say a context is created with the field, and a
+  create carries only fields on the create screen. The manual steps (types,
+  contexts, screens, time tracking) are in `docs/QUEUE.md` ("The planning
+  fields in Jira"). Decided beyond the design record: the capability sets and
+  never clears; the stakes mark is the literal prefix "Agent's reading:"; an
+  issue counts as needing enrichment when ANY planning input is missing, the
+  due date included; the minutes unit for the estimate.
+- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`, `tests/test_planning_fields.py`
+- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D3, D4, D5, D6, D8, D9, "Build order" 1 to 4); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`, `_jira_set_planning_fields`); `central_command/integrations/jira.py` (`set_planning_fields`, `create_issue`); `central_command/runtime/packs.py` (`_SET_PLANNING_FIELDS`); `central_command/runtime/tools.py` (`jira_planning_gaps`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`, the `jira-hygiene` seed); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)

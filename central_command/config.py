@@ -796,6 +796,10 @@ class Settings(BaseSettings):
     #   plan_padding_min_samples -> fewer outcomes than this with both numbers
     #                            and the padding stays 1.0 (the estimate as
     #                            entered); the ratio is clamped to 1.0-3.0.
+    #   plan_enrich_per_run   -> the most issues `jira_planning_gaps` returns
+    #                            (step 4b, D8): one night's enrichment, paced so
+    #                            a first pass over a large backlog is not
+    #                            hundreds of approvals at once.
     plan_backlog_jql: str = "assignee = currentUser() AND statusCategory != Done"
     plan_field_stakes: str = "Stakes"
     plan_field_value: str = "Value"
@@ -810,6 +814,7 @@ class Settings(BaseSettings):
     plan_min_block_minutes: int = 30
     plan_padding_window_days: int = 30
     plan_padding_min_samples: int = 5
+    plan_enrich_per_run: int = 10
 
     # Sandbox slice 1 (D-sandbox): the runner is a SEPARATE, credential-free
     # service (central_command/sandbox/runner.py) that drives ephemeral gVisor
