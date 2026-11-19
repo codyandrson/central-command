@@ -1920,3 +1920,55 @@ create unique index if not exists calendar_plan_event_active_uq
     on calendar_plan_event (calendar_id, event_id) where retired_at is null;
 create index if not exists calendar_plan_event_date_idx
     on calendar_plan_event (plan_date) where retired_at is null;
+
+-- The stored day plan (the EA planning design, D6; DL-221 step 4a): what the
+-- operator approved as the day's ranked list, so the evening review compares a
+-- RECORD with what happened instead of the model's memory of the morning.
+-- Written ONLY by the Executor's `plan.record_day` after approval. `items` is
+-- the ranked list as JSON, one object per issue: `issue_key`, `rank` (its place
+-- on the list), `reason` (the assistant's words), and the planning numbers AS
+-- THE TRACKER HELD THEM AT EXECUTION (`value`, `lateness_loss`, `due_date`,
+-- `estimate_hours`, `tier`; null when the issue could not be read, with
+-- `readable: false`), never numbers the agent wrote. A later plan for the same
+-- local date supersedes the earlier one by timestamp; a row is never deleted.
+-- At most one ACTIVE plan per date (the partial unique index). `action_key` is
+-- the Executor's (DL-219): a retried execution of the same action returns the
+-- plan its first attempt stored instead of storing a second one.
+create table if not exists day_plan (
+    id             bigserial primary key,
+    plan_date      date not null,               -- local, in CC_EA_TIMEZONE
+    proposal_id    text,                        -- the proposal that stored it
+    action_key     text,
+    items          jsonb not null default '[]'::jsonb,
+    created_at     timestamptz not null default now(),
+    superseded_at  timestamptz
+);
+create unique index if not exists day_plan_active_uq
+    on day_plan (plan_date) where superseded_at is null;
+create unique index if not exists day_plan_action_key_uq
+    on day_plan (action_key) where action_key is not null;
+
+-- The outcome record (D6): per date and issue, whether the work was done and
+-- how long it actually took, AS THE OPERATOR REPORTED IT in the evening review
+-- and confirmed by approving one `plan.record_review` proposal. Written ONLY by
+-- the Executor. `planned` is false for work that was not on that date's stored
+-- plan (unplanned work is real). The estimate-against-actual padding of D4 reads
+-- `actual_hours` against the plan's `estimate_hours`. One ACTIVE row per (date,
+-- issue): a later record supersedes the earlier by timestamp, never a delete.
+create table if not exists day_plan_outcome (
+    id             bigserial primary key,
+    plan_date      date not null,
+    issue_key      text not null,
+    done           boolean not null,
+    actual_hours   double precision check (actual_hours is null or actual_hours >= 0),
+    note           text,
+    planned        boolean not null,
+    proposal_id    text,                        -- the proposal that recorded it
+    action_key     text,
+    created_at     timestamptz not null default now(),
+    superseded_at  timestamptz
+);
+create unique index if not exists day_plan_outcome_active_uq
+    on day_plan_outcome (plan_date, issue_key) where superseded_at is null;
+create index if not exists day_plan_outcome_action_key_idx
+    on day_plan_outcome (action_key) where action_key is not null;

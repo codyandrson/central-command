@@ -240,10 +240,141 @@ async def _calendar_update_event(args: dict, approver: str, proposer: str | None
                if args.get(k) is not None}
     if not changed:
         raise ExecutorError("calendar.update_event: no field to change was supplied")
-    ev = await calendar_facade.update_event(
-        args["event_id"], calendar_id=args.get("calendar_id", "primary"), **changed)
-    return (f"calendar event {ev.get('event_id') or args['event_id']} updated "
+    calendar_id = args.get("calendar_id", "primary")
+    ev = await calendar_facade.update_event(args["event_id"], calendar_id=calendar_id, **changed)
+    line = (f"calendar event {ev.get('event_id') or args['event_id']} updated "
             f"({', '.join(sorted(changed))})")
+    if "start" in changed:
+        line += await _move_plan_date(str(args["event_id"]), calendar_id, changed["start"])
+    return line
+
+
+async def _move_plan_date(event_id: str, calendar_id: str, start: str) -> str:
+    """A moved work block keeps its date right (DL-221 step 4a): the ledger
+    row's plan date becomes the local date (`ea_timezone`) of the new start,
+    AFTER the update succeeded. A commitment or a placeholder has no plan date
+    and is left alone. A start that does not parse leaves the row as it was and
+    says so, since the provider accepted it and the update cannot be undone here."""
+    from zoneinfo import ZoneInfo
+
+    from central_command.db import repo
+
+    row = await repo.get_calendar_plan_event(event_id, calendar_id)
+    if row is None or row["kind"] != "work_block":
+        return ""
+    try:
+        moved = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+    except ValueError:
+        return f" — ledger: the new start {start!r} did not parse; plan date left {row['plan_date']}"
+    local = (moved.astimezone(ZoneInfo(settings.ea_timezone)).date()
+             if moved.tzinfo else moved.date())
+    if local == row["plan_date"]:
+        return ""
+    await repo.move_calendar_plan_event_date(event_id, calendar_id, plan_date=local)
+    return f" — ledger: work block for {row['issue_key']} moved from {row['plan_date']} to {local}"
+
+
+async def _calendar_release_event(args: dict, approver: str, proposer: str | None) -> str:
+    """Release an event from the plan ledger (DL-221 step 4a): retire its
+    active row and change NOTHING on the calendar, so a wrong adoption or a
+    block the operator keeps as an ordinary event is undone without deleting
+    the event. No active row is a refusal, and nothing is written. A re-run of
+    the same proposal finds the row it retired and says so."""
+    from central_command.db import repo
+
+    calendar_id = args.get("calendar_id", "primary")
+    event_id = str(args["event_id"])
+    retired = await repo.retire_calendar_plan_event(
+        event_id, calendar_id, proposal_id=_current_proposal_id.get())
+    if retired is None:
+        pid = _current_proposal_id.get()
+        if pid:
+            if await repo.calendar_plan_event_retired_by(event_id, calendar_id, pid):
+                return (f"calendar event {event_id} already released from the plan ledger "
+                        "by this proposal — calendar unchanged")
+        raise ExecutorError(
+            f"calendar.release_event: event {event_id} has no active row in the plan "
+            "ledger (it is not a work block or placeholder of the assistant's); nothing "
+            "was written")
+    what = retired["kind"].replace("_", " ")
+    if retired["kind"] == "work_block":
+        what += f" for {retired['issue_key']} on {retired['plan_date']}"
+    return (f"calendar event {event_id} released from the plan ledger (was a {what}) — "
+            "ledger row retired, calendar unchanged")
+
+
+async def _plan_record_day(args: dict, approver: str, proposer: str | None) -> str:
+    """Store the day's plan (the EA planning design, D6; DL-221 step 4a).
+
+    The agent supplies the issues and its reasons; the NUMBERS are re-read
+    from the tracker here, at execution (`ea_plan.planning_numbers`), never
+    taken from the proposal. An issue the tracker answered it cannot read is
+    stored with the numbers null and named in the result; a DOWN tracker
+    raises (stamped `jira`) and the action parks. A retry of the same action
+    (`action_key()`) returns the plan its first attempt stored, before any
+    read, and supersedes nothing."""
+    from central_command.db import repo
+    from central_command.reports import ea_plan
+
+    plan_date = str(args["date"])
+    key = action_key()
+    if key:
+        earlier = await repo.day_plan_by_action_key(key)
+        if earlier is not None:
+            keys = ", ".join(str(i.get("issue_key")) for i in earlier["items"])
+            return (f"day plan for {earlier['plan_date']} already stored by an earlier "
+                    f"attempt: {len(earlier['items'])} item(s) ({keys})")
+    asked = [str(i["issue_key"]).strip() for i in args["items"]]
+    numbers = await ea_plan.planning_numbers(asked)
+    items = []
+    for rank, (raw, issue_key) in enumerate(zip(args["items"], asked), start=1):
+        items.append({"issue_key": issue_key, "rank": rank,
+                      "reason": str(raw.get("reason") or "").strip()[:1000],
+                      **numbers[issue_key]})
+    row = await repo.record_day_plan(plan_date=plan_date, items=items,
+                                     proposal_id=_current_proposal_id.get(), action_key=key)
+    if row["already_existed"]:
+        return (f"day plan for {row['plan_date']} already stored by an earlier attempt: "
+                f"{len(row['items'])} item(s)")
+    line = (f"day plan for {row['plan_date']} stored: {len(items)} item(s) "
+            f"({', '.join(asked)}); planning numbers re-read from the tracker")
+    unreadable = [f"{i['issue_key']} ({i.get('unreadable_reason')})"
+                  for i in items if not i.get("readable")]
+    if unreadable:
+        line += f"; stored without numbers, unreadable: {'; '.join(unreadable)}"
+    if row.get("superseded_id"):
+        line += f"; supersedes the earlier plan for that date (#{row['superseded_id']})"
+    return line
+
+
+async def _plan_record_review(args: dict, approver: str, proposer: str | None) -> str:
+    """Record the evening review's outcomes (the EA planning design, D6; DL-221
+    step 4a): the operator's own account, confirmed by approving. Each replaces
+    the earlier record for its (date, issue); an issue not on the date's stored
+    plan is accepted and stored as unplanned. Idempotent on `action_key()`."""
+    from central_command.db import repo
+
+    outcomes = [{"issue_key": str(o["issue_key"]).strip(), "done": o["done"],
+                 "actual_hours": o.get("actual_hours"),
+                 "note": (str(o["note"]).strip() or None) if o.get("note") else None}
+                for o in args["outcomes"]]
+    out = await repo.record_day_plan_outcomes(
+        plan_date=str(args["date"]), outcomes=outcomes,
+        proposal_id=_current_proposal_id.get(), action_key=action_key())
+    rows = out["rows"]
+    if out["already_existed"]:
+        return (f"review for {args['date']} already recorded by an earlier attempt: "
+                f"{len(rows)} outcome(s)")
+    done = [r["issue_key"] for r in rows if r["done"]]
+    open_ = [r["issue_key"] for r in rows if not r["done"]]
+    unplanned = [r["issue_key"] for r in rows if not r["planned"]]
+    line = (f"review for {args['date']} recorded: {len(rows)} outcome(s); done: "
+            f"{', '.join(done) or 'none'}; not done: {', '.join(open_) or 'none'}")
+    if unplanned:
+        line += f"; not on the stored plan (recorded as unplanned): {', '.join(unplanned)}"
+    if out["replaced"]:
+        line += f"; replaces the earlier record for {', '.join(out['replaced'])}"
+    return line
 
 
 async def _calendar_delete_event(args: dict, approver: str, proposer: str | None) -> str:
@@ -2734,6 +2865,9 @@ HANDLERS = {
     "calendar.update_event": _calendar_update_event,
     "calendar.delete_event": _calendar_delete_event,
     "calendar.adopt_event": _calendar_adopt_event,
+    "calendar.release_event": _calendar_release_event,
+    "plan.record_day": _plan_record_day,
+    "plan.record_review": _plan_record_review,
     "charter.update": _charter_update,
     "loe.create": _loe_create,
     "loe.record_checkin": _loe_record_checkin,

@@ -4,6 +4,41 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-19 — v2.100.0: The day's plan is stored when it is approved, and the evening contact reviews the day against it
+
+The first half of step 4 of the EA-planning design (DL-221, FR-54; design record
+`docs/superpowers/specs/2026-11-18-ea-planning-design.md`).
+
+- **The plan is a stored object.** The morning proposal's first action is the new gated capability
+  `plan.record_day`: the date and the ranked list, each issue with its reason. On approval the Executor
+  stores the plan in a new table, `day_plan`, with the planning numbers it re-reads from the tracker at
+  that moment; the assistant supplies no numbers. The calendar blocks follow in the same proposal, so one
+  decision stores the plan and blocks the time. A later plan for the same date supersedes the earlier one
+  by timestamp.
+- **The evening contact is the review.** Its brief carries `plan_review`: each planned item against what
+  the tracker says now (done, not done, or could not be read, which is never treated as done), what
+  became of its work blocks, and issues completed today that were not on the plan. The assistant asks why
+  work slipped instead of guessing, asks how long done work took, and drafts tomorrow in words. It makes
+  no calendar change in the evening.
+- **Outcomes are recorded once.** The new gated capability `plan.record_review` writes what was done and
+  the hours the operator reported to a new table, `day_plan_outcome`. Unplanned work is accepted and
+  marked as such.
+- **Estimates are corrected from the record.** The ratio of actual to estimated hours over recent
+  outcomes (`CC_PLAN_PADDING_WINDOW_DAYS`, default 30; at least `CC_PLAN_PADDING_MIN_SAMPLES`, default 5;
+  held between 1.0 and 3.0) pads estimates when the ranking computes an issue's latest start.
+- **A placeholder can be released.** The new gated capability `calendar.release_event` retires an
+  event's ledger row and changes nothing on the calendar. A work block moved to another day now carries
+  its new date in the ledger.
+- A new pack, `plan-propose`, carries the two `plan.*` capabilities, and the executive-assistant hire
+  template gains it. 104 capabilities. The morning and mid-day briefs carry `plan`, today's stored plan
+  or its absence.
+
+For an operator: the update's schema phase creates `day_plan` and `day_plan_outcome`. A deployment that
+already hired the assistant grants it `plan-propose` in the cockpit. The unplanned-completions search
+relies on Jira's `resolved` date, so a workflow that sets no resolution is not found; it is left out,
+with the reason, when `CC_PLAN_BACKLOG_JQL` is not of the default shape. Not exercised against a live
+model, tracker or calendar.
+
 ## 2026-11-19 — v2.99.0: The executive assistant blocks time for the day's plan, and the control plane records which calendar events are its own
 
 Step 3 of the EA-planning design (DL-221, FR-54; design record

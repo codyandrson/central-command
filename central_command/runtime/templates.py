@@ -302,10 +302,14 @@ EA_TEMPLATE = HireTemplate(
     # the block only summarises. NOT seeded in schema.sql (the calendar-propose
     # precedent): a database that already hired the assistant gets the grant
     # from the operator in the cockpit.
+    # plan-propose added 2026-11-19 (the EA planning design, D6): the morning
+    # plan is stored as a record and the evening review records the outcomes,
+    # both gated. NOT seeded in schema.sql either: a database that already
+    # hired the assistant gets the grant from the operator in the cockpit.
     default_packs=("record-read", "activity-read", "graph-read", "graph-propose",
                    "ask-operator", "consult", "calendar-read", "calendar-propose",
                    "loe-read", "task-create", "mail-read", "session-recall", "skill-propose", "note-propose",
-                   "jira-read"),
+                   "jira-read", "plan-propose"),
     taskable=True,
     conversational=True,
 )

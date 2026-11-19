@@ -1085,9 +1085,9 @@ PACKS: dict[str, Pack] = {
         guidance=(
             "CALENDAR CHANGES: target_ref = {'system': 'calendar', 'id': '<the "
             "event_id, or the calendar_id for a new event>'}. "
-            "reversibility = 'reversible' for create, update and adopt, "
+            "reversibility = 'reversible' for create, update, adopt and release, "
             "'irreversible' for delete. READ BEFORE YOU PROPOSE: an update, an "
-            "adoption or a delete must name a REAL event_id you have actually seen — from "
+            "adoption, a release or a delete must name a REAL event_id you have actually seen — from "
             "`read_calendar` or the `calendar` block in your brief — never one "
             "you reconstructed from a description. Times are RFC3339 with an "
             "explicit offset. You never touch the calendar yourself: you "
@@ -1149,7 +1149,72 @@ PACKS: dict[str, Pack] = {
                        "moving that event later. Propose it only for an event the "
                        "operator agreed is part of the week's shape, never for a "
                        "meeting with other people. An event already in the ledger "
-                       "is refused."),
+                       "is refused. A wrong adoption is undone with "
+                       "calendar.release_event."),
+            ),
+            GatedCapability(
+                name="calendar.release_event",
+                arguments="{'event_id': '<id from a read>', 'calendar_id'?: 'primary'}",
+                notes=("Releases one of YOUR events (a work block or a placeholder) "
+                       "from the plan ledger: the event stays on the calendar as an "
+                       "ordinary commitment, and you may no longer propose moving "
+                       "it. It changes nothing on the calendar. Use it for a wrong "
+                       "adoption, or when the operator wants to keep a block as an "
+                       "ordinary event; to remove the event itself, propose "
+                       "calendar.delete_event instead. Refused when the ledger has "
+                       "no active row for the event."),
+            ),
+        ),
+    ),
+    # plan-propose (2026-11-19, the EA planning design, D6; DL-221 step 4a): the
+    # stored day plan and the review's outcome record. Both write only Central
+    # Command's own tables, through the Executor, after approval.
+    "plan-propose": Pack(
+        name="plan-propose",
+        description=("Propose storing the day's plan and recording the evening "
+                     "review's outcomes (written by the control plane after approval)."),
+        tool_names=("propose_action",),
+        guidance=(
+            "THE STORED PLAN: target_ref = {'system': 'central_command', 'id': "
+            "'day_plan:<YYYY-MM-DD>'}, reversibility = 'reversible' (a later "
+            "record supersedes an earlier one; nothing is rewritten or deleted). "
+            "The stored plan is the RECORD of what was planned, and the evening "
+            "review compares it with what happened. You write neither: you "
+            "propose, the operator approves, and the control plane stores it. "
+            "The morning plan's `plan.record_day` is the FIRST action of the "
+            "day's proposal, before its `calendar.create_event` blocks, so one "
+            "approval stores the plan and blocks the time; it may ride "
+            "`propose_calendar_change` with the blocks, and a plan with no "
+            "blocks is a proposal of its own. Never claim a plan is stored, or "
+            "an outcome recorded, before you are told the action executed."
+        ),
+        capabilities=(
+            GatedCapability(
+                name="plan.record_day",
+                arguments=("{'date': 'YYYY-MM-DD', 'items': [{'issue_key': '<KEY>', "
+                           "'reason': '<why it is on today\'s list>'}, ...]}"),
+                notes=("The day's ranked list, one to ten issues, in the order you "
+                       "propose them, each once, each with its reason. Do NOT send "
+                       "value, estimate or any other number: the control plane "
+                       "re-reads each issue's planning numbers from the tracker when "
+                       "the plan executes, and an item carrying other keys is "
+                       "refused. A later plan for the same date replaces this one "
+                       "as the day's record."),
+            ),
+            GatedCapability(
+                name="plan.record_review",
+                arguments=("{'date': 'YYYY-MM-DD', 'outcomes': [{'issue_key': '<KEY>', "
+                           "'done': true|false, 'actual_hours'?: <hours >= 0>, "
+                           "'note'?: '<text>'}, ...]}"),
+                notes=("The evening review's outcomes, ONE proposal once the "
+                       "conversation has settled them: per issue, whether it was "
+                       "done and how long it actually took, as the OPERATOR told "
+                       "you. Never mark work done on your own word or on the "
+                       "tracker's status alone; leave actual_hours off when the "
+                       "operator did not say. An issue that was not on that date's "
+                       "plan is accepted and stored as unplanned work. A later "
+                       "record for the same date and issue replaces the earlier "
+                       "one. The actual hours are what pads future estimates."),
             ),
         ),
     ),

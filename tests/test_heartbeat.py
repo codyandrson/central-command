@@ -657,7 +657,7 @@ async def test_ea_contact_hands_the_agent_a_fenced_data_block(monkeypatch, ea_st
 
     brief = ea_stubs["tasks"][0]["instructions"]
     assert "```json" in brief and '"queues"' in brief
-    assert "END-OF-DAY WRAP-UP" in brief
+    assert "EVENING REVIEW" in brief  # the digest's framing since DL-221 step 4a
     assert ea_stubs["tasks"][0]["agent_id"] == "ea"
     # The actor names the schedule, so the record says WHY the agent ran.
     assert ea_stubs["tasks"][0]["actor"] == "heartbeat:ea-digest"

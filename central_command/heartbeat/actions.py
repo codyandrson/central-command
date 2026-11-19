@@ -416,7 +416,8 @@ async def _retry_sweep(schedule_id: str, params: dict) -> dict:
 # hand-written mission texts (which is what `task.create` would have forced —
 # it passes the operator's instructions through verbatim, by design).
 # "digest" KEEPS its kind string for data compat but is framed as the
-# END-OF-DAY WRAP-UP since the 2026-08-21 EA charter (v5) daily arc;
+# END-OF-DAY WRAP-UP since the 2026-08-21 EA charter (v5) daily arc, and as the
+# EVENING REVIEW of the stored day plan since 2026-11-19 (DL-221 step 4a);
 # "week_ahead" (same change) is the Sunday look-ahead.
 
 # "onboarding_tour" (2026-08-23) is the odd one out on purpose: it is the ONE
@@ -442,17 +443,36 @@ EA_DELIVERED_EVENT = "ea.contact_delivered"
 
 _EA_FRAMING: dict[str, str] = {
     "digest": (
-        "This is the END-OF-DAY WRAP-UP — close what the morning opened. Tell "
-        "the operator what got done today, what is still open (and now waiting "
-        "on whom), and what comes first tomorrow. Questions other agents have "
-        "put to the operator are theirs: say how many are open in the "
-        "Decisions Inbox and whose they are, and never restate or re-ask one. "
-        "Then ask only your own questions, about the gaps the record cannot "
-        "close: anything sitting undecided, anything that looks stuck. The "
-        "calendar block is "
-        "TOMORROW's: flag anything on it the operator should prepare tonight — "
-        "an early start, a conflict, a meeting with no agenda — so tomorrow's "
-        "morning brief starts warm."
+        "This is the EVENING REVIEW: compare the day with its plan. "
+        "`plan_review` is today's STORED plan, the record of what was planned, "
+        "read against what the record shows now. For each planned item, set "
+        "what was planned (its reason and its planned estimate) against what the "
+        "tracker says (`tracker.done`; `null` means the tracker could not say, "
+        "and it is NEVER done for you) and against its work blocks (`state: "
+        "retired`, or the times the calendar holds now; `moved_off_day` names a "
+        "block that now sits on another day). For what slipped, name it and ASK "
+        "the operator why; never guess a reason. Ask how long each done item "
+        "actually took, and whether any item the tracker still shows open was in "
+        "fact finished. `unplanned_done` lists issues the tracker shows "
+        "completed today that were not on the plan (`asked` is the search the "
+        "control plane ran; `unplanned_done_omitted` says why it could not ask): "
+        "ask about those too, because unplanned work is real. Then ask what "
+        "should be added to the backlog or dropped from it, and name the "
+        "`unscored` issues tomorrow's plan would need scored and what each is "
+        "missing. Draft TOMORROW in words against the calendar block, which is "
+        "TOMORROW's, and its `free_time`: which issues you would plan and "
+        "roughly where, and anything the operator should prepare tonight (an "
+        "early start, a conflict, a meeting with no agenda). Propose no calendar "
+        "change tonight: the morning plan blocks the time. When the conversation "
+        "has settled the outcomes, record them as ONE `plan.record_review` "
+        "proposal (`done` for each issue, and `actual_hours` only where the "
+        "operator said), following the conclude-before-you-propose rule: "
+        "conclude first, then propose from the resumed run. Never mark work done "
+        "on your own word. If `plan_review` says no plan is stored, say so, and "
+        "review the day from the tracker and the calendar alone; if it is "
+        "unavailable, say the review could not be read and why. Questions other "
+        "agents have put to the operator are theirs: say how many are open in "
+        "the Decisions Inbox and whose they are, and never restate or re-ask one."
     ),
     "check_in": (
         "This is the MID-DAY CHECK-IN: a REPLAN only when the day has slipped. "
@@ -460,8 +480,10 @@ _EA_FRAMING: dict[str, str] = {
         "work_block` and today's `plan_date`, and `work_blocks_not_listed`) with "
         "the time now. A block whose time has passed (it is in "
         "`work_blocks_not_listed`, or it ended before now) or which now overlaps "
-        "a commitment (see `conflicts`) is a SLIP. Whether the work in a passed "
-        "block was actually done is not recorded by the control plane yet: ASK "
+        "a commitment (see `conflicts`) is a SLIP. `plan` is today's stored "
+        "plan, the record of what was planned (or says that none is stored). "
+        "Whether the work in a passed block was actually done is recorded only "
+        "in the evening review: ASK "
         "the operator, and never assume it was done or that it was missed. Only "
         "when there is a slip, propose the replan as ONE proposal through "
         "`propose_calendar_change`: `calendar.update_event` on your OWN work "
@@ -487,8 +509,13 @@ _EA_FRAMING: dict[str, str] = {
         "report, so say the day is unknown and why. Say what cannot be ranked "
         "and why (the `unscored` issues and what each is missing). Give the "
         "count of questions open in the Decisions Inbox and whose they are, "
-        "and never restate or re-ask one. Then BLOCK THE TIME: propose the "
-        "day's work blocks as ONE proposal through `propose_calendar_change`, "
+        "and never restate or re-ask one. `plan` says whether a plan is "
+        "already stored for today: if one is, say what it holds and propose "
+        "another only when the operator asks to replan. Then STORE THE PLAN AND "
+        "BLOCK THE TIME as ONE proposal through `propose_calendar_change`: its "
+        "FIRST action is `plan.record_day` with today's date and the ranked "
+        "list (each issue key with its reason, and no numbers: the control "
+        "plane re-reads them from the tracker), followed by "
         "one `calendar.create_event` action per block. Each block lies inside a "
         "`free_time` stretch, is no longer than its issue's estimate and never "
         "shorter than the minimum block, carries `plan: {\"kind\": "
@@ -499,14 +526,16 @@ _EA_FRAMING: dict[str, str] = {
         "it is missing. Leave the rest of the free time free. The proposal "
         "carries the plan to the operator, who corrects it by approving, "
         "rejecting with feedback, or dismissing it: put the ranked list and the "
-        "blocks you proposed in its intent, say that nothing is on the calendar "
-        "until the operator approves, and do not call ask_operator in the same "
+        "blocks you proposed in its intent, say that nothing is stored or on "
+        "the calendar until the operator approves, and do not call ask_operator in the same "
         "turn; never imply that any time has been blocked, moved or reserved "
         "before you are told the change executed. If the day has no "
-        "`free_time` or the calendar is unknown, propose no blocks, say why, "
+        "`free_time` or the calendar is unknown, propose no blocks: the "
+        "proposal is then the `plan.record_day` action alone. Say why, "
         "and ask the operator to CORRECT the plan, not to supply one. If the "
         "`backlog` block is absent or unavailable, say you could not see the "
-        "backlog and why, propose no blocks, and ask what matters most today."
+        "backlog and why, propose no blocks and no plan, and ask what matters "
+        "most today."
     ),
     "week_ahead": (
         "This is the WEEK-AHEAD look — audit the coming week before it starts. "
@@ -619,7 +648,7 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     from central_command import events
     from central_command.config import settings
     from central_command.db import repo
-    from central_command.reports import ea_backlog, ea_calendar, ea_followups, ea_report
+    from central_command.reports import ea_backlog, ea_calendar, ea_followups, ea_plan, ea_report
     from central_command.runtime import attention, ea
 
     kind = str(params.get("kind") or "").strip()
@@ -692,6 +721,23 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     if backlog.get("reason") != "not configured":
         snapshot["backlog"] = backlog
 
+    # The stored day plan (the EA planning design, D6; DL-221 step 4a). The
+    # evening contact carries the REVIEW of today's plan (an outside read of the
+    # tracker and the calendar: degraded on an outage like the blocks above);
+    # the morning and mid-day contacts carry today's plan in brief form, or its
+    # absence, so the assistant knows whether one exists before proposing.
+    plan_today = ea_backlog._today()
+    if kind == "digest":
+        try:
+            snapshot["plan_review"] = await ea_plan.review(plan_today)
+        except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
+            snapshot["plan_review"] = {"available": False, "error": str(e)}
+    elif kind in ("morning_report", "check_in"):
+        try:
+            snapshot["plan"] = await ea_plan.brief(plan_today)
+        except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
+            snapshot["plan"] = {"available": False, "error": str(e)}
+
     brief = (
         f"{_EA_FRAMING[kind]}\n\n"
         "The block below is the control plane's own snapshot of the record over "
@@ -762,8 +808,30 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
            "means the read hit its limit; `items_omitted` counts ranked rows "
            "left out of this block. `available: false` means the backlog is "
            "UNKNOWN (`error` says why): say so, and never present a plan as if "
-           "you had read it.\n"
+           "you had read it. `padding` is the ratio of actual to estimated "
+           "hours from the recorded evening reviews (`padding_samples` of them; "
+           "1.0 until there are enough), by which every estimate is multiplied "
+           "when its latest start is worked out.\n"
            if "backlog" in snapshot else "")
+        + ("`plan` is today's STORED plan, the record the operator approved "
+           "(its ranked items with their reasons, the estimate and tier as the "
+           "tracker held them when it was stored), or `available: false` with "
+           "`reason: no plan stored`. A stored plan exists only once its "
+           "proposal executed; never describe a plan as stored otherwise.\n"
+           if "plan" in snapshot else "")
+        + ("`plan_review` is today's stored plan read against what the record "
+           "shows now: each planned item with its `planned` numbers, its "
+           "`tracker` status (`done` from the status category; `null` when the "
+           "tracker could not say, which is never done), its work `blocks` "
+           "from the plan ledger (`state` active with the times the calendar "
+           "holds now, or retired) and any `outcome` already recorded; "
+           "`blocks_not_on_plan`, `unplanned_outcomes`, and `unplanned_done` "
+           "(issues completed today that were not planned, with the search "
+           "that found them) or `unplanned_done_omitted` saying why it was "
+           "not asked. `available: false` with `reason: no plan stored` means "
+           "no plan was stored for today; with `error`, the review could not "
+           "be read.\n"
+           if "plan_review" in snapshot else "")
         + "\n"
         "```json\n" + json.dumps(snapshot, indent=2, default=str) + "\n```\n\n"
         "If this is worth the operator's attention AND you have a question only "
@@ -774,7 +842,7 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
         "conversation."
     )
     title = {
-        "digest": "End-of-day wrap-up", "check_in": "Check-in",
+        "digest": "Evening review", "check_in": "Check-in",
         "morning_report": "Morning report", "week_ahead": "Week ahead",
     }[kind]
 

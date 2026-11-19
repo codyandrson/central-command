@@ -23,8 +23,10 @@ not configured.
 
 THE RULE (D4, as built in step 2):
 
-- Latest start. The estimate is multiplied by `padding` (1.0 until the evening
-  review has recorded estimate against actual), turned into whole working days
+- Latest start. The estimate is multiplied by `padding` (the ratio of actual to
+  estimated hours the evening review recorded, `ea_plan.padding()`: 1.0 until
+  there are `plan_padding_min_samples` outcomes in the window, then clamped to
+  1.0-3.0), turned into whole working days
   as ceil(padded hours / hours_per_day), and counted back from the due date in
   plain calendar days, the due date itself being a working day:
   latest_start = due_date - (days - 1). A four-hour task due today has a latest
@@ -252,13 +254,22 @@ async def backlog() -> dict:
             **{field: custom.get(name) for field, name in names.items()},
         })
 
-    ranked = rank(rows, _today(), settings.plan_hours_per_day)
+    # Estimate against actual (D4, D6; step 4a): the evening review's recorded
+    # outcomes pad the estimate once there are enough of them (a Postgres read;
+    # `rank()` stays pure and takes the ratio as an argument).
+    from central_command.reports import ea_plan
+
+    today = _today()
+    pad = await ea_plan.padding(today)
+    ranked = rank(rows, today, settings.plan_hours_per_day, pad["ratio"])
     ordered = [r for t in TIERS for r in ranked["tiers"][t]]
     shown = ordered[:max(0, settings.plan_brief_items)]
     return {
         "available": True,
         "unit": settings.plan_value_unit,
         "hours_per_day": settings.plan_hours_per_day,
+        "padding": pad["ratio"],
+        "padding_samples": pad["samples"],
         "planning_fields": {
             "declared": declared_names, "missing": missing_names,
             **({"unreadable": unreadable} if unreadable else {}),

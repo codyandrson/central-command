@@ -323,6 +323,14 @@ def real_backlog(monkeypatch):
     monkeypatch.setattr(settings, "plan_hours_per_day", 6.0)
     monkeypatch.setattr(settings, "plan_brief_items", 25)
     monkeypatch.setattr(settings, "plan_backlog_limit", 200)
+    # The padding is the evening review's record (step 4a); these tests rank
+    # with the estimate as entered. tests/test_day_plan.py covers the padding.
+    from central_command.reports import ea_plan
+
+    async def no_padding(today=None):
+        return {"ratio": 1.0, "samples": 0, "window_days": 30, "min_samples": 5}
+
+    monkeypatch.setattr(ea_plan, "padding", no_padding)
 
 
 def _fake_jira(monkeypatch, rows, *, declared=_DECLARED, truncated=False, note=None):

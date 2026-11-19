@@ -9331,3 +9331,250 @@ async def retire_calendar_plan_event(
         return dict(r) if r else None
     finally:
         await conn.close()
+
+
+async def move_calendar_plan_event_date(
+    event_id: str, calendar_id: str = "primary", *, plan_date,
+) -> dict | None:
+    """Set an ACTIVE work block's local plan date (a moved block keeps its date
+    right, DL-221 step 4a). None when the ledger holds no active work block for
+    the event. Called only by the Executor's `calendar.update_event`."""
+    from datetime import date as _date
+
+    if isinstance(plan_date, str):
+        plan_date = _date.fromisoformat(plan_date)
+    conn = await _conn()
+    try:
+        r = await conn.fetchrow(
+            """
+            update calendar_plan_event set plan_date = $3
+             where calendar_id = $1 and event_id = $2 and retired_at is null
+               and kind = 'work_block'
+            returning *
+            """,
+            calendar_id, event_id, plan_date)
+        return dict(r) if r else None
+    finally:
+        await conn.close()
+
+
+async def calendar_plan_event_retired_by(event_id: str, calendar_id: str,
+                                         proposal_id: str) -> bool:
+    """Did `proposal_id` retire a ledger row of this event? (A re-run of the
+    same release is then a no-op, not a refusal.)"""
+    conn = await _conn()
+    try:
+        return bool(await conn.fetchval(
+            "select 1 from calendar_plan_event where calendar_id = $1 and event_id = $2 "
+            "and retired_by = $3 limit 1", calendar_id, event_id, proposal_id))
+    finally:
+        await conn.close()
+
+
+async def list_calendar_plan_events_for_date(plan_date, calendar_id: str | None = None,
+                                             *, include_retired: bool = True) -> list[dict]:
+    """Every ledger work block planned for `plan_date`, retired ones included
+    by default: the evening review reports a block that was deleted as retired,
+    not as never planned."""
+    from datetime import date as _date
+
+    if isinstance(plan_date, str):
+        plan_date = _date.fromisoformat(plan_date)
+    clauses, params = ["kind = 'work_block'", "plan_date = $1"], [plan_date]
+    if calendar_id is not None:
+        params.append(calendar_id)
+        clauses.append(f"calendar_id = ${len(params)}")
+    if not include_retired:
+        clauses.append("retired_at is null")
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select * from calendar_plan_event where " + " and ".join(clauses)
+            + " order by created_at, id", *params)
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+# --- the stored day plan and its outcomes (the EA planning design, D6; DL-221
+# step 4a). The ONLY writers are `record_day_plan` and `record_day_plan_outcomes`,
+# and their only callers are the Executor's `plan.record_day` and
+# `plan.record_review` handlers, after an approved action ran (a source walk in
+# tests/test_day_plan.py pins that). Rows are never deleted: a later record
+# supersedes an earlier one by a timestamp.
+
+def _plan_row(r) -> dict:
+    import json as _json
+
+    out = dict(r)
+    if isinstance(out.get("items"), str):
+        out["items"] = _json.loads(out["items"])
+    return out
+
+
+async def record_day_plan(*, plan_date, items: list[dict], proposal_id: str | None = None,
+                          action_key: str | None = None) -> dict:
+    """Store the day's plan and supersede the date's earlier ACTIVE plan, in one
+    transaction under a per-date advisory lock. A repeat of the SAME action
+    (`action_key`, DL-219) returns the plan its first attempt stored with
+    `already_existed: True` and supersedes nothing."""
+    import json as _json
+    from datetime import date as _date
+
+    if isinstance(plan_date, str):
+        plan_date = _date.fromisoformat(plan_date)
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            await conn.execute("select pg_advisory_xact_lock(hashtextextended($1, 0))",
+                               f"day_plan:{plan_date.isoformat()}")
+            if action_key:
+                existing = await conn.fetchrow(
+                    "select * from day_plan where action_key = $1", action_key)
+                if existing is not None:
+                    return {**_plan_row(existing), "already_existed": True,
+                            "superseded_id": None}
+            prior = await conn.fetchrow(
+                """
+                update day_plan set superseded_at = now()
+                 where plan_date = $1 and superseded_at is null
+                returning id
+                """, plan_date)
+            row = await conn.fetchrow(
+                """
+                insert into day_plan (plan_date, proposal_id, action_key, items)
+                values ($1, $2, $3, $4::jsonb)
+                returning *
+                """, plan_date, proposal_id, action_key, _json.dumps(items, default=str))
+            return {**_plan_row(row), "already_existed": False,
+                    "superseded_id": prior["id"] if prior else None}
+    finally:
+        await conn.close()
+
+
+async def day_plan_by_action_key(action_key: str) -> dict | None:
+    """The plan an earlier attempt of the same action stored, or None."""
+    conn = await _conn()
+    try:
+        r = await conn.fetchrow("select * from day_plan where action_key = $1", action_key)
+        return _plan_row(r) if r else None
+    finally:
+        await conn.close()
+
+
+async def get_day_plan(plan_date) -> dict | None:
+    """The ACTIVE stored plan for one local date, or None."""
+    from datetime import date as _date
+
+    if isinstance(plan_date, str):
+        plan_date = _date.fromisoformat(plan_date)
+    conn = await _conn()
+    try:
+        r = await conn.fetchrow(
+            "select * from day_plan where plan_date = $1 and superseded_at is null", plan_date)
+        return _plan_row(r) if r else None
+    finally:
+        await conn.close()
+
+
+async def record_day_plan_outcomes(*, plan_date, outcomes: list[dict],
+                                   proposal_id: str | None = None,
+                                   action_key: str | None = None) -> dict:
+    """Record the review's outcomes for one date, each replacing the ACTIVE row
+    of its (date, issue) by timestamp. `planned` is computed HERE from the
+    date's active stored plan, never taken from the caller. One transaction
+    under the date's lock; a repeat of the same action (`action_key`) returns
+    the rows its first attempt wrote with `already_existed: True`."""
+    from datetime import date as _date
+
+    if isinstance(plan_date, str):
+        plan_date = _date.fromisoformat(plan_date)
+    conn = await _conn()
+    try:
+        async with conn.transaction():
+            await conn.execute("select pg_advisory_xact_lock(hashtextextended($1, 0))",
+                               f"day_plan:{plan_date.isoformat()}")
+            if action_key:
+                existing = await conn.fetch(
+                    "select * from day_plan_outcome where action_key = $1 order by id",
+                    action_key)
+                if existing:
+                    return {"rows": [dict(r) for r in existing], "already_existed": True,
+                            "replaced": []}
+            plan = await conn.fetchrow(
+                "select items from day_plan where plan_date = $1 and superseded_at is null",
+                plan_date)
+            items = _plan_row(plan)["items"] if plan else []
+            on_plan = {str(i.get("issue_key")) for i in items}
+            rows, replaced = [], []
+            for o in outcomes:
+                key = str(o["issue_key"])
+                old = await conn.fetchrow(
+                    """
+                    update day_plan_outcome set superseded_at = now()
+                     where plan_date = $1 and issue_key = $2 and superseded_at is null
+                    returning id
+                    """, plan_date, key)
+                if old is not None:
+                    replaced.append(key)
+                r = await conn.fetchrow(
+                    """
+                    insert into day_plan_outcome
+                        (plan_date, issue_key, done, actual_hours, note, planned,
+                         proposal_id, action_key)
+                    values ($1, $2, $3, $4, $5, $6, $7, $8)
+                    returning *
+                    """,
+                    plan_date, key, bool(o["done"]),
+                    (float(o["actual_hours"]) if o.get("actual_hours") is not None else None),
+                    o.get("note"), key in on_plan, proposal_id, action_key)
+                rows.append(dict(r))
+            return {"rows": rows, "already_existed": False, "replaced": replaced}
+    finally:
+        await conn.close()
+
+
+async def list_day_plan_outcomes(plan_date) -> list[dict]:
+    """The ACTIVE outcome rows of one date, by issue key."""
+    from datetime import date as _date
+
+    if isinstance(plan_date, str):
+        plan_date = _date.fromisoformat(plan_date)
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select * from day_plan_outcome where plan_date = $1 and superseded_at is null "
+            "order by issue_key", plan_date)
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+async def plan_padding_samples(since, until) -> list[dict]:
+    """Estimate against actual, for the padding ratio of D4: every ACTIVE
+    outcome with `actual_hours` dated in `[since, until]`, joined to the same
+    date's ACTIVE stored plan for that issue's `estimate_hours` (null when the
+    plan has none). `{plan_date, issue_key, actual_hours, estimate_hours}`."""
+    from datetime import date as _date
+
+    since = _date.fromisoformat(since) if isinstance(since, str) else since
+    until = _date.fromisoformat(until) if isinstance(until, str) else until
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            """
+            select o.plan_date, o.issue_key, o.actual_hours,
+                   (select (item->>'estimate_hours')::double precision
+                      from day_plan p, jsonb_array_elements(p.items) item
+                     where p.plan_date = o.plan_date and p.superseded_at is null
+                       and item->>'issue_key' = o.issue_key
+                       and jsonb_typeof(item->'estimate_hours') = 'number'
+                     limit 1) as estimate_hours
+              from day_plan_outcome o
+             where o.superseded_at is null and o.actual_hours is not null
+               and o.plan_date between $1 and $2
+             order by o.plan_date, o.issue_key
+            """, since, until)
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()

@@ -2795,5 +2795,85 @@ hygiene, and how the test suite itself must be written. See
   ledger is refused rather than relabelled. The latest start keeps
   `plan_hours_per_day`: free time is computed for one day and no future day's
   free time is forecast. Steps 4 to 6 are not built.
-- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`
-- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D4, D5, D9, "Build order" 1 to 3); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`); `central_command/db/schema.sql` (`calendar_plan_event`); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)
+- **Note (2026-11-19, step 4a built):** The stored plan and the evening review
+  are built (design record D6, D4's padding, D9's evening row; PRD FR-54);
+  enrichment and every Jira write (the rest of step 4), the weekly and
+  quarterly contacts and the staffing agent are not. **The stored plan** is
+  the table `day_plan` (`plan_date` local, `proposal_id`, `action_key`, `items`
+  JSON, `created_at`, `superseded_at`), at most one ACTIVE plan per date by a
+  partial unique index, never deleted. It is written only by the Executor's new
+  gated `plan.record_day` (`date`, `items` of one to ten `{issue_key, reason}`,
+  each key once; an item carrying any other key, a number included, is refused
+  by its `ARG_SPECS` check in both tiers): the handler re-reads each issue at
+  execution with `jira.get_issue` (per key, because a JQL key list fails whole
+  on one deleted key), resolves the planning fields by name and tiers the row
+  with `ea_backlog.rank()` under the current padding, and stores `value`,
+  `lateness_loss`, `due_date`, `estimate_hours`, `tier`, `summary` and
+  `readable`; an issue the tracker answers it cannot read (a NO, or no tracker
+  configured) is stored with the numbers null and its `unreadable_reason`, and
+  named in the result line; a DOWN tracker re-raises with `jira` stamped on the
+  error, so the action parks on Jira although the registry entry is `local`. A
+  later plan for the date supersedes the earlier in one transaction under a
+  per-date advisory lock. Retry safety: the handler looks up `action_key()`
+  first and returns the plan its earlier attempt stored without reading the
+  tracker, and the insert checks the key again inside the transaction (a unique
+  index on `action_key`), so a retried execution ends with one plan. The
+  morning plan is ONE `propose_calendar_change` proposal whose FIRST action is
+  `plan.record_day`, then one `calendar.create_event` per block (checked end to
+  end through `tests/fake_world.py`, and a refused second block leaves the plan
+  and the first block on the record); with no free time it is the
+  `plan.record_day` action alone. **The outcome record** is the table
+  `day_plan_outcome` (`plan_date`, `issue_key`, `done`, `actual_hours`, `note`,
+  `planned`, `proposal_id`, `action_key`, `created_at`, `superseded_at`), one
+  ACTIVE row per (date, issue), written only by the new gated
+  `plan.record_review` (`date`, `outcomes` of `{issue_key, done, actual_hours?,
+  note?}`, at most 50); `planned` is computed in the transaction from the
+  date's active plan, so unplanned work is accepted and marked; a repeat of the
+  same action returns the rows it wrote. Both `plan.*` capabilities are
+  `human`, reversible (a later record supersedes; nothing is rewritten),
+  dependency `local`, with no target arguments, in the new `plan-propose` pack
+  (tool `propose_action`), which `EA_TEMPLATE` carries and `schema.sql` does
+  not seed. **The review** is `reports/ea_plan.review(date)`: each planned item
+  with its planned numbers, its tracker status read by key (`done` from the
+  status CATEGORY `done`, a new `status_category` field on the Jira client's
+  issue and search rows; `null` when the category is missing or the issue
+  cannot be read, never assumed done), its ledger work blocks (retired, or
+  active with the start and end the calendar holds now through
+  `calendar_facade.get_event`, `moved_off_day` when that start's local date is
+  another day, `calendar: not found` on the provider's NO) and its recorded
+  outcome; `blocks_not_on_plan`; `unplanned_outcomes`; and `unplanned_done`,
+  from ONE search: the backlog JQL with its single `statusCategory != Done`
+  clause turned to `= Done`, wrapped in parentheses, and `resolved` bounded to
+  the date (in the Jira account's time zone), less the planned keys, with the
+  JQL under `asked`; a backlog JQL without exactly one such clause, or with an
+  ORDER BY, or a search the tracker refuses, gives `unplanned_done_omitted`
+  with the reason. An outage of the tracker or the calendar raises and the
+  caller degrades the key. No stored plan is `{available: false, reason: no
+  plan stored}`. **The brief**: the `digest` contact carries `plan_review` for
+  today; `morning_report` and `check_in` carry `plan` (`ea_plan.brief`, the
+  stored plan's items with rank, reason, estimate and tier, or `no plan
+  stored`); the evening framing is the REVIEW, and records the settled
+  outcomes as one `plan.record_review` proposal after concluding; its task
+  title is "Evening review". **Padding**: `ea_plan.padding_ratio()`, pure, is
+  sum(actual hours) / sum(planned estimate hours) over the samples with both
+  numbers (actual >= 0, estimate > 0, finite), 1.0 below
+  `plan_padding_min_samples` (5), clamped to [1.0, 3.0], rounded to four
+  places; `padding()` reads the active outcomes with actual hours dated in the
+  last `plan_padding_window_days` (30) days, today included, joined to the same
+  date's active plan for the estimate. `ea_backlog.backlog()` passes it to
+  `rank()` and reports `padding` and `padding_samples`; `rank()` is unchanged.
+  **The ledger**: a new gated `calendar.release_event` (`event_id`, optional
+  `calendar_id`; `human`, reversible, target `event_id`, dependency `local`,
+  in `calendar-propose`) retires an active ledger row and changes nothing on
+  the calendar (no active row is refused; a re-run by the same proposal is a
+  no-op), and `calendar.adopt_event`'s risk text now names it as the way back;
+  `calendar.update_event` that changes the start of a ledger work block sets
+  the row's `plan_date` to the new start's local date in `ea_timezone`
+  (`repo.move_calendar_plan_event_date`). Decided beyond the design record: an
+  outcome needs no stored plan (unplanned work is real); the review reads
+  done-ness only from the status category; the brief form of the plan omits
+  the planned value and lateness loss (the morning backlog block carries the
+  current ones). Open question 3 of the record (whether the evening record
+  stays gated) is answered for now by building it gated, as proposed.
+- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`
+- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D4, D5, D6, D9, "Build order" 1 to 3 and the first half of 4); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)

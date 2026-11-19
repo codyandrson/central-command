@@ -492,7 +492,8 @@ def test_only_the_executor_writes_the_ledger():
         if rel in ("db/repo.py", "gateway/executor.py"):
             continue
         src = path.read_text(encoding="utf-8")
-        for name in ("record_calendar_plan_event", "retire_calendar_plan_event"):
+        for name in ("record_calendar_plan_event", "retire_calendar_plan_event",
+                     "move_calendar_plan_event_date"):
             if re.search(rf"\b{name}\(", src):
                 offenders.append((rel, name))
         if re.search(r"(insert into|update)\s+calendar_plan_event", src, re.I):
@@ -763,7 +764,7 @@ def test_the_morning_framing_blocks_the_day_as_one_proposal():
                    "never shorter than the minimum block", '"kind": "work_block"',
                    "names the issue key and its summary", "Block only ranked issues",
                    "an `unscored` issue gets no block", "Leave the rest of the free time free",
-                   "nothing is on the calendar until the operator approves",
+                   "nothing is stored or on the calendar until the operator approves",
                    "never imply that any time has been blocked",
                    "If the day has no `free_time` or the calendar is unknown, propose no blocks"):
         assert phrase in text, phrase
@@ -786,7 +787,7 @@ def test_the_charter_carries_the_calendar_doctrine():
     c = ea_profile.CHARTER
     for phrase in ("THE CALENDAR HAS THREE KINDS OF EVENT", "WORK BLOCK", "PLACEHOLDER",
                    "COMMITMENT", "only in the free time the control plane computed",
-                   "ONE proposal, one block per action",
+                   "ONE proposal: the stored plan first, then one block per action",
                    "You may propose moving what the ledger says is your own",
                    "never propose a change to a commitment unless the operator asks",
                    "offer to create them, or to adopt events the operator already keeps",

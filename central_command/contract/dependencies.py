@@ -212,7 +212,7 @@ def stamped_dependencies(exc: BaseException | None) -> tuple[str, ...]:
 # - `mail.*` and `email.*` ride the n8n façade;
 # - `autodiscovery.skip` reads the proxy's catalog;
 # - `mcp.*` runs in the sandbox pod;
-# - `catalog`, `charter`, `skill`, `memory`, `loe`, `work` write Postgres only (`local`);
+# - `catalog`, `charter`, `skill`, `memory`, `loe`, `work`, `plan` write Postgres only (`local`);
 # - `web.fetch` is the open web, not a dependency (`()`).
 
 
@@ -267,7 +267,15 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
     **_each((LOCAL,),
             "catalog.tag charter.update skill.create skill.doc_add "
             "memory.note_add memory.note_retire "
-            "loe.record_checkin loe.create loe.update loe.list work.bulk_dismiss"),
+            "loe.record_checkin loe.create loe.update loe.list work.bulk_dismiss "
+            # The stored day plan and its outcomes are Central Command's own
+            # tables (DL-221 step 4a). `plan.record_day` also re-reads the
+            # tracker for the planning numbers; a DOWN tracker there stamps
+            # `jira` on the error it re-raises, so the retry waits on Jira.
+            "plan.record_day plan.record_review "
+            # Releasing an event from the plan ledger reads and changes nothing
+            # on the calendar: it retires a Postgres row.
+            "calendar.release_event"),
 }
 
 

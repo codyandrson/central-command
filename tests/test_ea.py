@@ -89,9 +89,12 @@ async def test_the_ea_is_hired_as_a_full_roster_member():
     # is re-derived from the record, never from memory.
     # jira-read granted 2026-11-18 (the EA planning design, D2): the brief
     # carries the ranked backlog and the EA opens an issue it only summarises.
+    # plan-propose granted 2026-11-19 (the EA planning design, D6): the stored
+    # day plan and the evening review's outcomes, both gated.
     assert grants == ["activity-read", "ask-operator", "calendar-propose",
                       "calendar-read", "consult", "graph-propose", "graph-read",
-                      "jira-read", "loe-read", "mail-read", "note-propose", "record-read", "session-recall",
+                      "jira-read", "loe-read", "mail-read", "note-propose", "plan-propose",
+                      "record-read", "session-recall",
                       "skill-propose", "task-create"]
     assert "jira-propose" not in grants
 

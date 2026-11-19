@@ -233,7 +233,7 @@ erDiagram
 
 ## Goals (lines of effort)
 
-The operator's goal-tracking substrate: lines of effort, their append-only check-ins, and the archived versions of each line's scoring semantics; and the calendar plan ledger of the work blocks and placeholders the assistant created or adopted.
+The operator's goal-tracking substrate: lines of effort, their append-only check-ins, and the archived versions of each line's scoring semantics; the calendar plan ledger of the work blocks and placeholders the assistant created or adopted; and the stored day plans with the outcomes the evening review recorded.
 
 ```mermaid
 erDiagram
@@ -241,6 +241,12 @@ erDiagram
         bigserial id PK
         text kind
         timestamptz retired_at
+    }
+    day_plan {
+        bigserial id PK
+    }
+    day_plan_outcome {
+        bigserial id PK
     }
     line_of_effort {
         text id PK
@@ -355,6 +361,8 @@ erDiagram
 | `skill_doc` | Skills library | One version of a skill document (guidance or reference); a correction is a new version. |
 | `skill_doc_review` | Skills library | Review of one target release against the library: per-document merge status and the operator's verdict. |
 | `calendar_plan_event` | Goals (lines of effort) | Executor-written ledger of the calendar events the assistant created or adopted (work block or placeholder), retired by timestamp. |
+| `day_plan` | Goals (lines of effort) | Executor-written record of the day's approved plan (ranked issues, reasons, planning numbers re-read from the tracker), superseded by timestamp. |
+| `day_plan_outcome` | Goals (lines of effort) | Executor-written evening-review outcome per date and issue (done, actual hours, note, planned or not), superseded by timestamp. |
 | `line_of_effort` | Goals (lines of effort) | One of the operator's goals, with its versioned scoring semantics and display settings. |
 | `loe_checkin` | Goals (lines of effort) | Append-only check-in recording a light, confidence and summary under a stamped semantic version. |
 | `loe_semantic` | Goals (lines of effort) | Archived superseded semantic versions of a line of effort. |

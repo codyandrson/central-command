@@ -790,6 +790,12 @@ class Settings(BaseSettings):
     #                            window starts at now.
     #   plan_min_block_minutes-> a free stretch shorter than this is dropped, and
     #                            no work block is proposed shorter than it.
+    #   plan_padding_window_days -> the days of recorded review outcomes (step 4a,
+    #                            D6) the padding ratio of D4 reads: actual hours
+    #                            over planned estimate hours.
+    #   plan_padding_min_samples -> fewer outcomes than this with both numbers
+    #                            and the padding stays 1.0 (the estimate as
+    #                            entered); the ratio is clamped to 1.0-3.0.
     plan_backlog_jql: str = "assignee = currentUser() AND statusCategory != Done"
     plan_field_stakes: str = "Stakes"
     plan_field_value: str = "Value"
@@ -802,6 +808,8 @@ class Settings(BaseSettings):
     plan_day_start: str = "08:00"
     plan_day_end: str = "18:00"
     plan_min_block_minutes: int = 30
+    plan_padding_window_days: int = 30
+    plan_padding_min_samples: int = 5
 
     # Sandbox slice 1 (D-sandbox): the runner is a SEPARATE, credential-free
     # service (central_command/sandbox/runner.py) that drives ephemeral gVisor

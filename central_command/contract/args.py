@@ -20,6 +20,7 @@ nothing looked at arguments before approval.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from typing import TYPE_CHECKING, Callable
@@ -109,6 +110,98 @@ def _calendar_plan_shape(capability: str, args: dict) -> list[str]:
         problems.append(f"{where}.date must be the local plan date YYYY-MM-DD for a "
                         f"work block, got {day!r}")
     return problems
+
+
+# The stored day plan and its review (the EA planning design, D6; DL-221 step
+# 4a). The agent names the issues and its reasons; the planning NUMBERS are
+# re-read from the tracker by the Executor, so an item carrying its own value or
+# estimate is refused here rather than silently ignored.
+PLAN_DAY_MAX_ITEMS = 10
+PLAN_REVIEW_MAX_OUTCOMES = 50
+PLAN_NOTE_CHARS = 500
+
+
+def _iso_date(value) -> bool:
+    if not isinstance(value, str) or len(value) != 10:
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _plan_items(capability: str, args: dict, *, list_key: str, allowed: set[str],
+                limit: int, check_item) -> list[str]:
+    problems: list[str] = []
+    if "date" in args and not _iso_date(args["date"]):
+        problems.append(f"{capability}: date must be the local plan date YYYY-MM-DD, "
+                        f"got {args['date']!r}")
+    items = args.get(list_key)
+    if list_key not in args or items in (None, []):
+        return problems     # the required-argument check names it
+    if not isinstance(items, list):
+        return problems + [f"{capability}: {list_key} must be a list, got "
+                           f"{type(items).__name__}"]
+    if len(items) > limit:
+        problems.append(f"{capability}: {list_key} holds {len(items)} entries; at most "
+                        f"{limit}")
+    seen: set[str] = set()
+    for n, item in enumerate(items):
+        where = f"{capability}: {list_key}[{n}]"
+        if not isinstance(item, dict):
+            problems.append(f"{where} must be an object, got {type(item).__name__}")
+            continue
+        unknown = sorted(set(item) - allowed)
+        if unknown:
+            problems.append(f"{where} carries unknown key(s) {', '.join(unknown)} "
+                            f"(allowed: {', '.join(sorted(allowed))})")
+        key = item.get("issue_key")
+        if not isinstance(key, str) or not key.strip():
+            problems.append(f"{where}.issue_key is required")
+        elif key.strip() in seen:
+            problems.append(f"{where}.issue_key {key!r} is named twice; each issue once")
+        else:
+            seen.add(key.strip())
+        problems.extend(f"{where}.{p}" for p in check_item(item))
+    return problems
+
+
+def _day_item(item: dict) -> list[str]:
+    reason = item.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        return ["reason is required: why the issue is on today's list"]
+    return []
+
+
+def _review_item(item: dict) -> list[str]:
+    problems = []
+    if not isinstance(item.get("done"), bool):
+        problems.append(f"done must be true or false, got {item.get('done')!r}")
+    if "actual_hours" in item and item["actual_hours"] is not None:
+        h = item["actual_hours"]
+        if (isinstance(h, bool) or not isinstance(h, (int, float))
+                or not math.isfinite(h) or h < 0):
+            problems.append(f"actual_hours must be a number of hours >= 0, got {h!r}")
+    if "note" in item and item["note"] is not None:
+        note = item["note"]
+        if not isinstance(note, str):
+            problems.append(f"note must be text, got {type(note).__name__}")
+        elif len(note) > PLAN_NOTE_CHARS:
+            problems.append(f"note is {len(note)} characters; at most {PLAN_NOTE_CHARS}")
+    return problems
+
+
+def _plan_day_shape(capability: str, args: dict) -> list[str]:
+    return _plan_items(capability, args, list_key="items",
+                       allowed={"issue_key", "reason"}, limit=PLAN_DAY_MAX_ITEMS,
+                       check_item=_day_item)
+
+
+def _plan_review_shape(capability: str, args: dict) -> list[str]:
+    return _plan_items(capability, args, list_key="outcomes",
+                       allowed={"issue_key", "done", "actual_hours", "note"},
+                       limit=PLAN_REVIEW_MAX_OUTCOMES, check_item=_review_item)
 
 
 ARG_SPECS: dict[str, ArgSpec] = {
@@ -228,6 +321,14 @@ ARG_SPECS: dict[str, ArgSpec] = {
                                     enums={"kind": ("placeholder",)}),
     "calendar.update_event": ArgSpec(required=("event_id",)),
     "calendar.delete_event": ArgSpec(required=("event_id", "reason")),
+    # Releasing a placeholder or block (DL-221 step 4a): the ledger row is
+    # retired and the calendar is untouched. Whether the event HAS an active row
+    # is world state, checked by the Executor.
+    "calendar.release_event": ArgSpec(required=("event_id",)),
+    # The stored day plan and the review's outcome record (D6).
+    "plan.record_day": ArgSpec(required=("date", "items"), checks=(_plan_day_shape,)),
+    "plan.record_review": ArgSpec(required=("date", "outcomes"),
+                                  checks=(_plan_review_shape,)),
     # The rationale is what the operator weighs a charter edit by, and the
     # record of why an agent's standing rules changed (GATE-009).
     "charter.update": ArgSpec(required=("agent_id", "content", "rationale")),

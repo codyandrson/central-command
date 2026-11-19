@@ -1,7 +1,7 @@
 # The executive assistant plans the operator's work: a ranked backlog, a blocked calendar, a daily and weekly rhythm
 
-> **Status:** partial — steps 1 to 3 of six shipped (v2.97.0: the brief fix, the budget default, the rationing text; v2.98.0: the ranked backlog, the planning charter, the morning plan; v2.99.0: free time, the calendar ledger, work blocks, the replan; DL-221, FR-54); steps 4 to 6 not built
-> **As-built:** `central_command/reports/ea_backlog.py`, `central_command/reports/ea_calendar.py`, `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/gateway/executor.py`, `central_command/db/schema.sql`
+> **Status:** partial — steps 1 to 3 and the first half of step 4 shipped (v2.97.0 to v2.100.0: the brief fix, the ranked backlog, the planning charter, free time, the calendar ledger and work blocks, the stored day plan, the evening review, estimate against actual; DL-221, FR-54); enrichment (step 4), steps 5 and 6 not built
+> **As-built:** `central_command/reports/ea_backlog.py`, `central_command/reports/ea_plan.py`, `central_command/reports/ea_calendar.py`, `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/gateway/executor.py`, `central_command/db/schema.sql`
 
 **Date:** 2026-11-18 · **Decisions:** the operator's, in the design discussion of this date, except where a section says "proposed" or "open".
 
@@ -318,6 +318,39 @@ D4's padding uses.
 Proposed: the review's record is written the way a line-of-effort check-in is
 written today, as a gated proposal. Open: whether one more approval each
 evening is acceptable, or whether this is a write the operator relaxes.
+
+**As built (step 4a).** Two tables, written only by the Executor and never
+deleted from. `day_plan` (local `plan_date`, the proposal, `items` JSON,
+`created_at`, `superseded_at`; one active plan per date) is written by the
+gated `plan.record_day` (`date`, one to ten `{issue_key, reason}`): the
+handler re-reads each issue from the tracker at execution (`jira.get_issue` by
+key, tiered by `ea_backlog.rank()`) and stores the value, lateness loss, due
+date, estimate hours and tier it found, never numbers the agent wrote; an
+issue the tracker cannot read is stored with the numbers null and named; a
+retry under the same action key returns the stored plan. The morning plan's
+proposal carries `plan.record_day` first and the work-block creates after it,
+so one approval stores the plan and blocks the time. `day_plan_outcome` (date,
+issue, done, actual hours, note, `planned`, the proposal; one active row per
+date and issue) is written by the gated `plan.record_review`; an outcome for
+an issue that was not planned is accepted and marked. Both are in a new
+`plan-propose` pack, reversible because a later record supersedes. The review
+is `reports/ea_plan.review()`: per planned item, its planned numbers, its
+tracker status by key (done is the status category `done`; an issue that
+cannot be read is never assumed done), its ledger work blocks as the calendar
+holds them now (or retired), and any recorded outcome; plus the issues
+completed that day off the plan, from one search that turns the backlog JQL's
+`statusCategory != Done` into `= Done` and bounds `resolved` to the date
+(omitted, with the reason, when the JQL cannot be turned around). The evening
+contact carries it as `plan_review` and is framed as the review; the morning
+and mid-day contacts carry today's stored plan as `plan`. D4's padding is
+built: sum of actual over sum of planned estimate hours across the outcomes of
+the last 30 days that carry both (`plan_padding_window_days`), 1.0 below 5 of
+them (`plan_padding_min_samples`), clamped to 1.0-3.0. Open question 3 is
+answered for now by building the record gated, as proposed. A gated
+`calendar.release_event` undoes an adoption (or keeps a block as an ordinary
+event) without touching the calendar, and an update that moves a work block's
+start moves its plan date with it. Enrichment (D8) and every Jira write are the
+next step.
 
 ### D7. The "how to work with me" guide
 

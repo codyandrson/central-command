@@ -441,6 +441,16 @@ def _assignee(fields: dict) -> str | None:
     return a.get("displayName") or a.get("emailAddress") or None
 
 
+def _status_category(fields: dict) -> str | None:
+    """The status's CATEGORY key (`new`, `indeterminate`, `done`), which both
+    products nest inside the `status` field; None when the response carries
+    none. A status NAME is the workflow's own word ("Closed", "Shipped"); the
+    category is what "done" means across workflows (the EA's review, DL-221)."""
+    cat = (fields.get("status") or {}).get("statusCategory")
+    key = cat.get("key") if isinstance(cat, dict) else None
+    return key if isinstance(key, str) and key else None
+
+
 def _estimate_hours(fields: dict) -> float | None:
     """The original estimate in hours, or None when unset (see SEARCH_FIELDS).
 
@@ -622,6 +632,7 @@ async def get_issue(issue_key: str) -> dict:
         "description": desc,
         "priority": (f.get("priority") or {}).get("name"),
         "status": (f.get("status") or {}).get("name"),
+        "status_category": _status_category(f),
         "issue_type": (f.get("issuetype") or {}).get("name"),
         "due_date": f.get("duedate"),
         "estimate_hours": _estimate_hours(f),
@@ -687,6 +698,7 @@ async def search_issues(jql: str, limit: int | None = None) -> dict:
                 "issue_key": it["key"],
                 "summary": f.get("summary"),
                 "status": (f.get("status") or {}).get("name"),
+                "status_category": _status_category(f),
                 "issue_type": (f.get("issuetype") or {}).get("name"),
                 "labels": f.get("labels") if isinstance(f.get("labels"), list) else [],
                 "due_date": f.get("duedate"),

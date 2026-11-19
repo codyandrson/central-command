@@ -1096,7 +1096,8 @@ REGISTRY: list[Capability] = [
             "row saying an existing event is the assistant's placeholder, which "
             "lets it propose moving that event later (every move is still a gated "
             "proposal). The row is never deleted; it is retired by a timestamp "
-            "when the event is deleted through the gate"
+            "when the event is deleted through the gate, or undone without "
+            "touching the event by calendar.release_event"
         ),
         holder="Executor",
         route=("integrations/calendar_facade.py get_event (the existence read: n8n "
@@ -1111,6 +1112,84 @@ REGISTRY: list[Capability] = [
             "in the ledger is refused unless this same proposal wrote its row (a "
             "re-execution is a no-op). `kind` is fixed to placeholder; work "
             "blocks enter the ledger only when the Executor creates them."
+        ),
+    ),
+    Capability(
+        name="calendar.release_event",
+        target_args=("event_id",),
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="reversible",
+        risk=(
+            "internal — changes nothing on the calendar; it retires the event's "
+            "plan-ledger row, so the event becomes an ordinary commitment the "
+            "assistant may no longer propose to move. A wrong release is undone "
+            "by adopting the event again"
+        ),
+        holder="Executor",
+        route="db/repo.py retire_calendar_plan_event (no calendar call)",
+        arguments=["event_id", "calendar_id?"],
+        description=(
+            "Release an event from the plan ledger (the EA planning design, D5; "
+            "DL-221 step 4a): a wrong adoption, or a work block or placeholder the "
+            "operator wants to keep as an ordinary event, is undone without "
+            "deleting the event. Retirement is a timestamp and the releasing "
+            "proposal; the row is never deleted. Refused, nothing written, when "
+            "the ledger holds no active row for the event."
+        ),
+    ),
+    # --- the stored day plan and its review (DL-221 step 4a) ------------------
+    Capability(
+        name="plan.record_day",
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="reversible",
+        risk=(
+            "internal — stores the day's ranked plan in Central Command's own "
+            "table, the record the evening review compares against; nothing "
+            "outside changes. A later plan for the same date supersedes it by a "
+            "timestamp, so a wrong plan is corrected by the next one, never "
+            "rewritten or deleted"
+        ),
+        holder="Executor",
+        route=("integrations/jira.py get_issue (the planning numbers, re-read per "
+               "issue at execution) → db/repo.py record_day_plan (day_plan table)"),
+        arguments=["date", "items ([{issue_key, reason}], 1 to 10)"],
+        description=(
+            "Store the day's plan (the EA planning design, D6): the local date and "
+            "the ranked issues with the reason for each. The planning numbers "
+            "(value, lateness loss, due date, estimate hours, tier) are NOT the "
+            "agent's: the Executor re-reads each issue from the tracker at "
+            "execution and stores what it held then; an issue it cannot read is "
+            "stored with the numbers null and named in the result. Supersedes the "
+            "date's earlier plan; idempotent on the action key. The morning plan "
+            "carries it as the FIRST action, before the day's work-block creates."
+        ),
+    ),
+    Capability(
+        name="plan.record_review",
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="reversible",
+        risk=(
+            "internal — records, per issue, whether the day's work was done and "
+            "how long it took, as the operator reported it. The actual hours feed "
+            "the estimate padding of the ranking; a wrong outcome is replaced by a "
+            "later record for the same date and issue, never rewritten or deleted"
+        ),
+        holder="Executor",
+        route="db/repo.py record_day_plan_outcomes (day_plan_outcome table)",
+        arguments=["date", "outcomes ([{issue_key, done, actual_hours?, note?}])"],
+        description=(
+            "Record the evening review's outcomes for one date (the EA planning "
+            "design, D6): per issue, done or not, the actual hours and a short "
+            "note, the operator's own account confirmed by approving. An issue "
+            "that was not on that date's stored plan is accepted and stored as "
+            "unplanned. Each row replaces the earlier record for the same date "
+            "and issue; idempotent on the action key."
         ),
     ),
     # --- lines of effort (2026-08-12) -----------------------------------------
