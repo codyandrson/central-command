@@ -585,7 +585,19 @@ _EA_FRAMING: dict[str, str] = {
         "blocks to the operator: put the priorities and the blocks in its "
         "intent, say nothing is on the calendar until the operator approves, "
         "and do not call ask_operator in the same turn. Never propose a change "
-        "to a commitment unless the operator asked for it. Questions other "
+        "to a commitment unless the operator asked for it. Read `delegated`, "
+        "when it is present, back as what the operator is waiting on from "
+        "other people: what is overdue, and what has gone quiet. When the plan "
+        "involves work for other people (a `delegated` block is present, or the "
+        "operator raises who should take something), ask the team's staffing "
+        "agent (`staffing_agent`) through `consult_agent` who should take it "
+        "and whether they have room, and carry its recommendation, with its "
+        "evidence, into the conversation. Never recommend an assignee from your "
+        "own judgment. When the operator has decided who takes what, consult the "
+        "staffing agent again with that decision, and it proposes the "
+        "assignments; you propose none. If the brief carries no "
+        "`staffing_agent`, say there is no staffing agent on the roster and "
+        "leave the assignment to the operator. Questions other "
         "agents have put to the operator are theirs: say how many are open in "
         "the Decisions Inbox and whose they are, and never restate or re-ask "
         "one."
@@ -741,8 +753,15 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     from central_command import events
     from central_command.config import settings
     from central_command.db import repo
-    from central_command.reports import ea_backlog, ea_calendar, ea_followups, ea_plan, ea_report
-    from central_command.runtime import attention, ea
+    from central_command.reports import (
+        ea_backlog,
+        ea_calendar,
+        ea_followups,
+        ea_plan,
+        ea_report,
+        ea_team,
+    )
+    from central_command.runtime import attention, ea, staffing_profile
 
     kind = str(params.get("kind") or "").strip()
     if kind not in EA_CONTACT_KINDS:
@@ -813,6 +832,29 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
         backlog = {"available": False, "error": str(e)}
     if backlog.get("reason") != "not configured":
         snapshot["backlog"] = backlog
+
+    # What the operator is waiting on from other people (the EA planning
+    # design, D2's `delegated`; DL-221 step 6). Every kind that carries the
+    # backlog carries it, degraded on failure like the blocks above; omitted
+    # when the tracker is not configured, the setting is empty, or nothing is
+    # delegated, so a deployment with no team sees no block and no mention.
+    try:
+        delegated = await ea_team.delegated()
+    except Exception as e:  # noqa: BLE001 — degrade, never lose the contact
+        delegated = {"available": False, "error": str(e)}
+    if delegated.get("error") or (delegated.get("available") and delegated.get("count")):
+        snapshot["delegated"] = delegated
+
+    # Who the team's staffing agent is (D10), by the template it was hired
+    # from: the weekly plan's assignment questions go to it through a consult.
+    # Present only when one is on the roster; the framing says what to do
+    # when it is absent.
+    if kind == "week_ahead":
+        staffing = [a for a in await repo.list_agents(include_retired=False)
+                    if a.get("template") == staffing_profile.TEMPLATE_ID]
+        if staffing:
+            snapshot["staffing_agent"] = {"id": staffing[0]["id"],
+                                          "name": staffing[0]["name"]}
 
     # The stored day plan (the EA planning design, D6; DL-221 step 4a). The
     # evening contact carries the REVIEW of today's plan (an outside read of the
@@ -934,6 +976,20 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
            "1.0 until there are enough), by which every estimate is multiplied "
            "when its latest start is worked out.\n"
            if "backlog" in snapshot else "")
+        + ("`delegated` is the issues the operator is WAITING ON from other "
+           "people, read from the tracker: each with its `assignee`, `status`, "
+           "`due_date`, `overdue` (and `days_overdue`) and `days_since_update`, "
+           "overdue first, then soonest due, then those with no due date; "
+           "`count` and `overdue` are the totals, `items_omitted` the rows left "
+           "out of this block and `truncated` that the read hit its limit. Read "
+           "it back as what the operator is waiting on: what is overdue, and "
+           "what has gone quiet (the longest without an update). It says what "
+           "the tracker shows, not why: ask, never guess. `available: false` "
+           "means it is UNKNOWN (`error` says why).\n"
+           if "delegated" in snapshot else "")
+        + ("`staffing_agent` is the team's staffing agent on the roster (its "
+           "`id` is the one to consult).\n"
+           if "staffing_agent" in snapshot else "")
         + ("`plan` is today's STORED plan, the record the operator approved "
            "(its ranked items with their reasons, the estimate and tier as the "
            "tracker held them when it was stored), or `available: false` with "

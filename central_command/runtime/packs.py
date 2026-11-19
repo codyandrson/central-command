@@ -202,11 +202,11 @@ PACKS: dict[str, Pack] = {
         name="jira-read",
         description=("Read live Jira state: projects, a project's issue types, one "
                      "issue, JQL search, legal transitions, custom fields, the "
-                     "backlog's planning gaps, users (filters, dashboards, "
-                     "gadgets on Cloud)."),
+                     "backlog's planning gaps, the team's load, users (filters, "
+                     "dashboards, gadgets on Cloud)."),
         tool_names=("jira_get_issue", "jira_search_issues", "jira_get_transitions",
                     "jira_list_projects", "jira_list_issue_types", "jira_list_fields",
-                    "jira_planning_gaps", "jira_find_users",
+                    "jira_planning_gaps", "jira_team_load", "jira_find_users",
                     "jira_list_filters",
                     "jira_list_dashboards", "jira_list_gadgets"),
     ),

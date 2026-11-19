@@ -1633,6 +1633,27 @@ REGISTRY: list[Capability] = [
         ),
     ),
     Capability(
+        name="jira.team_load",
+        kind="read",
+        gate="ungated read",
+        default_gate="none",
+        risk="none to the world",
+        holder="agents (jira_team_load tool)",
+        route=("reports/ea_team.py load → integrations/jira.py searchIssues with "
+               "plan_team_jql (bounded by plan_team_limit), and a second search "
+               "with its assignee clause turned round for the unassigned count"),
+        arguments=[],
+        description=(
+            "The team's load computed in code (the EA planning design, D10; "
+            "DL-221 step 6): per assignee, open, in progress, overdue, due in the "
+            "next 7 and 14 days, estimates and the unestimated count, the oldest "
+            "overdue issue; the unassigned count and the totals; what the counts "
+            "cannot show (work that is not in the tracker). Capacity READ live at "
+            "decision time (DL-176), so an agent told never to guess a workload "
+            "can read it."
+        ),
+    ),
+    Capability(
         name="jira.search_issues",
         kind="read",
         gate="ungated read",

@@ -28,7 +28,7 @@ PROFILE_MODULES = (
     "auditor_profile", "coach_profile", "ea_profile", "editor_profile",
     "graph_auditor_profile", "graph_curator_profile",
     "litellm_manager_profile", "mcp_manager_profile", "orchestrator_profile",
-    "steward_profile",
+    "staffing_profile", "steward_profile",
 )
 
 

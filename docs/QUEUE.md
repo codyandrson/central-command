@@ -271,6 +271,34 @@ The agent needs the `jira-read` pack (for `jira_planning_gaps`) and
 `jira-propose` (which carries `jira.set_planning_fields`); the founding
 tracker agent holds both.
 
+## The staffing agent's weekly load report
+
+The staffing agent (the EA planning design's step 6, DL-221; DL-176) is a hire
+template, `Staffing agent` in the cockpit's hire menu, and nothing seeds it or
+its schedule: a deployment with no team never has one. Once you have hired it,
+give it its weekly load report as a `task.create` schedule in the cockpit (born
+disabled like every schedule; enabling it is your click). Its parameters, with
+`<staffing-agent-id>` replaced by the id the hire gave it (on the Agents page)
+and the cron and time zone yours to choose:
+
+```json
+{"agent_id": "<staffing-agent-id>", "title": "Weekly team load report", "instructions": "Weekly team load report: (1) call jira_team_load; (2) report who is overloaded and who has room, what is overdue and with whom (each person's oldest overdue issue), and what has no owner (the unassigned count), with the numbers the tool returned and what it says they cannot show; (3) propose nothing unless a reassignment is clearly warranted, and then as ONE proposal with one jira.assign_issue action per issue, each with its reason in the intent and the assignee's user id read from jira_find_users. If the tool says the tracker is not configured or the load could not be read, say so plainly and propose nothing."}
+```
+
+with a cron trigger such as `{"expr": "0 8 * * 1", "tz": "America/Denver"}`
+(08:00 on Mondays). The instructions alone, for pasting into the schedule's
+instructions field:
+
+```text
+Weekly team load report: (1) call jira_team_load; (2) report who is overloaded and who has room, what is overdue and with whom (each person's oldest overdue issue), and what has no owner (the unassigned count), with the numbers the tool returned and what it says they cannot show; (3) propose nothing unless a reassignment is clearly warranted, and then as ONE proposal with one jira.assign_issue action per issue, each with its reason in the intent and the assignee's user id read from jira_find_users. If the tool says the tracker is not configured or the load could not be read, say so plainly and propose nothing.
+```
+
+`jira_team_load` reads `CC_PLAN_TEAM_JQL` (default `statusCategory != Done AND
+assignee is not EMPTY`) up to `CC_PLAN_TEAM_LIMIT` (default 500) issues, and
+counts the unassigned by the same JQL with its `assignee is not EMPTY` clause
+turned round. The template grants the packs the report needs (`jira-read`,
+`jira-propose`).
+
 ## The planning fields in Jira
 
 The EA's ranking reads four custom fields by their display NAMES

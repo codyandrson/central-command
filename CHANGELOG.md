@@ -4,6 +4,39 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-19 — v2.103.0: A staffing agent recommends who takes work, and the executive assistant carries its recommendation into the plan
+
+Step 6, the last, of the EA-planning design (DL-221, FR-54, FR-55; design record
+`docs/superpowers/specs/2026-11-18-ea-planning-design.md`). It builds the agent the 2026-08-21 staffing
+record decided on (DL-176): people are `Person` entities in the graph, load is read live from the
+tracker, and one agent proposes assignments through the gate.
+
+- **A staffing agent, as a hire template.** It is hired in the cockpit and seeded nowhere, so a
+  deployment with no team never has one; at most one can be active. For every recommendation it says
+  what it found on three things: capability (from the graph, cited), current load (from the tracker,
+  treated as a prompt for a question and never a measurement), and development value. Its charter names
+  the trap of loading the strongest people. It proposes `jira.assign_issue` for the operator to approve
+  and never assigns on its own word.
+- **A team-load read tool.** `jira_team_load` (in `jira-read`) returns, per assignee and computed in
+  code, open, in-progress and overdue issues, what is due in the next 7 and 14 days, estimate totals and
+  the oldest overdue issue, with the unassigned count and a line saying what the numbers cannot show.
+  The search is `CC_PLAN_TEAM_JQL`, bounded by `CC_PLAN_TEAM_LIMIT` (default 500).
+- **What the operator is waiting on.** The executive assistant's brief carries `delegated`: issues the
+  operator is waiting on from other people (`CC_PLAN_DELEGATED_JQL`), overdue first, with days since the
+  last update. It is absent when there is nothing, so a deployment with no team sees no mention of it.
+- **One planning conversation.** In the weekly plan the executive assistant consults the staffing agent
+  about who should take work and carries its recommendation, with its evidence, to the operator; it
+  never recommends an assignee from its own judgment. With no staffing agent on the roster it says so
+  and leaves assignment to the operator.
+- Hire templates can now fix the roster role line, make the hire consultable, and allow one per team.
+
+For an operator: nothing changes on a deployment with no team. On a deployment with one, hire the
+staffing agent from the cockpit; a ready-to-paste weekly load-report schedule is in `docs/QUEUE.md`, "The
+staffing agent's weekly load report" (no schedule is seeded, since the agent may not exist). 107
+capabilities. Proven against faked trackers and a deterministic model only: the quality of its
+recommendations, the default JQL on a real tracker and the consult round trip on a real model can only
+be proven at a deployment with a real team.
+
 ## 2026-11-19 — v2.102.0: The executive assistant plans the week and reviews the quarter, from blocks the control plane computes
 
 Step 5 of the EA-planning design (DL-221, FR-54; design record

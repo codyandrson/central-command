@@ -167,6 +167,16 @@ async def hire_agent(body: HireIn) -> dict:
     if not packs:
         raise HTTPException(422, "an agent cannot be hired without capability grants")
 
+    if tpl.one_per_team:
+        # One staffing agent per team (the EA planning design, D10): a second
+        # would be a second voice on who takes the same work. A RETIRED one
+        # does not count; reactivating it is the way back to the old one.
+        held = [a["id"] for a in await repo.list_agents(include_retired=False)
+                if a.get("template") == tpl.id]
+        if held:
+            raise HTTPException(409, f"the team already has an active agent hired "
+                                     f"from {tpl.id!r}: {', '.join(held)}")
+
     agent_id = agent_id_for(body.name)
     charter = tpl.render(name=body.name.strip(), mission=body.mission.strip(),
                          packs=packs)
@@ -174,7 +184,8 @@ async def hire_agent(body: HireIn) -> dict:
         row = await repo.hire_agent(
             agent_id, body.name.strip(), tpl.role_for(body.mission.strip()),
             charter, packs, template=tpl.id,
-            taskable=tpl.taskable, conversational=tpl.conversational,
+            taskable=tpl.taskable, consultable=tpl.consultable,
+            conversational=tpl.conversational,
         )
     except ValueError as e:
         raise HTTPException(409, str(e))

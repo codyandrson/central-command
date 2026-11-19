@@ -1,8 +1,9 @@
 # Human-team staffing — the humans are graph data, the staffing is an agent
 
-> **Status:** open — doctrine decided, not scheduled; no staffing agent or `Person`-entity query mechanism exists in code — nothing built
-> **As-built:** `docs/decisions/process.md` (DL-176), `docs/PRD.md`
+> **Status:** implemented — the staffing agent this doctrine decided was built on 2026-11-19 as step 6 of the EA planning design (DL-221, FR-55), proven against fakes only until a deployment with a real team runs it
+> **As-built:** `central_command/runtime/staffing_profile.py`, `central_command/runtime/templates.py`, `central_command/reports/ea_team.py`, `central_command/runtime/tools.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/api/routes.py`, `docs/decisions/process.md` (DL-176), `docs/PRD.md`
 > **As-built note (2026-09-20):** Doctrine decided, not scheduled — human roster/competency as graph queries over `Person` entities, capacity from live Jira reads, assignment as one staffing agent proposing through the normal gate; cold start seeded by the onboarding flow. Waits on real team traffic at the work transition; nothing of this record's own mechanism has been built.
+> **As-built note (2026-11-19):** Built as step 6 of the EA planning design (`docs/superpowers/specs/2026-11-18-ea-planning-design.md` D10; DL-221, FR-55). Decision 1: the people stay `Person` entities, read with the agent's graph search tools; no roster table. Decision 2: capacity is the `jira_team_load` read (`reports/ea_team.py`), computed in code at decision time and never stored. Decision 3: ONE agent, a hire-menu template (`TEMPLATES["staffing"]`, charter in `runtime/staffing_profile.py`) the operator hires in the cockpit, at most one ACTIVE, never seeded; it proposes `jira.assign_issue` through the gate, and its charter carries the consult-the-expert pattern and the trap of loading the strongest people. Decision 4: unchanged machinery (rejections and coaching). Decision 5: the existing team tour; nothing new seeds the graph. It meets the executive assistant as a consultable teammate: the assistant owns the planning conversation and asks it who should take what.
 
 _Design record written 2026-08-21 from a design discussion with the operator. The
 problem: processing emails/chats yields a well-populated graph and a pile of

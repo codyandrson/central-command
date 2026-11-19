@@ -84,6 +84,9 @@ TOOL_DEPENDENCY: dict[str, tuple[str, ...]] = {
     # The backlog's planning gaps (DL-221 step 4b): the ranked backlog's own
     # Jira read (`ea_backlog`), plus the padding's Postgres read, which is local.
     "jira_planning_gaps": ("jira",),
+    # The team's load (DL-221 step 6, D10): one bounded search by
+    # `plan_team_jql`, plus the unassigned count's second search (`ea_team`).
+    "jira_team_load": ("jira",),
     # --- Confluence -----------------------------------------------------------
     "confluence_list_spaces": ("confluence",),
     "confluence_get_page": ("confluence",),
@@ -236,7 +239,7 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
     **_each((JIRA,),
             "jira.set_due_date jira.create_issue jira.add_comment "
             "jira.update_attributes jira.set_fields jira.set_planning_fields "
-            "jira.planning_gaps jira.link_issues "
+            "jira.planning_gaps jira.team_load jira.link_issues "
             "jira.delete_link jira.assign_issue jira.delete_issue "
             "jira.transition_issue jira.create_filter jira.create_dashboard "
             "jira.create_project jira.get_issue jira.search_issues "

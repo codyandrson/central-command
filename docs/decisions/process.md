@@ -1567,6 +1567,16 @@ hygiene, and how the test suite itself must be written. See
   giftable is a consequence, not a goal). The operator's name is asked in
   the cockpit, and the assistant-hosted tour records team and environment
   facts as gated episodes.
+- **Note (2026-11-19):** The staffing agent this entry decided is built, as
+  step 6 of the EA planning design (DL-221; PRD FR-55): a hire-menu template the
+  operator hires in the cockpit (`TEMPLATES["staffing"]` in
+  `central_command/runtime/templates.py`, charter in
+  `central_command/runtime/staffing_profile.py`; never seeded, one at a time),
+  reading capability from the graph's `Person` entities, load live from the
+  tracker through `jira_team_load` (`central_command/reports/ea_team.py`), and
+  proposing assignments as gated `jira.assign_issue` proposals; the executive
+  assistant consults it about who takes what. The onboarding seed of the org
+  chart and competency map is the existing team tour; nothing new seeds it.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-08-21-human-team-staffing-design.md; docs/superpowers/specs/2026-08-21-setup-onboarding-design.md; docs/superpowers/specs/2026-08-21-work-transition-compatibility-design.md; docs/superpowers/specs/2026-08-22-expert-team-scaling-design.md
 
@@ -3010,5 +3020,69 @@ hygiene, and how the test suite itself must be written. See
   date does not serve it; an unscored issue that has an estimate is measured,
   one without is `unestimated`; the test suite holds `ea_plan.deadlines`
   unconfigured like the backlog read.
-- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`, `tests/test_planning_fields.py`, `tests/test_ea_week_quarter.py`
-- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D3, D4, D5, D6, D8, D9, "Build order" 1 to 5); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`, `_jira_set_planning_fields`); `central_command/integrations/jira.py` (`set_planning_fields`, `create_issue`); `central_command/runtime/packs.py` (`_SET_PLANNING_FIELDS`); `central_command/runtime/tools.py` (`jira_planning_gaps`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`, the `jira-hygiene` seed); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`)
+- **Note (2026-11-19, step 6 built):** The staffing agent and the `delegated`
+  block are built (design record D10, D2's `delegated`; PRD FR-55, and FR-54's
+  six steps are now all built); DL-176's staffing doctrine holds unchanged.
+  **The agent** is a hire-menu template, `TEMPLATES["staffing"]`
+  (`runtime/templates.py`), not a purpose-built loadout: the operator hires it
+  from the cockpit and nothing else does, so it is not seeded in `schema.sql`
+  and no startup path registers it, and a fresh database has none. Its charter
+  is a finished document all the same (`runtime/staffing_profile.py`, filled
+  with the operator's name for the hire and their words for it). Three new
+  `HireTemplate` fields carry what the menu's general skeletons did not need:
+  `role` (a fixed roster line, "the team's staffing agent: ...", which every
+  teammate's YOUR TEAM section shows), `consultable` (the hire route passes it;
+  every other menu entry stays not consultable as before) and `one_per_team`
+  (the hire route answers 409 while an ACTIVE agent holds the template; a
+  retired one does not count). Packs: `graph-read`, `jira-read`, `jira-propose`,
+  `ask-operator`, `record-read`, `task-create`, `session-recall`,
+  `skill-propose`, `note-propose`; no `consult` (it is asked, not asking) and no
+  `graph-propose`. **The load read** is `jira_team_load` (`jira-read`;
+  `@parkable_read`, `TOOL_DEPENDENCY` `jira`; registry row `jira.team_load`,
+  `CAPABILITY_DEPENDENCY` `jira`): `reports/ea_team.load()`, one search by the
+  new `plan_team_jql` (default `statusCategory != Done AND assignee is not
+  EMPTY`) up to the new `plan_team_limit` (500), turned per assignee by the pure
+  `team_load()` into `open`, `in_progress` (status category `indeterminate`),
+  `overdue` (due before today; due today is not), `due_next_7` and
+  `due_next_14` (today <= due <= today + N, the `deadline_coverage` window,
+  cumulative), `estimate_hours` over the `estimated` issues (an estimate above
+  zero, the ranking's rule) and `unestimated`, and `oldest_overdue` (earliest
+  due, then key); people by open issues, most first, then name; `totals`, with
+  `unassigned_in_read` and `done_in_read` for rows of the read with no assignee
+  or a done category, counted apart; the unassigned count from a second search,
+  the team JQL with its one `assignee is not EMPTY` clause (any case) turned to
+  `assignee is EMPTY` by the pure `unassigned_jql()`, or `unassigned_omitted`
+  with the reason when the JQL has none, several or an ORDER BY; `truncated`;
+  and `cannot_show`, the line that work outside the tracker is invisible. People
+  are keyed by the tracker's display name; the assignee's id comes from
+  `jira_find_users`. **The delegated block**: every EA contact kind that
+  carries `backlog` (all but the tour) carries `delegated`, from
+  `ea_team.delegated()` by the new `plan_delegated_jql` (default `reporter =
+  currentUser() AND assignee != currentUser() AND statusCategory != Done`; empty
+  turns it off), read up to `plan_backlog_limit` and shown up to
+  `plan_brief_items` with `items_omitted` and `truncated`: each issue with
+  `assignee`, `status`, `due_date`, `overdue` (and `days_overdue`) and
+  `days_since_update` (the update's day in `ea_timezone`), ordered by due date,
+  no due date last, then key, with `count` and `overdue` totals. Degraded on
+  failure; omitted when the tracker is not configured, the setting is empty or
+  the search returns nothing, and its explanation is in the brief only when it
+  is. **The assistant meets the staffing agent**: the weekly plan's brief names
+  `staffing_agent` (id and name, the ACTIVE agent hired from the template) when
+  there is one; the weekly framing and the built-in charter send every
+  assignment question to it through `consult_agent`, carry its recommendation
+  and evidence into the conversation, recommend no assignee and propose no
+  assignment (once the operator decides, a second consult tells the staffing
+  agent, which proposes), and say so when no staffing agent is on the roster;
+  `delegated` is read back as what is overdue and what has gone quiet. **The
+  weekly load report** is not seeded (the agent may not exist): `docs/QUEUE.md`
+  carries a ready-to-paste `task.create` schedule with a placeholder for the
+  hired agent's id. Checked end to end against fakes: the assistant consults a
+  hired staffing agent, whose advisory run holds `jira_team_load`, reads the
+  load and answers. Decided beyond the design record: the template's fields
+  above; the unassigned count's derivation; the brief's `staffing_agent` key on
+  the weekly plan only; the staffing agent recommends in a consult and drafts
+  the assignment only when told the operator's decision. The one-to-one
+  preparation D10 mentions is left to the charter's weekly report and the
+  operator's asking; nothing schedules it.
+- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`, `tests/test_planning_fields.py`, `tests/test_ea_week_quarter.py`, `tests/test_staffing.py`
+- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D3, D4, D5, D6, D8, D9, D10, "Build order" 1 to 6); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`, `_jira_set_planning_fields`); `central_command/integrations/jira.py` (`set_planning_fields`, `create_issue`); `central_command/runtime/packs.py` (`_SET_PLANNING_FIELDS`); `central_command/runtime/tools.py` (`jira_planning_gaps`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`, the `jira-hygiene` seed); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`); `central_command/reports/ea_team.py`; `central_command/runtime/staffing_profile.py`; `central_command/runtime/templates.py` (`TEMPLATES["staffing"]`); `central_command/api/routes.py` (`hire_agent`)

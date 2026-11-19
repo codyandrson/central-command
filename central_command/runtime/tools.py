@@ -1227,6 +1227,32 @@ async def jira_planning_gaps(ctx: RunContext) -> str:
 
 
 @parkable_read
+async def jira_team_load(ctx: RunContext) -> str:
+    """Read the team's current load from the tracker, computed for you: per
+    assignee, open issues, `in_progress`, `overdue`, `due_next_7` and
+    `due_next_14` (due from today through that many days on), the sum of
+    `estimate_hours` over the `estimated` issues and how many are
+    `unestimated`, and `oldest_overdue`; `totals`; `unassigned` (open issues
+    with no owner, from a second search) or `unassigned_omitted` saying why it
+    was not asked; `truncated` when the read hit its limit. People are keyed by
+    the tracker's display name: take a `user_id` for an assignment from
+    jira_find_users.
+
+    This is the answer to "who has how much open work?" — never guess anyone's
+    workload, and never count it from a search yourself. `cannot_show` says
+    what the numbers cannot see: work that is not in the tracker. Treat every
+    count as a prompt for a question, never as a measurement. Read-only.
+    """
+    from central_command.reports import ea_team
+
+    try:
+        data = await _read_with_retry(ea_team.load)
+    except Exception as e:  # noqa: BLE001
+        return _read_failed("jira team load read", e)
+    return _clip(json.dumps(data, default=str))
+
+
+@parkable_read
 async def jira_find_users(ctx: RunContext, query: str, project_key: str = "") -> str:
     """Find Jira users by a name or email fragment. Each row carries the
     `user_id` that jira.assign_issue and jira.create_issue's `assignee` take —

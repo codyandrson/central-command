@@ -807,6 +807,16 @@ class Settings(BaseSettings):
     #   plan_quarter_days     -> the quarterly review's reach: its audit reads
     #                            the last this-many days of the record and its
     #                            deadlines the coming this-many days (step 5).
+    #   plan_team_jql         -> the JQL that IS the team's open, assigned work,
+    #                            read by `jira_team_load` (step 6, D10;
+    #                            `reports/ea_team.py`). Its one `assignee is not
+    #                            EMPTY` clause is turned round for the unassigned
+    #                            count; a JQL without exactly one gives none.
+    #   plan_team_limit       -> the most issues that read takes (`truncated`
+    #                            says when it hit it); the unassigned search too.
+    #   plan_delegated_jql    -> the issues the operator waits on from other
+    #                            people, the EA brief's `delegated` block (step 6,
+    #                            D2). Empty turns the block off.
     plan_backlog_jql: str = "assignee = currentUser() AND statusCategory != Done"
     plan_field_stakes: str = "Stakes"
     plan_field_value: str = "Value"
@@ -824,6 +834,12 @@ class Settings(BaseSettings):
     plan_enrich_per_run: int = 10
     plan_overbooked_free_minutes: int = 120
     plan_quarter_days: int = 90
+    plan_team_jql: str = "statusCategory != Done AND assignee is not EMPTY"
+    plan_team_limit: int = 500
+    plan_delegated_jql: str = (
+        "reporter = currentUser() AND assignee != currentUser() "
+        "AND statusCategory != Done"
+    )
 
     # Sandbox slice 1 (D-sandbox): the runner is a SEPARATE, credential-free
     # service (central_command/sandbox/runner.py) that drives ephemeral gVisor

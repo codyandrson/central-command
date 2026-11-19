@@ -197,16 +197,27 @@ def _no_live_tracker_read():
 
     # The weekly and quarterly deadlines read the same backlog (DL-221 step 5):
     # held unconfigured too; tests/test_ea_week_quarter.py puts the real one back.
+    from central_command.reports import ea_team
+
+    async def no_delegated() -> dict:
+        return {"available": False, "reason": "not configured"}
+
+    # The delegated block reads the tracker too (DL-221 step 6): held
+    # unconfigured, so a test that fakes the tracker for the backlog does not
+    # grow a `delegated` block; tests/test_staffing.py puts the real one back.
     real = ea_followups.tracked
     real_backlog = ea_backlog.backlog
     real_deadlines = ea_plan.deadlines
+    real_delegated = ea_team.delegated
     ea_followups.tracked = unconfigured
     ea_backlog.backlog = no_backlog
     ea_plan.deadlines = no_deadlines
+    ea_team.delegated = no_delegated
     yield
     ea_followups.tracked = real
     ea_backlog.backlog = real_backlog
     ea_plan.deadlines = real_deadlines
+    ea_team.delegated = real_delegated
 
 
 @pytest.fixture(scope="session", autouse=True)

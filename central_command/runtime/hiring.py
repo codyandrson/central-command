@@ -34,8 +34,10 @@ async def ensure_hired(
     `template` is a `templates.HireTemplate` — it supplies the pack grants and
     the taskable/conversational flags, so the loadout lives in one place with
     the operator-facing templates rather than being spelled out at each call
-    site. `consultable` is passed explicitly because no template carries it:
-    consultability is a per-agent judgment with a recorded `deviations` reason.
+    site. `consultable` is passed explicitly because no purpose-built template
+    carries it: consultability is a per-agent judgment with a recorded
+    `deviations` reason. (A hire-menu template may carry it for the cockpit's
+    hire route, which has no such judgment of its own: the staffing agent's.)
     """
     from central_command.db import repo
     from central_command.runtime.templates import render_charter

@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from central_command.runtime import staffing_profile as _staffing
+
 # --- charter templating (2026-08-21 setup & onboarding design, decision 8) ---
 # A v0 charter is a TEMPLATE rendered ONCE, at hire; the recorded charter
 # version is plain text owned by the coaching loop from then on. Two marker
@@ -132,6 +134,14 @@ class HireTemplate:
     default_packs: tuple[str, ...]
     taskable: bool = True
     conversational: bool = True
+    # The three below are for a hire-menu entry whose charter is a finished
+    # document for one job (the staffing agent, 2026-11-19): a fixed roster
+    # role line in place of the operator's mission (what teammates' YOUR TEAM
+    # sections show, so they can find it), consultable from the hire, and at
+    # most one ACTIVE agent hired from it (the hire route refuses a second).
+    role: str = ""
+    consultable: bool = False
+    one_per_team: bool = False
 
     def render(self, name: str, mission: str, packs=None) -> str:
         # str.format first (it rewrites {{ }}, which is why placeholders are
@@ -141,7 +151,10 @@ class HireTemplate:
         return render_charter(filled, packs=self.default_packs if packs is None else packs)
 
     def role_for(self, mission: str) -> str:
-        # The roster's one-line role column — the mission, kept short.
+        # The roster's one-line role column — the mission, kept short, unless
+        # the template fixes it.
+        if self.role:
+            return self.role
         return mission if len(mission) <= 120 else mission[:117] + "..."
 
 
@@ -204,6 +217,43 @@ TEMPLATES: dict[str, HireTemplate] = {
         charter=HIRED_AGENT_CHARTER,
         default_packs=("jira-read", "graph-read", "task-create", "ask-operator",
                        "session-recall", "skill-propose", "note-propose"),
+    ),
+    # The staffing agent (2026-11-19, the EA planning design D10 on the
+    # 2026-08-21 staffing record, DL-176). In the hire menu, unlike the
+    # purpose-built loadouts below, because it is hired by the operator from
+    # the cockpit and never by the system: a deployment with no team never has
+    # one, so nothing seeds it and no startup path registers it. Its charter is
+    # a finished document all the same (`staffing_profile.CHARTER`, filled with
+    # the operator's name for it and their own words for the hire), its role
+    # line is fixed so teammates can find it on the roster, and the hire route
+    # refuses a second while one is ACTIVE. Packs, each for a part of the job:
+    # graph-read (capability: the Person entities and their facts), jira-read
+    # (load: jira_team_load, and jira_find_users for the assignee's id),
+    # jira-propose (jira.assign_issue, with the due date and planning fields
+    # that go with it, all gated), ask-operator (when it does not know),
+    # record-read (its own decided proposals and the operator's feedback on
+    # them), and the loadout every hire carries: task-create, session-recall,
+    # skill-propose, note-propose. No consult pack: it is ASKED (consultable),
+    # and nothing in its job needs it to ask another agent; no graph-propose:
+    # what it learns about people comes back through rejections and coaching.
+    "staffing": HireTemplate(
+        id=_staffing.TEMPLATE_ID,
+        label="Staffing agent",
+        description=(
+            "For a team: recommends who should take a piece of work from what "
+            "the knowledge graph records about each person, their load read "
+            "live from the tracker and who would grow from it, and proposes "
+            "the assignment for your approval. Reports the team's load weekly "
+            "and answers the executive assistant's questions about who should "
+            "take what. One per team. Taskable and consultable."
+        ),
+        charter=_staffing.CHARTER,
+        default_packs=("graph-read", "jira-read", "jira-propose", "ask-operator",
+                       "record-read", "task-create", "session-recall",
+                       "skill-propose", "note-propose"),
+        role=_staffing.ROLE,
+        consultable=True,
+        one_per_team=True,
     ),
 }
 

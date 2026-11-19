@@ -1,7 +1,7 @@
 # The executive assistant plans the operator's work: a ranked backlog, a blocked calendar, a daily and weekly rhythm
 
-> **Status:** partial — steps 1 to 5 of six shipped (v2.97.0 to v2.102.0: the brief fix, the ranked backlog, the planning charter, free time, the calendar ledger and work blocks, the stored day plan, the evening review, estimate against actual, enrichment, the weekly plan, the quarterly review and the time audit; DL-221, FR-54); step 6 (the staffing agent) not built
-> **As-built:** `central_command/reports/ea_backlog.py`, `central_command/reports/ea_plan.py`, `central_command/reports/ea_calendar.py`, `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/gateway/executor.py`, `central_command/db/schema.sql`
+> **Status:** implemented — all six steps shipped in v2.97.0 to v2.103.0 (DL-221, FR-54, FR-55); proven against fakes and a deterministic model only: no live model, tracker or calendar run, and the ranking rule has not been replayed on a scored backlog (see the open questions)
+> **As-built:** `central_command/reports/ea_backlog.py`, `central_command/reports/ea_plan.py`, `central_command/reports/ea_calendar.py`, `central_command/reports/ea_team.py`, `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/runtime/staffing_profile.py`, `central_command/gateway/executor.py`, `central_command/db/schema.sql`
 
 **Date:** 2026-11-18 · **Decisions:** the operator's, in the design discussion of this date, except where a section says "proposed" or "open".
 
@@ -500,6 +500,28 @@ EA:
 
 It is built after the EA's planning loop, because a deployment with no team
 can prove the loop and cannot prove staffing.
+
+**As built (step 6).** The staffing agent is a hire-menu template,
+`TEMPLATES["staffing"]`, with a finished-document charter
+(`runtime/staffing_profile.py`) and a fixed roster role ("the team's staffing
+agent: ..."), hired taskable and consultable; the hire route refuses a second
+while one is ACTIVE, and nothing seeds or registers it. Its packs are
+`graph-read`, `jira-read`, `jira-propose`, `ask-operator`, `record-read` and the
+loadout every hire carries. Its load read is `jira_team_load`
+(`reports/ea_team.py`): per assignee, from one search by `plan_team_jql` up to
+`plan_team_limit` (500), open, in progress, overdue, due in the next 7 and 14
+days, the estimates and the unestimated count, and the oldest overdue issue;
+the unassigned count from the same JQL with its `assignee is not EMPTY`
+clause turned round; `truncated`; and the line saying work outside the
+tracker is invisible. D2's `delegated` block rides every contact that carries
+the backlog (`plan_delegated_jql`; each issue with assignee, status, due date,
+overdue and days since update, overdue first), and is absent when there is
+nothing to show. The weekly plan's brief names `staffing_agent` when one is
+hired; the weekly framing and the charter send assignment questions to it by
+consult, and the assistant never recommends an assignee or proposes an
+assignment itself. The weekly load report is a schedule the operator creates
+after the hire (`docs/QUEUE.md`); the per-person one-to-one preparation is
+left to the charter's weekly report and the operator's asking.
 
 ## Build order
 
