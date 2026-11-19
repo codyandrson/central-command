@@ -76,26 +76,25 @@ afterEach(() => {
 });
 
 describe('order and prefetch', () => {
-  it('plays chunk 1 as soon as it arrives, requests chunk 2 while it plays, and never more than one ahead', async () => {
+  it('plays chunk 1 as soon as it arrives, fetches ahead back to back while it plays, and never more than one request in flight', async () => {
     const { result } = renderHook(() => useTTS(true, 'openai'));
     act(() => { void result.current.speakNow(THREE); });
-    expect(calls.map((c) => c.text)).toEqual([S1]); // only the first is requested up front
+    expect(calls.map((c) => c.text)).toEqual([S1]); // one request in flight: the second waits for the first to settle
     expect(calls[0].provider).toBe('openai');
     expect(result.current.speaking).toBe(THREE);
 
     await answer(0);
     expect(audios).toHaveLength(1);
     expect(audios[0].played).toBe(true);
-    expect(calls.map((c) => c.text)).toEqual([S1, S2]); // chunk 2 requested while 1 plays
+    expect(calls.map((c) => c.text)).toEqual([S1, S2]); // chunk 2 requested as soon as 1 settled
 
     await answer(1); // chunk 2 is ready early; it must wait for chunk 1 to end
     expect(audios).toHaveLength(1);
-    expect(calls).toHaveLength(2); // no third request until 2 starts
+    expect(calls.map((c) => c.text)).toEqual([S1, S2, S3]); // chunk 3 follows at once, not when 2 starts
 
     await endAudio(0);
     expect(audios).toHaveLength(2);
     expect(audios[1].played).toBe(true);
-    expect(calls.map((c) => c.text)).toEqual([S1, S2, S3]);
 
     await answer(2);
     expect(audios).toHaveLength(2); // 3 waits for 2
@@ -115,7 +114,7 @@ describe('order and prefetch', () => {
     await endAudio(0); // chunk 2 not here yet
     expect(audios).toHaveLength(1);
     expect(calls).toHaveLength(2);
-    // chunk 3 is requested only once chunk 2 plays, so it cannot overtake it
+    // chunk 3 is requested only once chunk 2 settles, so it cannot overtake it
     await answer(1);
     expect(audios).toHaveLength(2);
     expect(calls).toHaveLength(3);
@@ -410,5 +409,104 @@ describe('the speaking phase', () => {
     expect(result.current.speakingPhase).toBe('loading');
     await answer(calls.length - 1, refused);
     expect(result.current.speakingPhase).toBeNull();
+  });
+});
+
+describe('continuous fetching with a bounded buffer', () => {
+  const sentences = Array.from({ length: 5 }, (_, i) => `Sentence number ${i + 1} is long enough to be a chunk of its own here.`);
+  const FIVE = sentences.join(' ');
+
+  it('fetches back to back, one in flight, stops at the buffer limit and resumes as chunks finish; order kept', async () => {
+    const { result } = renderHook(() => useTTS(true, 'openai'));
+    act(() => { void result.current.speakNow(FIVE); });
+    expect(calls).toHaveLength(1);
+    await answer(0); // chunk 1 starts playing and is never finished until we say so
+    expect(calls).toHaveLength(2); // request 2 began when 1 settled, not when 1 played
+    await answer(1);
+    expect(calls).toHaveLength(3);
+    await answer(2);
+    expect(calls).toHaveLength(3); // 3 fetched and none finished: paused
+    await settle();
+    expect(calls).toHaveLength(3);
+    await endAudio(0);
+    expect(calls).toHaveLength(4); // resumed
+    await answer(3);
+    expect(calls).toHaveLength(4); // 3 buffered again
+    await endAudio(1);
+    expect(calls).toHaveLength(5);
+    await answer(4);
+    for (const i of [2, 3, 4]) await endAudio(i);
+    expect(calls.map((c) => c.text)).toEqual(sentences);
+    expect(audios).toHaveLength(5);
+    expect(result.current.speaking).toBeNull();
+  });
+
+  it('a long chunk after a short one is fetched ahead and causes no gap', async () => {
+    const short = 'A short opening sentence that is a chunk.';
+    const long = `${'A long clause that keeps going and going, '.repeat(4).trim()}.`;
+    const { result } = renderHook(() => useTTS(true, 'openai'));
+    act(() => { void result.current.speakNow(`${short} ${S2} ${long}`); });
+    await answer(0);
+    await answer(1);
+    expect(calls).toHaveLength(3); // the long chunk is being synthesised while 1 and 2 are still to play
+    await answer(2);
+    await endAudio(0);
+    await endAudio(1);
+    expect(audios).toHaveLength(3); // started the moment 2 ended: nothing to wait for
+    expect(audios[2].played).toBe(true);
+  });
+
+  it('cancelling with three buffered revokes every object URL, aborts nothing late and plays nothing more', async () => {
+    const created: string[] = [];
+    const revoked: string[] = [];
+    let n = 0;
+    URL.createObjectURL = vi.fn(() => { const u = `blob:${n++}`; created.push(u); return u; });
+    URL.revokeObjectURL = vi.fn((u: string) => { revoked.push(u); });
+    const { result } = renderHook(() => useTTS(true, 'openai'));
+    act(() => { void result.current.speakNow(FIVE); });
+    await answer(0); await answer(1); await answer(2);
+    act(() => result.current.stop());
+    expect(audios[0].paused).toBe(true);
+    await endAudio(0);
+    await settle();
+    expect(audios).toHaveLength(1);
+    expect(calls).toHaveLength(3);
+    expect([...revoked].sort()).toEqual([...created].sort());
+    expect(result.current.speaking).toBeNull();
+  });
+
+  it('a failure on chunk 4 while 2 plays lets 2 and 3 finish, then stops with one notice and fetches no more', async () => {
+    const { result } = renderHook(() => useTTS(true, 'openai'));
+    act(() => { void result.current.speakNow(FIVE); });
+    await answer(0); await answer(1); await answer(2);
+    await endAudio(0); // 2 plays; 4 is requested
+    expect(calls).toHaveLength(4);
+    await answer(3, refused);
+    expect(events).toHaveLength(0); // 2 and 3 are still to play
+    expect(audios[1].paused).toBe(false);
+    await endAudio(1);
+    expect(audios).toHaveLength(3);
+    expect(events).toHaveLength(0);
+    await endAudio(2);
+    expect(events).toHaveLength(1);
+    expect(events[0].title).toBe('Read-aloud failed');
+    expect(result.current.speaking).toBeNull();
+    expect(calls).toHaveLength(4); // none after the failure
+    expect(audios).toHaveLength(3);
+  });
+});
+
+describe('an audio error after ended', () => {
+  it('is ignored: no notice and the utterance carries on', async () => {
+    const { result } = renderHook(() => useTTS(true, 'openai'));
+    act(() => { void result.current.speakNow(THREE); });
+    await answer(0);
+    audios[0].fire('ended');
+    audios[0].fire('error'); // released source erroring right after ended
+    await settle();
+    expect(events).toHaveLength(0);
+    await answer(1);
+    expect(audios).toHaveLength(2);
+    expect(result.current.speaking).toBe(THREE);
   });
 });

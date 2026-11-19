@@ -4,6 +4,21 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.96.3: Read-aloud keeps a few sentences ready, so a long one no longer leaves a gap
+
+Measured on a live cockpit after v2.96.1: the gaps between sentences were 40 to 125 ms, except where a
+short sentence was followed by a long one (3.2 s of silence). The cockpit asked for the next chunk only
+when the current one started playing, so the speech engine sat idle while audio played.
+
+Fetching is now its own loop: the next chunk is requested as soon as the previous request finishes,
+still never more than one request in flight, and it pauses once three chunks are fetched and not yet
+played out (the one playing included). Playback, order, stopping, the length cap and the loading state
+are unchanged; a failed chunk still lets the ones before it play out, then ends the read-aloud with one
+notice. Buffered audio is held without an object URL until it plays, so stopping leaves nothing to
+release.
+
+Cockpit only.
+
 ## 2026-11-18 — v2.96.2: The system has a set of diagram pages, and the architecture document is corrected where it had drifted
 
 Documentation only: no application code changes. `docs/ARCHITECTURE.md` held three diagrams in

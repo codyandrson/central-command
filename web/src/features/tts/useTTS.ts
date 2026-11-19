@@ -89,6 +89,13 @@ export const TTS_LOADING_DELAY_MS = 250;
 /** `loading`: nothing audible yet (or between chunks); `playing`: audio is audible. */
 export type SpeakingPhase = 'loading' | 'playing';
 
+/**
+ * How many chunks may be fetched but not yet finished playing (the one playing
+ * included) before fetching pauses. It bounds memory and the synthesis wasted
+ * if the operator stops, while still covering a long chunk that follows a short one.
+ */
+export const TTS_MAX_BUFFERED_CHUNKS = 3;
+
 /** One utterance: a text cut into chunks that are requested and played one after another. */
 interface Utterance {
   /** The whole text as given; this is what `speaking` carries. */
@@ -102,6 +109,8 @@ interface Utterance {
   audio: { audio: HTMLAudioElement; url: string } | null;
   /** Releases the wait for the playing chunk to end (used on cancel). */
   wake: (() => void) | null;
+  /** Releases the fetch loop's wait at the read-ahead limit (used on cancel). */
+  resumeFetch: (() => void) | null;
   /** Pending switch to `loading` after a chunk ended with the next one not yet playing. */
   loadingTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -130,6 +139,7 @@ function cancelUtterance(utt: Utterance): void {
   clearLoadingTimer(utt);
   releaseAudio(utt);
   utt.wake?.();
+  utt.resumeFetch?.();
 }
 
 /**
@@ -137,9 +147,11 @@ function cancelUtterance(utt: Utterance): void {
  *
  * The text is cut into sentence-sized chunks (see speechChunks.ts). Each chunk
  * is fetched from `/api/tts` and played via an `HTMLAudioElement` as soon as it
- * arrives, strictly in order; while one plays, the next is already requested
- * (one ahead only: the speech service does one job at a time). Successive calls
- * cancel the previous utterance automatically.
+ * is next in order and ready. Fetching is its own sequential loop: the next
+ * request starts as soon as the last one settles, never more than one in flight
+ * (the speech service does one job at a time), and it pauses while
+ * {@link TTS_MAX_BUFFERED_CHUNKS} chunks are fetched and not yet played out.
+ * Successive calls cancel the previous utterance automatically.
  */
 export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model?: string) {
   const currentRef = useRef<Utterance | null>(null);
@@ -188,23 +200,54 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
       setSpeakingPhase(null);
       return Promise.resolve();
     }
-    const utt: Utterance = { text, auto, controller: new AbortController(), cancelled: false, audio: null, wake: null, loadingTimer: null };
+    const utt: Utterance = { text, auto, controller: new AbortController(), cancelled: false, audio: null, wake: null, resumeFetch: null, loadingTimer: null };
     currentRef.current = utt;
     setSpeaking(text);
     setSpeakingPhase('loading');
 
-    const request = (i: number): Promise<Blob> => {
-      const p = fetchTTS(plan.chunks[i], provider, model, utt.controller.signal);
+    // One slot per chunk, settled by the fetch loop and awaited by playback in order.
+    const slotResolve: Array<(b: Blob) => void> = [];
+    const slotReject: Array<(e: unknown) => void> = [];
+    const slots = plan.chunks.map((_, i) => {
+      const p = new Promise<Blob>((res, rej) => { slotResolve[i] = res; slotReject[i] = rej; });
       p.catch(() => {}); // a failure is raised when playback reaches this chunk
       return p;
+    });
+    let fetched = 0;
+    let finished = 0;
+
+    const fetchLoop = async (): Promise<void> => {
+      let next = 0;
+      try {
+        for (; next < plan.chunks.length; next++) {
+          while (!utt.cancelled && fetched - finished >= TTS_MAX_BUFFERED_CHUNKS) {
+            await new Promise<void>((resolve) => { utt.resumeFetch = resolve; });
+            utt.resumeFetch = null;
+          }
+          if (utt.cancelled) return;
+          let blob: Blob;
+          try {
+            blob = await fetchTTS(plan.chunks[next], provider, model, utt.controller.signal);
+          } catch (err) {
+            slotReject[next](err);
+            next++;
+            return; // no fetch after a failure
+          }
+          if (utt.cancelled) return;
+          fetched++;
+          slotResolve[next](blob);
+        }
+      } finally {
+        for (; next < plan.chunks.length; next++) slotReject[next](new Error('Read-aloud stopped'));
+      }
     };
+    void fetchLoop();
 
     return new Promise<void>((resolveStarted) => {
       void (async () => {
         try {
-          let pending: Promise<Blob> | null = request(0);
           for (let i = 0; i < plan.chunks.length; i++) {
-            const blob = await pending!;
+            const blob = await slots[i];
             // Superseded or stopped while the chunk was being fetched
             if (utt.cancelled) return;
             const url = URL.createObjectURL(blob);
@@ -224,8 +267,6 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
             await audio.play();
             if (utt.cancelled) return;
             failingRef.current = false;
-            // One request ahead, issued once this chunk is playing.
-            pending = i + 1 < plan.chunks.length ? request(i + 1) : null;
             if (i === 0) resolveStarted();
             await ended;
             if (utt.cancelled) return;
@@ -238,6 +279,8 @@ export function useTTS(enabled: boolean, provider: TTSProvider = 'openai', model
               }, TTS_LOADING_DELAY_MS);
             }
             releaseAudio(utt);
+            finished++;
+            utt.resumeFetch?.();
           }
           if (plan.truncated) {
             reportClientError({
