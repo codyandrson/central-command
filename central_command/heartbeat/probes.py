@@ -12,16 +12,20 @@ unit that keeps doing that is reported (`retry.failing_despite_probe`).
 
 **Cheap.** One probe per dependency per sweep (`ProbeCache`), run CONCURRENTLY
 (`ProbeCache.warm`), and a dependency nothing is parked on and nothing records
-down is never probed at all — so the common tick makes zero network calls. Every
-probe is a raw, UNAUTHENTICATED request (operator ruling 2026-10-27): the sweep
-never spends a credential or a provider call asking whether a service is there.
+down is never probed at all — so the common tick makes zero network calls. A
+probe of a service is a raw, UNAUTHENTICATED request (operator ruling
+2026-10-27): the sweep never spends a service credential asking whether Jira,
+Confluence, a forge, n8n, the graph or the sandbox is there. The two model
+probes are the stated exception (the operator confirmed it 2026-11-18): `llm`
+and `embedder` each make one real request through the model proxy and send the
+scoped model key it requires, never the admin key.
 A jira / confluence / forge probe is a bare GET of the configured instance's
 status route; ANY answer short of the transient statuses (the same set the
 failure taxonomy uses, 403 included) means the instance is up. Calendar and mail
 ride the n8n façade, so they are asked of its health.
 
-**The LLM probe is the one that costs anything** (a 1-token completion, fractions
-of a cent). `litellm_check_model_health` is deliberately NOT used: its own
+**The model probes are the ones that cost anything** (a 1-token completion and a
+one-word embedding, fractions of a cent). `litellm_check_model_health` is deliberately NOT used: its own
 docstring says it makes a real provider call PER REGISTERED MODEL, which is a
 health check that costs more than the work it guards.
 
