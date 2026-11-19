@@ -32,6 +32,8 @@ graph**: `central_command/runtime/` may never import `central_command/gateway/`
 (guard: `tests/test_governance.py::test_runtime_never_imports_the_gateway_tier`,
 an AST walk over every runtime module).
 
+The same ground as pictures, one topic a page: [`diagrams/`](diagrams/README.md).
+
 ```mermaid
 flowchart TB
     subgraph T1["① Control-plane UI — web/ (React + Hono)"]
@@ -942,7 +944,7 @@ What varies is the approver.
 | Category | Approver | Classes today | Switch (default) |
 |---|---|---|---|
 | **Human gate** — the baseline for everything | the operator | every capability whose `gate` is human approval: Jira, Confluence, calendar, mail, graph episodes and curation proposals, charter edits, MCP sync, model configuration, … | — |
-| **Graduated class** — the independent auditor re-derives the judgment from the raw source; a **CONCUR** executes with `approver="auditor"`, a **CHALLENGE** or an auditor error parks for the operator | the auditor, per class, revocable | `dismissal.confirm` (email dismissals) and `work.bulk_dismiss`; `dismissal.confirm.document`; graph-verification rows that are aligned, mechanically clean and addition-only (invalidations always park). An irreversible capability is never one of them (below) | `CC_AUDITOR_ENABLED` (false) + `CC_AUDITOR_MODE` (shadow); `CC_AUDITOR_DOCUMENT_MODE` (shadow); `CC_GRAPH_AUDITOR_ENABLED` (false) + `CC_GRAPH_AUDITOR_MODE` (shadow) |
+| **Graduated class** — the independent auditor re-derives the judgment from the raw source; a **CONCUR** executes with `approver="auditor"`, a **CHALLENGE** or an auditor error parks for the operator | the auditor, per class, revocable | `dismissal.confirm` (email dismissals) and `work.bulk_dismiss`; `dismissal.confirm.document`; graph-verification rows that are aligned, mechanically clean and addition-only (invalidations always park; here the auditor's authority is closing the verification row after the approved episode was written, not approving a proposal: the graph auditor is read-only and does not pass through this seam). An irreversible capability is never one of them (below) | `CC_AUDITOR_ENABLED` (false) + `CC_AUDITOR_MODE` (shadow); `CC_AUDITOR_DOCUMENT_MODE` (shadow); `CC_GRAPH_AUDITOR_ENABLED` (false) + `CC_GRAPH_AUDITOR_MODE` (shadow) |
 | **Gate override** — the operator's standing rule for one agent and one capability, scoped and narrowable by argument, target or schedule; the proposal is still decided at the seam, by the gateway, and run by the same Executor | `override:<id>` (`override:<a>+<b>`, sorted, when several cover it) | any capability whose default gate is `human` or `auditor`, for any agent but the auditor; none exists until the operator authors one in the cockpit. Three safeguards: (1) the gateway pre-checks and the Executor re-checks the scope before the first action; (2) the write carries `trust=override:<id>`; (3) a shadow period of the operator's own approvals first, and one-click revoke on the agent's and the capability's pages. An irreversible or LIVE class also needs an acknowledgement at authoring and a shadow of at least 1. Never operator agreement for graduation | `CC_GATE_OVERRIDE_SHADOW_RUNS` (5) |
 | **Ungated deterministic write** — exactly two, no proposal, because there is no agent judgment to review | code, or the operator's own click | the closed `EXEMPT_WRITES` tuple beside `REGISTRY` names them (they are not registry rows); task creation is a trigger, has no row and is not on the list. (1) operator graph curation: a closed write set in `integrations/neo4j_writer.py`, called from `api/routes.py` for the operator's own edits; (2) wiki stale-page annotation: a deterministic template over claim rows, no model in the path, whose Confluence write is made by `ingest/wiki_freshness.py` | — ; `CC_WIKI_ANNOTATION_MODE` (off) |
 
@@ -953,10 +955,10 @@ against a moved world is never waved through by the standing rule that covered
 the first draft.
 
 **The default gate** is a registry column, `Capability.default_gate`
-(`gateway/capabilities.py`), never a table (DL-143): `human` on 63 rows (every
+(`gateway/capabilities.py`), never a table (DL-143): `human` on 65 rows (every
 gated write but one), `auditor` on one (`work.bulk_dismiss`, the class a
 graduated auditor may confirm; the `CC_AUDITOR_*` switches still decide) and
-`none` on 33 (the 29 reads and the 4 sandbox writes). An override relaxes
+`none` on 34 (the 30 reads and the 4 sandbox writes). An override relaxes
 `human` or `auditor` to `none`, never the reverse; relaxing to `auditor` is
 graduation's job. **The exemption list** is the two ungated deterministic writes
 above, named once in `EXEMPT_WRITES` beside the registry, closed, and growing
@@ -1300,9 +1302,11 @@ back, leave no evidence of the outage beyond the banner and the logs, and end
 with the same result as if the service had never been offline.
 
 **DOWN versus NO.** `contract/failures.py` is the one classifier
-(`classify_failure`; unknown is NO). A DOWN failure — a transport error, a 408,
-429, 5xx or 403 (403 stays DOWN: an edge firewall denies with it), a neo4j
-`ServiceUnavailable` — parks the unit and retries. A NO — the dependency
+(`classify_failure`; unknown is NO). A DOWN failure — a transport error, a
+status in the closed set `TRANSIENT_STATUS` (403, 408, 429, 500, 502, 503, 504
+and 529; 403 stays DOWN: an edge firewall denies with it; any other 5xx, a 501
+or a 505 say, is not DOWN by its status), a neo4j `ServiceUnavailable` — parks the unit and
+retries. A NO — the dependency
 answered and refused — keeps today's behaviour: the semantic branch of every
 landing still lands FAILED at once with its reason, and `dispatch_max_attempts`
 still caps a ledger item's semantic attempts. Two typed errors carry their
@@ -1330,8 +1334,10 @@ instead of finishing the remaining actions on a stale premise. The set of world 
 **Names, probes and maps.** `DEPENDENCIES` in `contract/dependencies.py` is the
 one closed vocabulary a park, a probe or an outage row uses; the probe
 functions live in `heartbeat/probes.py` (config, httpx and the standard library
-only). Every probe is unauthenticated and capped at 5 s, and the sweep runs
-them concurrently, once per name per sweep:
+only). Every probe is capped at 5 s and unauthenticated, with two exceptions:
+the `llm` and `embedder` probes are one real request each through the model
+proxy and send the scoped model key it requires. The sweep runs them
+concurrently, once per name per sweep:
 
 | Name | What it is | Probe |
 |---|---|---|
@@ -1810,7 +1816,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | Surface | What it is | Entry points | Read first |
 |---|---|---|---|
 | `deploy/single/` | Single-node profile on Compose (`compose.yaml`). Unconditional services: postgres, litellm with its db and redis, neo4j; behind profiles: n8n (with its db), the crawler and speech. Deterministic driver: its phases and steps are declared once, in `steps.tsv` (run order), and recorded in a ledger as each completes; the operator's procedure is the generated [`CHECKLIST.md`](../deploy/single/CHECKLIST.md); exit codes 0/1/2/3 (3 = stopped for the operator) | `setup.sh`, `update.sh` (`init` · `import` · `stage` · `plan` · `apply` · `rollback`), `resolve-images.sh` + `images.txt` (constraint / locked tag / locked digest) | [`deploy/single/README.md`](../deploy/single/README.md), [deploy-single rules](../.claude/rules/deploy-single.md) |
-| `deploy/k3s/` | Multi-node profile: numbered manifests `00-namespace`, `20-postgres`, `30-litellm`, `31-litellm-rbac`, `40-graph`, `50-n8n`, `60-sandbox`, `61-mcp`, `70-crawler`, `80-vlogs`, `85-pgweb`, `90-speech`; placement split by state (stateful pinned, stateless floats), services exposed on loopback, the API / cockpit / sandbox-runner as systemd units outside the cluster. Same driver contract, six phases: validate · preflight · llm · stack · app · verify | `setup.sh`, `verify.sh` (sections A-E under the admin key, then F, the application self-check, on every run), `cc-update.sh`, `backup.sh` (besides the databases and the keys file it copies the containers' env file, the application's root env file and the cockpit's env file byte for byte, 0600, as `env_`, `env-app_` and `env-web_` copies; one that is missing or empty fails loudly by store name), `make-secrets.sh`, `mint-keys.sh`, `build-*-image.sh` | [`deploy/k3s/README.md`](../deploy/k3s/README.md), [deploy-k3s rules](../.claude/rules/deploy-k3s.md) |
+| `deploy/k3s/` | Multi-node profile: numbered manifests `00-namespace`, `20-postgres`, `30-litellm`, `31-litellm-rbac`, `40-graph`, `50-n8n`, `60-sandbox`, `61-mcp`, `70-crawler`, `80-vlogs`, `85-pgweb`, `90-speech`; placement split by state (stateful pinned, stateless floats), pinned services exposed on a loopback-only `hostPort` and floating ones (LiteLLM, the crawler, speech, VictoriaLogs) through a `LoadBalancer` Service that k3s's ServiceLB binds on every node (the `CC_*` endpoints the application uses still resolve to loopback), the API / cockpit / sandbox-runner as systemd units outside the cluster. Same driver contract, six phases: validate · preflight · llm · stack · app · verify | `setup.sh`, `verify.sh` (sections A-E under the admin key, then F, the application self-check, on every run), `cc-update.sh`, `backup.sh` (besides the databases and the keys file it copies the containers' env file, the application's root env file and the cockpit's env file byte for byte, 0600, as `env_`, `env-app_` and `env-web_` copies; one that is missing or empty fails loudly by store name), `make-secrets.sh`, `mint-keys.sh`, `build-*-image.sh` | [`deploy/k3s/README.md`](../deploy/k3s/README.md), [deploy-k3s rules](../.claude/rules/deploy-k3s.md) |
 | `deploy/shared/` | Assets both deployment substrates read: `litellm/` — `register-models.py` (run by both installers), `policy.py`/`checks.sh` and the k3s profile's declared LiteLLM policy (`config.yaml`, `model-preferences.yaml`; the single profile's equivalents are `deploy/single/litellm-config.yaml` and `deploy/single/models.json`). `gateway/executor.py` and `runtime/tools.py` name these files by path | — | [`deploy/shared/README.md`](../deploy/shared/README.md) |
 | `deploy/n8n/` | The mail and calendar façade workflows as code; applied by both updaters | `apply-workflows.sh` | [`deploy/n8n/README.md`](../deploy/n8n/README.md) |
 | `deploy/discover.sh`, `deploy/AIRGAP.md` | Environment discovery and the mirror / CA / proxy seams for restricted networks (`deploy/env-lib.sh` maps the answers to settings). Registry mirrors are per-upstream: `CC_REGISTRY_DOCKERIO`, `CC_REGISTRY_GHCR`, `CC_REGISTRY_MCR` | `discover.sh` | [`deploy/AIRGAP.md`](../deploy/AIRGAP.md) — **first**, for any mirrored or no-egress install |
@@ -1818,10 +1824,16 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | `docker-compose.yml` (root) | The dev database only: `cc-postgres` on 127.0.0.1:**5442** with the schema auto-loaded | `docker compose up -d postgres` | [AGENTS.md](../AGENTS.md) |
 
 **The k3s updater** (`cc-update.sh`), in order: resolve → version gate
-(`min_upgrade_from`) → busy check → rollback checkpoint → prebuild changed
-images (services stay up) → database dumps → stop → merge → additive schema →
-rebuild venv and cockpit → manifests and units → n8n workflows → bundled skill
-docs → reconcile app config → start services → health → roll back on failure. It
+(`min_upgrade_from`) → skill-review gate → busy check → removed-capability check
+(undecided work on a capability the release removes) → rollback checkpoint →
+prebuild changed images (services stay up) → database dumps → busy and
+removed-capability checks again → stop → merge → containers' env-file path →
+additive schema → rebuild venv and cockpit → manifests (with the configmap
+refresh and the `removed.txt` tombstone deletes) and units → n8n workflows →
+bundled skill docs → reconcile app config → start services → health → LiteLLM
+policy apply on a healthy result, or roll back on an unhealthy one. Only a failed
+health check rolls back; an earlier failure stops the run, restarts the services
+if they were stopped and records the update as failed. It
 reads `VERSION` for the installed version, not git. `kubectl apply` never deletes,
 so a removed manifest must be tombstoned in `deploy/k3s/removed.txt`; a changed
 updater unit takes effect on the *next* run.
@@ -1987,6 +1999,7 @@ another D-number.
 
 | You want | Read |
 |---|---|
+| To see the system before reading about it: the tiers, a mail's path, the verdicts, who approves, outages, the data model, deployment | [`diagrams/README.md`](diagrams/README.md) |
 | Why the product exists, who it is for, what it must do, the glossary | [`PRD.md`](PRD.md) |
 | The rules you must not break | [`AGENTS.md`](../AGENTS.md), then the [`.claude/rules/`](../.claude/rules/) file for the area |
 | Why a rule exists, and what guards it | [`decisions/README.md`](decisions/README.md) |

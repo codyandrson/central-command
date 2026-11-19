@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.96.2: The system has a set of diagram pages, and the architecture document is corrected where it had drifted
+
+Documentation only: no application code changes. `docs/ARCHITECTURE.md` held three diagrams in
+about 2,000 lines of prose, and nothing showed a flow through time, the data model or a deployment.
+
+- **`docs/diagrams/` is a set of seven pages**, one topic each: the system overview, the life of a
+  mail, the three verdicts, who approves, outage handling, the data model, and deployment (both
+  profiles and what an update does). Each page is a Mermaid diagram that GitHub renders, a table
+  mapping it to the code, and a list of what it leaves out. Every step was traced against the code.
+  `docs/diagrams/README.md` is the index, and `ARCHITECTURE.md` links to it.
+- **The data model page is generated** from `central_command/db/schema.sql` by
+  `scripts/gen_data_model_diagram.py` (38 tables in 11 areas; only declared foreign keys are drawn).
+  `tests/test_data_model_diagram.py` runs the script's `--check`, so the suite fails when the page is
+  stale or when the schema gains a table the script's area and purpose lists do not know.
+- **`ARCHITECTURE.md` is corrected in six places** where tracing the diagrams showed it had drifted
+  from the code: the default-gate counts (65 human, 1 auditor, 34 ungated); the transient statuses
+  (the closed set in `TRANSIENT_STATUS`, not every 5xx); the dependency probes (the `llm` and
+  `embedder` probes send the scoped model key, the rest are unauthenticated); the graph auditor
+  (it closes a verification row after the write and approves no proposal); k3s exposure (pinned
+  services on a loopback-only `hostPort`, floating ones through a `LoadBalancer` bound on every
+  node); and the updater's order (six steps were missing, and only a failed health check rolls back).
+
 ## 2026-11-18 — v2.96.1: Read-aloud starts sooner, and the button shows when audio is being prepared
 
 Two things the operator found on first hearing sentence-by-sentence read-aloud (v2.95.0).
