@@ -130,10 +130,28 @@ async def test_the_charter_carries_the_attention_doctrine():
     from central_command.runtime.ea_profile import CHARTER
 
     lowered = CHARTER.lower()
-    assert "budget" in lowered and "enforce" in lowered
     assert "digest" in lowered
     assert "conclude_discussion" in CHARTER and "propose" in lowered
     assert "```json" in CHARTER or "json" in lowered  # the data block is ground truth
+
+
+async def test_the_charter_does_not_ration_contact_and_never_re_asks():
+    """DL-221: the contact budget is a mechanical stop, not a doctrine. The two
+    paragraphs that rationed contact are gone, a quiet window is still a
+    one-line report, and the charter says the assistant never restates or
+    re-asks a question another agent put to the operator."""
+    from central_command.runtime.ea_profile import CHARTER
+
+    assert "CONTACT BUDGET" not in CHARTER
+    assert "HARD NUMBER" not in CHARTER
+    assert "ASK AT BREAKPOINTS" not in CHARTER
+    assert "NEVER BY POLLING" not in CHARTER
+    assert "consolidated contact" not in CHARTER
+    assert "budget" not in CHARTER.lower()
+    assert "A quiet window is a one-line report." in CHARTER
+    assert "NEVER restate or re-ask a question another agent has put to the operator" in CHARTER
+    assert "how many questions are open in the Decisions Inbox and whose they are" in CHARTER
+    assert "Your own questions are your own." in CHARTER
 
 
 async def test_the_ea_is_not_seeded_in_the_schema():

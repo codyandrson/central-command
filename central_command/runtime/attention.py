@@ -1,14 +1,14 @@
-"""The attention budget — how much unsolicited contact an agent may cost the
+"""The contact budget — how many conversations an agent may open with the
 operator in a day.
 
 The teaming doctrine's Decision 4 settled the shape: agents may initiate
-contact, and what keeps it from becoming noise is an explicit budget, defaulting
-LOW, with the dial in the operator's hands. This module is that rule, and NOTHING here
-is advice to an agent — a charter sentence asking an agent to be considerate is
-guidance without a mechanism, which is the failure mode this codebase has been
-bitten by three times. The budget is enforced at the seam that actually opens a
-lane (`questions._open_discussion`), so an agent that ignores its charter still
-cannot spend more attention than it has.
+contact, with an explicit budget and the dial in the operator's hands. Since
+2026-11-18 (docs/superpowers/specs/2026-11-18-ea-planning-design.md, D9) the
+budget no longer shapes the assistant's behaviour: its default is 20 and it
+remains only as a mechanical stop on a schedule that misfires. This module is
+that rule, and NOTHING here is advice to an agent. The budget is enforced at
+the seam that actually opens a lane (`questions._open_discussion`), so an agent
+that ignores its charter still cannot open more conversations than it has.
 
 **Every other agent's budget is 0, which means UNLIMITED.** That is not a
 loophole; it is the scope of the decision. The EA is the agent whose whole job

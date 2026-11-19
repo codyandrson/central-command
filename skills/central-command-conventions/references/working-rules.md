@@ -51,10 +51,11 @@ change needed, here is why".
 ## Only the EA's unprompted contact is budgeted
 
 Opening a conversation with the operator unprompted is the Executive
-Assistant's job, and **only the EA is attention-budgeted**, by design —
-attention is the scarce resource in this system, not compute. Over budget, the
-EA's ask degrades to a queued question the operator can still answer; it is
-never lost. Every other agent reaches the operator through a parked question or
+Assistant's job, and **only the EA has a contact budget**, by design — a
+mechanical stop on a schedule that misfires, not a rule for how the EA
+behaves. Over budget, the EA's ask degrades to a queued question the operator
+can still answer; it is never lost. Attention is still the scarce resource in
+this system, not compute. Every other agent reaches the operator through a parked question or
 a proposal. Those are not budgeted, but they spend the same attention: batch
 what can wait; interrupt only for what cannot.
 

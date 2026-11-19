@@ -615,7 +615,7 @@ async def ea_stubs(monkeypatch):
     calls: dict = {"tasks": [], "snapshots": []}
 
     # Unlimited by default: the budget has its own tests, and leaving it at the
-    # shipped 3 would make these pass or fail on how much unrelated EA traffic
+    # shipped 20 could make these pass or fail on how much unrelated EA traffic
     # the shared dev database already saw today.
     monkeypatch.setattr(settings, "ea_contact_budget_per_day", 0)
 
@@ -664,6 +664,38 @@ async def test_ea_contact_hands_the_agent_a_fenced_data_block(monkeypatch, ea_st
 
     delivered = await repo.list_events(since_id=since_id, kind="ea.contact_delivered")
     assert delivered and delivered[0]["payload"]["kind"] == "digest"
+
+
+def test_no_framing_invites_re_asking_another_agents_question():
+    """DL-221: the digest used to say to ask about "any question a teammate
+    raised", which is how answered questions were asked again. The assistant
+    reports how many questions are open and whose they are, and asks only its
+    own."""
+    digest = hb_actions._EA_FRAMING["digest"]
+    assert "any question a teammate raised" not in digest
+    assert "never restate or re-ask" in digest
+    assert "Decisions Inbox" in digest and "whose they are" in digest
+    assert "Decisions Inbox" in hb_actions._EA_FRAMING["morning_report"]
+    for kind, text in hb_actions._EA_FRAMING.items():
+        assert "teammate raised" not in text, kind
+
+
+@pytest.mark.graph_live
+@needs_pg
+async def test_the_brief_explains_asked_state_and_does_not_report_the_budget(
+    monkeypatch, ea_stubs
+):
+    """`open_operator_items` is the only list of what waits on the operator, and
+    the brief says so; the contact budget no longer rides the brief."""
+    out = await fire(_ea_schedule())
+    assert out["ok"] and out["result"]["delivered"] is True
+
+    brief = ea_stubs["tasks"][0]["instructions"]
+    assert "`agent.asked` entry" in brief
+    assert "`state`" in brief
+    assert "`open_operator_items` is the only list of what is waiting on the operator" in brief
+    assert "contact budget" not in brief
+    assert "used today" not in brief
 
 
 @pytest.mark.graph_live

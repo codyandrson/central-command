@@ -1,7 +1,7 @@
 # The executive assistant plans the operator's work: a ranked backlog, a blocked calendar, a daily and weekly rhythm
 
-> **Status:** open — design agreed in discussion with the operator on 2026-11-18; nothing built, no decision-log entry or PRD requirement written yet
-> **As-built:** nothing built; the code this record changes is `central_command/runtime/ea_profile.py`, `central_command/heartbeat/actions.py`, `central_command/reports/`
+> **Status:** partial — step 1 of six (the brief fix, the budget default, the rationing text) shipped in v2.97.0 (DL-221); steps 2 to 6 not built
+> **As-built:** `central_command/reports/ea_report.py`, `central_command/heartbeat/actions.py`, `central_command/runtime/ea_profile.py`, `central_command/config.py`
 
 **Date:** 2026-11-18 · **Decisions:** the operator's, in the design discussion of this date, except where a section says "proposed" or "open".
 

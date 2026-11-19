@@ -2655,3 +2655,44 @@ hygiene, and how the test suite itself must be written. See
   engine behind the same endpoint (Piper) or the same engine on a GPU.
 - **Enforced:** test: `tests/test_k3s_compute_cpu.py::test_the_speech_container_has_a_memory_limit_and_no_cpu_limit`, `tests/test_k3s_compute_cpu.py::test_neo4j_requests_at_least_twice_the_speech_pods_cpu`, `tests/test_k3s_compute_cpu.py::test_what_the_manifests_place_on_the_compute_node_still_fits_a_two_cpu_node`, `tests/test_litellm_policy.py::test_the_two_speech_aliases_declare_one_job_at_a_time_and_no_retries`, `tests/test_litellm_policy.py::test_no_other_alias_gained_the_concurrency_or_retry_parameters`, `tests/test_litellm_policy.py::test_apply_adds_the_params_to_an_existing_row_and_leaves_model_and_api_base_alone`
 - **Source:** `deploy/k3s/90-speech.yaml` (resources block); `deploy/k3s/40-graph.yaml` (resources block); `deploy/shared/litellm/model-preferences.yaml` (`policy_params:`); `deploy/shared/litellm/policy.py` (`apply_policy_params`, `policy_params_drift`); `deploy/shared/litellm/register-models.py` (`policy_params`); `deploy/single/models.json`
+
+### DL-221 — The executive assistant plans the operator's work, not only their attention; step 1 fixes the answered-question defect and takes the rationing out
+
+- **Status:** active
+- **Date:** 2026-11-18
+- **Rule:** (recorded here) The executive assistant's job is the operator's
+  plan as well as their attention, built in six steps from
+  `docs/superpowers/specs/2026-11-18-ea-planning-design.md`. An `agent.asked`
+  entry in the EA's snapshot carries the operator item's current state, and
+  `open_operator_items` is the only list of what waits on the operator; the EA
+  never restates or re-asks another agent's question; the contact budget
+  (`ea_contact_budget_per_day`, default 20) is a mechanical stop on a schedule
+  that misfires and no text tells the EA to ration its contact.
+- **Why:** The EA was built as an attention loop. The operator asked for it to
+  help decide what work to do, plan the day and the week and block calendar
+  time, which the attention-only brief and charter cannot serve. Observed on a
+  live deployment: an end-of-day contact listed questions as open that the
+  operator had answered the day before, because the activity block listed
+  `agent.asked` events with no sign of the answer, and the charter's contact-
+  rationing paragraphs (written when every contact was an interruption) pushed
+  against a planning conversation the operator asked for. The operator agreed
+  the design in discussion on 2026-11-18.
+- **Decision:** The job widens in six steps (the design record's "Build order");
+  only step 1 is built by this entry. Step 1: `ea_report.snapshot()` gives
+  every `agent.asked` example a `state` read from its operator item
+  (`open`, `answered`, `withdrawn`, or `unknown` when the item is not found)
+  and the kind a `still_open` count over the whole window, and
+  `read_team_activity` renders the same; the brief says so; the framings and the
+  built-in charter no longer invite restating a question another agent put to
+  the operator (the EA reports how many are open in the Decisions Inbox and
+  whose); the charter's "contact budget is a hard number" and "ask at
+  breakpoints, never by polling" paragraphs are removed and the budget's
+  closing sentence leaves the brief; the default rises from 3 to 20 and the
+  mechanism in `runtime/attention.py` is unchanged. A deployment that hired the
+  EA runs its governed charter, which a release does not rewrite: the new text
+  reaches it as a charter revision the operator saves or approves. Steps 2 to
+  6 (the backlog and ranking, the calendar, the review, the weekly and
+  quarterly plans, the staffing agent) are not built and not decided here
+  beyond the design record.
+- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`
+- **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D9, "Build order" 1); `central_command/reports/ea_report.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`); `central_command/runtime/ea_profile.py`; `central_command/config.py` (`ea_contact_budget_per_day`)

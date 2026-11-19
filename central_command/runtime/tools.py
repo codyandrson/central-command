@@ -673,11 +673,18 @@ async def read_team_activity(ctx: RunContext, since_hours: int = 24) -> str:
         if not entry["count"]:
             continue
         total += entry["count"]
-        lines.append(f"- {kind}: {entry['count']}")
+        # A question's event only says it was asked; `still_open` and each
+        # example's `state` are the operator item's current status, so this
+        # reader agrees with the brief's block about what is still waiting.
+        lines.append(
+            f"- {kind}: {entry['count']}"
+            + (f" ({entry['still_open']} still open)"
+               if "still_open" in entry else ""))
         for example in entry["examples"]:
+            state = f" ({example['state']})" if "state" in example else ""
             lines.append(
                 f"    · event:{example['event_id']} {example['at']} "
-                f"[{example['ref_id']}] {example['summary']}"
+                f"[{example['ref_id']}]{state} {example['summary']}"
             )
         if entry["truncated"]:
             lines.append(f"    · … and {entry['truncated']} more")

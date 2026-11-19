@@ -842,6 +842,22 @@ async def list_operator_items(status: str | None = "OPEN") -> list[dict]:
         await conn.close()
 
 
+async def operator_item_statuses(item_ids: list[str]) -> dict[str, str]:
+    """The CURRENT status (OPEN | ANSWERED | WITHDRAWN) of each item id, in one
+    query. An id with no row is absent from the result — the caller decides
+    what "not found" means; this read invents nothing."""
+    ids = [i for i in dict.fromkeys(item_ids) if i]
+    if not ids:
+        return {}
+    conn = await _conn()
+    try:
+        rows = await conn.fetch(
+            "select id, status from operator_item where id = any($1::text[])", ids)
+        return {r["id"]: r["status"] for r in rows}
+    finally:
+        await conn.close()
+
+
 # --- conversational sessions (Phase 3) ---------------------------------------
 
 

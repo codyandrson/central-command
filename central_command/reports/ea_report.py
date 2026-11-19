@@ -6,6 +6,10 @@ figures cost ZERO tool calls and cannot be a model's arithmetic. The agent's
 job is to say what they MEAN; `read_team_activity` exists for the follow-up
 question the block cannot answer. Both, with different jobs.
 
+An `agent.asked` entry carries each example's `state` (the operator item's
+CURRENT status) and a `still_open` count over the whole window: the event says
+a question was put, only the item says whether it is still waiting.
+
 Deliberately NOT `dispatcher.status()`. That reports process-local state (is
 THIS process's drain loop running), so a snapshot taken in the API process and
 one taken anywhere else would disagree about the same instant. Everything here
@@ -37,6 +41,10 @@ ACTIVITY_KINDS: tuple[str, ...] = (
     "work.enrolled",
 )
 
+# The kind whose entries carry a `state` and a `still_open` count: a question's
+# event says it was asked, the operator item says whether it is still waiting.
+ASKED_KIND = "agent.asked"
+
 # How many individual events of each kind ride the block. The block is a
 # summary the operator reads through an agent, not an export: counts are
 # complete, examples are a taste, and `truncated` says when there were more.
@@ -65,6 +73,17 @@ async def snapshot(since: datetime) -> dict:
     for row in events:
         grouped.setdefault(row["kind"], []).append(row)
 
+    # An `agent.asked` event is a question put to the operator; whether it is
+    # STILL waiting is the operator item's current status, not anything the
+    # event says. Read once for the whole window, so a day of questions cannot
+    # read as a day of open gaps (the digest re-asked answered questions).
+    asked_status = await repo.operator_item_statuses(
+        [r["ref_id"] for r in grouped.get(ASKED_KIND, []) if r.get("ref_id")])
+
+    def _asked_state(ref_id) -> str:
+        status = asked_status.get(ref_id)
+        return status.lower() if status else "unknown"
+
     by_kind: dict[str, dict] = {}
     for kind, rows in grouped.items():
         # The MOST RECENT examples, kept in chronological order. Taking the
@@ -84,8 +103,15 @@ async def snapshot(since: datetime) -> dict:
                 # emitter actually writes. Never the whole payload: a block
                 # that pastes every field is the log browser STATUS rejected.
                 "summary": _summarise(kind, r.get("payload") or {}),
+                **({"state": _asked_state(r["ref_id"])}
+                   if kind == ASKED_KIND else {}),
             } for r in shown],
         }
+        if kind == ASKED_KIND:
+            # Over ALL the window's asked events, not only the examples shown.
+            # An item that cannot be found reads "unknown" and is not open.
+            by_kind[kind]["still_open"] = sum(
+                1 for r in rows if _asked_state(r["ref_id"]) == "open")
 
     open_items = await repo.list_operator_items("OPEN")
     awaiting = await repo.list_proposals("AWAITING_HUMAN")

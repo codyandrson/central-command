@@ -35,7 +35,7 @@ The single-node profile exists for the work deployment. That it could be handed 
 ### 2.1 Jobs To Be Done
 
 - Keep up with email: triage, dismiss, file, draft replies, unsubscribe (Gmail only, see §5), with nothing acted on unseen.
-- Manage the calendar and prioritise the day and the week, through an executive assistant that may initiate contact within a budget.
+- Manage the calendar and prioritise the day and the week, through an executive assistant that may initiate contact; a daily contact budget remains only as a mechanical stop on a schedule that misfires.
 - Keep Jira true to reality: every email and document that changes a task's state is reflected; delegation is effective; hygiene is maintained.
 - Maintain Confluence: pages stay current, structure follows the real process, claims the team relies on are tracked for staleness.
 - Remember: a knowledge graph that grows through gated, verified proposals and stays trustworthy.
@@ -118,7 +118,7 @@ Requirements carry global ids. **AB** = as built, confirmed in review. **NEW** =
   - (b) Before round one of a multi-assignment project its plan (sub-tasks, assignees, order, what it will not do) parks for the operator to approve or revise, and every stall-triggered replan parks again.
   - (c) It may ask the operator a question that parks in the inbox, and the answer is trusted operator evidence.
   - (d) Stuck-ness, not time, is what it watches: stalls escalate to the operator, and round and fan-out limits are runaway backstops, never pacing.
-  - (e) The operator never talks to agents raw: the EA is the agent built to be talked to, and it can give a team tour that records the operator's world as gated episodes; an over-budget ask degrades to a queued question and is never lost; only the EA is attention-budgeted, by design. The attention budget is a nice-to-have, not an MVP feature: if it fails to work or becomes cumbersome it is disabled, and nothing else depends on it.
+  - (e) The operator never talks to agents raw: the EA is the agent built to be talked to, and it can give a team tour that records the operator's world as gated episodes; an over-budget ask degrades to a queued question and is never lost; only the EA has a contact budget, by design, and it is a mechanical stop on a schedule that misfires (default 20 a day), not a rule for how the EA behaves. The contact budget is a nice-to-have, not an MVP feature: if it fails to work or becomes cumbersome it is disabled, and nothing else depends on it.
 - **FR-22 (AB)** Agents declare capability gaps (missing knowledge, tools or reference material, including reference material found stale against a capture-time stamp) as first-class answers and never guess past them; a "never guess X" rule needs a tool that can read X.
 - **FR-23 (AB)** Skills are database rows delivered through capability loading, versioned (import is create-only at install; an update refreshes a bundled doc the operator did not change and asks about one they did, DL-198), searchable only at the current version, granted per agent. The library learns from use through the gate (DL-215): every roster agent but the auditors and the editor may propose a skill, a document or an exact-span correction of a document it read (applied to the current text at propose time, the diff shown, refused at execution if the document moved), and session-close reflection may propose at most one such correction, only for a skill the session loaded and only with a verbatim quote from the session that the code re-checks. Keeping agents away from files is not itself a requirement; the standing constraint is only that an agent never reaches a credential (FR-1, FR-14), so file access, if ever wanted, is given through the credential-free sandbox, never through the runtime process that holds secrets.
 
@@ -259,7 +259,7 @@ Success is the operator's own statement, not a dashboard rate. The three foundin
 1. **Email keeps Jira and the graph in sync.** A message that changes a task's state is reflected in Jira and remembered in the graph, with nothing acted on unseen.
 2. **Tasked, long-running work completes.** A compliance job given to an agent runs over days with a Confluence tracker the team can read, surviving restarts and outages, with the operator approving only the gated writes.
 3. **The graph grows richer while staying trustworthy.** Every fact arrived through the gate, carries its pedigree, and is superseded rather than silently rewritten.
-4. **The EA keeps the calendar and the day's priorities.** It plans the day and the week, and contacts the operator within its budget, never outside it.
+4. **The EA keeps the calendar and the day's priorities.** It plans the day and the week, and contacts the operator on its schedule; its contact budget is only a mechanical stop on a schedule that misfires.
 
 Beneath those, the operator reads trends from what the system already records, with no new instrumentation and no targets: whether the inbox drains at the pace the approval throttle sets rather than stalling; whether agent-proposed Jira and Confluence changes need less editing over time; whether the dangerous quadrant stays empty as classes graduate and overrides are set.
 

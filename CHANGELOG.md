@@ -4,6 +4,35 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-18 — v2.97.0: The executive assistant stops re-asking answered questions, and is no longer told to ration its contact
+
+The first of six steps that turn the executive assistant from a reporter on the team's record into a
+planner of the operator's work (DL-221; design record
+`docs/superpowers/specs/2026-11-18-ea-planning-design.md`). Nothing about planning is built yet; this
+step removes two things that worked against it.
+
+- **Answered questions no longer read as open.** The assistant's brief listed every question a teammate
+  had put to the operator in the window, with no sign of whether it had been answered, so an end-of-day
+  contact could present answered questions as gaps. Each such entry now carries the question's current
+  state (`open`, `answered`, `withdrawn`, or `unknown`) and the kind carries a `still_open` count over the
+  whole window. `read_team_activity` shows the same. The brief says that `open_operator_items` is the only
+  list of what is waiting on the operator.
+- **The assistant never restates another agent's question.** The built-in charter and the contact
+  framings now say so: it reports how many questions are open in the Decisions Inbox and whose they are,
+  and asks only its own.
+- **The contact budget is a backstop.** `CC_EA_CONTACT_BUDGET_PER_DAY` now defaults to 20 (was 3). The
+  two charter paragraphs that told the assistant to ration its contact are gone, and the brief no longer
+  reports the budget. The mechanism is unchanged: it remains as a stop on a schedule that misfires.
+
+For an operator: a deployment that sets `CC_EA_CONTACT_BUDGET_PER_DAY` in its `.env` keeps its own value.
+A deployment that has hired the assistant runs its governed charter, which a release does not rewrite;
+the charter change reaches it when the operator saves or approves a charter revision. The brief and
+activity changes apply at once.
+
+Also in this release: the `heartbeat/probes.py` module docstring now says which probes send a key (the
+`llm` and `embedder` probes send the scoped model key; the service probes are unauthenticated). Comment
+only.
+
 ## 2026-11-18 — v2.96.4: A possible read-aloud refinement is written down where it would be made
 
 Documentation only; nothing an operator uses changes. Read-aloud was measured after v2.96.3 and left as

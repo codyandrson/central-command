@@ -733,14 +733,16 @@ class Settings(BaseSettings):
     # sweep flags it (S1, at the operator) or nudges the agent (S2).
     discussion_stall_hours: int = 24
 
-    # The ATTENTION BUDGET (teaming doctrine, Decision 4): how many times a day
-    # the EA may open a conversation with the operator unprompted. The dial is
-    # The operator's and the default errs LOW — the notification-budget evidence puts
-    # total unsolicited agent contact at ~3-5/day before fatigue, and three
-    # scheduled kinds (morning report, check-in, digest) cost one each.
-    # 0 = unlimited, and every other agent's budget IS 0 — this is a per-agent
-    # rule (runtime/attention.py), not a system-wide throttle.
-    ea_contact_budget_per_day: int = 3
+    # The EA's CONTACT BUDGET (teaming doctrine, Decision 4; reduced to a
+    # backstop 2026-11-18, docs/superpowers/specs/2026-11-18-ea-planning-design.md
+    # D9): how many times a day the EA may open a conversation with the
+    # operator unprompted. It no longer shapes the assistant's behaviour — its
+    # charter does not mention it — and remains only as a mechanical stop on a
+    # schedule that misfires, so the default (20) sits far above the scheduled
+    # cadence. The dial is the operator's. 0 = unlimited, and every other
+    # agent's budget IS 0 — this is a per-agent rule (runtime/attention.py),
+    # not a system-wide throttle.
+    ea_contact_budget_per_day: int = 20
 
     # Sandbox slice 1 (D-sandbox): the runner is a SEPARATE, credential-free
     # service (central_command/sandbox/runner.py) that drives ephemeral gVisor

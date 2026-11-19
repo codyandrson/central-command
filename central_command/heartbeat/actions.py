@@ -444,9 +444,12 @@ _EA_FRAMING: dict[str, str] = {
     "digest": (
         "This is the END-OF-DAY WRAP-UP — close what the morning opened. Tell "
         "the operator what got done today, what is still open (and now waiting "
-        "on whom), and what comes first tomorrow. Then ask about the gaps the "
-        "record cannot close: anything sitting undecided, any question a "
-        "teammate raised, anything that looks stuck. The calendar block is "
+        "on whom), and what comes first tomorrow. Questions other agents have "
+        "put to the operator are theirs: say how many are open in the "
+        "Decisions Inbox and whose they are, and never restate or re-ask one. "
+        "Then ask only your own questions, about the gaps the record cannot "
+        "close: anything sitting undecided, anything that looks stuck. The "
+        "calendar block is "
         "TOMORROW's: flag anything on it the operator should prepare tonight — "
         "an early start, a conflict, a meeting with no agenda — so tomorrow's "
         "morning brief starts warm."
@@ -461,7 +464,9 @@ _EA_FRAMING: dict[str, str] = {
     ),
     "morning_report": (
         "This is the MORNING REPORT — the first contact of the day. Cover what "
-        "landed overnight and what is already waiting, then ask what the "
+        "landed overnight and what is already waiting (for questions other "
+        "agents put to the operator, only how many are open in the Decisions "
+        "Inbox and whose they are), then ask what the "
         "operator wants prioritised today. This is the one contact where asking "
         "about priorities is the point rather than an interruption. Frame the "
         "day against the calendar block: what is on it, where the free stretches "
@@ -622,7 +627,10 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
         + "`open_tasks` is every task not yet finished, and "
         "`open_operator_items` every question still waiting on the operator: "
         "together they are what the team currently owes and is owed inside "
-        "the control plane.\n"
+        "the control plane. An `agent.asked` entry under `activity` is a "
+        "question a teammate put to the operator in the window; its `state` "
+        "says whether it is still open, and `open_operator_items` is the only "
+        "list of what is waiting on the operator.\n"
         + ("`tracked_follow_ups` is the issue tracker's open issues labelled "
            "as follow-ups, soonest due first — the dated commitments. It is "
            "GROUND TRUTH for what is currently open: narrate it, never "
@@ -637,8 +645,7 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
         "`ask_operator(needs_discussion=True)` — your report goes in the "
         "question. If you have nothing they need to reply to, answer in plain "
         "text instead; a report nobody must respond to should not cost a "
-        "conversation. Your daily contact budget is enforced by the control "
-        f"plane ({used} of {budget} used today)."
+        "conversation."
     )
     title = {
         "digest": "End-of-day wrap-up", "check_in": "Check-in",

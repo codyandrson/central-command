@@ -533,11 +533,11 @@ insert into heartbeat_schedule
      '{"expr": "20 * * * *", "tz": "America/Denver"}', 'discussion.sweep',
      '{}', 'seed:heartbeat'),
     -- The EA's attention loop (2026-07-30). Four FIRINGS a day (07:30, 11:00,
-    -- 15:00, 17:00) against a budget of three INTERRUPTIONS
-    -- (CC_EA_CONTACT_BUDGET_PER_DAY = 3), and that is the intended shape: a
-    -- firing only spends budget if the EA actually opens a conversation, and a
-    -- quiet check-in is meant to report in plain text and cost nothing. The
-    -- budget is the ceiling on the operator's attention, never on the cadence.
+    -- 15:00, 17:00). A firing only spends contact budget if the EA actually
+    -- opens a conversation, and a quiet check-in is meant to report in plain
+    -- text and cost nothing. The budget (CC_EA_CONTACT_BUDGET_PER_DAY, default
+    -- 20 since 2026-11-18) no longer shapes the EA's behaviour; it remains only
+    -- as a mechanical stop on a schedule that misfires.
     -- Born disabled like every seed: the EA contacts nobody until the operator clicks
     -- enable.
     ('ea-morning-report', 'EA morning report', 'cron',
