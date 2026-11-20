@@ -236,6 +236,11 @@ async def _run_live(
                     raise RunStopped(session_id, after)
         result = agent_run.result
         await snapshot(result.all_messages())
+        if stop_requested:
+            # The stop arrived during the last model call, where there is no
+            # boundary to park on. The run is over; the request must not
+            # outlive it and stop the session's NEXT run at its first step.
+            await repo.clear_stop_request(session_id)
         return result
     except Exception as exc:
         # Best-effort final snapshot: the step that broke may have appended

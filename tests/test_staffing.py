@@ -308,6 +308,10 @@ def tracker(monkeypatch):
     """A configured tracker whose search answers by JQL."""
     monkeypatch.setattr(jira, "configured", lambda: True)
     monkeypatch.setattr(ea_backlog, "_today", lambda: TODAY)
+    # `ea_team` imports `_today` by name, so the module's own binding is the
+    # one its reads call; pinning only `ea_backlog._today` left these tests on
+    # the real clock, and they passed on the day they were written only.
+    monkeypatch.setattr(ea_team, "_today", lambda: TODAY)
     monkeypatch.setattr(settings, "plan_team_jql",
                         "statusCategory != Done AND assignee is not EMPTY")
     monkeypatch.setattr(settings, "plan_team_limit", 500)

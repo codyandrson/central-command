@@ -4,6 +4,23 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-20 — v2.105.1: A stop request no longer outlives the run it was pressed on
+
+- **A stop that arrived during a run's last model call stopped the session's NEXT run.** A run parks
+  STOPPED only at a boundary where a model request is about to be sent. A stop request (the operator's
+  Stop, or the one the update hold sets on every running conversation and task) that arrived while the
+  run was on its final model call found no such boundary: the run finished normally and the flag stayed
+  set. The next run on the same session read it at its first step and parked STOPPED at once, recorded
+  as stopped by the operator. Seen live: an update was started while an agent was writing a reply in a
+  conversation; after the update the operator's next message in that conversation was parked unanswered.
+  A run that saw the flag and finished now clears it (`repo.clear_stop_request`), and every flip of a
+  session to RUNNING clears it too (`mark_session_running` and the three parked-run claims, as the
+  stopped-run claim already did). A session left STOPPED this way before the fix resumes with the
+  cockpit's Resume lever; nothing was lost, the message is the record's unsent tail.
+- **Two staffing tests ran on the real clock.** `ea_team` imports `_today` by name, and the tests pinned
+  only `ea_backlog._today`, so they passed on the day they were written and failed from the next day on.
+  The fixture pins the name the module calls. No product change.
+
 ## 2026-11-19 — v2.105.0: A missed hard deadline is put to the operator as a decision, and the calendar list carries each event's id
 
 Two changes from the first live run of the EA-planning releases.

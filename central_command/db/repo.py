@@ -317,7 +317,8 @@ async def claim_parked_orchestration(session_id: str) -> dict | None:
     try:
         row = await conn.fetchrow(
             """
-            update session set status = 'RUNNING', updated_at = now()
+            update session set status = 'RUNNING', stop_requested = false,
+                   updated_at = now()
              where id = $1 and status = 'AWAITING_AGENTS'
             returning run_state
             """,
@@ -427,7 +428,8 @@ async def claim_parked_resume(session_id: str) -> dict | None:
     try:
         row = await conn.fetchrow(
             """
-            update session set status = 'RUNNING', updated_at = now()
+            update session set status = 'RUNNING', stop_requested = false,
+                   updated_at = now()
              where id = $1 and status = 'AWAITING_RESUME'
             returning run_state
             """,
@@ -486,7 +488,8 @@ async def claim_parked_continue(session_id: str) -> dict | None:
     try:
         row = await conn.fetchrow(
             """
-            update session set status = 'RUNNING', updated_at = now()
+            update session set status = 'RUNNING', stop_requested = false,
+                   updated_at = now()
              where id = $1 and status = 'AWAITING_CONTINUE'
             returning run_state
             """,
@@ -902,11 +905,38 @@ async def restamp_unstarted_session(session_id: str) -> None:
 
 async def mark_session_running(session_id: str) -> None:
     """Flip a resting conversation session back to RUNNING for a fresh turn, so
-    the Workspace shows it working while the transcript grows."""
+    the Workspace shows it working while the transcript grows.
+
+    Clears `stop_requested`, like every other flip to RUNNING: a stop asks the
+    run that is live when it is pressed, and a flag a finished run never read
+    must not stop the next one (see `clear_stop_request`)."""
     conn = await _conn()
     try:
         await conn.execute(
-            "update session set status = 'RUNNING', updated_at = now() where id = $1",
+            "update session set status = 'RUNNING', stop_requested = false, "
+            "updated_at = now() where id = $1",
+            session_id,
+        )
+    finally:
+        await conn.close()
+
+
+async def clear_stop_request(session_id: str) -> None:
+    """Drop a stop request its run never acted on.
+
+    A run parks STOPPED only at a boundary where a model request is about to be
+    sent. A stop (the operator's, or the update hold's) that arrives while the
+    run is on its LAST model call finds no such boundary: the run ends
+    normally and the flag stays set, and the next run on the session would
+    read it at its first step and stop at once, attributed to the operator
+    (2026-11-20: an update hold flagged a conversation mid-reply, and the
+    operator's next message after the update was parked unanswered). The run
+    that saw the flag and finished clears it here."""
+    conn = await _conn()
+    try:
+        await conn.execute(
+            "update session set stop_requested = false "
+            "where id = $1 and stop_requested",
             session_id,
         )
     finally:

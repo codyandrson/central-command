@@ -615,3 +615,45 @@ def test_both_resume_drivers_land_the_task_when_the_run_dies():
         src = inspect.getsource(fn)
         assert "except Exception as e:" in src, fn.__name__
         assert "_land_resumed_run_failure(task_id, e, after=after)" in src, fn.__name__
+
+
+# ── A stop the run never acted on does not outlive it (2026-11-20) ────────────
+
+
+async def test_a_stop_during_the_last_model_call_does_not_stop_the_next_run(monkeypatch):
+    """A stop parks only where a model request is about to be sent. One that
+    arrives while the run is on its LAST model call finds no such boundary, so
+    the run finishes; the flag must be cleared with it. Left set, the next run
+    on the session read it at its first step and parked STOPPED "by the
+    operator" (an update hold flagged a conversation mid-reply, and the
+    operator's next message after the update went unanswered)."""
+    # After the first snapshot: the outgoing request is persisted and the one
+    # model call is in flight.
+    _press_stop_mid_run(monkeypatch, after=1)
+    out = await run_task("jira-expert", "Answer in one line.",
+                         model=_looping_model(stop_after=0))
+
+    assert out.get("stopped") is not True, "there was no boundary to stop on"
+    session_id = out["session_id"]
+    assert await repo.session_status(session_id) != "STOPPED"
+    assert (await repo.get_session(session_id))["stop_requested"] is False
+
+
+async def test_a_fresh_turn_starts_with_no_stop_request():
+    """The flip to RUNNING clears the flag: a stop asks the run that is live
+    when it is pressed, never a later one."""
+    session_id = "sess_stale_stop_" + uuid.uuid4().hex[:8]
+    await repo.create_conversation_session(session_id, "jira-expert")  # RUNNING
+    try:
+        assert await repo.request_session_stop(session_id) is True
+        await repo.mark_session_awaiting_operator(session_id)   # the turn ended
+        assert (await repo.get_session(session_id))["stop_requested"] is True
+
+        await repo.mark_session_running(session_id)             # the next turn
+        assert (await repo.get_session(session_id))["stop_requested"] is False
+
+        await repo.request_session_stop(session_id)
+        await repo.clear_stop_request(session_id)
+        assert (await repo.get_session(session_id))["stop_requested"] is False
+    finally:
+        await repo.mark_session_failed(session_id)
