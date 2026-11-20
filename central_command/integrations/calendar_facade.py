@@ -117,9 +117,13 @@ async def list_events(
     fact about the read that the caller must be able to state honestly — a
     brief that silently drops events is worse than one that says it was cut. An
     envelope without an `events` list is a provider failure, never an empty day.
-    Each event is already normalised by the n8n lib (start, end, all_day,
-    summary, location, attendee_count, organizer_is_self, has_agenda, declined) —
-    and `integrations/exchange.py` builds the same shape in Python.
+    Each event is already normalised by the n8n lib (event_id, start, end,
+    all_day, summary, location, attendee_count, organizer_is_self, has_agenda,
+    declined) — and `integrations/exchange.py` builds the same shape in Python.
+    `event_id` is what the plan ledger is joined on and what a move, release or
+    adoption names; the lib once left it out of the list (found 2026-11-19), so
+    every Google event read as a commitment: `tests/test_n8n_workflows.py` runs
+    the shipped list node to keep it in.
     """
     provider = _exchange()
     if provider is not None:

@@ -367,6 +367,17 @@ async def _plan_record_day(args: dict, approver: str, proposer: str | None) -> s
                     f"attempt: {len(earlier['items'])} item(s) ({keys})")
     asked = [str(i["issue_key"]).strip() for i in args["items"]]
     numbers = await ea_plan.planning_numbers(asked)
+    # An issue past a hard deadline is a decision the operator owes (close it, or
+    # set a new due date), never a day's work: the tier is the tracker's word
+    # NOW, so one that passed its date between the draft and the approval is
+    # refused too. Nothing is stored; the drafter is resumed to redraft.
+    past_hard = [k for k in dict.fromkeys(asked) if numbers[k].get("tier") == "past_hard"]
+    if past_hard:
+        raise ExecutorError(
+            f"plan.record_day: {', '.join(past_hard)} "
+            f"{'is' if len(past_hard) == 1 else 'are'} past a hard deadline "
+            "and cannot be on a day's plan — decide it first: close it or set a "
+            "new due date; nothing was stored")
     items = []
     for rank, (raw, issue_key) in enumerate(zip(args["items"], asked), start=1):
         items.append({"issue_key": issue_key, "rank": rank,

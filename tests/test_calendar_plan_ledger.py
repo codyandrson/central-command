@@ -187,8 +187,13 @@ def test_the_minimum_block_setting_must_be_positive():
 
     with pytest.raises(ValueError):
         Settings(plan_min_block_minutes=0)
-    assert Settings().plan_min_block_minutes == 30
-    assert (Settings().plan_day_start, Settings().plan_day_end) == ("08:00", "18:00")
+    # The code defaults, read from the fields: a checkout whose environment
+    # sets the working day (an operator testing a longer one, 2026-11-19) must
+    # not fail this.
+    fields = Settings.model_fields
+    assert fields["plan_min_block_minutes"].default == 30
+    assert (fields["plan_day_start"].default, fields["plan_day_end"].default) == (
+        "08:00", "18:00")
 
 
 class _Facade:

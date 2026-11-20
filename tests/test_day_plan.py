@@ -281,6 +281,41 @@ async def test_the_numbers_are_re_read_at_execution_not_taken_from_the_agent(
 
 
 @needs_pg
+async def test_a_past_hard_issue_is_refused_and_nothing_is_stored(tracker, real_plan):
+    day = _day()
+    long_ago = (ea_backlog._today() - timedelta(days=30)).isoformat()
+    tracker.issues["DOE-7"] = _issue("DOE-7", value=8, lateness=20, estimate=4.0,
+                                     due=long_ago, deadline="hard")
+    tracker.issues["DOE-8"] = _issue("DOE-8", due=long_ago, deadline="hard")   # no numbers
+    tracker.issues["DOE-9"] = _issue("DOE-9", value=3, estimate=2.0)
+    with pytest.raises(executor.ExecutionFailed) as exc:
+        await executor.execute(
+            [_record_day(day, ("DOE-9", "fine"), ("DOE-7", "r"), ("DOE-8", "r"))],
+            "human:lee", [], proposal_id=_pid())
+    assert exc.value.transient is False
+    text = str(exc.value)
+    assert "DOE-7, DOE-8" in text and "DOE-9" not in text
+    assert "decide it first: close it or set a new due date" in text
+    assert await _plans(day) == []
+
+
+@needs_pg
+async def test_a_hard_deadline_due_today_or_a_passed_soft_one_may_be_planned(
+        tracker, real_plan):
+    day = _day()
+    today = ea_backlog._today().isoformat()
+    tracker.issues["DOE-10"] = _issue("DOE-10", value=4, lateness=9, estimate=2.0,
+                                      due=today, deadline="hard")
+    tracker.issues["DOE-11"] = _issue("DOE-11", value=4, lateness=9, estimate=2.0,
+                                      due=(ea_backlog._today() - timedelta(days=3)).isoformat(),
+                                      deadline="soft")
+    await executor.execute([_record_day(day, ("DOE-10", "r"), ("DOE-11", "r"))],
+                           "human:lee", [], proposal_id=_pid())
+    (plan,) = await _plans(day)
+    assert [i["tier"] for i in plan["items"]] == ["must_start", "must_start"]
+
+
+@needs_pg
 async def test_an_unreadable_issue_is_stored_without_numbers_and_named(tracker, real_plan):
     day = _day()
     tracker.issues["DOE-3"] = _issue("DOE-3", value=5, estimate=1.0)

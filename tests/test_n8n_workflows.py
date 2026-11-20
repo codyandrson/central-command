@@ -191,6 +191,28 @@ def test_a_2xx_that_is_not_an_events_list_is_a_no_never_an_empty_list(tmp_path, 
     assert "events" not in out
 
 
+def test_the_list_returns_each_events_id_and_never_an_empty_one_as_a_real_id(tmp_path):
+    """The plan ledger is joined on `event_id` (`heartbeat._annotate_plan_kinds`,
+    `ea_calendar.week`) and a move, release or adoption names it. The list node
+    once returned every other field and NOT the id, so on a Google deployment every
+    event read as a commitment and the EA could not name its own block: the fakes
+    in the other tests carried `event_id`, the provider did not. This runs the
+    SHIPPED node on a Google-shaped body (`id`, never `event_id`)."""
+    out = _run_list_node(tmp_path, {"statusCode": 200, "body": {"items": [
+        {"id": "abc123def", "summary": "Budget review",
+         "start": {"dateTime": "2026-11-20T10:00:00-07:00"},
+         "end": {"dateTime": "2026-11-20T10:30:00-07:00"}},
+        {"summary": "No id on this one",
+         "start": {"date": "2026-11-21"}, "end": {"date": "2026-11-22"}},
+    ]}})
+    first, second = out["events"]
+    assert first["event_id"] == "abc123def" and first["summary"] == "Budget review"
+    # an event without an id carries "", which every join treats as no id
+    assert second["event_id"] == ""
+    assert {"event_id", "start", "end", "all_day", "summary", "location",
+            "attendee_count", "organizer_is_self", "has_agenda", "declined"} <= set(first)
+
+
 def test_an_empty_items_array_is_still_a_complete_empty_list(tmp_path):
     out = _run_list_node(tmp_path, {"statusCode": 200, "body": {"items": []}})
     assert out == {"ok": True, "events": [], "truncated": False}

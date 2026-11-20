@@ -260,6 +260,26 @@ a finite non-negative JSON number, an estimate of zero, a due date that is not
 a date, and a deadline type other than hard or soft read as absent and are
 named under `missing`. The replay on a real backlog has not run yet.
 
+**As built, changed 2026-11-19 (the operator's ruling).** The rule above that
+demotes an issue past a HARD deadline to `standard` is replaced. The operator's
+words: "whenever a hard deadline is passed, that issue needs to be evaluated.
+Either it can no longer be accomplished, and therefore the issue should be
+deleted/closed, or we need to update the deadline. Simply decreasing its
+priority since it has passed is not a good response." A due date before today
+with the deadline type `hard` now puts the issue in a new first tier,
+`past_hard`, whatever else it has or lacks: no score and no rank among the
+others, listed by oldest due date, then key, each row carrying
+`needs_decision: "close_or_redate"`. A due date of today is not past, and a
+passed SOFT deadline is unchanged (it stays in `must_start`). The morning and
+weekly framings and the built-in charter name every such issue first and ask
+the one question (can it still be done? then it needs a new due date, proposed
+with `jira.set_planning_fields`; if not, it should be closed, which the EA does
+not do itself); the day's ranked list never holds one, no block is made for it,
+and `plan.record_day` refuses a plan that names one at execution, from the
+tracker's word then, saying to decide it first. `jira_planning_gaps` does not
+offer a `past_hard` issue for enrichment: it waits on the decision, and scoring
+an issue that may be closed spends approvals and offers a way round it.
+
 ### D5. The calendar: structure placeholders, work blocks, and a ledger that tells them apart
 
 Decided: a hybrid. Placeholders give the week a regular structure; the EA

@@ -2732,7 +2732,8 @@ hygiene, and how the test suite itself must be written. See
   issue with value and estimate but no lateness loss ranks in `standard`. An
   issue with no deadline type is treated as soft (it stays visible in
   `must_start`) and names the field under `missing`; one past a hard deadline
-  ranks in `standard`. The per-hour scores divide by the estimate as entered
+  ranked in `standard` until 2026-11-19 (it now sits in `past_hard`; see the
+  Note of that date). The per-hour scores divide by the estimate as entered
   (padding moves the date, not the ratio). Ties go to the earlier due date
   (none last), then the issue key; `unscored` is listed by due date, then key,
   with no score. Numbers from the tracker are data: a value that is not a
@@ -3084,5 +3085,20 @@ hygiene, and how the test suite itself must be written. See
   the assignment only when told the operator's decision. The one-to-one
   preparation D10 mentions is left to the charter's weekly report and the
   operator's asking; nothing schedules it.
+- **Note (2026-11-19, a passed hard deadline is a decision):** The operator
+  ruled that lowering an issue's priority because its hard deadline has passed
+  is not a response: it must be evaluated, closed if it can no longer be done,
+  or given a new due date. `rank()` gains a first tier, `past_hard` (a due date
+  before today and the deadline type `hard`, whatever else the issue has or
+  lacks), unranked with no score, ordered by oldest due date then key, each row
+  carrying `needs_decision: "close_or_redate"`; a passed soft deadline is
+  unchanged. The morning and weekly framings and the built-in charter name each
+  one first and ask the one question, and propose a new date with
+  `jira.set_planning_fields` (the EA holds no transition, so closing is said,
+  not done); `plan.record_day` refuses a plan naming one (an `ExecutorError`
+  that says to decide it first, the tier read from the tracker at execution),
+  and `jira_planning_gaps` leaves it out. An already-hired EA gets the charter
+  paragraph only as a revision the operator saves. Source: the design record's
+  D4, "As built, changed 2026-11-19".
 - **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`, `tests/test_planning_fields.py`, `tests/test_ea_week_quarter.py`, `tests/test_staffing.py`
 - **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D3, D4, D5, D6, D8, D9, D10, "Build order" 1 to 6); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`, `_jira_set_planning_fields`); `central_command/integrations/jira.py` (`set_planning_fields`, `create_issue`); `central_command/runtime/packs.py` (`_SET_PLANNING_FIELDS`); `central_command/runtime/tools.py` (`jira_planning_gaps`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`, the `jira-hygiene` seed); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`); `central_command/reports/ea_team.py`; `central_command/runtime/staffing_profile.py`; `central_command/runtime/templates.py` (`TEMPLATES["staffing"]`); `central_command/api/routes.py` (`hire_agent`)

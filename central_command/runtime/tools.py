@@ -1215,7 +1215,8 @@ async def jira_planning_gaps(ctx: RunContext) -> str:
     `planning_fields.cannot_write` names the arguments this tracker cannot take
     because it does not declare their field — do not propose those. The
     backlog is the configured backlog JQL, the same read the ranked plan uses.
-    Read-only.
+    An issue past a hard deadline is not listed: it waits on the operator's
+    decision (close it, or set a new due date), not on scoring. Read-only.
     """
     from central_command.reports import ea_backlog
 

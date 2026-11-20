@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-19 — v2.105.0: A missed hard deadline is put to the operator as a decision, and the calendar list carries each event's id
+
+Two changes from the first live run of the EA-planning releases.
+
+- **An issue past a hard deadline is no longer ranked; it is a decision.** The first build treated such an
+  issue as having "already taken its loss" and ranked it on value in the `standard` tier. The operator's
+  ruling: a passed hard deadline means the issue must be evaluated; either it can no longer be done and
+  should be closed, or it still can and needs a new due date. The ranking has a new first tier,
+  `past_hard`, unranked, each row marked `needs_decision: "close_or_redate"`. The morning plan, the weekly
+  plan and the quarterly review name every such issue first and ask the one question; it is never on a
+  day's ranked list, never gets a calendar block, and `plan.record_day` refuses a plan that names one.
+  The nightly enrichment does not offer it for scoring. A passed SOFT deadline is unchanged and stays in
+  `must_start`. The built-in EA charter gains a paragraph; a hired EA's governed charter is not rewritten
+  by a release, so the operator adds it by hand.
+- **The Google calendar list returns each event's id.** The n8n list mapping left the id out, while the
+  test doubles carried one, so on a Google deployment every event read as a commitment, the assistant's
+  own work blocks were reported as not on the calendar, and it had no id with which to move or release a
+  block. `deploy/n8n/workflows/lib-google-calendar.json` now returns `event_id`; a guard test runs the
+  shipped node on a provider-shaped body.
+- A test that compared a fresh `Settings()` with the code defaults now reads the defaults from the fields,
+  so a checkout whose environment sets the working day does not fail it.
+
 ## 2026-11-19 — v2.104.0: An agent's mail search shows the mail it finds outside the queue, and a question says what was checked first
 
 A replay of 23 triage sessions showed the agent asking the operator things the mailbox already

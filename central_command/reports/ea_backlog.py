@@ -33,14 +33,24 @@ THE RULE (D4, as built in step 2):
   start of today; a twelve-hour task at six hours a day, due Friday, of
   Thursday. Weekends and the calendar are not consulted (step 3 replaces
   `hours_per_day` with the calendar's real free time).
+- `past_hard`, FIRST: a due date before today and the deadline type `hard`,
+  whatever else the issue has or lacks (estimate, value, lateness loss). It is
+  not ranked and has no score: a missed hard deadline is a DECISION for the
+  operator, not an order of work (the operator's ruling of 2026-11-19, which
+  replaced the first build's rule that such an issue "has already taken its
+  loss" and ranked in `standard` on value). Either the work can no longer be
+  done and the issue should be closed, or it still can and needs a new due
+  date; lowering its priority because the date has passed is the wrong
+  answer. Listed by oldest due date first, then issue key; every row carries
+  `needs_decision: "close_or_redate"` (no other tier's row has the field). A
+  due date of TODAY is not past.
 - `must_start`: a due date, a lateness loss and an estimate, and a latest start
   of today or earlier. Ordered by lateness loss per estimated hour (the
   estimate as entered: padding moves the date, not the ratio), highest first;
-  ties by earlier due date, then issue key. An issue PAST a `hard` deadline
-  (due date before today) has already taken its loss, so it leaves this tier
-  and ranks in `standard` on its value. An issue past a `soft` deadline stays.
-  An issue with no deadline type is treated as soft for this test (it stays
-  visible) and names `deadline_type` under `missing`.
+  ties by earlier due date, then issue key. An issue past a `soft` deadline
+  stays here (the loss is real, but the date was never a promise). An issue
+  with no deadline type is treated as soft for this test (it stays visible) and
+  names `deadline_type` under `missing`.
 - `standard`: a value and an estimate, and not `must_start`. Ordered by value
   per estimated hour, highest first; ties by earlier due date (none last), then
   issue key.
@@ -65,7 +75,10 @@ from zoneinfo import ZoneInfo
 from central_command.config import settings
 from central_command.integrations import jira
 
-TIERS: tuple[str, ...] = ("must_start", "standard", "unscored")
+TIERS: tuple[str, ...] = ("past_hard", "must_start", "standard", "unscored")
+
+# What a `past_hard` row asks of the operator (its `needs_decision` field).
+NEEDS_DECISION = "close_or_redate"
 
 # The planning inputs, in the order `missing` names them.
 PLANNING_INPUTS: tuple[str, ...] = (
@@ -141,8 +154,9 @@ def _row(issue: dict, today: date, hours_per_day: float, padding: float) -> dict
               if due is not None and estimate is not None else None)
     past_hard = due is not None and due < today and deadline == "hard"
 
-    if (latest is not None and lateness is not None and latest <= today
-            and not past_hard):
+    if past_hard:
+        tier, score = "past_hard", None
+    elif (latest is not None and lateness is not None and latest <= today):
         tier, score = "must_start", lateness / estimate
     elif value is not None and estimate is not None:
         tier, score = "standard", value / estimate
@@ -166,6 +180,7 @@ def _row(issue: dict, today: date, hours_per_day: float, padding: float) -> dict
         "score": score,
         "latest_start": latest.isoformat() if latest else None,
         "missing": missing,
+        **({"needs_decision": NEEDS_DECISION} if tier == "past_hard" else {}),
         **({"url": issue["url"]} if issue.get("url") else {}),
     }
 
@@ -194,6 +209,7 @@ def rank(issues: list[dict], today: date, hours_per_day: float,
         tiers[row["tier"]].append(row)
 
     key = lambda r: str(r["issue_key"] or "")  # noqa: E731
+    tiers["past_hard"].sort(key=lambda r: (r["due_date"], key(r)))
     tiers["must_start"].sort(key=lambda r: (-r["score"], *_due_key(r), key(r)))
     tiers["standard"].sort(key=lambda r: (-r["score"], *_due_key(r), key(r)))
     tiers["unscored"].sort(key=lambda r: (*_due_key(r), key(r)))
@@ -332,8 +348,14 @@ _CUSTOM_INPUTS: tuple[str, ...] = ("stakes", "value", "lateness_loss", "deadline
 def gaps(ranked: dict, limit: int) -> dict:
     """PURE: the ranked rows that lack a planning input (a non-empty
     `missing`), soonest due first (none last), then issue key; at most `limit`.
-    The rows are `rank()`'s own, so `missing` is the ranking's word for it."""
-    rows = [r for t in TIERS for r in ranked["tiers"][t] if r["missing"]]
+    The rows are `rank()`'s own, so `missing` is the ranking's word for it.
+
+    The `past_hard` tier is left out: its issues wait on the operator's
+    decision (close it, or set a new due date), and scoring one that may be
+    closed spends approvals on it and offers a way round the decision. Once the
+    due date moves, or the issue closes, it is read again as any other."""
+    rows = [r for t in TIERS if t != "past_hard"
+            for r in ranked["tiers"][t] if r["missing"]]
     rows.sort(key=lambda r: (*_due_key(r), str(r["issue_key"] or "")))
     shown = rows[:max(0, int(limit))]
     keep = ("issue_key", "summary", "status", "tier", "due_date", "estimate_hours",

@@ -65,7 +65,7 @@ def test_every_issue_lands_in_exactly_one_tier():
     assert _tier(out, "must_start") == ["A-1"]
     assert _tier(out, "standard") == ["A-2", "A-3"]
     assert _tier(out, "unscored") == ["A-4"]
-    assert out["counts"] == {"must_start": 1, "standard": 2, "unscored": 1}
+    assert out["counts"] == {"past_hard": 0, "must_start": 1, "standard": 2, "unscored": 1}
     for name, rows in out["tiers"].items():
         assert all(r["tier"] == name for r in rows)
         assert [r["rank"] for r in rows] == list(range(1, len(rows) + 1))
@@ -108,33 +108,81 @@ def test_padding_moves_the_date_not_the_ratio():
     assert _row(padded, "D-1")["estimate_hours"] == 6.0
 
 
-def test_a_passed_hard_deadline_has_taken_its_loss_and_ranks_on_value():
+def test_a_passed_hard_deadline_is_a_decision_and_leaves_the_ranking():
     yesterday = (TODAY - timedelta(days=1)).isoformat()
     out = rank([_issue("E-1", due_date=yesterday, deadline_type="hard",
                        value=8, estimate_hours=2)], TODAY, 6)
-    assert _tier(out, "must_start") == []
+    assert _tier(out, "past_hard") == ["E-1"]
+    assert _tier(out, "must_start") == [] and _tier(out, "standard") == []
     row = _row(out, "E-1")
-    assert row["tier"] == "standard" and row["score"] == 4.0
+    assert row["tier"] == "past_hard" and row["score"] is None and row["rank"] == 1
+    assert row["needs_decision"] == "close_or_redate"
+    assert out["counts"] == {"past_hard": 1, "must_start": 0, "standard": 0, "unscored": 0}
+
+
+@pytest.mark.parametrize("lacks", [
+    {},                                                  # fully scored
+    {"estimate_hours": None},                            # no estimate
+    {"value": None},                                     # no value
+    {"lateness_loss": None},                             # no lateness loss
+    {"estimate_hours": None, "value": None, "lateness_loss": None, "stakes": None},
+    {"estimate_hours": 0},                               # a zero estimate reads as absent
+])
+def test_a_passed_hard_deadline_is_past_hard_whatever_else_it_lacks(lacks):
+    last_week = (TODAY - timedelta(days=7)).isoformat()
+    row = _row(rank([_issue("E-3", due_date=last_week, deadline_type="hard", **lacks)],
+                    TODAY, 6), "E-3")
+    assert row["tier"] == "past_hard" and row["score"] is None
+    assert row["needs_decision"] == "close_or_redate"
+
+
+def test_a_past_hard_row_is_past_hard_with_the_deadline_type_spelled_any_way():
+    last_week = (TODAY - timedelta(days=7)).isoformat()
+    assert _tier(rank([_issue("E-4", due_date=last_week, deadline_type=["Hard"])],
+                      TODAY, 6), "past_hard") == ["E-4"]
+
+
+def test_past_hard_lists_the_oldest_due_date_first_then_the_key():
+    def old(key, days):
+        return _issue(key, due_date=(TODAY - timedelta(days=days)).isoformat(),
+                      deadline_type="hard", value=100 - days)
+    out = rank([old("Z-1", 3), old("Z-3", 10), old("Z-2", 10), old("Z-0", 1)], TODAY, 6)
+    assert _tier(out, "past_hard") == ["Z-2", "Z-3", "Z-1", "Z-0"]
+    assert [r["rank"] for r in out["tiers"]["past_hard"]] == [1, 2, 3, 4]
+    assert all(r["score"] is None for r in out["tiers"]["past_hard"])
+
+
+def test_the_tiers_come_in_the_order_past_hard_first():
+    assert ea_backlog.TIERS == ("past_hard", "must_start", "standard", "unscored")
+
+
+def test_only_a_past_hard_row_carries_needs_decision():
+    yesterday = (TODAY - timedelta(days=1)).isoformat()
+    out = rank([
+        _issue("Y-1", due_date=yesterday, deadline_type="hard"),            # past_hard
+        _issue("Y-2", due_date=yesterday, deadline_type="soft"),            # must_start
+        _issue("Y-3", due_date=(TODAY + timedelta(days=30)).isoformat()),   # standard
+        _issue("Y-4", value=None),                                          # unscored
+    ], TODAY, 6)
+    have = {r["issue_key"] for t in out["tiers"].values() for r in t
+            if "needs_decision" in r}
+    assert have == {"Y-1"}
+    assert _row(out, "Y-2")["tier"] == "must_start"
 
 
 def test_a_hard_deadline_due_today_is_not_passed():
     out = rank([_issue("E-2", due_date=TODAY.isoformat(), deadline_type="Hard")],
                TODAY, 6)
-    assert _tier(out, "must_start") == ["E-2"]
+    assert _tier(out, "must_start") == ["E-2"] and _tier(out, "past_hard") == []
     assert _row(out, "E-2")["deadline_type"] == "hard"
-
-
-def test_a_passed_hard_deadline_with_no_value_is_unscored():
-    yesterday = (TODAY - timedelta(days=1)).isoformat()
-    out = rank([_issue("E-3", due_date=yesterday, deadline_type="hard", value=None)],
-               TODAY, 6)
-    assert _tier(out, "unscored") == ["E-3"]
+    assert "needs_decision" not in _row(out, "E-2")
 
 
 def test_a_passed_soft_deadline_stays_in_must_start():
     out = rank([_issue("F-1", due_date=(TODAY - timedelta(days=5)).isoformat(),
                        deadline_type="soft")], TODAY, 6)
-    assert _tier(out, "must_start") == ["F-1"]
+    assert _tier(out, "must_start") == ["F-1"] and _tier(out, "past_hard") == []
+    assert "needs_decision" not in _row(out, "F-1")
 
 
 def test_no_deadline_type_is_treated_as_soft_and_named_missing():
@@ -291,8 +339,8 @@ def test_a_bad_configuration_is_refused(hpd, pad):
 
 def test_an_empty_backlog_ranks_to_empty_tiers():
     assert rank([], TODAY, 6) == {
-        "tiers": {"must_start": [], "standard": [], "unscored": []},
-        "counts": {"must_start": 0, "standard": 0, "unscored": 0}}
+        "tiers": {"past_hard": [], "must_start": [], "standard": [], "unscored": []},
+        "counts": {"past_hard": 0, "must_start": 0, "standard": 0, "unscored": 0}}
 
 
 # --- backlog(): the outside read ------------------------------------------------
@@ -363,7 +411,7 @@ async def test_backlog_reads_the_configured_jql_and_ranks(monkeypatch, real_back
     assert out["available"] is True and out["unit"] == settings.plan_value_unit
     assert out["planning_fields"] == {"declared": ["Stakes", "Value", "Lateness loss"],
                                       "missing": ["Deadline type"]}
-    assert out["counts"] == {"must_start": 1, "standard": 1, "unscored": 1}
+    assert out["counts"] == {"past_hard": 0, "must_start": 1, "standard": 1, "unscored": 1}
     assert [i["issue_key"] for i in out["items"]] == ["Q-1", "Q-2", "Q-3"]
     assert out["items"][0]["stakes"] == "Ship it" and out["items"][0]["score"] == 10.0
     assert out["truncated"] is False and out["items_omitted"] == 0
@@ -481,7 +529,46 @@ async def test_the_brief_cap_takes_must_start_then_standard_then_unscored(
     out = await ea_backlog.backlog()
     assert [i["issue_key"] for i in out["items"]] == ["T-3", "T-2", "T-1"]
     assert out["items_omitted"] == 1
-    assert out["counts"] == {"must_start": 1, "standard": 2, "unscored": 1}
+    assert out["counts"] == {"past_hard": 0, "must_start": 1, "standard": 2, "unscored": 1}
+
+
+async def test_the_brief_block_lists_the_past_hard_issues_first(monkeypatch, real_backlog):
+    declared = [*_DECLARED, {"id": "customfield_4", "name": "Deadline type",
+                             "type": "select", "writable": True}]
+    old = (TODAY - timedelta(days=9)).isoformat()
+    recent = (TODAY - timedelta(days=2)).isoformat()
+    rows = [
+        _row_in("W-1", {"Value": 9, "Lateness loss": 9, "Deadline type": "soft"},
+                due_date=TODAY.isoformat()),                              # must_start
+        _row_in("W-2", {"Value": 5}),                                     # standard
+        _row_in("W-3", {"Deadline type": "hard"}, due_date=recent),       # past_hard, no value
+        _row_in("W-4", {"Value": 9, "Lateness loss": 9, "Deadline type": "hard"},
+                due_date=old),                                            # past_hard
+    ]
+    _fake_jira(monkeypatch, rows, declared=declared)
+    out = await ea_backlog.backlog()
+    assert [i["issue_key"] for i in out["items"]] == ["W-4", "W-3", "W-1", "W-2"]
+    assert [i["tier"] for i in out["items"]] == ["past_hard", "past_hard", "must_start",
+                                                 "standard"]
+    assert out["counts"] == {"past_hard": 2, "must_start": 1, "standard": 1, "unscored": 0}
+    assert [i.get("needs_decision") for i in out["items"]] == [
+        "close_or_redate", "close_or_redate", None, None]
+    assert out["items"][0]["score"] is None
+
+
+async def test_a_past_hard_issue_is_not_offered_for_enrichment(monkeypatch, real_backlog):
+    declared = [*_DECLARED, {"id": "customfield_4", "name": "Deadline type",
+                             "type": "select", "writable": True}]
+    old = (TODAY - timedelta(days=9)).isoformat()
+    rows = [
+        _row_in("V-1", {"Deadline type": "hard"}, due_date=old),          # past_hard, no value
+        _row_in("V-2", {"Value": 3}, due_date=(TODAY + timedelta(days=9)).isoformat()),
+        _row_in("V-3"),                                                   # unscored
+    ]
+    _fake_jira(monkeypatch, rows, declared=declared)
+    out = await ea_backlog.planning_gaps()
+    assert [i["issue_key"] for i in out["issues"]] == ["V-2", "V-3"]
+    assert out["totals"]["read"] == 3 and out["totals"]["needing_enrichment"] == 2
 
 
 async def test_an_unconfigured_tracker_is_said_so_and_never_called(monkeypatch, real_backlog):
@@ -669,6 +756,43 @@ def test_the_morning_framing_is_the_plan():
     assert "`unscored`" in text
     assert "Decisions Inbox" in text and "whose they are" in text
     assert "what the operator wants prioritised" not in text
+
+
+def test_the_brief_explains_the_past_hard_tier_and_no_longer_ranks_it_standard():
+    import inspect
+    import re
+
+    # the brief text is adjacent string literals: join them before looking
+    src = re.sub(r'"\s*\n\s*"', "", inspect.getsource(hb_actions._ea_contact))
+    assert "`past_hard`" in src and "`needs_decision`" in src
+    assert "ranks in `standard`" not in src and "has already taken its loss" not in src
+    assert "an issue past a soft deadline stays here" in src
+
+
+@pytest.mark.parametrize("kind", ["morning_report", "week_ahead"])
+def test_the_morning_and_weekly_framings_put_past_hard_issues_to_the_operator_first(kind):
+    text = hb_actions._EA_FRAMING[kind]
+    assert "name EVERY issue in" in text or "FIRST name EVERY issue in" in text
+    assert "`past_hard` tier" in text
+    assert "can it still be done? If yes it needs a new due date; if no it should be closed" in text
+    assert "block calendar time for it" in text
+    assert "`jira.set_planning_fields` (`due_date`)" in text
+    assert text.index("`past_hard`") < text.index("`must_start`")
+    assert "never propose a `plan.record_day` item for it" in hb_actions._EA_FRAMING[
+        "morning_report"]
+
+
+def test_the_evening_and_quarterly_framings_keep_past_hard_out_of_the_plan():
+    assert "never an issue in the `past_hard` tier" in hb_actions._EA_FRAMING["digest"]
+    assert "`past_hard` tier first" in hb_actions._EA_FRAMING["quarter_ahead"]
+
+
+def test_the_charter_says_a_missed_hard_deadline_is_a_decision():
+    c = ea_profile.CHARTER
+    assert "A MISSED HARD DEADLINE IS A DECISION, NOT A RANKING" in c
+    assert "can it still be done?" in c and "needs a new due date" in c
+    assert "never gets a calendar block" in c
+    assert "plan.record_day" not in c       # the charter never names a capability
 
 
 # --- lines of effort in the snapshot -----------------------------------------------
