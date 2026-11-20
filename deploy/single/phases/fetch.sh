@@ -277,9 +277,28 @@ fetch_cockpit() {
 # (update.sh apply's acquisition) installs into a throwaway tree, so it never
 # skips on, and never writes, the deployment's record — the post-merge fetch
 # would otherwise skip an install the new lockfile needs.
+#
+# CC_COCKPIT_NPM_PREINSTALLED=1 (v2.106.0) replaces `npm ci` with an offline
+# check of the operator's own tree (setup.sh's cockpit_adopt_preinstalled): the
+# install that empties node_modules never starts. A STAGED run cannot check
+# that tree against the NEW release's package.json (the tree is the
+# deployment's, the manifest is the staged copy's, and npm ls needs both in
+# one directory), so it says so and the post-merge fetch does the check.
 fetch_cockpit_npm() {
   if (( ! STAGED )) && cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT"; then
-    pass "cockpit" "npm tree current — web/node_modules was installed from this package-lock.json (and this node major), so npm ci was skipped"
+    if cc_cockpit_preinstalled; then
+      pass "cockpit" "npm tree current — the operator-provided web/node_modules was accepted against this package-lock.json (and this node major), so it was not checked again"
+    else
+      pass "cockpit" "npm tree current — web/node_modules was installed from this package-lock.json (and this node major), so npm ci was skipped"
+    fi
+    return 0
+  fi
+  if cc_cockpit_preinstalled; then
+    if (( STAGED )); then
+      warn "cockpit" "CC_COCKPIT_NPM_PREINSTALLED=1 — the new release's npm tree was NOT acquired: the deployment's own web/node_modules is checked against the new web/package.json after the merge, and a tree that no longer satisfies it stops there (repair it in web/ with npm install --no-package-lock, then re-run ./setup.sh)"
+      return 0
+    fi
+    cockpit_adopt_preinstalled
     return 0
   fi
   (( STAGED )) || cc_cockpit_forget "$STATE_DIR" npm

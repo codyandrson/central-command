@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-20 — v2.106.0: Setup can accept a cockpit npm tree the operator installed
+
+- **A mirror lacking one pinned npm version left no way to finish an install.** `npm ci` installs
+  exactly `web/package-lock.json`'s pins, so `CC_NPM_REGISTRY` cannot route around a version a mirror
+  does not carry, and every deployment-side route was closed: an edited lockfile fails the
+  pristine-tree check, a tree installed by hand was emptied by the next `npm ci` before it failed, and
+  the record that lets `npm ci` be skipped was written only after `npm ci` itself had succeeded.
+  `CC_COCKPIT_NPM_PREINSTALLED=1` (single-node profile; off by default, asked by `./setup.sh
+  configure` among the mirrors) is the route: with it, `fetch` and `app` never run `npm ci`. They
+  accept `web/node_modules` when `npm ls --all --offline` finds every dependency `web/package.json`
+  declares, inside its declared range and with nothing extraneous, and record it so later runs skip
+  the check until the lockfile changes. A tree that does not fit, or no tree at all, is a FAIL naming
+  npm's own findings, and the tree is left exactly as it was. Install it in `web/` with `npm install
+  --no-package-lock`, which leaves the lockfile as released.
+- **What the key gives up, and how it says so.** An accepted tree satisfies version RANGES, not the
+  lockfile's pins, so the deployment's cockpit dependencies are then the operator's choice rather than
+  the release's. Acceptance is a WARN each time it is decided (once per lockfile), not a PASS. During
+  `./update.sh apply` the staged acquisition cannot check the deployment's tree against the new
+  release's `package.json`; it WARNs and the check runs after the merge. The intended use is short: a
+  missing version is still a finding to report, fixed by a release that pins a version the mirror
+  carries (v2.105.2 was one), after which the key goes back to 0. `deploy/AIRGAP.md` has the procedure.
+- No schema, unit or manifest change. The k3s profile is unchanged.
+
 ## 2026-11-20 — v2.105.2: The cockpit lockfile pins a chart library version a mirror carries
 
 - **`npm ci` failed with a 404 on a mirrored network.** `web/package-lock.json` pinned

@@ -79,13 +79,14 @@ def _version() -> str:
 # phase_fetch reduced to its cockpit step — every image and the Python graph
 # need a registry this rig does not have. Every OTHER row's probe reads true
 # (a stub venv cannot import the app); the cockpit's own probes stay REAL, so
-# the plan and the post-phase check are the shipped decision.
+# the plan and the post-phase check are the shipped decision. It loads .env
+# first, as the real phase does: the cockpit step reads its seams from there.
 _TAIL = r'''
 for __f in $(compgen -A function p_); do
   case "$__f" in p_cockpit_npm|p_cockpit_build|p_node_ok) continue ;; esac
   eval "$__f() { return 0; }"
 done
-phase_fetch() { fetch_cockpit; }
+phase_fetch() { load_env || return 1; fetch_cockpit; }
 '''
 
 
@@ -283,3 +284,120 @@ exit 0
     a = rig.run("app")
     assert a.returncode == 1, a.stdout + a.stderr
     assert not rig.record("build").exists(), "a failed build left a record that reads current"
+
+
+# ── the operator-provided tree (CC_COCKPIT_NPM_PREINSTALLED=1, v2.106.0) ─────
+# A mirror that lacks one version the lockfile pins cannot serve `npm ci`, and
+# `npm ci` empties node_modules before it fails. With the key, setup checks the
+# tree the operator installed (`npm ls --all --offline`) and never runs
+# `npm ci` — and never deletes the tree, whatever the check says.
+
+_LS = "npm ls --all --offline"
+
+
+def _preinstalled(rig: Rig, *, ls_rc: int = 0, tree: bool = True) -> Path:
+    """Turn the key on, with a stub npm whose `ls` answers `ls_rc` and whose
+    `ci` would destroy the tree (as the real one does). Returns the marker file
+    standing for the operator's own install."""
+    _set(rig.repo / ".env", {"CC_COCKPIT_NPM_PREINSTALLED": "1"})
+    marker = rig.web / "node_modules" / "operators-own.txt"
+    if tree:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("installed by hand\n")
+    _exe(rig.tmp / "bin" / "npm", f'''#!/usr/bin/env bash
+echo "npm $*" >> "{rig.npm_log.as_posix()}"
+case "$1" in
+  ci)  rm -rf node_modules && mkdir -p node_modules ;;
+  ls)  if (( {ls_rc} )); then
+         echo "npm error code ELSPROBLEMS" >&2
+         echo "npm error missing: fancy-canvas@2.1.0, required by lightweight-charts@5.2.1" >&2
+         exit {ls_rc}
+       fi ;;
+  run) rm -rf dist server-dist && mkdir -p dist server-dist && touch server-dist/index.js ;;
+esac
+exit 0
+''')
+    return marker
+
+
+@drives_installer
+def test_a_provided_tree_is_checked_and_accepted_and_npm_ci_never_runs(rig: Rig):
+    marker = _preinstalled(rig)
+    f = rig.run("fetch")
+    _ok(f)
+    assert rig.npm_calls() == [_LS], rig.npm_calls()
+    assert "WARN cockpit: npm tree ACCEPTED AS PROVIDED" in f.stdout, f.stdout
+    assert marker.exists(), "the operator's tree was replaced"
+    assert rig.record("npm").read_text().strip(), "an accepted tree left no record"
+    a = rig.run("app")
+    _ok(a)
+    assert rig.npm_calls() == ["npm run build"], "app checked or reinstalled an accepted tree"
+    assert marker.exists()
+
+
+@drives_installer
+def test_an_accepted_tree_is_not_checked_again_until_the_lockfile_changes(rig: Rig):
+    marker = _preinstalled(rig)
+    _ok(rig.run("fetch"))
+    f = rig.run("fetch")
+    _ok(f)
+    assert rig.npm_calls() == [], rig.npm_calls()
+    assert "operator-provided web/node_modules was accepted" in f.stdout, f.stdout
+    # A new release's lockfile: the tree is checked against it — never reinstalled.
+    write_lf(rig.web / "package-lock.json", '{"name": "web", "lockfileVersion": 3, "x": 1}\n')
+    f = rig.run("fetch")
+    _ok(f)
+    assert rig.npm_calls() == [_LS], rig.npm_calls()
+    assert marker.exists()
+
+
+@drives_installer
+def test_a_provided_tree_that_does_not_fit_fails_and_is_left_alone(rig: Rig):
+    marker = _preinstalled(rig, ls_rc=1)
+    f = rig.run("fetch")
+    assert f.returncode == 1, f.stdout + f.stderr
+    assert "FAIL cockpit: CC_COCKPIT_NPM_PREINSTALLED=1 but web/node_modules does not satisfy" in f.stdout
+    assert "missing: fancy-canvas@2.1.0" in f.stdout, "the FAIL line does not name npm's finding"
+    assert rig.npm_calls() == [_LS], "a failed check went on to npm ci"
+    assert marker.exists(), "a tree that failed the check was deleted"
+    assert not rig.record("npm").exists(), "a refused tree left a record that reads current"
+
+
+@drives_installer
+def test_the_key_with_no_tree_fails_instead_of_installing_one(rig: Rig):
+    _preinstalled(rig, tree=False)
+    f = rig.run("fetch")
+    assert f.returncode == 1, f.stdout + f.stderr
+    assert "web/node_modules is absent" in f.stdout, f.stdout
+    assert rig.npm_calls() == [], rig.npm_calls()
+
+
+@drives_installer
+def test_app_alone_accepts_a_provided_tree_and_refuses_to_build_on_a_bad_one(rig: Rig):
+    """fetch may not have left a record (an older state dir, a tree provided
+    after fetch): app asks the same question and never falls back to npm ci."""
+    marker = _preinstalled(rig)
+    led = rig.state / "ledger.tsv"
+    led.write_text(led.read_text() + f"fetch/cockpit\tdone\t{_version()}\t2026-10-01T00:00:00Z\tnone\t\n")
+    a = rig.run("app")
+    _ok(a)
+    assert rig.npm_calls() == [_LS, "npm run build"], rig.npm_calls()
+    assert marker.exists()
+
+    _preinstalled(rig, ls_rc=1)
+    write_lf(rig.web / "package-lock.json", '{"name": "web", "lockfileVersion": 3, "x": 2}\n')
+    a = rig.run("app")
+    assert a.returncode == 1, a.stdout + a.stderr
+    assert rig.npm_calls() == [_LS], "app built against a tree that failed the check"
+    assert marker.exists()
+
+
+@drives_installer
+def test_without_the_key_a_tree_setup_did_not_install_is_still_reinstalled(rig: Rig):
+    """Off by default: a tree that merely happens to be there is never adopted."""
+    marker = rig.web / "node_modules" / "left-over.txt"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("x\n")
+    _ok(rig.run("fetch"))
+    assert rig.npm_calls() == ["npm ci"], rig.npm_calls()
+    assert not marker.exists()

@@ -46,6 +46,7 @@
 #                                         what the cockpit's npm tree / build is made FROM
 #     cc_cockpit_current <state> <npm|build> <repo-root>   artifacts present + record equal
 #     cc_cockpit_record / cc_cockpit_forget                write / drop that record
+#     cc_cockpit_preinstalled / cc_cockpit_tree_problems   the operator-provided npm tree
 #     cc_exit_code <fails> <warns> <actions>      the ONE exit-code rule
 #     cc_tree_diff <repo-root>            is this tree still the release it claims
 #   The run lock (2026-10-01 design record, D11 — one run at a time):
@@ -896,6 +897,28 @@ cc_cockpit_record() { # cc_cockpit_record <state-dir> <npm|build> <repo-root>
 # matching the inputs would then skip the repair forever.
 cc_cockpit_forget() { # cc_cockpit_forget <state-dir> <npm|build>
   rm -f "$(cc_cockpit_record_file "$1" "$2")"
+}
+
+# THE OPERATOR-PROVIDED TREE (CC_COCKPIT_NPM_PREINSTALLED=1, v2.106.0). `npm ci`
+# installs exactly the lockfile's pins, and a mirror that lacks one pinned
+# version cannot serve it whatever CC_NPM_REGISTRY says (2026-11-20 work-site
+# report: one missing patch release stopped the whole install). Until then
+# there was no way to hand setup a tree it had not installed itself: `npm ci`
+# empties node_modules BEFORE it fails, and the record that lets it be skipped
+# was written only after it succeeded. With the key set, setup never runs
+# `npm ci`: it accepts web/node_modules when `npm ls --all --offline` finds
+# every declared dependency present, at a version inside the range its
+# dependent's package.json declares, with nothing extraneous — and never
+# deletes it otherwise. That is a weaker promise than the lockfile's (ranges,
+# not pins), which is why it is the operator's explicit, per-deployment
+# decision and off by default. `--all` is load-bearing: without it npm ls
+# checks the top level only and a missing transitive dependency reads fine.
+# `--offline`: the check reads the disk and nothing else.
+cc_cockpit_preinstalled() { [[ "${CC_COCKPIT_NPM_PREINSTALLED:-0}" == "1" ]]; }
+
+# Prints npm's own problem lines; 0 = the tree satisfies web/package.json.
+cc_cockpit_tree_problems() { # cc_cockpit_tree_problems <repo-root>
+  ( cd "$1/web" && npm ls --all --offline 2>&1 >/dev/null )
 }
 
 # The consumer list a WARN names, per command. Kept here so the phrasing is

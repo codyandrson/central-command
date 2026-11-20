@@ -576,6 +576,20 @@ when a matching file is read.
   command runs; `cc_cockpit_current` is the one question the two steps and
   their probes ask. A staged run never reads or writes the deployment's
   records.
+- **`CC_COCKPIT_NPM_PREINSTALLED=1` is the only way setup accepts an npm tree
+  it did not install, and it never deletes one** (v2.106.0). A mirror lacking
+  one pinned version stopped a whole install (2026-11-20 work-site report):
+  `npm ci` empties `web/node_modules` before it fails, the record that skips
+  it was written only after it succeeded, and an edited lockfile fails the
+  pristine-tree check, so there was no route. With the key, fetch and app
+  call `cockpit_adopt_preinstalled`: `npm ls --all --offline` (`--all`, or a
+  missing transitive dependency reads fine) accepts or FAILs, and nothing
+  runs `npm ci`. Accepted is a WARN, because the versions are the operator's
+  and not the lockfile's pins. Keep it opt-in and off by default: adopting
+  any tree that happens to be there would quietly replace "the deployment is
+  the release" with "whatever fits the ranges" on every host. A staged run
+  cannot check the tree against the new `package.json`, WARNs, and leaves the
+  check to the post-merge fetch.
 - **The mail self-check applies when something in the app READS mail — never
   on the n8n flag or the façade token** (v2.58.2, finding F4 of the
   2026-10-02 laptop run). `make-secrets.sh` generates `CC_EMAIL_FACADE_TOKEN`

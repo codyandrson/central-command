@@ -343,7 +343,12 @@ phase_app() {
       # Windows run spent ~66 s rebuilding an unchanged cockpit on every
       # `app`. Each record is dropped before its command starts and written
       # only after it succeeded.
-      if ! cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT"; then
+      # CC_COCKPIT_NPM_PREINSTALLED=1: the operator's tree is checked, never
+      # reinstalled (setup.sh's cockpit_adopt_preinstalled) — and a tree that
+      # fails the check stops here, before a build against it.
+      if ! cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT" && cc_cockpit_preinstalled; then
+        cockpit_adopt_preinstalled || return 1
+      elif ! cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT"; then
         cc_cockpit_forget "$STATE_DIR" npm
         step "cockpit" "cockpit npm tree installed (fetch had not left one from this lockfile)" \
           in_web npm ci || return 1

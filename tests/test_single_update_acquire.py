@@ -514,6 +514,32 @@ def test_after_a_clean_acquisition_it_merges_and_runs_the_post_merge_phases_in_o
 
 
 @drives_installer
+def test_with_an_operator_provided_npm_tree_the_staged_run_installs_nothing_and_says_so(dep: Dep):
+    """CC_COCKPIT_NPM_PREINSTALLED=1 (v2.106.0): the mirror cannot serve the
+    lockfile, which is why the key is set, so the staged acquisition must not
+    try `npm ci` and stop every update on it. It cannot check the deployment's
+    tree against the new package.json either; it WARNs and the update goes on
+    to the merge, where the post-merge fetch does that check."""
+    _set(dep.repo / ".env", {"CC_COCKPIT_NPM_PREINSTALLED": "1"})
+    marker = dep.repo / "web" / "node_modules" / "operators-own.txt"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("installed by hand\n")
+    dep.fill_ledger()
+    r = dep.update("apply", CC_UPDATE_DRIVEN="1")
+
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "WARN cockpit: CC_COCKPIT_NPM_PREINSTALLED=1 — the new release's npm tree was NOT acquired" in r.stdout
+    npm = [l for l in dep.log.read_text().splitlines() if l.startswith("npm ")]
+    assert not [l for l in npm if "/stage/tree/web" in l], npm
+    assert not [l for l in npm if l.startswith("npm ci")], npm
+    assert dep.head() == dep.git("rev-parse", "upstream"), "the warning stopped the merge"
+    # After the merge the deployment's own tree is checked, accepted and kept.
+    assert any(l.startswith("npm ls --all --offline") for l in npm), npm
+    assert "WARN cockpit: npm tree ACCEPTED AS PROVIDED" in r.stdout, r.stdout
+    assert marker.exists()
+
+
+@drives_installer
 def test_with_n8n_the_facade_workflows_are_the_stack_phases_not_a_step_of_their_own(dep: Dep):
     """v2.58.0: the post-merge order is schema → fetch → llm → stack → app →
     verify even with CC_ENABLE_N8N=1. The n8n façade workflows used to be a

@@ -140,7 +140,7 @@ the dry gate: it runs nine sections that change nothing (`./setup.sh check
 19. `fetch/image-sandbox`: Build the agent sandbox image, when `CC_ENABLE_SANDBOX=1`.
 20. `fetch/image-crawler`: Build the browser-rendering crawl image, when `CC_ENABLE_CRAWLER=1`.
 21. `fetch/venv`: Create the install's CPython 3.12 virtual environment and resolve the Python graph.
-22. `fetch/cockpit`: Install the cockpit's npm tree from the configured registry — skipped while web/node_modules was installed from this same package-lock.json.
+22. `fetch/cockpit`: Install the cockpit's npm tree from the configured registry — skipped while web/node_modules was installed from this same package-lock.json. With `CC_COCKPIT_NPM_PREINSTALLED=1` nothing is installed: the tree you provided is checked with npm ls and left as it is.
 
 ### `llm`
 
