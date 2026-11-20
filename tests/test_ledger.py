@@ -528,6 +528,10 @@ async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(
     from central_command.ingest import dispatcher
 
     monkeypatch.setattr(settings, "retry_backoff_cap_seconds", 3600)
+    # The freeze under test is the related-busy one; without this the claim
+    # first asks the checkout's real model for the item's entities, and the
+    # test waits on a model server (it hung behind a busy one, 2026-11-20).
+    monkeypatch.setattr(settings, "entity_keys_enabled", False)
     await ledger.enroll_email(_raw(801))
 
     async def claim():

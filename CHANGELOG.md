@@ -4,6 +4,20 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-20 — v2.105.2: The cockpit lockfile pins a chart library version a mirror carries
+
+- **`npm ci` failed with a 404 on a mirrored network.** `web/package-lock.json` pinned
+  `lightweight-charts` to 5.1.0, a patch release an internal npm mirror may not carry, and `npm ci`
+  installs exactly the pinned version: `CC_NPM_REGISTRY` changes the host a tarball is asked from, never
+  the version. Setup stopped in its fetch phase (`FAIL cockpit: npm ci failed`) with no way round it on
+  the deployment side, because an edited lockfile fails the pristine-tree check. The lock entry now pins
+  5.2.1 (inside `package.json`'s unchanged `^5.1.0` range; same single dependency, `fancy-canvas` 2.1.0,
+  so nothing else in the lockfile moves). The chart screen's imports are unchanged in 5.2.1 and the
+  cockpit builds as before. No schema, unit or manifest change.
+- **A ledger test asked the checkout's real model for entities.** The related-busy freeze test left
+  entity extraction on, so it passed while the model server was idle and timed out behind a busy one.
+  It now switches the layer off, as the other freeze tests do. No product change.
+
 ## 2026-11-20 — v2.105.1: A stop request no longer outlives the run it was pressed on
 
 - **A stop that arrived during a run's last model call stopped the session's NEXT run.** A run parks
