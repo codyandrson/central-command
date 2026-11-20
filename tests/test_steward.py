@@ -230,7 +230,7 @@ async def test_an_ask_parks_an_operator_item_instead_of_exploding():
     result = await steward.run_document(
         DOC, source_text=DOC,
         model=make_deferred_tool_model(
-            "ask_operator", {"question": "Which Postgres 17 minor?"}
+            "ask_operator", {"searched": "no tool I hold records this", "question": "Which Postgres 17 minor?"}
         ),
     )
     assert result["asked"] is True

@@ -19,18 +19,37 @@ async def test_mail_search_reports_queue_state_per_match(monkeypatch):
     async def items(message_ids):
         assert message_ids == [provider_message_id(u) for u in ("u1", "u2", "u3")]
         return [
-            {"id": "wi_1", "state": "PROCESSED", "received_at": "2026-03-01",
+            {"id": "wi_1", "message_id": provider_message_id("u1"),
+             "state": "PROCESSED", "received_at": "2026-03-01",
              "sender": "Jane Doe <jane@example.com>", "subject": "Data",
              "session_id": "sess_a", "folded_into": None,
              "dismissal_rationale": "nothing to do"},
-            {"id": "wi_2", "state": "UNPROCESSED", "received_at": "2026-03-02",
+            {"id": "wi_2", "message_id": provider_message_id("u2"),
+             "state": "UNPROCESSED", "received_at": "2026-03-02",
              "sender": "Jane Doe <jane@example.com>", "subject": "Code",
              "session_id": None, "folded_into": None, "dismissal_rationale": None},
         ]
 
+    fetched = []
+
+    async def get_message(uuid):
+        fetched.append(uuid)
+        return {"date": "2026-03-03", "from": "Sam Rivers <sam@example.com>",
+                "to": "Jane Doe <jane@example.com>", "subject": "Re: Data",
+                "snippet": "Sent  it\nyesterday."}
+
     monkeypatch.setattr(email_facade, "list_refs", list_refs)
+    monkeypatch.setattr(email_facade, "get_message", get_message)
     monkeypatch.setattr(repo, "mail_items_for_message_ids", items)
     out = await tools.mail_search(None, "from:jane@example.com")
+    # A match the queue never enrolled (the operator's own reply, here) is
+    # listed from the mailbox with the id `mail_read` opens, not only counted:
+    # an agent that can see a reply exists and cannot read it asks the
+    # operator what the mailbox already says (replay 2026-11-19).
+    assert fetched == ["u3"]
+    assert "Not in the queue (1 of 1 shown):" in out
+    assert ("- u3 [not in the queue] 2026-03-03 from Sam Rivers <sam@example.com> "
+            "to Jane Doe <jane@example.com>: Re: Data — Sent it yesterday.") in out
     assert "3 message(s) match" in out and "2 of them are in the queue" in out
     assert "1 never enrolled" in out
     assert "wi_1 [PROCESSED]" in out and "session=sess_a" in out
@@ -141,3 +160,43 @@ async def test_a_provider_refusal_reaches_the_agent_as_text_and_an_outage_still_
     with pytest.raises(email_facade.EmailFacadeError) as info:
         await tools.mail_search(None, "from:myprotein")
     assert "n8n" in getattr(info.value, tools._DEPENDENCIES_ATTR, ())
+
+
+@pytest.mark.asyncio
+async def test_mail_search_bounds_the_matches_it_lists_from_outside_the_queue(monkeypatch):
+    """Each listed match outside the queue costs one mailbox call, so a search
+    lists the first few and says how many there are; a fetch the provider
+    refuses is a line, and an outage still parks the read."""
+    from central_command.db import repo
+    from central_command.integrations import email_facade
+
+    async def list_refs(query):
+        return [{"uuid": f"u{i}"} for i in range(12)]
+
+    async def items(message_ids):
+        return []
+
+    fetched = []
+
+    async def get_message(uuid):
+        fetched.append(uuid)
+        if uuid == "u1":
+            raise email_facade.EmailFacadeError("message gone", status_code=422)
+        return {"date": "2026-03-03", "from": "a@example.com", "to": "b@example.com",
+                "subject": None, "snippet": ""}
+
+    monkeypatch.setattr(email_facade, "list_refs", list_refs)
+    monkeypatch.setattr(email_facade, "get_message", get_message)
+    monkeypatch.setattr(repo, "mail_items_for_message_ids", items)
+    out = await tools.mail_search(None, "in:sent to:b@example.com")
+    assert len(fetched) == tools._MAIL_OUTSIDE_SHOWN == 8
+    assert "Not in the queue (8 of 12 shown):" in out
+    assert "- u1 [not in the queue] could not be fetched (message gone)" in out
+    assert "- u0 [not in the queue] 2026-03-03 from a@example.com to b@example.com: (no subject)" in out
+
+    async def down(uuid):
+        raise email_facade.EmailFacadeError("façade down", status_code=503)
+
+    monkeypatch.setattr(email_facade, "get_message", down)
+    with pytest.raises(email_facade.EmailFacadeError):
+        await tools.mail_search(None, "in:sent to:b@example.com")

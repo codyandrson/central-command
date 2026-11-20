@@ -224,7 +224,7 @@ async def test_a_non_proposal_deferral_on_the_reject_path_resolves_mechanically(
         if "ask_operator" not in returned:
             return ModelResponse(parts=[
                 ToolCallPart(tool_name="ask_operator",
-                             args={"question": "Which date did Dana mean?"}),
+                             args={"searched": "no tool I hold records this", "question": "Which date did Dana mean?"}),
             ])
         return ModelResponse(parts=[TextPart(content="Understood — standing down.")])
 
@@ -267,7 +267,7 @@ async def test_the_close_out_note_carries_the_unanswerable_question():
             ])
         # Never settles: reaches for the operator on every round.
         return ModelResponse(parts=[
-            ToolCallPart(tool_name="ask_operator", args={"question": question}),
+            ToolCallPart(tool_name="ask_operator", args={"searched": "no tool I hold records this", "question": question}),
         ])
 
     model = FunctionModel(_respond)

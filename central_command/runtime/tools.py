@@ -2449,13 +2449,35 @@ def _mail_line(row: dict) -> str:
             f"{locator}{why}")
 
 
+# How many matches outside the queue one search lists: each costs one façade
+# call, and a narrower query shows the rest.
+_MAIL_OUTSIDE_SHOWN = 8
+
+
+def _outside_line(ref: dict, msg: dict) -> str:
+    snippet = " ".join(str(msg.get("snippet") or "").split())[:160]
+    return (f"- {ref['uuid']} [not in the queue] {msg.get('date') or '?'} "
+            f"from {msg.get('from') or '?'} to {msg.get('to') or '?'}: "
+            f"{msg.get('subject') or '(no subject)'}"
+            + (f" — {snippet}" if snippet else ""))
+
+
 @parkable_read
 async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
     """Search the mailbox with a Gmail query and see what the QUEUE knows about
     each match: its work-item id, state (UNPROCESSED / PROCESSED / FOLDED …),
     date, sender, subject, the session that handled it and — when it was
-    dismissed — the recorded reason. Headers and locators only; open one with
-    `mail_read`.
+    dismissed — the recorded reason. Matches that are NOT in the queue (the
+    operator's sent mail, mail never enrolled) are listed too, the first few,
+    with date, sender, recipient, subject and a snippet. Headers and locators
+    only; open one with `mail_read`, by its work-item id or, for a match not
+    in the queue, the id on its line.
+
+    Use it to find out what happened AFTER a mail, before you treat its
+    request as still open or ask the operator about it: search the identifiers
+    the mail gives (a case, order or account number), the subject with
+    `after:` set to the mail's own date, and the operator's replies (`in:sent`
+    plus the recipient or a phrase).
 
     Use it BEFORE `propose_bulk_dismiss`: the same `query` pins the same set,
     so what you review here is what the operator will be asked to approve.
@@ -2490,6 +2512,21 @@ async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
     lines = [_mail_line(r) for r in shown]
     if len(rows) > len(shown):
         lines.append(f"... {len(shown)} of {len(rows)} shown (raise `limit` to see more)")
+    # A match the queue never enrolled (the operator's sent mail above all) was
+    # only a number in the head line: the agent could see that a reply existed
+    # and could not read it (replay 2026-11-19). List the first few from the
+    # mailbox, with the id `mail_read` opens.
+    queued = {r["message_id"] for r in rows}
+    outside = [r for r in refs if ref_message_id(r) not in queued]
+    if outside:
+        lines.append(f"Not in the queue ({min(len(outside), _MAIL_OUTSIDE_SHOWN)} "
+                     f"of {len(outside)} shown):")
+        for ref in outside[:_MAIL_OUTSIDE_SHOWN]:
+            try:
+                lines.append(_outside_line(ref, await email_facade.get_message(ref["uuid"])))
+            except email_facade.EmailFacadeError as e:
+                _raise_if_down(e)
+                lines.append(f"- {ref['uuid']} [not in the queue] could not be fetched ({e})")
     return _clip("\n".join([head, *lines]))
 
 
@@ -3216,9 +3253,36 @@ async def assign_work(
     raise CallDeferred(metadata={"kind": "assign_work"})
 
 
+_ASK_SEARCHED_MIN = 20
+
+
+def _ask_handed_back(ctx: RunContext) -> bool:
+    """Has this run already been handed an `ask_operator` call back?"""
+    for message in getattr(ctx, "messages", None) or []:
+        for part in getattr(message, "parts", None) or []:
+            if (getattr(part, "part_kind", "") == "tool-return"
+                    and getattr(part, "tool_name", "") == "ask_operator"
+                    and str(getattr(part, "content", "")).startswith("Not sent.")):
+                return True
+    return False
+
+
+# What an `ask_operator` call gets back when it does not say what the agent
+# looked at first. Returned as text, once per run, never a retry: a second
+# empty call goes through, because a question must always be able to reach the
+# operator.
+_ASK_HANDBACK = (
+    "Not sent. `searched` is empty: before a question goes to the operator, say "
+    "which searches you ran to answer it yourself and what each returned, or say "
+    "in one line why no tool you hold could answer it. Run the search now if you "
+    "have not, then call ask_operator again."
+)
+
+
 async def ask_operator(
     ctx: RunContext,
     question: str,
+    searched: str,
     needs_discussion: bool = False,
     why: str = "",
 ) -> str:
@@ -3248,7 +3312,15 @@ async def ask_operator(
     discussion for something answerable in a sentence wastes the team lead's
     time, and your choice is recorded and coached like any other judgement.
     When in doubt, ask the bounded question first.
+
+    `searched` is required: the searches you ran to answer this question
+    yourself and what each returned, e.g. "mail_search 'case 4471
+    after:2025/09/02': nothing later; jira_search_issues 'refund': no issue".
+    If no tool you hold could answer it, say why in one line. The operator
+    sees it under the question.
     """
+    if len((searched or "").strip()) < _ASK_SEARCHED_MIN and not _ask_handed_back(ctx):
+        return _ASK_HANDBACK
     raise CallDeferred(metadata={"kind": "ask_operator"})
 
 

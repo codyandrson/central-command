@@ -265,7 +265,7 @@ async def test_a_retried_rejection_redraft_still_gets_the_evidence_check(monkeyp
 async def test_a_transient_answer_resume_parks_without_failing_the_task(monkeypatch):
     from central_command.runtime import durable
 
-    model = make_deferred_tool_model("ask_operator", {"question": "A or B?"})
+    model = make_deferred_tool_model("ask_operator")
     task_id = "task_" + uuid.uuid4().hex[:12]
     await repo.create_task(task_id, "outage test", "Update the issue.", "jira-expert")
     out = await run_task("jira-expert", "Update the issue.", model=model,

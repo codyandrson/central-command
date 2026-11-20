@@ -94,7 +94,7 @@ async def test_an_ambiguous_task_asks_and_the_answer_resumes_it():
     from central_command.runtime.questions import resume_with_answer
 
     model = make_deferred_tool_model(
-        "ask_operator", {"question": "TASKS-12 or TASKS-13?"}
+        "ask_operator", {"searched": "no tool I hold records this", "question": "TASKS-12 or TASKS-13?"}
     )
     out = await run_task("jira-expert", "Update the issue.", model=model)
 
@@ -149,6 +149,7 @@ async def test_a_discussion_opens_seeded_with_the_question_and_unblocks_the_task
 
     model = make_deferred_tool_model("ask_operator", {
         "question": "Should this epic be split, or tracked as one issue?",
+        "searched": "no tool I hold records this",
         "needs_discussion": True,
         "why": "the answer changes how I structure everything after it",
     })
@@ -204,7 +205,8 @@ def _ask_then(tool_name: str, args: dict, ask_args: dict | None = None):
     from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-    asked_with = {"question": "TASKS-12 or TASKS-13?", **(ask_args or {})}
+    asked_with = {"question": "TASKS-12 or TASKS-13?",
+                  "searched": "no tool I hold records this", **(ask_args or {})}
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         called = {
@@ -320,7 +322,7 @@ async def test_a_second_question_on_the_resumed_run_is_still_parked():
 
     def _always_ask(messages, info):
         return ModelResponse(parts=[
-            ToolCallPart(tool_name="ask_operator", args={"question": "A or B?"}),
+            ToolCallPart(tool_name="ask_operator", args={"searched": "no tool I hold records this", "question": "A or B?"}),
         ])
 
     asking = FunctionModel(_always_ask)
@@ -345,6 +347,7 @@ async def test_a_summary_the_operator_never_said_is_flagged():
 
     model = make_deferred_tool_model("ask_operator", {
         "question": "A or B?", "needs_discussion": True, "why": "unclear",
+        "searched": "no tool I hold records this",
     })
     out = await run_task("jira-expert", "Do the thing.", model=model)
     disc = out["discussion_session_id"]
@@ -378,6 +381,7 @@ async def test_the_lane_exchange_rides_the_resume_not_just_the_answer_field():
 
     model = make_deferred_tool_model("ask_operator", {
         "question": "How did the week go?", "needs_discussion": True,
+        "searched": "no tool I hold records this",
         "why": "five questions need real answers",
     })
     out = await run_task("jira-expert", "Run the check-in.", model=model)
@@ -413,3 +417,74 @@ async def test_the_lane_exchange_rides_the_resume_not_just_the_answer_field():
     returned = "\n".join(seen)
     assert "Yes, all good." in returned
     assert "operator: All sessions happened; Barley needs direction." in returned
+
+
+def _ctx_with(*parts):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(messages=[SimpleNamespace(parts=list(parts))], deps=None)
+
+
+@pytest.mark.asyncio
+async def test_a_question_says_what_was_checked_first_or_is_handed_back_once():
+    """Half the questions triage asked had no search made for them, and the
+    operator's standard is that asking without having looked is a failure
+    (replay 2026-11-19). `searched` is a required argument, and an empty one
+    is handed back as text ONCE: the second call goes through, because a
+    question must always be able to reach the operator."""
+    import inspect
+    from types import SimpleNamespace
+
+    from pydantic_ai.exceptions import CallDeferred
+
+    from central_command.runtime import tools
+
+    sig = inspect.signature(tools.ask_operator)
+    assert sig.parameters["searched"].default is inspect.Parameter.empty
+
+    out = await tools.ask_operator(_ctx_with(), "A or B?", "  ")
+    assert out == tools._ASK_HANDBACK and out.startswith("Not sent.")
+
+    handed_back = SimpleNamespace(
+        part_kind="tool-return", tool_name="ask_operator", content=tools._ASK_HANDBACK)
+    with pytest.raises(CallDeferred):
+        await tools.ask_operator(_ctx_with(handed_back), "A or B?", "")
+    with pytest.raises(CallDeferred):
+        await tools.ask_operator(
+            _ctx_with(), "A or B?", "jira_search_issues 'refund': no issue")
+
+
+def test_the_ask_tool_survives_a_call_that_leaves_the_argument_out():
+    """A missing required argument is handed back by validation; the default
+    retry budget of one would fail the session on the second such call."""
+    from central_command.runtime import packs
+
+    for pack in ("ask-operator", "orchestrate"):
+        assert packs.toolset_for([pack]).tools["ask_operator"].max_retries == 10
+
+
+@needs_pg
+@pytest.mark.asyncio
+async def test_what_was_checked_reaches_the_operator_and_the_record(monkeypatch):
+    from central_command import events
+
+    seen = []
+    real_emit = events.emit
+
+    async def emit(kind, **kw):
+        seen.append((kind, kw.get("payload") or {}))
+        return await real_emit(kind, **kw)
+
+    monkeypatch.setattr(events, "emit", emit)
+    model = make_deferred_tool_model("ask_operator", {
+        "question": "TASKS-12 or TASKS-13?",
+        "searched": "jira_search_issues 'refund': both issues are open",
+    })
+    out = await run_task("jira-expert", "Update the issue.", model=model)
+    assert out["asked"] is True
+    item = await repo.get_operator_item(out["item_id"])
+    assert item["body"] == ("TASKS-12 or TASKS-13?\n\nChecked first: "
+                            "jira_search_issues 'refund': both issues are open")
+    asked = [p for k, p in seen if k == "agent.asked"]
+    assert asked and asked[0]["question"] == "TASKS-12 or TASKS-13?"
+    assert asked[0]["searched"] == "jira_search_issues 'refund': both issues are open"

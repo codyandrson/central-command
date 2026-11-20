@@ -31,6 +31,7 @@ def _asking_model() -> FunctionModel:
         return ModelResponse(parts=[
             ToolCallPart(tool_name="ask_operator", args={
                 "question": "Should I reply to this sender before dismissing it?",
+                "searched": "no tool I hold records this",
                 "why": "The charter says to ask when genuinely uncertain.",
             })
         ])

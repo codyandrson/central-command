@@ -2299,6 +2299,12 @@ def toolset_for(pack_names) -> FunctionToolset:
                 # seam's advisory lock closes the race ACROSS runs).
                 sequential = tool_name == "create_task"
                 fn = Tool(fn, max_retries=10, sequential=sequential)
+            elif tool_name == "ask_operator":
+                # `searched` is a required argument: a call that leaves it out
+                # is handed back by argument validation, and the default
+                # budget of one would fail the session on the second such
+                # call. A question must be able to reach the operator.
+                fn = Tool(fn, max_retries=10)
             seen.setdefault(tool_name, fn)
     return FunctionToolset(list(seen.values()), id="granted-packs")
 

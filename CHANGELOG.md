@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-19 — v2.104.0: An agent's mail search shows the mail it finds outside the queue, and a question says what was checked first
+
+A replay of 23 triage sessions showed the agent asking the operator things the mailbox already
+answered: its searches named only the sender, and a reply the operator had sent was a number in a
+count line it could not read.
+
+- **`mail_search` lists matches that are not in the queue.** A match the queue never enrolled (the
+  operator's sent mail above all) used to appear only as "N never enrolled". The first eight are now
+  listed from the mailbox with date, sender, recipient, subject, a snippet and the id `mail_read`
+  opens; a narrower query shows the rest. Each listed match costs one mailbox call. A fetch the
+  provider refuses is a line; an outage still parks the read.
+- **The tool's description says to look for what happened after a mail**: the identifiers it gives,
+  the subject with `after:` set to the mail's own date, and the operator's replies (`in:sent`).
+- **`ask_operator` takes a required `searched` argument**: the searches the agent ran to answer the
+  question itself and what each returned, or one line on why no tool could answer it. The operator
+  sees it under the question ("Checked first: …") and the `agent.asked` event carries it as
+  `searched`. An empty one is handed back to the agent once; the second call goes through, so a
+  question can always reach the operator. The tool's retry budget is 10, as for the propose tools,
+  so a call that leaves the argument out does not fail the session. This applies to every agent
+  that holds the tool, the orchestrator and the executive assistant's contacts included.
+
+No schema change. A deployment that runs a governed charter keeps its own text: the built-in triage
+charter is unchanged by this release.
+
 ## 2026-11-19 — v2.103.1: A plain-text paragraph field is readable, and a planning field's name is matched without regard to case
 
 Two defects found by reading a real tracker after the first apply of the EA-planning releases.

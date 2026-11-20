@@ -573,7 +573,10 @@ def make_deferred_tool_model(tool_name: str, args: dict | None = None) -> Functi
                 if isinstance(p, ToolCallPart) and p.tool_name == tool_name:
                     return ModelResponse(parts=[TextPart(content="Closing out.")])
         return ModelResponse(parts=[
-            ToolCallPart(tool_name=tool_name, args=args or {"question": "A or B?"})
+            ToolCallPart(tool_name=tool_name, args=args or {
+                "question": "A or B?",
+                "searched": "no tool I hold records which one the operator means",
+            })
         ])
 
     return FunctionModel(_respond)
@@ -1051,6 +1054,7 @@ def _respond_ea_digest(messages, info: AgentInfo) -> ModelResponse:
     return ModelResponse(parts=[
         ToolCallPart(tool_name="ask_operator", args={
             "question": _EA_DIGEST_QUESTION,
+            "searched": "only the operator can answer this; no tool I hold records it",
             "needs_discussion": True,
             "why": "The answer sets what I chase next and will raise the next question.",
         })
@@ -1160,6 +1164,7 @@ def _respond_intro(messages, info: AgentInfo) -> ModelResponse:
     return ModelResponse(parts=[
         ToolCallPart(tool_name="ask_operator", args={
             "question": _INTRO_QUESTION,
+            "searched": "only the operator can answer this; no tool I hold records it",
             "needs_discussion": True,
             "why": "Their answer is the calibration this introduction exists to get.",
         })

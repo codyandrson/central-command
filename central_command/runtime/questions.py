@@ -55,6 +55,11 @@ async def park_question(
     question = str(args.get("question") or "").strip() or "(no question given)"
     wants_discussion = bool(args.get("needs_discussion"))
     why = str(args.get("why") or "").strip()
+    # What the agent says it looked at before asking (`ask_operator`'s
+    # `searched`). The operator reads it under the question; the event keeps
+    # it apart so a question can be coached on whether it was looked into.
+    searched = str(args.get("searched") or "").strip()
+    body = question + (f"\n\nChecked first: {searched}" if searched else "")
 
     await repo.save_paused_session(
         session_id, agent_id, dump_run_state(result, call.tool_call_id)
@@ -66,7 +71,7 @@ async def park_question(
         kind="question",
         session_id=session_id,
         agent_id=agent_id,
-        body=question,
+        body=body,
         task_id=task_id,
         tool_call_id=call.tool_call_id,
     )
@@ -83,6 +88,7 @@ async def park_question(
             "question": question[:2000],
             "tier": "discussion" if wants_discussion else "question",
             "why": why or None,
+            "searched": searched[:2000] or None,
         },
         actor=f"agent:{agent_id}",
     )
