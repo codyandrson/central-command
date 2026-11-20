@@ -166,6 +166,26 @@ def no_custom_field_discovery(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _planning_settings_are_the_defaults():
+    """The planning settings name things in the OPERATOR's tracker (the backlog
+    JQL, the four planning fields, the value unit, the working day), so a
+    checkout whose `.env` sets them made the planning tests compare against one
+    deployment's field names ("Lateness Loss" where the default is "Lateness
+    loss") and six of them failed on that checkout alone (2026-11-19). Every
+    `plan_*` setting is the code default here; a test that wants another value
+    patches it, which wins.
+
+    Set and restored by hand for the reason `_no_live_tracker_read` gives."""
+    fields = type(settings).model_fields
+    saved = {name: getattr(settings, name) for name in fields if name.startswith("plan_")}
+    for name in saved:
+        setattr(settings, name, fields[name].default)
+    yield
+    for name, value in saved.items():
+        setattr(settings, name, value)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_tracker_read():
     """The EA's contact reads the issue tracker for open follow-ups. A checkout
     whose `.env` carries real Jira credentials would send every test that
