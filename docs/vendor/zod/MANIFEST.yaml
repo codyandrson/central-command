@@ -1,6 +1,8 @@
 name: zod
 source_repo: https://github.com/colinhacks/zod
-source_ref: v4.3.6
-fetched_url: https://codeload.github.com/colinhacks/zod/tar.gz/v4.3.6
-fetched_date: 2026-08-25
+source_ref: v4.6.7
+fetched_url: https://codeload.github.com/colinhacks/zod/tar.gz/v4.6.7
+fetched_date: 2026-11-21
 subpaths: [packages/docs/content packages/docs/README.md]
+note: >
+  Project pins zod 4.6.7; vendored at the matching release tag v4.6.7 (docs content only).
