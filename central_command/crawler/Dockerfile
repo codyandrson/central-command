@@ -11,15 +11,18 @@
 # old python:slim base needed `playwright install --with-deps`, i.e. Debian's
 # archive plus Microsoft's CDN, three mirrors for one image. Now the only
 # external sources are the registry (the base) and PyPI. The playwright
-# PACKAGE version MUST equal the image tag: the baked browsers are the build
-# that version expects, and a mismatch downloads (or fails to) at runtime.
+# PACKAGE must come from the image tag's own minor series (the base is not
+# installed with the package: measured 2026-11-21, `import playwright` fails in
+# v1.64.1-noble): the baked browsers are the build that series expects, and a
+# mismatch downloads (or fails to) at runtime. The RANGE below names that
+# series; the build-time launch check after it is what proves the pair.
 # The base REF comes from the manifest (2026-09-23 design record, D2):
 # resolve-images.sh resolves images.txt's `crawler-base` row and the single-node
 # build script passes it as CC_IMG_PLAYWRIGHT_PYTHON, so a mirror that lacks the
 # locked tag or re-namespaces the path reaches this build too. The ARG default
 # must equal images.txt's row — tests/test_single_airgap_seams.py fails the
-# suite if they drift, and the playwright PACKAGE version below must equal the
-# tag either way.
+# suite if they drift, and the playwright range below must name the same minor
+# series as the tag (images.txt's constraint column, v1.64) either way.
 ARG CC_REGISTRY_MCR=mcr.microsoft.com
 ARG CC_IMG_PLAYWRIGHT_PYTHON=${CC_REGISTRY_MCR}/playwright/python:v1.64.1-noble
 FROM ${CC_IMG_PLAYWRIGHT_PYTHON}
@@ -71,9 +74,11 @@ ENV PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
 ENV PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Everything PINNED — a browser-automation stack is not something to let
-# float on a rebuild, and a mirror rebuild must produce the bytes the bundle
-# holds. No [torch]/[transformer] extras: those pull PyTorch/HF models for
+# Every package is a RANGE (floor and ceiling), resolved by pip against the
+# configured index: a mirror needs a version inside each range, not one exact
+# pin. The ceilings keep a rebuild inside the tested line of a
+# browser-automation stack (crawl4ai is 0.x, so its ceiling is the next
+# minor). No [torch]/[transformer] extras: those pull PyTorch/HF models for
 # features this service does not use. httpx is listed explicitly (crawl4ai
 # pulls it in anyway) because the service imports it directly. Ubuntu's
 # python is PEP 668 "externally managed"; this container IS the environment.
@@ -81,16 +86,17 @@ ENV PYTHONUNBUFFERED=1 \
 # hosts, not URLs) — derived from PIP_INDEX_URL in the same RUN rather than a
 # second seam to keep in step. Credentials in the URL are stripped with the
 # scheme.
-# brotli is pinned above crawl4ai 0.9.5's own floor (>=1.1.0): 1.2.1 fixes a
+# brotli's floor is above crawl4ai 0.9.5's own (>=1.1.0): 1.2.1 fixes a
 # decoder CVE (CVE-2026-111497) that crawl4ai 0.9.6 meets by raising its floor.
-# 0.9.6 is newer than the mirror-lag rule admits (2026-11-20) and its other
-# fix (the TLS-certificate-fetch SSRF) sits behind fetch_ssl_certificate, which
-# this service never sets — so the floor is carried here instead (2026-11-21).
+# crawl4ai 0.9.6's other fix (the TLS-certificate-fetch SSRF) sits behind
+# fetch_ssl_certificate, which this service never sets — so the floor is
+# carried here instead (2026-11-21).
 RUN if [ "$CC_TLS_INSECURE" = 1 ] && [ -n "$PIP_INDEX_URL" ]; then \
       h="${PIP_INDEX_URL#*://}"; h="${h##*@}"; export PIP_TRUSTED_HOST="${h%%/*}"; \
     fi; \
     pip install --no-cache-dir --break-system-packages \
-        playwright==1.64.1 crawl4ai==0.9.5 brotli==1.2.1 fastapi==0.141.1 uvicorn==0.52.4 httpx==0.28.1
+        "playwright>=1.64,<1.65" "crawl4ai>=0.9.5,<0.10" "brotli>=1.2.1,<2" \
+        "fastapi>=0.111,<1" "uvicorn>=0.30,<1" "httpx>=0.27,<1"
 
 # crawl4ai's post-install creates its home dir and, unless CRAWL4AI_MODE=api,
 # runs `playwright install --with-deps --force chromium` (apt + CDN — exactly

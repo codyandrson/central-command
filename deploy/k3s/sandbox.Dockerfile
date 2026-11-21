@@ -86,8 +86,12 @@ RUN if [ -n "$CC_APT_MIRROR" ]; then \
 # warned EBADENGINE). Newer sandbox-runtime wants node >=22.12, which no Debian
 # release packages — a move there needs a new package source, an operator call.
 # The apt packages ride Debian stable's own versioning (trixie only moves
-# them for security fixes); the npm package is PINNED because npm's `latest`
-# is a moving tag and a mirror rebuild must reproduce the same bytes.
+# them for security fixes); the npm package is a RANGE, `>=0.0.74 <0.0.79`:
+# 0.0.74 is the version this was tested on, and 0.0.79 is the first release
+# whose engines say node >=22.12 (0.0.74 to 0.0.78 say >=20.11, checked with
+# `npm view` 2026-11-21), so the ceiling is the last line this base's node 20.19
+# satisfies. (npm resolves the newest version in a range without reading
+# engines, so a ceiling at 0.0.79 or above would install one node 20 cannot run.)
 # The npm step honours the insecure knob inline rather than through a global
 # npmrc: the global file's path depends on the node PREFIX, and an exported
 # variable in the same RUN is the one form that is certainly read (npm reads any
@@ -96,7 +100,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         nodejs npm bubblewrap git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && if [ "$CC_TLS_INSECURE" = 1 ]; then export NPM_CONFIG_STRICT_SSL=false; fi \
-    && npm install -g @anthropic-ai/sandbox-runtime@0.0.74 \
+    && npm install -g "@anthropic-ai/sandbox-runtime@>=0.0.74 <0.0.79" \
     && npm cache clean --force
 
 RUN useradd -m -u 1000 -s /bin/bash sandbox \
