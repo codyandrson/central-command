@@ -4,6 +4,20 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-20 — v2.107.1: A deferral moves the due date, and the comment records the move
+
+- **The assistant's charter listed the due date and the reason as two separate records and never said
+  a deferral needs both.** At its first quarterly review after v2.107.0's rule was drafted, the
+  assistant deferred four issues and proposed no date change ("nothing was re-scored"). The charter's
+  "WHAT TO RECORD, AND WHERE" paragraph now says a deferral, a slip or a new date is BOTH: the due
+  date changes in the planning-fields proposal, and a comment on the issue records what the date was,
+  what it is now and why; the comment is never a substitute for the change. When the operator moves
+  an issue without naming a date, the assistant asks for it and never picks one.
+- The ranking is unchanged: an issue with a later due date leaves `must_start` and still ranks in
+  `standard` on its value. Left as it is on purpose, to be revisited from observed behaviour.
+- Built-in charter text only; an assistant on a saved charter gets it when the operator saves a
+  revision. No schema, unit or manifest change.
+
 ## 2026-11-20 — v2.107.0: Work is recorded in the tracker, lasting facts in the graph, and an issue's comments can be read
 
 - **Decisions about work were being proposed as graph episodes.** On a live deployment the executive

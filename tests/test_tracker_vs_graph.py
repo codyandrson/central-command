@@ -249,6 +249,12 @@ def test_the_charter_routes_work_to_the_tracker_and_facts_to_the_graph():
     for phrase in ("WHAT TO RECORD, AND WHERE",
                    "has ONE home",
                    "is a comment on that issue",
+                   # v2.107.1: a deferral moves the date AND is commented; the
+                   # first quarterly review deferred four issues and moved none.
+                   "A DEFERRAL, A SLIP OR A NEW DATE IS BOTH",
+                   "its due date CHANGES, in the planning-fields proposal",
+                   "never a substitute for it",
+                   "ask for the date; never pick one",
                    "NONE of these is ever a graph.add_episode",
                    "needs an issue key to make sense",
                    "WHEN WORK FINISHES, ASK WHAT IT LEFT",
