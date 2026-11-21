@@ -24,7 +24,8 @@ In Fluent Bit 5.1 and later, `elasticsearch` is accepted as an alias for the plu
 | `cloud_id` | If using Elastic's Elasticsearch Service you can specify the `cloud_id` of the cluster running. The string has the format `<deployment_name>:<base64_info>`. Once decoded, the `base64_info` string has the format `<deployment_region>$<elasticsearch_hostname>$<kibana_hostname>`. | _none_ |
 | `compress` | Set payload compression mechanism. Option available is `gzip`. | _none_ |
 | `current_time_index` | Use current time for index generation instead of message record. | `Off` |
-| `generate_id` | When enabled, generate `_id` for outgoing records. This prevents duplicate records when retrying ES. | `Off` |
+| `drop_unrecoverable_records` | Drop records that the `_bulk` API rejects with an unrecoverable error instead of retrying them. Enabling this option causes data loss. See [Bulk retries](#bulk-retries). Supported in v5.1.3 or later. | `Off` |
+| `generate_id` | When enabled, generate `_id` for outgoing records. This prevents duplicate records when retrying ES. See [Bulk retries](#bulk-retries). | `Off` |
 | `host` | IP address or hostname of the target Elasticsearch instance. | `127.0.0.1` |
 | `http_api_key` | API key for authenticating with Elasticsearch. Must be `base64` encoded. If `http_user` or `cloud_auth` are defined, this parameter is ignored. | _none_ |
 | `http_passwd` | Password for user defined in `http_user`. | _none_ |
@@ -46,9 +47,10 @@ In Fluent Bit 5.1 and later, `elasticsearch` is accepted as an alias for the plu
 | `time_key` | When `logstash_format` is enabled, each record will get a new timestamp field. The `time_key` property defines the name of that field. | `@timestamp` |
 | `time_key_format` | When `logstash_format` is enabled, this property defines the format of the timestamp. | `%Y-%m-%dT%H:%M:%S` |
 | `time_key_nanos` | When `logstash_format` is enabled, enabling this property sends nanosecond precision timestamps. | `Off` |
-| `trace_error` | If Elasticsearch returns an error, print the Elasticsearch API request and response for diagnostics. | `Off` |
+| `trace_error` | Log diagnostics whenever a bulk request doesn't fully succeed, either because Elasticsearch reported failed operations or because Fluent Bit couldn't interpret the bulk response. Logs the request payload at `debug` level and the Elasticsearch response at `error` level. | `Off` |
 | `trace_output` | Print all Elasticsearch API request payloads to `stdout` for diagnostics. | `Off` |
 | `type` | Type name. | `_doc` |
+| `upstream` | Path to an upstream configuration file that defines multiple Elasticsearch nodes. When set, Fluent Bit sends each flush to the next node in round-robin order and ignores `host`, `port`, and the host from `cloud_id`. See [Upstream servers](#upstream-servers). Supported in v5.1 or later. | _none_ |
 | `workers` | The number of [workers](../../administration/multithreading.md#outputs) to perform flush operations for this output. | `2` |
 | `write_operation` | Operation type for records. Can be any of: `create`, `index`, `update`, `upsert`. | `create` |
 
@@ -80,6 +82,144 @@ The `write_operation` can be any of:
 `Id_Key` or `Generate_ID` is required for `update` and `upsert`.
 
 {% endhint %}
+
+### Bulk retries
+
+Fluent Bit sends records to the Elasticsearch `_bulk` API in batches. Elasticsearch can accept some documents in a batch while rejecting others, and reports this with an HTTP `200` response that contains `"errors": true` and a per-document `status` in the `items` array.
+
+In v5.1.2 or later, when this happens, Fluent Bit inspects each item and rebuilds the payload so that it contains only the documents that weren't accepted. If any documents remain after this filtering, the flush is retried and the next attempt sends that reduced payload instead of the original batch. If no documents remain, Fluent Bit treats the flush as successful and doesn't retry it. Documents that Elasticsearch already accepted aren't sent again, which limits duplicates caused by partial failures. This filtering is always active and has no configuration option, but `drop_unrecoverable_records` controls what happens to the documents that remain.
+
+In v5.1.0 and v5.1.1, Fluent Bit treats a `_bulk` response as successful if any document in it was accepted. The documents that failed aren't retried and are lost. Upgrade to v5.1.2 or later to retry them.
+
+A document counts as accepted when its `status` is in the `2xx` range. A `409` conflict also counts as accepted, but only for the `create` operation, where the conflict confirms the document already exists. A `409` returned for any other operation is treated as a failure and retried.
+
+By default, every document that wasn't accepted stays in the retry payload, including documents Elasticsearch rejected for a reason that won't change on a later attempt, such as a mapping conflict. These documents are retried like any other failure, subject to the [`Retry_Limit`](../../administration/scheduling-and-retries.md) set for the output. In Fluent Bit version 5.1.3 and greater, you can set `drop_unrecoverable_records` to `On` to drop them instead of retrying them. Fluent Bit then treats a failed document as unrecoverable when its `status` is in the `4xx` range, except for `408`, `409`, and `429`. The `408` and `429` statuses, and every `5xx` status, are still retried. A `409` conflict is never dropped: with the `create` operation it counts as accepted, and with any other operation it's retried. When every failed document in a batch is dropped this way, nothing remains to send, so Fluent Bit treats the flush as successful instead of retrying it.
+
+In v5.2 or later, an HTTP `429` response for the whole request, or a `429` status for any document in a `_bulk` response, is a throttle signal. If [throttling](../../administration/scheduling-and-retries.md#throttling) is enabled for the output, Fluent Bit pauses the output for a cooldown, honors any `Retry-After` value in the response, and then sends the remaining documents in the retry payload again. Otherwise, Fluent Bit retries these responses like other failures, subject to `Retry_Limit`. With `Retry_Limit` set to `no_retries`, the documents aren't sent again in either case. Documents that aren't sent again are discarded, or moved to the [Dead Letter Queue](../../administration/dead-letter-queue.md) if that's enabled.
+
+Fluent Bit version 5.1.3 and greater logs an error summary whenever a bulk response reports failures. The summary reports how many documents failed, the status, type, and reason of the first error, and how many documents Fluent Bit is retrying. When `drop_unrecoverable_records` is enabled and documents were dropped, the summary also reports the dropped count, and those documents are added to the output's dropped records metric.
+
+{% hint style="warning" %}
+
+Enabling `drop_unrecoverable_records` discards the rejected documents permanently. Use it when repeated retries of documents Elasticsearch won't accept are causing a backlog, and you accept losing those documents.
+
+{% endhint %}
+
+If Fluent Bit can't interpret the bulk response, it logs `invalid Elasticsearch bulk response` and retries the entire batch. Set `trace_error` to `On` to log the request and response for diagnosis. Because a batch can still be re-sent in full in this case, set `generate_id` or `id_key` so that every document carries a stable, unique `_id` across attempts. What a repeated write then does depends on `write_operation`. With `create`, Elasticsearch rejects the duplicate with a `409` conflict, which Fluent Bit counts as accepted. With `index`, `update`, or `upsert`, Elasticsearch applies the write again, and these operations aren't inherently no-ops, so choose an `_id` scheme and a write operation that make a repeated write safe for your data.
+
+{% hint style="info" %}
+
+A successful bulk response can be larger than `buffer_size`, in which case Fluent Bit reads only part of it. The batch is still treated as complete when the truncated response shows a top-level `"errors": false`. Otherwise the batch is retried in full. Increase `buffer_size` if you send large batches.
+
+{% endhint %}
+
+### Upstream servers
+
+In v5.1 or later, the `upstream` parameter points the output at an upstream configuration file instead of a single `host` and `port`. The file defines a list of nodes, and Fluent Bit sends each flush to the next node in round-robin order. The file can use the classic format, with one `[UPSTREAM]` section and one `[NODE]` section for each node, or the YAML format, with an `upstream_servers` section. For the file format and the per-node TLS settings, see [Upstream servers (YAML)](../../administration/configuring-fluent-bit/yaml/upstream-servers-section.md) or [Upstream servers (classic)](../../administration/configuring-fluent-bit/classic-mode/upstream-servers.md).
+
+When `upstream` is set, `host`, `port`, and the host from `cloud_id` are ignored. Fluent Bit stops at startup if the file can't be loaded or doesn't define any nodes. Configure TLS in each node's definition. Define one upstream group in each file.
+
+In v5.2 or later, a relative `upstream` path is resolved from the directory of the main configuration file first, and from the working directory if the file isn't found there. Earlier versions check the working directory first. Use an absolute path to avoid ambiguity.
+
+A node can also set any of the following parameters. A value set on a node applies to requests sent to that node, and the output's value is used for any parameter the node doesn't set:
+
+- Index and document: `index`, `type`, `logstash_format`, `logstash_prefix`, `logstash_prefix_key`, `logstash_prefix_separator`, `logstash_dateformat`, `current_time_index`, `suppress_type_name`, `replace_dots`, `generate_id`, `id_key`, `write_operation`.
+- Request: `path`, `pipeline`, `compress`, `buffer_size`.
+- Authentication: `http_user`, `http_passwd`, `http_api_key`.
+- AWS: `aws_auth`, `aws_region`, `aws_service_name`, `aws_sts_endpoint`, `aws_profile`, `aws_role_arn`, `aws_external_id`.
+
+All other parameters, including `cloud_auth`, apply to every node and can't be set for each node.
+
+When you use per-node settings, keep these behaviors in mind:
+
+- Fluent Bit stops at startup if a node sets an invalid value for `logstash_format`, `replace_dots`, `suppress_type_name`, `current_time_index`, `generate_id`, `aws_auth`, `id_key`, or `logstash_prefix_key`.
+- Enabling `aws_auth` on the output requires `aws_region` on the output, even if every node sets its own `aws_region`. Enabling `aws_auth` only on a node requires `aws_region` on that node or the output. Otherwise, Fluent Bit stops at startup.
+- If the output sets `write_operation` to `update` or `upsert`, the output must also set `id_key` or `generate_id`, or Fluent Bit stops at startup. A node's `id_key` doesn't satisfy this check.
+- Node values for `buffer_size` and `write_operation` aren't validated at startup. If a node sets `write_operation` to `update` or `upsert`, make sure `id_key` or `generate_id` is set for that node or the output.
+- On a node, any `compress` value other than `gzip` turns compression off for that node.
+- Credentials resolve key by key. If `http_user` is set on the node or the output, Fluent Bit uses basic authentication, and a node's `http_api_key` has no effect.
+- A node doesn't inherit `aws_role_arn` or `aws_external_id` from the output, and the output's role isn't used in upstream mode. To assume a role for a node with `aws_auth` enabled, set `aws_role_arn`, and `aws_external_id` if the role requires it, on that node.
+- Node values can reference environment variables, such as `${ES_PASSWORD}`.
+- All flushes share one rotation, so a retry goes to whichever node is next when the retry runs. Other flushes can advance the rotation in between, so the retry can reach a different node or the original one.
+- In v5.1.2 or later, a `_bulk` response can report that only some documents failed. Fluent Bit then re-sends the remaining documents as they were built for the original node (see [Bulk retries](#bulk-retries)). The `index`, `type`, `write_operation`, and `_id` values in that payload come from the original node, while the `path`, `pipeline`, credentials, and `compress` settings of the node that receives the retry apply. If nodes write to different indices, a retried document can land in an index set for another node. If nodes use different ingest pipelines, a retried document can be processed by another node's pipeline.
+- In v5.1.0 and v5.1.1, documents that fail in a partially successful `_bulk` response are lost instead of retried (see [Bulk retries](#bulk-retries)).
+
+The following example sends records to two clusters. Each node writes to its own index, and the second node uses its own credentials.
+
+{% tabs %}
+{% tab title="es-upstream.yaml" %}
+
+```yaml
+upstream_servers:
+  - name: es-balancing
+    nodes:
+      - name: es-1
+        host: es-1.example.com
+        port: 9200
+        index: logs-cluster-1
+
+      - name: es-2
+        host: es-2.example.com
+        port: 9200
+        tls: on
+        index: logs-cluster-2
+        http_user: fluent-bit
+        http_passwd: ${ES_2_PASSWORD}
+```
+
+{% endtab %}
+{% tab title="es-upstream.conf" %}
+
+```text
+[UPSTREAM]
+  Name        es-balancing
+
+[NODE]
+  Name        es-1
+  Host        es-1.example.com
+  Port        9200
+  Index       logs-cluster-1
+
+[NODE]
+  Name        es-2
+  Host        es-2.example.com
+  Port        9200
+  Tls         On
+  Index       logs-cluster-2
+  Http_User   fluent-bit
+  Http_Passwd ${ES_2_PASSWORD}
+```
+
+{% endtab %}
+{% endtabs %}
+
+Reference the upstream file from the output:
+
+{% tabs %}
+{% tab title="fluent-bit.yaml" %}
+
+```yaml
+pipeline:
+  outputs:
+    - name: es
+      match: '*'
+      upstream: es-upstream.yaml
+      suppress_type_name: on
+```
+
+{% endtab %}
+{% tab title="fluent-bit.conf" %}
+
+```text
+[OUTPUT]
+  Name               es
+  Match              *
+  Upstream           es-upstream.conf
+  Suppress_Type_Name On
+```
+
+{% endtab %}
+{% endtabs %}
 
 ## Get started
 

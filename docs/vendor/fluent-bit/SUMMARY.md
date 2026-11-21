@@ -1,6 +1,6 @@
 # Table of contents
 
-* [Fluent Bit documentation](README.md)
+* [Fluent Bit 5.2 documentation](README.md)
 
 ## About
 
@@ -139,6 +139,19 @@
   * [Content modifier](pipeline/processors/content-modifier.md)
   * [Cumulative to delta](pipeline/processors/cumulative-to-delta.md)
   * [Filters as processors](pipeline/processors/filters.md)
+  * [Fluent Typed Scripting (FTS)](pipeline/processors/fluent-typed-scripting.md)
+    * [Quickstart](pipeline/processors/fluent-typed-scripting/quickstart.md)
+    * [Configuration](pipeline/processors/fluent-typed-scripting/configuration.md)
+    * [Typed values](pipeline/processors/fluent-typed-scripting/typed-values.md)
+    * [Logs](pipeline/processors/fluent-typed-scripting/logs.md)
+    * [Metrics](pipeline/processors/fluent-typed-scripting/metrics.md)
+    * [Traces](pipeline/processors/fluent-typed-scripting/traces.md)
+    * [Common helpers](pipeline/processors/fluent-typed-scripting/common-helpers.md)
+    * [Errors and limits](pipeline/processors/fluent-typed-scripting/errors-and-limits.md)
+    * [Fluent Typed Scripting (FTS) and the Lua filter](pipeline/processors/fluent-typed-scripting/lua-filter.md)
+    * [Native recipe blocks](pipeline/processors/fluent-typed-scripting/native-recipes.md)
+    * [Recipes](pipeline/processors/fluent-typed-scripting/recipes.md)
+  * [Journald OpenTelemetry](pipeline/processors/journald-otel.md)
   * [Labels](pipeline/processors/labels.md)
   * [Metrics selector](pipeline/processors/metrics-selector.md)
   * [OpenTelemetry envelope](pipeline/processors/opentelemetry-envelope.md)
@@ -180,6 +193,8 @@
   * [Amazon Kinesis Data Streams](pipeline/outputs/kinesis.md)
   * [Amazon S3](pipeline/outputs/s3.md)
   * [Apache SkyWalking](pipeline/outputs/skywalking.md)
+  * [ArvanCloud CloudLogs](pipeline/outputs/arvancloud_cloudlogs.md)
+  * [Bronto](pipeline/outputs/bronto.md)
   * [Counter](pipeline/outputs/counter.md)
   * [Dash0](pipeline/outputs/dash0.md)
   * [Datadog](pipeline/outputs/datadog.md)

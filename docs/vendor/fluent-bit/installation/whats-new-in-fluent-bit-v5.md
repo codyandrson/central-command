@@ -4,6 +4,32 @@ This page gives a quick user-focused overview of the main changes in the Fluent 
 
 For migration-impacting changes, see [Upgrade notes](upgrade-notes.md).
 
+## Fluent Bit v5.2
+
+Fluent Bit `v5.2` is the upcoming release developed on `master`. It adds Fluent Typed Scripting (FTS) and improves log ingestion, processor execution, and buffering. The following highlights describe the development code ahead of the `5.2.0` release.
+
+### Fluent Typed Scripting
+
+The new `fts` processor lets you write Lua policies for logs, metrics, and traces. Typed access preserves integer widths, binary values, and nanosecond timestamps. Policies can also access OpenTelemetry resources, scopes, and attributes. FTS provides instruction, memory, and output limits, with configurable handling of policy errors. See the [FTS processor guide](https://github.com/fluent/fluent-bit/blob/master/plugins/processor_fts/README.md) for configuration and examples.
+
+### Performance and scalability
+
+#### OpenTelemetry log ingestion and processing
+
+The [OpenTelemetry input](../pipeline/inputs/opentelemetry.md) adds direct internal log decoding for JSON and Protobuf payloads. Compatible native log processor chains can run in input workers, reducing intermediate encoding and decoding. These improvements apply automatically to eligible pipelines.
+
+#### Processor chains
+
+Compatible native log processors can share processing work across a chain. Large log buffers are processed in windows to reduce temporary allocation pressure. Existing processor configurations continue to select the processors and their order.
+
+#### HTTP worker connection balancing
+
+The shared HTTP server balances accepted connections across workers. HTTP-based inputs configured with multiple workers can distribute connection handling more evenly.
+
+#### Buffer allocation
+
+Input chunks use adaptive size projections and append-sized storage hints to reduce allocation overhead as data arrives. See [Buffering](../pipeline/buffering.md) for storage configuration.
+
 ## Fluent Bit v5.1
 
 Fluent Bit `v5.1` focuses on network ingestion throughput, adds several new inputs and outputs, and hardens TLS and FIPS compliance options.
@@ -62,11 +88,11 @@ The [Node Exporter Metrics input](../pipeline/inputs/node-exporter-metrics.md) a
 
 #### New Google Cloud Storage output
 
-The [Google Cloud Storage output](../pipeline/outputs/gcs.md) uploads records to a GCS bucket with service-account `OAuth 2.0` authentication and optional gzip compression.
+The [Google Cloud Storage output](../pipeline/outputs/gcs.md) uploads records to a GCS bucket with service-account `OAuth 2.0` authentication and optional gzip compression. Fluent Bit uploads an object when `upload_timeout` elapses. In Fluent Bit version 5.1.3 and greater, Fluent Bit also uploads an object when the file currently being buffered for a tag reaches `total_file_size`.
 
 #### Kafka output Confluent Schema Registry support
 
-The [Kafka output](../pipeline/outputs/kafka.md) can resolve Avro schemas directly from a Confluent Schema Registry with `schema_registry_url` and related settings, instead of requiring a schema to be configured inline.
+The [Kafka output](../pipeline/outputs/kafka.md) can resolve schemas directly from a Confluent Schema Registry with `schema_registry_url` and related settings, instead of requiring a schema to be configured inline. Set `format` to `avro` to serialize records against the resolved schema. This feature is part of Avro support and requires a build with `FLB_AVRO_ENCODER` enabled. See [Build and install](downloads/source/build-and-install.md).
 
 #### File output rotation and compression
 

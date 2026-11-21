@@ -8,6 +8,35 @@ Release notes will be prepared in advance of a Git tag for a release. An officia
 
 The tag drives the binary release process. Release binaries (containers and packages) will appear after a tag and its associated release note. This lets users to expect the new release binary to appear and allow/deny/update it as appropriate in their infrastructure.
 
+## Fluent Bit v5.2
+
+Fluent Bit `v5.2` is the upcoming release developed on `master`. Review [What's new in Fluent Bit v5.2](whats-new-in-fluent-bit-v5.md#fluent-bit-v52) before testing an upgrade from `5.1` or an earlier series.
+
+### Native log processing
+
+Version `5.2` changes internal log decoding, processor execution, and chunk allocation. Before deploying an upgrade, test representative log payloads and processor chains with your buffering and backpressure settings. Check record contents, routing, and delivery under load.
+
+### Opt in to Fluent Typed Scripting
+
+The new `fts` processor is configured through the YAML `processors` section. Existing Lua filters continue to use the `lua` filter plugin. To adopt Fluent Typed Scripting (FTS), write policies against its typed API and configure an `fts` processor for each signal you want to process. See the [FTS processor guide](https://github.com/fluent/fluent-bit/blob/master/plugins/processor_fts/README.md) for its callback contract and resource limits.
+
+### Stricter validation and security fixes
+
+Version `5.2` tightens several checks that can change the behavior of existing configurations. Review the following changes before you upgrade:
+
+- `https` URLs with an explicit port, such as `https://example.com:8443`, now always use TLS. Earlier versions connected to some of these URLs without TLS, including the [Amazon S3](../pipeline/outputs/s3.md) `authorization_endpoint_url` and the [Azure Blob](../pipeline/outputs/azure_blob.md) `configuration_endpoint_url`. If you set the [Stackdriver](../pipeline/outputs/stackdriver.md) or [Google Cloud Storage](../pipeline/outputs/gcs.md) `metadata_server` to an `https` address, it now fails with `TLS context required for URL`. Use the default `http` address instead.
+- The [NATS](../pipeline/outputs/nats.md) output rejects tags that aren't valid NATS subjects, such as tags that contain spaces, `*`, or `>`, and drops those chunks. Rename the tags, or set `invalid_subject_action` to `encode`, which publishes those tags, and tags that already start with `_flb_encoded.`, to `_flb_encoded.` subjects that subscribers and permissions must then cover.
+- The [File](../pipeline/outputs/file.md) output escapes more characters in the `out_file`, CSV, and LTSV formats. Update any tools that parse these files.
+- The [Forward](../pipeline/inputs/forward.md) and [Syslog](../pipeline/inputs/syslog.md) inputs refuse to start when the Unix socket path is a symbolic link, such as `/dev/log` on many systemd-based systems, or is too long. The Syslog input also fails to start when `buffer_chunk_size` or `buffer_max_size` is out of range.
+- The [Rewrite tag](../pipeline/filters/rewrite-tag.md) filter can no longer be used as an output processor, and Fluent Bit fails to start with that configuration.
+- HTTP-based inputs close the connection, without a response, for HTTP/1 requests whose request line, headers, and closing blank line exceed `32KiB`. If clients send larger headers, raise `http_server.http1_max_header_size`. See [Pipeline](../administration/configuring-fluent-bit/yaml/pipeline-section.md).
+- Inputs that validate `OAuth 2.0` tokens accept `JWKS` responses up to `1M`, including headers, which raises the earlier limit of 4,096 bytes, and apply a new `30s` time limit to the `JWKS` response. Adjust `oauth2.jwks_buffer_max_size` or `oauth2.jwks_response_timeout` if needed.
+- The [OpenTelemetry](../pipeline/outputs/opentelemetry.md) output, when it uses HTTP/2 or gRPC, drops chunks whose responses exceed the new `http_client.*` size and header limits. Responses that exceed `http_client.response_timeout` are retried. See [Service](../administration/configuring-fluent-bit/yaml/service-section.md).
+- `AWS_CONTAINER_CREDENTIALS_FULL_URI` now requires `http` hosts to be IP addresses in the allowed loopback and link-local ranges, or the exact ECS and EKS Pod Identity addresses, or the `Greengrass` endpoint. Host names that only started with or contained an allowed address, such as `127.example.com`, are rejected. If it's rejected, Fluent Bit can fall back to the EC2 instance role. See [AWS credentials](../administration/aws-credentials.md).
+- The [Amazon S3](../pipeline/outputs/s3.md) authorization endpoint and the [Azure Blob](../pipeline/outputs/azure_blob.md) configuration endpoint now verify TLS certificates using the output's `tls.verify` and certificate authority settings. Earlier versions didn't verify them. A configuration endpoint that fails verification stops Fluent Bit from starting.
+- Regular expression searches that exceed a fixed work limit fail. Filters, routing, and multiline parsing treat a failed search as no match, while some include and exclude lists in metrics inputs treat it as a match. See [Regular expression format](../pipeline/parsers/regular-expression.md).
+- The [Prometheus text file](../pipeline/inputs/prometheus-textfile.md) input sends one merged payload for each scrape and adds a `fluentbit_textfile_scrape_error` metric.
+
 ## Fluent Bit v5.1
 
 ### Debian and Ubuntu package upgrades restart the service
@@ -27,6 +56,14 @@ No action is required unless you want to opt in to the new rate gate.
 ### 64-bit timestamp handling beyond 2038
 
 Event timestamps at or after the 2038 32-bit `time_t` rollover now round-trip correctly through the internal msgpack `EventTime` encoding that Fluent Bit uses. On platforms where `time_t` is still 32-bit, timestamps remain bound by that platform's range.
+
+### `tls.verify_client_cert` applies even when `tls.verify` is off
+
+In v5.1.2 and earlier, setting `tls.verify_client_cert on` had no effect on a listener that also set `tls.verify off`. Fluent Bit never asked the client for a certificate and accepted any client that connected, despite the option requesting mutual TLS (`mTLS`).
+
+In v5.1.3 and later, enabling `tls.verify_client_cert` always forces certificate validation for that listener. Fluent Bit logs a warning when you combine it with `tls.verify off`, and clients that don't present a certificate signed by the configured CA are rejected.
+
+Review any input plugin that sets both options. If you rely on accepting clients without a certificate, remove `tls.verify_client_cert` from that input before you upgrade. If you intended `mTLS`, no change is required, and the listener starts enforcing it.
 
 ## Fluent Bit v5.0
 
@@ -201,7 +238,7 @@ If you have existing queries based on the resource's `project_id,` update your q
 
 The migration from v1.4 to v1.5 is pretty straightforward.
 
-- The `keepalive` configuration mode has been renamed to `net.keepalive`. Now, all Network I/O keepalive is enabled by default. To learn more about this and other associated configuration properties read the [Networking Administration](https://docs.fluentbit.io/manual/administration/networking#tcp-keepalive) section. - If you use the Elasticsearch output plugin, the default value of `type` [changed from `flb_type` to `_doc`](https://github.com/fluent/fluent-bit/commit/04ed3d8104ca8a2f491453777ae6e38e5377817e#diff-c9ae115d3acaceac5efb949edbb21196). Many versions of Elasticsearch tolerate this, but Elasticsearch v5.6 through v6.1 require a `type` without a leading underscore. See the [Elasticsearch output plugin documentation FAQ entry](https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch#faq-underscore) for more.
+- The `keepalive` configuration mode has been renamed to `net.keepalive`. Now, all Network I/O keepalive is enabled by default. To learn more about this and other associated configuration properties read the [Networking Administration](https://docs.fluentbit.io/manual/administration/networking#connection-keepalive) section. - If you use the Elasticsearch output plugin, the default value of `type` [changed from `flb_type` to `_doc`](https://github.com/fluent/fluent-bit/commit/04ed3d8104ca8a2f491453777ae6e38e5377817e#diff-c9ae115d3acaceac5efb949edbb21196). Many versions of Elasticsearch tolerate this, but Elasticsearch v5.6 through v6.1 require a `type` without a leading underscore. See the [Elasticsearch output plugin documentation FAQ entry](https://docs.fluentbit.io/manual/pipeline/outputs/elasticsearch#mapping-type-names-cant-start-with-underscores) for more.
 
 ## Fluent Bit v1.4
 
@@ -280,7 +317,7 @@ The change introduced in the 1.0 series switched from absolute path to the base 
 
 ```text kube.apache.log ```
 
-THe Fluent Bit v1.1 release restored the default behavior and now the Tag is composed using the absolute path of the monitored file.
+The Fluent Bit v1.1 release restored the default behavior and now the Tag is composed using the absolute path of the monitored file.
 
 Having absolute path in the Tag is relevant for routing and flexible configuration where it also helps to keep compatibility with Fluentd behavior.
 
