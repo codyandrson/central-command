@@ -76,7 +76,7 @@ dockerio  library/postgres            16                    16.16-trixie       s
 dockerio  library/neo4j               5.26                  5.26.33            sha256:51d0314ef86074f519003da8dd4daaa9fff72b8479672b742d7cab7f3064e3ed  core
 dockerio  library/redis               7                     7.4.12-alpine      sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe  core
 ghcr      berriai/litellm-database    main-stable           main-stable        -                                                                        core
-dockerio  n8nio/n8n                   2                     2.29.0             sha256:846f0248604d82d989e30457277da9004cdf8a69ad7b6a27ae2ad811841cf25d  n8n
+dockerio  n8nio/n8n                   2                     2.48.7             sha256:fabce3e9678a07d2dde83bd8f5124017f3ec457d0a3fc6b63bb4cec465d63861  n8n
 dockerio  library/python              3.12                  3.12-slim-bookworm -                                                                        sandbox-base
 mcr       playwright/python           v1.62                 v1.62.0-noble      sha256:aa81288e738725378becba5b3e06cb0f3a7f012a610e87e8d767a090ea3f740d  crawler-base
 ghcr      speaches-ai/speaches        0.8                   0.8.3-cpu          sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8  speech

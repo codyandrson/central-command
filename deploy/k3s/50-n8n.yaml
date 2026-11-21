@@ -143,7 +143,7 @@ spec:
         cc-role/anchor: "true"
       containers:
         - name: n8n
-          image: docker.io/n8nio/n8n:2.29.0
+          image: docker.io/n8nio/n8n:2.48.7
           ports:
             - name: http
               containerPort: 5678
@@ -176,7 +176,7 @@ spec:
               value: "5678"
             - name: N8N_PROTOCOL
               value: http
-            - name: WEBHOOK_URL
+            - name: N8N_WEBHOOK_URL
               valueFrom:
                 secretKeyRef: {name: cc-n8n, key: N8N_WEBHOOK_URL}
             - name: GENERIC_TIMEZONE
@@ -188,8 +188,6 @@ spec:
               value: "false"
             - name: N8N_LOG_LEVEL
               value: info
-            - name: N8N_RUNNERS_ENABLED
-              value: "true"
             - name: N8N_BLOCK_ENV_ACCESS_IN_NODE
               value: "false"
           volumeMounts:

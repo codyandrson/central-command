@@ -272,7 +272,7 @@ services:
   n8n:
     profiles: [n8n]
     container_name: ${CC_POD_PREFIX:-cc-}n8n
-    image: ${CC_IMG_N8NIO_N8N:-docker.io/n8nio/n8n:2.29.0}
+    image: ${CC_IMG_N8NIO_N8N:-docker.io/n8nio/n8n:2.48.7}
     restart: always
     depends_on:
       n8n-db:
@@ -291,11 +291,10 @@ services:
       N8N_PROTOCOL: http
       # Browser-facing, so `localhost` is correct here (the loopback-vs-::1
       # rule is about what the SCRIPTS dial).
-      WEBHOOK_URL: http://localhost:${CC_N8N_PORT:-5678}/
+      N8N_WEBHOOK_URL: http://localhost:${CC_N8N_PORT:-5678}/
       N8N_DEFAULT_BINARY_DATA_MODE: filesystem
       N8N_SECURE_COOKIE: "false"
       N8N_LOG_LEVEL: info
-      N8N_RUNNERS_ENABLED: "true"
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
     ports:
       - "127.0.0.1:${CC_N8N_PORT:-5678}:5678"
