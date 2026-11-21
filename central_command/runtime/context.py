@@ -750,6 +750,30 @@ class WorkingWindow(AbstractCapability[Any]):
         return None
 
 
+_RUN_CONTEXT_LOOKUP: list = []  # resolved once: [callable or None]
+
+
+def _current_run_context_lookup():
+    """pydantic-ai's `get_current_run_context`, which lives in a PRIVATE module
+    (`pydantic_ai._run_context`; its model-request docstring names it). If a
+    release moves it, the missed-window check goes off — never every model
+    request with an ImportError — and that is said ONCE, loudly. The window
+    itself is applied by `WorkingWindow`'s hook, which does not depend on it."""
+    if not _RUN_CONTEXT_LOOKUP:
+        try:
+            from pydantic_ai._run_context import get_current_run_context as lookup
+        except ImportError:
+            import logging
+
+            logging.getLogger(__name__).error(
+                "context: pydantic_ai._run_context.get_current_run_context is unavailable; "
+                "the check that a windowed agent's request got its working window "
+                "(session.context_window_unapplied) is OFF until it is restored")
+            lookup = None
+        _RUN_CONTEXT_LOOKUP.append(lookup)
+    return _RUN_CONTEXT_LOOKUP[0]
+
+
 async def _unwindowed(messages: list, model_name: str | None, run_context=None) -> list:
     """`messages` itself, unless this request comes from a windowed agent's step
     that the framework sent WITHOUT running `WorkingWindow.prepare_model_request`.
@@ -760,9 +784,10 @@ async def _unwindowed(messages: list, model_name: str | None, run_context=None) 
     `request_stream` is handed); no record for it means an agent without the
     capability, or a call made outside a run."""
     if run_context is None:
-        from pydantic_ai._run_context import get_current_run_context
-
-        run_context = get_current_run_context()
+        lookup = _current_run_context_lookup()
+        if lookup is None:
+            return messages  # the check is off (logged once); the window hook is not
+        run_context = lookup()
     key = _step_key(run_context)
     owed = _steps.get(key) if key else None
     if owed is None or owed.get("applied") is not False:

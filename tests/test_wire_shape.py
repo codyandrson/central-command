@@ -311,3 +311,119 @@ async def _drop_test_skill(skill_id: str) -> None:
         await conn.execute("delete from skill where id = $1", skill_id)
     finally:
         await conn.close()
+
+
+def _wire_ids(body: dict) -> set:
+    ids = set()
+    for m in body["messages"]:
+        ids.update(c["id"] for c in m.get("tool_calls") or [])
+        if m["role"] == "tool":
+            ids.add(m["tool_call_id"])
+    return ids
+
+
+@needs_pg
+async def test_the_production_builder_summarises_again_and_loses_nothing(monkeypatch):
+    """Summarising ON through production assembly (`capabilities_for`,
+    `catalog_line`, `build_agent`, the real mapping): after a skill load the
+    session is summarised at least twice, and after every request each raw
+    call and result is either summarised or on the wire, the newest result
+    is on the wire, and the load exchange and the guidance appear once."""
+    from pydantic_ai.messages import ToolCallPart, ToolReturnPart
+
+    from central_command.db import repo
+    from central_command.runtime import agent as agent_mod
+    from central_command.runtime import skills as skills_mod
+
+    skill, tool = "cc-test-wire", "search_cc_test_wire_reference"
+    calls = 14
+    await _drop_test_skill(skill)
+    try:
+        await repo.create_skill(skill, "Jira guide", "How this Jira is used")
+        await repo.add_skill_doc(skill, "guidance", "guidance", "How we use Jira", GUIDANCE)
+        await repo.grant_skill("inbox-triage", skill)
+
+        async def big_hits(skill_id, query, limit):
+            return [{"doc_key": "ref", "title": "Ref", "content": f"[{query}] " + "y" * PAYLOAD}]
+        monkeypatch.setattr(repo, "search_skill_chunks", big_hits)
+        caps = await skills_mod.capabilities_for("inbox-triage")
+        catalog = await skills_mod.catalog_line("inbox-triage")
+
+        def script(n):
+            if n == 1:
+                return _call("load_capability", {"id": skill}, "c-load")
+            if n <= 1 + calls:
+                return _call(tool, {"query": f"q{n}"}, f"c-skill-{n}")
+            return {"role": "assistant", "content": "Nothing else to do."}
+
+        bodies, store = install_stub_seam(monkeypatch, script, window=12_000, cfg={
+            "pressure_warning": False, "clear_tool_results": False, "drop_thinking": False,
+            "output_headroom": False, "summarize_threshold": 0.5})
+        summarised: set = set()
+        made = []
+
+        async def fake_summarize(model, region):
+            summarised.update(p.tool_call_id for m in region for p in m.parts
+                              if isinstance(p, (ToolCallPart, ToolReturnPart)))
+            made.append(1)
+            return f"SUMMARY-{len(made)}"
+        monkeypatch.setattr(context, "summarize", fake_summarize)
+        agent = await agent_mod.build_agent(model=await models._live_model("cc-default"),
+                                            capabilities=caps, skills_catalog=catalog)
+        result = await agent.run("Mail: please comment on TASKS-12.",
+                                 deps=TriageDeps(agent_id="inbox-triage", session_id="sess_prodsum"))
+    finally:
+        await _drop_test_skill(skill)
+    assert result.output == "Nothing else to do."
+    assert len(made) >= 2, f"summarised {len(made)} times, not two or more"
+    record = result.all_messages()
+    for i, body in enumerate(bodies, 1):
+        assert_one_leading_system_and_a_valid_sequence(body, i)
+        raw = record[:2 * i - 1]
+        on_wire = _wire_ids(body)
+        missing = [p.tool_call_id for m in raw for p in m.parts
+                   if isinstance(p, (ToolCallPart, ToolReturnPart))
+                   and p.tool_call_id not in on_wire | summarised]
+        assert not missing, f"request {i}: neither summarised nor sent: {missing}"
+        newest = {p.tool_call_id for p in raw[-1].parts if isinstance(p, ToolReturnPart)}
+        assert newest <= on_wire, f"request {i}: the newest result is not on the wire"
+        if i > 1:
+            text = json.dumps(body["messages"])
+            loads = [c for m in body["messages"] for c in m.get("tool_calls") or []
+                     if c["function"]["name"] == "load_capability"]
+            assert len(loads) == 1, f"request {i}: the load exchange appears {len(loads)} times"
+            assert text.count(GUIDANCE) == 1, f"request {i}: the guidance is not sent once"
+
+
+@needs_pg
+async def test_a_2_18_session_resumes_through_the_production_resume_factory(monkeypatch):
+    """`build_agent_for` (the RESUME factory: grants, packs, skills loadout)
+    resumes the 2.18 fixture through the real mapping: one system message,
+    first, carrying the ORIGINAL charter, and the loaded skill still loaded."""
+    from pathlib import Path
+
+    from central_command.db import repo
+    from central_command.runtime import agent as agent_mod
+
+    rs = json.loads((Path(__file__).parent / "fixtures" / "pai_2_18_paused_session.json").read_text())
+    skill = "jira-guide"  # the id the fixture's session loaded
+    assert await repo.get_skill(skill) is None, "the test owns this skill id"
+    try:
+        await repo.create_skill(skill, "Jira guide", "How this Jira is used")
+        await repo.add_skill_doc(skill, "guidance", "guidance", "How we use Jira",
+                                 "SKILL: Jira guide. Always quote the issue key.")
+        await repo.grant_skill("inbox-triage", skill)
+        bodies, _store = install_stub_seam(
+            monkeypatch, lambda n: {"role": "assistant", "content": "Recorded."})
+        agent = await agent_mod.build_agent_for(
+            "inbox-triage", model=await models._live_model("cc-default"))
+        result = await durable.resume(agent, durable.load_messages(rs), rs["tool_call_id"],
+                                      "approved: executed", agent_id="inbox-triage",
+                                      session_id="sess_old_prod")
+    finally:
+        await _drop_test_skill(skill)
+    assert result.output == "Recorded."
+    body = bodies[-1]
+    assert_one_leading_system_and_a_valid_sequence(body, "resume")
+    assert body["messages"][0]["content"].startswith("ORIGINAL CHARTER (2.18)")
+    assert "search_jira_guide_reference" in [t["function"]["name"] for t in body["tools"]]

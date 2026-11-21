@@ -289,3 +289,33 @@ async def test_no_reader_turns_bookkeeping_into_a_row_and_the_guidance_shows_wit
         assert not any(j in corpus for j in junk)
     rows = session_recall.extract(rs).parts
     assert rows and not any(j in r[4] for r in rows for j in junk)
+
+
+def test_each_load_row_shows_only_its_own_skill_guidance():
+    """Two skills loaded in one response: each load's row in the Workspace and
+    the cockpit chat carries its own guidance, matched by the capability id
+    its call named."""
+    import asyncio
+
+    from pydantic_ai.messages import ToolCallPart
+
+    a = Capability(id="sk-A", description="a", instructions="GUIDE-A", defer_loading=True)
+    a.tool_plain(name="ref_a")(lambda q: "x")
+    b = Capability(id="sk-B", description="b", instructions="GUIDE-B", defer_loading=True)
+    b.tool_plain(name="ref_b")(lambda q: "x")
+
+    def model(messages, info):
+        if len(messages) == 1:
+            return ModelResponse(parts=[ToolCallPart("load_capability", {"id": "sk-A"}, tool_call_id="la"),
+                                        ToolCallPart("load_capability", {"id": "sk-B"}, tool_call_id="lb")])
+        return ModelResponse(parts=[TextPart("done")])
+    result = asyncio.run(Agent(FunctionModel(model), capabilities=[a, b]).run("hi"))
+    rs = {"messages": ModelMessagesTypeAdapter.dump_python(result.all_messages(), mode="json")}
+    rows = {t["content"].split("'")[1]: t["content"] for t in durable.simplify_messages(rs)
+            if t["tool"] == "load_capability" and t["kind"] == "tool-return"}
+    assert "GUIDE-A" in rows["sk-A"] and "GUIDE-B" not in rows["sk-A"]
+    assert "GUIDE-B" in rows["sk-B"] and "GUIDE-A" not in rows["sk-B"]
+    chat = {c["toolCallId"]: c["content"] for c in nerve_gateway._transcript_to_chat_messages(rs)
+            if c["role"] == "toolResult" and c["toolName"] == "load_capability"}
+    assert "GUIDE-A" in chat["la"] and "GUIDE-B" not in chat["la"]
+    assert "GUIDE-B" in chat["lb"] and "GUIDE-A" not in chat["lb"]

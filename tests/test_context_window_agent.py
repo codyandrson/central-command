@@ -309,3 +309,27 @@ async def test_a_session_summarised_again_and_again_loses_nothing(monkeypatch):
             assert len(loads) == 1, f"request {i}: the load exchange appears {len(loads)} times"
             assert texts[i - 1].count(GUIDANCE) == 1, f"request {i}: the guidance is not sent once"
             assert "skill_lookup" in tools
+
+
+async def test_without_the_private_run_context_lookup_the_run_still_windows(monkeypatch, pinned,
+                                                                            caplog):
+    """`get_current_run_context` lives in a private pydantic-ai module. If a
+    release moves it, the missed-window check goes off with ONE loud error,
+    and requests still go out windowed — never an ImportError per request."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_private(name, *args, **kwargs):
+        if name == "pydantic_ai._run_context":
+            raise ImportError("moved")
+        return real_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", no_private)
+    monkeypatch.setattr(context, "_RUN_CONTEXT_LOOKUP", [])
+    fn, seen = _script()
+    agent = _agent(context.WindowedModel(FunctionModel(fn, model_name="cc-default")))
+    result = await agent.run("do the thing", deps=_deps())
+    assert result.output == "done"
+    _assert_windowed_and_raw(seen, result.all_messages())
+    assert caplog.text.count("get_current_run_context is unavailable") == 1, "once, not per request"
+    assert "session.context_window_unapplied" not in [k for k, _ in pinned]

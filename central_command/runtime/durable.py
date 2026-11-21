@@ -246,19 +246,39 @@ def is_bookkeeping(part) -> bool:
     return kind in BOOKKEEPING_KINDS
 
 
-def load_return_text(part: dict, request_parts: list) -> str | None:
+def load_call_ids(messages: list) -> dict:
+    """`tool_call_id -> capability id` for every `load_capability` call in
+    stored message dicts (what `load_return_text` matches a return by)."""
+    out: dict = {}
+    for message in messages:
+        for p in message.get("parts", []) or []:
+            if p.get("part_kind") == "tool-call" and p.get("tool_kind") == "capability-load":
+                args = p.get("args")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except ValueError:
+                        args = {}
+                if isinstance(args, dict) and args.get("id"):
+                    out[p.get("tool_call_id")] = str(args["id"])
+    return out
+
+
+def load_return_text(part: dict, request_parts: list, load_ids: dict) -> str | None:
     """A `load_capability` return (stored dict) as a transcript shows it: its
-    content and, since pydantic-ai 2.59, the skill guidance the load delivered,
-    recorded as `instruction-delta` parts (`capability:<id>`) in the same
-    request. None for any other part."""
+    content and, since pydantic-ai 2.59, the guidance THIS load delivered,
+    recorded as an `instruction-delta` part `capability:<its id>` in the same
+    request (the id from its call, via `load_call_ids`). None for any other
+    part."""
     if part.get("part_kind") != "tool-return" or part.get("tool_kind") != "capability-load" \
             or retry_text(part) is not None:
         return None
     text = part.get("content")
     text = text if isinstance(text, str) else json.dumps(text, default=str)
+    capability = load_ids.get(part.get("tool_call_id"))
     guidance = [str(p.get("content")) for p in request_parts
-                if isinstance(p, dict) and p.get("part_kind") == "instruction-delta"
-                and str(p.get("id", "")).startswith("capability:") and p.get("content")]
+                if capability and isinstance(p, dict) and p.get("part_kind") == "instruction-delta"
+                and str(p.get("id", "")) == f"capability:{capability}" and p.get("content")]
     return "\n\n".join([text, *guidance])
 
 
@@ -487,7 +507,9 @@ def simplify_messages(run_state: dict, max_chars: int = 6000) -> list[dict]:
     Reads the FULL transcript (archived + live window), so a compacted session
     still shows the operator everything that happened."""
     turns: list[dict] = []
-    for message in full_messages(run_state):
+    messages = full_messages(run_state)
+    load_ids = load_call_ids(messages)
+    for message in messages:
         parts = message.get("parts", [])
         for part in parts:
             kind = part.get("part_kind", "unknown")
@@ -505,7 +527,7 @@ def simplify_messages(run_state: dict, max_chars: int = 6000) -> list[dict]:
                 # quote corpus, the Workspace) tell a retry — our own words
                 # back to the model — from a tool's result by it.
                 kind, content = "retry-prompt", retried
-            elif (loaded := load_return_text(part, parts)) is not None:
+            elif (loaded := load_return_text(part, parts, load_ids)) is not None:
                 content = loaded
             elif kind == "tool-return":
                 content = str(part.get("content", ""))

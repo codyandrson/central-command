@@ -297,10 +297,13 @@ def _transcript_to_chat_messages(run_state: dict) -> list[dict]:
     is a human-read surface, so it shows the whole transcript even after
     compaction has moved older turns out of what the model sees.
     """
-    from central_command.runtime.durable import full_messages, load_return_text, retry_text
+    from central_command.runtime.durable import (
+        full_messages, load_call_ids, load_return_text, retry_text)
 
     out: list[dict] = []
-    for message in full_messages(run_state):
+    messages = full_messages(run_state)
+    load_ids = load_call_ids(messages)
+    for message in messages:
         msg_ts = message.get("timestamp")
         if message.get("kind") == "response":
             blocks: list[dict] = []
@@ -335,7 +338,7 @@ def _transcript_to_chat_messages(run_state: dict) -> list[dict]:
                 out.append({"role": "user", "content": text, "timestamp": ts})
             elif pk == "tool-return" or retry_text(part) is not None:
                 retried = retry_text(part)
-                loaded = load_return_text(part, message.get("parts", []))
+                loaded = load_return_text(part, message.get("parts", []), load_ids)
                 out.append({
                     "role": "toolResult",
                     "content": (retried if retried is not None
