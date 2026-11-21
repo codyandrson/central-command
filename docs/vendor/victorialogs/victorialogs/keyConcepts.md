@@ -1,6 +1,7 @@
 ---
 weight: 2
 title: Key Concepts
+description: "VictoriaLogs data model. Structured and unstructured logs, fields, streams, and time."
 menu:
   docs:
     identifier: vl-key-concepts
@@ -15,6 +16,8 @@ aliases:
 - /VictoriaLogs/keyConcepts.html
 ---
 ## Data model
+
+{{< youtube ZM6rUTJzqow >}}
 
 [VictoriaLogs](https://docs.victoriametrics.com/victorialogs/) works with both structured and unstructured logs.
 Every log entry must contain at least the [log message field](https://docs.victoriametrics.com/victorialogs/keyconcepts/#message-field). An arbitrary number of additional `key=value` fields can be added to the log entry.
@@ -287,8 +290,9 @@ VictoriaLogs works perfectly with such fields unless they are associated with [l
 - Increased disk read/write I/O
 
 VictoriaLogs exposes `vl_streams_created_total` [metric](https://docs.victoriametrics.com/victorialogs/metrics/#vl_streams_created_total),
-which shows the number of created streams since the last VictoriaLogs restart. If this metric grows at a rapid rate
-over a long period of time, then there is a high chance of high-cardinality issues mentioned above.
+which shows the number of log streams registered in daily partitions since the last VictoriaLogs restart. The same stream
+is counted again when it is registered in another daily partition. If this metric increases much faster than expected outside the normal
+creation of daily partitions, then there is a high chance of high-cardinality issues mentioned above.
 VictoriaLogs can log all the newly registered streams - see [these docs](https://docs.victoriametrics.com/victorialogs/#logging-new-streams).
 This can help narrow down and eliminate high-cardinality fields from [log streams](https://docs.victoriametrics.com/victorialogs/keyconcepts/#stream-fields).
 

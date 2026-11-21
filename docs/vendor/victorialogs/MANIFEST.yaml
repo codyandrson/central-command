@@ -1,6 +1,8 @@
 name: victorialogs
 source_repo: https://github.com/VictoriaMetrics/VictoriaLogs
-source_ref: v1.52.0
-fetched_url: https://codeload.github.com/VictoriaMetrics/VictoriaLogs/tar.gz/v1.52.0
-fetched_date: 2026-08-25
+source_ref: v1.54.0
+fetched_url: https://codeload.github.com/VictoriaMetrics/VictoriaLogs/tar.gz/v1.54.0
+fetched_date: 2026-11-21
 subpaths: [docs/victorialogs README.md LICENSE]
+note: >
+  The deployed image is VictoriaLogs v1.54.0; vendored at the matching release tag v1.54.0.
