@@ -4,6 +4,60 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.110.0: The LiteLLM proxy moves from 1.98.0 to 1.110.2, and speech requests queue in the application
+
+- **Why now.** 1.98.0 is twelve release lines behind and inside the affected range of GHSA-7hp6-4w63-5g45
+  (an internal user escalating to proxy admin and code execution through the MCP stdio endpoint, fixed
+  from 1.100.4) and GHSA-4xm2-x5g5-wc8q (`/key/info` letting a userless key read other userless keys). The
+  proxy is pinned to `v1.110.2` by digest in the k3s manifest, and the single-node profile no longer
+  floats `main-stable`: `deploy/single/images.txt` locks `v1.110.2` with constraint `v1.110`, so a mirror
+  may substitute a newer 1.110 patch and nothing else. 1.110.0 and 1.110.1 must not be used (memory growth
+  on every finished request).
+- **Rehearsed on a copy of a deployment's proxy database (3.5 GB).** 82 migrations ran in about two
+  seconds and two request-log indexes built in about five; the proxy answered ready 55 to 68 seconds
+  after the container started. Every model row kept its parameters (`chat_template_kwargs`,
+  `max_parallel_requests`, `num_retries`, timeouts), the virtual keys verified, and the stored provider
+  credential stayed byte-identical and still decrypts through `integrations/litellm_credstore.py` with
+  the unchanged salt key. The migrations add 35 tables and drop none.
+- **The proxy now rejects where it used to wait.** At a deployment's `max_parallel_requests`, 1.98.0 held
+  the next request until a slot freed; 1.110.2 answers HTTP 429 (`Deployment has all
+  max_parallel_requests slots in use`, no `Retry-After`), and on the audio routes it retries that 429 for
+  several seconds first whatever the deployment's `num_retries`. `cc-tts` and `cc-stt` carry that limit
+  (one job at a time, the speech pod's protection), so a second read-aloud or dictation would have
+  failed. The wait now lives in the process that calls the proxy: a first-in-first-out line per alias,
+  with no time limit and no retry, in the cockpit server (`web/server/lib/fifo-gate.ts`, which serves
+  `/api/tts` and `/api/transcribe` on the k3s profile) and in the API (`integrations/speech_gate.py`,
+  which serves them on the single-node profile). A caller that disconnects while waiting leaves the line
+  and nothing is sent for it. The limit stays on the aliases. A 429 that still arrives is surfaced as
+  the error it is: the cockpit server and the API keep separate lines, so the API's model probe of a
+  speech alias, or a setup script, can meet one while a read-aloud is running.
+- **The config file now owns the keys it names.** 1.110 lets `config.yaml` win over the database copy of
+  any key the file sets, and the proxy's settings API answers 400 for those keys:
+  `router_settings.allowed_fails`, `cooldown_time` and `disable_cooldowns`, and every `general_settings`
+  key in the file. Change them in the file. At start the proxy logs that the stored `database_url`,
+  `master_key` and `cache_params` are ignored in favour of the file; that is expected.
+- **Cooldown stays off, now stated outright.** `cooldown_time: 0` was measured to disable cooldown on both
+  versions, and 1.110 never cools down an alias with a single deployment. `disable_cooldowns: true` is
+  added as the explicit switch; the 1.98.0 image starts cleanly with it, so the file does not get in the
+  way of a rollback.
+- **A start-up probe on the proxy pod.** Migrations run before the port opens, so the pod gets a
+  `startupProbe` (`/health/liveliness`, 21 tries 10 seconds apart, about three times the slowest start
+  measured) and the liveness probe drops its flat 60-second delay.
+- **Checked against a 1.110.2 proxy with a stand-in model server:** `policy.py --check` and `--apply`,
+  `register-models.py` (create, update, the mode patch, the kept `chat_template_kwargs`, the capability
+  probes), `checks.sh`, every call `integrations/litellm.py` makes (keys, models, fallbacks, usage, the
+  MCP register/grant/list/call chain), the heartbeat probes, `cancel_on_disconnect` (the upstream request
+  closed the moment the client left) and the cache still leaving embeddings out. Statuses matched 1.98.0
+  on every call; the response differences are added fields the client does not read.
+- **Rolling back.** On the rehearsed data the 1.98.0 image started and served on the migrated database
+  and changed nothing in it, so the k3s updater's image-only rollback holds. The clean way back is the
+  pre-update proxy database dump with the old image. An old image started with
+  `DISABLE_SCHEMA_UPDATE=true` logs a list of SQL statements, 35 of them `DROP TABLE`: do not run them.
+- **Not verified here:** the `/anthropic` pass-through with a local `claude` client (1.103 changed which
+  credential it forwards), and usage totals on real traffic. `docs/vendor/litellm` still documents
+  1.98.0 and is owed a refetch. The comments that cited 1.94.1 now state what was read in 1.110.2.
+- No schema or unit change.
+
 ## 2026-11-21 — v2.109.0: Container images move to patched versions, and Postgres and Redis are pinned to exact tags
 
 - **n8n 2.29.0 → 2.48.7.** 2.29 stopped receiving fixes in July; the releases since fix sandbox escapes in
