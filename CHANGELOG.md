@@ -4,6 +4,52 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.111.0: The agent runtime moves from pydantic-ai 2.18 to 2.66
+
+- **Why.** 2.18 was 48 releases behind, and 2.66.0 is the first release with the fix for
+  GHSA-4cj4-hgwf-4hc4: a tool result holding JSON shaped like one of the library's file types was rebuilt
+  as that file when a stored history was reloaded, and this runtime reloads histories that hold mail
+  bodies and fetched pages. The pin is `>=2.66,<2.67`; `openai` moves to 3.31.0 with it.
+- **Two things would have broken without an error, and both are fixed here.** From 2.59 the trimmed
+  context window stopped reaching the model for any agent that holds a skill (the full record went out
+  instead, with no clearing, clipping or summary); the window is now applied in the library's own
+  `prepare_model_request` hook, and the stored record stays the raw one. From 2.60 a retry is no longer a
+  `retry-prompt` part, so the route check could not find its own earlier question and would have asked
+  again on every redraft until the run failed; one reader (`durable.retry_text`) now recognises the old
+  stored shape and both new ones, and every reader of a transcript uses it (the route check, session
+  recall, the summary renderer, the cockpit chat, notes, reflection and the test model).
+- **A summary keeps a loaded skill loaded.** A summary now carries forward the skill-load exchange and the
+  latest guidance and tool availability of the region it replaces, bounded to the latest per skill.
+- **One system message, first, on every model.** 2.66 delivers a loaded skill's guidance as a system
+  message in the middle of the conversation, and a local model's chat template may refuse that outright
+  (measured on a llama.cpp model: HTTP 500, "System message must be at the beginning"). The one model
+  seam now sets the library's own switches so the charter, the skill catalog and one fixed sentence are
+  merged into a single leading system message, and later guidance arrives as a user turn wrapped in
+  `<system>` tags. The persisted system prompt is unchanged, and a resumed session is still sent the
+  charter it was started under (tested with a session written by 2.18 and one written by 2.66).
+- **What an agent sees differently.** A skill's tools are offered only after `load_capability`, never on
+  the first request, and `search_tools` is never offered (the `ToolSearch` capability was dead and is
+  removed). A refused tool call comes back as `{"error": ...}` in the tool message, and an
+  output-validator retry as a user message fenced in `<retry_feedback>`. A skill tool called before its
+  skill is loaded is handed back instead of run; skill tools take a retry budget of 10 so that is not
+  fatal. The prompt prefix changes once, so a local model's prompt cache starts cold after the update.
+- **What the operator sees differently.** A skill load's row in the Workspace and the cockpit chat reads
+  "Capability 'X' loaded" followed by that skill's guidance. The library's bookkeeping parts are no one's
+  turn: they no longer appear as rows, and the discussion-stall check no longer reads one as the agent
+  having spoken last.
+- **A missed window is loud.** If a windowed agent's request reaches the model without the hook having
+  run, the run logs an error, records `session.context_window_unapplied` and sends a clipped request,
+  never the raw record.
+- **Rolling back strands sessions the new version has written.** A session started, resumed or continued
+  under 2.66 holds parts the 2.18 schema rejects, so it cannot be loaded or resumed after a rollback
+  until 2.66 is back. Sessions untouched since before the update load under either.
+- **Checked:** a session written by 2.18 (a charter, a loaded skill, two retries and a parked proposal)
+  loads, renders and resumes; the requests the new version sends after a skill load, a tool retry and an
+  output retry were replayed against a local llama.cpp model and accepted; two independent review passes
+  of the change. **Not measured:** how the changed prompt wording affects a local model's choices over
+  real work. Read the first skill load and the first long session after applying.
+- No schema, unit or manifest change.
+
 ## 2026-11-21 — v2.110.0: The LiteLLM proxy moves from 1.98.0 to 1.110.2, and speech requests queue in the application
 
 - **Why now.** 1.98.0 is twelve release lines behind and inside the affected range of GHSA-7hp6-4w63-5g45
