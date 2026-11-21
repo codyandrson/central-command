@@ -35,7 +35,7 @@ const charterPath = (agentId: string) => `/agents/${encodeURIComponent(agentId)}
 
 app.get('/api/cc/charter/:agentId', rateLimitGeneral, async (c) => {
   try {
-    const res = await cc(charterPath(c.req.param('agentId')));
+    const res = await cc(charterPath(c.req.param('agentId') ?? ''));
     if (!res.ok) return c.json({ ok: false, error: await gvError(res) }, res.status === 404 ? 404 : 502);
     return c.json({ ok: true, result: await res.json() });
   } catch (err) {
@@ -46,7 +46,7 @@ app.get('/api/cc/charter/:agentId', rateLimitGeneral, async (c) => {
 app.post('/api/cc/charter/:agentId', rateLimitGeneral, async (c) => {
   try {
     const { content, rationale } = await c.req.json() as { content?: string; rationale?: string };
-    const res = await cc(charterPath(c.req.param('agentId')), {
+    const res = await cc(charterPath(c.req.param('agentId') ?? ''), {
       method: 'POST',
       body: JSON.stringify({ content: content ?? '', rationale: rationale?.trim() || null }),
     });

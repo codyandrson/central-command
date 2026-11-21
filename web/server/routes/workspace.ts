@@ -55,7 +55,7 @@ app.get('/api/workspace/:key', rateLimitGeneral, async (c) => {
     return handleAgentWorkspaceError(c, err);
   }
 
-  const key = c.req.param('key');
+  const key = c.req.param('key') ?? '';
   const filename = FILE_MAP[key];
   if (!filename) return c.json({ ok: false, error: 'Unknown file key' }, 400);
 
@@ -142,7 +142,7 @@ app.put('/api/workspace/:key', rateLimitGeneral, async (c) => {
     return handleAgentWorkspaceError(c, err);
   }
 
-  const key = c.req.param('key');
+  const key = c.req.param('key') ?? '';
   const filename = FILE_MAP[key];
   if (!filename) return c.json({ ok: false, error: 'Unknown file key' }, 400);
 

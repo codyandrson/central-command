@@ -321,7 +321,7 @@ app.get('/api/sessions/runtime', rateLimitGeneral, async (c) => {
 });
 
 app.get('/api/sessions/:id/model', rateLimitGeneral, async (c) => {
-  const sessionId = c.req.param('id');
+  const sessionId = c.req.param('id') ?? '';
   const agentId = c.req.query('agentId')?.trim() || 'main';
 
   // Basic validation — session IDs are UUIDs

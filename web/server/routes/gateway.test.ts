@@ -189,9 +189,11 @@ describe('gateway routes', () => {
 
     it('uses a long enough timeout for model catalog fetches', async () => {
       vi.resetModules();
-      vi.doMock('node:child_process', () => ({
-        execFile: (...args: unknown[]) => execFileImpl(...args),
-      }));
+      vi.doMock('node:child_process', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('node:child_process')>();
+        const mock = { ...actual, execFile: (...args: unknown[]) => execFileImpl(...args) };
+        return { ...mock, default: mock };
+      });
       vi.doMock('../lib/config.js', () => ({
         config: {
           auth: false, port: 3000, host: '127.0.0.1', sslPort: 3443,

@@ -64,7 +64,7 @@ app.post('/api/cc/mail-rules', rateLimitGeneral, async (c) => {
 app.post('/api/cc/mail-rules/:id/revoke', rateLimitGeneral, async (c) => {
   try {
     const body = await c.req.json().catch(() => ({}));
-    const res = await cc(`/mail/rules/${encodeURIComponent(c.req.param('id'))}/revoke`, {
+    const res = await cc(`/mail/rules/${encodeURIComponent(c.req.param('id') ?? '')}/revoke`, {
       method: 'POST',
       body: JSON.stringify(body),
     });

@@ -300,7 +300,7 @@ function mapscheduleInOrThrow(sched: NerveSchedule | undefined): { schedule_kind
 
 app.patch('/api/crons/:id', rateLimitGeneral, async (c) => {
   try {
-    const id = c.req.param('id');
+    const id = c.req.param('id') ?? '';
     const { patch } = await c.req.json() as { patch: Record<string, unknown> };
     const { schedules } = await fetchSchedules();
     const existing = schedules.find(s => s.id === id);
@@ -356,7 +356,7 @@ app.patch('/api/crons/:id', rateLimitGeneral, async (c) => {
 
 app.delete('/api/crons/:id', rateLimitGeneral, async (c) => {
   try {
-    const res = await cc(`/heartbeat/schedules/${encodeURIComponent(c.req.param('id'))}`, { method: 'DELETE' });
+    const res = await cc(`/heartbeat/schedules/${encodeURIComponent(c.req.param('id') ?? '')}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(await gvError(res));
     return c.json({ ok: true });
   } catch (err) {
@@ -367,7 +367,7 @@ app.delete('/api/crons/:id', rateLimitGeneral, async (c) => {
 app.post('/api/crons/:id/toggle', rateLimitGeneral, async (c) => {
   try {
     const { enabled } = await c.req.json() as { enabled: boolean };
-    const res = await cc(`/heartbeat/schedules/${encodeURIComponent(c.req.param('id'))}/toggle`, {
+    const res = await cc(`/heartbeat/schedules/${encodeURIComponent(c.req.param('id') ?? '')}/toggle`, {
       method: 'POST',
       body: JSON.stringify({ enabled: Boolean(enabled) }),
     });
@@ -380,7 +380,7 @@ app.post('/api/crons/:id/toggle', rateLimitGeneral, async (c) => {
 
 app.post('/api/crons/:id/run', rateLimitGeneral, async (c) => {
   try {
-    const res = await cc(`/heartbeat/schedules/${encodeURIComponent(c.req.param('id'))}/run`, { method: 'POST' });
+    const res = await cc(`/heartbeat/schedules/${encodeURIComponent(c.req.param('id') ?? '')}/run`, { method: 'POST' });
     if (!res.ok) throw new Error(await gvError(res));
     const outcome = await res.json() as { ok: boolean; error?: string };
     if (!outcome.ok) return fail(c, outcome.error ?? 'The action errored — see its run history.', 502);
@@ -392,7 +392,7 @@ app.post('/api/crons/:id/run', rateLimitGeneral, async (c) => {
 
 app.get('/api/crons/:id/runs', rateLimitGeneral, async (c) => {
   try {
-    const res = await cc(`/heartbeat/schedules/${encodeURIComponent(c.req.param('id'))}/runs`);
+    const res = await cc(`/heartbeat/schedules/${encodeURIComponent(c.req.param('id') ?? '')}/runs`);
     if (!res.ok) throw new Error(await gvError(res));
     const data = await res.json() as { events: { kind: string; created_at: string; payload: Record<string, unknown> }[] };
     // Completed/errored firings are the "runs"; fired/report/window events

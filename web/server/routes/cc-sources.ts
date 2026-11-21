@@ -34,9 +34,9 @@ async function forward(c: Context, path: string, method: 'GET' | 'POST'): Promis
 app.get('/api/sources', rateLimitGeneral, (c) => forward(c, '/sources', 'GET'));
 app.post('/api/sources', rateLimitGeneral, (c) => forward(c, '/sources', 'POST'));
 app.post('/api/sources/:id/walk', rateLimitGeneral, (c) =>
-  forward(c, `/sources/${encodeURIComponent(c.req.param('id'))}/walk`, 'POST'));
+  forward(c, `/sources/${encodeURIComponent(c.req.param('id') ?? '')}/walk`, 'POST'));
 app.post('/api/sources/:id/enable', rateLimitGeneral, (c) =>
-  forward(c, `/sources/${encodeURIComponent(c.req.param('id'))}/enable`, 'POST'));
+  forward(c, `/sources/${encodeURIComponent(c.req.param('id') ?? '')}/enable`, 'POST'));
 
 app.get('/api/catalog/documents', rateLimitGeneral, (c) => {
   const sourceId = c.req.query('source_id');
@@ -44,8 +44,8 @@ app.get('/api/catalog/documents', rateLimitGeneral, (c) => {
   return forward(c, `/catalog/documents${qs}`, 'GET');
 });
 app.post('/api/catalog/documents/:id/rescind', rateLimitGeneral, (c) =>
-  forward(c, `/catalog/documents/${encodeURIComponent(c.req.param('id'))}/rescind`, 'POST'));
+  forward(c, `/catalog/documents/${encodeURIComponent(c.req.param('id') ?? '')}/rescind`, 'POST'));
 app.post('/api/catalog/documents/:id/reinstate', rateLimitGeneral, (c) =>
-  forward(c, `/catalog/documents/${encodeURIComponent(c.req.param('id'))}/reinstate`, 'POST'));
+  forward(c, `/catalog/documents/${encodeURIComponent(c.req.param('id') ?? '')}/reinstate`, 'POST'));
 
 export default app;

@@ -84,8 +84,8 @@ app.get('/api/activity/event-kinds', rateLimitGeneral, (c) => proxyGet(c, '/even
 // acknowledge leaves the row FAILED (the record is the truth) and stops it
 // asking for action.
 app.post('/api/activity/work/:id/requeue', rateLimitGeneral, (c) =>
-  proxyPost(c, `/work/${encodeURIComponent(c.req.param('id'))}/requeue`));
+  proxyPost(c, `/work/${encodeURIComponent(c.req.param('id') ?? '')}/requeue`));
 app.post('/api/activity/work/:id/ack', rateLimitGeneral, (c) =>
-  proxyPost(c, `/work/${encodeURIComponent(c.req.param('id'))}/ack_failure`));
+  proxyPost(c, `/work/${encodeURIComponent(c.req.param('id') ?? '')}/ack_failure`));
 
 export default app;

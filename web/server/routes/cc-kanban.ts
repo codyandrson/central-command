@@ -270,7 +270,7 @@ app.patch('/api/kanban/tasks/:id', rateLimitGeneral, async (c) => {
     return c.json({ error: 'invalid JSON' }, 400);
   }
   if (body.status === 'CANCELLED') {
-    const res = await cc(`/tasks/${encodeURIComponent(c.req.param('id'))}/cancel`, { method: 'POST' });
+    const res = await cc(`/tasks/${encodeURIComponent(c.req.param('id') ?? '')}/cancel`, { method: 'POST' });
     if (!res.ok) return c.json({ error: await gvError(res) }, 409);
     const task = (await fetchGvTasks()).find(t => t.id === c.req.param('id'));
     return c.json(task ? mapTask(task) : { ok: true });
@@ -279,7 +279,7 @@ app.patch('/api/kanban/tasks/:id', rateLimitGeneral, async (c) => {
 });
 
 app.delete('/api/kanban/tasks/:id', rateLimitGeneral, async (c) => {
-  const res = await cc(`/tasks/${encodeURIComponent(c.req.param('id'))}/cancel`, { method: 'POST' });
+  const res = await cc(`/tasks/${encodeURIComponent(c.req.param('id') ?? '')}/cancel`, { method: 'POST' });
   if (!res.ok) return c.json({ error: await gvError(res) }, 409);
   return c.json({ ok: true });
 });
@@ -291,7 +291,7 @@ app.post('/api/kanban/tasks/:id/reorder', rateLimitGeneral, async (c) => {
   } catch {
     return c.json({ error: 'invalid JSON' }, 400);
   }
-  const id = c.req.param('id');
+  const id = c.req.param('id') ?? '';
   try {
     const task = (await fetchGvTasks()).find(t => t.id === id);
     if (!task) return c.json({ error: 'task not found' }, 404);
@@ -311,7 +311,7 @@ app.post('/api/kanban/tasks/:id/reorder', rateLimitGeneral, async (c) => {
 });
 
 app.post('/api/kanban/tasks/:id/execute', rateLimitGeneral, async (c) => {
-  const id = c.req.param('id');
+  const id = c.req.param('id') ?? '';
   try {
     const task = (await fetchGvTasks()).find(t => t.id === id);
     if (!task) return c.json({ error: 'task not found' }, 404);
@@ -335,7 +335,7 @@ app.post('/api/kanban/tasks/:id/execute', rateLimitGeneral, async (c) => {
 // stays IN_PROGRESS — it did not finish — so it stays in its lane; `stopped`
 // on the wire row is what tells the board.
 app.post('/api/kanban/tasks/:id/abort', rateLimitGeneral, async (c) => {
-  const id = c.req.param('id');
+  const id = c.req.param('id') ?? '';
   const res = await cc(`/tasks/${encodeURIComponent(id)}/stop`, { method: 'POST' });
   if (!res.ok) return c.json({ error: await gvError(res) }, 409);
   try {

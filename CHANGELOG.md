@@ -4,6 +4,38 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.108.2: Security fixes in the mail-HTML reader, the TLS trust store and the cockpit's server packages
+
+- **Hostile mail HTML could exhaust memory or CPU in the text converter.** `inscriptis` turns a mail's HTML
+  into the text an agent reads (`ingest/mailtext.py`), so anyone who can send mail reaches it. 2.7.4 had
+  three denial-of-service defects (GHSA-q87h-c5m7-659j, GHSA-4wxf-43cv-cfxx, GHSA-r39g-x868-w7r7); the lock
+  moves to 2.7.7 and `pyproject.toml` now requires at least that.
+- **The bundled CA store trusted roots whose intermediate keys were compromised.** `certifi` 2026.7.22 is
+  the trust store for web fetch, Exchange and every outbound HTTPS call (GHSA-6q48-6c7w-9gw2); the lock
+  moves to 2026.10.23.
+- **Other Python pins moved, all inside their existing major lines:** pillow 13.0.0, pypdfium2 5.15.2 (its
+  PDFium carries CVE fixes; 5.15.1 was withdrawn upstream), pyyaml 6.0.4 (merge-key expansion on crafted
+  YAML), urllib3 2.8.0, mcp 1.30.0, fastmcp-slim 3.4.11, pyjwt 2.15.1, authlib 1.9.5, joserfc 1.8.0, pyasn1
+  0.6.5, dnspython 2.9.2, soupsieve 2.10, cryptography 50.0.2, neo4j driver 6.4.1 (a result/connection
+  desync fixed in 6.3.1; 6.4.0 is skipped for its pool race), asyncpg 0.32.0 (two pool-release deadlocks),
+  markitdown 0.1.9 with mammoth 1.13.0, python-dotenv 1.2.4. Every version except inscriptis, pyyaml and
+  pypdfium2 was published at least two weeks ago, so a lagging package mirror should carry it.
+- **The cockpit lockfile clears 27 of 34 `npm audit` advisories, with no change to `web/package.json`.**
+  The ones a running cockpit can reach: hono 4.13.17 (static-file access, SSE and cookie injection),
+  @hono/node-server 1.19.18 (static-path bypasses), ws 8.22.1 (memory disclosure, fragment exhaustion),
+  dompurify 3.4.17 (sanitiser bypasses) and zod 4.6.7. Build and test tooling moved too (vite 7.3.7,
+  vitest 4.1.12, rollup, postcss and their dependencies). hono's newer typing makes a route parameter
+  `string | undefined`, so 22 call sites in `web/server/routes/` now read it with `?? ''` (the form
+  `cc-learned.ts` already used; a matched route always has the parameter, so nothing behaves differently),
+  and one test's `node:child_process` mock takes the form vitest 4.1 requires.
+- **A mirrored install needs these npm versions.** `npm ci` installs exactly the lockfile's pins, and no
+  pinned version here is newer than 2026-11-07; `lightweight-charts` stays at 5.2.1. A mirror that lacks
+  one is the case `CC_COCKPIT_NPM_PREINSTALLED=1` exists for (v2.106.0).
+- **Still reported by `npm audit`, and why:** @hono/node-server's double-decoded static path
+  (GHSA-rmxm-3fg6-px4f) is fixed only in its 2.x line; the `shadcn` tool's chain needs shadcn 4; and the
+  lint chain's minimatch needs a typescript-eslint release published five days ago, held back for mirrors.
+- No schema, unit or manifest change.
+
 ## 2026-11-20 — v2.108.1: A run a restart closed no longer sits in the sessions panel as stopped work
 
 - **A triage run killed by a restart stayed in the sidebar marked STOPPED, with no lever.** A restart
