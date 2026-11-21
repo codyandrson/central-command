@@ -420,3 +420,33 @@ async def test_the_summary_degrades_to_the_default_when_nothing_is_declared(monk
     assert out == "SUMMARY"
     assert not (seen["settings"] or {}).get("extra_body")
 
+
+
+def test_the_carried_state_is_the_latest_per_capability_not_every_delta():
+    """A summary carries what keeps a skill loaded, bounded: one exchange per
+    loaded capability (its latest load), the latest instruction delta per
+    block, one availability delta per tool set, the latest settings delta.
+    The summary prefix is counted from the window built, not assumed."""
+    from pydantic_ai._deferred_capabilities import LoadCapabilityCallPart, LoadCapabilityReturnPart
+    from pydantic_ai.messages import InstructionDeltaPart, ToolAvailabilityDeltaPart
+
+    def load(call_id, text):
+        return [
+            ModelResponse(parts=[LoadCapabilityCallPart(args={"id": "sk"}, tool_call_id=call_id)]),
+            ModelRequest(parts=[LoadCapabilityReturnPart(content={"message": "loaded"}, tool_call_id=call_id),
+                                ToolAvailabilityDeltaPart(tools_added=["sk_ref"], tool_call_id=call_id),
+                                InstructionDeltaPart(id="capability:sk", content=text)]),
+        ]
+    msgs = [ModelRequest(parts=[SystemPromptPart("charter"), UserPromptPart("go")]),
+            *load("l1", "guidance v1"), *load("l2", "guidance v2"),
+            ModelResponse(parts=[ToolCallPart("read_thing", {}, tool_call_id="r1")]),
+            ModelRequest(parts=[ToolReturnPart("read_thing", "x", tool_call_id="r1")]),
+            ModelResponse(parts=[TextPart("done")])]
+    calls, returns, state = context._carried_state(msgs[1:7])
+    assert [c.tool_call_id for c in calls] == ["l2"] and [r.tool_call_id for r in returns] == ["l2"]
+    deltas = [p for p in state if isinstance(p, InstructionDeltaPart)]
+    assert [d.content for d in deltas] == ["guidance v2"]
+    assert sum(isinstance(p, ToolAvailabilityDeltaPart) for p in state) == 1
+    window, prefix = context.summarized(msgs, 7, "S")
+    assert window[prefix:] == msgs[7:], "window[prefix + i] is messages[through + i]"
+    assert prefix == 4 and _pairs_ok(window)

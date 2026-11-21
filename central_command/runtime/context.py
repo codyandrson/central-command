@@ -23,7 +23,6 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
 from typing import Any
 
 from pydantic_ai import RunContext
@@ -499,6 +498,15 @@ def summary_boundary(messages, cover: float = 0.5) -> int | None:
 def apply_summary(messages, through: int, text: str):
     """messages[0], the summary, then the tail from `through` — plus the
     framework's own state from the summarized region (`_carried_state`)."""
+    return summarized(messages, through, text)[0]
+
+
+def summarized(messages, through: int, text: str):
+    """`(window, prefix)`: the window `apply_summary` builds and how many of
+    its messages come BEFORE the retained tail, so `window[prefix + i]` is
+    `messages[through + i]`. The prefix is counted from the window itself —
+    the summary plus whatever `_carried_state` carried — never assumed, so the
+    index arithmetic of a later summary cannot drift from the shape built here."""
     from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart
 
     calls, returns, state = _carried_state(messages[1:through])
@@ -508,7 +516,9 @@ def apply_summary(messages, through: int, text: str):
     else:
         summary.parts.extend(state)
         carried = []
-    return [messages[0], summary, *carried, *messages[through:]]
+    tail = list(messages[through:])
+    window = [messages[0], summary, *carried, *tail]
+    return window, len(window) - len(tail)
 
 
 def _carried_state(region):
@@ -517,25 +527,63 @@ def _carried_state(region):
     `load_capability` exchange (and any tool-search exchange) marks it loaded,
     and the instruction / availability / settings deltas recorded beside it say
     what the model was told. Summarized away, the model would lose the skill
-    the record still holds loaded (the execution gate reads the record). Kept
-    in their original order, the typed exchanges whole (call and return both),
-    so the wire stays protocol-valid."""
+    the record still holds loaded (the execution gate reads the record).
+
+    The LATEST effective state only, so a long session's carry stays bounded
+    however often it is re-summarized: one exchange per loaded capability (its
+    last load) and per tool search, the last delta per instruction block, per
+    revealed tool set and per loaded set, the last settings delta and the last
+    baseline. The typed exchanges are kept whole (call and return both), so
+    the wire stays protocol-valid; order is the order of last occurrence."""
     from pydantic_ai import messages as m
 
-    state_types = tuple(getattr(m, n) for n in (
-        "InstructionBaselinePart", "InstructionDeltaPart", "ToolAvailabilityDeltaPart",
-        "CapabilityLoadDeltaPart", "ModelSettingsDeltaPart") if hasattr(m, n))
-    calls = [p for msg in region if isinstance(msg, m.ModelResponse) for p in msg.parts
-             if isinstance(p, m.ToolCallPart) and getattr(p, "tool_kind", None)]
-    returns = [p for msg in region if isinstance(msg, m.ModelRequest) for p in msg.parts
-               if isinstance(p, m.ToolReturnPart) and getattr(p, "tool_kind", None)]
-    answered = {p.tool_call_id for p in returns}
-    calls = [p for p in calls if p.tool_call_id in answered]
-    asked = {p.tool_call_id for p in calls}
-    returns = [p for p in returns if p.tool_call_id in asked]
-    state = [p for msg in region if isinstance(msg, m.ModelRequest) for p in msg.parts
-             if state_types and isinstance(p, state_types)]
-    return calls, returns, state
+    responses = [msg for msg in region if isinstance(msg, m.ModelResponse)]
+    requests = [msg for msg in region if isinstance(msg, m.ModelRequest)]
+    returns = {p.tool_call_id: p for msg in requests for p in msg.parts
+               if isinstance(p, m.ToolReturnPart) and getattr(p, "tool_kind", None)
+               and getattr(p, "outcome", None) != "retried"}
+    latest_call: dict = {}
+    for msg in responses:
+        for p in msg.parts:
+            if isinstance(p, m.ToolCallPart) and getattr(p, "tool_kind", None) \
+                    and p.tool_call_id in returns:
+                key = (p.tool_kind, _call_key(p))
+                latest_call.pop(key, None)  # re-insert: order of last occurrence
+                latest_call[key] = p
+    calls = list(latest_call.values())
+    kept = [returns[p.tool_call_id] for p in calls]
+
+    def state_key(p):
+        kind = getattr(p, "part_kind", "")
+        if kind == "instruction-delta":
+            return (kind, str(p.id))
+        if kind == "tool-availability-delta":
+            return (kind, repr(p.tools_added))
+        if kind == "capability-load-delta":
+            return (kind, tuple(p.loaded))
+        if kind in ("model-settings-delta", "instruction-baseline"):
+            return (kind,)
+        return None
+
+    latest_state: dict = {}
+    for msg in requests:
+        for p in msg.parts:
+            if (key := state_key(p)) is not None:
+                latest_state.pop(key, None)
+                latest_state[key] = p
+    return calls, kept, list(latest_state.values())
+
+
+def _call_key(call) -> str:
+    """A typed call's identity for the carry: the capability a load names, else
+    the call itself."""
+    try:
+        args = call.args_as_dict()
+    except Exception:  # noqa: BLE001 — malformed args: keep the call on its own
+        args = {}
+    if call.tool_kind == "capability-load" and args.get("id"):
+        return str(args["id"])
+    return call.tool_call_id
 
 
 def render_for_summary(messages, part_cap: int = 4000) -> str:
@@ -604,14 +652,34 @@ async def summarize(model, messages) -> str:
     return result.output
 
 
-# Set by `WorkingWindow.before_model_request` for the step about to be sent
-# and cleared by its `prepare_model_request`, so a request that reaches
-# `WindowedModel` with it still set belongs to a windowed agent whose window
-# was never applied (`_unwindowed`). Cleared FIRST in the prepare hook: the
-# summary is a nested model call made from inside it, and must not read as
-# the fault. A ContextVar because the hooks and the model request run in the
-# same task, one after the other.
-_owed: ContextVar[dict | None] = ContextVar("cc_working_window_owed", default=None)
+# Per request STEP, keyed by the run and its step number (both carried on the
+# RunContext the hooks get and the one pydantic-ai makes current around the
+# model call, in whichever task that runs): `before_model_request` records the
+# step as owing a window, `prepare_model_request` records it applied, and
+# `WindowedModel` checks the step it is serving (`_unwindowed`). Not a
+# ContextVar: the streamed request runs in a task whose context was copied
+# between the two hooks, so a variable cleared in one task stayed set in the
+# other and every streamed request read as a miss. A nested run (the summary)
+# has its own run id, so it is never mistaken for the step it was made from.
+# Bounded: a step's record is only read while that step is being sent.
+_STEP_RECORDS_MAX = 512
+_steps: dict[tuple, dict] = {}
+
+
+def _step_key(ctx) -> tuple | None:
+    run_id = getattr(ctx, "run_id", None)
+    return (run_id, getattr(ctx, "run_step", None)) if run_id else None
+
+
+def _record_step(ctx, **fields) -> None:
+    key = _step_key(ctx)
+    if key is None:
+        return
+    record = _steps.pop(key, {})
+    record.update(fields)
+    _steps[key] = record
+    while len(_steps) > _STEP_RECORDS_MAX:
+        _steps.pop(next(iter(_steps)))
 
 
 async def window_messages(ctx: RunContext[Any], messages: list) -> list:
@@ -668,13 +736,13 @@ class WorkingWindow(AbstractCapability[Any]):
 
     async def before_model_request(self, ctx, request_context):
         deps = getattr(ctx, "deps", None)
-        _owed.set({"session_id": getattr(deps, "session_id", None),
-                   "agent_id": getattr(deps, "agent_id", None)})
+        _record_step(ctx, applied=False, session_id=getattr(deps, "session_id", None),
+                     agent_id=getattr(deps, "agent_id", None))
         return request_context
 
     async def prepare_model_request(self, ctx, request_context):
-        _owed.set(None)
         request_context.messages = await window_messages(ctx, list(request_context.messages))
+        _record_step(ctx, applied=True)
         return request_context
 
     @classmethod
@@ -682,16 +750,24 @@ class WorkingWindow(AbstractCapability[Any]):
         return None
 
 
-async def _unwindowed(messages: list, model_name: str | None) -> list:
+async def _unwindowed(messages: list, model_name: str | None, run_context=None) -> list:
     """`messages` itself, unless this request comes from a windowed agent's step
     that the framework sent WITHOUT running `WorkingWindow.prepare_model_request`.
     That is the fault 2.59 introduced silently (see `WorkingWindow`), so it is
     loud here: logged, recorded as `session.context_window_unapplied`, and the
-    static clip goes on the wire instead of the raw record."""
-    owed = _owed.get()
-    if owed is None:
+    static clip goes on the wire instead of the raw record. The step comes from
+    the run context pydantic-ai makes current around a model call (or the one
+    `request_stream` is handed); no record for it means an agent without the
+    capability, or a call made outside a run."""
+    if run_context is None:
+        from pydantic_ai._run_context import get_current_run_context
+
+        run_context = get_current_run_context()
+    key = _step_key(run_context)
+    owed = _steps.get(key) if key else None
+    if owed is None or owed.get("applied") is not False:
         return messages
-    _owed.set(None)
+    owed["applied"] = None  # reported once
     import logging
 
     logging.getLogger(__name__).error(
@@ -788,7 +864,7 @@ class WindowedModel(WrapperModel):
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters,
                              run_context=None):
-        sent = await _unwindowed(messages, self.wrapped.model_name)
+        sent = await _unwindowed(messages, self.wrapped.model_name, run_context)
         async with model_turn_slot(self.wrapped.model_name), self.wrapped.request_stream(
             sent, model_settings, model_request_parameters, run_context,
         ) as stream:
@@ -815,29 +891,44 @@ async def _prepare_window(ctx, messages):
         return msgs
 
     # A cached summary applies to RAW indices — the persisted history only ever
-    # grows by append, so a boundary stays valid until it is superseded.
+    # grows by append, so a boundary stays valid until it is superseded. It must
+    # name a response with at least the newest request after it: a window is
+    # never allowed to end before the request being answered.
+    from pydantic_ai.messages import ModelResponse
+
+    def valid_boundary(through: int) -> bool:
+        return 1 < through < len(messages) - 1 and isinstance(messages[through], ModelResponse)
+
     cached = None
     if session_id:
         from central_command.db import repo
 
         rs = await repo.get_session_run_state(session_id) or {}
         cached = rs.get("context_summary")
-        if cached and not (1 < int(cached.get("through", 0)) < len(messages)):
+        if cached and not valid_boundary(int(cached.get("through", 0))):
             cached = None
 
     def with_summary(summary):
-        return apply_summary(messages, int(summary["through"]), summary["text"]) if summary else messages
+        """(window, prefix): `window[prefix + i]` is `messages[through + i]`."""
+        if not summary:
+            return messages, 0
+        return summarized(messages, int(summary["through"]), summary["text"])
 
-    working = trimmed(with_summary(cached))
+    working = trimmed(with_summary(cached)[0])
     fraction = (est(working) + headroom) / window
 
     if cfg["summarize"] and session_id and fraction >= float(cfg["summarize_threshold"]):
-        base = with_summary(cached)          # what the model currently sees, raw
+        base, prefix = with_summary(cached)   # what the model currently sees, raw
         through = summary_boundary(base)
-        if through is not None and through > 2:
-            # Indices in `base` map back to raw ones: the summary request stands
-            # in for raw[1:cached.through], so raw_through = through + (cached.through - 2).
-            raw_through = through + (int(cached["through"]) - 2 if cached else 0)
+        # Indices in `base` map back to raw ones through the prefix the base was
+        # built with: base[prefix:] is raw[cached.through:]. A boundary inside
+        # the prefix (the old summary or its carried exchange) is no progress.
+        raw_through = None
+        if through is not None and through > max(2, prefix if cached else 0):
+            raw_through = through - prefix + (int(cached["through"]) if cached else 0)
+            if not valid_boundary(raw_through):
+                raw_through = None
+        if raw_through is not None:
             region = trimmed(base[1:through]) if cfg["drop_thinking"] else base[1:through]
             # The summary is one model call and it can die like any other (a
             # reasoning model spending its whole output cap thinking, 2026-09-18).
@@ -860,7 +951,7 @@ async def _prepare_window(ctx, messages):
             from central_command.db import repo
 
             await repo.update_session_run_state(session_id, {"context_summary": summary})
-            working = trimmed(with_summary(summary))
+            working = trimmed(with_summary(summary)[0])
             after = est(working)
             await events.emit(
                 "session.context_compacted", ref_id=session_id,

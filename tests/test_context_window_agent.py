@@ -82,20 +82,23 @@ def _returns(messages, tool="read_thing"):
             if isinstance(p, ToolReturnPart) and p.tool_name == tool]
 
 
-def _script():
-    """load the skill, call its tool, then TURNS reads (each with reasoning),
-    then answer. Returns (function, the list of what each request saw)."""
+def _script(turns: int = TURNS, on_request=None):
+    """load the skill, call its tool, then `turns` reads (each with reasoning),
+    then answer. Returns (function, the list of what each request saw).
+    `on_request` is called at each request, after the window was applied."""
     seen: list = []
 
     def fn(messages, info: AgentInfo):
         seen.append((list(messages), [t.name for t in info.function_tools]))
+        if on_request:
+            on_request()
         step = len(seen)
         if step == 1:
             return ModelResponse(parts=[ToolCallPart("load_capability", {"id": "sk-window"},
                                                      tool_call_id="load-1")])
         if step == 2:
             return ModelResponse(parts=[ToolCallPart("skill_lookup", {}, tool_call_id="skill-1")])
-        if step < 3 + TURNS:
+        if step < 3 + turns:
             return ModelResponse(parts=[
                 ThinkingPart(f"reasoning {step} " + "t" * 400),
                 ToolCallPart("read_thing", {"n": step}, tool_call_id=f"read-{step}"),
@@ -157,7 +160,10 @@ async def test_a_real_run_sends_the_window_and_persists_the_raw_record():
     _assert_windowed_and_raw(seen, result.all_messages())
 
 
-async def test_a_streamed_run_sends_the_window_too():
+async def test_a_streamed_run_sends_the_window_too(pinned, caplog):
+    """2.66 runs the streamed request in a task whose context was copied
+    between the window's two hooks; a healthy streamed run must not read as a
+    missed window (no event, no error, no clip on top of the window)."""
     fn, seen = _script()
 
     async def stream(messages, info: AgentInfo):
@@ -180,6 +186,8 @@ async def test_a_streamed_run_sends_the_window_too():
     assert sum(str(r.content).startswith("[cleared from context") for r in wire_returns) == TURNS - 3
     assert all(len(str(r.content)) > PAYLOAD for r in _returns(record)), "the record is raw"
     assert GUIDANCE in _texts(last)
+    assert "session.context_window_unapplied" not in [k for k, _ in pinned]
+    assert "without its working window" not in caplog.text
 
 
 async def test_a_loaded_skill_survives_a_summary(monkeypatch):
@@ -241,3 +249,63 @@ async def test_a_request_that_misses_its_window_is_loud_and_clipped(monkeypatch,
     assert all("[CLIPPED at" in str(r.content) and len(str(r.content)) < size + 200
                for r in _returns(seen[-1][0])), "the clip went on the wire, not the raw record"
     assert all(len(str(r.content)) > PAYLOAD for r in _returns(result.all_messages()))
+
+
+async def test_a_session_summarised_again_and_again_loses_nothing(monkeypatch):
+    """Every re-summary maps its boundary back to the RAW record through the
+    shape the previous summary built (its summary request and the carried
+    skill exchange). After each request: every raw message is either inside
+    the summary boundary or on the wire, the newest tool result is on the
+    wire, and the carried exchange and the guidance appear exactly once."""
+    from pydantic_ai.messages import ToolCallPart as Call
+
+    store: dict = {}
+    fn, seen = _script(turns=16)
+    summaries = iter(f"SUMMARY-{i}" for i in range(1, 100))
+
+    async def get_rs(session_id):
+        return dict(store)
+
+    async def put_rs(session_id, patch):
+        store.update(patch)
+
+    summarised: set = set()  # every call id a summary was written over
+
+    async def fake_summarize(model, region):
+        summarised.update(p.tool_call_id for m in region for p in m.parts
+                          if isinstance(p, (Call, ToolReturnPart)))
+        return next(summaries)
+    from central_command.db import repo
+    monkeypatch.setattr(repo, "get_session_run_state", get_rs)
+    monkeypatch.setattr(repo, "update_session_run_state", put_rs)
+    monkeypatch.setattr(context, "summarize", fake_summarize)
+
+    async def load():
+        return {**context.DEFAULTS, "pressure_warning": False, "clear_tool_results": False,
+                "drop_thinking": False, "output_headroom": False, "summarize_threshold": 0.5}
+    monkeypatch.setattr(context, "load_settings", load)
+    context._windows["cc-default"] = 9_000
+
+    agent = _agent(context.WindowedModel(FunctionModel(fn, model_name="cc-default")))
+    result = await agent.run("do the thing", deps=SimpleNamespace(session_id="sess_resum",
+                                                                  agent_id="ctx-agent-test"))
+    record = result.all_messages()
+    texts = [_texts(w) for w, _ in seen]
+    made = int(next(summaries).split("-")[1]) - 1
+    assert made >= 3, f"the session was summarised {made} times, not three or more"
+    for i, (wire, tools) in enumerate(seen, 1):
+        raw = record[:2 * i - 1]              # the record as this request was sent
+        wire_ids = {p.tool_call_id for m in wire for p in m.parts
+                    if isinstance(p, (Call, ToolReturnPart))}
+        missing = [p.tool_call_id for m in raw for p in m.parts
+                   if isinstance(p, (Call, ToolReturnPart))
+                   and p.tool_call_id not in wire_ids | summarised]
+        assert not missing, f"request {i}: raw messages neither summarised nor sent: {missing}"
+        newest = [p.tool_call_id for p in raw[-1].parts if isinstance(p, ToolReturnPart)]
+        assert set(newest) <= wire_ids, f"request {i}: the newest tool result is not on the wire"
+        if i > 1:
+            loads = [p for m in wire for p in m.parts
+                     if isinstance(p, Call) and p.tool_name == "load_capability"]
+            assert len(loads) == 1, f"request {i}: the load exchange appears {len(loads)} times"
+            assert texts[i - 1].count(GUIDANCE) == 1, f"request {i}: the guidance is not sent once"
+            assert "skill_lookup" in tools
