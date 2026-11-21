@@ -179,7 +179,6 @@ async def test_density_is_measured_from_what_the_proxy_counted(monkeypatch):
     model = context.WindowedModel(FunctionModel(echo))
     name = model.wrapped.model_name
     before = context.estimate_messages(msgs, name)
-    await context.prepare_window(_ctx(model_name=name), msgs)
     await model.request(msgs, None, ModelRequestParameters())
     assert abs(context.density_for(name) - 2.0) < 0.05
     assert context.estimate_messages(msgs, name) > before * 1.4

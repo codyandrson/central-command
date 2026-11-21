@@ -1,6 +1,6 @@
 """Context management, slice 2: the WORKING window (2026-09-10).
 
-The record stays raw; `context.prepare_window` rewrites the OUTGOING request
+The record stays raw; `context.window_messages` rewrites the OUTGOING request
 only, step by step, each step an operator toggle. What is under test:
 
 - each pure step does exactly its one thing and leaves the wire protocol valid
@@ -177,21 +177,24 @@ def _pin(monkeypatch, cfg: dict, window: int = 100_000):
 async def test_the_test_model_and_all_off_send_the_raw_history(monkeypatch):
     msgs = _transcript()
     monkeypatch.setattr(settings, "test_model", True)
-    assert await context.prepare_window(_ctx(), msgs) is msgs
+    assert await context.window_messages(_ctx(), msgs) is msgs
 
     monkeypatch.setattr(settings, "test_model", False)
     _pin(monkeypatch, {"drop_thinking": False, "clear_tool_results": False,
                        "pressure_warning": False, "output_headroom": False, "summarize": False})
-    assert await context.prepare_window(_ctx(), msgs) is msgs
-    assert context.working_window(msgs) is msgs
+    assert await context.window_messages(_ctx(), msgs) is msgs
 
 
 async def _window(ctx, msgs):
-    """What the wire sees: the processor returns the record untouched (that
-    is the point — pydantic-ai persists whatever it returns) and the window
-    rides to the model wrapper."""
-    assert await context.prepare_window(ctx, msgs) is msgs
-    return context.working_window(msgs)
+    """What the wire sees. The input is the record and is never modified (the
+    `WorkingWindow` hook's output is not persisted; a real run is driven in
+    `test_context_window_agent.py`)."""
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    before = ModelMessagesTypeAdapter.dump_json(msgs)
+    out = await context.window_messages(ctx, msgs)
+    assert ModelMessagesTypeAdapter.dump_json(msgs) == before, "the record is untouched"
+    return out
 
 
 async def test_defaults_trim_and_warn_without_touching_the_input(monkeypatch):
@@ -212,7 +215,11 @@ async def test_defaults_trim_and_warn_without_touching_the_input(monkeypatch):
     assert "[context notice]" not in str(ending_on_request[-1].parts), "the record never carries it"
 
 
-async def test_the_window_is_applied_on_the_wire_and_the_record_stays_raw(monkeypatch):
+async def test_the_wrapper_sends_a_request_as_given_outside_a_windowed_step(monkeypatch):
+    """`WindowedModel` no longer swaps anything in: the window is applied by the
+    `WorkingWindow` hook before the request reaches it. A request from outside
+    a windowed agent's step (the summariser, an agent without the capability)
+    goes out exactly as given."""
     from pydantic_ai.models import ModelRequestParameters
     from pydantic_ai.models.function import FunctionModel
 
@@ -222,16 +229,9 @@ async def test_the_window_is_applied_on_the_wire_and_the_record_stays_raw(monkey
         seen.append(messages)
         return ModelResponse(parts=[TextPart("ok")])
     msgs = _transcript(turns=8, payload=4000)
-    _pin(monkeypatch, {"summarize": False}, window=20_000)
     model = context.WindowedModel(FunctionModel(echo))
-    await context.prepare_window(_ctx(session_id="sess_w"), msgs)
     await model.request(msgs, None, ModelRequestParameters())
-    assert seen and seen[0] is not msgs and context.estimate_messages(seen[0]) < context.estimate_messages(msgs)
-    # A different request (a stale measurement) goes out raw rather than under
-    # someone else's window.
-    other = _transcript(turns=2)
-    await model.request(other, None, ModelRequestParameters())
-    assert seen[1] is other
+    assert seen[0] is msgs
 
 
 def test_clear_tool_results_leaves_typed_returns_alone():
@@ -278,8 +278,7 @@ async def test_a_broken_step_sends_the_clipped_history_not_the_raw_one(monkeypat
     def boom(*a, **k):
         raise RuntimeError("no")
     monkeypatch.setattr(context, "drop_thinking", boom)
-    assert await context.prepare_window(_ctx(), msgs) is msgs
-    sent = context.working_window(msgs)
+    sent = await context.window_messages(_ctx(), msgs)
     assert sent is not msgs and sent == msgs, "nothing was over the clip size, so content is equal"
     assert "sending the clipped history" in caplog.text
 
@@ -292,8 +291,7 @@ async def test_a_clip_that_itself_fails_sends_the_raw_history(monkeypatch, caplo
         raise RuntimeError("no")
     monkeypatch.setattr(context, "drop_thinking", boom)
     monkeypatch.setattr(context, "clip_tool_results", boom)
-    assert await context.prepare_window(_ctx(), msgs) is msgs
-    assert context.working_window(msgs) is msgs
+    assert await context.window_messages(_ctx(), msgs) is msgs
     assert "fallback clip failed" in caplog.text
 
 

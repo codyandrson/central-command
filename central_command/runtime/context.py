@@ -27,6 +27,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from pydantic_ai import RunContext
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.models.wrapper import WrapperModel
 
 from central_command.config import settings
@@ -242,7 +243,7 @@ async def check_pressure(
         estimate = estimate_tokens(run_state)
         if not estimate:
             return
-        # The working window, when `prepare_window` has measured one for this
+        # The working window, when `window_messages` has measured one for this
         # session, is what the model actually saw; the raw snapshot overstates.
         estimate = min(estimate, _sent.get(session_id, estimate))
         cfg = await load_settings()
@@ -277,11 +278,12 @@ async def check_pressure(
 
 # --- slice 2: the WORKING WINDOW (2026-09-10) ---------------------------------
 # What the model is SENT is no longer what the record HOLDS. The persisted
-# history (`run_state.messages`) stays complete and raw; a pydantic-ai
-# `ProcessHistory` capability (`prepare_window`) MEASURES the window and
-# `WindowedModel` (wrapped around every live model at the `resolve_model`
-# seam) swaps it in on the wire. The processor itself returns the history
-# UNCHANGED, and that is load-bearing: pydantic-ai writes a processor's
+# history (`run_state.messages`) stays complete and raw; the `WorkingWindow`
+# capability puts the window on the wire from pydantic-ai's per-attempt
+# `prepare_model_request` hook, whose changes are not persisted (a history
+# processor's are), and `WindowedModel` (wrapped around every live model at
+# the `resolve_model` seam) catches a request that missed it. The record
+# never carrying the window is load-bearing: pydantic-ai writes a processor's
 # output back into `state.message_history`, which is what every persistence
 # path snapshots — so a processor that returned the trimmed list put the
 # placeholders INTO the record (v2.24.0–v2.24.2), compounding turn over turn,
@@ -495,9 +497,45 @@ def summary_boundary(messages, cover: float = 0.5) -> int | None:
 
 
 def apply_summary(messages, through: int, text: str):
-    from pydantic_ai.messages import ModelRequest, UserPromptPart
+    """messages[0], the summary, then the tail from `through` — plus the
+    framework's own state from the summarized region (`_carried_state`)."""
+    from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart
 
-    return [messages[0], ModelRequest(parts=[UserPromptPart(SUMMARY_LEAD + text)]), *messages[through:]]
+    calls, returns, state = _carried_state(messages[1:through])
+    summary = ModelRequest(parts=[UserPromptPart(SUMMARY_LEAD + text)])
+    if calls:
+        carried = [ModelResponse(parts=calls), ModelRequest(parts=[*returns, *state])]
+    else:
+        summary.parts.extend(state)
+        carried = []
+    return [messages[0], summary, *carried, *messages[through:]]
+
+
+def _carried_state(region):
+    """What a summary must not take with it: since pydantic-ai 2.59 a loaded
+    skill's guidance and tools reach the model THROUGH HISTORY — its
+    `load_capability` exchange (and any tool-search exchange) marks it loaded,
+    and the instruction / availability / settings deltas recorded beside it say
+    what the model was told. Summarized away, the model would lose the skill
+    the record still holds loaded (the execution gate reads the record). Kept
+    in their original order, the typed exchanges whole (call and return both),
+    so the wire stays protocol-valid."""
+    from pydantic_ai import messages as m
+
+    state_types = tuple(getattr(m, n) for n in (
+        "InstructionBaselinePart", "InstructionDeltaPart", "ToolAvailabilityDeltaPart",
+        "CapabilityLoadDeltaPart", "ModelSettingsDeltaPart") if hasattr(m, n))
+    calls = [p for msg in region if isinstance(msg, m.ModelResponse) for p in msg.parts
+             if isinstance(p, m.ToolCallPart) and getattr(p, "tool_kind", None)]
+    returns = [p for msg in region if isinstance(msg, m.ModelRequest) for p in msg.parts
+               if isinstance(p, m.ToolReturnPart) and getattr(p, "tool_kind", None)]
+    answered = {p.tool_call_id for p in returns}
+    calls = [p for p in calls if p.tool_call_id in answered]
+    asked = {p.tool_call_id for p in calls}
+    returns = [p for p in returns if p.tool_call_id in asked]
+    state = [p for msg in region if isinstance(msg, m.ModelRequest) for p in msg.parts
+             if state_types and isinstance(p, state_types)]
+    return calls, returns, state
 
 
 def render_for_summary(messages, part_cap: int = 4000) -> str:
@@ -564,19 +602,20 @@ async def summarize(model, messages) -> str:
     return result.output
 
 
-# (outgoing request object, working window) measured by the last
-# `prepare_window` call in this task. A ContextVar because the processor and
-# the model request run in the same task, one after the other; the identity
-# check on the request is the guard against a stale value.
-_pending: ContextVar[tuple | None] = ContextVar("cc_working_window", default=None)
+# Set by `WorkingWindow.before_model_request` for the step about to be sent
+# and cleared by its `prepare_model_request`, so a request that reaches
+# `WindowedModel` with it still set belongs to a windowed agent whose window
+# was never applied (`_unwindowed`). Cleared FIRST in the prepare hook: the
+# summary is a nested model call made from inside it, and must not read as
+# the fault. A ContextVar because the hooks and the model request run in the
+# same task, one after the other.
+_owed: ContextVar[dict | None] = ContextVar("cc_working_window_owed", default=None)
 
 
-async def prepare_window(ctx: RunContext[Any], messages: list):
-    """The `ProcessHistory` seam. Measures the working window for this request
-    and hands it to `WindowedModel` via `_pending`; RETURNS THE INPUT UNCHANGED
-    so the record pydantic-ai persists stays raw (see the slice-2 note). A step
-    that breaks means the CLIPPED history is sent (R3), never the raw one and
-    never a dead run."""
+async def window_messages(ctx: RunContext[Any], messages: list) -> list:
+    """The working window for one outgoing request: what goes on the wire in
+    place of `messages`, which is never modified. A step that breaks means the
+    CLIPPED history is sent (R3), never the raw one and never a dead run."""
     try:
         working = await _prepare_window(ctx, messages)
     except Exception:
@@ -592,27 +631,86 @@ async def prepare_window(ctx: RunContext[Any], messages: list):
         # small record comes back unchanged in content, and there is no estimate
         # to gate on (the estimate may be what raised).
         try:
-            density = density_for(getattr(ctx.model, "model_name", None))
-            working = clip_tool_results(
-                messages, int(settings.context_window * OVERFLOW_CLIP_SHARE * density))
+            working = _static_clip(messages, getattr(ctx.model, "model_name", None))
             log.exception(
-                "context.prepare_window failed; sending the clipped history, not the raw one")
+                "context.window_messages failed; sending the clipped history, not the raw one")
         except Exception:
             log.exception(
-                "context.prepare_window failed AND the fallback clip failed; sending raw history")
+                "context.window_messages failed AND the fallback clip failed; sending raw history")
             working = messages
-    if messages:
-        _pending.set((messages[-1], working))
-    return messages
+    return working
 
 
-def working_window(messages: list) -> list:
-    """What goes on the wire for `messages`: the window `prepare_window` just
-    measured for exactly this outgoing request, else the messages themselves."""
-    pending = _pending.get()
-    if pending and messages and pending[0] is messages[-1]:
-        return pending[1]
-    return messages
+def _static_clip(messages: list, model_name: str | None) -> list:
+    """The clip from inputs that need no I/O: the static window setting and
+    the density table (the fallback of `window_messages`)."""
+    return clip_tool_results(
+        messages, int(settings.context_window * OVERFLOW_CLIP_SHARE * density_for(model_name)))
+
+
+class WorkingWindow(AbstractCapability[Any]):
+    """The seam that puts the working window on the wire (slice 2).
+
+    `prepare_model_request` is pydantic-ai's documented hook for context-window
+    fitting and compaction: it runs per attempt, after the step's history state
+    (instructions, a loaded skill's guidance, tool reveals) has been recorded on
+    the request, and what it sets on `request_context.messages` shapes the wire
+    for that attempt WITHOUT being persisted — so the record stays raw, and the
+    framework's own projection (`prepare_messages`) still runs over the window,
+    which is what turns a loaded skill's recorded guidance into text the model
+    reads. Before pydantic-ai 2.59 this was a `ProcessHistory` processor that
+    handed the window to `WindowedModel` by object identity of the outgoing
+    request; 2.59 started copying that request, the identity never matched and
+    the RAW record went on the wire with no error. Nothing here matches objects.
+    """
+
+    async def before_model_request(self, ctx, request_context):
+        deps = getattr(ctx, "deps", None)
+        _owed.set({"session_id": getattr(deps, "session_id", None),
+                   "agent_id": getattr(deps, "agent_id", None)})
+        return request_context
+
+    async def prepare_model_request(self, ctx, request_context):
+        _owed.set(None)
+        request_context.messages = await window_messages(ctx, list(request_context.messages))
+        return request_context
+
+    @classmethod
+    def get_serialization_name(cls) -> str | None:
+        return None
+
+
+async def _unwindowed(messages: list, model_name: str | None) -> list:
+    """`messages` itself, unless this request comes from a windowed agent's step
+    that the framework sent WITHOUT running `WorkingWindow.prepare_model_request`.
+    That is the fault 2.59 introduced silently (see `WorkingWindow`), so it is
+    loud here: logged, recorded as `session.context_window_unapplied`, and the
+    static clip goes on the wire instead of the raw record."""
+    owed = _owed.get()
+    if owed is None:
+        return messages
+    _owed.set(None)
+    import logging
+
+    logging.getLogger(__name__).error(
+        "context: a windowed agent's request reached the model without its working window "
+        "(session %s); sending the clipped history", owed.get("session_id"))
+    try:
+        from central_command import events
+
+        await events.emit(
+            "session.context_window_unapplied", ref_id=owed.get("session_id"),
+            payload={"agent_id": owed.get("agent_id"), "model": model_name,
+                     "messages": len(messages)},
+            actor="system",
+        )
+    except Exception:  # noqa: BLE001 — the record of a fault never becomes a dead turn
+        logging.getLogger(__name__).exception("context: could not record the unapplied window")
+    try:
+        return _static_clip(messages, model_name)
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception("context: the clip failed too; sending the request as is")
+        return messages
 
 
 def parse_concurrency_spec(spec: str | int) -> dict[str, tuple[str, int]]:
@@ -667,14 +765,16 @@ async def model_turn_slot(model_name: str | None):
 
 
 class WindowedModel(WrapperModel):
-    """Sends `working_window(messages)` to the wrapped model, under the
-    admission gate (`model_turn_slot`). Wrapped around every live model at
-    `resolve_model` — the one model seam — so the record never carries a
-    trim, every run path (fresh, resume, consult) is covered without knowing
-    it, and no path can submit a turn the backend has no slot for."""
+    """Sends the request to the wrapped model under the admission gate
+    (`model_turn_slot`), and calibrates the density from what was sent.
+    Wrapped around every live model at `resolve_model` — the one model seam —
+    so no path can submit a turn the backend has no slot for. The working
+    window itself is applied before the request gets here, by the
+    `WorkingWindow` capability; this wrapper is where a request that missed it
+    is caught (`_unwindowed`)."""
 
     async def request(self, messages, model_settings, model_request_parameters):
-        sent = working_window(messages)
+        sent = await _unwindowed(messages, self.wrapped.model_name)
         async with model_turn_slot(self.wrapped.model_name):
             response = await self.wrapped.request(sent, model_settings, model_request_parameters)
         try:
@@ -686,8 +786,9 @@ class WindowedModel(WrapperModel):
     @asynccontextmanager
     async def request_stream(self, messages, model_settings, model_request_parameters,
                              run_context=None):
+        sent = await _unwindowed(messages, self.wrapped.model_name)
         async with model_turn_slot(self.wrapped.model_name), self.wrapped.request_stream(
-            working_window(messages), model_settings, model_request_parameters, run_context,
+            sent, model_settings, model_request_parameters, run_context,
         ) as stream:
             yield stream
 
@@ -797,9 +898,9 @@ async def _prepare_window(ctx, messages):
 
 def capabilities() -> list:
     """What every long-lived agent builder appends to its capability list."""
-    from pydantic_ai.capabilities import ProcessHistory, ToolSearch
+    from pydantic_ai.capabilities import ToolSearch
 
-    return [ProcessHistory(prepare_window), ToolSearch(tool_description=TOOL_SEARCH_DESCRIPTION)]
+    return [WorkingWindow(), ToolSearch(tool_description=TOOL_SEARCH_DESCRIPTION)]
 
 
 # pydantic-ai's default `search_tools` description says "If no tools are found,

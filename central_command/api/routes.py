@@ -4123,7 +4123,7 @@ async def graph_settings_put(body: GraphSettingsIn) -> dict:
 
 
 # --- Context window (Settings › Context, 2026-09-10) -------------------------
-# The operator's toggles for what `runtime/context.prepare_window` does to the
+# The operator's toggles for what `runtime/context.window_messages` does to the
 # WORKING window. Same shape as the graph settings above: one `app_setting`
 # row, partial PUT, defaults live in code (`context.DEFAULTS`).
 
