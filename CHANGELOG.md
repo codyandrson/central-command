@@ -4,6 +4,50 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.109.0: Container images move to patched versions, and Postgres and Redis are pinned to exact tags
+
+- **n8n 2.29.0 → 2.48.7.** 2.29 stopped receiving fixes in July; the releases since fix sandbox escapes in
+  Code nodes and expressions (GHSA-m3hg-p5r9-fg9h, GHSA-9x83-43r8-5hwc, CVE-2026-86083, CVE-2026-86076,
+  GHSA-9p7v-45m2-wxgj, GHSA-gx3v-3x3v-f8r5), an unauthenticated cross-project webhook execution
+  (GHSA-4c7j-qff5-r9cx) and credential forwarding on cross-origin redirects (GHSA-prmc-fg87-r4gh).
+  Rehearsed on a copy of a deployment's n8n database with no network egress: 141 migrations in under 15
+  seconds, every workflow still active with its body unchanged, the same webhook paths registered, every
+  credential decrypted with the unchanged `N8N_ENCRYPTION_KEY`, and `deploy/n8n/apply-workflows.sh`
+  (import, SQL activation, restart) working as it is. Not proven without egress: a live Gmail or Calendar
+  call and an OAuth token refresh; read one through the façade after applying. n8n's database moves
+  forward at first start, and the updaters' rollback does not restore it: going back to 2.29.0 means
+  restoring the pre-update n8n dump.
+- **What changes around n8n.** The container now gets the webhook address as `N8N_WEBHOOK_URL` (n8n
+  deprecated `WEBHOOK_URL` in 2.35) and no longer sets `N8N_RUNNERS_ENABLED` (n8n says to remove it); the
+  secret key and the `.env` key the address comes from are unchanged. n8n 2.48 logs that Postgres 16 has
+  compatibility support only; its database stays on 16. A no-token POST to the mail façade now answers 500
+  where 2.29 answered an empty 200; the scripts accept any answer but 404.
+- **Neo4j 5.26.2 → 5.26.33**, the same long-term-support line: about thirty patch releases, among them a
+  fix for `neo4j-admin database dump --overwrite-destination` writing a dump that fails to load (the path
+  `backup.sh` uses) and one for an index query returning a deleted entity. Neo4j does not support going
+  back to an older patch over a store a newer one has opened, and the k3s updater takes no graph dump: run
+  `deploy/k3s/backup.sh` before applying this release.
+- **VictoriaLogs v1.52.0 → v1.54.0** (the log viewer now sanitises HTML and Markdown in log messages; a
+  panic on duplicate stream-field names is fixed), **Fluent Bit 5.1.1 → 5.1.5**, **pgweb 0.16.2 → 0.17.0**.
+- **Postgres and Redis no longer float.** `postgres:16` and `redis:7-alpine` were series tags: each node ran
+  whatever it last pulled, and upstream moved `postgres:16` from a Debian bookworm base to trixie, which
+  changes the C library under an existing data directory on the next pull. The three databases are now
+  `postgres:16.16-trixie` and the cache is `redis:7.4.12-alpine`, in the k3s manifests, the Compose
+  profiles and `deploy/single/images.txt` (constraint `16` and `7`; a mirror may substitute a tag of the
+  same series and flavour, with a WARN). 16.16 carries the November security fixes. The two rows carry no
+  digest, because docker-library re-pushes an exact tag whenever its base image is rebuilt.
+- **Check a database created under the old bookworm base before or after applying.** Run `select datname,
+  datcollversion, pg_database_collation_actual_version(oid) from pg_database;` in each Postgres. Equal
+  values (2.41 on trixie) need nothing. A database still recording 2.36 will warn of a collation version
+  mismatch under the new image, and its text indexes may no longer match the library's sort order: with
+  the application stopped, run `REINDEX DATABASE <name>;` then `ALTER DATABASE <name> REFRESH COLLATION
+  VERSION;` in each affected database.
+- **Applying it (k3s).** The updater pulls each new image inside that workload's rollout wait (300 seconds
+  each, with the application stopped). If a slow pull times one out, the update reports `failed` at the
+  manifests phase with the services restarted on the new tree and the pod still rolling; it is not rolled
+  back, and the pod finishes on its own. The single-node profile pulls every image before anything moves.
+- No schema or unit change.
+
 ## 2026-11-21 — v2.108.2: Security fixes in the mail-HTML reader, the TLS trust store and the cockpit's server packages
 
 - **Hostile mail HTML could exhaust memory or CPU in the text converter.** `inscriptis` turns a mail's HTML
