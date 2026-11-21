@@ -47,6 +47,9 @@ def pinned(monkeypatch):
     monkeypatch.setattr(settings, "test_model", False)
     context._windows.clear()
     context._sent.clear()
+    # A FunctionModel's usage calibrates the density table; it must not leak
+    # into the next test's estimates.
+    monkeypatch.setattr(context, "_density", {})
 
     async def load():
         return {**context.DEFAULTS, "summarize": False, "pressure_warning": False}

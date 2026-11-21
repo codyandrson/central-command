@@ -130,11 +130,12 @@ def test_the_route_check_is_not_asked_again_after_an_old_history_resumes():
     assert tools._route_check(ctx, proposal) is not None, "the same draft is asked about in a fresh record"
 
 
-async def test_an_old_paused_session_resumes_under_its_original_charter():
+async def test_an_old_paused_session_resumes_under_its_original_charter(monkeypatch):
     """The resume goes through `durable.resume` (DeferredToolResults for the
     decided call). The agent it resumes under has a DIFFERENT charter now:
     the model must be sent the one persisted with the session, and the skill
     the session loaded must still be loaded."""
+    monkeypatch.setattr(context, "_density", {})  # the wrapper calibrates; keep it here
     rs = _old()
     msgs = durable.load_messages(rs)
     seen = []
