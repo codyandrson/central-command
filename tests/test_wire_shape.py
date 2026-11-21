@@ -31,6 +31,7 @@ from central_command.config import settings
 from central_command.integrations import http as http_client
 from central_command.runtime import context, durable, models, tools
 from central_command.runtime.deps import TriageDeps
+from tests.conftest import needs_pg
 from tests.test_route_check import _episode, _proposal
 
 CHARTER = "CHARTER: you triage mail for the operator."
@@ -66,13 +67,14 @@ def _script(n: int) -> dict:
     return {"role": "assistant", "content": "Recorded."}
 
 
-async def capture_session(monkeypatch) -> list[dict]:
-    """Run the session; return every JSON body the chat client sent, in order."""
+def install_stub_seam(monkeypatch, script, *, window: int = 9_000, cfg: dict | None = None):
+    """Stub the seam's client with an in-process transport that answers with
+    `script(n)` for the n-th request; return (bodies, run_state store)."""
     bodies: list[dict] = []
 
     def answer(request: httpx.Request) -> httpx.Response:
         bodies.append(json.loads(request.content))
-        msg = _script(len(bodies))
+        msg = script(len(bodies))
         return httpx.Response(200, json={
             "id": f"chatcmpl-{len(bodies)}", "object": "chat.completion", "created": 0,
             "model": "cc-default",
@@ -102,8 +104,9 @@ async def capture_session(monkeypatch) -> list[dict]:
         pass
 
     async def load():
-        return {**context.DEFAULTS, "pressure_warning": False, "summarize_threshold": 0.5,
-                "output_headroom": False, "clear_tool_results": False}
+        return {**context.DEFAULTS, **(cfg if cfg is not None else {
+            "pressure_warning": False, "summarize_threshold": 0.5,
+            "output_headroom": False, "clear_tool_results": False})}
 
     from central_command import events
     from central_command.db import repo
@@ -113,13 +116,33 @@ async def capture_session(monkeypatch) -> list[dict]:
     monkeypatch.setattr(context, "load_settings", load)
     monkeypatch.setattr(context, "summarize", fake_summarize)
     monkeypatch.setattr(context, "_density", {})
-    monkeypatch.setattr(context, "_windows", {"cc-default": 9_000})
+    monkeypatch.setattr(context, "_windows", {"cc-default": window})
     monkeypatch.setattr(repo, "get_session_run_state", get_rs)
     monkeypatch.setattr(repo, "update_session_run_state", put_rs)
     monkeypatch.setattr(events, "emit", emit)
     monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "llm_base_url", "http://llm.invalid:4000")
     monkeypatch.setattr(settings, "llm_api_key", "sk-not-a-real-key")
+    return bodies, store
+
+
+def assert_one_leading_system_and_a_valid_sequence(body: dict, label) -> None:
+    """One system message, at index 0; every tool message answers a call the
+    assistant message before it made."""
+    msgs = body["messages"]
+    roles = [m["role"] for m in msgs]
+    assert roles[0] == "system" and roles.count("system") == 1, (label, roles)
+    open_calls: set = set()
+    for m in msgs[1:]:
+        if m["role"] == "assistant":
+            open_calls = {c["id"] for c in m.get("tool_calls") or []}
+        elif m["role"] == "tool":
+            assert m["tool_call_id"] in open_calls, (label, "a tool message answers no call")
+
+
+async def capture_session(monkeypatch) -> list[dict]:
+    """Run the session; return every JSON body the chat client sent, in order."""
+    bodies, store = install_stub_seam(monkeypatch, _script)
 
     def build(model):
         cap = Capability(id=SKILL_ID, description="How this Jira is used",
@@ -168,8 +191,7 @@ async def test_no_system_message_after_the_first_in_any_request(monkeypatch):
     bodies = await capture_session(monkeypatch)
     assert len(bodies) == AFTER_OUTPUT_RETRY + 1
     for i, body in enumerate(bodies, 1):
-        roles = [m["role"] for m in body["messages"]]
-        assert roles[0] == "system" and roles.count("system") == 1, (i, roles)
+        assert_one_leading_system_and_a_valid_sequence(body, i)
     for i, body in enumerate(bodies[AFTER_LOAD - 1:], AFTER_LOAD):
         assert GUIDANCE in _texts(body), f"request {i} lost the skill's guidance"
         assert SKILL_TOOL in [t["function"]["name"] for t in body.get("tools", [])]
@@ -194,3 +216,98 @@ async def test_every_model_the_seam_builds_carries_the_profile(monkeypatch):
         profile = (await models._live_model(alias)).wrapped.profile
         assert profile["supports_inline_system_prompts"] is False
         assert profile["openai_chat_supports_multiple_system_messages"] is False
+
+
+async def test_a_session_parked_at_2_18_resumes_through_the_real_mapping(monkeypatch):
+    """The 2.18 fixture (tests/test_pai_old_history.py), resumed through the
+    real seam: one system message, first, carrying the ORIGINAL charter."""
+    from pathlib import Path
+
+    rs = json.loads((Path(__file__).parent / "fixtures" / "pai_2_18_paused_session.json").read_text())
+    bodies, _store = install_stub_seam(monkeypatch, lambda n: {"role": "assistant", "content": "Recorded."})
+    cap = Capability(id="jira-guide", description="How this Jira is used",
+                     instructions="SKILL: Jira guide. Always quote the issue key.", defer_loading=True)
+
+    def skill_jira_guide(query: str) -> str:
+        """Search the Jira guide."""
+        return "guide"
+    cap.tool_plain(name="skill_jira_guide", retries=10)(skill_jira_guide)
+    agent = Agent(await models._live_model("cc-default"), system_prompt="NEW CHARTER",
+                  output_type=[str, DeferredToolRequests], deps_type=TriageDeps,
+                  capabilities=[cap, *context.capabilities()],
+                  tools=[Tool(tools.propose_action, max_retries=10)])
+    result = await durable.resume(agent, durable.load_messages(rs), rs["tool_call_id"],
+                                  "approved: executed", agent_id="inbox-triage", session_id="sess_old")
+    assert result.output == "Recorded."
+    body = bodies[-1]
+    assert_one_leading_system_and_a_valid_sequence(body, "resume")
+    assert body["messages"][0]["content"].startswith("ORIGINAL CHARTER (2.18)")
+    assert "NEW CHARTER" not in json.dumps(body)
+    assert "Always quote the issue key" in json.dumps(body["messages"][1:])
+    assert "skill_jira_guide" in [t["function"]["name"] for t in body["tools"]]
+
+
+@needs_pg
+async def test_the_production_builder_windows_and_keeps_the_wire_shape(monkeypatch):
+    """The same assertions through production assembly: a granted skill built
+    by `skills.capabilities_for`, the catalog from `skills.catalog_line`, and
+    `runtime/agent.build_agent` (charter, packs, base tools, the context
+    capabilities). A divergence between the look-alike agents above and
+    production cannot hide here."""
+    from central_command.db import repo
+    from central_command.runtime import agent as agent_mod
+    from central_command.runtime import skills as skills_mod
+
+    skill, tool = "cc-test-wire", "search_cc_test_wire_reference"
+    calls = 6
+    await _drop_test_skill(skill)
+    try:
+        await repo.create_skill(skill, "Jira guide", "How this Jira is used")
+        await repo.add_skill_doc(skill, "guidance", "guidance", "How we use Jira", GUIDANCE)
+        await repo.grant_skill("inbox-triage", skill)
+
+        async def big_hits(skill_id, query, limit):
+            return [{"doc_key": "ref", "title": "Ref", "content": f"[{query}] " + "y" * PAYLOAD}]
+        monkeypatch.setattr(repo, "search_skill_chunks", big_hits)
+        caps = await skills_mod.capabilities_for("inbox-triage")
+        catalog = await skills_mod.catalog_line("inbox-triage")
+
+        def script(n):
+            if n == 1:
+                return _call("load_capability", {"id": skill}, "c-load")
+            if n <= 1 + calls:
+                return _call(tool, {"query": f"q{n}"}, f"c-skill-{n}")
+            return {"role": "assistant", "content": "Nothing else to do."}
+
+        bodies, _store = install_stub_seam(monkeypatch, script, window=1_000_000,
+                                           cfg={"summarize": False, "pressure_warning": False})
+        agent = await agent_mod.build_agent(model=await models._live_model("cc-default"),
+                                            capabilities=caps, skills_catalog=catalog)
+        result = await agent.run("Mail: please comment on TASKS-12.",
+                                 deps=TriageDeps(agent_id="inbox-triage", session_id="sess_prod"))
+    finally:
+        await _drop_test_skill(skill)
+    assert result.output == "Nothing else to do."
+    assert len(bodies) == calls + 2
+    for i, body in enumerate(bodies, 1):
+        assert_one_leading_system_and_a_valid_sequence(body, i)
+        if i > 1:
+            assert GUIDANCE in json.dumps(body["messages"]), f"request {i} lost the guidance"
+    assert GUIDANCE not in json.dumps(bodies[0]["messages"])
+    last_tools = [m for m in bodies[-1]["messages"] if m["role"] == "tool"]
+    cleared = [m for m in last_tools if m["content"].startswith("[cleared from context")]
+    assert len(cleared) == calls - 3, "the working window (old tool output cleared) is on the wire"
+    from pydantic_ai.messages import ToolReturnPart
+    raw = [p for m in result.all_messages() for p in getattr(m, "parts", [])
+           if isinstance(p, ToolReturnPart) and p.tool_name == tool]
+    assert len(raw) == calls and all(len(str(p.content)) > PAYLOAD for p in raw), "the record is raw"
+
+
+async def _drop_test_skill(skill_id: str) -> None:
+    from central_command.db import repo
+
+    conn = await repo._conn()
+    try:
+        await conn.execute("delete from skill where id = $1", skill_id)
+    finally:
+        await conn.close()
