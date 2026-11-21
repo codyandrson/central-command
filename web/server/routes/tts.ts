@@ -55,8 +55,18 @@ type SynthesisOutcome =
   | { ok: true; buf: Buffer; contentType: string }
   | { ok: false; status: number; message: string };
 
-/** Syntheses under way, by cache key (see the POST handler). */
-const inflightSyntheses = new Map<string, Promise<SynthesisOutcome>>();
+/**
+ * A synthesis under way, by cache key (see the POST handler). `subscribers` is
+ * the number of requests still waiting on it; `controller` aborts its place in
+ * the speech alias's FIFO line when the last of them has gone (it has no effect
+ * on a synthesis that is already running).
+ */
+interface InflightSynthesis {
+  promise: Promise<SynthesisOutcome>;
+  subscribers: number;
+  controller: AbortController;
+}
+const inflightSyntheses = new Map<string, InflightSynthesis>();
 
 function audioResponse(buf: Buffer, contentType = 'audio/mpeg'): Response {
   return new Response(buf, {
@@ -128,12 +138,16 @@ app.post(
       // click) waits for that job and gets its bytes. The job is not tied to
       // any one request, so a client that disconnects cancels nothing for the
       // others. The entry goes when the job settles; a failure reaches every
-      // waiter and is not cached, so the next request tries again.
+      // waiter and is not cached, so the next request tries again. A job that is
+      // still WAITING for its turn at the proxy (the speech alias runs one job at
+      // a time, in order: lib/fifo-gate.ts) leaves the line when the last request
+      // waiting on it disconnects; one already running finishes and is cached.
       let job = inflightSyntheses.get(hash);
       if (job) {
         console.log('[tts] joining an in-flight synthesis');
       } else {
-        job = (async (): Promise<SynthesisOutcome> => {
+        const controller = new AbortController();
+        const promise = (async (): Promise<SynthesisOutcome> => {
           let result;
           if (effectiveProvider === 'xiaomi') {
             result = await synthesizeXiaomi(text, { model, voice });
@@ -142,17 +156,35 @@ app.post(
           } else if (effectiveProvider === 'replicate') {
             result = await synthesizeReplicate(text, { model, voice });
           } else {
-            result = await synthesizeOpenAI(text, voice, model);
+            result = await synthesizeOpenAI(text, voice, model, controller.signal);
           }
           if (!result.ok) return { ok: false, status: result.status, message: result.message };
           const contentType = 'contentType' in result ? (result as { contentType: string }).contentType : 'audio/mpeg';
           setTtsCache(hash, result.buf);
           return { ok: true, buf: result.buf, contentType };
         })().finally(() => inflightSyntheses.delete(hash));
+        job = { promise, subscribers: 0, controller };
         inflightSyntheses.set(hash, job);
       }
 
-      const outcome = await job;
+      const waitingOn = job;
+      waitingOn.subscribers += 1;
+      let left = false;
+      const leave = () => {
+        if (left) return;
+        left = true;
+        waitingOn.subscribers -= 1;
+        if (waitingOn.subscribers <= 0) waitingOn.controller.abort();
+      };
+      const requestSignal = c.req.raw.signal;
+      requestSignal.addEventListener('abort', leave, { once: true });
+      let outcome: SynthesisOutcome;
+      try {
+        outcome = await waitingOn.promise;
+      } finally {
+        left = true;
+        requestSignal.removeEventListener('abort', leave);
+      }
       if (!outcome.ok) {
         return c.text(outcome.message, outcome.status as ContentfulStatusCode);
       }

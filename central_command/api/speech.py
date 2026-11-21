@@ -10,6 +10,12 @@ speech aliases: ``cc-tts`` (/v1/audio/speech) and ``cc-stt``
 engine sits behind an alias is the operator's registration (a self-hosted
 cc-speech pod, or the operator's own Whisper-convention models).
 
+One job at a time, in order: both aliases carry ``max_parallel_requests: 1``
+(DL-220) and LiteLLM 1.110 answers a second concurrent request with HTTP 429
+where 1.98 made it wait, so each route takes its place in a FIFO line
+(``integrations/speech_gate``) before it calls the proxy. A 429 that still
+arrives is the same 502 as any other proxy refusal; this module retries nothing.
+
 The spine's virtual key must be scoped to the two aliases as well as
 cc-default — mint-keys.sh / setup.sh app do that; a key minted before this
 release needs re-minting (FORCE=1) or the aliases added in the proxy UI.
@@ -27,6 +33,7 @@ from starlette.datastructures import UploadFile
 
 from central_command.config import settings
 from central_command.integrations import http as http_client
+from central_command.integrations.speech_gate import STT_GATE, TTS_GATE, Disconnected
 
 router = APIRouter(prefix="/api")
 
@@ -60,15 +67,25 @@ def _unconfigured() -> JSONResponse | None:
     return None
 
 
+def _client_gone() -> JSONResponse:
+    # The caller left while it waited its turn; nothing was sent to the proxy.
+    # 499 is the "client closed request" status: nobody reads it, the log does.
+    return JSONResponse({"error": "client disconnected before its turn"}, status_code=499)
+
+
 @router.post("/tts")
-async def tts(req: TTSRequest) -> Response:
+async def tts(req: TTSRequest, request: Request) -> Response:
     if (err := _unconfigured()) is not None:
         return err
     if not req.text.strip():
         return JSONResponse({"error": "Text cannot be empty or whitespace"}, status_code=400)
     body: dict = {"model": TTS_ALIAS, "voice": req.voice or settings.tts_voice, "input": req.text, "response_format": "mp3"}
-    async with httpx.AsyncClient(timeout=120, **http_client.client_kwargs()) as client:
-        resp = await client.post(f"{_base()}/v1/audio/speech", headers=_headers(), json=body)
+    try:
+        async with TTS_GATE.slot(request.is_disconnected):
+            async with httpx.AsyncClient(timeout=120, **http_client.client_kwargs()) as client:
+                resp = await client.post(f"{_base()}/v1/audio/speech", headers=_headers(), json=body)
+    except Disconnected:
+        return _client_gone()
     if resp.status_code != 200:
         return JSONResponse({"error": f"{TTS_ALIAS}: HTTP {resp.status_code}", "detail": resp.text[:500]}, status_code=502)
     return Response(content=resp.content, media_type=resp.headers.get("content-type", "audio/mpeg"))
@@ -103,13 +120,17 @@ async def transcribe(request: Request) -> Response:
     language = form.get("language")
     if isinstance(language, str) and language:
         data["language"] = language
-    async with httpx.AsyncClient(timeout=180, **http_client.client_kwargs()) as client:
-        resp = await client.post(
-            f"{_base()}/v1/audio/transcriptions",
-            headers=_headers(),
-            data=data,
-            files={"file": (file.filename or "audio.webm", audio, file.content_type or "application/octet-stream")},
-        )
+    try:
+        async with STT_GATE.slot(request.is_disconnected):
+            async with httpx.AsyncClient(timeout=180, **http_client.client_kwargs()) as client:
+                resp = await client.post(
+                    f"{_base()}/v1/audio/transcriptions",
+                    headers=_headers(),
+                    data=data,
+                    files={"file": (file.filename or "audio.webm", audio, file.content_type or "application/octet-stream")},
+                )
+    except Disconnected:
+        return _client_gone()
     if resp.status_code != 200:
         return JSONResponse({"error": f"{STT_ALIAS}: HTTP {resp.status_code}", "detail": resp.text[:500]}, status_code=502)
     return JSONResponse({"text": resp.json().get("text", "")})

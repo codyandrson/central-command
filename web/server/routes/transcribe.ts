@@ -14,6 +14,7 @@ import { isLanguageSupported } from '../lib/language.js';
 import { transcribe as transcribeOpenAI } from '../services/openai-whisper.js';
 import { transcribeLocal, isModelAvailable, getActiveModel, setWhisperModel, getDownloadProgress, getSystemInfo } from '../services/whisper-local.js';
 import { rateLimitTranscribe, rateLimitGeneral } from '../middleware/rate-limit.js';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 const MAX_FILE_SIZE = config.limits.transcribe; // 12 MB
 
@@ -61,13 +62,13 @@ app.post('/api/transcribe', rateLimitTranscribe, async (c) => {
       if (!config.openaiApiKey) {
         return c.text('OpenAI API key not configured. Set OPENAI_API_KEY in .env or switch to STT_PROVIDER=local', 500);
       }
-      result = await transcribeOpenAI(fileData, filename, file.type || 'audio/webm', lang);
+      result = await transcribeOpenAI(fileData, filename, file.type || 'audio/webm', lang, c.req.raw.signal);
     } else {
       result = await transcribeLocal(fileData, filename, lang);
     }
 
     if (!result.ok) {
-      return c.text(result.message, result.status as 400 | 500);
+      return c.text(result.message, result.status as ContentfulStatusCode);
     }
 
     return c.json({ text: result.text });

@@ -343,6 +343,50 @@ describe('TTS routes', () => {
       expect(await synthCalls()).toHaveBeenCalledTimes(1);
       await leaving.catch(() => {});
     });
+
+    it("takes the job out of the speech alias's line only when the LAST request waiting on it is gone", async () => {
+      const held = heldSynth();
+      mockDeps({ openaiKey: 'sk-test', openaiImpl: held.impl });
+      const app = await buildApp();
+      const one = new AbortController();
+      const two = new AbortController();
+      const req = (signal: AbortSignal) =>
+        app.request('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: 'Same sentence.', provider: 'openai' }),
+          signal,
+        });
+      const first = req(one.signal);
+      const second = req(two.signal);
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(1));
+      const call = (await synthCalls()).mock.calls[0];
+      const lineSignal = call[3] as AbortSignal; // what synthesizeOpenAI queues on
+      expect(lineSignal.aborted).toBe(false);
+      one.abort();
+      await new Promise((r) => setTimeout(r, 5));
+      expect(lineSignal.aborted).toBe(false); // the second request still wants it
+      two.abort();
+      await vi.waitFor(() => expect(lineSignal.aborted).toBe(true));
+      held.jobs[0].finish({ ok: false, status: 499, message: 'client disconnected before its turn' });
+      await Promise.allSettled([first, second]);
+    });
+
+    it('surfaces a proxy 429 as the same status and body, and a later request tries again', async () => {
+      const held = heldSynth();
+      mockDeps({ openaiKey: 'sk-test', openaiImpl: held.impl });
+      const app = await buildApp();
+      const first = post(app, 'Same sentence.');
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(1));
+      held.jobs[0].finish({ ok: false, status: 429, message: 'slots in use' });
+      const res = await first;
+      expect(res.status).toBe(429);
+      expect(await res.text()).toBe('slots in use');
+      const again = post(app, 'Same sentence.');
+      await vi.waitFor(() => expect(held.jobs).toHaveLength(2));
+      held.jobs[1].finish({ ok: true, buf: Buffer.from('ok') });
+      expect((await again).status).toBe(200);
+    });
   });
 
   describe('GET /api/tts/config', () => {

@@ -93,6 +93,81 @@ describe('synthesizeOpenAI', () => {
     });
   });
 
+  describe('the speech alias runs one job at a time, in order (LiteLLM 1.110 rejects a second with a 429)', () => {
+    /** A fetch that records how many calls are in flight and in what order they arrived. */
+    function slowFetch() {
+      const state = { inside: 0, peak: 0, order: [] as string[] };
+      const releases: Array<() => void> = [];
+      const fn = vi.fn(async (_url: string, init: { body: string }) => {
+        state.inside += 1;
+        state.peak = Math.max(state.peak, state.inside);
+        state.order.push(JSON.parse(init.body).input);
+        await new Promise<void>((resolve) => releases.push(resolve));
+        state.inside -= 1;
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      });
+      return { fn, state, releases };
+    }
+    const tick = () => new Promise((r) => setTimeout(r, 5));
+
+    it('lets one call reach the proxy at a time, in arrival order', async () => {
+      const mod = await load({ OPENAI_TTS_MODEL: 'cc-tts' });
+      const f = slowFetch();
+      vi.stubGlobal('fetch', f.fn);
+      const calls = ['one', 'two', 'three'].map((t) => mod.synthesizeOpenAI(t));
+      await tick();
+      expect(f.state.order).toEqual(['one']);
+      for (const expected of [['one', 'two'], ['one', 'two', 'three']]) {
+        f.releases.shift()!();
+        await tick();
+        expect(f.state.order).toEqual(expected);
+      }
+      f.releases.shift()!();
+      const results = await Promise.all(calls);
+      expect(results.every((r) => r.ok)).toBe(true);
+      expect(f.state.peak).toBe(1);
+    });
+
+    it('a call aborted while it waits sends nothing and does not hold the next one up', async () => {
+      const mod = await load({ OPENAI_TTS_MODEL: 'cc-tts' });
+      const f = slowFetch();
+      vi.stubGlobal('fetch', f.fn);
+      const first = mod.synthesizeOpenAI('first');
+      const gone = new AbortController();
+      const abandoned = mod.synthesizeOpenAI('abandoned', undefined, undefined, gone.signal);
+      const last = mod.synthesizeOpenAI('last');
+      await tick();
+      gone.abort();
+      expect(await abandoned).toEqual({ ok: false, status: 499, message: 'client disconnected before its turn' });
+      f.releases.shift()!();
+      await tick();
+      expect(f.state.order).toEqual(['first', 'last']); // 'abandoned' never reached the proxy
+      f.releases.shift()!();
+      expect((await first).ok).toBe(true);
+      expect((await last).ok).toBe(true);
+    });
+
+    it('a 429 from the proxy is the error it is: its status and body, no retry, and the line moves on', async () => {
+      const mod = await load({ OPENAI_TTS_MODEL: 'cc-tts' });
+      const fn = vi.fn(async () => new Response('slots in use', { status: 429 }));
+      vi.stubGlobal('fetch', fn);
+      expect(await mod.synthesizeOpenAI('x')).toEqual({ ok: false, status: 429, message: 'slots in use' });
+      expect(await mod.synthesizeOpenAI('y')).toEqual({ ok: false, status: 429, message: 'slots in use' });
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not gate a plain OpenAI endpoint (no OPENAI_TTS_MODEL)', async () => {
+      const mod = await load({});
+      const f = slowFetch();
+      vi.stubGlobal('fetch', f.fn);
+      const calls = [mod.synthesizeOpenAI('a'), mod.synthesizeOpenAI('b')];
+      await tick();
+      expect(f.state.order).toEqual(['a', 'b']);
+      f.releases.splice(0).forEach((r) => r());
+      await Promise.all(calls);
+    });
+  });
+
   describe('outside deployment speech mode (no OPENAI_TTS_MODEL)', () => {
     it('is unchanged: stored model and voice, a request model overrides, instructions for gpt-4o-mini-tts', async () => {
       const mod = await load({});

@@ -15,6 +15,7 @@ the last stop before the proxy. Admin ops carry the LiteLLM MASTER key
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import struct
@@ -25,6 +26,7 @@ from central_command.config import settings
 from central_command.contract.failures import ProviderStatusError
 from central_command.contract.args import COST_FIELDS
 from central_command.integrations import http as http_client
+from central_command.integrations import speech_gate
 
 # A LiteLLM model_name (alias) and a provider model string ("anthropic/claude-…").
 # Kept deliberately conservative — these are model-controlled and name real infra.
@@ -691,12 +693,17 @@ async def probe_model(
     }
     if kind in one_shot:
         path, body = one_shot[kind]
-        if kind == "audio_transcription":
-            resp = await _call("POST", path, timeout=timeout,
-                               files={"file": ("probe.wav", _probe_wav(), "audio/wav"),
-                                      "model": (None, alias)})
-        else:
-            resp = await _call("POST", path, body, timeout=timeout)
+        # cc-tts / cc-stt take one job at a time, and the proxy REJECTS the
+        # second at that limit (1.110): the probe takes its place in the same
+        # line as read-aloud and voice input (integrations/speech_gate).
+        line = speech_gate.GATES.get(alias)
+        async with (line.slot() if line is not None else contextlib.nullcontext()):
+            if kind == "audio_transcription":
+                resp = await _call("POST", path, timeout=timeout,
+                                   files={"file": ("probe.wav", _probe_wav(), "audio/wav"),
+                                          "model": (None, alias)})
+            else:
+                resp = await _call("POST", path, body, timeout=timeout)
         ok = resp.status_code == 200
         observed[kind] = {"ok": ok, "detail": "endpoint answered" if ok else
                           f"{resp.status_code}: {resp.text[:200]}"}

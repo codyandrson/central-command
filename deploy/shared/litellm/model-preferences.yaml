@@ -388,16 +388,30 @@ registration_only:
   # ONE JOB AT A TIME, NO RETRIES (policy_params, DL-220, 2026-11-18). The CPU
   # engine behind these aliases synthesises slowly under load, and on
   # 2026-11-17 the cockpit sent one long text three times, the proxy retried
-  # each (num_retries defaults to 3), and 15 synthesis jobs landed on the pod
-  # at once; it pinned its limits, failed its probes and was restarted.
-  # `max_parallel_requests: 1` is LiteLLM's per-deployment concurrency limit
-  # (documented as a router semaphore, so a second request waits for the
-  # first; that the audio routes honour it is UNVERIFIED until read on the
-  # live row) and `num_retries: 0` is the per-deployment retry count (it
-  # outranks the router-wide default of 3; only a request header or body can
-  # override it). Per alias on purpose: the same values on the chat aliases
-  # would be a fleet-wide change. The timeouts below are unchanged in this
-  # release.
+  # each (the router's default is num_retries 2, i.e. three attempts), and 15
+  # synthesis jobs landed on the pod at once; it pinned its limits, failed its
+  # probes and was restarted. `max_parallel_requests: 1` is LiteLLM's
+  # per-deployment concurrency limit and `num_retries: 0` is the per-deployment
+  # retry count (it outranks the router-wide default; only a request header or
+  # body can override it). Per alias on purpose: the same values on the chat
+  # aliases would be a fleet-wide change. The timeouts below are unchanged.
+  #
+  # MEASURED ON THE PINNED PROXY, v1.110.2 (2026-11-21, a copy of this
+  # deployment's database): a request that arrives while the alias's one slot
+  # is taken is REJECTED, HTTP 429 `Deployment has all max_parallel_requests
+  # slots in use`, no Retry-After header. (1.98.0 made it WAIT: three concurrent
+  # 5 s requests finished at 5/10/15 s, all 200.) And on the audio routes the
+  # deployment's `num_retries: 0` is not honoured for that 429: the proxy
+  # retries it with backoff for 4.6-8 s before it returns it. So the queue is
+  # not LiteLLM's any more: the application serialises each route in FIFO order
+  # before it calls the proxy (central_command/integrations/speech_gate.py in
+  # the API process, web/server/lib/fifo-gate.ts in the cockpit server), and a
+  # 429 that still arrives is surfaced as the error it is, never retried. The
+  # limit STAYS on the rows, because it is the pod's own protection against
+  # any caller that is not that application (a script, the setup probes, a
+  # second process), and the no-retry count stays because a retried synthesis
+  # is the pile-up this was written for. Never a router-wide `retry_policy`
+  # for this: that would change every alias.
   cc-tts:
     registration:
       model: openai/PLACEHOLDER
