@@ -33,7 +33,10 @@
 #                   Those move on every upstream rebuild, so the TAG is the pin
 #                   and a digest there would fail weekly on a healthy registry.
 #                   An exact-version tag gets a real digest, and a mismatch on
-#                   one is a hard FAIL.
+#                   one is a hard FAIL. The exception is docker-library's
+#                   postgres and redis: an exact tag there (16.16-trixie,
+#                   7.4.12-alpine) is re-pushed whenever its Debian or Alpine
+#                   base is rebuilt, so those rows pin the tag and carry `-`.
 #     component     core | n8n | sandbox-base | crawler-base | speech
 #                   (resolution skips components whose CC_ENABLE_* flag is 0)
 #
@@ -72,9 +75,9 @@
 #       https://<registry>/v2/<path>/manifests/<tag> | grep -i docker-content-digest
 #   (docker.io needs a bearer token from auth.docker.io first.) Locked 2026-08-30.
 
-dockerio  library/postgres            16                    16.16-trixie       sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f  core
+dockerio  library/postgres            16                    16.16-trixie       -                                                                        core
 dockerio  library/neo4j               5.26                  5.26.33            sha256:51d0314ef86074f519003da8dd4daaa9fff72b8479672b742d7cab7f3064e3ed  core
-dockerio  library/redis               7                     7.4.12-alpine      sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe  core
+dockerio  library/redis               7                     7.4.12-alpine      -                                                                        core
 ghcr      berriai/litellm-database    main-stable           main-stable        -                                                                        core
 dockerio  n8nio/n8n                   2                     2.48.7             sha256:fabce3e9678a07d2dde83bd8f5124017f3ec457d0a3fc6b63bb4cec465d63861  n8n
 dockerio  library/python              3.12                  3.12-slim-bookworm -                                                                        sandbox-base
