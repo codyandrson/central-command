@@ -1332,7 +1332,8 @@ async def list_sessions(
     3408 oneshot dispatch runs vs 50 closed conversations, the unfiltered
     `limit 1000` pushed conversations out of the window before the client-side
     history toggle ever saw them. RUNNING oneshots still show (the
-    paused-task-run-in-panel behavior) — only terminal ones are dropped, so
+    paused-task-run-in-panel behavior) — only terminal ones are dropped, a run
+    a restart closed STOPPED and unresumable among them, so
     the Activity/Runs browser and the spawnedBy child lookup, which need every
     row, must never pass it. Paging is KEYSET on `(created_at, id)`, not offset: sessions
     are created while the operator pages, and an offset would silently skip or
@@ -1365,8 +1366,20 @@ async def list_sessions(
     if exclude_terminal_oneshot:
         # A re-run pair stays: both rows show the link, and the cockpit keeps them
         # under its closed-sessions toggle.
-        where.append("not (s.mode = 'oneshot' and s.status in ('DONE','FAILED','CANCELLED') "
-                     "and s.rerun_of is null and s.rerun_by is null)")
+        # A run a restart closed STOPPED with no way back in is over too (the
+        # same test as `orchestration._finished_for_waiters`): its work was
+        # re-run fresh, Resume refuses it, and listed it reads as paused work
+        # with no lever. A run the operator stopped stays: that one resumes.
+        # The CASE keeps `run_state` unread for every row that is not STOPPED;
+        # the coalesces keep a missing marker from turning the test NULL, which
+        # would drop the row.
+        where.append(
+            "not (s.mode = 'oneshot' and s.rerun_of is null and s.rerun_by is null "
+            "and (s.status in ('DONE','FAILED','CANCELLED') or "
+            "case when s.status = 'STOPPED' then "
+            "coalesce(s.run_state->'pending_stop'->>'reason', '') = 'restart' "
+            "and not coalesce((s.run_state->'pending_stop'->>'resumable')::boolean, false) "
+            "else false end))")
     limit_ph = _arg(limit)
     where_sql = " and ".join(where)
 

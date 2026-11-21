@@ -12,6 +12,7 @@ expression there passes every stubbed test.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -405,4 +406,47 @@ async def test_the_list_query_computes_a_title_and_a_token_estimate():
     assert 900 < row["token_estimate"] < 1_400, (
         f"~4000 chars of live window is ~1000 tokens, got {row['token_estimate']}"
         " — the archive must not count, it is never sent"
+    )
+
+
+@needs_pg
+async def test_exclude_terminal_oneshot_drops_a_restart_closed_run_but_keeps_a_stopped_one():
+    """A run a restart closed STOPPED cannot be resumed and its work was re-run,
+    so it is over; listed, it sat in the sidebar as paused work with no lever.
+    A run the operator stopped (or a restart stop that can be re-entered) is
+    paused work and stays."""
+    agent_id = "sidebar-stopped-agent"
+    await repo.upsert_agent(agent_id, "Sidebar Stopped", "sidebar", "")
+    restart_closed, restart_task, operator_stopped, restart_resumable, bare = (
+        "sess_" + uuid.uuid4().hex[:12] for _ in range(5))
+    markers = {
+        restart_closed: {"reason": "restart", "resumable": False, "task_id": None},
+        restart_task: {"reason": "restart", "resumable": False, "task_id": "task_x"},
+        operator_stopped: {"after": "task", "task_id": "task_y"},
+        restart_resumable: {"reason": "restart", "resumable": True},
+    }
+    conn = await repo._conn()
+    try:
+        for sid, marker in markers.items():
+            await conn.execute(
+                "insert into session (id, agent_id, status, mode, run_state) values "
+                "($1, $2, 'STOPPED', 'oneshot', jsonb_build_object('pending_stop', $3::jsonb))",
+                sid, agent_id, json.dumps(marker),
+            )
+        await conn.execute(
+            "insert into session (id, agent_id, status, mode) values "
+            "($1, $2, 'STOPPED', 'oneshot')", bare, agent_id,
+        )
+    finally:
+        await conn.close()
+
+    filtered_ids = {
+        r["id"] for r in
+        await repo.list_sessions(200, agent_id=agent_id, exclude_terminal_oneshot=True)
+    }
+    assert filtered_ids == {operator_stopped, restart_resumable, bare}
+
+    default_ids = {r["id"] for r in await repo.list_sessions(200, agent_id=agent_id)}
+    assert {restart_closed, restart_task} <= default_ids, (
+        "the Activity browser lists every row; only the sidebar drops them"
     )

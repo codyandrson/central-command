@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-20 — v2.108.1: A run a restart closed no longer sits in the sessions panel as stopped work
+
+- **A triage run killed by a restart stayed in the sidebar marked STOPPED, with no lever.** A restart
+  closes a run it killed mid-turn STOPPED and unresumable, and the work is run again fresh; Resume
+  refuses that session and a run cannot be closed by hand. The sidebar's list dropped finished one-shot
+  runs only when they were DONE, FAILED or CANCELLED, so this one stayed listed and read as paused work
+  nobody could act on. The list now also drops a STOPPED one-shot run whose stop marker says a restart
+  closed it with no way back in (the test `_finished_for_waiters` already applies). A run the operator
+  stopped stays listed, and so does a restart stop that can be resumed. The Activity browser still lists
+  every session. No schema, unit or manifest change.
+
 ## 2026-11-20 — v2.108.0: The assistant checks its planned work blocks against the tracker at every planning run, removes finished ones and judges the rest
 
 - **Blocks stayed on the calendar after their issue moved.** On a live deployment the operator moved two
