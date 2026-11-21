@@ -4,6 +4,61 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.112.0: Security floors that reach every install, a crawler that checks certificates, the sandbox image on Debian 13, and the cockpit server's static-path fix
+
+- **A security pin in the lock alone did not reach a networked deployment.** Outside an air gap, setup and
+  the updaters install with `uv pip install -e ".[dev,runtime]"`, which resolves from `pyproject.toml` and
+  leaves alone any installed version that still satisfies its bounds; only `CC_AIRGAP=1` installs from
+  `requirements.lock`. So of v2.108.2's fixes only inscriptis, which got a floor, arrived on a k3s
+  deployment updated through it: that deployment was still running certifi 2026.7.22, Pillow 12.3.0,
+  pyyaml 6.0.3 and urllib3 2.7.0. `pyproject.toml` now states the fixed versions as floors: certifi
+  2026.10.19 (GHSA-6q48-6c7w-9gw2), urllib3 2.8.0, pyyaml 6.0.4, Pillow 13.0.0, pypdfium2 5.15.2,
+  markitdown 0.1.9, mcp 1.30 (below 2), pyjwt 2.15, authlib 1.9.1, neo4j driver 6.4.1 and asyncpg 0.32.
+  The next update installs them. A networked install takes the NEWEST version above each floor, which
+  is not necessarily the lock's.
+- **The framework pins of v2.111.1 are lock-only** for the same reason: they move an air-gapped install,
+  and a networked one keeps its FastAPI until something requires a newer one.
+- **The crawler no longer accepts a certificate it cannot verify.** crawl4ai 0.9.2 launched Chromium with
+  `--ignore-certificate-errors`, so a crawled page could be served by anyone able to intercept the
+  connection. The crawler image moves to crawl4ai 0.9.5 on the Playwright 1.64.1 base
+  (`mcr.microsoft.com/playwright/python:v1.64.1-noble`), with `brotli` pinned to 1.2.1. 0.9.5 drops the
+  hard-coded flag but still ignores HTTPS errors by default, so the service sets
+  `ignore_https_errors=False` itself. Built and run on arm64 against the old image: a plain page returns
+  byte-identical markdown, the same request and response keys, LLM extraction still uses the provider it
+  is given, and a self-signed page that the old image returned in full now fails with
+  `net::ERR_CERT_AUTHORITY_INVALID`.
+- **What that changes for an operator.** A fetch or crawl of a site whose certificate does not verify now
+  fails, including an internal site signed by a private CA. The single-node build installs
+  `CC_CA_BUNDLE` into the image's system trust (whether Chromium honours it there was not tested); the
+  k3s crawler build takes no CA at all, so such sites fail there until one is wired in. The image is rebuilt by the update before anything stops; the amd64 build on a compute node
+  was not run here.
+- **The sandbox image moves from Debian 12 to Debian 13** (`python:3.12-slim-bookworm` →
+  `python:3.12-slim-trixie`, the same Python 3.12 line). Bookworm left regular support in July and ships
+  Node 18, below what the installed sandbox runtime declares; trixie ships Node 20.19, and the build's
+  engine warning is gone. Run the way the runner runs a command (`bash -lc` as the unprivileged user in
+  `/workspace`), every step answered the same on both images: shell, Python with a venv and pip, Node
+  and npm, git, HTTP and TLS with and without the CA, writes inside the workspace, and refused writes
+  outside it. An agent will notice newer tools (git 2.47, curl 8.14, OpenSSL 3.5; `/usr/bin/python3` is
+  3.13, while `python` stays 3.12). Not tested here: gVisor, and the build on a compute node; run the
+  sandbox drill after applying.
+- **A mirrored install must now carry Debian trixie.** The sandbox build's apt sources, the `index-apt`
+  check and `deploy/AIRGAP.md` name `trixie`, `trixie-updates` and `trixie-security`; a mirror holding
+  only bookworm fails the check. `servers/echo-demo` still builds on bookworm.
+- **The cockpit's static-file server moves to `@hono/node-server` 2.1.6**, the only line with the fix for
+  the double-decoded static path (GHSA-rmxm-3fg6-px4f). No source changed: its public API is the same,
+  and the cockpit's own `/ws` relay still owns the upgrade. Old and new builds were run side by side and
+  answered the same for the page, hashed assets (type, cache headers, gzip, ranges), deep links, some
+  thirty encoded path-traversal attempts, the authenticated API without a session, and the WebSocket
+  relay open, refused and upstream-closed; a client disconnect still aborts the request, which the
+  read-aloud queue relies on. Static files now also carry `Last-Modified`.
+- **The unused `shadcn` code generator moves to 4.23.0**, with one `overrides` entry in `web/package.json`
+  pinning `minimatch` 11.0.5 beneath it (4.23.0 alone leaves that advisory). Nothing in the repository
+  runs the tool. `npm audit` now reports 2, both in the lint chain and waiting on a typescript-eslint
+  release too recent for a mirror. No pinned npm version is newer than 2026-11-07; a mirror must carry
+  eight packages the lockfile did not name before (`@shadcn/registry`, `@modelcontextprotocol/core` and
+  `server`, `cn`, `socks`, `smart-buffer`, `@isaacs/nonrecursive-glob-match`, `type-fest`).
+- No schema or unit change.
+
 ## 2026-11-21 — v2.111.1: The web framework pins move forward
 
 - **The lock moves** fastapi 0.141.1 → 0.162.2, starlette 1.6.0 → 1.10.0, uvicorn 0.52.4 → 0.54.0, pydantic
