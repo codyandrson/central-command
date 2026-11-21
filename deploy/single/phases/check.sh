@@ -804,7 +804,7 @@ check_indexes() {
 
   # apt runs INSIDE the local image builds, and the suite comes from each base
   # image: library/python:3.12-slim-bookworm is Debian BOOKWORM, mcr
-  # playwright/python:v1.62.0-noble is Ubuntu NOBLE
+  # playwright/python:v1.64.1-noble is Ubuntu NOBLE
   # (images.txt's locked tags say so). Hardcoded here on purpose — a suite is a
   # property of the base image, not an operator answer.
   local apt="${CC_APT_MIRROR:-https://deb.debian.org/debian}"

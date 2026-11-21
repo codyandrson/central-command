@@ -86,5 +86,5 @@ dockerio  library/redis               7                     7.4.12-alpine      -
 ghcr      berriai/litellm-database    v1.110                v1.110.2           sha256:3b239acc68e601c436e5feeec7ca0f01a41cd5dffe50975142b7fa7155c1b2ff  core
 dockerio  n8nio/n8n                   2                     2.48.7             sha256:fabce3e9678a07d2dde83bd8f5124017f3ec457d0a3fc6b63bb4cec465d63861  n8n
 dockerio  library/python              3.12                  3.12-slim-bookworm -                                                                        sandbox-base
-mcr       playwright/python           v1.62                 v1.62.0-noble      sha256:aa81288e738725378becba5b3e06cb0f3a7f012a610e87e8d767a090ea3f740d  crawler-base
+mcr       playwright/python           v1.64                 v1.64.1-noble      sha256:330d401ae23c905896a0c26c66c36fc971b621519e7b11b435a8328d7bf6e031  crawler-base
 ghcr      speaches-ai/speaches        0.8                   0.8.3-cpu          sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8  speech

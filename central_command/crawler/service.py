@@ -16,16 +16,16 @@ Reach for this only when the site is a JS-rendered SPA that plain fetching
 reads as an empty shell, or when a whole documentation tree is wanted.
 
 THE ONE MODEL CALL, AND IT IS OPT-IN AND LOCAL: `filter="llm"` swaps the
-heuristic PruningContentFilter for Crawl4AI's LLMContentFilter, which costs one
+heuristic PruningContentFilterLXML for Crawl4AI's LLMContentFilter, which costs one
 model call per page (chunked). It points ONLY at this cluster's own LiteLLM
 proxy (LLM_BASE_URL/LLM_API_KEY/LLM_MODEL, from the optional `cc-crawler-llm`
 Secret) — never a provider directly. Unset key or an unreachable proxy FALLS
 BACK to pruning and says so in `warnings`; a crawl must not fail because a
 nice-to-have filter was unavailable. Default stays "pruning": zero model cost.
 
-API (crawl4ai 0.9.x, read from docs.crawl4ai.com 2026-08-07):
+API (crawl4ai 0.9.5, read from the installed package 2026-11-21):
   BFSDeepCrawlStrategy(max_depth, include_external, max_pages, filter_chain)
-  DefaultMarkdownGenerator(content_filter=PruningContentFilter(...))
+  DefaultMarkdownGenerator(content_filter=PruningContentFilterLXML(...))
     -> result.markdown.fit_markdown / .raw_markdown
   LLMContentFilter(llm_config=LLMConfig(provider=..., api_token=..., base_url=...),
                    instruction=..., chunk_token_threshold=...)
@@ -44,7 +44,8 @@ import time
 from typing import Any, Literal
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig, LLMConfig
-from crawl4ai.content_filter_strategy import LLMContentFilter, PruningContentFilter
+from crawl4ai.content_filter_strategy import LLMContentFilter
+from crawl4ai.content_filter_strategy_lxml import PruningContentFilterLXML
 from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
 from crawl4ai.deep_crawling.filters import FilterChain, URLPatternFilter
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
@@ -64,7 +65,12 @@ app = FastAPI(title="cc-crawler")
 # semaphore sized to the memory limit, or crawl4ai's own dispatcher.
 _lock = asyncio.Lock()
 
-_BROWSER = BrowserConfig(headless=True, verbose=False)
+# ignore_https_errors=False is load-bearing: crawl4ai defaults it to True, and
+# that default is a Playwright context option (0.9.5 dropped the Chromium launch
+# flag, not the option), so a bare BrowserConfig still crawls past a bad
+# certificate. A site whose certificate does not verify is an error the
+# operator should see, not a page read over an unauthenticated channel.
+_BROWSER = BrowserConfig(headless=True, verbose=False, ignore_https_errors=False)
 
 # The LiteLLM proxy inside this cluster. Service name is `litellm` (the
 # Deployment is cc-litellm; the Service is not) — see deploy/k3s/30-litellm.yaml.
@@ -114,8 +120,8 @@ class CrawlResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-def _pruning() -> PruningContentFilter:
-    return PruningContentFilter(threshold=0.45, threshold_type="dynamic")
+def _pruning() -> PruningContentFilterLXML:
+    return PruningContentFilterLXML(threshold=0.45, threshold_type="dynamic")
 
 
 async def _llm_reachable() -> bool:

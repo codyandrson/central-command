@@ -21,7 +21,7 @@
 # suite if they drift, and the playwright PACKAGE version below must equal the
 # tag either way.
 ARG CC_REGISTRY_MCR=mcr.microsoft.com
-ARG CC_IMG_PLAYWRIGHT_PYTHON=${CC_REGISTRY_MCR}/playwright/python:v1.62.0-noble
+ARG CC_IMG_PLAYWRIGHT_PYTHON=${CC_REGISTRY_MCR}/playwright/python:v1.64.1-noble
 FROM ${CC_IMG_PLAYWRIGHT_PYTHON}
 # pip honours PIP_INDEX_URL from the environment; blank = PyPI.
 ARG PIP_INDEX_URL=
@@ -81,11 +81,16 @@ ENV PYTHONUNBUFFERED=1 \
 # hosts, not URLs) — derived from PIP_INDEX_URL in the same RUN rather than a
 # second seam to keep in step. Credentials in the URL are stripped with the
 # scheme.
+# brotli is pinned above crawl4ai 0.9.5's own floor (>=1.1.0): 1.2.1 fixes a
+# decoder CVE (CVE-2026-111497) that crawl4ai 0.9.6 meets by raising its floor.
+# 0.9.6 is newer than the mirror-lag rule admits (2026-11-20) and its other
+# fix (the TLS-certificate-fetch SSRF) sits behind fetch_ssl_certificate, which
+# this service never sets — so the floor is carried here instead (2026-11-21).
 RUN if [ "$CC_TLS_INSECURE" = 1 ] && [ -n "$PIP_INDEX_URL" ]; then \
       h="${PIP_INDEX_URL#*://}"; h="${h##*@}"; export PIP_TRUSTED_HOST="${h%%/*}"; \
     fi; \
     pip install --no-cache-dir --break-system-packages \
-        playwright==1.62.0 crawl4ai==0.9.2 fastapi==0.141.1 uvicorn==0.52.4 httpx==0.28.1
+        playwright==1.64.1 crawl4ai==0.9.5 brotli==1.2.1 fastapi==0.141.1 uvicorn==0.52.4 httpx==0.28.1
 
 # crawl4ai's post-install creates its home dir and, unless CRAWL4AI_MODE=api,
 # runs `playwright install --with-deps --force chromium` (apt + CDN — exactly
