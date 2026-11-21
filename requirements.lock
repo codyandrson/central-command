@@ -14,7 +14,7 @@
 aiofile==3.12.3
 annotated-doc==0.0.5
 annotated-types==0.8.0
-anthropic==1.0.0
+anthropic==1.15.0
 anyio==4.14.2
 argcomplete==3.7.2
 asyncpg==0.32.0
@@ -51,9 +51,9 @@ executing==2.2.1
 fastapi==0.141.1
 fastmcp-slim==3.4.11
 flatbuffers==25.12.19
-genai-prices==0.1.4
+genai-prices==0.1.13
 google-auth==2.56.3
-google-genai==2.19.0
+google-genai==2.30.0
 googleapis-common-protos==1.75.1
 graphiti-core==0.30.2
 griffelib==2.2.0
@@ -100,7 +100,7 @@ numpy==2.5.2
 oauthlib==3.3.1
 onnxruntime==1.20.1 ; sys_platform == 'win32'
 onnxruntime==1.29.0 ; sys_platform != 'win32'
-openai==3.3.1
+openai==3.31.0
 openpyxl==3.1.5
 opentelemetry-api==1.44.0
 opentelemetry-exporter-otlp-proto-common==1.44.0
@@ -126,11 +126,11 @@ pyasn1==0.6.5
 pyasn1-modules==0.4.2
 pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
 pydantic==2.13.4
-pydantic-ai==2.18.0
-pydantic-ai-slim==2.18.0
+pydantic-ai==2.66.0
+pydantic-ai-slim==2.66.0
 pydantic-core==2.46.4
-pydantic-evals==2.18.0
-pydantic-graph==2.18.0
+pydantic-evals==2.66.0
+pydantic-graph==2.66.0
 pydantic-settings==2.15.0
 pygments==2.21.0
 pyjwt==2.15.1

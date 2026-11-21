@@ -71,7 +71,12 @@ runtime = [
     # failed test_skills_delivery (rehearsal finding F9, 2026-08-21) — every
     # gift install was getting an untested runtime. Raising this bound is a
     # deliberate act: bump, run the full suite, then commit both together.
-    "pydantic-ai>=2.18,<2.19",
+    # 2.18 -> 2.66 (2026-11-21): 2.66.0 fixes GHSA-4cj4-hgwf-4hc4; the minors
+    # between changed how instructions, retries and deferred tools are carried
+    # in history, which `runtime/context.py` (the working window) and
+    # `runtime/durable.retry_text` absorb. A history written by 2.60+ does not load at
+    # 2.18, so rolling this back strands sessions written after the upgrade.
+    "pydantic-ai>=2.66,<2.67",
     # HTML->markdown for the web-fetch tool (integrations/webfetch.py).
     # trafilatura does the primary boilerplate-stripping extraction; markdownify
     # (pulling in beautifulsoup4) stays as the fallback for pages trafilatura
