@@ -1,29 +1,34 @@
 import { h } from 'vue'
-import type { Theme } from 'vitepress'
-import DefaultTheme from 'vitepress/theme'
 import TwoslashFloatingVue from '@shikijs/vitepress-twoslash/client'
 import '@shikijs/vitepress-twoslash/style.css'
-import './styles/vars.css'
-import './styles/landing.css'
-import AsideSponsors from './components/AsideSponsors.vue'
+import 'virtual:group-icons.css'
+import Theme from '@voidzero-dev/vitepress-theme/src/vite'
+import OldDocument from './components/OldDocument.vue'
+import './styles.css'
+
+// components
 import SvgImage from './components/SvgImage.vue'
 import YouTubeVideo from './components/YouTubeVideo.vue'
-import SponsorBanner from './components/SponsorBanner.vue'
 import NonInheritBadge from './components/NonInheritBadge.vue'
-import 'virtual:group-icons.css'
+import AsideSponsors from './components/AsideSponsors.vue'
+import ScrimbaLink from './components/ScrimbaLink.vue'
 
 export default {
-  extends: DefaultTheme,
   Layout() {
-    return h(DefaultTheme.Layout, null, {
-      'layout-top': () => h(SponsorBanner),
+    return h((Theme as any).Layout, null, {
       'aside-ads-before': () => h(AsideSponsors),
+      'layout-top': () => h(OldDocument),
     })
   },
-  enhanceApp({ app }) {
+  enhanceApp(ctx: any) {
+    const { app } = ctx
+
     app.component('SvgImage', SvgImage)
     app.component('YouTubeVideo', YouTubeVideo)
     app.component('NonInheritBadge', NonInheritBadge)
+    app.component('ScrimbaLink', ScrimbaLink)
     app.use(TwoslashFloatingVue)
+
+    Theme.enhanceApp(ctx)
   },
-} satisfies Theme
+}
