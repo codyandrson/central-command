@@ -4,6 +4,50 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.113.0: Installs resolve from declared version ranges, not exact pins
+
+- **Why.** An install tied to one exact version fails when a mirror does not carry that version, and a
+  site that installs through internal mirrors cannot always get it (v2.105.2 was cut for one such
+  version). Every install path now asks its package manager for a version inside a declared minimum and
+  maximum, using that tool's own behaviour and nothing added on top.
+- **Python.** Every profile and mode runs `uv pip install -e ".[dev,runtime]"`, which resolves
+  `pyproject.toml`'s ranges against the configured index; `CC_AIRGAP=1` no longer installs
+  `requirements.lock`'s 175 exact pins. Each direct dependency that had only a floor has a ceiling now,
+  at the next major (`fastapi>=0.111,<1`, `pydantic>=2.7,<3`, `certifi>=2026.10.19,<2027` and 26 more).
+  Two stay tight on purpose: `graphiti-core==0.30.2`, because the carried patches refuse any other
+  version, and `pydantic-ai>=2.66,<2.67`. A Python mirror must carry a version inside each range, and
+  that one exact graphiti-core.
+- **The cockpit.** Every install path runs `npm install --no-package-lock` in place of `npm ci`, so npm
+  resolves `web/package.json`'s ranges and never reads or writes the lockfile. **This needs npm 11**:
+  npm 10.9, the one Node 22 ships, crashes in its own resolver on this dependency tree (`Cannot read
+  properties of null (reading 'edgesOut')`). Setup reports an older npm the way it reports an older Node
+  (the cockpit is not built; fix: `npm install -g npm@11`, run for the system Node, not one a version
+  manager supplies), and the k3s updater refuses the update before anything is stopped. The
+  record that lets a later run skip the install now keys on `package.json`, the Node major and the npm
+  major. `CC_COCKPIT_NPM_PREINSTALLED=1` still works for an operator who builds the tree by hand.
+- **Image builds.** The crawler image's Python packages are ranges (`crawl4ai>=0.9.5,<0.10`,
+  `brotli>=1.2.1,<2`, `playwright>=1.64,<1.65` to match its base image's browsers, and FastAPI, uvicorn
+  and httpx as in `pyproject.toml`); the sandbox image installs `@anthropic-ai/sandbox-runtime` at
+  `>=0.0.74 <0.0.79`, the versions that run on the Node 20 its Debian base packages. Container image
+  tags are unchanged: the single-node profile already accepts a tag of the same series from a mirror,
+  and the k3s manifests keep their tags.
+- **The lock files stay, as the record of what was tested.** `requirements.lock` and
+  `web/package-lock.json` are the exact sets the test suites ran against; no install reads them.
+- **What this gives up.** An install takes the newest version inside each range on the day it runs, so
+  what runs can differ from what was tested, and two installs on different days can differ from each
+  other. Resolved today, a fresh Python install differs from the lock in most packages (FastAPI 0.165.0
+  against a tested 0.162.2) and the cockpit in 26 of its 46 production dependencies (React 19.3.1
+  against 19.2.4); both built and the cockpit's tests pass on that tree. An existing environment keeps
+  any installed version that still satisfies its range, so a fix arrives there only through a raised
+  floor.
+- **One test only passed by accident.** A read-aloud test built a `Response` from the test environment's
+  `Blob`, which newer jsdom (28.1.0) exposes differently; it now builds it from bytes. Read-aloud itself
+  never does this.
+- **Updating to this release (k3s).** The update is run by the installed release's own updater, which
+  still uses `npm ci`; the lockfile matches this release, so that step works as before. Updates after
+  this one use the new path.
+- No schema, unit or manifest change.
+
 ## 2026-11-21 — v2.112.2: The crawler reads a page whatever its certificate says, as it did before v2.112.0
 
 - **v2.112.0 made the crawler refuse a certificate it could not verify; that is reversed** at the
