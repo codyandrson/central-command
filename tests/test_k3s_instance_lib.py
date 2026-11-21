@@ -375,7 +375,7 @@ def test_the_rebuild_finds_uv_under_the_owners_home(tmp_path: Path, stubs: Path)
     repo, home, log = tmp_path / "r", tmp_path / "h", tmp_path / "called"
     (repo / "web").mkdir(parents=True)
     _exe(home / ".local" / "bin" / "uv", f'echo "uv $VIRTUAL_ENV" >> "{log}"\n')
-    _exe(stubs / "npm", f'echo "npm $1" >> "{log}"\n')
+    _exe(stubs / "npm", f'echo "npm $*" >> "{log}"\n')
     script = "\n".join([
         "set -uo pipefail",
         'note() { printf "%s\\n" "$*"; }',
@@ -388,7 +388,47 @@ def test_the_rebuild_finds_uv_under_the_owners_home(tmp_path: Path, stubs: Path)
     ])
     r = subprocess.run(["bash", "-c", script], env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
     assert r.returncode == 0, r.stderr
-    assert log.read_text().splitlines() == [f"uv {repo}/.venv", "npm ci", "npm run"]
+    # The cockpit resolves package.json's ranges and never reads or writes the lockfile.
+    assert log.read_text().splitlines() == [
+        f"uv {repo}/.venv", "npm install --no-package-lock", "npm run build"]
+
+
+def _npm_gate(stubs: Path, version: str) -> subprocess.CompletedProcess:
+    _exe(stubs / "npm", f'[ "$1" = "-v" ] && echo {version}\n')
+    script = "\n".join([
+        "set -uo pipefail",
+        "RUNAS=()",
+        'OWNER=tester',
+        'die() { echo "DIED at $1: $2"; exit 1; }',
+        _fn("refuse_if_npm_too_old"),
+        "refuse_if_npm_too_old resolve",
+        "echo passed",
+    ])
+    return subprocess.run(["bash", "-c", script], env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
+
+
+def test_the_updater_refuses_npm_10_with_the_fix_named(stubs: Path):
+    r = _npm_gate(stubs, "10.9.9")
+    assert r.returncode == 1 and "passed" not in r.stdout, r.stdout
+    assert "DIED at resolve: npm v10.9.9 is older than 11" in r.stdout
+    assert "npm install -g npm@11" in r.stdout
+    assert "nothing was stopped, merged or restarted" in r.stdout
+
+
+def test_the_updater_accepts_npm_11(stubs: Path):
+    r = _npm_gate(stubs, "11.21.3")
+    assert r.returncode == 0 and "passed" in r.stdout, r.stdout
+
+
+def test_the_npm_gate_runs_before_anything_is_checkpointed_built_or_stopped():
+    """The refusal must land while the services are up: main() asks it before the
+    checkpoint tag, the prebuild and the stop, so an npm-10 host is refused
+    cleanly instead of failing in the rebuild with the services down."""
+    main = UPDATER[UPDATER.index("\nmain() {"):]
+    gate = main.index("refuse_if_npm_too_old resolve")
+    for later in ('PHASE_NOW=checkpoint', 'PHASE_NOW=prebuild', 'PHASE_NOW=db-backup',
+                  'systemctl stop cc-uvicorn', 'git -C "$REPO" merge', "rebuild ||"):
+        assert gate < main.index(later), later
 
 
 def test_a_build_worktree_can_never_become_repo():

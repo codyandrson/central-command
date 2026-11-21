@@ -195,8 +195,9 @@ fi
 exit 0
 ''')
     _exe(b / "npm", f'''#!/usr/bin/env bash
+[[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $* (in $PWD)" >> "{log}"
-[[ "$1" == ci ]] && mkdir -p node_modules
+[[ "$1" == install ]] && mkdir -p node_modules
 exit 0
 ''')
     _exe(b / "node", "#!/usr/bin/env bash\necho v22.11.0\n")
@@ -509,15 +510,15 @@ def test_after_a_clean_acquisition_it_merges_and_runs_the_post_merge_phases_in_o
         assert rows[step][1:3] == ["done", NEW], rows[step]
     assert rows["boot/boot-api"][2] == OLD
     # The stage was sparse: what the acquisition reads, never docs/vendor.
-    stage_cmd = [l for l in dep.log.read_text().splitlines() if l.startswith("npm ci")]
+    stage_cmd = [l for l in dep.log.read_text().splitlines() if l.startswith("npm install --no-package-lock")]
     assert any("/stage/tree/web" in l for l in stage_cmd), stage_cmd
 
 
 @drives_installer
 def test_with_an_operator_provided_npm_tree_the_staged_run_installs_nothing_and_says_so(dep: Dep):
-    """CC_COCKPIT_NPM_PREINSTALLED=1 (v2.106.0): the mirror cannot serve the
-    lockfile, which is why the key is set, so the staged acquisition must not
-    try `npm ci` and stop every update on it. It cannot check the deployment's
+    """CC_COCKPIT_NPM_PREINSTALLED=1 (v2.106.0): the operator builds the tree
+    by hand, which is why the key is set, so the staged acquisition must not
+    run the npm install and stop every update on it. It cannot check the deployment's
     tree against the new package.json either; it WARNs and the update goes on
     to the merge, where the post-merge fetch does that check."""
     _set(dep.repo / ".env", {"CC_COCKPIT_NPM_PREINSTALLED": "1"})
@@ -531,7 +532,7 @@ def test_with_an_operator_provided_npm_tree_the_staged_run_installs_nothing_and_
     assert "WARN cockpit: CC_COCKPIT_NPM_PREINSTALLED=1 — the new release's npm tree was NOT acquired" in r.stdout
     npm = [l for l in dep.log.read_text().splitlines() if l.startswith("npm ")]
     assert not [l for l in npm if "/stage/tree/web" in l], npm
-    assert not [l for l in npm if l.startswith("npm ci")], npm
+    assert not [l for l in npm if l.startswith("npm install")], npm
     assert dep.head() == dep.git("rev-parse", "upstream"), "the warning stopped the merge"
     # After the merge the deployment's own tree is checked, accepted and kept.
     assert any(l.startswith("npm ls --all --offline") for l in npm), npm
@@ -1009,11 +1010,11 @@ def test_the_suite_runs_even_while_the_api_answers(tmp_path: Path, api_up: int):
     assert _rows(tmp_path)["test/test"][1] == "failed"
 
 
-# ── phase_app: a failed `npm ci` is the cockpit step's FAIL ─────────────────
+# ── phase_app: a failed npm install is the cockpit step's FAIL ──────────────
 
 
 @drives_installer
-def test_a_failing_npm_ci_fails_the_cockpit_step_even_when_the_build_would_succeed(tmp_path: Path):
+def test_a_failing_npm_install_fails_the_cockpit_step_even_when_the_build_would_succeed(tmp_path: Path):
     repo = _plain_tree(tmp_path)
     _set(repo / ".env", {"CC_LLM_API_KEY": "sk-already-minted-0000000000", "CC_LLM_PROXY_ADMIN_KEY": ""})
     _ledger(tmp_path, ["check/tree-pristine", "fetch/venv", "fetch/cockpit", "llm/secrets",
@@ -1027,10 +1028,11 @@ def test_a_failing_npm_ci_fails_the_cockpit_step_even_when_the_build_would_succe
     b.mkdir()
     _exe(b / "uv", "#!/usr/bin/env bash\nexit 0\n")
     _exe(b / "node", "#!/usr/bin/env bash\necho v22.11.0\n")
-    # `npm ci` fails; `npm run build` would succeed and leave a complete build.
+    # The install fails; `npm run build` would succeed and leave a complete build.
     _exe(b / "npm", f'''#!/usr/bin/env bash
+[[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $*" >> "{calls.as_posix()}"
-[[ "$1" == ci ]] && exit 1
+[[ "$1" == install ]] && exit 1
 mkdir -p dist server-dist && touch server-dist/index.js
 exit 0
 ''')
@@ -1040,8 +1042,8 @@ exit 0
     assert r.returncode == 1, r.stdout + r.stderr
     assert "FAIL cockpit:" in r.stdout, r.stdout
     assert "PASS cockpit: cockpit built" not in r.stdout
-    assert calls.read_text().split("\n")[0] == "npm ci"
-    assert "npm run build" not in calls.read_text(), "the build ran after a failed npm ci"
+    assert calls.read_text().split("\n")[0] == "npm install --no-package-lock"
+    assert "npm run build" not in calls.read_text(), "the build ran after a failed npm install"
     assert _rows(tmp_path)["app/cockpit"][1] == "failed"
 
 

@@ -744,8 +744,7 @@ STAGE_PATHS=(
                      # central_command/crawler/, the crawler image's context
   pyproject.toml     # the ranges the Python graph is resolved from
   VERSION            # which release the staged run names in its output
-  web/package.json   # what `npm ci` installs, exactly
-  web/package-lock.json
+  web/package.json   # the ranges `npm install --no-package-lock` resolves
 )
 STAGE_DIR=""
 

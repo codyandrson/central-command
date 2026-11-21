@@ -139,7 +139,7 @@ Assumed already true before phase 2:
 - **Repo-root `.env`** populated (see `.env.example`). Different audience: the
   app's own `CC_*` settings. Secrets live only in gitignored environment files:
   these two plus `web/.env` (§6) — all three are gitignored.
-- **uv-managed CPython 3.12** and **NodeSource 22** on the anchor node.
+- **uv-managed CPython 3.12**, **NodeSource 22** and **npm 11 or newer** (`npm install -g npm@11`; Node 22 ships npm 10) on the anchor node.
 - **`socat`** on the anchor node (`sudo apt install socat`) — the loopback relay
   `cc-graph-bolt` runs on it (§6).
 - **No arm64 image builder.** Both locally built images (sandbox, crawler)
@@ -374,7 +374,7 @@ cd <checkout>
 python3 -m venv .venv && source .venv/bin/activate   # uv-managed CPython 3.12
 pip install -e ".[dev,runtime]"
 python scripts/apply_graphiti_patches.py             # AFTER every install
-(cd web && npm install && npm run build)
+(cd web && npm install --no-package-lock && npm run build)   # npm >= 11; resolves package.json, leaves the lockfile alone
 ```
 
 The knowledge graph's extraction and search run inside the API through

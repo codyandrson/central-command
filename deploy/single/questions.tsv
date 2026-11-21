@@ -69,7 +69,7 @@ CC_REGISTRY_MCR	mirrors	Mirror HOST for mcr.microsoft.com (the crawler's Playwri
 CC_PYPI_INDEX_URL	mirrors	PyPI simple-index URL for the venv and the image builds — a full URL like https://mirror.corp.example/pypi/simple; blank = pypi.org	-	n	v_url	-	n
 CC_PYTHON_MIRROR	mirrors	Where uv downloads a CPython 3.12 when this host has none — a full URL, and file:// works; blank = the public python-build-standalone mirror	-	n	v_url	-	n
 CC_NPM_REGISTRY	mirrors	npm registry URL for the cockpit build — a full URL like https://mirror.corp.example/npm/; blank = registry.npmjs.org	-	n	v_url	-	n
-CC_COCKPIT_NPM_PREINSTALLED	mirrors	Use a web/node_modules you installed yourself instead of letting setup run npm ci? Only for a mirror that lacks a version package-lock.json pins: setup then checks the tree with npm ls and never reinstalls or deletes it (1/0)	0	n	v_bool01	-	n
+CC_COCKPIT_NPM_PREINSTALLED	mirrors	Use a web/node_modules you installed yourself (in web/: npm install --no-package-lock) instead of letting setup install it? Setup then checks the tree with npm ls and never reinstalls or deletes it (1/0)	0	n	v_bool01	-	n
 CC_APT_MIRROR	mirrors	Debian archive URL for the two image builds that apt-get — a full URL like https://mirror.corp.example/debian; blank = deb.debian.org	-	n	v_url	-	n
 CC_APT_SECURITY_MIRROR	mirrors	Debian SECURITY archive URL, a separate path on every mirror — a full URL like https://mirror.corp.example/debian-security; blank = build without the security suite	-	n	v_url	-	n
 CC_HF_ENDPOINT	mirrors	Hugging Face mirror URL for the speech engine's model snapshots — a full URL; blank = huggingface.co, and pre-placed snapshots need neither	-	n	v_url	CC_ENABLE_SPEECH=1	n

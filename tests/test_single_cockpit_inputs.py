@@ -1,7 +1,7 @@
 """The cockpit's npm tree and build re-run only when their inputs changed (P5, F12).
 
 The 2026-10-02 Windows acceptance run measured adoption — and every `fetch` /
-`app` re-run — spending ~70 s on `npm ci` and ~66 s on `npm run build` with
+`app` re-run — spending ~70 s on the npm install and ~66 s on `npm run build` with
 nothing in web/ changed. The local images learned the rule in v2.57.0
 (`cc.build-inputs`); the cockpit now records what it was made FROM in the
 STATE dir (`<state>/cockpit.npm-inputs`, `<state>/cockpit.build-inputs` —
@@ -172,14 +172,19 @@ def rig(tmp_path: Path) -> Rig:
     _exe(b / "node", "#!/usr/bin/env bash\necho v22.11.0\n")
     python_shim(b)
     _exe(b / "npm", f'''#!/usr/bin/env bash
+[[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $*" >> "{r.npm_log.as_posix()}"
 case "$1" in
-  ci)  rm -rf node_modules && mkdir -p node_modules ;;
+  install)  rm -rf node_modules && mkdir -p node_modules ;;
   run) rm -rf dist server-dist && mkdir -p dist server-dist && touch server-dist/index.js ;;
 esac
 exit 0
 ''')
     return r
+
+
+# The one command every install path runs: the package.json ranges, no lockfile.
+_INSTALL = "npm install --no-package-lock"
 
 
 def _ok(p: subprocess.CompletedProcess) -> None:
@@ -190,7 +195,7 @@ def _ok(p: subprocess.CompletedProcess) -> None:
 def test_the_first_run_installs_and_builds_and_records_both_in_the_state_dir(rig: Rig):
     f = rig.run("fetch")
     _ok(f)
-    assert rig.npm_calls() == ["npm ci"]
+    assert rig.npm_calls() == [_INSTALL]
     assert "PASS cockpit: npm tree installed" in f.stdout
     a = rig.run("app")
     _ok(a)
@@ -209,7 +214,7 @@ def test_a_second_run_skips_both_and_says_so(rig: Rig):
     f = rig.run("fetch")
     _ok(f)
     assert rig.npm_calls() == [], rig.npm_calls()
-    assert "npm ci was skipped" in f.stdout, f.stdout
+    assert "the install was skipped" in f.stdout, f.stdout
     a = rig.run("app")
     _ok(a)
     assert rig.npm_calls() == [], rig.npm_calls()
@@ -245,19 +250,69 @@ def test_a_crlf_only_difference_is_not_a_change(rig: Rig):
 
 
 @drives_installer
-def test_a_changed_lockfile_reinstalls_and_rebuilds_and_the_plan_says_so(rig: Rig):
+def test_a_changed_package_json_reinstalls_and_rebuilds_and_the_plan_says_so(rig: Rig):
     _ok(rig.run("fetch"))
     _ok(rig.run("app"))
-    write_lf(rig.web / "package-lock.json", '{"name": "web", "lockfileVersion": 3, "x": 1}\n')
+    write_lf(rig.web / "package.json", '{"name": "web", "version": "0.0.0", "x": 1}\n')
     f = rig.run("fetch")
     _ok(f)
     # The probe compares the same record, so the plan predicted the re-run.
     assert "PLAN fetch: WILL RUN" in f.stdout + f.stderr, f.stdout + f.stderr
-    assert rig.npm_calls() == ["npm ci"], rig.npm_calls()
+    assert rig.npm_calls() == [_INSTALL], rig.npm_calls()
     a = rig.run("app")
     _ok(a)
     assert "PLAN app: WILL RUN" in a.stdout + a.stderr
     assert rig.npm_calls() == ["npm run build"], rig.npm_calls()
+
+
+@drives_installer
+def test_the_lockfile_is_not_an_input_of_either_record(rig: Rig):
+    """No install reads package-lock.json, so changing it reinstalls and rebuilds nothing."""
+    _ok(rig.run("fetch"))
+    _ok(rig.run("app"))
+    write_lf(rig.web / "package-lock.json", '{"name": "web", "lockfileVersion": 3, "x": 1}\n')
+    _ok(rig.run("fetch"))
+    assert rig.npm_calls() == [], rig.npm_calls()
+    _ok(rig.run("app"))
+    assert rig.npm_calls() == [], rig.npm_calls()
+
+
+@drives_installer
+def test_a_new_npm_major_reinstalls(rig: Rig):
+    _ok(rig.run("fetch"))
+    _ok(rig.run("app"))
+    _exe(rig.tmp / "bin" / "npm", f'''#!/usr/bin/env bash
+[[ "$1" == "-v" ]] && {{ echo 12.0.0; exit 0; }}
+echo "npm $*" >> "{rig.npm_log.as_posix()}"
+case "$1" in
+  install)  rm -rf node_modules && mkdir -p node_modules ;;
+  run) rm -rf dist server-dist && mkdir -p dist server-dist && touch server-dist/index.js ;;
+esac
+exit 0
+''')
+    f = rig.run("fetch")
+    _ok(f)
+    assert rig.npm_calls() == [_INSTALL], rig.npm_calls()
+
+
+@drives_installer
+def test_npm_10_is_refused_with_the_fix_named_and_nothing_is_installed(rig: Rig):
+    """`npm install --no-package-lock` crashes inside npm 10's resolver on this
+    tree: the drivers gate npm >= 11 the way they gate node >= 22 (a WARN: the
+    API runs without the cockpit), and name the fix."""
+    _exe(rig.tmp / "bin" / "npm", f'''#!/usr/bin/env bash
+[[ "$1" == "-v" ]] && {{ echo 10.9.9; exit 0; }}
+echo "npm $*" >> "{rig.npm_log.as_posix()}"
+exit 0
+''')
+    f = rig.run("fetch")
+    _ok(f)
+    assert "WARN cockpit: npm v10.9.9 is older than 11" in f.stdout, f.stdout
+    assert "npm install -g npm@11" in f.stdout
+    a = rig.run("app")
+    _ok(a)
+    assert "WARN cockpit: npm v10.9.9 is older than 11" in a.stdout, a.stdout
+    assert rig.npm_calls() == [], rig.npm_calls()
 
 
 @drives_installer
@@ -277,6 +332,7 @@ def test_a_failed_build_leaves_no_record_behind(rig: Rig):
     _ok(rig.run("app"))
     write_lf(rig.web / "src" / "main.tsx", "export const a = 2\n")
     _exe(rig.tmp / "bin" / "npm", f'''#!/usr/bin/env bash
+[[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $*" >> "{rig.npm_log.as_posix()}"
 [[ "$1" == run ]] && {{ mkdir -p dist server-dist; touch server-dist/index.js; exit 1; }}
 exit 0
@@ -287,17 +343,16 @@ exit 0
 
 
 # ── the operator-provided tree (CC_COCKPIT_NPM_PREINSTALLED=1, v2.106.0) ─────
-# A mirror that lacks one version the lockfile pins cannot serve `npm ci`, and
-# `npm ci` empties node_modules before it fails. With the key, setup checks the
-# tree the operator installed (`npm ls --all --offline`) and never runs
-# `npm ci` — and never deletes the tree, whatever the check says.
+# An operator who builds web/node_modules by hand hands setup the tree with the
+# key. Setup checks it (`npm ls --all --offline`) and never runs the install —
+# and never deletes the tree, whatever the check says.
 
 _LS = "npm ls --all --offline"
 
 
 def _preinstalled(rig: Rig, *, ls_rc: int = 0, tree: bool = True) -> Path:
     """Turn the key on, with a stub npm whose `ls` answers `ls_rc` and whose
-    `ci` would destroy the tree (as the real one does). Returns the marker file
+    `install` would rewrite the tree. Returns the marker file
     standing for the operator's own install."""
     _set(rig.repo / ".env", {"CC_COCKPIT_NPM_PREINSTALLED": "1"})
     marker = rig.web / "node_modules" / "operators-own.txt"
@@ -305,9 +360,10 @@ def _preinstalled(rig: Rig, *, ls_rc: int = 0, tree: bool = True) -> Path:
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("installed by hand\n")
     _exe(rig.tmp / "bin" / "npm", f'''#!/usr/bin/env bash
+[[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $*" >> "{rig.npm_log.as_posix()}"
 case "$1" in
-  ci)  rm -rf node_modules && mkdir -p node_modules ;;
+  install)  rm -rf node_modules && mkdir -p node_modules ;;
   ls)  if (( {ls_rc} )); then
          echo "npm error code ELSPROBLEMS" >&2
          echo "npm error missing: fancy-canvas@2.1.0, required by lightweight-charts@5.2.1" >&2
@@ -321,7 +377,7 @@ exit 0
 
 
 @drives_installer
-def test_a_provided_tree_is_checked_and_accepted_and_npm_ci_never_runs(rig: Rig):
+def test_a_provided_tree_is_checked_and_accepted_and_the_install_never_runs(rig: Rig):
     marker = _preinstalled(rig)
     f = rig.run("fetch")
     _ok(f)
@@ -336,15 +392,15 @@ def test_a_provided_tree_is_checked_and_accepted_and_npm_ci_never_runs(rig: Rig)
 
 
 @drives_installer
-def test_an_accepted_tree_is_not_checked_again_until_the_lockfile_changes(rig: Rig):
+def test_an_accepted_tree_is_not_checked_again_until_package_json_changes(rig: Rig):
     marker = _preinstalled(rig)
     _ok(rig.run("fetch"))
     f = rig.run("fetch")
     _ok(f)
     assert rig.npm_calls() == [], rig.npm_calls()
     assert "operator-provided web/node_modules was accepted" in f.stdout, f.stdout
-    # A new release's lockfile: the tree is checked against it — never reinstalled.
-    write_lf(rig.web / "package-lock.json", '{"name": "web", "lockfileVersion": 3, "x": 1}\n')
+    # A new release's package.json: the tree is checked against it — never reinstalled.
+    write_lf(rig.web / "package.json", '{"name": "web", "version": "0.0.0", "x": 1}\n')
     f = rig.run("fetch")
     _ok(f)
     assert rig.npm_calls() == [_LS], rig.npm_calls()
@@ -358,7 +414,7 @@ def test_a_provided_tree_that_does_not_fit_fails_and_is_left_alone(rig: Rig):
     assert f.returncode == 1, f.stdout + f.stderr
     assert "FAIL cockpit: CC_COCKPIT_NPM_PREINSTALLED=1 but web/node_modules does not satisfy" in f.stdout
     assert "missing: fancy-canvas@2.1.0" in f.stdout, "the FAIL line does not name npm's finding"
-    assert rig.npm_calls() == [_LS], "a failed check went on to npm ci"
+    assert rig.npm_calls() == [_LS], "a failed check went on to the install"
     assert marker.exists(), "a tree that failed the check was deleted"
     assert not rig.record("npm").exists(), "a refused tree left a record that reads current"
 
@@ -375,7 +431,7 @@ def test_the_key_with_no_tree_fails_instead_of_installing_one(rig: Rig):
 @drives_installer
 def test_app_alone_accepts_a_provided_tree_and_refuses_to_build_on_a_bad_one(rig: Rig):
     """fetch may not have left a record (an older state dir, a tree provided
-    after fetch): app asks the same question and never falls back to npm ci."""
+    after fetch): app asks the same question and never falls back to the install."""
     marker = _preinstalled(rig)
     led = rig.state / "ledger.tsv"
     led.write_text(led.read_text() + f"fetch/cockpit\tdone\t{_version()}\t2026-10-01T00:00:00Z\tnone\t\n")
@@ -385,7 +441,7 @@ def test_app_alone_accepts_a_provided_tree_and_refuses_to_build_on_a_bad_one(rig
     assert marker.exists()
 
     _preinstalled(rig, ls_rc=1)
-    write_lf(rig.web / "package-lock.json", '{"name": "web", "lockfileVersion": 3, "x": 2}\n')
+    write_lf(rig.web / "package.json", '{"name": "web", "version": "0.0.0", "x": 2}\n')
     a = rig.run("app")
     assert a.returncode == 1, a.stdout + a.stderr
     assert rig.npm_calls() == [_LS], "app built against a tree that failed the check"
@@ -399,5 +455,5 @@ def test_without_the_key_a_tree_setup_did_not_install_is_still_reinstalled(rig: 
     marker.parent.mkdir(parents=True)
     marker.write_text("x\n")
     _ok(rig.run("fetch"))
-    assert rig.npm_calls() == ["npm ci"], rig.npm_calls()
+    assert rig.npm_calls() == [_INSTALL], rig.npm_calls()
     assert not marker.exists()

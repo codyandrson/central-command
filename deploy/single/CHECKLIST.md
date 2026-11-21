@@ -40,7 +40,8 @@ what is missing, but it cannot install them.
 - **CPython 3.12 on the host, or `CC_PYTHON_MIRROR`** set to a mirror of
   python-build-standalone. With neither, uv downloads an interpreter from
   github.com; with `CC_AIRGAP=1` that download is impossible and `check` FAILs.
-- **Node.js 22 or newer.** Without it `check` WARNs and the cockpit is not
+- **Node.js 22 or newer, with npm 11 or newer** (`npm install -g npm@11`;
+  Node 22 ships npm 10). Without them `check` WARNs and the cockpit is not
   built — and the cockpit is where the demo is approved.
 - **On Windows: Git Bash**, which runs the `.sh` scripts. `unzip` is not
   needed: `./update.sh` reads a release zip with the same Python the install
@@ -140,7 +141,7 @@ the dry gate: it runs nine sections that change nothing (`./setup.sh check
 19. `fetch/image-sandbox`: Build the agent sandbox image, when `CC_ENABLE_SANDBOX=1`.
 20. `fetch/image-crawler`: Build the browser-rendering crawl image, when `CC_ENABLE_CRAWLER=1`.
 21. `fetch/venv`: Create the install's CPython 3.12 virtual environment and resolve the Python graph.
-22. `fetch/cockpit`: Install the cockpit's npm tree from the configured registry — skipped while web/node_modules was installed from this same package-lock.json. With `CC_COCKPIT_NPM_PREINSTALLED=1` nothing is installed: the tree you provided is checked with npm ls and left as it is.
+22. `fetch/cockpit`: Install the cockpit's npm tree from the configured registry with npm install --no-package-lock (it resolves web/package.json's ranges and reads no lockfile; npm 11 or newer) — skipped while web/node_modules was installed from this same package.json, node major and npm major. With `CC_COCKPIT_NPM_PREINSTALLED=1` nothing is installed: the tree you provided is checked with npm ls and left as it is.
 
 ### `llm`
 

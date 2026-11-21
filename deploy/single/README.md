@@ -266,7 +266,8 @@ below), pulls the resolved refs, builds
 the local images (sandbox, crawler — each when enabled) with your mirrors
 passed in as build-args, resolves the Python dependencies (graphiti-core, the
 graph client, among them — from `CC_PYPI_INDEX_URL` like the rest), and runs the cockpit's
-`npm ci`. Each artifact it cannot get is a `FAIL` naming the `.env` seam that
+`npm install --no-package-lock` (npm 11 or newer; it resolves `web/package.json`'s ranges and
+reads no lockfile). Each artifact it cannot get is a `FAIL` naming the `.env` seam that
 governs it (`CC_REGISTRY_*`, `CC_APT_MIRROR`, `CC_PYPI_INDEX_URL`,
 `CC_NPM_REGISTRY`, …), and the phase exits 1 (v2.55.0 — a `USERACTION` is
 reserved for a seam only you can fill). Fix the mirror and run `./setup.sh` again — it resumes from the ledger at `fetch`,

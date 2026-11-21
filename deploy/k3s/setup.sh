@@ -122,6 +122,24 @@ wait_http() { # wait_http <url> <seconds>
   done
 }
 
+# 0 and silent when npm can install the cockpit (`npm install
+# --no-package-lock` needs npm >= 11: npm 10's resolver crashes on this
+# project's tree); 1 and the reason, fix named, when it cannot. The single-node
+# profile's twin is cc_npm_refusal in deploy/env-lib.sh.
+npm_refusal() {
+  local nv m
+  nv="$(npm -v 2>/dev/null)"; nv="${nv//$'\r'/}"; nv="${nv%%$'\n'*}"
+  if [[ -z "$nv" ]]; then
+    printf 'npm not found'
+  else
+    m="${nv%%.*}"
+    [[ "$m" =~ ^[0-9]+$ ]] && (( m >= 11 )) && return 0
+    printf 'npm v%s is older than 11' "$nv"
+  fi
+  printf ' — the cockpit needs npm >= 11; fix: npm install -g npm@11'
+  return 1
+}
+
 # ── .env helpers (same three as the single-node driver) ─────────────────────
 load_env() {
   [[ -f "$ENV_FILE" ]] || { fail "answer-file" "$ENV_FILE not found — run: ./deploy/k3s/init-env.sh"; return 1; }
@@ -575,6 +593,12 @@ phase_preflight() {
     local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
     if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
       pass "node-version" "node v$nv"
+      local npmwhy
+      if npmwhy="$(npm_refusal)"; then
+        pass "npm-version" "npm v$(npm -v 2>/dev/null)"
+      else
+        warn "npm-version" "$npmwhy; the cockpit build will be skipped (the API still runs)"
+      fi
     else
       warn "node-version" "node v$nv is older than 22 — the cockpit build will be skipped (the API still runs)"
     fi
@@ -1182,10 +1206,12 @@ phase_app() {
     pass "web-speech-key" "web/.env OPENAI_API_KEY already set"
   fi
 
-  local nv=""
+  local nv="" npmwhy=""
   command -v node >/dev/null 2>&1 && { nv="$(node -v 2>/dev/null)"; nv="${nv#v}"; }
-  if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
-    step "cockpit" "cockpit built (web/)" in_web bash -c 'npm ci && npm run build' || return 1
+  if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )) && npmwhy="$(npm_refusal)"; then
+    step "cockpit" "cockpit built (web/)" in_web bash -c 'npm install --no-package-lock && npm run build' || return 1
+  elif [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
+    warn "cockpit" "$npmwhy; cockpit not built, the API runs without it"
   else
     warn "cockpit" "node ${nv:-not found} is not >= 22 — cockpit not built; the API runs without it"
   fi

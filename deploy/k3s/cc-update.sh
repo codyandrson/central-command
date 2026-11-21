@@ -157,10 +157,30 @@ rebuild() { # as the checkout's owner, never root
   "${RUNAS[@]}" env VIRTUAL_ENV="$REPO/.venv" PATH="$OWNER_HOME/.local/bin:$PATH" \
     bash -c "cd '$REPO' && uv pip install -e '.[dev,runtime]'" || return 1
   patch_graphiti
-  # `npm ci`, never `npm install`: install REWRITES package-lock.json when its
-  # resolution differs (2026-08-29: one metadata line), leaving a dirty tracked
-  # file that makes the NEXT run die at resolve's clean-tree check.
-  "${RUNAS[@]}" bash -c "cd '$REPO/web' && npm ci && npm run build" || return 1
+  # The cockpit's dependencies resolve from web/package.json's ranges, never
+  # from the lockfile: `--no-package-lock` neither reads nor writes
+  # package-lock.json. The flag is load-bearing for a second reason — a plain
+  # `npm install` REWRITES the lockfile when its resolution differs
+  # (2026-08-29: one metadata line), leaving a dirty tracked file that makes the
+  # NEXT run die at resolve's clean-tree check. Needs npm >= 11 (checked in
+  # main() before anything is touched); the rollback's rebuild runs the same
+  # line on the rolled-back tree, whose package.json it resolves the same way.
+  "${RUNAS[@]}" bash -c "cd '$REPO/web' && npm install --no-package-lock && npm run build" || return 1
+}
+
+# The npm the rebuild will run (as the checkout's owner, with the owner's PATH)
+# must be >= 11: `npm install --no-package-lock` crashes inside npm 10's
+# resolver on this project's tree. Checked BEFORE anything is stopped, merged
+# or built, so a host with npm 10 refuses the update with the fix named instead
+# of failing in the rebuild with the services down.
+refuse_if_npm_too_old() { # refuse_if_npm_too_old <phase>
+  local nv
+  nv="$("${RUNAS[@]}" npm -v 2>/dev/null)"; nv="${nv//$'\r'/}"; nv="${nv%%$'\n'*}"
+  if [[ -z "$nv" ]]; then
+    die "$1" "npm not found for $OWNER — the cockpit needs npm >= 11; fix: npm install -g npm@11 — nothing was stopped, merged or restarted"
+  elif ! [[ "${nv%%.*}" =~ ^[0-9]+$ ]] || (( ${nv%%.*} < 11 )); then
+    die "$1" "npm v$nv is older than 11 — the cockpit needs npm >= 11; fix: npm install -g npm@11 — nothing was stopped, merged or restarted"
+  fi
 }
 
 # The carried graphiti-core fixes (deploy/graphiti-patches/, design record
@@ -582,6 +602,7 @@ main() {
     die resolve "v$TARGET_VERSION requires upgrading from >= $minfrom (installed $CUR_VERSION) — apply the intermediate release first"
   fi
   skills_review_gate
+  refuse_if_npm_too_old resolve
 
   # Twice: here so the common refusal costs nothing, and again right before
   # the stop, because prebuild + dumps leave a window a new run can start in.

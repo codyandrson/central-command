@@ -462,7 +462,7 @@ when a matching file is read.
   `phase_test` no longer skips itself when the API is up; a `done`
   `test/test` row at this version is what skips it in the full run. A `step`
   whose body is `A || B; C` hides A's failure behind C's exit status — split
-  it (the cockpit's `npm ci` then `npm run build` was one), and a `bash -c`
+  it (the cockpit's npm install then `npm run build` was one), and a `bash -c`
   pipe needs its own `set -o pipefail`.
 - **A locally built image carries the hash of what it was built from, and
   "the tag exists" is not "done"** (v2.57.0). The local tags are fixed
@@ -569,27 +569,27 @@ when a matching file is read.
   is recorded into the import commit's index as a 120000 entry, so
   `upstream` carries the release's links on every host.
 - **The cockpit rebuilds only when its inputs changed** (v2.58.2). Every
-  re-run spent ~70 s on `npm ci` and ~66 s on `npm run build` with nothing in
-  `web/` changed. `<state>/cockpit.npm-inputs` (the lockfile + node's major)
-  and `<state>/cockpit.build-inputs` (the files and trees `npm run build`
-  reads, CR-stripped) are written after success and deleted before the
-  command runs; `cc_cockpit_current` is the one question the two steps and
-  their probes ask. A staged run never reads or writes the deployment's
-  records.
+  re-run spent ~70 s on the npm install and ~66 s on `npm run build` with
+  nothing in `web/` changed. `<state>/cockpit.npm-inputs` (`web/package.json`
+  + node's major + npm's major) and `<state>/cockpit.build-inputs` (the files
+  and trees `npm run build` reads, CR-stripped) are written after success and
+  deleted before the command runs; `cc_cockpit_current` is the one question the
+  two steps and their probes ask. A staged run never reads or writes the
+  deployment's records. The install is `npm install --no-package-lock`
+  (ranges, no lockfile read or written; npm >= 11, which every driver gates the
+  way it gates node >= 22 — npm 10's resolver crashes on this tree).
 - **`CC_COCKPIT_NPM_PREINSTALLED=1` is the only way setup accepts an npm tree
-  it did not install, and it never deletes one** (v2.106.0). A mirror lacking
-  one pinned version stopped a whole install (2026-11-20 work-site report):
-  `npm ci` empties `web/node_modules` before it fails, the record that skips
-  it was written only after it succeeded, and an edited lockfile fails the
-  pristine-tree check, so there was no route. With the key, fetch and app
+  it did not install, and it never deletes one** (v2.106.0). It began as the
+  route round a mirror lacking one version the lockfile pinned (2026-11-20
+  work-site report); installs now resolve ranges, and the key stays for an
+  operator who builds `web/node_modules` by hand. With the key, fetch and app
   call `cockpit_adopt_preinstalled`: `npm ls --all --offline` (`--all`, or a
-  missing transitive dependency reads fine) accepts or FAILs, and nothing
-  runs `npm ci`. Accepted is a WARN, because the versions are the operator's
-  and not the lockfile's pins. Keep it opt-in and off by default: adopting
-  any tree that happens to be there would quietly replace "the deployment is
-  the release" with "whatever fits the ranges" on every host. A staged run
-  cannot check the tree against the new `package.json`, WARNs, and leaves the
-  check to the post-merge fetch.
+  missing transitive dependency reads fine) accepts or FAILs, and nothing runs
+  the install. Accepted is a WARN, because the versions are the operator's.
+  Keep it opt-in and off by default: adopting any tree that happens to be there
+  would quietly replace "setup installs the cockpit" with "whatever is on the
+  disk" on every host. A staged run cannot check the tree against the new
+  `package.json`, WARNs, and leaves the check to the post-merge fetch.
 - **The mail self-check applies when something in the app READS mail — never
   on the n8n flag or the façade token** (v2.58.2, finding F4 of the
   2026-10-02 laptop run). `make-secrets.sh` generates `CC_EMAIL_FACADE_TOKEN`

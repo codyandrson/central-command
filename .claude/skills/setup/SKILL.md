@@ -150,7 +150,7 @@ the folder, which is a step of the checklist's **Before you start**.)
   tells you, before you wait, which phases a changed `.env` key will re-run.
 - **Protocol lines** on stdout, `PASS|WARN|FAIL|USERACTION <check-name>:
   <message>`; detail on stderr; everything appended to `<state>/setup-log.txt`.
-  Read every line — a WARN is not nothing (`node-version` means the cockpit is
+  Read every line — a WARN is not nothing (`node-version` or `npm-version` means the cockpit is
   not built, and the demo is approved in the cockpit).
 - **The ledger table**, printed at the end and at every stop: one row per
   step, `done`, `failed` (with the reason), `pending`, `gate` (waiting on the

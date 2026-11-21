@@ -782,16 +782,18 @@ cc_resolve_py() {
 # and `<state>/cockpit.build-inputs` — never inside web/ (nothing is written
 # inside the checkout, D7).
 #
-#   npm   the lockfile (CR-stripped) and node's MAJOR version: `npm ci` installs
-#         exactly the lockfile, and a new major is a new native-module ABI
-#         (the cockpit carries a native whisper addon), which only a reinstall
-#         rebuilds.
+#   npm   web/package.json (CR-stripped), node's MAJOR and npm's MAJOR: the
+#         install is `npm install --no-package-lock`, which resolves the
+#         package.json ranges and reads no lockfile, so those are what decide
+#         it. A new node major is a new native-module ABI (the cockpit carries
+#         a native whisper addon), which only a reinstall rebuilds; npm's major
+#         decides how the ranges resolve (npm >= 11 is required).
 #   build what `npm run build` reads — `tsc -b` (tsconfig.json and its four
 #         referenced projects: config/tsconfig.{app,node,server,scripts}.json
 #         over src/, vite.config.ts, server/ and scripts/), `vite build`
 #         (index.html, vite.config.ts, package.json's version, src/, public/)
 #         and `build:server` (config/tsconfig.server.json and
-#         config/tsconfig.bin.json over server/ and bin/) — plus the lockfile,
+#         config/tsconfig.bin.json over server/ and bin/) — plus package.json,
 #         because the installed dependencies are compiled in. The config FILES
 #         are named one by one rather than hashing config/: tsc writes its
 #         .tsbuildinfo beside a config, and a hash that the build itself
@@ -812,19 +814,49 @@ cc__cockpit_file_line() { # cc__cockpit_file_line <repo-root> <web-relative file
   fi
 }
 
+# The cockpit needs npm >= 11: `npm install --no-package-lock`
+# crashes inside npm 10's resolver on this project's tree (measured on 10.9.9,
+# 2026-11-21), and npm 11's is the one it was run against. Prints npm's major
+# version; 1 when npm is absent or answers nothing numeric.
+cc_npm_min_major=11
+cc_npm_major() {
+  local v
+  v="$(npm -v 2>/dev/null)" || return 1
+  v="${v//$'\r'/}"; v="${v%%$'\n'*}"
+  [[ "${v%%.*}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "${v%%.*}"
+}
+
+# 0 and silent when npm can install the cockpit; 1 and the reason, fix named,
+# when it cannot. One sentence for every driver's WARN/FAIL.
+cc_npm_refusal() {
+  local nv m
+  nv="$(npm -v 2>/dev/null)"; nv="${nv//$'\r'/}"; nv="${nv%%$'\n'*}"
+  if [[ -z "$nv" ]]; then
+    printf 'npm not found'
+  else
+    m="${nv%%.*}"
+    [[ "$m" =~ ^[0-9]+$ ]] && (( m >= cc_npm_min_major )) && return 0
+    printf 'npm v%s is older than %s' "$nv" "$cc_npm_min_major"
+  fi
+  printf ' — the cockpit needs npm >= %s; fix: npm install -g npm@%s' "$cc_npm_min_major" "$cc_npm_min_major"
+  return 1
+}
+
 cc_cockpit_npm_inputs() { # cc_cockpit_npm_inputs <repo-root>  -> the hash; 1 = unknowable
-  local root="$1" nv line
-  [[ -f "$root/web/package-lock.json" ]] || return 1
+  local root="$1" nv nm line
+  [[ -f "$root/web/package.json" ]] || return 1
   nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
-  line="$(cc__cockpit_file_line "$root" package-lock.json)" || return 1
-  printf 'cc-cockpit-npm/1\nnode-major %s\n%s\n' "${nv%%.*}" "$line" | cc_sha256_stdin
+  nm="$(cc_npm_major)" || return 1
+  line="$(cc__cockpit_file_line "$root" package.json)" || return 1
+  printf 'cc-cockpit-npm/2\nnode-major %s\nnpm-major %s\n%s\n' "${nv%%.*}" "$nm" "$line" | cc_sha256_stdin
 }
 
 cc_cockpit_build_inputs() { # cc_cockpit_build_inputs <repo-root>  -> the hash; 1 = unknowable
   local root="$1" f d payload="cc-cockpit-build/1"$'\n' line
   # The list above, as data — web-relative. A new build input goes HERE, or
   # the cockpit silently stops rebuilding when it changes.
-  local -a files=(package.json package-lock.json index.html vite.config.ts tsconfig.json
+  local -a files=(package.json index.html vite.config.ts tsconfig.json
     config/tsconfig.app.json config/tsconfig.node.json config/tsconfig.server.json
     config/tsconfig.scripts.json config/tsconfig.bin.json)
   local -a dirs=(src server public bin scripts)
@@ -847,8 +879,8 @@ cc_cockpit_record_file() { # cc_cockpit_record_file <state-dir> <npm|build>
 
 # One hash per kind and tree per PROCESS: the plan's probe, the phase's skip
 # decision, the probe after the phase and the record all ask the same
-# question, and nothing a run does between them changes the inputs (`npm ci`
-# writes node_modules, never the lockfile; the build writes dist/ and
+# question, and nothing a run does between them changes the inputs (the
+# install writes node_modules, never package.json; the build writes dist/ and
 # server-dist/). Sets _CC_COCKPIT_HASH; returns 1 when the hash is unknowable.
 cc__cockpit_hash() { # cc__cockpit_hash <npm|build> <repo-root>
   local h
@@ -891,26 +923,24 @@ cc_cockpit_record() { # cc_cockpit_record <state-dir> <npm|build> <repo-root>
   printf '%s\n' "$_CC_COCKPIT_HASH" >"$f.tmp.$$" && mv -f "$f.tmp.$$" "$f"
 }
 
-# Forget the record BEFORE the work starts: `npm ci` deletes node_modules and
-# then fills it, and the build deletes server-dist first, so a run that dies
-# half-way leaves the artifact present but partial — and a record still
-# matching the inputs would then skip the repair forever.
+# Forget the record BEFORE the work starts: an install rewrites node_modules
+# and the build deletes server-dist first, so a run that dies half-way leaves
+# the artifact present but partial — and a record still matching the inputs
+# would then skip the repair forever.
 cc_cockpit_forget() { # cc_cockpit_forget <state-dir> <npm|build>
   rm -f "$(cc_cockpit_record_file "$1" "$2")"
 }
 
-# THE OPERATOR-PROVIDED TREE (CC_COCKPIT_NPM_PREINSTALLED=1, v2.106.0). `npm ci`
-# installs exactly the lockfile's pins, and a mirror that lacks one pinned
-# version cannot serve it whatever CC_NPM_REGISTRY says (2026-11-20 work-site
-# report: one missing patch release stopped the whole install). Until then
-# there was no way to hand setup a tree it had not installed itself: `npm ci`
-# empties node_modules BEFORE it fails, and the record that lets it be skipped
-# was written only after it succeeded. With the key set, setup never runs
-# `npm ci`: it accepts web/node_modules when `npm ls --all --offline` finds
-# every declared dependency present, at a version inside the range its
-# dependent's package.json declares, with nothing extraneous — and never
-# deletes it otherwise. That is a weaker promise than the lockfile's (ranges,
-# not pins), which is why it is the operator's explicit, per-deployment
+# THE OPERATOR-PROVIDED TREE (CC_COCKPIT_NPM_PREINSTALLED=1, v2.106.0). Setup
+# installs the cockpit with `npm install --no-package-lock`, which resolves
+# web/package.json's ranges against the configured registry; an operator who
+# builds web/node_modules by hand (a registry setup cannot reach, a version
+# found some other way) hands setup that tree with this key. With the key set
+# setup never runs the install: it accepts web/node_modules when
+# `npm ls --all --offline` finds every declared dependency present, at a
+# version inside the range its dependent's package.json declares, with nothing
+# extraneous — and never deletes it otherwise. The versions are then the
+# operator's, which is why it is that operator's explicit, per-deployment
 # decision and off by default. `--all` is load-bearing: without it npm ls
 # checks the top level only and a missing transitive dependency reads fine.
 # `--offline`: the check reads the disk and nothing else.

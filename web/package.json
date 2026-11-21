@@ -114,8 +114,8 @@
   },
   "allowScripts": {
     "esbuild": true,
-    "node-pty@1.1.0": true,
-    "@fugood/whisper.node@1.0.16": true,
+    "node-pty": true,
+    "@fugood/whisper.node": true,
     "msw": true
   },
   "overrides": {

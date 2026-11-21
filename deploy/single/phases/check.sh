@@ -392,6 +392,12 @@ preflight_host() {
     local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
     if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
       pass "node-version" "node v$nv"
+      local npmwhy
+      if npmwhy="$(cc_npm_refusal)"; then
+        pass "npm-version" "npm v$(npm -v 2>/dev/null)"
+      else
+        warn "npm-version" "$npmwhy; the cockpit build will be skipped (the API still runs)"
+      fi
     else
       warn "node-version" "node v$nv is older than 22 — the cockpit build will be skipped"
     fi

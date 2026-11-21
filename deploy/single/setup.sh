@@ -1261,18 +1261,18 @@ catch_up_images() { # catch_up_images <check-name> [service...]
 in_repo() { ( cd "$REPO_ROOT" && "$@" ); }
 in_web()  { ( cd "$REPO_ROOT/web" && "$@" ); }
 
-# Accept the operator's own web/node_modules instead of running `npm ci`
+# Accept the operator's own web/node_modules instead of running the npm install
 # (CC_COCKPIT_NPM_PREINSTALLED=1 — deploy/env-lib.sh says why the seam exists
 # and what `npm ls` does and does not promise). The ONE adoption fetch/cockpit
 # and app/cockpit both call. It never deletes or repairs the tree: a tree that
 # does not satisfy web/package.json is a FAIL naming npm's own findings, and
 # the operator's tree is exactly as they left it. Accepted is a WARN, once per
-# lockfile: the deployment's dependency versions are then the operator's, not
-# the release's pins, and that should be on the record every time it is decided.
+# package.json: the deployment's dependency versions are then the operator's,
+# and that should be on the record every time it is decided.
 cockpit_adopt_preinstalled() {
   local problems first
   if [[ ! -d "$REPO_ROOT/web/node_modules" ]]; then
-    fail "cockpit" "CC_COCKPIT_NPM_PREINSTALLED=1 but web/node_modules is absent — install the tree yourself (in web/: npm install --no-package-lock, which honours package.json's ranges and leaves package-lock.json as released), or unset the key and setup runs npm ci"
+    fail "cockpit" "CC_COCKPIT_NPM_PREINSTALLED=1 but web/node_modules is absent — install the tree yourself (in web/: npm install --no-package-lock, which honours package.json's ranges), or unset the key and setup installs it itself"
     return 1
   fi
   cc_cockpit_forget "$STATE_DIR" npm
@@ -1280,12 +1280,12 @@ cockpit_adopt_preinstalled() {
   if problems="$(cc_cockpit_tree_problems "$REPO_ROOT")"; then
     cc_cockpit_record "$STATE_DIR" npm "$REPO_ROOT" \
       || warn "cockpit" "could not record the npm tree's inputs in $(cc_cockpit_record_file "$STATE_DIR" npm) — the next run checks it again"
-    warn "cockpit" "npm tree ACCEPTED AS PROVIDED (CC_COCKPIT_NPM_PREINSTALLED=1): npm ls finds every dependency web/package.json declares, inside its declared range — npm ci was NOT run, so installed versions may differ from package-lock.json's pins. Unset the key to return to the lockfile"
+    warn "cockpit" "npm tree ACCEPTED AS PROVIDED (CC_COCKPIT_NPM_PREINSTALLED=1): npm ls finds every dependency web/package.json declares, inside its declared range — the install was NOT run, so the installed versions are the ones you chose. Unset the key and setup installs the tree itself"
     return 0
   fi
   [[ -n "$problems" ]] && printf '%s\n' "$problems" >&2
   first="$(printf '%s\n' "$problems" | grep -E 'missing:|invalid:|extraneous:' | head -n 3 | sed -e 's/^npm \(error\|ERR!\) //' | tr '\n' ';')"
-  fail "cockpit" "CC_COCKPIT_NPM_PREINSTALLED=1 but web/node_modules does not satisfy web/package.json — ${first:-npm ls --all --offline failed; its output is on stderr} The tree was left as it is: repair it (in web/: npm install --no-package-lock) or unset the key and setup runs npm ci"
+  fail "cockpit" "CC_COCKPIT_NPM_PREINSTALLED=1 but web/node_modules does not satisfy web/package.json — ${first:-npm ls --all --offline failed; its output is on stderr} The tree was left as it is: repair it (in web/: npm install --no-package-lock) or unset the key and setup installs it itself"
   return 1
 }
 
@@ -2060,14 +2060,16 @@ p_venv() {
   venv_python >/dev/null
 }
 
-# node >= 22, i.e. is the cockpit in scope on this host at all? The phases WARN
-# and carry on without it, so every cockpit row probes 0 when it is absent.
+# node >= 22 and npm >= 11, i.e. is the cockpit in scope on this host at all?
+# The phases WARN and carry on without it, so every cockpit row probes 0 when it
+# is absent.
 p_node_ok() {
   command -v node >/dev/null 2>&1 || return 1
   local nv
   nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
   [[ "${nv%%.*}" =~ ^[0-9]+$ ]] || return 1
-  (( ${nv%%.*} >= 22 ))
+  (( ${nv%%.*} >= 22 )) || return 1
+  cc_npm_refusal >/dev/null
 }
 # The LOCAL images: done means the tag is present AND its build-inputs
 # label equals this tree's (v2.57.0, local_image_state). That comparison is

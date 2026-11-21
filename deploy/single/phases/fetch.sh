@@ -46,7 +46,7 @@ CC_PHASE_FETCH_LOADED=1
 # registry (resolve-images.sh: constraint/lock/resolve, design record D2) and
 # then pulling the resolved ref, a build by building it (podman caches layers,
 # so a retry costs the failing layer), the Python graph by resolving it, the
-# cockpit by `npm ci`. Each failure names the seam that governs it, and the
+# cockpit by `npm install --no-package-lock`. Each failure names the seam that governs it, and the
 # phase ends in USERACTION (exit 3): the operator fixes the mirror seam
 # (deploy/discover.sh maps what the network can reach) and re-runs — acquired
 # artifacts fast-forward. Nothing falls back on its own — a fallback chosen at
@@ -236,7 +236,7 @@ phase_fetch() {
     resolve_python_deps
   fi
 
-  # Cockpit: `npm ci` is the acquisition; the build itself is the app phase's.
+  # Cockpit: the npm install is the acquisition; the build itself is the app phase's.
   fetch_cockpit
 
   if (( FAILS )); then
@@ -252,12 +252,17 @@ phase_fetch() {
   return 0
 }
 
-# The cockpit's acquisition: its npm tree, when node 22+ is there to use it.
+# The cockpit's acquisition: its npm tree, when node 22+ and npm 11+ are there
+# to use it.
 fetch_cockpit() {
   if command -v node >/dev/null 2>&1; then
-    local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
+    local nv npmwhy; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
     if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
-      fetch_cockpit_npm
+      if npmwhy="$(cc_npm_refusal)"; then
+        fetch_cockpit_npm
+      else
+        warn "cockpit" "$npmwhy; cockpit not fetched, the API runs without it"
+      fi
     else
       warn "cockpit" "node v$nv is older than 22 — cockpit not fetched; the API runs without it"
     fi
@@ -266,30 +271,32 @@ fetch_cockpit() {
   fi
 }
 
-# `npm ci` only when the tree is not already the lockfile's (P5, F12): the
-# 2026-10-02 Windows run spent ~70 s reinstalling an unchanged tree on every
-# fetch, adoption included. CURRENT means web/node_modules is there AND
-# `<state>/cockpit.npm-inputs` equals the hash of the lockfile and node's major
-# version now (deploy/env-lib.sh's cc_cockpit_current — the same question
-# p_cockpit_npm asks, so the plan agrees). The record is dropped BEFORE
-# `npm ci` starts (it empties node_modules first, and a run killed half-way
-# must not read current) and written only after it succeeded. A STAGED run
-# (update.sh apply's acquisition) installs into a throwaway tree, so it never
-# skips on, and never writes, the deployment's record — the post-merge fetch
-# would otherwise skip an install the new lockfile needs.
+# The install runs only when the tree is not already what it would produce
+# (P5, F12): the 2026-10-02 Windows run spent ~70 s reinstalling an unchanged
+# tree on every fetch, adoption included. CURRENT means web/node_modules is
+# there AND `<state>/cockpit.npm-inputs` equals the hash of web/package.json,
+# node's major and npm's major now (deploy/env-lib.sh's cc_cockpit_current —
+# the same question p_cockpit_npm asks, so the plan agrees). The install is
+# `npm install --no-package-lock`: it resolves package.json's ranges against
+# the configured registry and reads no lockfile. The record is dropped BEFORE
+# it starts (a run killed half-way must not read current) and written only
+# after it succeeded. A STAGED run (update.sh apply's acquisition) installs
+# into a throwaway tree, so it never skips on, and never writes, the
+# deployment's record — the post-merge fetch would otherwise skip an install
+# the new package.json needs.
 #
-# CC_COCKPIT_NPM_PREINSTALLED=1 (v2.106.0) replaces `npm ci` with an offline
+# CC_COCKPIT_NPM_PREINSTALLED=1 (v2.106.0) replaces the install with an offline
 # check of the operator's own tree (setup.sh's cockpit_adopt_preinstalled): the
-# install that empties node_modules never starts. A STAGED run cannot check
+# install never starts. A STAGED run cannot check
 # that tree against the NEW release's package.json (the tree is the
 # deployment's, the manifest is the staged copy's, and npm ls needs both in
 # one directory), so it says so and the post-merge fetch does the check.
 fetch_cockpit_npm() {
   if (( ! STAGED )) && cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT"; then
     if cc_cockpit_preinstalled; then
-      pass "cockpit" "npm tree current — the operator-provided web/node_modules was accepted against this package-lock.json (and this node major), so it was not checked again"
+      pass "cockpit" "npm tree current — the operator-provided web/node_modules was accepted against this package.json (and this node and npm major), so it was not checked again"
     else
-      pass "cockpit" "npm tree current — web/node_modules was installed from this package-lock.json (and this node major), so npm ci was skipped"
+      pass "cockpit" "npm tree current — web/node_modules was installed from this package.json (and this node and npm major), so the install was skipped"
     fi
     return 0
   fi
@@ -302,17 +309,17 @@ fetch_cockpit_npm() {
     return 0
   fi
   (( STAGED )) || cc_cockpit_forget "$STATE_DIR" npm
-  if in_web npm ci >&2; then
+  if in_web npm install --no-package-lock >&2; then
     (( STAGED )) || cc_cockpit_record "$STATE_DIR" npm "$REPO_ROOT" \
       || warn "cockpit" "could not record the npm tree's inputs in $(cc_cockpit_record_file "$STATE_DIR" npm) — the next run reinstalls it"
     pass "cockpit" "npm tree installed from ${CC_NPM_REGISTRY:-registry.npmjs.org}"
   else
-    fail "cockpit" "npm ci failed — seam: CC_NPM_REGISTRY"
+    fail "cockpit" "npm install --no-package-lock failed — seam: CC_NPM_REGISTRY"
   fi
 }
 
-# Present AND installed from this lockfile: a changed package-lock.json (or a
-# new node major) reads false, so the plan says WILL RUN and the row re-runs.
+# Present AND installed from this package.json: a changed package.json (or a
+# new node or npm major) reads false, so the plan says WILL RUN and the row re-runs.
 p_cockpit_npm() {
   p_node_ok || return 0
   cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT"

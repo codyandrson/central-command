@@ -321,12 +321,12 @@ phase_app() {
   # the default ("the operator") is correct until someone is asked.
 
   if command -v node >/dev/null 2>&1; then
-    local nv; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
-    if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
-      # fetch already ran `npm ci`; only a tree it did not leave gets one here.
+    local nv npmwhy; nv="$(node -v 2>/dev/null)"; nv="${nv#v}"
+    if [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )) && npmwhy="$(cc_npm_refusal)"; then
+      # fetch already ran the npm install; only a tree it did not leave gets one here.
       # TWO steps, never one `A || B; C` body (2026-10-01 design record, D5):
-      # `[[ -d node_modules ]] || npm ci; npm run build` handed the step the
-      # BUILD's exit status, so a failed `npm ci` followed by a build that
+      # `[[ -d node_modules ]] || npm install; npm run build` handed the step the
+      # BUILD's exit status, so a failed install followed by a build that
       # happened to succeed against a stale tree was a PASS. Both carry the
       # check-name `cockpit`, so a failed install is what app/cockpit's ledger
       # row records, whatever its probe would read.
@@ -344,13 +344,13 @@ phase_app() {
         cockpit_adopt_preinstalled || return 1
       elif ! cc_cockpit_current "$STATE_DIR" npm "$REPO_ROOT"; then
         cc_cockpit_forget "$STATE_DIR" npm
-        step "cockpit" "cockpit npm tree installed (fetch had not left one from this lockfile)" \
-          in_web npm ci || return 1
+        step "cockpit" "cockpit npm tree installed (fetch had not left one from this package.json)" \
+          in_web npm install --no-package-lock || return 1
         cc_cockpit_record "$STATE_DIR" npm "$REPO_ROOT" \
           || warn "cockpit" "could not record the npm tree's inputs in $(cc_cockpit_record_file "$STATE_DIR" npm) — the next run reinstalls it"
       fi
       if cc_cockpit_current "$STATE_DIR" build "$REPO_ROOT"; then
-        pass "cockpit" "cockpit build current — web/dist and web/server-dist were built from these inputs (web/src, web/server, the lockfile, the build configs), so npm run build was skipped"
+        pass "cockpit" "cockpit build current — web/dist and web/server-dist were built from these inputs (web/src, web/server, package.json, the build configs), so npm run build was skipped"
       else
         cc_cockpit_forget "$STATE_DIR" build
         step "cockpit" "cockpit built (web/) — its inputs recorded, so an unchanged tree skips the next build" \
@@ -358,6 +358,8 @@ phase_app() {
         cc_cockpit_record "$STATE_DIR" build "$REPO_ROOT" \
           || warn "cockpit" "could not record the cockpit build's inputs in $(cc_cockpit_record_file "$STATE_DIR" build) — the next run rebuilds it"
       fi
+    elif [[ "${nv%%.*}" =~ ^[0-9]+$ ]] && (( ${nv%%.*} >= 22 )); then
+      warn "cockpit" "$npmwhy; cockpit not built, the API runs without it"
     else
       warn "cockpit" "node v$nv is older than 22 — cockpit not built; the API runs without it"
     fi
@@ -390,7 +392,7 @@ p_install() {
 
 # Built AND built from this tree: web/server-dist/index.js and web/dist present,
 # and `<state>/cockpit.build-inputs` equal to the hash of the build's inputs
-# now — so a changed source file or lockfile reads false and the row re-runs.
+# now — so a changed source file or package.json reads false and the row re-runs.
 p_cockpit_build() {
   p_node_ok || return 0
   cc_cockpit_current "$STATE_DIR" build "$REPO_ROOT"

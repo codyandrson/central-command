@@ -40,7 +40,8 @@ what is missing, but it cannot install them.
 - **CPython 3.12 on the host, or `CC_PYTHON_MIRROR`** set to a mirror of
   python-build-standalone. With neither, uv downloads an interpreter from
   github.com; with `CC_AIRGAP=1` that download is impossible and `check` FAILs.
-- **Node.js 22 or newer.** Without it `check` WARNs and the cockpit is not
+- **Node.js 22 or newer, with npm 11 or newer** (`npm install -g npm@11`;
+  Node 22 ships npm 10). Without them `check` WARNs and the cockpit is not
   built — and the cockpit is where the demo is approved.
 - **On Windows: Git Bash**, which runs the `.sh` scripts. `unzip` is not
   needed: `./update.sh` reads a release zip with the same Python the install
