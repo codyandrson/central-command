@@ -4,6 +4,21 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.111.1: The web framework pins move forward
+
+- **The lock moves** fastapi 0.141.1 → 0.162.2, starlette 1.6.0 → 1.10.0, uvicorn 0.52.4 → 0.54.0, pydantic
+  2.13.4 → 2.14.3 (pydantic-core 2.50.4) and pydantic-settings 2.15.0 → 2.16.2. No advisory applied to the
+  old pins; the point is not to fall further behind a framework that made eleven breaking changes between
+  these two versions. Each new version was published on or before 2026-11-07.
+- **FastAPI's breaking changes, read against this code.** They concern form fields (omitted booleans,
+  empty values, unselected files), individual `Body` parameters given a JSON `null`, parameter models'
+  `extra` setting, `root_path` and `openapi_prefix`. The API takes its JSON bodies as models, declares no
+  individual `Body` parameter and no boolean form field, and sets none of the removed options, so no
+  route changes behaviour.
+- **Left where they are:** trafilatura (2.3.1 needs an lxml newer than exchangelib 5.6.0 allows), croniter
+  (7.0.0 is a major twelve days old with no fix we need), pytest (9.2.0 breaks the current pytest-xdist).
+- No code, schema, unit or manifest change.
+
 ## 2026-11-21 — v2.111.0: The agent runtime moves from pydantic-ai 2.18 to 2.66
 
 - **Why.** 2.18 was 48 releases behind, and 2.66.0 is the first release with the fix for
