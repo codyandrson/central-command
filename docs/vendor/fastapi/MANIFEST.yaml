@@ -1,6 +1,8 @@
 name: fastapi
 source_repo: https://github.com/fastapi/fastapi
-source_ref: 0.141.1
-fetched_url: https://codeload.github.com/fastapi/fastapi/tar.gz/0.141.1
-fetched_date: 2026-08-25
+source_ref: 0.162.2
+fetched_url: https://codeload.github.com/fastapi/fastapi/tar.gz/0.162.2
+fetched_date: 2026-11-21
 subpaths: [docs/en/docs README.md LICENSE*]
+note: >
+  Project pins fastapi 0.162.2; vendored at the matching release tag 0.162.2 (the fastapi/docs/en/docs tree only).
