@@ -31,7 +31,10 @@ describe('useTTS speakNow / stop', () => {
     act(() => { void result.current.speakNow('read this'); });
     act(() => result.current.stop());
     expect(result.current.speaking).toBeNull();
-    await act(async () => { resolveFetch(new Response(new Blob(['x']), { headers: { 'Content-Type': 'audio/mpeg' } })); });
+    // A Node-native body, not `new Blob(...)`: under jsdom `Blob` is jsdom's class, and since jsdom
+    // 28.1.0 (blob.text()/arrayBuffer() added, still no stream()) Node's Response treats it as a
+    // Blob it can stream and throws "object.stream is not a function".
+    await act(async () => { resolveFetch(new Response(new Uint8Array([120]), { headers: { 'Content-Type': 'audio/mpeg' } })); });
     expect(result.current.speaking).toBeNull();
   });
 });
