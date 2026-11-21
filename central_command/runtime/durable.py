@@ -230,6 +230,38 @@ def retry_text(part) -> str | None:
     return content if isinstance(content, str) else json.dumps(content, default=str)
 
 
+# Parts pydantic-ai 2.23+ records in a request about the framework's own state
+# (instructions in force, tools revealed, capabilities loaded, settings): no
+# one's turn. A transcript reader skips them; the one a person needs to see, a
+# loaded skill's guidance, which 2.18 carried in the `load_capability` return,
+# is shown with that return (`load_return_text`).
+BOOKKEEPING_KINDS = frozenset({
+    "instruction-baseline", "instruction-delta", "tool-availability-delta",
+    "capability-load-delta", "model-settings-delta",
+})
+
+
+def is_bookkeeping(part) -> bool:
+    kind = part.get("part_kind") if isinstance(part, dict) else getattr(part, "part_kind", None)
+    return kind in BOOKKEEPING_KINDS
+
+
+def load_return_text(part: dict, request_parts: list) -> str | None:
+    """A `load_capability` return (stored dict) as a transcript shows it: its
+    content and, since pydantic-ai 2.59, the skill guidance the load delivered,
+    recorded as `instruction-delta` parts (`capability:<id>`) in the same
+    request. None for any other part."""
+    if part.get("part_kind") != "tool-return" or part.get("tool_kind") != "capability-load" \
+            or retry_text(part) is not None:
+        return None
+    text = part.get("content")
+    text = text if isinstance(text, str) else json.dumps(text, default=str)
+    guidance = [str(p.get("content")) for p in request_parts
+                if isinstance(p, dict) and p.get("part_kind") == "instruction-delta"
+                and str(p.get("id", "")).startswith("capability:") and p.get("content")]
+    return "\n\n".join([text, *guidance])
+
+
 def load_messages(run_state: dict):
     """Rebuild the message history from persisted state."""
     return ModelMessagesTypeAdapter.validate_python(repair_messages(run_state["messages"]))
@@ -448,14 +480,19 @@ async def resume(
 def simplify_messages(run_state: dict, max_chars: int = 6000) -> list[dict]:
     """Persisted Pydantic AI message history → readable transcript turns for
     the Agent Workspace. Tolerant of shape drift: unknown part kinds render as
-    their kind + stringified content rather than crashing the viewer.
+    their kind + stringified content rather than crashing the viewer. The
+    framework's bookkeeping parts (`BOOKKEEPING_KINDS`) are no one's turn and
+    are left out; a skill load shows its guidance with its return.
 
     Reads the FULL transcript (archived + live window), so a compacted session
     still shows the operator everything that happened."""
     turns: list[dict] = []
     for message in full_messages(run_state):
-        for part in message.get("parts", []):
+        parts = message.get("parts", [])
+        for part in parts:
             kind = part.get("part_kind", "unknown")
+            if is_bookkeeping(part):
+                continue  # the framework's own state, no one's turn
             if kind == "system-prompt":
                 content = str(part.get("content", ""))
             elif kind in ("user-prompt", "text", "thinking"):
@@ -468,6 +505,8 @@ def simplify_messages(run_state: dict, max_chars: int = 6000) -> list[dict]:
                 # quote corpus, the Workspace) tell a retry — our own words
                 # back to the model — from a tool's result by it.
                 kind, content = "retry-prompt", retried
+            elif (loaded := load_return_text(part, parts)) is not None:
+                content = loaded
             elif kind == "tool-return":
                 content = str(part.get("content", ""))
             else:

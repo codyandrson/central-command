@@ -217,3 +217,75 @@ async def test_a_session_paused_at_2_66_resumes_under_the_charter_it_was_paused_
     assert sent == ["CHARTER v1"]
     assert not any("CHARTER v2" in (m.instructions or "") for m in seen[-1]
                    if isinstance(m, ModelRequest))
+
+
+# --- the framework's bookkeeping parts are no one's turn (2.66 records) --------
+
+
+async def _lane_record_ending_in_an_operator_reply() -> dict:
+    """A real 2.66 lane record: the agent asked, the operator replied, and the
+    turn died at the model. 2.66 records the instruction baseline on the
+    operator's request, so the record ends [user-prompt, instruction-baseline]."""
+    from pydantic_ai.messages import ModelRequest as Req
+
+    cap = Capability(id="sk", description="d", instructions="G", defer_loading=True)
+    cap.tool_plain(name="sk_ref")(lambda q: "x")
+
+    class Down(Exception):
+        pass
+
+    def down(messages, info):
+        raise Down("model down")
+    agent = Agent(FunctionModel(down), capabilities=[cap])
+    seed = [Req(parts=[SystemPromptPart("charter")]), ModelResponse(parts=[TextPart("Which project?")])]
+    held = {}
+    try:
+        async with agent.iter("TASKS, please", message_history=seed) as run:
+            held["run"] = run
+            async for _ in run:
+                pass
+    except Down:
+        pass
+    record = ModelMessagesTypeAdapter.dump_python(held["run"].ctx.state.message_history, mode="json")
+    assert [p["part_kind"] for p in record[-1]["parts"]] == ["user-prompt", "instruction-baseline"]
+    return {"messages": record}
+
+
+async def test_the_operator_spoke_last_when_only_bookkeeping_follows_their_reply():
+    from central_command.heartbeat.actions import _last_turn_by
+
+    rs = await _lane_record_ending_in_an_operator_reply()
+    assert _last_turn_by(rs) == "operator"
+    assert [t["kind"] for t in durable.simplify_messages(rs)] == ["system-prompt", "text", "user-prompt"]
+
+
+async def _skill_session() -> dict:
+    from tests import test_context_window_agent as cwa
+
+    fn, _seen = cwa._script()
+    result = await cwa._agent(FunctionModel(fn, model_name="cc-default")).run(
+        "do the thing", deps=cwa._deps())
+    return {"messages": ModelMessagesTypeAdapter.dump_python(result.all_messages(), mode="json")}
+
+
+async def test_no_reader_turns_bookkeeping_into_a_row_and_the_guidance_shows_with_its_load():
+    from tests.test_context_window_agent import GUIDANCE
+
+    from central_command.runtime import reflection
+
+    rs = await _skill_session()
+    stored = [p["part_kind"] for m in rs["messages"] for p in m["parts"]]
+    assert {"instruction-baseline", "instruction-delta", "tool-availability-delta"} <= set(stored)
+    junk = ("part_kind", "'instructions':", "tools_added", "base_hash")
+    turns = durable.simplify_messages(rs)
+    assert not any(j in t["content"] for t in turns for j in junk)
+    # The Workspace shows a skill load as 2.18 did: the guidance with the load's return.
+    load = [t for t in turns if t["tool"] == "load_capability" and t["kind"] == "tool-return"]
+    assert len(load) == 1 and GUIDANCE in load[0]["content"]
+    chat = nerve_gateway._transcript_to_chat_messages(rs)
+    assert any(c["role"] == "toolResult" and c["toolName"] == "load_capability"
+               and GUIDANCE in c["content"] for c in chat)
+    for corpus in (reflection._transcript_text(rs), *reflection._quote_corpus(rs)):
+        assert not any(j in corpus for j in junk)
+    rows = session_recall.extract(rs).parts
+    assert rows and not any(j in r[4] for r in rows for j in junk)
