@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from central_command.config import settings
@@ -122,19 +122,23 @@ async def test_search_tool_schema_exposes_no_skill_selector(clean_skills):
 
     caps = await skills_mod.capabilities_for("inbox-triage")
 
-    captured: dict = {}
+    offered: list = []
 
     def capture(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        captured["tools"] = info.function_tools
+        offered.append(info.function_tools)
+        if len(offered) == 1:
+            return ModelResponse(parts=[ToolCallPart("load_capability", {"id": "cc-test-lite"})])
         return ModelResponse(parts=[TextPart("ok")])
 
-    # A non-deferred capability so the search tool's schema is visible on the
-    # very first turn without a load_capability round trip.
+    # Deferred, as in production: since pydantic-ai 2.26 a capability's tools
+    # are offered only once it is loaded, so the schema is read after the load.
     agent = Agent(FunctionModel(capture), capabilities=caps)
     await agent.run("hi")
 
+    assert not [t for t in offered[0] if t.name == "search_cc_test_lite_reference"], (
+        "an unloaded skill's tool is not on the wire")
     search_tools = [
-        t for t in captured["tools"] if t.name == "search_cc_test_lite_reference"
+        t for t in offered[1] if t.name == "search_cc_test_lite_reference"
     ]
     assert len(search_tools) == 1
     schema = search_tools[0].parameters_json_schema
@@ -618,24 +622,58 @@ async def test_reactivate_emits_and_is_reachable_through_the_gateway(clean_skill
 
 
 @pytest.mark.asyncio
-async def test_the_search_tools_description_says_a_miss_is_not_a_missing_tool():
-    """pydantic-ai's default `search_tools` text ends "If no tools are found,
-    they do not exist" — and two agents (2026-09-14) declared missing_tool
-    gaps for pack tools they held after a miss. Every builder appends
-    `context.capabilities()`, so the truthful description rides every agent."""
+async def test_a_loaded_skill_works_and_survives_a_resume_and_search_tools_never_shows():
+    """Through the production builder (`build_agent`, `context.capabilities()`
+    appended). The skill's tool arrives by `load_capability`, answers, and is
+    still offered when the session continues from its persisted record. And
+    `search_tools` is never on the wire: from pydantic-ai 2.26 it is offered
+    only for a deferred tool no capability gates, and this runtime has none,
+    so the default text that made two agents (2026-09-14) declare tools they
+    held missing ("If no tools are found, they do not exist") cannot reach an
+    agent. That is why `context.capabilities()` no longer carries a
+    `ToolSearch` to override it."""
+    from pydantic_ai.capabilities import Capability
+    from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelRequest, ToolReturnPart
+
     from central_command.runtime import agent as agent_mod
-    from central_command.runtime.context import TOOL_SEARCH_DESCRIPTION
+    from central_command.runtime.deps import TriageDeps
 
-    captured: dict = {}
+    offered: list[list[str]] = []
+    returned: list[str] = []
 
-    def capture(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        captured["tools"] = {t.name: t for t in info.function_tools}
+    def script(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        offered.append([t.name for t in info.function_tools])
+        returned.extend(str(p.content) for m in messages[-1:] if isinstance(m, ModelRequest)
+                        for p in m.parts if isinstance(p, ToolReturnPart)
+                        and p.tool_name == "search_cc_test_deferred_reference")
+        step = len(offered)
+        if step == 1:
+            return ModelResponse(parts=[ToolCallPart("load_capability", {"id": "cc-test-deferred"})])
+        if step in (2, 4):
+            return ModelResponse(parts=[ToolCallPart(
+                "search_cc_test_deferred_reference", {"query": f"q{step}"})])
         return ModelResponse(parts=[TextPart("ok")])
 
-    from pydantic_ai.capabilities import Capability
-    cap = Capability(id="cc-test-deferred", description="x", instructions="y", defer_loading=True)
-    cap.tool_plain(name="search_cc_test_deferred_reference")(lambda query: query)
-    agent = await agent_mod.build_agent(model=FunctionModel(capture), capabilities=[cap])
-    from central_command.runtime.deps import TriageDeps
-    await agent.run("hi", deps=TriageDeps(agent_id="inbox-triage"))
-    assert captured["tools"]["search_tools"].description == TOOL_SEARCH_DESCRIPTION
+    def build():
+        cap = Capability(id="cc-test-deferred", description="x", instructions="y",
+                         defer_loading=True)
+
+        def search_cc_test_deferred_reference(query: str) -> str:
+            """Search the test skill."""
+            return f"hit for {query}"
+        cap.tool_plain(name="search_cc_test_deferred_reference")(search_cc_test_deferred_reference)
+        return agent_mod.build_agent(model=FunctionModel(script), capabilities=[cap])
+
+    first = await (await build()).run("hi", deps=TriageDeps(agent_id="inbox-triage"))
+    assert "search_cc_test_deferred_reference" not in offered[0]
+    assert "search_cc_test_deferred_reference" in offered[1]
+    assert returned == ["hit for q2"], "the loaded skill's tool ran"
+
+    # A fresh process: the record is dumped and loaded, the agent rebuilt.
+    stored = ModelMessagesTypeAdapter.dump_python(first.all_messages(), mode="json")
+    history = ModelMessagesTypeAdapter.validate_python(stored)
+    await (await build()).run("again", message_history=history,
+                              deps=TriageDeps(agent_id="inbox-triage"))
+    assert "search_cc_test_deferred_reference" in offered[3], "still loaded after the resume"
+    assert returned == ["hit for q2", "hit for q4"]
+    assert not any("search_tools" in names for names in offered)

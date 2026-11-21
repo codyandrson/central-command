@@ -899,22 +899,16 @@ async def _prepare_window(ctx, messages):
 
 
 def capabilities() -> list:
-    """What every long-lived agent builder appends to its capability list."""
-    from pydantic_ai.capabilities import ToolSearch
+    """What every long-lived agent builder appends to its capability list.
 
-    return [WorkingWindow(), ToolSearch(tool_description=TOOL_SEARCH_DESCRIPTION)]
-
-
-# pydantic-ai's default `search_tools` description says "If no tools are found,
-# they do not exist — do not retry." In this runtime the ONLY searchable corpus
-# is the per-skill reference-search tool, which load_capability reveals anyway;
-# every pack tool is already on the wire. Two agents (2026-09-14) read a miss
-# as "the tool is not granted" and declared missing_tool gaps for tools they
-# held (jira_search_issues; search_graph_group). The description is the seam.
-TOOL_SEARCH_DESCRIPTION = (
-    "Searches ONLY the reference-search tools of skills in your library, which "
-    "load_capability reveals anyway. Every other tool you hold is ALREADY in "
-    "your tool list — a miss here never means a tool is missing or ungranted. "
-    "Never declare a missing_tool gap on the strength of a miss here; read "
-    "your tool list instead."
-)
+    No `ToolSearch` any more (removed with the pydantic-ai 2.66 upgrade). It
+    was here to replace the default `search_tools` description ("If no tools
+    are found, they do not exist"), which two agents read as "not granted" for
+    tools they held (2026-09-14). From 2.26 `search_tools` is offered only for
+    a deferred tool that no capability gates, and every deferred tool in this
+    runtime is a skill's, gated by its `Capability` (skills.py; packs and MCP
+    toolsets defer nothing): a skill's tools arrive by `load_capability`, the
+    search tool is never on the wire, and the description could reach no
+    agent. If a standalone deferred tool is ever added, its search tool is
+    offered again with the default text — revisit this then."""
+    return [WorkingWindow()]
