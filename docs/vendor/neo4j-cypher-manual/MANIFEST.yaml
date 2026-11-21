@@ -2,5 +2,9 @@ name: neo4j-cypher-manual
 source_repo: https://github.com/neo4j/docs-cypher
 source_ref: cypher-5
 fetched_url: https://codeload.github.com/neo4j/docs-cypher/tar.gz/cypher-5
-fetched_date: 2026-08-25
+fetched_date: 2026-11-21
 subpaths: [modules README.adoc]
+note: >
+  The project runs Neo4j 5.26.33, which speaks Cypher 5. docs-cypher has no tag
+  per Neo4j patch release; its cypher-5 branch is the Cypher 5 manual, vendored
+  as of the fetch date.
