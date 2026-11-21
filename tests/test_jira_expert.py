@@ -109,8 +109,14 @@ async def test_real_run_reports_nonzero_usage_shape():
 
     agent = Agent(make_jira_advice_model(), system_prompt="advise")
     result = await agent.run("q")
+    from pydantic_ai.usage import RunUsage
+
+    from central_command.runtime.run import _total_tokens
+
     usage = result.usage
-    assert not callable(usage) and usage.requests >= 1
+    # A property since v2; since 2.64 a RunUsage is callable too (V1 compat).
+    assert isinstance(usage, RunUsage) and usage.requests >= 1
+    assert _total_tokens(result) == usage.total_tokens
 
 
 # --- phase B: the new gated capabilities map to the right façade calls --------

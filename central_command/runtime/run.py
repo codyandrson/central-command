@@ -318,10 +318,12 @@ def _total_tokens(result) -> int:
     `usage` became a PROPERTY in pydantic-ai v2 (`result.usage()` → `.usage`) —
     the old call raised TypeError into this catch-all and every run reported
     ZERO tokens. Found 2026-07-20 during the multi-agent-patterns research
-    pass; handle both shapes."""
+    pass; handle both shapes. Since pydantic-ai 2.64 a `RunUsage` is itself
+    callable (it returns itself, with a deprecation warning), so the v1 shape
+    is told apart by what it lacks, not by being callable."""
     try:
         usage = result.usage
-        if callable(usage):  # v1 shape
+        if callable(usage) and not hasattr(usage, "total_tokens"):  # v1 shape
             usage = usage()
     except Exception:  # noqa: BLE001 — usage is telemetry, never fatal
         return 0

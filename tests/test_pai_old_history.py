@@ -176,3 +176,44 @@ async def test_an_old_paused_session_resumes_under_its_original_charter(monkeypa
     assert record[0].parts[0].content == CHARTER
     dumped = ModelMessagesTypeAdapter.dump_python(record, mode="json")
     assert ModelMessagesTypeAdapter.validate_python(copy.deepcopy(dumped))
+
+
+async def test_a_session_paused_at_2_66_resumes_under_the_charter_it_was_paused_under():
+    """The same rule for a session written after the upgrade: `system_prompt=`
+    is persisted with the record, so a resume after a charter edit still sends
+    the charter the proposal was drafted under (AGENTS.md, never
+    `instructions=` for the charter)."""
+    from pydantic_ai.messages import ToolCallPart
+
+    from tests.test_route_check import _JIRA, _proposal
+
+    seen = []
+
+    def model(messages, info: AgentInfo):
+        seen.append(messages)
+        if len(seen) == 1:
+            return ModelResponse(parts=[ToolCallPart(
+                "propose_action", {"proposal": _proposal(_JIRA).model_dump(mode="json")},
+                tool_call_id="call-p")])
+        return ModelResponse(parts=[TextPart("done")])
+
+    def build(charter):
+        return Agent(FunctionModel(model), system_prompt=charter,
+                     output_type=[str, DeferredToolRequests],
+                     tools=[Tool(tools.propose_action, max_retries=10)])
+
+    from types import SimpleNamespace
+    first = await build("CHARTER v1").run(
+        "mail", deps=SimpleNamespace(session_id="sess_charter", agent_id="inbox-triage"))
+    call = durable.extract_deferred(first)
+    assert call is not None
+    state = durable.dump_run_state(first, call.tool_call_id)
+    msgs = durable.load_messages(json.loads(json.dumps(state)))
+    result = await durable.resume(build("CHARTER v2"), msgs, call.tool_call_id, "approved",
+                                  agent_id="inbox-triage")
+    assert result.output == "done"
+    sent = [p.content for m in seen[-1] if isinstance(m, ModelRequest) for p in m.parts
+            if isinstance(p, SystemPromptPart)]
+    assert sent == ["CHARTER v1"]
+    assert not any("CHARTER v2" in (m.instructions or "") for m in seen[-1]
+                   if isinstance(m, ModelRequest))
