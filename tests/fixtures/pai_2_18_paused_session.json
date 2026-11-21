@@ -1,0 +1,424 @@
+{
+ "generated_by": "pydantic-ai 2.18.0, tests/fixtures/gen_pai_2_18_paused_session.py",
+ "messages": [
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "instructions": "The following capabilities are deferred and can be loaded using the `load_capability` tool:\n- jira-guide: How this Jira is used",
+   "kind": "request",
+   "metadata": null,
+   "parts": [
+    {
+     "content": "ORIGINAL CHARTER (2.18): you triage mail for the operator.",
+     "dynamic_ref": null,
+     "part_kind": "system-prompt",
+     "timestamp": "2026-11-21T07:02:28.826409Z"
+    },
+    {
+     "content": "Mail from travel@example.com: Jane Doe flies to Tampa on 2026-08-25.",
+     "part_kind": "user-prompt",
+     "timestamp": "2026-11-21T07:02:28.826429Z"
+    }
+   ],
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.827230Z"
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "finish_reason": null,
+   "kind": "response",
+   "metadata": null,
+   "model_name": "function:model:",
+   "parts": [
+    {
+     "args": {
+      "id": "jira-guide"
+     },
+     "id": null,
+     "part_kind": "tool-call",
+     "provider_details": null,
+     "provider_name": null,
+     "tool_call_id": "call-load",
+     "tool_kind": "capability-load",
+     "tool_name": "load_capability"
+    }
+   ],
+   "provider_details": null,
+   "provider_name": null,
+   "provider_response_id": null,
+   "provider_url": null,
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.830260Z",
+   "usage": {
+    "cache_audio_read_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "details": {},
+    "input_audio_tokens": 0,
+    "input_tokens": 73,
+    "output_audio_tokens": 0,
+    "output_tokens": 5
+   }
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "instructions": "The following capabilities are deferred and can be loaded using the `load_capability` tool:\n- jira-guide: How this Jira is used",
+   "kind": "request",
+   "metadata": null,
+   "parts": [
+    {
+     "content": {
+      "instructions": "SKILL: Jira guide. Always quote the issue key."
+     },
+     "metadata": null,
+     "outcome": "success",
+     "part_kind": "tool-return",
+     "timestamp": "2026-11-21T07:02:28.832377Z",
+     "tool_call_id": "call-load",
+     "tool_kind": "capability-load",
+     "tool_name": "load_capability"
+    }
+   ],
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.833296Z"
+  },
+  {
+   "conversation_id": null,
+   "finish_reason": null,
+   "kind": "response",
+   "metadata": null,
+   "model_name": null,
+   "parts": [
+    {
+     "args": {
+      "queries": [
+       "jira-guide"
+      ]
+     },
+     "id": null,
+     "part_kind": "tool-call",
+     "provider_details": null,
+     "provider_name": null,
+     "tool_call_id": "auto_load_4e403b2d5e521e99",
+     "tool_kind": "tool-search",
+     "tool_name": "search_tools"
+    }
+   ],
+   "provider_details": null,
+   "provider_name": null,
+   "provider_response_id": null,
+   "provider_url": null,
+   "run_id": null,
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.834772Z",
+   "usage": {
+    "cache_audio_read_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "details": {},
+    "input_audio_tokens": 0,
+    "input_tokens": 0,
+    "output_audio_tokens": 0,
+    "output_tokens": 0
+   }
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "instructions": null,
+   "kind": "request",
+   "metadata": null,
+   "parts": [
+    {
+     "content": {
+      "discovered_tools": [
+       {
+        "name": "skill_jira_guide"
+       }
+      ]
+     },
+     "metadata": null,
+     "outcome": "success",
+     "part_kind": "tool-return",
+     "timestamp": "2026-11-21T07:02:28.834790Z",
+     "tool_call_id": "auto_load_4e403b2d5e521e99",
+     "tool_kind": "tool-search",
+     "tool_name": "search_tools"
+    }
+   ],
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.834851Z"
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "finish_reason": null,
+   "kind": "response",
+   "metadata": null,
+   "model_name": "function:model:",
+   "parts": [
+    {
+     "args": {
+      "query": "issue key"
+     },
+     "id": null,
+     "part_kind": "tool-call",
+     "provider_details": null,
+     "provider_name": null,
+     "tool_call_id": "call-skill",
+     "tool_kind": null,
+     "tool_name": "skill_jira_guide"
+    }
+   ],
+   "provider_details": null,
+   "provider_name": null,
+   "provider_response_id": null,
+   "provider_url": null,
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.835447Z",
+   "usage": {
+    "cache_audio_read_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "details": {},
+    "input_audio_tokens": 0,
+    "input_tokens": 90,
+    "output_audio_tokens": 0,
+    "output_tokens": 17
+   }
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "instructions": "The following capabilities are deferred and can be loaded using the `load_capability` tool:\n- jira-guide: How this Jira is used",
+   "kind": "request",
+   "metadata": null,
+   "parts": [
+    {
+     "content": "[guide] Quote the issue key, e.g. TASKS-12.",
+     "metadata": null,
+     "outcome": "success",
+     "part_kind": "tool-return",
+     "timestamp": "2026-11-21T07:02:28.838261Z",
+     "tool_call_id": "call-skill",
+     "tool_kind": null,
+     "tool_name": "skill_jira_guide"
+    }
+   ],
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.839160Z"
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "finish_reason": null,
+   "kind": "response",
+   "metadata": null,
+   "model_name": "function:model:",
+   "parts": [
+    {
+     "content": "I think I am done.",
+     "id": null,
+     "part_kind": "text",
+     "provider_details": null,
+     "provider_name": null
+    }
+   ],
+   "provider_details": null,
+   "provider_name": null,
+   "provider_response_id": null,
+   "provider_url": null,
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.841764Z",
+   "usage": {
+    "cache_audio_read_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "details": {},
+    "input_audio_tokens": 0,
+    "input_tokens": 99,
+    "output_audio_tokens": 0,
+    "output_tokens": 23
+   }
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "instructions": "The following capabilities are deferred and can be loaded using the `load_capability` tool:\n- jira-guide: How this Jira is used",
+   "kind": "request",
+   "metadata": null,
+   "parts": [
+    {
+     "content": "Finish by proposing, or answer in plain text why nothing is needed.",
+     "part_kind": "retry-prompt",
+     "timestamp": "2026-11-21T07:02:28.843783Z",
+     "tool_call_id": "pyd_ai_8333c6c8bfb244619524000720f966e1",
+     "tool_name": null
+    }
+   ],
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.844633Z"
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "finish_reason": null,
+   "kind": "response",
+   "metadata": null,
+   "model_name": "function:model:",
+   "parts": [
+    {
+     "args": {
+      "proposal": {
+       "actions": [
+        {
+         "arguments": {
+          "episode_body": "Jane Doe flies to Tampa on 2026-08-25.",
+          "name": "Tampa trip",
+          "reference_time": "2026-08-01T10:00:00Z",
+          "scope": "shared",
+          "source_description": "email from travel@example.com"
+         },
+         "capability": "graph.add_episode",
+         "reversibility": "reversible",
+         "target_ref": {
+          "id": "central_command",
+          "system": "graphiti"
+         }
+        }
+       ],
+       "confidence": {
+        "level": "high",
+        "rationale": "the mail states it"
+       },
+       "evidence": [
+        {
+         "claim": "Jane Doe flies to Tampa on 2026-08-25.",
+         "kind": "email",
+         "locator": "email",
+         "source_ref": "travel@example.com"
+        }
+       ],
+       "expected_effect": "the trip is on record",
+       "intent": "record the trip"
+      }
+     },
+     "id": null,
+     "part_kind": "tool-call",
+     "provider_details": null,
+     "provider_name": null,
+     "tool_call_id": "call-draft-1",
+     "tool_kind": null,
+     "tool_name": "propose_action"
+    }
+   ],
+   "provider_details": null,
+   "provider_name": null,
+   "provider_response_id": null,
+   "provider_url": null,
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.846585Z",
+   "usage": {
+    "cache_audio_read_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "details": {},
+    "input_audio_tokens": 0,
+    "input_tokens": 120,
+    "output_audio_tokens": 0,
+    "output_tokens": 105
+   }
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "instructions": "The following capabilities are deferred and can be loaded using the `load_capability` tool:\n- jira-guide: How this Jira is used",
+   "kind": "request",
+   "metadata": null,
+   "parts": [
+    {
+     "content": "ROUTE CHECK (asked once, then never again in this session): the episode 'Tampa trip' (2026-08-25) states a date AFTER its own reference_time.",
+     "part_kind": "retry-prompt",
+     "timestamp": "2026-11-21T07:02:28.849282Z",
+     "tool_call_id": "call-draft-1",
+     "tool_name": "propose_action"
+    }
+   ],
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.850434Z"
+  },
+  {
+   "conversation_id": "01a1fce9-e2c7-7577-a7ac-33f632f748bb",
+   "finish_reason": null,
+   "kind": "response",
+   "metadata": null,
+   "model_name": "function:model:",
+   "parts": [
+    {
+     "args": {
+      "proposal": {
+       "actions": [
+        {
+         "arguments": {
+          "episode_body": "Jane Doe flies to Tampa on 2026-08-25.",
+          "name": "Tampa trip",
+          "reference_time": "2026-08-01T10:00:00Z",
+          "scope": "shared",
+          "source_description": "email from travel@example.com"
+         },
+         "capability": "graph.add_episode",
+         "reversibility": "reversible",
+         "target_ref": {
+          "id": "central_command",
+          "system": "graphiti"
+         }
+        }
+       ],
+       "confidence": {
+        "level": "high",
+        "rationale": "the mail states it"
+       },
+       "evidence": [
+        {
+         "claim": "Jane Doe flies to Tampa on 2026-08-25.",
+         "kind": "email",
+         "locator": "email",
+         "source_ref": "travel@example.com"
+        }
+       ],
+       "expected_effect": "the trip is on record",
+       "intent": "record the trip"
+      }
+     },
+     "id": null,
+     "part_kind": "tool-call",
+     "provider_details": null,
+     "provider_name": null,
+     "tool_call_id": "call-draft-2",
+     "tool_kind": null,
+     "tool_name": "propose_action"
+    }
+   ],
+   "provider_details": null,
+   "provider_name": null,
+   "provider_response_id": null,
+   "provider_url": null,
+   "run_id": "01a1fce9-e2c7-7577-a7ac-33f51520b43b",
+   "state": "complete",
+   "timestamp": "2026-11-21T07:02:28.852903Z",
+   "usage": {
+    "cache_audio_read_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "details": {},
+    "input_audio_tokens": 0,
+    "input_tokens": 149,
+    "output_audio_tokens": 0,
+    "output_tokens": 187
+   }
+  }
+ ],
+ "tool_call_id": "call-draft-2"
+}
