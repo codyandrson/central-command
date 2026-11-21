@@ -82,7 +82,7 @@ exact-matching ref:** litellm (docs moved to the separate
 TypeScript-Website, tailwindcss.com, hono-website, radix-ui-website, k3s
 (k3s-io/docs is not version-branched per k3s release — vendored from
 `main`; our deployed k3s is v1.34), fluent-bit (fluent-bit-docs is untagged
-per release — vendored from `master`; we run fluent-bit 5.1.1). This is
+per release — vendored from `master`; we run fluent-bit 5.1.5). This is
 expected for most "marketing site" doc repos — they publish continuously
 rather than cutting versioned doc releases — and is still far better than
 nothing air-gapped.
