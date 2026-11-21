@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.112.2: The crawler reads a page whatever its certificate says, as it did before v2.112.0
+
+- **v2.112.0 made the crawler refuse a certificate it could not verify; that is reversed** at the
+  operator's ruling. A deployment behind a TLS-inspecting proxy, or one that crawls internal sites signed
+  by a private CA, presents Chromium with an unverifiable certificate on every request, and the k3s
+  crawler build takes no CA at all, so a strict crawler would have read nothing there. The service now
+  sets `ignore_https_errors=True` outright instead of relying on crawl4ai's default. The rest of
+  v2.112.0's crawler change stands: crawl4ai 0.9.5 on the Playwright 1.64.1 base, with `brotli` 1.2.1.
+  Checked in the built image: a page served with a self-signed certificate is returned in full.
+- A deployment that never applied v2.112.0 sees no change in this behaviour.
+- No schema, unit or manifest change.
+
 ## 2026-11-21 — v2.112.1: The vendored documentation matches the versions now pinned
 
 - **Fifteen vendored documentation sets were refetched** for the dependencies the releases since v2.108.1

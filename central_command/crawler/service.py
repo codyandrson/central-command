@@ -65,12 +65,14 @@ app = FastAPI(title="cc-crawler")
 # semaphore sized to the memory limit, or crawl4ai's own dispatcher.
 _lock = asyncio.Lock()
 
-# ignore_https_errors=False is load-bearing: crawl4ai defaults it to True, and
-# that default is a Playwright context option (0.9.5 dropped the Chromium launch
-# flag, not the option), so a bare BrowserConfig still crawls past a bad
-# certificate. A site whose certificate does not verify is an error the
-# operator should see, not a page read over an unauthenticated channel.
-_BROWSER = BrowserConfig(headless=True, verbose=False, ignore_https_errors=False)
+# ignore_https_errors=True, STATED rather than left to crawl4ai's default: the
+# crawler reads a page whatever its certificate says (operator ruling
+# 2026-11-21). A deployment behind a TLS-inspecting proxy, or one that crawls
+# internal sites signed by a private CA, presents Chromium with certificates it
+# cannot verify on every request, and a crawler that refused them would read
+# nothing there. crawl4ai 0.9.2 did this with a hard-coded Chromium flag; 0.9.5
+# does it through this option (a Playwright context option plus the flag).
+_BROWSER = BrowserConfig(headless=True, verbose=False, ignore_https_errors=True)
 
 # The LiteLLM proxy inside this cluster. Service name is `litellm` (the
 # Deployment is cc-litellm; the Service is not) — see deploy/k3s/30-litellm.yaml.
