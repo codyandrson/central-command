@@ -11,7 +11,9 @@ dependencies = [
     "python-dotenv>=1.0",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
-    "asyncpg>=0.29",
+    # >=0.32: two pool-release deadlocks fixed (a release after a protocol abort,
+    # a stuck cancellation).
+    "asyncpg>=0.32",
     "httpx>=0.27",
     # Cron-expression schedules for the heartbeat (D27).
     "croniter>=2.0",
@@ -20,7 +22,9 @@ dependencies = [
     # (integrations/neo4j_writer.py) and graphiti-core's own driver. Agents'
     # graph reads run over it in-process too; what `runtime/` may never hold
     # is a WRITE path (tests/test_governance.py enforces the import graph).
-    "neo4j>=5",
+    # >=6.4.1: 6.3.1 fixed a result/connection desync that could hand one query
+    # another's records; 6.4.0 has a pool race, so the floor is the release after.
+    "neo4j>=6.4.1",
     # The knowledge graph's extraction and search, in-process (design record
     # 2026-10-04, D1) — it replaced the Graphiti MCP server, whose in-memory
     # queue acknowledged episodes and then dropped them. EXACT pin: the two
@@ -33,7 +37,8 @@ dependencies = [
     # The Executor parses proposed LiteLLM config files before writing them
     # (litellm.apply_config_change); deploy/shared/litellm/policy.py reads the
     # routing declaration with it too.
-    "pyyaml>=6",
+    # >=6.0.4: exponential merge-key expansion on crafted YAML.
+    "pyyaml>=6.0.4",
     # HTML mail -> the text an agent reads (ingest/mailtext.py). Layout-table
     # aware and drops nothing; chosen by bake-off over markdown converters
     # (5-8x the tokens) and article extractors (which delete receipts).
@@ -55,6 +60,17 @@ dependencies = [
     "exchangelib>=5.6,<6",
     "pynacl>=1.5",
     "cryptography>=42",
+    # SECURITY FLOORS for packages this code does not import itself. A
+    # non-air-gapped install and the k3s updater resolve from THIS file
+    # (`uv pip install -e ".[dev,runtime]"`), and an installed version that
+    # still satisfies the bounds is left alone: a fix that lives only in
+    # requirements.lock never reaches such a deployment (found 2026-11-21: a
+    # deployment updated through v2.108.2 still ran certifi 2026.7.22). So a
+    # security bump of a transitive package is stated here as a floor. Drop a
+    # line once the package that pulls it in requires the fixed version.
+    # certifi: the trust store for every outbound HTTPS call (GHSA-6q48-6c7w-9gw2).
+    "certifi>=2026.10.19",
+    "urllib3>=2.8.0",
 ]
 
 [project.optional-dependencies]
@@ -90,12 +106,13 @@ runtime = [
     # directly; the seam reads PDFs and spreadsheets with the readers below
     # (DL-216). The audio-transcription and Azure content-understanding
     # extras are skipped on purpose (heavy, unused).
-    "markitdown[pdf,docx,pptx,xlsx]>=0.1.7",
+    "markitdown[pdf,docx,pptx,xlsx]>=0.1.9",
     # The PDF text layer behind the extraction seam (ingest/readers.py), and
     # page rendering for the scanned-PDF OCR fallback (api/attachments.py):
     # no text layer -> pypdfium2 renders pages -> the session's vision model
     # transcribes them.
-    "pypdfium2>=4",
+    # >=5.15.2: its PDFium carries CVE fixes (5.15.1 was withdrawn upstream).
+    "pypdfium2>=5.15.2",
     # Purpose-built readers behind the extraction seam, chosen by bake-off on
     # 2026-11-14 over markitdown for these types (DL-216): spreadsheets
     # (xlsx/xlsm/xlsb/xls/ods, with sheet visibility, merged ranges and a
@@ -105,6 +122,13 @@ runtime = [
     "python-calamine>=0.9.1",
     "icalendar>=7.3",
     "striprtf>=0.0.35",
+    # Security floors for packages the runtime stack pulls in (see the note on
+    # certifi above): Pillow behind markitdown and the PDF page renderer, and
+    # the MCP client with its token libraries behind pydantic-ai.
+    "pillow>=13.0.0",
+    "mcp>=1.30,<2",
+    "pyjwt>=2.15",
+    "authlib>=1.9.1",
 ]
 dev = [
     "pytest>=8",
