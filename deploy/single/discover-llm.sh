@@ -218,8 +218,8 @@ print(len(v))'
     ;;
   speech)
     [[ -n "${2:-}" && -n "${3:-}" ]] || { echo "usage: $0 speech <model-id> <out.mp3>" >&2; exit 1; }
-    # `voice` is REQUIRED — by LiteLLM's Router.aspeech() (main-stable since
-    # 2026-09-02) and by speaches itself (422 without it); neither supplies a
+    # `voice` is REQUIRED — by LiteLLM's Router.aspeech() (since the
+    # 2026-09-02 build) and by speaches itself (422 without it); neither supplies a
     # default. Same seam as api/speech.py; the bundled Kokoro's first voice.
     _api -H 'Content-Type: application/json' \
       -d "{\"model\": \"$2\", \"voice\": \"${CC_TTS_VOICE:-af_heart}\", \"input\": \"Central Command is listening.\", \"response_format\": \"mp3\"}" \

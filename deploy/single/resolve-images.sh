@@ -15,7 +15,7 @@
 #                          recorded locked-mirror: pushes re-serialise manifests.)
 #                          Unless the lock's digest column is `-`, which
 #                          declares the tag ROLLING (a series or a channel:
-#                          main-stable, 3.12-slim-bookworm) — those move on every
+#                          3.12-slim-bookworm) — those move on every
 #                          upstream rebuild, so the tag is the pin and the
 #                          digest is provenance only.
 #     another tag fits     WARN naming the substitution — use the highest by
@@ -278,7 +278,7 @@ except Exception: pass' <<<"$body" 2>/dev/null
 # 5.26.2, `-alpine` for 7-alpine, `-slim-bookworm` for 3.12-slim-bookworm.
 flavour() { local t="${1#v}"; while [[ "$t" == [0-9.]* ]]; do t="${t#?}"; done; printf '%s' "$t"; }
 # Does a tag satisfy the constraint? The constraint is a VERSION SERIES (16,
-# 5.26, 7, main-stable): the tag equals it or continues it at a non-digit
+# 5.26, 7, v1.110): the tag equals it or continues it at a non-digit
 # (16 admits 16.10, not 160). The substitute must also keep the LOCKED tag's
 # flavour: a prefix alone lets postgres `16` admit 16.10-alpine3.22 and neo4j
 # `5.26` admit 5.26.2-enterprise (needs a licence env var; never starts) —
@@ -383,7 +383,8 @@ self_test() {
   t v1.62.1-noble v1.62 v1.62.0-noble yes; t v1.62.1-jammy v1.62 v1.62.0-noble no
   t 0.8.4-cpu 0.8 0.8.3-cpu yes;    t 0.8.4-cuda 0.8 0.8.3-cpu no;    t 2.49.0 2 2.48.7 yes
   t 1.1.1-standalone 1.1 1.1.0-standalone yes; t 1.1.1 1.1 1.1.0-standalone no; t 1.0.2-standalone 1.1 1.1.0-standalone no
-  t main-stable main-stable main-stable yes; t main-stable-2 main-stable main-stable no
+  t v1.110.3 v1.110 v1.110.2 yes;   t v1.111.0 v1.110 v1.110.2 no;   t v1.1100.0 v1.110 v1.110.2 no
+  t v1.110.3-nightly v1.110 v1.110.2 no
   (( ok )) && echo "self-test: fits ok"
 
   # ── the pin decision (D2). These four cases ARE the rule, and none of them
@@ -506,8 +507,8 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
             | sed -n 's/^[Dd]ocker-[Cc]ontent-[Dd]igest: *//p' | tail -1)" && [[ -n "$dig" ]]; then
     chosen="$lock"; mode=locked
     if [[ "$ldig" == "-" ]]; then
-      # A ROLLING tag (a series or a channel: main-stable, 3.12-slim-bookworm,
-      # main-stable). Its digest moves every upstream rebuild, so there is
+      # A ROLLING tag (a series: 3.12-slim-bookworm). Its digest moves
+      # every upstream rebuild, so there is
       # nothing to lock and a mismatch would fire weekly on a healthy
       # registry. The tag itself is the pin; the digest is recorded in
       # installed.manifest as provenance, not asserted.

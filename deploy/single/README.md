@@ -286,7 +286,7 @@ never `7.4` or `7.4-alpine3.22`; `5.26.33` never admits `5.26.34-enterprise`). `
   poisoned); on a configured mirror it is a `WARN` naming both digests, because
   a mirror seeded by push re-serialises manifests (v2.45.4) — the tag is the
   pin there. A tag that
-  is a series or a channel (`main-stable`, `3.12-slim-bookworm`) is declared
+  is a series (`3.12-slim-bookworm`) is declared
   ROLLING with a `-` in the digest column: it moves on every upstream rebuild,
   so the tag is the pin and the observed digest is recorded as provenance;
 - otherwise the newest tag satisfying the constraint → `WARN` naming the

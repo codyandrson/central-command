@@ -5,11 +5,14 @@ Postgres (CC_LITELLM_DB_URL, 5443 — see deploy/k3s/30-litellm.yaml) and
 decrypts it with LiteLLM's own LITELLM_SALT_KEY (CC_LITELLM_SALT_KEY). No
 Central Command-side provider enrollment exists any more.
 
-VERSION-COUPLED to LiteLLM 1.94.1's `litellm/proxy/common_utils/encrypt_decrypt_utils.py`:
-a stored string is either legacy nacl SecretBox (key = sha256(salt_key),
-urlsafe-b64 encoded) or, prefixed `v2:gcm:`, AES-GCM via `cryptography`
-(same key derivation, 12-byte nonce). Re-verify this module against that file
-on any proxy upgrade.
+VERSION-COUPLED to LiteLLM's `litellm/proxy/common_utils/encrypt_decrypt_utils.py`,
+last read in the 1.110.2 image (2026-11-21): a stored string is either legacy
+nacl SecretBox (key = sha256(salt_key), urlsafe-b64 encoded; still what the
+proxy WRITES unless `general_settings.encryption_algorithm` is `aes-256-gcm`)
+or, prefixed `v2:gcm:`, AES-GCM via `cryptography` (same sha256 key derivation,
+12-byte nonce, no associated data). The proxy's opt-in `fips_mode` derives its
+key by KBKDF instead and is not read here. Re-verify this module against that
+file on any proxy upgrade.
 
 This module holds decrypted secrets TRANSIENTLY, in-process — it must never
 log, print, or return them anywhere except the `values` dict handed back to
@@ -31,7 +34,7 @@ class CredStoreError(Exception):
 
 
 def litellm_decrypt(stored_value: str, salt_key: str) -> str:
-    """Decrypt one string field as LiteLLM 1.94.1 would. A single field that
+    """Decrypt one string field as LiteLLM 1.110.2 would. A single field that
     fails to decrypt is treated as stored PLAINTEXT (LiteLLM does this for
     some fields) and returned as-is; the caller decides what "every field
     failed" means (wrong salt key)."""

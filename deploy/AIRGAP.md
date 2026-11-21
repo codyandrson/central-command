@@ -393,8 +393,8 @@ are reachable and which mirrors can stand in.
 * the locked tag → PASS, and its digest is verified: a mismatch on the public
   registry FAILS (drifted or poisoned), but on a configured mirror it is a WARN
   naming both digests (v2.45.4 — a mirror seeded by push re-serialises
-  manifests, so the tag is the pin there). A rolling series or channel tag (`main-stable`,
-  `3.12-slim-bookworm`) carries `-` instead of a digest and is pinned by the tag alone;
+  manifests, so the tag is the pin there). A rolling series tag (`3.12-slim-bookworm`) carries `-`
+  instead of a digest and is pinned by the tag alone;
 * otherwise the newest tag satisfying the constraint, with a WARN naming the
   substitution and no digest check — deliberate: the digest pin defended against
   public-registry tag poisoning, a threat a mirrored air gap does not carry;

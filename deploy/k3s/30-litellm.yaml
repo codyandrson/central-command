@@ -221,9 +221,17 @@ spec:
           tolerationSeconds: 30
       containers:
         - name: litellm
-          # Pinned to a digest 2026-08-25 — main-stable is a moving tag;
-          # bumping this is now a deliberate act, not an automatic pull.
-          image: ghcr.io/berriai/litellm-database:main-stable@sha256:5ead13edd4efd89f32dab349c1f19447d395affca53f3aeae00f5e6e01b8c08d
+          # Pinned to a version AND its digest (the multi-arch index, amd64 +
+          # arm64): v1.110.2, 2026-11-21 (was 1.98.0, main-stable digest
+          # 5ead13ed…). Bumping this is a deliberate act, never a pull of a
+          # moving tag. NOT v1.110.0 or v1.110.1: a memory-growth bug in both
+          # (the 6Gi limit below is the backstop, not the fix). 82 migrations
+          # run at the first start on an existing database (measured ~2 s, plus
+          # two request-log index builds, ~5 s on a 3.5 GB database); the old
+          # image still starts and serves on the migrated schema, so the
+          # updater's image-only rollback holds, and the clean rollback is the
+          # pre-update database dump plus the old image.
+          image: ghcr.io/berriai/litellm-database:v1.110.2@sha256:3b239acc68e601c436e5feeec7ca0f01a41cd5dffe50975142b7fa7155c1b2ff
           args: ["--config", "/app/config.yaml", "--port", "4000"]
           ports:
             - name: http
@@ -279,15 +287,29 @@ spec:
               mountPath: /app/config.yaml
               subPath: config.yaml
               readOnly: true
+          # Start-up is its own probe: the first start after an image bump runs
+          # the Prisma migrations before the port opens (ready at 55-68 s on a
+          # loaded Pi, 63-107 s for the old image; measured 2026-11-21). The
+          # kubelet holds readiness and liveness off until this passes, and
+          # restarts the container only after 21 x 10 s = 210 s without an
+          # answer (~3x the worst measured start), so a slow migration is not
+          # read as a dead proxy by the liveness probe's own budget.
+          startupProbe:
+            httpGet: {path: /health/liveliness, port: 4000}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 21
           readinessProbe:
             httpGet: {path: /health/liveliness, port: 4000}
             initialDelaySeconds: 30
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 5
+          # No initial delay: the startup probe above already waited for the
+          # first answer (it used to carry the start-up wait as a flat 60 s).
           livenessProbe:
             httpGet: {path: /health/liveliness, port: 4000}
-            initialDelaySeconds: 60
+            initialDelaySeconds: 0
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 6

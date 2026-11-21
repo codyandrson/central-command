@@ -42,8 +42,9 @@ dependencies = [
     "inscriptis>=2.7.7,<3",
     # Decrypting LiteLLM's stored credentials for autodiscovery
     # (integrations/litellm_credstore.py): pynacl for its default SecretBox
-    # scheme (still the default in 1.94.1), cryptography for the opt-in
-    # AES-GCM "v2:gcm:" scheme.
+    # scheme (still the default in 1.110.2, read from the image's
+    # encrypt_decrypt_utils.py 2026-11-21), cryptography for the opt-in AES-GCM
+    # "v2:gcm:" scheme (general_settings.encryption_algorithm: aes-256-gcm).
     # On-premises Microsoft Exchange over EWS (integrations/exchange.py). CORE,
     # not an extra: the mail FEED and the Executor both reach it on a site
     # whose only mailbox is Exchange, so an install missing it has no mail at

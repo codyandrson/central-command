@@ -116,15 +116,31 @@ litellm_settings:
 # deploy/shared/litellm/model-preferences.yaml and are pushed to the DB (POST
 # /fallback) by `policy.py --apply`. tests/test_litellm_policy.py fails if a
 # fallbacks block reappears here.
-# NOTE: with store_model_in_db: true the DB wins this whole key, and the live
-# value has been cooldown_time: 0 since 2026-07-31. Mirrored here so the file
-# does not contradict the deployment. Cooldown is OFF on purpose: every alias
-# has a single deployment, so a 60s cooldown converted one failed request into a
-# total outage reported as the misleading "No deployments available for selected
-# model" instead of the real upstream error.
+#
+# FILE-OWNED KEYS (LiteLLM 1.110.2, measured 2026-11-21): a key NAMED here wins
+# over the database copy, and `POST /config/update` answers 400 "router_settings
+# key '<name>' is set in the config file and cannot be changed here" for it
+# (keys this file does not name stay writable in the database; the startup log
+# also WARNs "set in the config file ... stored value ignored" for the
+# database_url / master_key / cache_params keys above, which is cosmetic). So
+# the three keys below are owned by THIS FILE: change them here, not in the UI.
+# Before 1.110 the database won this whole key, and the live value had been
+# cooldown_time: 0 since 2026-07-31; it is mirrored here so the file does not
+# contradict the deployment.
+#
+# Cooldown is OFF on purpose: every alias has a single deployment, so a 60s
+# cooldown converted one failed request into a total outage reported as the
+# misleading "No deployments available for selected model" instead of the real
+# upstream error. `cooldown_time: 0` measured off on both 1.98.0 and 1.110.2;
+# 1.110.2 also never cools down a group with a single deployment (all of ours).
+# `disable_cooldowns: true` is the explicit, supported switch for the same
+# thing (measured working on 1.110.2; the 1.98.0 image starts cleanly with it
+# present and answers the real upstream error on every request, so a rollback
+# is not broken by this file).
 router_settings:
   allowed_fails: 1
   cooldown_time: 0
+  disable_cooldowns: true
 
 # Local model groups point at the operator's MODEL HOST (<model-host-address>), one GPU.
 # The :8081 slot is llama-swap (the model swapper, since 2026-08-19): ONE big

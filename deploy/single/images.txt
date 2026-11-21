@@ -22,14 +22,14 @@
 #   Columns:  <registry-key> <path> <constraint> <locked-tag> <locked-digest> <component>
 #     registry-key  dockerio | ghcr | mcr  → CC_REGISTRY_DOCKERIO / _GHCR / _MCR
 #     path          the repository path, WITHOUT a tag
-#     constraint    the VERSION SERIES only (16, 5.26, 7, main-stable): a tag
+#     constraint    the VERSION SERIES only (16, 5.26, 7, v1.110): a tag
 #                   fits when it equals it or continues it at a non-digit
 #                   (16 admits 16.10, not 160). The FLAVOUR comes from the
 #                   locked tag and a substitute must keep it: 7-alpine admits
 #                   7.4-alpine and rejects 7.4 and 7.4-alpine3.22; 16 rejects
 #                   16.10-alpine3.22; 5.26.33 rejects 5.26.34-enterprise.
 #     locked-digest what the locked tag must hash to, or `-` when the tag is
-#                   ROLLING (a series or a channel: main-stable, 3.12-slim-bookworm).
+#                   ROLLING (a series: 3.12-slim-bookworm).
 #                   Those move on every upstream rebuild, so the TAG is the pin
 #                   and a digest there would fail weekly on a healthy registry.
 #                   An exact-version tag gets a real digest, and a mismatch on
@@ -78,7 +78,12 @@
 dockerio  library/postgres            16                    16.16-trixie       -                                                                        core
 dockerio  library/neo4j               5.26                  5.26.33            sha256:51d0314ef86074f519003da8dd4daaa9fff72b8479672b742d7cab7f3064e3ed  core
 dockerio  library/redis               7                     7.4.12-alpine      -                                                                        core
-ghcr      berriai/litellm-database    main-stable           main-stable        -                                                                        core
+# LiteLLM is locked to an exact version + digest (was the rolling main-stable
+# channel until 2026-11-21): v1.110.2, the multi-arch index digest. The
+# constraint v1.110 lets a mirror substitute a newer v1.110.x only; v1.111 and
+# later are a new series to test. v1.110.0 and v1.110.1 must never be served
+# in place of the lock (a memory-growth bug in both).
+ghcr      berriai/litellm-database    v1.110                v1.110.2           sha256:3b239acc68e601c436e5feeec7ca0f01a41cd5dffe50975142b7fa7155c1b2ff  core
 dockerio  n8nio/n8n                   2                     2.48.7             sha256:fabce3e9678a07d2dde83bd8f5124017f3ec457d0a3fc6b63bb4cec465d63861  n8n
 dockerio  library/python              3.12                  3.12-slim-bookworm -                                                                        sandbox-base
 mcr       playwright/python           v1.62                 v1.62.0-noble      sha256:aa81288e738725378becba5b3e06cb0f3a7f012a610e87e8d767a090ea3f740d  crawler-base
