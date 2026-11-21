@@ -84,7 +84,7 @@ spec:
         - name: victoria-logs
           # Multi-arch upstream (arm64+amd64) — matters only if the pin ever
           # changes, but IfNotPresent+multi-arch is the house default.
-          image: docker.io/victoriametrics/victoria-logs:v1.52.0
+          image: docker.io/victoriametrics/victoria-logs:v1.54.0
           args:
             - -storageDataPath=/victoria-logs-data
             - -retentionPeriod=30d
@@ -191,7 +191,7 @@ spec:
       containers:
         - name: fluent-bit
           # Multi-arch upstream — this genuinely runs on both architectures.
-          image: docker.io/fluent/fluent-bit:5.1.1
+          image: docker.io/fluent/fluent-bit:5.1.5
           env:
             - name: NODE_NAME
               valueFrom:

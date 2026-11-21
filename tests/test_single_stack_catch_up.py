@@ -121,7 +121,7 @@ class Stack:
             "CC_ENABLE_SANDBOX": "0",
             "CC_IMG_POSTGRES": "docker.io/library/postgres:16",
             "CC_IMG_REDIS": "docker.io/library/redis:7-alpine",
-            "CC_IMG_NEO4J": "docker.io/library/neo4j:5.26.2",
+            "CC_IMG_NEO4J": "docker.io/library/neo4j:5.26.33",
             "CC_IMG_BERRIAI_LITELLM_DATABASE": "ghcr.io/berriai/litellm-database:main-stable",
         }
         self.write_env()
@@ -148,7 +148,7 @@ class Stack:
             "litellm-db": "docker.io/library/postgres:16",
             "litellm-redis": "docker.io/library/redis:7-alpine",
             "litellm": "ghcr.io/berriai/litellm-database:main-stable",
-            "neo4j": "docker.io/library/neo4j:5.26.2",
+            "neo4j": "docker.io/library/neo4j:5.26.33",
             "crawler": "localhost/cc-crawler:1",
         }
         self.containers = {svc: OLD for svc in self.refs}

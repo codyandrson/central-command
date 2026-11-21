@@ -86,7 +86,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: neo4j
-          image: docker.io/library/neo4j:5.26.2
+          image: docker.io/library/neo4j:5.26.33
           env:
             # Auth DISABLED, deliberately (2026-08-31): Neo4j is reachable only
             # in-cluster and via the operator's loopback forward / tailnet

@@ -27,7 +27,7 @@
 #                   (16 admits 16.10, not 160). The FLAVOUR comes from the
 #                   locked tag and a substitute must keep it: 7-alpine admits
 #                   7.4-alpine and rejects 7.4 and 7.4-alpine3.22; 16 rejects
-#                   16.10-alpine3.22; 5.26.2 rejects 5.26.4-enterprise.
+#                   16.10-alpine3.22; 5.26.33 rejects 5.26.34-enterprise.
 #     locked-digest what the locked tag must hash to, or `-` when the tag is
 #                   ROLLING (a series or a channel: 16, 7-alpine, main-stable).
 #                   Those move on every upstream rebuild, so the TAG is the pin
@@ -73,7 +73,7 @@
 #   (docker.io needs a bearer token from auth.docker.io first.) Locked 2026-08-30.
 
 dockerio  library/postgres            16                    16                 -                                                                        core
-dockerio  library/neo4j               5.26                  5.26.2             sha256:099b9f74968c123209972835417985ed2a1cc19c0422c0753a313e26a736c365  core
+dockerio  library/neo4j               5.26                  5.26.33            sha256:51d0314ef86074f519003da8dd4daaa9fff72b8479672b742d7cab7f3064e3ed  core
 dockerio  library/redis               7                     7-alpine           -                                                                        core
 ghcr      berriai/litellm-database    main-stable           main-stable        -                                                                        core
 dockerio  n8nio/n8n                   2                     2.29.0             sha256:846f0248604d82d989e30457277da9004cdf8a69ad7b6a27ae2ad811841cf25d  n8n

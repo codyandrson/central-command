@@ -197,7 +197,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: dumper
-      image: docker.io/library/neo4j:5.26.2
+      image: docker.io/library/neo4j:5.26.33
       command: ["sleep", "1800"]
       volumeMounts: [{name: data, mountPath: /data}]
   volumes:

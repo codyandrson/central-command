@@ -207,7 +207,7 @@ services:
   # ── THE GRAPH ─────────────────────────────────────────────────────────────
   neo4j:
     container_name: ${CC_POD_PREFIX:-cc-}neo4j
-    image: ${CC_IMG_NEO4J:-docker.io/library/neo4j:5.26.2}
+    image: ${CC_IMG_NEO4J:-docker.io/library/neo4j:5.26.33}
     restart: always
     environment:
       # The container's expected "user/password" form; the app (CC_NEO4J_URL +

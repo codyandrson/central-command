@@ -501,7 +501,7 @@ def test_after_a_clean_acquisition_it_merges_and_runs_the_post_merge_phases_in_o
     # The post-merge fetch wrote the REAL refs and manifest; the rows the
     # update ran are recorded at the new release, the rest left where they were.
     assert (dep.state / "installed.manifest").exists()
-    assert "CC_IMG_NEO4J=docker.io/library/neo4j:5.26.2" in (dep.repo / ".env").read_text()
+    assert "CC_IMG_NEO4J=docker.io/library/neo4j:5.26.33" in (dep.repo / ".env").read_text()
     rows = dep.ledger_rows()
     # stack among them since v2.57.0: the update DEPLOYS what it acquired.
     for step in ("fetch/resolve-images", "llm/catalog", "stack/up-stack", "app/mint-key",

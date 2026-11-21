@@ -279,7 +279,7 @@ because rigid `@sha256` pinning broke real installs when an enterprise mirror
 lacked the exact artifact. `images.txt` carries, per image, the tag SERIES this
 release supports (`16`, `5.26`, `7`) alongside the tested tag and digest; a
 substitute must keep the locked tag's FLAVOUR (`7-alpine` admits `7.4-alpine`,
-never `7.4` or `7.4-alpine3.22`; `5.26.2` never admits `5.26.4-enterprise`). `resolve-images.sh` asks the registry what it has:
+never `7.4` or `7.4-alpine3.22`; `5.26.33` never admits `5.26.34-enterprise`). `resolve-images.sh` asks the registry what it has:
 
 - the locked tag → `PASS`, and its digest is verified against `images.txt`.
   A mismatch on the PUBLIC registry is a `FAIL` (that tag has drifted or been
