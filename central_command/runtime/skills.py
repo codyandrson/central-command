@@ -159,7 +159,13 @@ async def capabilities_for(agent_id: str) -> list[Capability]:
         # search tool could pass a different `_sid` and read a skill it was
         # never granted, defeating the whole point of per-agent grants. A
         # factory closes over `sid` in its own scope and exposes nothing.
-        cap.tool_plain(name=tool_name)(_make_search(skill_id))
+        #
+        # `retries=10`, the budget every tool the framework can hand back gets
+        # (packs.py: the propose tools, ask_operator). Since pydantic-ai 2.30 a
+        # call to this tool before its skill is loaded is refused as a RETRY
+        # charged to it ("call load_capability first"), and the default budget
+        # of one fails the session on the third such call in a row.
+        cap.tool_plain(name=tool_name, retries=10)(_make_search(skill_id))
 
         claimed[tool_name] = skill_id
         caps.append(cap)

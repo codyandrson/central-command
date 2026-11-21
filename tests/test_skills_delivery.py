@@ -677,3 +677,37 @@ async def test_a_loaded_skill_works_and_survives_a_resume_and_search_tools_never
     assert "search_cc_test_deferred_reference" in offered[3], "still loaded after the resume"
     assert returned == ["hit for q2", "hit for q4"]
     assert not any("search_tools" in names for names in offered)
+
+
+@pytestmark_db
+@pytest.mark.asyncio
+async def test_calling_a_skill_tool_before_loading_it_is_handed_back_not_fatal(clean_skills):
+    """Since pydantic-ai 2.30 a skill tool called before `load_capability` is
+    refused as a retry charged to that tool. With the default budget of one the
+    third such call in a row failed the session; skill tools carry ten, like every tool
+    the framework can hand back."""
+    from pydantic_ai.messages import ModelRequest, ToolReturnPart
+
+    await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
+    await repo.add_skill_doc("cc-test-lite", "guidance", "guidance", "How we run it", "body")
+    await repo.grant_skill("inbox-triage", "cc-test-lite")
+    caps = await skills_mod.capabilities_for("inbox-triage")
+    refusals: list[str] = []
+
+    def script(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        last = messages[-1]
+        if isinstance(last, ModelRequest):
+            refusals.extend(str(p.content) for p in last.parts
+                            if isinstance(p, ToolReturnPart) and p.outcome == "retried")
+        step = sum(isinstance(m, ModelResponse) for m in messages) + 1
+        if step in (1, 2, 3, 5):
+            return ModelResponse(parts=[ToolCallPart("search_cc_test_lite_reference", {"query": "x"})])
+        if step == 4:
+            return ModelResponse(parts=[ToolCallPart("load_capability", {"id": "cc-test-lite"})])
+        return ModelResponse(parts=[TextPart("ok")])
+
+    result = await Agent(FunctionModel(script), capabilities=caps).run("hi")
+    assert result.output == "ok"
+    # Measured at 2.66: the first refusal is free, so the default budget of one
+    # fails the run on the THIRD consecutive refusal.
+    assert len(refusals) == 3 and all("load_capability" in r for r in refusals)

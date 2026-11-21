@@ -210,9 +210,28 @@ async def _live_model(model_name: str, agent_id=None, thinking: str | None = Non
         if body:
             model_settings["extra_body"] = body
 
-    # The working window is applied HERE, on the wire, so the persisted record
-    # stays raw whichever run path snapshots it (runtime/context.py, slice 2).
-    return WindowedModel(OpenAIChatModel(model_name, provider=provider, settings=model_settings))
+    # The wrapper is the admission gate, and where a request that missed the
+    # working window is caught (runtime/context.py, slice 2).
+    return WindowedModel(OpenAIChatModel(model_name, provider=provider, settings=model_settings,
+                                         profile=dict(WIRE_PROFILE)))
+
+
+# ONE system message, and only at the start. pydantic-ai 2.59+ delivers a
+# loaded skill's guidance and a "tools now available" note as mid-conversation
+# `system` messages wherever the profile says inline system prompts work, and
+# every OpenAI-chat profile says so. The local model's chat template (a Qwen
+# template under llama.cpp) answers that with HTTP 500 "System message must be
+# at the beginning" (live, 2026-11-21) — every skill load would have failed.
+# Any LiteLLM alias may be such a model, so this applies to every model the
+# seam builds. Both are the framework's own switches: with the first off it
+# sends those as `<system>`-tagged USER turns and states what the tag means in
+# the standing prompt; with the second off the leading system messages (the
+# charter, that statement, the instructions) go as one. 2.18 sent two leading
+# system messages and never one later; one is the shape every template takes.
+WIRE_PROFILE = {
+    "supports_inline_system_prompts": False,
+    "openai_chat_supports_multiple_system_messages": False,
+}
 
 
 async def resolve_session_model(session_id: str | None, agent_id: str | None):
