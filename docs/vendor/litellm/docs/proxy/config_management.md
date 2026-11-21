@@ -1,3 +1,7 @@
+---
+displayed_sidebar: tutorialSidebar
+---
+
 # File Management
 
 ## `include` external YAML files in a config.yaml 
@@ -11,7 +15,7 @@ To include a config file, use `include` with either a single file or a list of f
 Contents of `parent_config.yaml`:
 ```yaml
 include:
-  - model_config.yaml # 👈 Key change, will include the contents of model_config.yaml
+  - model_config.yaml # Key change, will include the contents of model_config.yaml
 
 litellm_settings:
   callbacks: ["prometheus"] 
@@ -21,9 +25,9 @@ litellm_settings:
 Contents of `model_config.yaml`:
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_base: https://exampleopenaiendpoint-production.up.railway.app/
   - model_name: fake-anthropic-endpoint
     litellm_params:

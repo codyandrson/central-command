@@ -1,3 +1,9 @@
+---
+title: "Writer Palmyra on Bedrock with LiteLLM"
+sidebar_label: "Bedrock - Writer Palmyra"
+description: "Call Writer Palmyra models on AWS Bedrock via LiteLLM from the Python SDK or AI Gateway, with config.yaml setup, multi-step tool calling and PDF inputs."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -60,7 +66,7 @@ litellm --config config.yaml
 ```bash showLineNumbers title="curl Request"
 curl -X POST http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "writer-palmyra-x5",
     "messages": [{"role": "user", "content": "Hello, how are you?"}]
@@ -74,7 +80,7 @@ curl -X POST http://localhost:4000/v1/chat/completions \
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-1234",
+    api_key="sk-<your-litellm-api-key>",
     base_url="http://localhost:4000/v1"
 )
 
@@ -133,7 +139,7 @@ response = litellm.completion(
 ```bash showLineNumbers title="Tool Calling - curl"
 curl -X POST http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "writer-palmyra-x5",
     "messages": [{"role": "user", "content": "What'\''s the weather in Boston?"}],
@@ -161,7 +167,7 @@ curl -X POST http://localhost:4000/v1/chat/completions \
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-1234",
+    api_key="sk-<your-litellm-api-key>",
     base_url="http://localhost:4000/v1"
 )
 
@@ -242,7 +248,7 @@ PDF_BASE64=$(base64 -i document.pdf)
 
 curl -X POST http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "writer-palmyra-x5",
     "messages": [{
@@ -269,7 +275,7 @@ from openai import OpenAI
 import base64
 
 client = OpenAI(
-    api_key="sk-1234",
+    api_key="sk-<your-litellm-api-key>",
     base_url="http://localhost:4000/v1"
 )
 
@@ -311,6 +317,6 @@ response = client.chat.completions.create(
 | `bedrock/writer.palmyra-x5-v1:0` | 1M tokens | $0.0006 | $0.006 |
 | `bedrock/writer.palmyra-x4-v1:0` | 128K tokens | $0.0025 | $0.010 |
 
-:::info Cross-Region Inference
+:::info[Cross-Region Inference]
 The `us.writer.*` model IDs use cross-region inference profiles. Use these for production workloads.
 :::

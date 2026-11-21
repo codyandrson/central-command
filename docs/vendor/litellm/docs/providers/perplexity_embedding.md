@@ -1,3 +1,9 @@
+---
+title: "Perplexity Embeddings with LiteLLM"
+sidebar_label: "Perplexity Embeddings"
+description: "Create pplx-embed v1 embeddings with Perplexity's 0.6b and 4b models, then reduce output dimensions or switch to binary encoding, from the SDK or AI Gateway."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -60,7 +66,7 @@ litellm --config /path/to/config.yaml
 ```bash
 curl http://0.0.0.0:4000/v1/embeddings \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "pplx-embed-v1-0.6b",
     "input": ["good morning from litellm"]
@@ -104,7 +110,7 @@ print(f"Embedding dimensions: {len(response.data[0]['embedding'])}")
 ```bash
 curl http://0.0.0.0:4000/v1/embeddings \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "pplx-embed-v1-4b",
     "input": ["Your text here"],

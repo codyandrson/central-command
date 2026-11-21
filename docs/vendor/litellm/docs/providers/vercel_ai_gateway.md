@@ -1,3 +1,9 @@
+---
+title: "Vercel AI Gateway with LiteLLM: Setup"
+sidebar_label: "Vercel AI Gateway"
+description: "Route OpenAI and Anthropic Claude models through Vercel AI Gateway with streaming, and create text-embedding-3-small embeddings with custom dimensions."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -53,7 +59,7 @@ messages = [{"content": "Hello, how are you?", "role": "user"}]
 
 # Vercel AI Gateway call
 response = completion(
-    model="vercel_ai_gateway/openai/gpt-4o", 
+    model="vercel_ai_gateway/openai/{{openai_large}}", 
     messages=messages
 )
 
@@ -73,7 +79,7 @@ messages = [{"content": "Hello, how are you?", "role": "user"}]
 
 # Vercel AI Gateway call with streaming
 response = completion(
-    model="vercel_ai_gateway/openai/gpt-4o",
+    model="vercel_ai_gateway/openai/{{openai_large}}",
     messages=messages,
     stream=True
 )
@@ -115,9 +121,9 @@ Add the following to your LiteLLM Proxy configuration file:
 
 ```yaml showLineNumbers title="config.yaml"
 model_list:
-  - model_name: gpt-4o-gateway
+  - model_name: {{openai_large}}-gateway
     litellm_params:
-      model: vercel_ai_gateway/openai/gpt-4o
+      model: vercel_ai_gateway/openai/{{openai_large}}
       api_key: os.environ/VERCEL_AI_GATEWAY_API_KEY
 
   - model_name: claude-4-sonnet-gateway
@@ -153,7 +159,7 @@ client = OpenAI(
 
 # Non-streaming response
 response = client.chat.completions.create(
-    model="gpt-4o-gateway",
+    model="{{openai_large}}-gateway",
     messages=[{"role": "user", "content": "Hello, how are you?"}]
 )
 
@@ -171,7 +177,7 @@ client = OpenAI(
 
 # Streaming response
 response = client.chat.completions.create(
-    model="gpt-4o-gateway",
+    model="{{openai_large}}-gateway",
     messages=[{"role": "user", "content": "Hello, how are you?"}],
     stream=True
 )
@@ -190,7 +196,7 @@ import litellm
 
 # Configure LiteLLM to use your proxy
 response = litellm.completion(
-    model="litellm_proxy/gpt-4o-gateway",
+    model="litellm_proxy/{{openai_large}}-gateway",
     messages=[{"role": "user", "content": "Hello, how are you?"}],
     api_base="http://localhost:4000",
     api_key="your-proxy-api-key"
@@ -204,7 +210,7 @@ import litellm
 
 # Configure LiteLLM to use your proxy with streaming
 response = litellm.completion(
-    model="litellm_proxy/gpt-4o-gateway",
+    model="litellm_proxy/{{openai_large}}-gateway",
     messages=[{"role": "user", "content": "Hello, how are you?"}],
     api_base="http://localhost:4000",
     api_key="your-proxy-api-key",
@@ -225,7 +231,7 @@ curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-proxy-api-key" \
   -d '{
-    "model": "gpt-4o-gateway",
+    "model": "{{openai_large}}-gateway",
     "messages": [{"role": "user", "content": "Hello, how are you?"}]
   }'
 ```
@@ -235,7 +241,7 @@ curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-proxy-api-key" \
   -d '{
-    "model": "gpt-4o-gateway",
+    "model": "{{openai_large}}-gateway",
     "messages": [{"role": "user", "content": "Hello, how are you?"}],
     "stream": true
   }'

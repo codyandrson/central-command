@@ -1,3 +1,9 @@
+---
+title: "Xiaomi MiMo API with LiteLLM AI Gateway"
+sidebar_label: "Xiaomi MiMo"
+description: "Call Xiaomi MiMo models such as mimo-v2-flash, streaming replies and tuning temperature and top_p, then add them to a LiteLLM AI Gateway config.yaml."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -92,7 +98,7 @@ Here's how to call a Xiaomi MiMo model with the LiteLLM Proxy Server
   ```python
   import openai
   client = openai.OpenAI(
-      api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+      api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
       base_url="http://0.0.0.0:4000" # litellm-proxy-base url
   )
 
@@ -114,7 +120,7 @@ Here's how to call a Xiaomi MiMo model with the LiteLLM Proxy Server
 
   ```shell
   curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
       "model": "my-model",

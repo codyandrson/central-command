@@ -22,7 +22,7 @@ Using a custom api base
 $ export HUGGINGFACE_API_KEY=my-api-key #[OPTIONAL]
 $ litellm --model huggingface/tinyllama --api_base https://k58ory32yinf1ly0.us-east-1.aws.endpoints.huggingface.cloud
 ```
-OpenAI Compatible Endpoint at http://0.0.0.0:8000
+OpenAI Compatible Endpoint at http://0.0.0.0:4000
 
 **Step 2: Create a Virtual Env for LM Harness + Use OpenAI 0.28.1**
 We will now run lm harness with a new virtual env with openai==0.28.1
@@ -39,7 +39,7 @@ uv add openai==0.28.01
 
 **Step 3: Set OpenAI API Base & Key**
 ```shell
-$ export OPENAI_BASE_URL=http://0.0.0.0:8000
+$ export OPENAI_BASE_URL=http://0.0.0.0:4000
 ```
 
 LM Harness requires you to set an OpenAI API key `OPENAI_API_SECRET_KEY` for running benchmarks
@@ -74,7 +74,7 @@ $ litellm --model huggingface/bigcode/starcoder
 
 **Step 2: Set OpenAI API Base & Key**
 ```shell
-$ export OPENAI_BASE_URL=http://0.0.0.0:8000
+$ export OPENAI_BASE_URL=http://0.0.0.0:4000
 ```
 
 Set this to anything since the proxy has the credentials
@@ -96,7 +96,7 @@ cd FastEval
 On FastEval make the following **2 line code change** to set `OPENAI_BASE_URL`
 
 https://github.com/FastEval/FastEval/pull/90/files
-```python
+```python nolint
 try:
     api_base = os.environ["OPENAI_BASE_URL"] #changed: read api base from .env
     if api_base == None:
@@ -114,9 +114,9 @@ Set `-b` to the benchmark you want to run. Possible values are `mt-bench`, `huma
 
 Since LiteLLM provides an OpenAI compatible proxy `-t` and `-m` don't need to change
 `-t` will remain openai
-`-m` will remain gpt-3.5
+`-m` will remain `gpt-3.5-turbo`, since FastEval's `openai` type only accepts model names that start with `gpt-3.5-turbo` or `gpt-4`. The proxy answers with the model it was started with, so this name never reaches OpenAI.
 
-```shell
+```shell keep-model-ids
 ./fasteval -b human-eval-plus -t openai -m gpt-3.5-turbo
 ```
 
@@ -130,7 +130,7 @@ $ litellm --model huggingface/bigcode/starcoder
 
 **Step 2: Set OpenAI API Base & Key**
 ```shell
-$ export OPENAI_BASE_URL=http://0.0.0.0:8000
+$ export OPENAI_BASE_URL=http://0.0.0.0:4000
 ```
 
 **Step 3 Run with FLASK** 

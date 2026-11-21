@@ -1,3 +1,9 @@
+---
+title: "Vertex AI Text to Speech with LiteLLM"
+sidebar_label: "Vertex AI Text to Speech"
+description: "Run text to speech with Chirp3 HD voices and Gemini TTS on Gemini Enterprise Agent Platform (formerly Vertex AI) via LiteLLM's Python SDK or AI Gateway."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -58,7 +64,7 @@ litellm --config /path/to/config.yaml
 
 ```bash showLineNumbers title="Chirp3 Quick Start"
 curl http://0.0.0.0:4000/v1/audio/speech \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "vertex-tts",
@@ -74,7 +80,7 @@ curl http://0.0.0.0:4000/v1/audio/speech \
 ```python showLineNumbers title="Chirp3 Quick Start"
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 response = client.audio.speech.create(
     model="vertex-tts",
@@ -86,6 +92,48 @@ response.stream_to_file("speech.mp3")
 
 </TabItem>
 </Tabs>
+
+### Regional Endpoints
+
+The deployment's `vertex_location` picks the Cloud Text-to-Speech host for Chirp. <SinceVersion v="1.110.0" /> On earlier versions, every Chirp request goes to the global host.
+
+| `vertex_location` | Host LiteLLM calls |
+|-------------------|--------------------|
+| `us`, `us-central1`, `us-east1`, `us-east4`, `us-east5`, `us-south1`, `us-west1`, `us-west2`, `us-west3`, `us-west4`, `us-west5` | `us-texttospeech.googleapis.com` |
+| `eu`, `europe-central2`, `europe-north1`, `europe-north2`, `europe-southwest1`, `europe-west1`, `europe-west3`, `europe-west4`, `europe-west8`, `europe-west9`, `europe-west10`, `europe-west12` | `eu-texttospeech.googleapis.com` |
+| Not set, `global`, or any other location | `texttospeech.googleapis.com` |
+
+Only the `vertex_location` set on the deployment or passed in the call picks the Chirp host. `VERTEXAI_LOCATION` and `litellm.vertex_location` do not.
+
+```yaml showLineNumbers title="config.yaml"
+model_list:
+  - model_name: chirp-eu
+    litellm_params:
+      model: vertex_ai/chirp
+      vertex_project: "your-project-id"
+      vertex_location: "eu"
+      vertex_credentials: "/path/to/service_account.json"
+```
+
+```bash showLineNumbers title="Chirp on the EU host"
+curl http://0.0.0.0:4000/v1/audio/speech \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "chirp-eu",
+    "voice": "fr-FR-Chirp3-HD-Aoede",
+    "input": "Bonjour, votre rendez-vous est confirmé."
+  }' \
+  --output speech.wav
+```
+
+LiteLLM sends this request to `https://eu-texttospeech.googleapis.com/v1/text:synthesize`, and the request's spend log shows that URL as its `api_base`.
+
+To use a host the table does not list, such as a single-region host, set `api_base` to the full URL, for example `https://europe-west2-texttospeech.googleapis.com/v1/text:synthesize`. An `api_base` always wins over `vertex_location`.
+
+:::note
+If your network allows outbound traffic only to `texttospeech.googleapis.com`, also allow `us-texttospeech.googleapis.com` or `eu-texttospeech.googleapis.com` before you upgrade a Chirp deployment with a US or EU `vertex_location`.
+:::
 
 ### Voice Mapping
 
@@ -140,7 +188,7 @@ response.stream_to_file("speech.mp3")
 
 ```bash showLineNumbers title="Chirp3 HD Voice"
 curl http://0.0.0.0:4000/v1/audio/speech \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "vertex-tts",
@@ -152,7 +200,7 @@ curl http://0.0.0.0:4000/v1/audio/speech \
 
 ```bash showLineNumbers title="Voice as Dict (Multilingual)"
 curl http://0.0.0.0:4000/v1/audio/speech \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "vertex-tts",
@@ -168,7 +216,7 @@ curl http://0.0.0.0:4000/v1/audio/speech \
 ```python showLineNumbers title="Chirp3 HD Voice"
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 response = client.audio.speech.create(
     model="vertex-tts",
@@ -181,7 +229,7 @@ response.stream_to_file("speech.mp3")
 ```python showLineNumbers title="Voice as Dict (Multilingual)"
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 response = client.audio.speech.create(
     model="vertex-tts",
@@ -242,7 +290,7 @@ response.stream_to_file("speech.mp3")
 
 ```bash showLineNumbers title="SSML Input"
 curl http://0.0.0.0:4000/v1/audio/speech \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "vertex-tts",
@@ -258,7 +306,7 @@ curl http://0.0.0.0:4000/v1/audio/speech \
 ```python showLineNumbers title="SSML Input"
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 ssml = """<speak><p>Hello!</p><break time="500ms"/><p>How are you?</p></speak>"""
 
@@ -306,6 +354,8 @@ asyncio.run(main())
 ## Gemini TTS
 
 Gemini models with audio output capabilities using the chat completions API.
+
+The Voice Mapping table above is for Chirp. For Gemini TTS, pass a Gemini prebuilt voice name such as `Kore`, or from v1.107.0 an OpenAI voice name, which maps to a Gemini voice as listed in the [Gemini provider docs](./gemini#voice-names).
 
 :::warning
 **Limitations:**
@@ -368,7 +418,7 @@ litellm --config /path/to/config.yaml
 ```bash showLineNumbers title="Gemini TTS Request"
 curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "gemini-tts",
     "messages": [{"role": "user", "content": "Say hello in a friendly voice"}],
@@ -384,7 +434,7 @@ curl http://0.0.0.0:4000/v1/chat/completions \
 ```python showLineNumbers title="Gemini TTS Request"
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 response = client.chat.completions.create(
     model="gemini-tts",

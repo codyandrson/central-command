@@ -1,12 +1,24 @@
+---
+title: Legacy customer usage dashboard
+description: View spend and logs for the supported legacy end-user tracking APIs.
+unlisted: true
+---
+
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-# Customer Usage
+# Legacy customer usage dashboard
 
-Track and visualize end-user spend directly in the dashboard. Monitor customer-level usage analytics, spend logs, and activity metrics to understand how your customers are using your LLM services.
+:::info Recommended for new integrations
 
-This feature is **available in v1.80.8-stable and above**.
+Use [Customer Management](./customers.md), available from v1.111, for new customer and end-user tracking. This page covers the supported legacy **Usage → Customer Usage** dashboard and `/customer/*` APIs.
+
+:::
+
+Track and visualize legacy end-user spend in the dashboard. Monitor customer-level usage analytics, spend logs, and activity metrics to understand how your customers are using your LLM services.
+
+<SinceVersion v="1.80.8-stable" />
 
 ## Overview
 
@@ -34,9 +46,9 @@ Make a `/chat/completions` call with the `user` field containing your customer I
 ```bash showLineNumbers title="Track spend with customer ID in body"
 curl -X POST 'http://0.0.0.0:4000/chat/completions' \
   --header 'Content-Type: application/json' \
-  --header 'Authorization: Bearer sk-1234' \
+  --header "Authorization: Bearer $LITELLM_API_KEY" \
   --data '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "user": "customer-123",
     "messages": [
       {
@@ -61,10 +73,10 @@ LiteLLM automatically recognizes these standard headers (no configuration requir
 ```bash showLineNumbers title="Track spend with customer ID in header"
 curl -X POST 'http://0.0.0.0:4000/chat/completions' \
   --header 'Content-Type: application/json' \
-  --header 'Authorization: Bearer sk-1234' \
+  --header "Authorization: Bearer $LITELLM_API_KEY" \
   --header 'x-litellm-customer-id: customer-123' \
   --data '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [
       {
         "role": "user",
@@ -80,7 +92,7 @@ Claude Code supports custom headers via the `ANTHROPIC_CUSTOM_HEADERS` environme
 
 ```bash title="Configure Claude Code with customer tracking"
 export ANTHROPIC_BASE_URL="http://0.0.0.0:4000/v1/messages"
-export ANTHROPIC_API_KEY="sk-1234"
+export ANTHROPIC_API_KEY="sk-<your-api-key>"
 export ANTHROPIC_CUSTOM_HEADERS="x-litellm-customer-id: my-customer-id"
 ```
 

@@ -1,7 +1,16 @@
+---
+title: "Perplexity API with LiteLLM: Sonar and Agent API"
+sidebar_label: "Perplexity AI"
+description: "Call Perplexity Sonar models and the Agent API via LiteLLM with the perplexity/ prefix from the Python SDK or AI Gateway, with web search and reasoning."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 # Perplexity AI (pplx-api)
+
+Perplexity offers the Sonar models and an Agent API with a web search tool; LiteLLM calls both with the `perplexity/` prefix from the Python SDK or AI Gateway.
+
 https://www.perplexity.ai
 
 ## API Key
@@ -41,7 +50,7 @@ for chunk in response:
 
 ## Reasoning Effort
 
-Requires v1.72.6+
+<SinceVersion v="1.72.6" />
 
 :::info
 
@@ -122,7 +131,7 @@ All models listed here https://docs.perplexity.ai/docs/model-cards are supported
 
 ## Agent API (Responses API)
 
-Requires v1.72.6+
+<SinceVersion v="1.72.6" />
 
 
 ### Using Presets
@@ -196,7 +205,7 @@ import os
 os.environ['PERPLEXITY_API_KEY'] = ""
 
 response = responses(
-    model="perplexity/openai/gpt-5.2",
+    model="perplexity/openai/{{openai_large}}",
     input="Explain quantum computing in simple terms",
     custom_llm_provider="perplexity",
     max_output_tokens=500,
@@ -215,7 +224,7 @@ import os
 os.environ['PERPLEXITY_API_KEY'] = ""
 
 response = responses(
-    model="perplexity/anthropic/claude-sonnet-4-5",
+    model="perplexity/anthropic/{{anthropic}}",
     input="Write a short story about a robot learning to paint",
     custom_llm_provider="perplexity",
     max_output_tokens=500,
@@ -234,7 +243,7 @@ import os
 os.environ['PERPLEXITY_API_KEY'] = ""
 
 response = responses(
-    model="perplexity/google/gemini-2.5-flash",
+    model="perplexity/google/{{gemini_flash}}",
     input="Explain the concept of neural networks",
     custom_llm_provider="perplexity",
     max_output_tokens=500,
@@ -276,7 +285,7 @@ import os
 os.environ['PERPLEXITY_API_KEY'] = ""
 
 response = responses(
-    model="perplexity/openai/gpt-5.2",
+    model="perplexity/openai/{{openai_large}}",
     input="What's the weather in San Francisco today?",
     custom_llm_provider="perplexity",
     tools=[{"type": "web_search"}],
@@ -297,7 +306,7 @@ import os
 os.environ['PERPLEXITY_API_KEY'] = ""
 
 response = responses(
-    model="perplexity/openai/gpt-5.2",
+    model="perplexity/openai/{{openai_large}}",
     input="What's the weather in San Francisco?",
     custom_llm_provider="perplexity",
     tools=[
@@ -370,7 +379,7 @@ import os
 os.environ['PERPLEXITY_API_KEY'] = ""
 
 response = responses(
-    model="perplexity/openai/gpt-5.2",
+    model="perplexity/openai/{{openai_large}}",
     input="Solve this complex problem step by step",
     custom_llm_provider="perplexity",
     reasoning={"effort": "high"},  # Options: low, medium, high
@@ -391,7 +400,7 @@ import os
 os.environ['PERPLEXITY_API_KEY'] = ""
 
 response = responses(
-    model="perplexity/anthropic/claude-sonnet-4-5",
+    model="perplexity/anthropic/{{anthropic}}",
     input=[
         {"type": "message", "role": "system", "content": "You are a helpful assistant."},
         {"type": "message", "role": "user", "content": "What are the latest AI developments?"},
@@ -415,7 +424,7 @@ import os
 os.environ['PERPLEXITY_API_KEY'] = ""
 
 response = responses(
-    model="perplexity/openai/gpt-5.2",
+    model="perplexity/openai/{{openai_large}}",
     input="Tell me a story about space exploration",
     custom_llm_provider="perplexity",
     stream=True,
@@ -465,7 +474,7 @@ os.environ['PERPLEXITY_API_KEY'] = ""
 
 # Comprehensive example with multiple features
 response = responses(
-    model="perplexity/openai/gpt-5.2",
+    model="perplexity/openai/{{openai_large}}",
     input="Research the latest developments in quantum computing and provide sources",
     custom_llm_provider="perplexity",
     tools=[
@@ -473,8 +482,6 @@ response = responses(
         {"type": "fetch_url"}
     ],
     instructions="Use web_search to find relevant information and fetch_url to retrieve detailed content from sources. Provide citations for all claims.",
-    max_output_tokens=1000,
-    temperature=0.7,
 )
 
 print(f"Response ID: {response.id}")

@@ -25,7 +25,7 @@ Codex, OpenCode) with their LLM traffic routed through the proxy.
    The `lite` client is a thin laptop install: it points at a LiteLLM proxy and runs your coding agents through it, with none of the proxy server runtime pulled in. The one-line installer needs only `curl`; it bootstraps [uv](https://github.com/astral-sh/uv) when it's missing and lets uv provision a compatible Python for you:
 
    ```shell
-   curl -fsSL https://raw.githubusercontent.com/BerriAI/litellm/main/scripts/install-cli.sh | sh
+   curl -fsSL https://raw.githubusercontent.com/BerriAI/litellm/main/litellm/scripts/install-cli.sh | sh
    ```
 
    Already have uv and prefer to drive it yourself? Install the package directly:
@@ -67,7 +67,7 @@ You can use the CLI to authenticate to the LiteLLM Gateway. This is great if you
 
 :::info
 
-For an indepth guide, see [CLI Authentication](./cli_sso).
+For an indepth guide, see [CLI sign-in](./cli_sso).
 
 :::
 
@@ -75,7 +75,7 @@ For an indepth guide, see [CLI Authentication](./cli_sso).
 
 :::warning[Beta Feature - Required Environment Variable]
 
-CLI SSO Authentication is currently in beta. You must set this environment variable **when starting up your LiteLLM Proxy**:
+CLI sign-in is currently in beta. You must set this environment variable **when starting up your LiteLLM Proxy**:
 
 ```bash
 export EXPERIMENTAL_UI_LOGIN="True"
@@ -178,44 +178,45 @@ lite logout             # clear the keychain entry and the token file, and revok
 
   ```bash
   lite models list
-  lite models add gpt-4 \
-    --param api_key=sk-123 \
-    --param max_tokens=2048
-  lite models update <model-id> -p temperature=0.7
+  lite models add {{openai_large}} --param model=openai/{{openai_large}} --param api_key=sk-123
+  lite models update <model-id> -p api_key=sk-456 -i id=<model-id>
   lite models delete <model-id>
   ```
 
-  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/model%20management)
+  [API used (OpenAPI)](https://docs.litellm.ai/api-reference/#/model%20management)
 
 ### Credentials Management
 
-- List, create, get, and delete credentials for LLM providers.
+- List, create, get, and delete credentials for LLM providers. Names can't change, so `update` only sets or clears the display name
 - Example:
 
   ```bash
   lite credentials list
   lite credentials create azure-prod \
     --info='{"custom_llm_provider": "azure"}' \
-    --values='{"api_key": "sk-123", "api_base": "https://prod.azure.openai.com"}'
+    --values='{"api_key": "sk-123", "api_base": "https://prod.azure.openai.com"}' \
+    --display-name="Azure (prod)"
+  lite credentials update azure-prod --display-name="Azure EU (prod)"
+  lite credentials update azure-prod --clear-display-name
   lite credentials get azure-cred
   lite credentials delete azure-cred
   ```
 
-  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/credential%20management)
+  [API used (OpenAPI)](https://docs.litellm.ai/api-reference/#/credential%20management)
 
 ### Keys Management
 
-- List, generate, get info, delete, and import API keys.
+- List, generate, delete, and import API keys. To look up a single key, filter `lite keys list` by `--key-alias` or `--key-hash`.
 - Example:
 
   ```bash
   lite keys list
   lite keys generate \
-    --models=gpt-4 \
+    --models={{openai_large}} \
     --spend=100 \
     --duration=24h \
     --key-alias=my-key
-  lite keys info --key sk-key1
+  lite keys list --key-alias my-key
   lite keys delete --keys sk-key1,sk-key2 --key-aliases alias1,alias2
   ```
 
@@ -228,7 +229,7 @@ lite logout             # clear the keychain entry and the token file, and revok
     --created-since 2026-01-01
   ```
 
-  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/key%20management)
+  [API used (OpenAPI)](https://docs.litellm.ai/api-reference/#/key%20management)
 
 ### User Management
 
@@ -247,7 +248,7 @@ lite logout             # clear the keychain entry and the token file, and revok
   lite users delete <user-id>
   ```
 
-  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/Internal%20User%20management)
+  [API used (OpenAPI)](https://docs.litellm.ai/api-reference/#/Internal%20User%20management)
 
 ### Teams Management
 
@@ -262,18 +263,20 @@ lite logout             # clear the keychain entry and the token file, and revok
 
   Running `lite teams assign-key` without `--team-id` prompts you to pick a team interactively.
 
-  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/team%20management)
+  [API used (OpenAPI)](https://docs.litellm.ai/api-reference/#/team%20management)
 
 ### Chat Completions
 
-- Ask for chat completions from the proxy server.
+- Start an interactive streaming chat session with a model on the proxy server. Omit the model to pick one interactively.
+- `lite chat` sends a temperature of 0.7 unless you pass `--temperature`, and reasoning models that only accept 1 reject it, so the examples pass `--temperature 1`.
 - Example:
 
   ```bash
-  lite chat completions gpt-4 -m "user:Hello, how are you?"
+  lite chat {{openai_large}} --temperature 1
+  lite chat {{openai_large}} --temperature 1 --system "You are a helpful coding assistant"
   ```
 
-  [API used (OpenAPI)](https://litellm-api.up.railway.app/#/chat%2Fcompletions)
+  [API used (OpenAPI)](https://docs.litellm.ai/api-reference/#/chat%2Fcompletions)
 
 ### General HTTP Requests
 
@@ -283,10 +286,10 @@ lite logout             # clear the keychain entry and the token file, and revok
   ```bash
   lite http request \
     POST /chat/completions \
-    --json '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}'
+    --json '{"model": "{{openai_large}}", "messages": [{"role": "user", "content": "Hello"}]}'
   ```
 
-  [All APIs (OpenAPI)](https://litellm-api.up.railway.app/#/)
+  [All APIs (OpenAPI)](https://docs.litellm.ai/api-reference/#/)
 
 ### Encryption Migration
 
@@ -317,9 +320,7 @@ lite logout             # clear the keychain entry and the token file, and revok
 2. **Add a new model:**
 
    ```bash
-   lite models add gpt-4 \
-     --param api_key=sk-123 \
-     --param max_tokens=2048
+   lite models add {{openai_large}} --param model=openai/{{openai_large}} --param api_key=sk-123
    ```
 
 3. **Create a credential:**
@@ -334,17 +335,18 @@ lite logout             # clear the keychain entry and the token file, and revok
 
    ```bash
    lite keys generate \
-     --models=gpt-4 \
+     --models={{openai_large}} \
      --spend=100 \
      --duration=24h \
      --key-alias=my-key
    ```
 
-5. **Chat completion:**
+5. **Interactive chat:**
 
    ```bash
-   lite chat completions gpt-4 \
-     -m "user:Write a story"
+   lite chat {{openai_large}} \
+     --temperature 1 \
+     --system "You are a helpful coding assistant"
    ```
 
 6. **Custom HTTP request:**
@@ -352,7 +354,7 @@ lite logout             # clear the keychain entry and the token file, and revok
    ```bash
    lite http request \
      POST /chat/completions \
-     --json '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}'
+     --json '{"model": "{{openai_large}}", "messages": [{"role": "user", "content": "Hello"}]}'
    ```
 
 ## Error Handling

@@ -1,20 +1,32 @@
+---
+title: "Vertex AI Gemini API with LiteLLM"
+sidebar_label: "Gemini Enterprise Agent Platform"
+description: "Call Gemini on Gemini Enterprise Agent Platform (formerly Vertex AI) via LiteLLM with the vertex_ai/ prefix: GCP auth, function calling, thinking, caching."
+---
+
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 # VertexAI [Gemini]
 
+Gemini Enterprise Agent Platform (formerly Vertex AI) is Google Cloud's fully-managed platform for generative AI; LiteLLM calls Gemini on it with the `vertex_ai/` prefix and your GCP credentials from the Python SDK or AI Gateway.
+
 ## Overview
 
 | Property | Details |
 |-------|-------|
-| Description | Vertex AI is a fully-managed AI development platform for building and using generative AI. |
+| Description | Vertex AI, renamed Gemini Enterprise Agent Platform by Google in 2026, is Google Cloud's fully-managed platform for building and using generative AI. |
 | Provider Route on LiteLLM | `vertex_ai/` |
-| Link to Provider Doc | [Vertex AI ↗](https://cloud.google.com/vertex-ai) |
+| Link to Provider Doc | [Gemini Enterprise Agent Platform (formerly Vertex AI) ↗](https://cloud.google.com/products/gemini-enterprise-agent-platform) |
 | Base URL | 1. Regional endpoints<br/>`https://{vertex_location}-aiplatform.googleapis.com/`<br/>2. Global endpoints (limited availability)<br/>`https://aiplatform.googleapis.com/`|
-| Supported Operations | [`/chat/completions`](#sample-usage), `/completions`, [`/embeddings`](#embedding-models), [`/audio/speech`](/docs/providers/vertex_speech), [`/fine_tuning`](#fine-tuning-apis), [`/batches`](/docs/providers/vertex_batch), [`/files`](/docs/providers/vertex_batch), `/images`, [`/rerank`](#rerank-api) |
+| Supported Operations | [`/chat/completions`](#sample-usage), `/completions`, [`/embeddings`](#embedding-models), [`/audio/speech`](/docs/providers/vertex_speech), [`/audio/transcriptions`](/docs/providers/vertex_transcription), [`/fine_tuning`](#fine-tuning-apis), [`/batches`](/docs/providers/vertex_batch), [`/files`](/docs/providers/vertex_batch), `/images`, [`/rerank`](#rerank-api) |
 
-:::tip Vertex AI vs Gemini API
+:::info[Vertex AI is now Gemini Enterprise Agent Platform]
+Google renamed Vertex AI to Gemini Enterprise Agent Platform (Agent Platform for short) in 2026. It is a brand rename only: the API host (`{vertex_location}-aiplatform.googleapis.com`), the model IDs, GCP authentication, and the request and response shapes are unchanged, so LiteLLM keeps `vertex_ai/` as the provider route. Nothing changes in your `model_list`, credentials, routing, or cost tracking. Google's [name change table](https://docs.cloud.google.com/gemini-enterprise-agent-platform/vertex-ai-name-changes) maps each old product name to its new one.
+:::
+
+:::tip[Vertex AI vs Gemini API]
 | Model Format | Provider | Auth Required |
 |-------------|----------|---------------|
 | `vertex_ai/gemini-2.0-flash` | Vertex AI | GCP credentials + project |
@@ -29,13 +41,13 @@ Models without a prefix default to Vertex AI which requires GCP authentication.
 <br />
 <br />
 
-<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/main/cookbook/liteLLM_VertextAI_Example.ipynb">
+<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/89a6b5fbb26b632ef0faf633b0d3cf317d73deaa/cookbook/liteLLM_VertextAI_Example.ipynb">
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
 ## `vertex_ai/` route 
 
-The `vertex_ai/` route uses uses [VertexAI's REST API](https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference#syntax).
+The `vertex_ai/` route uses [Vertex AI's REST API](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/models/inference#syntax).
 
 ```python
 from litellm import completion
@@ -56,7 +68,7 @@ vertex_credentials_json = json.dumps(vertex_credentials)
 
 ## COMPLETION CALL 
 response = completion(
-  model="vertex_ai/gemini-2.5-pro",
+  model="vertex_ai/{{gemini_pro}}",
   messages=[{ "content": "Hello, how are you?","role": "user"}],
   vertex_credentials=vertex_credentials_json
 )
@@ -80,7 +92,7 @@ vertex_credentials_json = json.dumps(vertex_credentials)
 
 
 response = completion(
-  model="vertex_ai/gemini-2.5-pro",
+  model="vertex_ai/{{gemini_pro}}",
   messages=[{"content": "You are a good bot.","role": "system"}, {"content": "Hello, how are you?","role": "user"}], 
   vertex_credentials=vertex_credentials_json
 )
@@ -138,7 +150,7 @@ tools = [
 ]
 
 data = {
-    "model": "vertex_ai/gemini-1.5-pro-preview-0514"),
+    "model": "vertex_ai/{{gemini_pro}}",
     "messages": messages,
     "tools": tools,
     "tool_choice": "required",
@@ -151,7 +163,7 @@ print(completion(**data))
 
 ### **JSON Schema**
 
-From v`1.40.1+` LiteLLM supports sending `response_schema` as a param for Gemini-1.5-Pro on Vertex AI. For other models (e.g. `gemini-1.5-flash` or `claude-3-5-sonnet`), LiteLLM adds the schema to the message list with a user-controlled prompt.
+LiteLLM supports sending `response_schema` as a param for Gemini models on Vertex AI (e.g. `{{gemini_pro}}`) <SinceVersion v="1.40.1" />. For models that don't support it natively, LiteLLM adds the schema to the message list with a user-controlled prompt.
 
 **Response Schema**
 <Tabs>
@@ -186,9 +198,9 @@ response_schema = {
 
 
 completion(
-    model="vertex_ai/gemini-1.5-pro", 
+    model="vertex_ai/{{gemini_pro}}", 
     messages=messages, 
-    response_format={"type": "json_object", "response_schema": response_schema} # 👈 KEY CHANGE
+    response_format={"type": "json_object", "response_schema": response_schema} # KEY CHANGE
     )
 
 print(json.loads(completion.choices[0].message.content))
@@ -200,9 +212,9 @@ print(json.loads(completion.choices[0].message.content))
 1. Add model to config.yaml
 ```yaml
 model_list:
-  - model_name: gemini-2.5-pro
+  - model_name: {{gemini_pro}}
     litellm_params:
-      model: vertex_ai/gemini-2.5-pro
+      model: vertex_ai/{{gemini_pro}}
       vertex_project: "project-id"
       vertex_location: "us-central1"
       vertex_credentials: "/path/to/service_account.json" # [OPTIONAL] Do this OR `!gcloud auth application-default login` - run this to add vertex credentials to your env
@@ -210,9 +222,9 @@ model_list:
 or
 ```yaml
 model_list:
- - model_name: gemini-pro
+  - model_name: {{gemini_pro}}
     litellm_params:
-      model: vertex_ai/gemini-1.5-pro
+      model: vertex_ai/{{gemini_pro}}
       litellm_credential_name: vertex-global
       vertex_project: project-name-here
       vertex_location: global
@@ -232,9 +244,9 @@ $ litellm --config /path/to/config.yaml
 ```bash
 curl -X POST 'http://0.0.0.0:4000/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -D '{
-  "model": "gemini-2.5-pro",
+  "model": "{{gemini_pro}}",
   "messages": [
         {"role": "user", "content": "List 5 popular cookie recipes."}
     ],
@@ -268,12 +280,12 @@ To validate the response_schema, set `enforce_validation: true`.
 from litellm import completion, JSONSchemaValidationError
 try: 
 	completion(
-    model="vertex_ai/gemini-1.5-pro", 
+    model="vertex_ai/{{gemini_pro}}", 
     messages=messages, 
     response_format={
         "type": "json_object", 
         "response_schema": response_schema,
-        "enforce_validation": true # 👈 KEY CHANGE
+        "enforce_validation": true # KEY CHANGE
     }
 	)
 except JSONSchemaValidationError as e: 
@@ -286,9 +298,9 @@ except JSONSchemaValidationError as e:
 1. Add model to config.yaml
 ```yaml
 model_list:
-  - model_name: gemini-2.5-pro
+  - model_name: {{gemini_pro}}
     litellm_params:
-      model: vertex_ai/gemini-2.5-pro
+      model: vertex_ai/{{gemini_pro}}
       vertex_project: "project-id"
       vertex_location: "us-central1"
       vertex_credentials: "/path/to/service_account.json" # [OPTIONAL] Do this OR `!gcloud auth application-default login` - run this to add vertex credentials to your env
@@ -305,9 +317,9 @@ $ litellm --config /path/to/config.yaml
 ```bash
 curl -X POST 'http://0.0.0.0:4000/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -D '{
-  "model": "gemini-2.5-pro",
+  "model": "{{gemini_pro}}",
   "messages": [
         {"role": "user", "content": "List 5 popular cookie recipes."}
     ],
@@ -368,7 +380,7 @@ Return a `list[Recipe]`
     }
 ]
 
-completion(model="vertex_ai/gemini-1.5-flash-preview-0514", messages=messages, response_format={ "type": "json_object" })
+completion(model="vertex_ai/{{gemini_flash}}", messages=messages, response_format={ "type": "json_object" })
 ```
 
 ### **Google Hosted Tools (Web Search, Code Execution, etc.)**
@@ -390,10 +402,10 @@ from litellm import completion
 ## SETUP ENVIRONMENT
 # !gcloud auth application-default login - run this to add vertex credentials to your env
 
-tools = [{"googleSearch": {}}] # 👈 ADD GOOGLE SEARCH
+tools = [{"googleSearch": {}}] # ADD GOOGLE SEARCH
 
 resp = litellm.completion(
-                    model="vertex_ai/gemini-1.0-pro-001",
+                    model="vertex_ai/{{gemini_pro}}",
                     messages=[{"role": "user", "content": "Who won the world cup?"}],
                     tools=tools,
                 )
@@ -410,12 +422,12 @@ print(resp)
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-1234", # pass litellm proxy key, if you're using virtual keys
+    api_key="sk-<your-litellm-api-key>", # pass litellm proxy key, if you're using virtual keys
     base_url="http://0.0.0.0:4000/v1/" # point to litellm proxy
 )
 
 response = client.chat.completions.create(
-    model="gemini-2.5-pro",
+    model="{{gemini_pro}}",
     messages=[{"role": "user", "content": "Who won the world cup?"}],
     tools=[{"googleSearch": {}}],
 )
@@ -428,9 +440,9 @@ print(response)
 ```bash showLineNumbers
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gemini-2.5-pro",
+    "model": "{{gemini_pro}}",
     "messages": [
       {"role": "user", "content": "Who won the world cup?"}
     ],
@@ -464,11 +476,11 @@ import os
 
 os.environ["GEMINI_API_KEY"] = ".."
 
-# 👇 ADD URL CONTEXT
+# ADD URL CONTEXT
 tools = [{"urlContext": {}}]
 
 response = completion(
-    model="gemini/gemini-2.0-flash",
+    model="gemini/{{gemini_flash}}",
     messages=[{"role": "user", "content": "Summarize this document: https://ai.google.dev/gemini-api/docs/models"}],
     tools=tools,
 )
@@ -488,9 +500,9 @@ print(f"Retrieval Status: {urlMetadata['urlRetrievalStatus']}")
 1. Setup config.yaml
 ```yaml
 model_list:
-  - model_name: gemini-2.0-flash
+  - model_name: {{gemini_flash}}
     litellm_params:
-      model: gemini/gemini-2.0-flash
+      model: gemini/{{gemini_flash}}
       api_key: os.environ/GEMINI_API_KEY
 ```
 
@@ -505,7 +517,7 @@ curl -X POST 'http://0.0.0.0:4000/chat/completions' \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR-LITELLM-KEY>" \
   -d '{
-    "model": "gemini-2.0-flash",
+    "model": "{{gemini_flash}}",
     "messages": [{"role": "user", "content": "Summarize this document: https://ai.google.dev/gemini-api/docs/models"}],
     "tools": [{"urlContext": {}}]
   }'
@@ -526,10 +538,10 @@ from litellm import completion
 ## SETUP ENVIRONMENT
 # !gcloud auth application-default login - run this to add vertex credentials to your env
 
-tools = [{"enterpriseWebSearch": {}}] # 👈 ADD GOOGLE ENTERPRISE SEARCH
+tools = [{"enterpriseWebSearch": {}}] # ADD GOOGLE ENTERPRISE SEARCH
 
 resp = litellm.completion(
-                    model="vertex_ai/gemini-1.0-pro-001",
+                    model="vertex_ai/{{gemini_pro}}",
                     messages=[{"role": "user", "content": "Who won the world cup?"}],
                     tools=tools,
                 )
@@ -546,12 +558,12 @@ print(resp)
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-1234", # pass litellm proxy key, if you're using virtual keys
+    api_key="sk-<your-litellm-api-key>", # pass litellm proxy key, if you're using virtual keys
     base_url="http://0.0.0.0:4000/v1/" # point to litellm proxy
 )
 
 response = client.chat.completions.create(
-    model="gemini-2.5-pro",
+    model="{{gemini_pro}}",
     messages=[{"role": "user", "content": "Who won the world cup?"}],
     tools=[{"enterpriseWebSearch": {}}],
 )
@@ -564,9 +576,9 @@ print(response)
 ```bash showLineNumbers
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gemini-2.5-pro",
+    "model": "{{gemini_pro}}",
     "messages": [
       {"role": "user", "content": "Who won the world cup?"}
     ],
@@ -599,10 +611,10 @@ import os
 # !gcloud auth application-default login - run this to add vertex credentials to your env
 
 
-tools = [{"codeExecution": {}}] # 👈 ADD CODE EXECUTION
+tools = [{"codeExecution": {}}] # ADD CODE EXECUTION
 
 response = completion(
-    model="vertex_ai/gemini-2.0-flash",
+    model="vertex_ai/{{gemini_flash}}",
     messages=[{"role": "user", "content": "What is the weather in San Francisco?"}],
     tools=tools,
 )
@@ -616,9 +628,9 @@ print(response)
 ```bash showLineNumbers
 curl -X POST 'http://0.0.0.0:4000/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -d '{
-  "model": "gemini-2.0-flash",
+  "model": "{{gemini_flash}}",
   "messages": [{"role": "user", "content": "What is the weather in San Francisco?"}],
   "tools": [{"codeExecution": {}}]
 }
@@ -649,10 +661,10 @@ from litellm import completion
 ## SETUP ENVIRONMENT
 # !gcloud auth application-default login - run this to add vertex credentials to your env
 
-tools = [{"googleMaps": {"enableWidget": "ENABLE_WIDGET"}}] # 👈 ADD GOOGLE MAPS
+tools = [{"googleMaps": {"enableWidget": "ENABLE_WIDGET"}}] # ADD GOOGLE MAPS
 
 resp = litellm.completion(
-    model="vertex_ai/gemini-2.0-flash",
+    model="vertex_ai/{{gemini_flash}}",
     messages=[{"role": "user", "content": "What restaurants are nearby?"}],
     tools=tools,
 )
@@ -677,10 +689,10 @@ tools = [{
         "longitude": -122.4194,     # San Francisco longitude
         "languageCode": "en_US"     # Optional: language for results
     }
-}] # 👈 ADD GOOGLE MAPS WITH LOCATION
+}] # ADD GOOGLE MAPS WITH LOCATION
 
 resp = litellm.completion(
-    model="vertex_ai/gemini-2.0-flash",
+    model="vertex_ai/{{gemini_flash}}",
     messages=[{"role": "user", "content": "What restaurants are nearby?"}],
     tools=tools,
 )
@@ -700,12 +712,12 @@ print(resp)
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-1234", # pass litellm proxy key, if you're using virtual keys
+    api_key="sk-<your-litellm-api-key>", # pass litellm proxy key, if you're using virtual keys
     base_url="http://0.0.0.0:4000/v1/" # point to litellm proxy
 )
 
 response = client.chat.completions.create(
-    model="gemini-2.0-flash",
+    model="{{gemini_flash}}",
     messages=[{"role": "user", "content": "What restaurants are nearby?"}],
     tools=[{"googleMaps": {"enableWidget": "ENABLE_WIDGET"}}],
 )
@@ -719,12 +731,12 @@ print(response)
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-1234", # pass litellm proxy key, if you're using virtual keys
+    api_key="sk-<your-litellm-api-key>", # pass litellm proxy key, if you're using virtual keys
     base_url="http://0.0.0.0:4000/v1/" # point to litellm proxy
 )
 
 response = client.chat.completions.create(
-    model="gemini-2.0-flash",
+    model="{{gemini_flash}}",
     messages=[{"role": "user", "content": "What restaurants are nearby?"}],
     tools=[{
         "googleMaps": {
@@ -746,9 +758,9 @@ print(response)
 ```bash showLineNumbers
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gemini-2.0-flash",
+    "model": "{{gemini_flash}}",
     "messages": [
       {"role": "user", "content": "What restaurants are nearby?"}
     ],
@@ -765,9 +777,9 @@ curl http://localhost:4000/v1/chat/completions \
 ```bash showLineNumbers
 curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gemini-2.0-flash",
+    "model": "{{gemini_flash}}",
     "messages": [
       {"role": "user", "content": "What restaurants are nearby?"}
     ],
@@ -801,7 +813,7 @@ from vertexai.generative_models import GenerativeModel, GenerationConfig, Tool, 
 
 vertexai.init(project=project_id, location="us-central1")
 
-model = GenerativeModel("gemini-1.5-flash-001")
+model = GenerativeModel("{{gemini_flash}}")
 
 # Use Google Search for grounding
 tool = Tool.from_google_search_retrieval(grounding.GoogleSearchRetrieval())
@@ -826,10 +838,10 @@ from litellm import completion
 
 # !gcloud auth application-default login - run this to add vertex credentials to your env
 
-tools = [{"googleSearch": {"disable_attributon": False}}] # 👈 ADD GOOGLE SEARCH
+tools = [{"googleSearch": {"disable_attributon": False}}] # ADD GOOGLE SEARCH
 
 resp = litellm.completion(
-                    model="vertex_ai/gemini-1.0-pro-001",
+                    model="vertex_ai/{{gemini_pro}}",
                     messages=[{"role": "user", "content": "Who won the world cup?"}],
                     tools=tools,
                     vertex_project="project-id"
@@ -863,7 +875,7 @@ from litellm import completion
 # !gcloud auth application-default login - run this to add vertex credentials to your env
 
 resp = completion(
-    model="vertex_ai/gemini-2.5-flash-preview-04-17",
+    model="vertex_ai/{{gemini_flash}}",
     messages=[{"role": "user", "content": "What is the capital of France?"}],
     reasoning_effort="low",
     vertex_project="project-id",
@@ -879,9 +891,9 @@ resp = completion(
 1. Setup config.yaml
 
 ```yaml
-- model_name: gemini-2.5-flash
+- model_name: {{gemini_flash}}
   litellm_params:
-    model: vertex_ai/gemini-2.5-flash-preview-04-17
+    model: vertex_ai/{{gemini_flash}}
     vertex_credentials: {"project_id": "project-id", "location": "us-central1", "project_key": "project-key"}
     vertex_project: "project-id"
     vertex_location: "us-central1"
@@ -900,7 +912,7 @@ curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR-LITELLM-KEY>" \
   -d '{
-    "model": "gemini-2.5-flash",
+    "model": "{{gemini_flash}}",
     "messages": [{"role": "user", "content": "What is the capital of France?"}],
     "reasoning_effort": "low"
   }'
@@ -916,7 +928,7 @@ curl http://0.0.0.0:4000/v1/chat/completions \
 ModelResponse(
     id='chatcmpl-c542d76d-f675-4e87-8e5f-05855f5d0f5e',
     created=1740470510,
-    model='claude-3-7-sonnet-20250219',
+    model='{{gemini_flash}}',
     object='chat.completion',
     system_fingerprint=None,
     choices=[
@@ -964,7 +976,7 @@ from litellm import completion
 # !gcloud auth application-default login - run this to add vertex credentials to your env
 
 response = litellm.completion(
-  model="vertex_ai/gemini-2.5-flash-preview-04-17",
+  model="vertex_ai/{{gemini_flash}}",
   messages=[{"role": "user", "content": "What is the capital of France?"}],
   thinking={"type": "enabled", "budget_tokens": 1024},
   vertex_project="project-id",
@@ -980,7 +992,7 @@ curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_KEY" \
   -d '{
-    "model": "vertex_ai/gemini-2.5-flash-preview-04-17",
+    "model": "vertex_ai/{{gemini_flash}}",
     "messages": [{"role": "user", "content": "What is the capital of France?"}],
     "thinking": {"type": "enabled", "budget_tokens": 1024}
   }'
@@ -988,6 +1000,31 @@ curl http://0.0.0.0:4000/v1/chat/completions \
 
 </TabItem>
 </Tabs>
+
+
+#### Thought signatures and tool call ids
+
+Gemini on Vertex AI returns a thought signature with its tool calls, and LiteLLM handles it as it does for the Gemini API. By default, the id of a tool call that carries a signature holds the whole signature, as `call_123__thought__<thought-signature>`, which is often hundreds of characters long. For a client that limits the id length, set `thought_signature_in_tool_call_id: false` <SinceVersion v="1.109.0" /> on the deployment or per request. Ids are then short, such as `call_467312`, and the signature is only in `provider_specific_fields.thought_signature` of that tool call.
+
+```yaml
+model_list:
+  - model_name: {{gemini_flash}}
+    litellm_params:
+      model: vertex_ai/{{gemini_flash}}
+      vertex_project: "project-id"
+      vertex_location: "global"
+      thought_signature_in_tool_call_id: false
+```
+
+[Keep tool call ids short](/docs/providers/gemini#keep-tool-call-ids-short) covers the per-request setting, what a bad value does, and how the signature goes back to the model on the next turn.
+
+### **Long outputs**
+
+On a model that ends a request with a `continuationToken`, such as Gemini 4 Argon, LiteLLM sends the request again with that token until the answer finishes or `max_tokens` is spent, so `max_tokens` can go above Google's per-request cap. [Long outputs](/blog/gemini-4-argon#long-outputs) covers how it works, the usage it reports and the timeouts it needs.
+
+A request that sends no output limit is sent once and stops at Google's own per-request limit. From v1.108.0, set the env var `LITELLM_GEMINI_DEFAULT_MAX_OUTPUT_TOKENS` to an integer to give those requests a budget. It applies to chat completion, text completion and Responses API requests through the proxy or the Python SDK, and never to `/v1/messages`, which requires `max_tokens`. LiteLLM caps the budget at the model's `max_output_tokens` in the cost map, and any output limit the request already carries wins. It is not applied to a model the cost map does not list as a chat model, such as an image model, to a model whose cost map `supported_output_modalities` leaves out text, to a request whose `modalities` asks for anything besides text, to a request that resumes with a `continuation_token`, or to the native `:generateContent` route on a `vertex_ai/` model. A large value makes a non-streamed request run as long as the answer, so stream long answers or raise the client's timeout. The [env var reference](/docs/proxy/config_settings#environment-variables---reference) lists every case.
+
+`supports_continuation: true` in the cost map marks a model that can end a request with a `continuationToken` <SinceVersion v="1.110.0" />. It is set on `gemini/gemini-4-argon`, `vertex_ai/gemini-4-argon` and `vertex_ai/gemini-4-argon-cyber-permissive`. Read it before sending a request with `litellm.supports_continuation("vertex_ai/gemini-4-argon")` or `litellm.get_model_info("vertex_ai/gemini-4-argon")["supports_continuation"]`, or through the proxy at `GET /model/info` and `GET /v1/model/info`, where each deployment carries it in `model_info`, and at `GET /model_group/info`, where a model group reports `true` when any of its deployments supports it. `get_model_info` and `/model/info` return `None` (`null`) for a model the cost map leaves unflagged, so check for `true` instead of `false`. A deployment's own `model_info` in `config.yaml` or the Admin UI overrides the cost map value for that deployment only, so set `supports_continuation: true` there for a model the cost map does not flag yet. The flag only says what the model can do and does not turn continuation on or off. LiteLLM sends the request again only when it has an output limit, from `max_tokens` or `LITELLM_GEMINI_DEFAULT_MAX_OUTPUT_TOKENS`, and asks for one choice (`n` of 1), whatever the flag says. Whether a given answer was cut short still comes from the response. On `/chat/completions` that answer ends with `finish_reason: "length"` and carries `provider_specific_fields.continuation_token`, and [Long outputs](/blog/gemini-4-argon#long-outputs) shows how to send it back to continue the answer.
 
 
 ### **Context Caching**
@@ -1007,7 +1044,7 @@ from litellm import completion
 
 for _ in range(2): 
     resp = completion(
-        model="vertex_ai/gemini-2.5-pro",
+        model="vertex_ai/{{gemini_pro}}",
         messages=[
         # System Message
             {
@@ -1016,7 +1053,7 @@ for _ in range(2):
                     {
                         "type": "text",
                         "text": "Here is the full text of a complex legal agreement" * 4000,
-                        "cache_control": {"type": "ephemeral"}, # 👈 KEY CHANGE
+                        "cache_control": {"type": "ephemeral"}, # KEY CHANGE
                     }
                 ],
             },
@@ -1033,7 +1070,7 @@ for _ in range(2):
             }]
     )
 
-    print(resp.usage) # 👈 2nd usage block will be less, since cached tokens used
+    print(resp.usage) # 2nd usage block will be less, since cached tokens used
 ```
 
 </TabItem>
@@ -1044,7 +1081,7 @@ from litellm import completion
 
 # Cache for 2 hours (7200 seconds)
 resp = completion(
-    model="vertex_ai/gemini-2.5-pro",
+    model="vertex_ai/{{gemini_pro}}",
     messages=[
         {
             "role": "system",
@@ -1054,7 +1091,7 @@ resp = completion(
                     "text": "Here is the full text of a complex legal agreement" * 4000,
                     "cache_control": {
                         "type": "ephemeral", 
-                        "ttl": "7200s"  # 👈 Cache for 2 hours
+                        "ttl": "7200s"  # Cache for 2 hours
                     },
                 }
             ],
@@ -1067,7 +1104,7 @@ resp = completion(
                     "text": "What are the key terms and conditions in this agreement?",
                     "cache_control": {
                         "type": "ephemeral",
-                        "ttl": "3600s"  # 👈 This TTL will be ignored (first one is used)
+                        "ttl": "3600s"  # This TTL will be ignored (first one is used)
                     },
                 }
             ],
@@ -1085,9 +1122,9 @@ print(resp.usage)
 
 ```yaml
 model_list:
-  - model_name: gemini-2.5-pro
+  - model_name: {{gemini_pro}}
     litellm_params:
-      model: vertex_ai/gemini-2.5-pro
+      model: vertex_ai/{{gemini_pro}}
       vertex_project: "project-id"
       vertex_location: "us-central1"
       vertex_credentials: "/path/to/service_account.json"
@@ -1105,9 +1142,9 @@ litellm --config /path/to/config.yaml
 
 curl -X POST 'http://0.0.0.0:4000/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -d '{
-    "model": "gemini-2.5-flash",
+    "model": "{{gemini_flash}}",
     "messages": [
         {
             "role": "system",
@@ -1155,7 +1192,7 @@ curl http://0.0.0.0:4000/vertex_ai/v1/projects/{project_id}/locations/{location}
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_KEY" \
   -d '{
-    "model": "projects/{project_id}/locations/{location}/publishers/google/models/gemini-2.5-flash",
+    "model": "projects/{project_id}/locations/{location}/publishers/google/models/{{gemini_flash}}",
     "displayName": "example_cache",
     "contents": [{
       "role": "user",
@@ -1176,7 +1213,7 @@ Vertex AI will return a response containing the `name` of the cached content. Th
 ```json
 {
     "name": "projects/12341234/locations/{location}/cachedContents/123123123123123",
-    "model": "projects/{project_id}/locations/{location}/publishers/google/models/gemini-2.5-flash",
+    "model": "projects/{project_id}/locations/{location}/publishers/google/models/{{gemini_flash}}",
     "createTime": "2025-09-23T19:13:50.674976Z",
     "updateTime": "2025-09-23T19:13:50.674976Z",
     "expireTime": "2025-09-23T20:13:50.655988Z",
@@ -1202,7 +1239,7 @@ curl http://0.0.0.0:4000/chat/completions \
   -H "Authorization: Bearer $LITELLM_KEY" \
   -d '{
     "cachedContent": "projects/545201925769/locations/us-central1/cachedContents/4511135542628319232",
-    "model": "gemini-2.5-flash",
+    "model": "{{gemini_flash}}",
     "messages": [
         {
             "role": "user",
@@ -1234,7 +1271,7 @@ import litellm
 litellm.vertex_project = "hardy-device-38811" # Your Project ID
 litellm.vertex_location = "us-central1"  # proj location
 
-response = litellm.completion(model="gemini-2.5-pro", messages=[{"role": "user", "content": "write code for saying hi from LiteLLM"}])
+response = litellm.completion(model="{{gemini_pro}}", messages=[{"role": "user", "content": "write code for saying hi from LiteLLM"}])
 ```
 
 ## Usage with LiteLLM Proxy Server
@@ -1253,12 +1290,12 @@ Here's how to use Vertex AI with the LiteLLM Proxy Server
   model_list:
     - model_name: gemini-vision
       litellm_params:
-        model: vertex_ai/gemini-1.0-pro-vision-001
+        model: vertex_ai/{{gemini_pro}}
         vertex_project: "project-id"
         vertex_location: "us-central1"
     - model_name: gemini-vision
       litellm_params:
-        model: vertex_ai/gemini-1.0-pro-vision-001
+        model: vertex_ai/{{gemini_pro}}
         vertex_project: "project-id2"
         vertex_location: "us-east"
   ```
@@ -1277,7 +1314,7 @@ Here's how to use Vertex AI with the LiteLLM Proxy Server
   model_list: 
     -model_name: team1-gemini-2.5-pro
     litellm_params: 
-      model: gemini-2.5-pro
+      model: {{gemini_pro}}
   ```
 
   </TabItem>
@@ -1299,7 +1336,7 @@ Here's how to use Vertex AI with the LiteLLM Proxy Server
   ```python
   import openai
   client = openai.OpenAI(
-      api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+      api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
       base_url="http://0.0.0.0:4000" # litellm-proxy-base url
   )
 
@@ -1321,7 +1358,7 @@ Here's how to use Vertex AI with the LiteLLM Proxy Server
 
   ```shell
   curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
       "model": "team1-gemini-2.5-pro",
@@ -1374,7 +1411,7 @@ vertex_credentials_json = json.dumps(vertex_credentials)
 
 
 response = completion(
-  model="vertex_ai/gemini-2.5-pro",
+  model="vertex_ai/{{gemini_pro}}",
   messages=[{"content": "You are a good bot.","role": "system"}, {"content": "Hello, how are you?","role": "user"}], 
   vertex_credentials=vertex_credentials_json,
   vertex_project="my-special-project", 
@@ -1387,12 +1424,12 @@ response = completion(
 
 ```yaml
 model_list:
-    - model_name: gemini-1.5-pro
+    - model_name: {{gemini_pro}}
       litellm_params:
-        model: gemini-1.5-pro
+        model: {{gemini_pro}}
         vertex_credentials: os.environ/VERTEX_FILE_PATH_ENV_VAR # os.environ["VERTEX_FILE_PATH_ENV_VAR"] = "/path/to/service_account.json" 
         vertex_project: "my-special-project"
-        vertex_location: "my-special-location:
+        vertex_location: "my-special-location"
 ```
 
 </TabItem>
@@ -1414,9 +1451,9 @@ To use Workload Identity Federation, pass the path to your WIF credentials confi
 from litellm import completion
 
 response = completion(
-    model="vertex_ai/gemini-1.5-pro",
+    model="vertex_ai/{{gemini_pro}}",
     messages=[{"role": "user", "content": "Hello!"}],
-    vertex_credentials="/path/to/wif-credentials.json",  # 👈 WIF credentials file
+    vertex_credentials="/path/to/wif-credentials.json",  # WIF credentials file
     vertex_project="your-gcp-project-id",
     vertex_location="us-central1"
 )
@@ -1429,10 +1466,10 @@ response = completion(
 model_list:
   - model_name: gemini-model
     litellm_params:
-      model: vertex_ai/gemini-1.5-pro
+      model: vertex_ai/{{gemini_pro}}
       vertex_project: your-gcp-project-id
       vertex_location: us-central1
-      vertex_credentials: /path/to/wif-credentials.json  # 👈 WIF credentials file
+      vertex_credentials: /path/to/wif-credentials.json  # WIF credentials file
 ```
 
 Alternatively, you can create credentials in **LLM Credentials** in the LiteLLM UI and use those to authenticate your models:
@@ -1441,10 +1478,10 @@ Alternatively, you can create credentials in **LLM Credentials** in the LiteLLM 
 model_list:
   - model_name: gemini-model
     litellm_params:
-      model: vertex_ai/gemini-1.5-pro
+      model: vertex_ai/{{gemini_pro}}
       vertex_project: your-gcp-project-id
       vertex_location: us-central1
-      litellm_credential_name: my-vertex-wif-credential  # 👈 Reference credential stored in UI
+      litellm_credential_name: my-vertex-wif-credential  # Reference credential stored in UI
 ```
 
 </TabItem>
@@ -1522,7 +1559,7 @@ Add the `aws_*` keys at the **top level** of your WIF credential JSON (alongside
 from litellm import completion
 
 response = completion(
-    model="vertex_ai/gemini-1.5-pro",
+    model="vertex_ai/{{gemini_pro}}",
     messages=[{"role": "user", "content": "Hello!"}],
     vertex_credentials="/path/to/wif-credentials-with-aws.json",  # WIF JSON with aws_* keys
     vertex_project="your-gcp-project-id",
@@ -1537,7 +1574,7 @@ response = completion(
 model_list:
   - model_name: gemini-model
     litellm_params:
-      model: vertex_ai/gemini-1.5-pro
+      model: vertex_ai/{{gemini_pro}}
       vertex_project: your-gcp-project-id
       vertex_location: us-central1
       vertex_credentials: /path/to/wif-credentials-with-aws.json  # WIF JSON with aws_* keys
@@ -1585,8 +1622,8 @@ In certain use-cases you may need to make calls to the models and pass [safety s
 
 ```python
 response = completion(
-    model="vertex_ai/gemini-2.5-pro", 
-    messages=[{"role": "user", "content": "write code for saying hi from LiteLLM"}]
+    model="vertex_ai/{{gemini_pro}}", 
+    messages=[{"role": "user", "content": "write code for saying hi from LiteLLM"}],
     safety_settings=[
         {
             "category": "HARM_CATEGORY_HARASSMENT",
@@ -1678,7 +1715,7 @@ response = client.chat.completions.create(
 ```python
 import litellm 
 
-litellm.set_verbose = True 👈 See RAW REQUEST/RESPONSE 
+litellm.set_verbose = True # See RAW REQUEST/RESPONSE
 
 litellm.vertex_ai_safety_settings = [
         {
@@ -1699,7 +1736,7 @@ litellm.vertex_ai_safety_settings = [
         },
     ]
 response = completion(
-    model="vertex_ai/gemini-2.5-pro", 
+    model="vertex_ai/{{gemini_pro}}", 
     messages=[{"role": "user", "content": "write code for saying hi from LiteLLM"}]
 )
 ```
@@ -1747,12 +1784,12 @@ litellm.vertex_project = "hardy-device-38811" # Your Project ID`
 import os, litellm 
 
 # set via env var
-os.environ["VERTEXAI_LOCATION"] = "us-central1 # Your Location
+os.environ["VERTEXAI_LOCATION"] = "us-central1" # Your Location
 
 ### OR ###
 
 # set directly on module 
-litellm.vertex_location = "us-central1 # Your Location
+litellm.vertex_location = "us-central1" # Your Location
 ```
 
 ## Gemini Pro
@@ -1776,6 +1813,10 @@ LiteLLM automatically tracks spend for Vertex AI Gemini models using the correct
 When you use [Vertex AI PayGo](https://cloud.google.com/vertex-ai/generative-ai/pricing) (on-demand priority) or batch workloads, LiteLLM reads `trafficType` from the response and applies the matching cost per token from the [model cost map](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json). No configuration is required; spend tracking works for both standard and PayGo requests.
 
 See [Spend Tracking](../proxy/cost_tracking.md) for general cost tracking setup.
+
+## Interactions API and Deep Research
+
+`vertex_ai` deployments serve Google's Interactions API natively at `/v1beta/interactions`, including the `deep-research-preview-04-2026` agent as a background job. Give the agent its own deployment whose `model` is the agent, then send that deployment's model group as `model` and the agent as `agent`. To poll, cancel or delete a job through the proxy, send the deployment ID from the create response's `x-litellm-model-id` header, or the model group it was created on, as a `model` query parameter or an `x-litellm-model` header. [Interactions on Vertex AI](../interactions.md#vertex-ai) has the config, requests and cost tracking details.
 
 ## Private Service Connect (PSC) Endpoints
 
@@ -1920,21 +1961,12 @@ curl --location 'https://0.0.0.0:4000/v1/chat/completions' \
 ## Gemini Pro Vision
 | Model Name       | Function Call                        |
 |------------------|--------------------------------------|
-| gemini-2.5-pro-vision   | `completion('gemini-2.5-pro-vision', messages)`, `completion('vertex_ai/gemini-2.5-pro-vision', messages)`|
-
-## Gemini 1.5 Pro (and Vision)
-| Model Name       | Function Call                        |
-|------------------|--------------------------------------|
-| gemini-1.5-pro   | `completion('gemini-1.5-pro', messages)`, `completion('vertex_ai/gemini-1.5-pro', messages)` |
-| gemini-1.5-flash-preview-0514   | `completion('gemini-1.5-flash-preview-0514', messages)`, `completion('vertex_ai/gemini-1.5-flash-preview-0514', messages)` |
-| gemini-1.5-pro-preview-0514   | `completion('gemini-1.5-pro-preview-0514', messages)`, `completion('vertex_ai/gemini-1.5-pro-preview-0514', messages)` |
-
-
+| gemini-3.1-pro-preview   | `completion('gemini-3.1-pro-preview', messages)`, `completion('vertex_ai/gemini-3.1-pro-preview', messages)`|
 
 
 #### Using Gemini Pro Vision
 
-Call `gemini-2.5-pro-vision` in the same input/output format as OpenAI [`gpt-4-vision`](https://docs.litellm.ai/docs/providers/openai#openai-vision-models)
+Call `{{gemini_pro}}` in the same input/output format as OpenAI [`gpt-4-vision`](https://docs.litellm.ai/docs/providers/openai#openai-vision-models)
 
 LiteLLM Supports the following image types passed in `url`
 - Images with Cloud Storage URIs - gs://cloud-samples-data/generative-ai/image/boats.jpeg
@@ -1952,7 +1984,7 @@ LiteLLM Supports the following image types passed in `url`
 import litellm
 
 response = litellm.completion(
-  model = "vertex_ai/gemini-2.5-pro-vision",
+  model = "vertex_ai/{{gemini_pro}}",
   messages=[
       {
           "role": "user",
@@ -1990,7 +2022,7 @@ image_path = "cached_logo.jpg"
 # Getting the base64 string
 base64_image = encode_image(image_path)
 response = litellm.completion(
-    model="vertex_ai/gemini-2.5-pro-vision",
+    model="vertex_ai/{{gemini_pro}}",
     messages=[
         {
             "role": "user",
@@ -2046,7 +2078,7 @@ tools = [
 messages = [{"role": "user", "content": "What's the weather like in Boston today?"}]
 
 response = completion(
-    model="vertex_ai/gemini-2.5-pro-vision",
+    model="vertex_ai/{{gemini_pro}}",
     messages=messages,
     tools=tools,
 )
@@ -2105,7 +2137,7 @@ messages = [
 ]
 
 response = completion(
-    model="vertex_ai/gemini-3-pro-preview",
+    model="vertex_ai/{{gemini_pro}}",
     messages=messages,
 )
 ```
@@ -2137,7 +2169,7 @@ messages = [
 ]
 
 response = completion(
-    model="vertex_ai/gemini-3-pro-preview",
+    model="vertex_ai/{{gemini_pro}}",
     messages=messages,
 )
 ```
@@ -2169,7 +2201,7 @@ LiteLLM supports fine-grained video processing control through the `video_metada
 :::
 
 :::tip
-Video clipping (`start_offset`/`end_offset`) and frame rate control (`fps`) are supported by all Gemini models, but analysis quality is significantly higher with the **Gemini 2.5 series** (e.g., `gemini-2.5-flash`, `gemini-2.5-pro`).
+Video clipping (`start_offset`/`end_offset`) and frame rate control (`fps`) are supported by all Gemini models, but analysis quality is significantly higher with the **Gemini 2.5 series and later** (e.g., `{{gemini_flash}}`, `{{gemini_pro}}`).
 :::
 
 :::warning
@@ -2186,7 +2218,7 @@ Video clipping (`start_offset`/`end_offset`) and frame rate control (`fps`) are 
 from litellm import completion
 
 response = completion(
-    model="vertex_ai/gemini-3-pro-preview",
+    model="vertex_ai/{{gemini_pro}}",
     messages=[
         {
             "role": "user",
@@ -2219,7 +2251,7 @@ print(response.choices[0].message.content)
 from litellm import completion
 
 response = completion(
-    model="vertex_ai/gemini-3-pro-preview",
+    model="vertex_ai/{{gemini_pro}}",
     messages=[
         {
             "role": "user",
@@ -2253,9 +2285,9 @@ print(response.choices[0].message.content)
 
 ```yaml
 model_list:
-  - model_name: gemini-3-pro
+  - model_name: {{gemini_pro}}
     litellm_params:
-      model: vertex_ai/gemini-3-pro-preview
+      model: vertex_ai/{{gemini_pro}}
       vertex_project: your-project
       vertex_location: us-central1
 ```
@@ -2273,7 +2305,7 @@ curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR-LITELLM-KEY>" \
   -d '{
-    "model": "gemini-3-pro",
+    "model": "{{gemini_pro}}",
     "messages": [
       {
         "role": "user",
@@ -2307,7 +2339,7 @@ Pass any file supported by Vertex AI, through LiteLLM.
 
 LiteLLM Supports the following file types passed in url. 
 
-Using `file` message type for VertexAI is live from v1.65.1+ 
+You can use the `file` message type for VertexAI <SinceVersion v="1.65.1" />
 
 ```
 Files with Cloud Storage URIs - gs://cloud-samples-data/generative-ai/image/boats.jpeg
@@ -2324,7 +2356,7 @@ Base64 Encoded Local Files
 from litellm import completion
 
 response = completion(
-    model="vertex_ai/gemini-1.5-flash",
+    model="vertex_ai/{{gemini_flash}}",
     messages=[
         {
             "role": "user",
@@ -2362,7 +2394,7 @@ file_data = response.content
 encoded_file = base64.b64encode(file_data).decode("utf-8")
 
 response = completion(
-    model="vertex_ai/gemini-1.5-flash",
+    model="vertex_ai/{{gemini_flash}}",
     messages=[
         {
             "role": "user",
@@ -2371,13 +2403,13 @@ response = completion(
                 {
                     "type": "file",
                     "file": {
-                        "file_data": f"data:application/pdf;base64,{encoded_file}", # 👈 PDF
+                        "file_data": f"data:application/pdf;base64,{encoded_file}", # PDF
                     }  
                 },
                 {
                     "type": "audio_input",
-                    "audio_input {
-                        "audio_input": f"data:audio/mp3;base64,{encoded_file}", # 👈 AUDIO File ('file' message works as too)
+                    "audio_input": {
+                        "audio_input": f"data:audio/mp3;base64,{encoded_file}", # AUDIO File ('file' message works as too)
                     }  
                 },
             ],
@@ -2394,9 +2426,9 @@ print(response.choices[0])
 1. Add model to config 
 
 ```yaml
-- model_name: gemini-1.5-flash
+- model_name: {{gemini_flash}}
   litellm_params:
-    model: vertex_ai/gemini-1.5-flash
+    model: vertex_ai/{{gemini_flash}}
     vertex_credentials: "/path/to/service_account.json"
 ```
 
@@ -2414,7 +2446,7 @@ curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR-LITELLM-KEY>" \
   -d '{
-    "model": "gemini-1.5-flash",
+    "model": "{{gemini_flash}}",
     "messages": [
       {
         "role": "user",
@@ -2445,7 +2477,7 @@ curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <YOUR-LITELLM-KEY>" \
   -d '{
-    "model": "gemini-1.5-flash",
+    "model": "{{gemini_flash}}",
     "messages": [
       {
         "role": "user",
@@ -2457,13 +2489,13 @@ curl http://0.0.0.0:4000/v1/chat/completions \
           {
                 "type": "file",
                 "file": {
-                    "file_data": f"data:application/pdf;base64,{encoded_file}", # 👈 PDF
+                    "file_data": f"data:application/pdf;base64,{encoded_file}", # PDF
                 },
             },
             {
                 "type": "audio_input",
                 "audio_input {
-                    "audio_input": f"data:audio/mp3;base64,{encoded_file}", # 👈 AUDIO File ('file' message works as too)
+                    "audio_input": f"data:audio/mp3;base64,{encoded_file}", # AUDIO File ('file' message works as too)
                 }  
             },
     ]
@@ -2477,33 +2509,9 @@ curl http://0.0.0.0:4000/v1/chat/completions \
 </Tabs>
 
 
-## Chat Models
-| Model Name       | Function Call                        |
-|------------------|--------------------------------------|
-| chat-bison-32k   | `completion('chat-bison-32k', messages)` |
-| chat-bison       | `completion('chat-bison', messages)`     |
-| chat-bison@001   | `completion('chat-bison@001', messages)` |
+## Legacy PaLM 2 and Gemini 1.x Models
 
-## Code Chat Models
-| Model Name           | Function Call                              |
-|----------------------|--------------------------------------------|
-| codechat-bison       | `completion('codechat-bison', messages)`     |
-| codechat-bison-32k   | `completion('codechat-bison-32k', messages)` |
-| codechat-bison@001   | `completion('codechat-bison@001', messages)` |
-
-## Text Models
-| Model Name       | Function Call                        |
-|------------------|--------------------------------------|
-| text-bison       | `completion('text-bison', messages)` |
-| text-bison@001   | `completion('text-bison@001', messages)` |
-
-## Code Text Models
-| Model Name       | Function Call                        |
-|------------------|--------------------------------------|
-| code-bison       | `completion('code-bison', messages)` |
-| code-bison@001   | `completion('code-bison@001', messages)` |
-| code-gecko@001   | `completion('code-gecko@001', messages)` |
-| code-gecko@latest| `completion('code-gecko@latest', messages)` |
+Google has retired the PaLM 2 models (`chat-bison`, `codechat-bison`, `text-bison`, `code-bison`, `code-gecko`) and the Gemini 1.0 and 1.5 models on Vertex AI, and they are no longer in the LiteLLM model map. Unprefixed names like `completion('chat-bison', messages)` or `completion('gemini-1.5-pro', messages)` fail with `LLM Provider NOT provided`, and the `vertex_ai/` prefixed forms return a 404 from Vertex AI. Use a current Gemini model instead, for example `completion('vertex_ai/gemini-2.5-pro', messages)`
 
 
 ## **Embedding Models**
@@ -2555,7 +2563,7 @@ $ litellm --config /path/to/config.yaml
 ```python
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 response = client.embeddings.create(
     model="snowflake-arctic-embed-m-long-1731622468876", 
@@ -2602,7 +2610,7 @@ All models listed [here](https://github.com/BerriAI/litellm/blob/57f37f743886a02
 ```python
 response = litellm.embedding(
     model="vertex_ai/text-embedding-004",
-    input=["good morning from litellm", "gm"]
+    input=["good morning from litellm", "gm"],
     input_type = "RETRIEVAL_DOCUMENT",
     dimensions=1,
 )
@@ -2614,7 +2622,7 @@ response = litellm.embedding(
 ```python
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 response = client.embeddings.create(
     model="text-embedding-004", 
@@ -2651,7 +2659,7 @@ You can pass any vertex specific params to the embedding model. Just pass them t
 ```python
 response = litellm.embedding(
     model="vertex_ai/text-embedding-004",
-    input=["good morning from litellm", "gm"]
+    input=["good morning from litellm", "gm"],
     task_type = "RETRIEVAL_DOCUMENT",
     title = "test",
     dimensions=1,
@@ -2665,7 +2673,7 @@ response = litellm.embedding(
 ```python
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 response = client.embeddings.create(
     model="text-embedding-004", 
@@ -2748,7 +2756,7 @@ Requests with GCS Image / Video URI
 ```python
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 # # request sent to model set on litellm proxy, `litellm --model`
 response = client.embeddings.create(
@@ -2764,7 +2772,7 @@ Requests with base64 encoded images
 ```python
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 # # request sent to model set on litellm proxy, `litellm --model`
 response = client.embeddings.create(
@@ -2788,7 +2796,7 @@ embeddings_models = "multimodalembedding@001"
 embeddings = OpenAIEmbeddings(
     model="multimodalembedding@001",
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234",  # type: ignore
+    api_key="sk-<your-litellm-api-key>",  # type: ignore
 )
 
 
@@ -2809,7 +2817,7 @@ embeddings_models = "multimodalembedding@001"
 embeddings = OpenAIEmbeddings(
     model="multimodalembedding@001",
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234",  # type: ignore
+    api_key="sk-<your-litellm-api-key>",  # type: ignore
 )
 
 
@@ -2852,7 +2860,7 @@ from vertexai.vision_models import VideoSegmentConfig
 from google.auth.credentials import Credentials
 
 
-LITELLM_PROXY_API_KEY = "sk-1234"
+LITELLM_PROXY_API_KEY = "sk-<your-litellm-api-key>"
 LITELLM_PROXY_BASE = "http://0.0.0.0:4000/vertex-ai"
 
 import datetime
@@ -2970,7 +2978,7 @@ Text + Image
 ```python
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 # # request sent to model set on litellm proxy, `litellm --model`
 response = client.embeddings.create(
@@ -2985,7 +2993,7 @@ Text + Video
 ```python
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 # # request sent to model set on litellm proxy, `litellm --model`
 response = client.embeddings.create(
@@ -3000,7 +3008,7 @@ Image + Video
 ```python
 import openai
 
-client = openai.OpenAI(api_key="sk-1234", base_url="http://0.0.0.0:4000")
+client = openai.OpenAI(api_key="sk-<your-litellm-api-key>", base_url="http://0.0.0.0:4000")
 
 # # request sent to model set on litellm proxy, `litellm --model`
 response = client.embeddings.create(
@@ -3027,13 +3035,13 @@ print(response)
 #### 1. Add `finetune_settings` to your config.yaml
 ```yaml
 model_list:
-  - model_name: gpt-4
+  - model_name: {{openai_large}}
     litellm_params:
       model: openai/fake
       api_key: fake-key
       api_base: https://exampleopenaiendpoint-production.up.railway.app/
 
-# 👇 Key change: For /fine_tuning/jobs endpoints
+# Key change: For /fine_tuning/jobs endpoints
 finetune_settings:
   - custom_llm_provider: "vertex_ai"
     vertex_project: "adroit-crow-413218"
@@ -3048,7 +3056,7 @@ finetune_settings:
 
 ```python
 ft_job = await client.fine_tuning.jobs.create(
-    model="gemini-1.0-pro-002",                  # Vertex model you want to fine-tune
+    model="{{gemini_flash}}",                  # Vertex model you want to fine-tune
     training_file="gs://cloud-samples-data/ai-platform/generative_ai/sft_train_data.jsonl",                 # file_id from create file response
     extra_headers={"custom-llm-provider": "vertex_ai"}, # tell litellm proxy which provider to use
 )
@@ -3060,10 +3068,10 @@ ft_job = await client.fine_tuning.jobs.create(
 ```shell
 curl http://localhost:4000/v1/fine_tuning/jobs \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer sk-1234" \
+    -H "Authorization: Bearer $LITELLM_API_KEY" \
     -H "custom-llm-provider: vertex_ai" \
     -d '{
-    "model": "gemini-1.0-pro-002",
+    "model": "{{gemini_flash}}",
     "training_file": "gs://cloud-samples-data/ai-platform/generative_ai/sft_train_data.jsonl"
     }'
 ```
@@ -3083,7 +3091,7 @@ Set hyper_parameters, such as `n_epochs`, `learning_rate_multiplier` and `adapte
 ```python
 
 ft_job = client.fine_tuning.jobs.create(
-    model="gemini-1.0-pro-002",                  # Vertex model you want to fine-tune
+    model="{{gemini_flash}}",                  # Vertex model you want to fine-tune
     training_file="gs://cloud-samples-data/ai-platform/generative_ai/sft_train_data.jsonl",                 # file_id from create file response
     hyperparameters={
         "n_epochs": 3,                      # epoch_count on Vertex
@@ -3100,10 +3108,10 @@ ft_job = client.fine_tuning.jobs.create(
 ```shell
 curl http://localhost:4000/v1/fine_tuning/jobs \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer sk-1234" \
+    -H "Authorization: Bearer $LITELLM_API_KEY" \
     -H "custom-llm-provider: vertex_ai" \
     -d '{
-    "model": "gemini-1.0-pro-002",
+    "model": "{{gemini_flash}}",
     "training_file": "gs://cloud-samples-data/ai-platform/generative_ai/sft_train_data.jsonl",
     "hyperparameters": {
         "n_epochs": 3,
@@ -3141,7 +3149,7 @@ Here is an example JSON request demonstrating the labels usage:
 
 ```json
 {
-    "model": "gemini-2.0-flash-lite",
+    "model": "{{gemini_flash}}",
     "messages": [
         { "role": "user", "content": "respond in 20 words. who are you?" }
     ],
@@ -3152,6 +3160,52 @@ Here is an example JSON request demonstrating the labels usage:
     }
 }
 ```
+
+### Label requests with key, team, org, and project identity
+
+The proxy can add labels for you from the virtual key that made the call, so Cloud Billing splits Vertex AI costs by key, team, org, and project on the routes listed at the end of this section, without any change to your clients <SinceVersion v="1.111.0" />. It is off by default. List the fields to send under `litellm_settings`:
+
+```yaml
+litellm_settings:
+  vertex_request_label_fields:
+    - user_api_key_alias
+    - user_api_key_team_alias
+    - user_api_key_org_alias
+    - user_api_key_project_alias
+    - spend_logs_metadata
+```
+
+With that config, a request made with key `chargeback` on team `AI Platform`, org `ml-org`, and project `support-bot`, whose key metadata sets `spend_logs_metadata` to `{"cost-center": "cc-1234"}`, reaches Vertex AI with these labels:
+
+```json
+{
+    "user_api_key_alias": "chargeback",
+    "user_api_key_team_alias": "ai_platform",
+    "user_api_key_org_alias": "ml-org",
+    "user_api_key_project_alias": "support-bot",
+    "cost-center": "cc-1234"
+}
+```
+
+| Field | Label value |
+|-------|-------------|
+| `user_api_key_alias` | Alias of the virtual key |
+| `user_api_key_team_id`, `user_api_key_team_alias` | Team the key belongs to |
+| `user_api_key_org_id`, `user_api_key_org_alias` | Organization the key belongs to |
+| `user_api_key_project_id`, `user_api_key_project_alias` | Project the key belongs to |
+| `spend_logs_metadata` | Every text pair in the request's [`spend_logs_metadata`](../proxy/cost_tracking.md#custom-spend-log-metadata) |
+
+A field with no value on a given request, such as `user_api_key_team_alias` for a key without a team, is left out, and a field set to an empty string is sent with an empty value. Other text `user_api_key_*` fields from the [Bedrock identity list](./bedrock.md#forward-key-team-and-org-identity-from-the-proxy) work too, but they make poor labels. `user_api_key_hash` is cut to 63 characters, so it no longer matches spend logs, emails and routes come out with `_` in place of `@`, `.`, and `/`, and per-user ids like `user_api_key_end_user_id` run into Google's value limit below. The caller also sets `user_api_key_end_user_id` itself through the `user` field, so it is not identity the proxy vouches for. `spend_logs_metadata` is the way to add your own dimensions like cost center. Set it once in the key or team `metadata` and LiteLLM merges it into every request made with that key, with values sent on the request winning over the key and team defaults.
+
+Vertex AI gets the identity labels first, in the order you list them, then the caller's labels from [Labels](#labels) above, then the `spend_logs_metadata` pairs. When two of them use the same key, the earlier one wins. LiteLLM sends at most 64 labels, the most Vertex AI accepts on a Google model, and at most 32 on Claude and Mistral, where they go in the `X-Vertex-AI-Labels` header. Identity labels always get a slot. On Claude and Mistral the caller's labels come only from the `labels` field on `/chat/completions` or from an `X-Vertex-AI-Labels` header the caller sends, never from `metadata`, and only from that header on `/v1/messages`. A caller can send that header in the request body's `extra_headers`, or as an HTTP header when the proxy forwards client headers, with `forward_client_headers_to_llm_api: true` under `general_settings` or with the model group listed under `litellm_settings.model_group_settings.forward_client_headers_to_llm_api`. When the header and the `labels` field both arrive, the header replaces the `labels` field.
+
+While the setting is on, keys starting with `user_api_key_` in any letter case are reserved for the proxy, so a caller label or `spend_logs_metadata` pair with such a key is dropped and a caller cannot forge identity through labels. Only identity labels are protected this way. A caller can still replace a `spend_logs_metadata` label like `cost-center` by sending its own `spend_logs_metadata` or a label with the same key, so use team or project identity labels for chargeback that callers must not change. On Claude and Mistral, LiteLLM reads the caller's `X-Vertex-AI-Labels` header as its labels and sends its own header in place of it. A header that is not base64-encoded JSON is dropped, and LiteLLM uses the caller's `labels` field instead. Everywhere else LiteLLM adds labels, it puts them in the request body and drops a caller's `X-Vertex-AI-Labels` header, so that header can't carry a forged identity label to Vertex AI.
+
+Identity and `spend_logs_metadata` text is lowercased, every character other than a letter, a number, `_`, or `-` becomes `_`, accent and vowel marks written as separate characters and modifier letters like `ʰ` included, and it is cut to 63 characters, so a team alias like `AI Platform` becomes the valid label value `ai_platform`. A `spend_logs_metadata` key that does not start with a letter after that is dropped. Two aliases that differ only in letter case or in those characters, like `AI Platform` and `ai.platform`, share one label value, so list `user_api_key_team_id` when exact team names matter. The caller's own labels are sent as they are, like with the setting off.
+
+Google keeps at most 1,000 unique values per label key over the life of the billing account and may drop a key that goes past that without notice, so keep per-request ids out of `spend_logs_metadata` and caller labels. A proxy with more than 1,000 virtual keys reaches that limit on `user_api_key_alias` too, so list team, org, or project fields instead. Labels reach Cloud Billing only on pay-as-you-go requests. Google bills by labels on `generateContent`, `streamGenerateContent`, and `interactions.create` for Gemini, on `rawPredict` and `streamRawPredict` for partner models like Claude and Mistral, on `predict` only for Imagen, and on `predictLongRunning` for Veo, so Vertex AI ignores the labels LiteLLM sends with text and multimodal embeddings and they do not show up in Cloud Billing. Google does not say whether rerank labels, which go to the Discovery Engine ranking API, or batch job labels show up there.
+
+The setting covers `/chat/completions`, `/v1/messages`, `/v1/responses`, and `/v1/completions` on Gemini, Claude, and Mistral (Codestral included), the Google GenAI `generateContent` and `streamGenerateContent` routes, the Interactions API, text and multimodal embeddings, image generation and image edits, Veo video generation, Gemini audio transcription, rerank, batches, and the `/vertex_ai` pass-through routes, and no other route. On the pass-through, LiteLLM labels only POST requests. It adds labels to the request body on `generateContent`, `streamGenerateContent`, `predict`, `predictLongRunning`, and batch job creation, and to the `X-Vertex-AI-Labels` header on Claude and Mistral `rawPredict` and `streamRawPredict`, where `labels` the caller sends in the body move into that header too. It also rewrites the labels on any other pass-through POST body that already has them, so a caller can't forge identity there. `rawPredict` and `streamRawPredict` on other partner models and on custom endpoints, and `PATCH` and `PUT` requests, go out as the caller sent them. A batch job gets its labels only from the proxy, never from the `metadata` sent with the batch request. Requests on every other Vertex AI route get no identity labels, including AI21, Llama, and the other partner models, Gemma and Model Garden chat models, Agent Engine, RAG Engine and vector stores, fine-tuning, Chirp audio transcription, speech, and realtime, and `gemini-embedding-2`.
 
 
 
@@ -3203,7 +3257,7 @@ def load_vertex_ai_credentials():
 
 :::info
 
-Trying to deploy LiteLLM on Google Cloud Run? Tutorial [here](https://docs.litellm.ai/docs/proxy/deploy#deploy-with-terraform-aws-and-gcp)
+[Deploy LiteLLM on Google Cloud Run with Terraform](../proxy/deploy/terraform.md#gcp).
 
 :::
 
@@ -3312,7 +3366,7 @@ Test with curl:
 
 ```bash
 curl http://0.0.0.0:4000/rerank \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "semantic-ranker-default@latest",

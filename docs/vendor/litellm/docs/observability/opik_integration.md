@@ -1,3 +1,8 @@
+---
+title: "Comet Opik Tracing for LiteLLM AI Gateway"
+sidebar_label: "Comet Opik"
+description: "Send LiteLLM traces to Comet Opik from the Python SDK or AI Gateway, with Opik-specific parameters per request and metadata added from API keys."
+---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import Image from '@theme/IdealImage';
@@ -48,7 +53,7 @@ litellm.callbacks = ["opik"]
 
 # openai call
 response = litellm.completion(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages=[
         {"role": "user", "content": "Why is tracking and evaluation of LLMs important?"}
     ]
@@ -70,7 +75,7 @@ litellm.callbacks = ["opik"]
 def streaming_function(input):
     messages = [{"role": "user", "content": input}]
     response = litellm.completion(
-        model="gpt-3.5-turbo",
+        model="{{openai_small}}",
         messages=messages,
         metadata = {
             "opik": {
@@ -92,9 +97,9 @@ chunks = list(response)
 
 ```yaml
 model_list:
-  - model_name: gpt-3.5-turbo-testing
+  - model_name: {{openai_small}}-testing
     litellm_params:
-      model: gpt-3.5-turbo
+      model: {{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
 litellm_settings:
@@ -116,9 +121,9 @@ litellm --config config.yaml
 ```bash
 curl -L -X POST 'http://0.0.0.0:4000/v1/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -d '{
-  "model": "gpt-3.5-turbo-testing",
+  "model": "{{openai_small}}-testing",
   "messages": [
     {
       "role": "user",
@@ -156,7 +161,7 @@ litellm.callbacks = ["opik"]
 
 messages = [{"role": "user", "content": input}]
 response = litellm.completion(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages=messages,
     metadata = {
         "opik": {
@@ -175,9 +180,9 @@ return response
 ```bash
 curl -L -X POST 'http://0.0.0.0:4000/v1/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -d '{
-  "model": "gpt-3.5-turbo",
+  "model": "{{openai_small}}",
   "messages": [
     {
       "role": "user",
@@ -205,12 +210,12 @@ You can also pass the fields as part of the request header with a `opik_*` prefi
 ```shell
 curl --location --request POST 'http://0.0.0.0:4000/chat/completions' \
     --header 'Content-Type: application/json' \
-    --header 'Authorization: Bearer sk-1234' \
+    --header "Authorization: Bearer $LITELLM_API_KEY" \
     --header 'opik_project_name: your-opik-project-name' \
     --header 'opik_thread_id: your-thread-id' \
     --header 'opik_tags: ["streaming-test"]' \
     --data '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [
         {
         "role": "user",
@@ -244,7 +249,7 @@ curl -L -X POST 'http://0.0.0.0:4000/v1/chat/completions' \
 -H 'Content-Type: application/json' \
 -H 'Authorization: Bearer sk-key-from-step-1' \
 -d '{
-  "model": "gpt-3.5-turbo",
+  "model": "{{openai_small}}",
   "messages": [
     {
       "role": "user",
@@ -259,6 +264,6 @@ All requests made with this key will automatically be tracked in the "TestProjec
 
 ## Support & Talk to Founders
 
-- [Schedule Demo 👋](https://calendly.com/d/4mp-gd3-k5k/berriai-1-1-onboarding-litellm-hosted-version)
-- [Community Discord 💭](https://discord.gg/wuPM9dRgDw)
-- Our emails ✉️ ishaan@berri.ai / krrish@berri.ai
+- [Schedule Demo](https://calendly.com/d/4mp-gd3-k5k/berriai-1-1-onboarding-litellm-hosted-version)
+- [Community Discord](https://discord.gg/wuPM9dRgDw)
+- Our emails ishaan@berri.ai / krrish@berri.ai

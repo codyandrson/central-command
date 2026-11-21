@@ -1,3 +1,8 @@
+---
+title: "Log Raw LLM Requests and Responses in LiteLLM"
+sidebar_label: "Raw Request/Response Logging"
+description: "See the raw request LiteLLM sends to each provider in logging tools such as Langfuse or OpenTelemetry, and return raw OpenAI response headers."
+---
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -33,9 +38,9 @@ litellm.success_callback = ["langfuse"]
  
 # openai call
 response = litellm.completion(
-  model="gpt-3.5-turbo",
+  model="{{openai_small}}",
   messages=[
-    {"role": "user", "content": "Hi 👋 - i'm openai"}
+    {"role": "user", "content": "Hi - i'm openai"}
   ]
 )
 ```
@@ -78,7 +83,7 @@ litellm.return_response_headers = True
 os.environ["OPENAI_API_KEY"] = "your-api-key"
 
 response = litellm.completion(
-  model="gpt-3.5-turbo",
+  model="{{openai_small}}",
   messages=[{ "content": "Hello, how are you?","role": "user"}]
 )
 
@@ -92,9 +97,9 @@ print(response._hidden_params)
 
 ```yaml
 model_list:
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
-      model: gpt-3.5-turbo
+      model: {{openai_small}}
       api_key: os.environ/GROQ_API_KEY
 
 litellm_settings:
@@ -106,9 +111,9 @@ litellm_settings:
 ```bash
 curl -X POST 'http://0.0.0.0:4000/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -D '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [
         { "role": "system", "content": "Use your tools smartly"},
         { "role": "user", "content": "What time is it now? Use your tool"}

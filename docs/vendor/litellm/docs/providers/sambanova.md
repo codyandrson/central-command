@@ -1,7 +1,16 @@
+---
+title: "SambaNova API with LiteLLM: Python SDK and Gateway"
+sidebar_label: "SambaNova"
+description: "Call Llama 4 Maverick and Llama 3.3 70B on SambaNova Cloud with tool calling, image input and JSON schema output, and embed text with E5-Mistral-7B."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 # SambaNova
+
+SambaNova Cloud serves chat, vision and embedding models; LiteLLM calls every SambaNova model with the `sambanova/` prefix from the Python SDK or AI Gateway.
+
 [https://cloud.sambanova.ai/](http://cloud.sambanova.ai?utm_source=litellm&utm_medium=external&utm_campaign=cloud_signup)
 
 :::tip
@@ -99,7 +108,7 @@ Here's how to call a Sambanova model with the LiteLLM Proxy Server
   ```python
   import openai
   client = openai.OpenAI(
-      api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+      api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
       base_url="http://0.0.0.0:4000" # litellm-proxy-base url
   )
 
@@ -121,7 +130,7 @@ Here's how to call a Sambanova model with the LiteLLM Proxy Server
 
   ```shell
   curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
       "model": "my-model",
@@ -145,7 +154,7 @@ import litellm
 # Example dummy function
 
 def get_current_weather(location, unit="fahrenheit"):
-    if unit == "fahrenheit"
+    if unit == "fahrenheit":
         return{"location": location, "temperature": "72", "unit": "fahrenheit"}
     else:
         return{"location": location, "temperature": "22", "unit": "celsius"}
@@ -184,8 +193,7 @@ print("\nFirst LLM Response:\n", response)
 response_message = response.choices[0].message
 tool_calls = response_message.tool_calls
 
-if tool_calls:
-    # Step 2: check if the model wanted to call a function
+# Step 2: check if the model wanted to call a function
 if tool_calls:
     # Step 3: call the function
     # Note: the JSON response may not always be valid; be sure to handle errors
@@ -305,7 +313,7 @@ response = litellm.completion(
     stream=False
 )
 
-print(response.choices[0].message.content))
+print(response.choices[0].message.content)
 ```
 
 ## SambaNova - Embeddings

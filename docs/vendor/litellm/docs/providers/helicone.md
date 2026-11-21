@@ -1,3 +1,9 @@
+---
+title: "Helicone AI Gateway with LiteLLM: Setup"
+sidebar_label: "Helicone"
+description: "Route OpenAI and Anthropic calls through Helicone's AI Gateway from the LiteLLM Python SDK, with streaming, custom property headers, caching and fallbacks."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -50,7 +56,7 @@ messages = [{"content": "What is the capital of France?", "role": "user"}]
 
 # Helicone call - routes through Helicone gateway to OpenAI
 response = completion(
-    model="helicone/gpt-4",
+    model="helicone/{{openai_large}}",
     messages=messages
 )
 
@@ -70,7 +76,7 @@ messages = [{"content": "Write a short poem about AI", "role": "user"}]
 
 # Helicone call with streaming
 response = completion(
-    model="helicone/gpt-4",
+    model="helicone/{{openai_large}}",
     messages=messages,
     stream=True
 )
@@ -79,7 +85,7 @@ for chunk in response:
     print(chunk)
 ```
 
-### With Metadata (Helicone Custom Properties)
+### With Custom Properties
 
 ```python showLineNumbers title="Helicone with Custom Properties"
 import os
@@ -89,9 +95,9 @@ from litellm import completion
 os.environ["HELICONE_API_KEY"] = ""  # your Helicone API key
 
 response = completion(
-    model="helicone/gpt-4o-mini",
+    model="helicone/{{openai_small}}",
     messages=[{"role": "user", "content": "What's the weather like?"}],
-    metadata={
+    extra_headers={
         "Helicone-Property-Environment": "production",
         "Helicone-Property-User-Id": "user_123",
         "Helicone-Property-Session-Id": "session_abc"
@@ -110,7 +116,7 @@ import litellm
 os.environ["HELICONE_API_KEY"] = ""  # your Helicone API key
 
 response = litellm.completion(
-    model="helicone/gpt-4o-mini",  # text completion model
+    model="helicone/{{openai_small}}",  # text completion model
     prompt="Once upon a time"
 )
 
@@ -124,14 +130,14 @@ print(response)
 import litellm
 
 litellm.api_base = "https://ai-gateway.helicone.ai/"
-litellm.metadata = {
+litellm.headers = {
     "Helicone-Retry-Enabled": "true",
     "helicone-retry-num": "3",
     "helicone-retry-factor": "2",
 }
 
 response = litellm.completion(
-    model="helicone/gpt-4o-mini/openai,claude-3-5-sonnet-20241022/anthropic", # Try OpenAI first, then fallback to Anthropic, then continue with other models,
+    model="helicone/{{openai_small}}/openai,{{anthropic}}/anthropic", # Try OpenAI first, then fallback to Anthropic, then continue with other models,
     messages=[{"role": "user", "content": "Hello"}]
 )
 ```
@@ -159,7 +165,7 @@ Helicone supports all standard OpenAI-compatible parameters:
 
 ## Helicone-Specific Headers
 
-Pass these as metadata to use Helicone features:
+Pass these as request headers with `extra_headers` to use Helicone features, or set `litellm.headers` to send them on every call. The `metadata` param is not forwarded to Helicone:
 
 | Header | Description |
 |--------|-------------|
@@ -176,9 +182,9 @@ Example with headers:
 import litellm
 
 response = litellm.completion(
-    model="helicone/gpt-4",
+    model="helicone/{{openai_large}}",
     messages=[{"role": "user", "content": "Hello"}],
-    metadata={
+    extra_headers={
         "Helicone-Cache-Enabled": "true",
         "Helicone-Property-Environment": "production",
         "Helicone-Property-User-Id": "user_123",
@@ -201,7 +207,7 @@ import litellm
 os.environ["HELICONE_API_KEY"] = "your-helicone-key"
 
 response = litellm.completion(
-    model="helicone/claude-3.5-haiku/anthropic",
+    model="helicone/{{anthropic}}/anthropic",
     messages=[{"role": "user", "content": "Hello"}]
 )
 ```
@@ -214,18 +220,18 @@ Enable caching to reduce costs and latency:
 import litellm
 
 response = litellm.completion(
-    model="helicone/gpt-4",
+    model="helicone/{{openai_large}}",
     messages=[{"role": "user", "content": "What is 2+2?"}],
-    metadata={
+    extra_headers={
         "Helicone-Cache-Enabled": "true"
     }
 )
 
 # Subsequent identical requests will be served from cache
 response2 = litellm.completion(
-    model="helicone/gpt-4",
+    model="helicone/{{openai_large}}",
     messages=[{"role": "user", "content": "What is 2+2?"}],
-    metadata={
+    extra_headers={
         "Helicone-Cache-Enabled": "true"
     }
 )

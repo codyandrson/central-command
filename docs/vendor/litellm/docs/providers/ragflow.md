@@ -1,3 +1,9 @@
+---
+title: "RAGFlow API with LiteLLM: Chat and Agents"
+sidebar_label: "RAGFlow"
+description: "Call RAGFlow chat and agent endpoints by ID with OpenAI-format requests and streaming, from the LiteLLM Python SDK or AI Gateway config.yaml."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -50,7 +56,7 @@ os.environ['RAGFLOW_API_KEY'] = "your-ragflow-api-key"
 os.environ['RAGFLOW_API_BASE'] = "http://localhost:9380"  # or your hosted URL
 
 response = completion(
-    model="ragflow/chat/my-chat-id/gpt-4o-mini",
+    model="ragflow/chat/my-chat-id/{{openai_small}}",
     messages=[{"role": "user", "content": "How does the deep doc understanding work?"}]
 )
 print(response)
@@ -66,7 +72,7 @@ os.environ['RAGFLOW_API_KEY'] = "your-ragflow-api-key"
 os.environ['RAGFLOW_API_BASE'] = "http://localhost:9380"  # or your hosted URL
 
 response = completion(
-    model="ragflow/agent/my-agent-id/gpt-4o-mini",
+    model="ragflow/agent/my-agent-id/{{openai_small}}",
     messages=[{"role": "user", "content": "What are the key features?"}]
 )
 print(response)
@@ -80,7 +86,7 @@ You can also pass `api_key` and `api_base` directly as parameters:
 from litellm import completion
 
 response = completion(
-    model="ragflow/chat/my-chat-id/gpt-4o-mini",
+    model="ragflow/chat/my-chat-id/{{openai_small}}",
     messages=[{"role": "user", "content": "Hello!"}],
     api_key="your-ragflow-api-key",
     api_base="http://localhost:9380"
@@ -98,7 +104,7 @@ os.environ['RAGFLOW_API_KEY'] = "your-ragflow-api-key"
 os.environ['RAGFLOW_API_BASE'] = "http://localhost:9380"
 
 response = completion(
-    model="ragflow/agent/my-agent-id/gpt-4o-mini",
+    model="ragflow/agent/my-agent-id/{{openai_small}}",
     messages=[{"role": "user", "content": "Explain RAGFlow"}],
     stream=True
 )
@@ -116,18 +122,18 @@ The model name must follow one of these formats:
 ragflow/chat/{chat_id}/{model_name}
 ```
 
-Example: `ragflow/chat/my-chat-id/gpt-4o-mini`
+Example: `ragflow/chat/my-chat-id/{{openai_small}}`
 
 ### Agent Endpoint
 ```
 ragflow/agent/{agent_id}/{model_name}
 ```
 
-Example: `ragflow/agent/my-agent-id/gpt-4o-mini`
+Example: `ragflow/agent/my-agent-id/{{openai_small}}`
 
 Where:
 - `{chat_id}` or `{agent_id}` is the ID of your chat or agent in RAGFlow
-- `{model_name}` is the actual model name (e.g., `gpt-4o-mini`, `gpt-4o`, etc.)
+- `{model_name}` is the actual model name (e.g., `{{openai_small}}`, `{{openai_large}}`, etc.)
 
 ## Configuration Sources
 
@@ -156,12 +162,12 @@ export RAGFLOW_API_BASE="http://localhost:9380"
 model_list:
   - model_name: ragflow-chat-gpt4
     litellm_params:
-      model: ragflow/chat/my-chat-id/gpt-4o-mini
+      model: ragflow/chat/my-chat-id/{{openai_small}}
       api_key: os.environ/RAGFLOW_API_KEY
       api_base: os.environ/RAGFLOW_API_BASE
   - model_name: ragflow-agent-gpt4
     litellm_params:
-      model: ragflow/agent/my-agent-id/gpt-4o-mini
+      model: ragflow/agent/my-agent-id/{{openai_small}}
       api_key: os.environ/RAGFLOW_API_KEY
       api_base: os.environ/RAGFLOW_API_BASE
 ```
@@ -186,7 +192,7 @@ $ litellm --config /path/to/config.yaml
 ```bash
 curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "ragflow-chat-gpt4",
     "messages": [
@@ -202,7 +208,7 @@ curl http://0.0.0.0:4000/v1/chat/completions \
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-1234",  # Your LiteLLM proxy key
+    api_key="sk-<your-litellm-api-key>",  # Your LiteLLM proxy key
     base_url="http://0.0.0.0:4000"
 )
 

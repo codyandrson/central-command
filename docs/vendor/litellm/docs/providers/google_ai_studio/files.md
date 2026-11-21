@@ -1,3 +1,9 @@
+---
+title: "Gemini Files API (Beta) with LiteLLM"
+sidebar_label: "[BETA] Google AI Studio (Gemini) Files API"
+description: "Beta: upload large media files to Google AI Studio (Gemini) through the LiteLLM AI Gateway for generateContent, with config.yaml setup and Azure Blob Storage."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -37,9 +43,9 @@ encoded_string = base64.b64encode(wav_data).decode('utf-8')
 
 
 file = create_file(
-    file=wav_data,
-    purpose="user_data",
-    extra_headers={"custom-llm-provider": "gemini"},
+    file=("alloy.wav", wav_data),
+    purpose="assistants",
+    custom_llm_provider="gemini",
     api_key=os.getenv("GEMINI_API_KEY"),
 )
 
@@ -50,7 +56,7 @@ assert file is not None
 
 ### GENERATE CONTENT ### 
 completion = completion(
-    model="gemini-2.0-flash",
+    model="{{gemini_flash}}",
     messages=[
         {
             "role": "user",
@@ -64,7 +70,7 @@ completion = completion(
                     "file": {
                         "file_id": file.id,
                         "filename": "my-test-name",
-                        "format": "audio/wav"
+                        "format": "audio/x-wav"
                     }
                 }
             ]
@@ -82,9 +88,9 @@ print(completion.choices[0].message)
 
 ```yaml
 model_list:
-    - model_name: "gemini-2.0-flash"
+    - model_name: "{{gemini_flash}}"
       litellm_params:
-        model: gemini/gemini-2.0-flash
+        model: gemini/{{gemini_flash}}
         api_key: os.environ/GEMINI_API_KEY
 ```
 
@@ -103,7 +109,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234"
+    api_key="sk-<your-litellm-api-key>"
 )
 
 # Fetch the audio file and convert it to a base64 encoded string
@@ -117,7 +123,7 @@ encoded_string = base64.b64encode(wav_data).decode('utf-8')
 file = client.files.create(
     file=wav_data,
     purpose="user_data",
-    extra_body={"target_model_names": "gemini-2.0-flash"}
+    extra_body={"target_model_names": "{{gemini_flash}}"}
 )
 
 print(f"file: {file}")
@@ -125,7 +131,7 @@ print(f"file: {file}")
 assert file is not None
 
 completion = client.chat.completions.create(
-    model="gemini-2.0-flash",
+    model="{{gemini_flash}}",
     modalities=["text", "audio"],
     audio={"voice": "alloy", "format": "wav"},
     messages=[
@@ -200,9 +206,9 @@ Azure Blob Storage supports all Gemini-compatible file types:
 
 ```yaml
 model_list:
-    - model_name: "gemini-2.5-flash"
+    - model_name: "{{gemini_flash}}"
       litellm_params:
-        model: gemini/gemini-2.5-flash
+        model: gemini/{{gemini_flash}}
         api_key: os.environ/GEMINI_API_KEY
 ```
 
@@ -228,7 +234,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234"
+    api_key="sk-<your-litellm-api-key>"
 )
 
 # Upload file to Azure Blob Storage
@@ -236,8 +242,8 @@ file = client.files.create(
     file=open("document.pdf", "rb"),
     purpose="user_data",
     extra_body={
-        "target_model_names": "gemini-2.0-flash",
-        "target_storage": "azure_storage"  # 👈 Use Azure Blob Storage
+        "target_model_names": "{{gemini_flash}}",
+        "target_storage": "azure_storage"  # Use Azure Blob Storage
     }
 )
 
@@ -245,7 +251,7 @@ print(f"File uploaded to Azure Blob Storage: {file.id}")
 
 # Use the file with Gemini
 completion = client.chat.completions.create(
-    model="gemini-2.0-flash",
+    model="{{gemini_flash}}",
     messages=[
         {
             "role": "user",
@@ -271,19 +277,19 @@ print(completion.choices[0].message.content)
 ```bash
 # Upload file with Azure Blob Storage
 curl -X POST "http://0.0.0.0:4000/v1/files" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -F "file=@document.pdf" \
   -F "purpose=user_data" \
   -F "target_storage=azure_storage" \
-  -F "target_model_names=gemini-2.0-flash" \
+  -F "target_model_names={{gemini_flash}}" \
   -F "custom_llm_provider=gemini"
 
 # Use the file with Gemini
 curl -X POST "http://0.0.0.0:4000/v1/chat/completions" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemini-2.0-flash",
+    "model": "{{gemini_flash}}",
     "messages": [
       {
         "role": "user",

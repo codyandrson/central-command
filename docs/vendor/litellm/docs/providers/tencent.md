@@ -1,3 +1,9 @@
+---
+title: "Tencent TokenHub API with LiteLLM: Setup"
+sidebar_label: "Tencent TokenHub"
+description: "Reach DeepSeek V4, GLM-5, Kimi, MiniMax and Hunyuan models on Tencent TokenHub with thinking or reasoning_effort and its Anthropic-compatible Messages API."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -171,7 +177,7 @@ python litellm/proxy/main.py
 ```bash
 curl -L -X POST 'http://0.0.0.0:4000/v1/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -d '{
     "model": "deepseek-v4-pro",
     "messages": [

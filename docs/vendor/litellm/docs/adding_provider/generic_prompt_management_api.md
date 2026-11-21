@@ -52,8 +52,8 @@ async def get_prompt(prompt_id: str):
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": "Help me with {task}"}
         ],
-        "prompt_template_model": "gpt-4",
-        "prompt_template_optional_params": {"temperature": 0.7}
+        "prompt_template_model": "{{openai_large}}",
+        "prompt_template_optional_params": {"max_tokens": 500}
     }
 ```
 
@@ -63,7 +63,7 @@ async def get_prompt(prompt_id: str):
 from litellm import completion
 
 response = completion(
-    model="gpt-4",
+    model="{{openai_large}}",
     prompt_id="simple_prompt",
     prompt_variables={"task": "data analysis"},
     messages=[{"role": "user", "content": "I have sales data"}]
@@ -110,11 +110,9 @@ GET /beta/litellm_prompt_management?prompt_id=hello-world-prompt-2bac&project_na
       "content": "Help me with {task}"
     }
   ],
-  "prompt_template_model": "gpt-4",
+  "prompt_template_model": "{{openai_large}}",
   "prompt_template_optional_params": {
-    "temperature": 0.7,
-    "max_tokens": 500,
-    "top_p": 0.9
+    "max_tokens": 500
   }
 }
 ```
@@ -131,9 +129,9 @@ Add to `config.yaml`:
 
 ```yaml
 model_list:
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
-      model: openai/gpt-3.5-turbo
+      model: openai/{{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
 prompts:
@@ -168,7 +166,7 @@ prompts:
 from litellm import completion
 
 response = completion(
-    model="gpt-4",
+    model="{{openai_large}}",
     prompt_id="simple_prompt",
     messages=[{"role": "user", "content": "Additional message"}]
 )
@@ -178,7 +176,7 @@ response = completion(
 
 ```python
 response = completion(
-    model="gpt-4",
+    model="{{openai_large}}",
     prompt_id="simple_prompt",
     prompt_variables={
         "domain": "data science",
@@ -203,9 +201,9 @@ litellm --config /path/to/config.yaml
 ```bash
 curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gpt-4",
+    "model": "{{openai_large}}",
     "prompt_id": "simple_prompt",
     "prompt_variables": {
       "domain": "healthcare",
@@ -224,11 +222,11 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234"
+    api_key="sk-<your-litellm-api-key>"
 )
 
 response = client.chat.completions.create(
-    model="gpt-4",
+    model="{{openai_large}}",
     messages=[
         {"role": "user", "content": "Analyze the data"}
     ],
@@ -244,7 +242,7 @@ response = client.chat.completions.create(
 
 ## Implementation Example
 
-See [mock_prompt_management_server.py](https://github.com/BerriAI/litellm/blob/main/cookbook/mock_prompt_management_server/mock_prompt_management_server.py) for a complete reference implementation with multiple example prompts, authentication, and convenience endpoints.
+See [mock_prompt_management_server.py](https://github.com/BerriAI/litellm/blob/89a6b5fbb26b632ef0faf633b0d3cf317d73deaa/cookbook/mock_prompt_management_server/mock_prompt_management_server.py) for a complete reference implementation with multiple example prompts, authentication, and convenience endpoints.
 
 **Minimal FastAPI example:**
 
@@ -269,9 +267,8 @@ PROMPTS = {
                 "content": "Help me with: {task}"
             }
         ],
-        "prompt_template_model": "gpt-4",
+        "prompt_template_model": "{{openai_large}}",
         "prompt_template_optional_params": {
-            "temperature": 0.7,
             "max_tokens": 500
         }
     },
@@ -287,9 +284,8 @@ PROMPTS = {
                 "content": "Review the following code:\n\n{code}"
             }
         ],
-        "prompt_template_model": "gpt-4-turbo",
+        "prompt_template_model": "{{openai_large}}",
         "prompt_template_optional_params": {
-            "temperature": 0.3,
             "max_tokens": 1000
         }
     }
@@ -407,9 +403,8 @@ Expected response:
       "content": "Help me with: {task}"
     }
   ],
-  "prompt_template_model": "gpt-4",
+  "prompt_template_model": "{{openai_large}}",
   "prompt_template_optional_params": {
-    "temperature": 0.7,
     "max_tokens": 500
   }
 }
@@ -436,7 +431,7 @@ LiteLLM automatically substitutes variables in your prompt templates using the `
 **Client request:**
 ```python
 completion(
-    model="gpt-4",
+    model="{{openai_large}}",
     prompt_id="expert_prompt",
     prompt_variables={
         "domain": "machine learning",
@@ -470,7 +465,7 @@ prompts:
       api_base: http://localhost:8080
 ```
 
-If your API returns `"prompt_template_model": "gpt-4"`, LiteLLM will use `gpt-4` regardless of what the client specified.
+If your API returns `"prompt_template_model": "{{openai_large}}"`, LiteLLM will use `{{openai_large}}` regardless of what the client specified.
 
 **With `ignore_prompt_manager_model: true`:**
 ```yaml
@@ -490,18 +485,18 @@ LiteLLM will use the model specified by the client, ignoring the prompt's model.
 
 Client params are merged with prompt params, with prompt params taking precedence:
 ```python
-# Prompt returns: {"temperature": 0.7, "max_tokens": 500}
-# Client sends: {"temperature": 0.9, "top_p": 0.95}
-# Final params: {"temperature": 0.7, "max_tokens": 500, "top_p": 0.95}
+# Prompt returns: {"max_tokens": 500, "reasoning_effort": "low"}
+# Client sends: {"max_tokens": 1000, "seed": 7}
+# Final params: {"max_tokens": 500, "reasoning_effort": "low", "seed": 7}
 ```
 
 **With `ignore_prompt_manager_optional_params: true`:**
 
 Only client params are used:
 ```python
-# Prompt returns: {"temperature": 0.7, "max_tokens": 500}
-# Client sends: {"temperature": 0.9, "top_p": 0.95}
-# Final params: {"temperature": 0.9, "top_p": 0.95}
+# Prompt returns: {"max_tokens": 500, "reasoning_effort": "low"}
+# Client sends: {"max_tokens": 1000, "seed": 7}
+# Final params: {"max_tokens": 1000, "seed": 7}
 ```
 
 ## Security Considerations
@@ -573,4 +568,3 @@ This is a **beta API**. We're actively improving it based on feedback. Open an i
 - [Prompt Management Overview](../proxy/prompt_management.md)
 - [Generic Guardrail API](./generic_guardrail_api.md)
 - [LiteLLM Proxy Setup](../proxy/quick_start.md)
-

@@ -1,3 +1,8 @@
+---
+title: "Arize Phoenix Tracing for LiteLLM: Setup"
+sidebar_label: "Arize Phoenix"
+description: "Send LiteLLM traces to Arize Phoenix from the Python SDK or AI Gateway, route each team or key to its own project, and also export to Arize AX."
+---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -7,7 +12,7 @@ import TabItem from '@theme/TabItem';
 
 Phoenix is separate from [Arize AX](https://arize.com/products/ax/), the full-featured platform for production teams, AI-native companies, and enterprises, available as managed cloud or enterprise self-hosted deployment. LiteLLM supports both backends, but they use different callbacks, credentials, and endpoints. Use `arize_phoenix` for Phoenix, use `arize` for AX, or enable both when you need to send the same traces to each.
 
-For teams building evaluation loops around LiteLLM traces, Arize's [agent evaluation guide](https://arize.com/guides/ai-agent-handbook/agent-evaluation/) and [LLM evaluation guide](https://arize.com/resources/llm-evaluation/) cover production workflows for tracing failures, evaluating model behavior, and improving agent reliability.
+For teams building evaluation loops around LiteLLM traces, Arize's [agent evaluation guide](https://arize.com/ai-agents/agent-evaluation/) and [LLM evaluation guide](https://arize.com/resources/llm-evaluation/) cover production workflows for tracing failures, evaluating model behavior, and improving agent reliability.
 
 :::info
 We want to learn how we can make the callbacks better! Meet the LiteLLM [founders](https://calendly.com/d/4mp-gd3-k5k/berriai-1-1-onboarding-litellm-hosted-version) or
@@ -41,9 +46,9 @@ litellm.callbacks = ["arize_phoenix"]
 
 # openai call
 response = litellm.completion(
-  model="gpt-4o",
+  model="{{openai_large}}",
   messages=[
-    {"role": "user", "content": "Hi 👋 - i'm openai"}
+    {"role": "user", "content": "Hi - i'm openai"}
   ]
 )
 ```
@@ -55,9 +60,9 @@ response = litellm.completion(
 
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 litellm_settings:
@@ -84,9 +89,9 @@ litellm --config /path/to/config.yaml
 ```bash
 curl -L -X POST 'http://0.0.0.0:4000/v1/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -d '{
-  "model": "gpt-4o",
+  "model": "{{openai_large}}",
   "messages": [
     {
       "role": "user",
@@ -103,7 +108,9 @@ curl -L -X POST 'http://0.0.0.0:4000/v1/chat/completions' \
 
 Open Phoenix; the project comes from `PHOENIX_PROJECT_NAME` (default `default`), stamped as the `openinference.project.name` resource attribute. Each request shows up as a `chat <model>` span under the request root. On the proxy you can send a team's or key's LLM spans to a different Phoenix project; see [Route traces to a Phoenix project per team or key](#route-traces-to-a-phoenix-project-per-team-or-key).
 
-Phoenix uses the same OpenInference vocabulary as Arize AX, so the LLM-call span carries `llm.model_name`, `llm.provider`, the `llm.token_count.*` usage split, `llm.invocation_parameters`, the message arrays when content capture is on, and `llm.tools.*`, alongside the canonical `gen_ai.*` keys. See the [full attribute table](./opentelemetry_v2#seeing-your-traces).
+Phoenix uses the same OpenInference vocabulary as Arize AX, so the LLM-call span carries `llm.model_name`, `llm.provider`, the `llm.token_count.*` usage split, `llm.invocation_parameters`, the message arrays when content capture is on, and `llm.tools.*`, alongside the canonical `gen_ai.*` keys. The span also carries each assistant tool call as structured `llm.output_messages.{idx}.message.tool_calls.{idx}.tool_call.*` attributes and the allowlisted request metadata as a `metadata` attribute, which is what fills Phoenix's Output tool-call row and its Metadata section. See the [full attribute table](./opentelemetry_v2#seeing-your-traces) and [OpenInference tool calls and metadata](./opentelemetry_v2#openinference-tool-calls-and-metadata).
+
+The `arize_phoenix` preset names the `openinference` mapper for you. If you point the generic OTLP path at Phoenix instead (your own collector, `OTEL_ENDPOINT` at the Phoenix `/v1/traces` URL), the spans arrive with only the canonical `gen_ai.*` names and render plainly until you name the mapper with `MAPPER_NAMES=genai,openinference` or `callback_settings.otel.mapper_names`.
 
 ![LiteLLM trace in Phoenix](/img/observability/otel_v2_phoenix.png)
 
@@ -148,7 +155,7 @@ Every key on the team sends its LLM spans to the named project.
 
 ```bash
 curl -X POST 'http://localhost:4000/team/new' \
-  -H 'Authorization: Bearer sk-1234' \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"team_alias": "payments", "metadata": {"phoenix_project_name": "payments-prod"}}'
 ```
@@ -157,7 +164,7 @@ Update an existing team the same way:
 
 ```bash
 curl -X POST 'http://localhost:4000/team/update' \
-  -H 'Authorization: Bearer sk-1234' \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"team_id": "<team-id>", "metadata": {"phoenix_project_name": "payments-prod"}}'
 ```
@@ -166,7 +173,7 @@ Then generate a key for that team and call the proxy as usual:
 
 ```bash
 curl -X POST 'http://localhost:4000/key/generate' \
-  -H 'Authorization: Bearer sk-1234' \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"team_id": "<team-id>"}'
 ```
@@ -175,7 +182,7 @@ curl -X POST 'http://localhost:4000/key/generate' \
 curl -X POST 'http://localhost:4000/v1/chat/completions' \
   -H 'Authorization: Bearer $TEAM_KEY' \
   -H 'Content-Type: application/json' \
-  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "hello"}]}'
+  -d '{"model": "{{openai_large}}", "messages": [{"role": "user", "content": "hello"}]}'
 ```
 
 </TabItem>
@@ -185,7 +192,7 @@ A single key can name its own project, including keys that do not belong to a te
 
 ```bash
 curl -X POST 'http://localhost:4000/key/generate' \
-  -H 'Authorization: Bearer sk-1234' \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"metadata": {"phoenix_project_name": "payments-canary"}}'
 ```
@@ -217,7 +224,7 @@ Phoenix assigns a whole trace to one project by whichever of its spans arrives f
 
 A gRPC-only Phoenix exporter cannot route: `x-project-name` is honored on OTLP/HTTP only. Point `PHOENIX_COLLECTOR_HTTP_ENDPOINT` at an HTTP `/v1/traces` URL (see [Picking the right collector endpoint](#picking-the-right-collector-endpoint)). Guardrail spans are not project-routed.
 
-This is different from [per-team destinations](./opentelemetry_v2#per-key--per-team-destinations-multi-tenant), which send traces to a different backend. Project routing stays on the one Phoenix collector and only changes the project name.
+This is different from [per-team credentials](./opentelemetry_v2#per-key--per-team-credentials-multi-tenant), which send a tenant's traces to its own backend account. Project routing stays on the one Phoenix collector and only changes the project name.
 
 ## Advanced
 
@@ -238,6 +245,6 @@ Looking for prompt management rather than tracing? See [Arize Phoenix Prompt Man
 
 ## Support & Talk to Founders
 
-- [Schedule Demo 👋](https://calendly.com/d/4mp-gd3-k5k/berriai-1-1-onboarding-litellm-hosted-version)
-- [Community Discord 💭](https://discord.gg/wuPM9dRgDw)
-- Our emails ✉️ ishaan@berri.ai / krrish@berri.ai
+- [Schedule Demo](https://calendly.com/d/4mp-gd3-k5k/berriai-1-1-onboarding-litellm-hosted-version)
+- [Community Discord](https://discord.gg/wuPM9dRgDw)
+- Our emails ishaan@berri.ai / krrish@berri.ai

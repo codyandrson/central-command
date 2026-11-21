@@ -1,3 +1,8 @@
+---
+title: "IBM FMS Guardrails on LiteLLM AI Gateway"
+sidebar_label: "IBM Guardrails"
+description: "Detect jailbreaks, PII and hate speech with IBM FMS Guardrails on the LiteLLM AI Gateway, calling a detector server or the orchestrator from config.yaml."
+---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -27,9 +32,9 @@ You can run these checks:
 
 ```yaml
 model_list:
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
-      model: openai/gpt-3.5-turbo
+      model: openai/{{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -64,9 +69,9 @@ litellm --config config.yaml --detailed_debug
 ```shell
 curl -i http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [
       {"role": "user", "content": "Hello, how are you?"}
     ],
@@ -199,9 +204,9 @@ Then in your request:
 ```shell
 curl -i http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [{"role": "user", "content": "Hello"}],
     "guardrails": ["jailbreak-check", "pii-check"]
   }'

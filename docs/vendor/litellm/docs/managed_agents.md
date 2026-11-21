@@ -34,7 +34,7 @@ export GEMINI_API_KEY="AIzaSy..."
 
 ```yaml
 general_settings:
-  master_key: "sk-1234"
+  master_key: "sk-<your-litellm-master-key>"
 
 environment_variables:
   GEMINI_API_KEY: "AIzaSy..."   # or set in shell env
@@ -70,7 +70,7 @@ You can also pass `api_key="AIzaSy..."` to each call instead of setting the envi
 
 ```bash
 curl -X POST "http://localhost:4000/v1beta/agents" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "my-custom-slides-agent",
@@ -127,7 +127,7 @@ Async variant: `litellm.interactions.agents.acreate(...)`.
 
 ```bash
 curl -X POST "http://localhost:4000/v1beta/interactions" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "agent": "my-slides-agent",
@@ -166,7 +166,7 @@ See also: [/interactions](/docs/interactions) for the full Interactions API.
 
 ```bash
 curl "http://localhost:4000/v1beta/agents" \
-  -H "Authorization: Bearer sk-1234"
+  -H "Authorization: Bearer $LITELLM_API_KEY"
 ```
 
 **Response**
@@ -200,7 +200,7 @@ agents = litellm.interactions.agents.list()
 
 ```bash
 curl "http://localhost:4000/v1beta/agents/my-slides-agent" \
-  -H "Authorization: Bearer sk-1234"
+  -H "Authorization: Bearer $LITELLM_API_KEY"
 ```
 
 **Response**
@@ -241,7 +241,7 @@ agent = litellm.interactions.agents.get(
 
 ```bash
 curl -X DELETE "http://localhost:4000/v1beta/agents/my-slides-agent" \
-  -H "Authorization: Bearer sk-1234"
+  -H "Authorization: Bearer $LITELLM_API_KEY"
 ```
 
 </TabItem>
@@ -264,7 +264,7 @@ litellm.interactions.agents.delete(
 
 ```bash
 curl "http://localhost:4000/v1beta/agents/my-slides-agent/versions" \
-  -H "Authorization: Bearer sk-1234"
+  -H "Authorization: Bearer $LITELLM_API_KEY"
 ```
 **Response**
 ```json
@@ -310,7 +310,7 @@ There is no way to use managed agents with any provider other than Google AI Stu
 
 - `base_agent` only accepts `"antigravity-preview-05-2026"` (Google's current restriction).
 - Agents are stored on Google's side only. LiteLLM does not persist them in its database. If you delete an agent via Google's API directly, the proxy will not know.
-- Using the Interactions API via the `agent` param is only supported by Gemini as of now. Use the `model` param to call other providers' models.
+- Custom agents created through `/v1beta/agents` live on Google AI Studio (`gemini`) only. The Interactions API `agent` param works on both `gemini` and `vertex_ai`, for example Google's Deep Research agent on Vertex AI, see [Deep Research on Vertex AI](./interactions.md#deep-research-on-vertex-ai). Use the `model` param to call other providers' models.
 - `GEMINI_API_KEY` / `GOOGLE_API_KEY` must be present in the proxy environment. Passing the key per-request via `api_key` is supported in the SDK but not currently via the proxy endpoint.
 
 ## Tags

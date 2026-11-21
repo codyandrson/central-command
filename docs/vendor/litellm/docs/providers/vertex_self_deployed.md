@@ -1,3 +1,9 @@
+---
+title: "Vertex AI Self-Deployed Models with LiteLLM"
+sidebar_label: "Vertex AI - Self Deployed Models"
+description: "Call your own Model Garden, Gemma and MedGemma endpoints on Gemini Enterprise Agent Platform (formerly Vertex AI) via LiteLLM and config.yaml."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -72,10 +78,10 @@ litellm --config /path/to/config.yaml
 
 ```bash
 curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
-            "model": "llama3-1-8b-instruct", # 👈 the 'model_name' in config
+            "model": "llama3-1-8b-instruct", # the 'model_name' in config
             "messages": [
                 {
                 "role": "user",
@@ -149,7 +155,7 @@ litellm --config /path/to/config.yaml
 ```bash
 curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "gemma-model",
     "messages": [{"role": "user", "content": "What is machine learning?"}],
@@ -206,7 +212,7 @@ litellm --config /path/to/config.yaml
 ```bash
 curl http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "medgemma-model",
     "messages": [{"role": "user", "content": "What are the symptoms of hypertension?"}],

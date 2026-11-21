@@ -1,3 +1,9 @@
+---
+title: "Azure AI Foundry (AI Studio) API with LiteLLM"
+sidebar_label: "Azure AI"
+description: "Call Command R, Mistral Large, Jamba and Claude on Azure AI Foundry (formerly AI Studio) from the Python SDK or AI Gateway, with tool calling and rerank."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -65,7 +71,7 @@ response = completion(
   ```python
   import openai
   client = openai.OpenAI(
-      api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+      api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
       base_url="http://0.0.0.0:4000" # litellm-proxy-base url
   )
 
@@ -92,7 +98,7 @@ response = completion(
 
   ```shell
   curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
       "model": "command-r-plus",
@@ -116,6 +122,44 @@ response = completion(
 </TabItem>
 
 </Tabs>
+
+## Foundry project and `/openai/v1` endpoints
+
+<SinceVersion v="1.112.0" />
+
+`api_base` can point at a Foundry resource, its `/openai/v1` endpoint, or a Foundry project. LiteLLM picks the chat route from the shape of `api_base`.
+
+| `api_base` | Chat route |
+|---|---|
+| `https://<resource>.services.ai.azure.com` | `/models/chat/completions` |
+| `https://<resource>.services.ai.azure.com/openai/v1` | `/openai/v1/chat/completions` |
+| `https://<resource>.services.ai.azure.com/api/projects/<project>` | `/api/projects/<project>/openai/v1/chat/completions` |
+
+On a project endpoint LiteLLM sends no `api-version`, because that route rejects every value. It sends the key as `Authorization: Bearer`, so `api_key` can hold an API key or a Microsoft Entra token. A service principal gets a token for `https://ai.azure.com/.default` unless `azure_scope` or `AZURE_SCOPE` sets another scope. A gateway in front of a project works too, as long as its path ends at `/api/projects/<project>` or goes on with `/openai`, `/models`, or `/v1`. LiteLLM keeps the gateway's query parameters, such as `subscription-key`, and drops only `api-version`.
+
+On a resource `/openai/v1` endpoint LiteLLM sends the key in the `api-key` header and passes through any `api_version` you set, such as `preview`.
+
+An OpenAI model such as `azure_ai/gpt-4.1` on a `<resource>.openai.azure.com/openai/v1` or `<resource>.cognitiveservices.azure.com/openai/v1` base goes through the [Azure OpenAI](./azure/azure.md) provider, and its spend is logged under `azure`.
+
+On any Azure OpenAI `/openai/v1` base, an entry with no `api_version` uses the Azure OpenAI v1 API for chat, embeddings, and image generation, even if `AZURE_API_VERSION` holds a dated version.
+
+```yaml
+model_list:
+  - model_name: gpt-4.1
+    litellm_params:
+      model: azure_ai/gpt-4.1
+      api_base: https://my-resource.services.ai.azure.com/api/projects/my-project
+      api_key: os.environ/AZURE_AI_API_KEY
+```
+
+```shell
+curl http://0.0.0.0:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "gpt-4.1", "messages": [{"role": "user", "content": "What is 2+2? Answer in one word."}]}'
+```
+
+LiteLLM sends the request to `https://my-resource.services.ai.azure.com/api/projects/my-project/openai/v1/chat/completions`, and the response's message content is `Four`. The same entry also serves `/v1/responses` and `/v1/messages`.
 
 ## Passing additional params - max_tokens, temperature 
 See all litellm.completion supported params [here](../completion/input.md#translated-openai-params)
@@ -167,7 +211,7 @@ response = completion(
   ```python
   import openai
   client = openai.OpenAI(
-      api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+      api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
       base_url="http://0.0.0.0:4000" # litellm-proxy-base url
   )
 
@@ -189,7 +233,7 @@ response = completion(
 
   ```shell
   curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
       "model": "mistral",
@@ -312,6 +356,31 @@ LiteLLM supports **ALL** azure ai models. Here's a few examples:
 | mistral-large-latest | `completion(model="azure_ai/mistral-large-latest", messages)` | 
 | AI21-Jamba-Instruct | `completion(model="azure_ai/ai21-jamba-instruct", messages)` | 
 
+## Latest model aliases
+
+<SinceVersion v="1.109.0" />
+
+`azure_ai/<family>-latest` names follow a model family as LiteLLM moves them to newer models, so your application keeps one model string. Use them like any other Azure AI Foundry model name. LiteLLM sends Azure AI Foundry the current target model and bills at that model's price. See [Latest model aliases](../model_latest_aliases.md) for how aliases work and the full list across providers.
+
+| Alias | Model family |
+| --- | --- |
+| `azure_ai/gpt-luna-latest` | GPT Luna |
+| `azure_ai/gpt-sol-latest` | GPT Sol |
+| `azure_ai/gpt-terra-latest` | GPT Terra |
+| `azure_ai/gpt-astra-latest` | GPT Astra |
+| `azure_ai/gpt-mini-latest` | GPT Mini |
+| `azure_ai/claude-opus-latest` | Claude Opus |
+| `azure_ai/claude-sonnet-latest` | Claude Sonnet |
+| `azure_ai/claude-haiku-latest` | Claude Haiku |
+| `azure_ai/claude-fable-latest` | Claude Fable |
+| `azure_ai/grok-latest` | Grok |
+| `azure_ai/kimi-latest` | Kimi |
+| `azure_ai/glm-latest` | GLM |
+| `azure_ai/glm-flash-latest` | GLM Flash |
+| `azure_ai/deepseek-pro-latest` | DeepSeek Pro |
+| `azure_ai/deepseek-flash-latest` | DeepSeek Flash |
+| `azure_ai/minimax-latest` | MiniMax |
+
 ## Usage - Azure Anthropic (Azure Foundry Claude)
 
 LiteLLM funnels Azure Claude deployments through the `azure_ai/` provider so Claude Opus models on Azure Foundry keep working with Tool Search, Effort, streaming, and the rest of the advanced feature set. Point `AZURE_AI_API_BASE` to `https://<resource>.services.ai.azure.com/anthropic` (LiteLLM appends `/v1/messages` automatically) and authenticate with `AZURE_AI_API_KEY` or an Azure AD token.
@@ -328,7 +397,7 @@ os.environ["AZURE_AI_API_KEY"] = "your-azure-ai-api-key"
 os.environ["AZURE_AI_API_BASE"] = "https://my-resource.services.ai.azure.com/anthropic"
 
 response = completion(
-    model="azure_ai/claude-opus-4-1",
+    model="azure_ai/{{anthropic_large}}",
     messages=[{"role": "user", "content": "Explain how Azure Anthropic hosts Claude Opus differently from the public Anthropic API."}],
     max_tokens=1200,
     temperature=0.7,
@@ -356,7 +425,7 @@ export AZURE_AI_API_BASE="https://my-resource.services.ai.azure.com/anthropic"
 model_list:
   - model_name: claude-4-azure
     litellm_params:
-      model: azure_ai/claude-opus-4-1
+      model: azure_ai/{{anthropic_large}}
       api_key: os.environ/AZURE_AI_API_KEY
       api_base: os.environ/AZURE_AI_API_BASE
 ```
@@ -457,7 +526,7 @@ Test request
 
 ```bash
 curl http://0.0.0.0:4000/rerank \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "cohere-rerank-v3.5",

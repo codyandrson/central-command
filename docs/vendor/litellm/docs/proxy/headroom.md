@@ -9,7 +9,7 @@ This is available on both `/v1/chat/completions` and `/v1/messages` (Anthropic f
 
 ## Demo
 
-<iframe width="840" height="500" src="https://www.loom.com/embed/6cb57484c5444c9aa0585db1a1b17bb5" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen></iframe>
+<iframe width="840" height="500" src="https://www.loom.com/embed/6cb57484c5444c9aa0585db1a1b17bb5" frameBorder="0" allowFullScreen></iframe>
 
 ## Architecture
 
@@ -19,7 +19,9 @@ Headroom runs as a sidecar service alongside LiteLLM. Client traffic continues t
 
 ## Requirements
 
-LiteLLM v1.92.x or later, and a reachable Headroom proxy. See [Deploy Headroom](#deploy-headroom) below for a one-file Dockerfile.
+<SinceVersion v="1.92.0" />
+
+You need a reachable Headroom proxy. See [Deploy Headroom](#deploy-headroom) below for a one-file Dockerfile.
 
 For testing ahead of the stable cut, use the [v1.92.0-dev.1](https://github.com/BerriAI/litellm/releases/tag/v1.92.0-dev.1) dev release.
 
@@ -29,9 +31,9 @@ For testing ahead of the stable cut, use the [v1.92.0-dev.1](https://github.com/
 
 ```yaml showLineNumbers title="config.yaml"
 model_list:
-  - model_name: claude-sonnet-4
+  - model_name: {{anthropic}}
     litellm_params:
-      model: anthropic/claude-sonnet-4
+      model: anthropic/{{anthropic}}
       api_key: os.environ/ANTHROPIC_API_KEY
 
 guardrails:
@@ -63,7 +65,7 @@ litellm --config config.yaml
 curl -i http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "claude-sonnet-4",
+    "model": "{{anthropic}}",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "Summarize the prior conversation..."}
@@ -80,7 +82,7 @@ curl -i http://0.0.0.0:4000/v1/messages \
   -H "Content-Type: application/json" \
   -H "anthropic-version: 2023-06-01" \
   -d '{
-    "model": "claude-sonnet-4",
+    "model": "{{anthropic}}",
     "max_tokens": 1024,
     "messages": [
       {"role": "user", "content": "Summarize the prior conversation..."}
@@ -102,7 +104,7 @@ Create a key with Headroom attached:
 
 ```shell
 curl -X POST 'http://0.0.0.0:4000/key/generate' \
-  -H 'Authorization: Bearer sk-1234' \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
         "guardrails": ["headroom-compression"]
@@ -125,7 +127,7 @@ curl -i http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-..." \
   -d '{
-    "model": "claude-sonnet-4",
+    "model": "{{anthropic}}",
     "messages": [...],
     "guardrails": ["headroom-compression"]
   }'
@@ -141,7 +143,7 @@ curl -i http://0.0.0.0:4000/v1/messages \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-..." \
   -d '{
-    "model": "claude-sonnet-4",
+    "model": "{{anthropic}}",
     "max_tokens": 1024,
     "messages": [...],
     "litellm_metadata": {"guardrails": ["headroom-compression"]}
@@ -152,6 +154,16 @@ curl -i http://0.0.0.0:4000/v1/messages \
 </Tabs>
 
 The response includes an `x-litellm-applied-guardrails: headroom-compression` header so the caller can confirm compression actually ran.
+
+### `x-headroom-bypass` only ever switches compression off
+
+LiteLLM decides whether `headroom-compression` runs on a given request before the guardrail's own code ever sees a header: that decision comes from `default_on` in `config.yaml`, whether the guardrail is attached to the caller's key or team, or the per-request `guardrails` / `litellm_metadata.guardrails` opt-in shown above. Only after that decision comes back "run it" does the guardrail check `x-headroom-bypass`, and the only value it treats as a bypass is the literal string `true`, matched case-insensitively. Any other value, including `false`, an empty header, or no header at all, has no effect and leaves the guardrail running as already scheduled.
+
+Concretely: with `default_on: false` and no `headroom-compression` attached to the caller's key, sending `x-headroom-bypass: false` does not turn compression on for that request, and there is no per-request header that does. Skipping compression per request works (`x-headroom-bypass: true`, as in the Claude Code section above); enabling it per request without admin involvement requires the `guardrails` / `litellm_metadata.guardrails` field, not a header.
+
+## Compression behind an auto router
+
+A request an [auto router](./auto_routing.md) serves makes two calls, one to classify the request and one to the model it routes to. By default both see the same compressed text. From v1.101.0 the router can name a compression guardrail per hop, or `none` for either, with `auto_router_routing_compression` and `auto_router_model_compression`. Setting either field puts the router in charge of compression for its own requests and suppresses the guardrails above for them, whether they were attached to a key, a team, or the request body. See [Compression](./auto_routing.md#compression).
 
 ## Claude Code usage
 
@@ -165,12 +177,12 @@ The flow has three steps.
 
 ```shell
 curl -X POST 'http://0.0.0.0:4000/key/generate' \
-  -H 'Authorization: Bearer sk-1234' \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
         "key_alias": "claude-code-alice",
         "guardrails": ["headroom-compression"],
-        "models": ["claude-sonnet-4"],
+        "models": ["{{anthropic}}"],
         "metadata": {"team": "claude-code-rollout"}
       }'
 ```
@@ -200,7 +212,7 @@ In the Admin UI, open any request in **Logs**, scroll to the **Guardrails & Poli
 Here is the dockerfile for deploying the headroom proxy
 
 ```Dockerfile
-FROM python:3.12-slim
+FROM python:{{python_version}}-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
@@ -238,3 +250,11 @@ Headroom protects two message types by default, set on the Headroom container it
 | -------------------- | -------------------------------------------------------------------- |
 | `HEADROOM_API_BASE`  | Fallback for `api_base` when not set in the guardrail config.        |
 | `HEADROOM_API_KEY`   | Fallback for `api_key` when not set in the guardrail config.         |
+
+## How compression savings are calculated
+
+The Cost Optimization page in the Admin UI shows a **Compression savings** tile with a dollar amount and the number of tokens compressed. Both come from the per-request stats Headroom returns.
+
+Each time compression succeeds, the `/v1/compress` response reports `tokens_before` and `tokens_after`, counted by Headroom's own tokenizer over the messages it was sent. LiteLLM stores those stats in the request's `guardrail_information` on the spend log, together with `tokens_saved`, which is `tokens_before - tokens_after` when the Headroom service does not send it. When the spend log is rolled into the daily spend tables, `tokens_saved` is written as the request's `compression_saved_tokens`, and `compression_savings_spend` is `tokens_saved` multiplied by the `input_cost_per_token` of the model the request was sent to. That rate is the deployment's configured input price when `model_list` sets one, otherwise LiteLLM's built-in price for the model. The tile sums both columns over the selected date range.
+
+The dollar figure is an estimate of what the removed tokens would have cost at the plain input rate, so prompt caching discounts and service tiers are not applied. Requests where compression failed or was skipped contribute nothing, and a model with no known price contributes its tokens but zero dollars.

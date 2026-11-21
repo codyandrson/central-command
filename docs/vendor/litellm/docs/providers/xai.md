@@ -1,7 +1,15 @@
+---
+title: "xAI Grok API with LiteLLM: Python SDK and Gateway"
+sidebar_label: "xAI"
+description: "Call xAI Grok 4.5 with low, medium or high reasoning effort, vision input, JSON responses, streaming and the grok-latest alias, and read reasoning tokens."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 # xAI
+
+xAI builds the Grok models; LiteLLM calls every xAI model with the `xai/` prefix from the Python SDK or AI Gateway, with streaming, vision and reasoning.
 
 https://docs.x.ai/docs
 
@@ -45,6 +53,16 @@ response = completion(
 # env variable
 os.environ['XAI_API_KEY']
 ```
+
+## Latest model aliases
+
+<SinceVersion v="1.109.0" />
+
+`xai/<family>-latest` names follow a model family as LiteLLM moves them to newer models, so your application keeps one model string. Use them like any other xAI model name. LiteLLM sends xAI the current target model and bills at that model's price. See [Latest model aliases](../model_latest_aliases.md) for how aliases work and the full list across providers.
+
+| Alias | Model family |
+| --- | --- |
+| `xai/grok-latest` | Grok |
 
 ## Sample Usage
 
@@ -164,7 +182,7 @@ Here's how to call a XAI model with the LiteLLM Proxy Server
   ```python showLineNumbers
   import openai
   client = openai.OpenAI(
-      api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+      api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
       base_url="http://0.0.0.0:4000" # litellm-proxy-base url
   )
 
@@ -186,7 +204,7 @@ Here's how to call a XAI model with the LiteLLM Proxy Server
 
   ```shell
   curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
       "model": "my-model",
@@ -238,7 +256,7 @@ print(response.usage.completion_tokens_details.reasoning_tokens)
 ```python showLineNumbers title="reasoning with xai/grok-4.5"
 import openai
 client = openai.OpenAI(
-    api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+    api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
     base_url="http://0.0.0.0:4000" # litellm-proxy-base url
 )
 

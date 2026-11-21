@@ -1,3 +1,8 @@
+---
+title: "Guardrails for the Realtime API on LiteLLM"
+sidebar_label: "Realtime API Guardrails"
+description: "Guard voice conversations on the LiteLLM AI Gateway Realtime API by checking each speech transcription before the model responds, per virtual key."
+---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -9,7 +14,7 @@ Guard voice conversations in the [Realtime API](/docs/realtime) by intercepting 
 
 The Realtime API is a long-lived WebSocket session. Unlike `/chat/completions` where a guardrail runs once per HTTP request, a voice session has many turns, and each one needs to be checked individually.
 
-LiteLLM intercepts each turn at the transcription event, after Whisper converts speech to text but before the LLM generates a response:
+LiteLLM intercepts each turn at the transcription event, after the transcription model converts speech to text but before the LLM generates a response:
 
 ```
 User speaks into mic
@@ -22,7 +27,7 @@ User speaks into mic
          ▼
 ┌───────────────────┐
 │     OpenAI        │
-│  VAD → Whisper    │  detects speech end, transcribes
+│  VAD → transcribe │  detects speech end, transcribes
 └────────┬──────────┘
          │
          │  conversation.item.input_audio_transcription.completed
@@ -60,9 +65,9 @@ Add a guardrail with `mode: realtime_input_transcription` to your proxy config:
 
 ```yaml
 model_list:
-  - model_name: openai/gpt-4o-realtime-preview
+  - model_name: openai/gpt-realtime-2.1
     litellm_params:
-      model: openai/gpt-4o-realtime-preview
+      model: openai/gpt-realtime-2.1
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -83,7 +88,7 @@ guardrails:
           description: "Prompt injection attempt"
 
 general_settings:
-  master_key: sk-1234
+  master_key: os.environ/LITELLM_MASTER_KEY
 ```
 
 ### Step 2: Start proxy
@@ -100,26 +105,33 @@ Connect your client to the proxy instead of directly to OpenAI:
 <TabItem value="js" label="JavaScript">
 
 ```javascript
+const WebSocket = require("ws")
+
 const ws = new WebSocket(
-  "ws://localhost:4000/v1/realtime?model=openai/gpt-4o-realtime-preview",
+  "ws://localhost:4000/v1/realtime?model=openai/gpt-realtime-2.1",
   [],
-  { headers: { Authorization: "Bearer sk-1234" } }
+  { headers: { Authorization: "Bearer sk-<your-litellm-api-key>" } }
 )
 
 ws.onopen = () => {
   ws.send(JSON.stringify({
     type: "session.update",
     session: {
-      modalities: ["audio", "text"],
-      input_audio_transcription: { model: "whisper-1" },
-      turn_detection: { type: "server_vad" },
+      type: "realtime",
+      output_modalities: ["audio"],
+      audio: {
+        input: {
+          transcription: { model: "gpt-transcribe" },
+          turn_detection: { type: "server_vad" },
+        },
+      },
     },
   }))
 }
 
 ws.onmessage = (e) => {
   const event = JSON.parse(e.data)
-  if (event.type === "response.audio.delta") {
+  if (event.type === "response.output_audio.delta") {
     // play audio...
   }
 }
@@ -135,17 +147,22 @@ import websockets
 
 async def main():
     async with websockets.connect(
-        "ws://localhost:4000/v1/realtime?model=openai/gpt-4o-realtime-preview",
-        additional_headers={"Authorization": "Bearer sk-1234"},
+        "ws://localhost:4000/v1/realtime?model=openai/gpt-realtime-2.1",
+        additional_headers={"Authorization": "Bearer sk-<your-litellm-api-key>"},
     ) as ws:
         await ws.recv()  # session.created
 
         await ws.send(json.dumps({
             "type": "session.update",
             "session": {
-                "modalities": ["audio", "text"],
-                "input_audio_transcription": {"model": "whisper-1"},
-                "turn_detection": {"type": "server_vad"},
+                "type": "realtime",
+                "output_modalities": ["audio"],
+                "audio": {
+                    "input": {
+                        "transcription": {"model": "gpt-transcribe"},
+                        "turn_detection": {"type": "server_vad"},
+                    },
+                },
             },
         }))
 
@@ -169,19 +186,13 @@ When the guardrail fires, the proxy:
 
 The LLM never processes the injected instruction.
 
-## Using with any guardrail provider
+On a transcription-only session (`/v1/realtime?intent=transcription`, or a `session.type` of `transcription`) there is no assistant turn to cancel or re-create, so the proxy sends nothing upstream on a block. It still forwards the transcript, then sends the client an `error` event with `"type": "guardrail_violation"` and the block message, and the session keeps transcribing the next turn. `on_violation: end_session` and `end_session_after_n_fails` close the session the same way they do on a voice session.
 
-`realtime_input_transcription` mode works with any guardrail that implements `apply_guardrail`. Just swap `litellm_content_filter` for your provider:
+## Using with other guardrail providers
 
-```yaml
-guardrails:
-  - guardrail_name: "voice-lakera"
-    litellm_params:
-      guardrail: lakera_ai
-      mode: realtime_input_transcription
-      default_on: true
-      api_key: os.environ/LAKERA_API_KEY
-```
+The proxy runs realtime guardrails through the provider's `apply_guardrail` method, but a guardrail can only be configured with `mode: realtime_input_transcription` if that hook is listed in its `get_supported_event_hooks()`. Currently only `litellm_content_filter` declares it. Setting the mode on another provider (for example `lakera_v2`, which supports only `pre_call`, `during_call`, and `post_call`) fails validation at proxy startup: the proxy logs an error (`Skipping guardrail ... proxy is starting WITHOUT this guardrail`) and starts without that guardrail, so realtime sessions run unprotected. Setting `LITELLM_STRICT_GUARDRAIL_MODES=false` downgrades the log to a warning, but the guardrail is still not supported for this mode.
+
+To add realtime support to a custom guardrail, include `GuardrailEventHooks.realtime_input_transcription` in its `get_supported_event_hooks()` and implement `apply_guardrail`.
 
 ## Per-key guardrail control
 

@@ -1,3 +1,8 @@
+---
+title: "Pillar Security Guardrails on LiteLLM AI Gateway"
+sidebar_label: "Pillar Security"
+description: "Block prompt injection, jailbreaks and PII leaks with Pillar Security on the LiteLLM AI Gateway via the Generic Guardrail API, on prompts and responses."
+---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -28,9 +33,9 @@ Create or update your `config.yaml`:
 
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -47,7 +52,7 @@ guardrails:
         plr_scanners: true
 ```
 
-:::warning Important
+:::warning[Important]
 - The `api_base` must be exactly `https://api.pillar.security/api/v1/integrations/litellm`, the only endpoint that supports the Generic Guardrail API integration.
 - The value `guardrail: generic_guardrail_api` must not be changed. This is the LiteLLM built-in guardrail type. However, you can customize the `guardrail_name` to any value you prefer.
 :::
@@ -65,7 +70,7 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-master-key" \
   -d '{
-    "model": "gpt-4o",
+    "model": "{{openai_large}}",
     "messages": [{"role": "user", "content": "Hello, how are you?"}]
   }'
 ```
@@ -90,7 +95,7 @@ Pillar Security supports three execution modes:
 
 ### Why Dual Mode is Recommended
 
-:::tip Recommended
+:::tip[Recommended]
 Use `[pre_call, post_call]` for complete protection of both inputs and outputs.
 :::
 
@@ -138,9 +143,9 @@ These parameters are passed via `additional_provider_specific_params`:
 
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -174,9 +179,9 @@ litellm_settings:
 
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -207,9 +212,9 @@ general_settings:
 
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -239,9 +244,9 @@ general_settings:
 
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -337,7 +342,7 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-key" \
   -d '{
-    "model": "gpt-4o",
+    "model": "{{openai_large}}",
     "messages": [{"role": "user", "content": "Hello!"}],
     "user": "user-123",
     "metadata": {
@@ -368,7 +373,7 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-master-key-here" \
   -d '{
-    "model": "gpt-4o",
+    "model": "{{openai_large}}",
     "messages": [{"role": "user", "content": "Hello! Can you tell me a joke?"}],
     "max_tokens": 100
   }'
@@ -381,7 +386,7 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
   "id": "chatcmpl-BvQhm0VZpiDSEbrssSzO7GLHgHCkW",
   "object": "chat.completion",
   "created": 1753027050,
-  "model": "gpt-4o",
+  "model": "{{openai_large}}",
   "choices": [
     {
       "index": 0,
@@ -405,7 +410,7 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-master-key-here" \
   -d '{
-    "model": "gpt-4o",
+    "model": "{{openai_large}}",
     "messages": [
       {
         "role": "user",
@@ -456,7 +461,7 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-master-key-here" \
   -d '{
-    "model": "gpt-4o",
+    "model": "{{openai_large}}",
     "messages": [
       {
         "role": "user",

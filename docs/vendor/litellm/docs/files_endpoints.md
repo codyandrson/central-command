@@ -33,15 +33,15 @@ Use different OpenAI API keys for files and batches by specifying a `model` para
 ```yaml
 model_list:
   # litellm OpenAI Account
-  - model_name: "gpt-4o-litellm"
+  - model_name: "openai-litellm"
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_LITELLM_API_KEY
   
   # Free OpenAI Account
-  - model_name: "gpt-4o-free"
+  - model_name: "openai-free"
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_FREE_API_KEY
 ```
 
@@ -51,7 +51,7 @@ model_list:
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-1234",  # Your LiteLLM proxy key
+    api_key="sk-<your-litellm-api-key>",  # Your LiteLLM proxy key
     base_url="http://0.0.0.0:4000"
 )
 
@@ -59,10 +59,10 @@ client = OpenAI(
 file_response = client.files.create(
     file=open("batch_data.jsonl", "rb"),
     purpose="batch",
-    extra_body={"model": "gpt-4o-litellm"}  # Routes to litellm key
+    extra_body={"model": "openai-litellm"}  # Routes to litellm key
 )
 print(f"File ID: {file_response.id}")
-# Returns encoded ID like: file-bGl0ZWxsbTpmaWxlLWFiYzEyMzttb2RlbCxncHQtNG8taWZvb2Q
+# Returns encoded ID like: file-bGl0ZWxsbTpmaWxlLWFiYzEyMzttb2RlbCxvcGVuYWktbGl0ZWxsbQ
 
 # Create batch using the encoded file ID
 # No need to specify model again - it's embedded in the file ID
@@ -80,26 +80,26 @@ print(f"Status: {batch_status.status}")
 
 # List files for a specific account
 files = client.files.list(
-    extra_body={"model": "gpt-4o-free"}  # List free files
+    extra_body={"model": "openai-free"}  # List free files
 )
 
 # List batches for a specific account
 batches = client.batches.list(
-    extra_query={"model": "gpt-4o-litellm"}  # List litellm batches
+    extra_query={"model": "openai-litellm"}  # List litellm batches
 )
 ```
 
 ### Parameter Options
 
 You can pass the `model` parameter via:
-- **Request body**: `extra_body={"model": "gpt-4o-litellm"}`
-- **Query parameter**: `?model=gpt-4o-litellm`
-- **Header**: `x-litellm-model: gpt-4o-litellm`
+- **Request body**: `extra_body={"model": "openai-litellm"}`
+- **Query parameter**: `?model=openai-litellm`
+- **Header**: `x-litellm-model: openai-litellm`
 
 ### How Encoded IDs Work
 
 - When you create a file/batch with a `model` parameter, LiteLLM encodes the model name into the returned ID
-- The encoded ID is base64-encoded and looks like: `file-bGl0ZWxsbTpmaWxlLWFiYzEyMzttb2RlbCxncHQtNG8taWZvb2Q`
+- The encoded ID is base64-encoded and looks like: `file-bGl0ZWxsbTpmaWxlLWFiYzEyMzttb2RlbCxvcGVuYWktbGl0ZWxsbQ`
 - When you use this ID in subsequent operations (retrieve, delete, batch create), LiteLLM automatically:
   1. Decodes the ID
   2. Extracts the model name
@@ -133,15 +133,15 @@ client.files.retrieve(file_id, extra_headers={"custom-llm-provider": "openai"})
 **New approach (recommended):**
 ```yaml
 model_list:
-  - model_name: "gpt-4o-account1"
+  - model_name: "openai-account1"
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_KEY
 ```
 
 ```python
 # Specify model once on create
-file = client.files.create(..., extra_body={"model": "gpt-4o-account1"})
+file = client.files.create(..., extra_body={"model": "openai-account1"})
 
 # Then just use the ID - routing is automatic
 client.files.retrieve(file.id)  # No need to specify account
@@ -252,7 +252,7 @@ print("content=", content)
 
 **Upload a File**
 ```python
-from litellm
+import litellm
 import os 
 
 os.environ["OPENAI_API_KEY"] = "sk-.."
@@ -267,7 +267,7 @@ print("Response from creating file=", file_obj)
 
 **List Files**
 ```python
-files = await litellm.alist_files(
+files = await litellm.afile_list(
     custom_llm_provider="openai",
     limit=10
 )
@@ -276,7 +276,7 @@ print("files=", files)
 
 **Retrieve File Information**
 ```python
-file = await litellm.aretrieve_file(
+file = await litellm.afile_retrieve(
     file_id="file-abc123",
     custom_llm_provider="openai"
 )
@@ -285,7 +285,7 @@ print("file=", file)
 
 **Delete File**
 ```python
-response = await litellm.adelete_file(
+response = await litellm.afile_delete(
     file_id="file-abc123",
     custom_llm_provider="openai"
 )
@@ -332,4 +332,4 @@ print("file content=", content.text)
 Anthropic Files API has a different purpose than OpenAI's. Rather than serving Batches or Fine-tuning, it lets you upload a file once and reference it by `file_id` in multiple messages, avoiding re-uploads. File API operations are free; file content used in Messages requests is priced as input tokens.
 :::
 
-## [Swagger API Reference](https://litellm-api.up.railway.app/#/files)
+## [Swagger API Reference](https://docs.litellm.ai/api-reference/#/files)

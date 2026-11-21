@@ -27,7 +27,7 @@ import os
 os.environ["OPENAI_API_KEY"] = ""
 audio_file = open("/path/to/audio.mp3", "rb")
 
-response = transcription(model="whisper", file=audio_file)
+response = transcription(model="gpt-transcribe", file=audio_file)
 
 print(f"response: {response}")
 ```
@@ -42,30 +42,30 @@ print(f"response: {response}")
 
 ```yaml showLineNumbers title="OpenAI Configuration"
 model_list:
-- model_name: whisper
+- model_name: gpt-transcribe
   litellm_params:
-    model: whisper-1
+    model: gpt-transcribe
     api_key: os.environ/OPENAI_API_KEY
   model_info:
     mode: audio_transcription
     
 general_settings:
-  master_key: sk-1234
+  master_key: os.environ/LITELLM_MASTER_KEY
 ```
 </TabItem>
 <TabItem value="openai+azure" label="OpenAI + Azure">
 
 ```yaml showLineNumbers title="OpenAI + Azure Configuration"
 model_list:
-- model_name: whisper
+- model_name: gpt-transcribe
   litellm_params:
-    model: whisper-1
+    model: gpt-transcribe
     api_key: os.environ/OPENAI_API_KEY
   model_info:
     mode: audio_transcription
-- model_name: whisper
+- model_name: gpt-transcribe
   litellm_params:
-    model: azure/azure-whisper
+    model: azure/gpt-transcribe
     api_version: 2024-02-15-preview
     api_base: os.environ/AZURE_EUROPE_API_BASE
     api_key: os.environ/AZURE_EUROPE_API_KEY
@@ -73,7 +73,7 @@ model_list:
     mode: audio_transcription
 
 general_settings:
-  master_key: sk-1234
+  master_key: os.environ/LITELLM_MASTER_KEY
 ```
 
 </TabItem>
@@ -84,7 +84,7 @@ general_settings:
 ```bash showLineNumbers title="Start Proxy Server"
 litellm --config /path/to/config.yaml 
 
-# RUNNING on http://0.0.0.0:8000
+# RUNNING on http://0.0.0.0:4000
 ```
 
 ### Test 
@@ -93,10 +93,10 @@ litellm --config /path/to/config.yaml
 <TabItem value="curl" label="Curl">
 
 ```bash showLineNumbers title="Test with cURL"
-curl --location 'http://0.0.0.0:8000/v1/audio/transcriptions' \
---header 'Authorization: Bearer sk-1234' \
+curl --location 'http://0.0.0.0:4000/v1/audio/transcriptions' \
+--header "Authorization: Bearer $LITELLM_API_KEY" \
 --form 'file=@"/Users/krrishdholakia/Downloads/gettysburg.wav"' \
---form 'model="whisper"'
+--form 'model="gpt-transcribe"'
 ```
 
 </TabItem>
@@ -104,15 +104,15 @@ curl --location 'http://0.0.0.0:8000/v1/audio/transcriptions' \
 
 ```python showLineNumbers title="Test with OpenAI Python SDK"
 from openai import OpenAI
-client = openai.OpenAI(
-    api_key="sk-1234",
-    base_url="http://0.0.0.0:8000"
+client = OpenAI(
+    api_key="sk-<your-litellm-api-key>",
+    base_url="http://0.0.0.0:4000"
 )
 
 
 audio_file = open("speech.mp3", "rb")
 transcript = client.audio.transcriptions.create(
-  model="whisper",
+  model="gpt-transcribe",
   file=audio_file
 )
 ```
@@ -126,6 +126,7 @@ transcript = client.audio.transcriptions.create(
 - [Fireworks AI](./providers/fireworks_ai.md#audio-transcription)
 - [Groq](./providers/groq.md#speech-to-text---whisper)
 - [Deepgram](./providers/deepgram.md)
+- [Google AI Studio (Gemini)](./providers/gemini.md#audio-transcription-speech-to-text)
 - [Mistral (Voxtral)](./providers/mistral.md#audio-transcription)
 - [OVHcloud AI Endpoints](./providers/ovhcloud.md)
 
@@ -140,10 +141,10 @@ You can configure fallbacks for audio transcription to automatically retry with 
 
 ```bash showLineNumbers title="Test with cURL and Fallbacks"
 curl --location 'http://0.0.0.0:4000/v1/audio/transcriptions' \
---header 'Authorization: Bearer sk-1234' \
+--header "Authorization: Bearer $LITELLM_API_KEY" \
 --form 'file=@"gettysburg.wav"' \
 --form 'model="groq/whisper-large-v3"' \
---form 'fallbacks[]="openai/whisper-1"'
+--form 'fallbacks[]="openai/gpt-transcribe"'
 ```
 
 </TabItem>
@@ -152,7 +153,7 @@ curl --location 'http://0.0.0.0:4000/v1/audio/transcriptions' \
 ```python showLineNumbers title="Test with OpenAI Python SDK and Fallbacks"
 from openai import OpenAI
 client = OpenAI(
-    api_key="sk-1234",
+    api_key="sk-<your-litellm-api-key>",
     base_url="http://0.0.0.0:4000"
 )
 
@@ -161,7 +162,7 @@ transcript = client.audio.transcriptions.create(
     model="groq/whisper-large-v3",
     file=audio_file,
     extra_body={
-        "fallbacks": ["openai/whisper-1"]
+        "fallbacks": ["openai/gpt-transcribe"]
     }
 )
 ```
@@ -170,7 +171,7 @@ transcript = client.audio.transcriptions.create(
 
 ### Testing Fallbacks
 
-:::warning Deprecated for Proxy requests
+:::warning[Deprecated for Proxy requests]
 Starting in LiteLLM Proxy v1.85.0, `mock_testing_fallbacks` is stripped from incoming Proxy requests and has no effect. It remains supported only for direct `litellm.Router` calls in tests.
 :::
 

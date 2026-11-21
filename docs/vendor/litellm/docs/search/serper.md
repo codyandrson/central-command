@@ -1,4 +1,11 @@
+---
+title: "Serper Google Search API with LiteLLM: Setup"
+sidebar_label: "Serper Search"
+description: "Add Serper Google results to LiteLLM: call search() in the Python SDK or /v1/search on the AI Gateway, with country, language and time filters."
+---
 # Serper Search
+
+[Serper](https://serper.dev) is an API for Google Search results; LiteLLM exposes it through one `search()` call in the Python SDK and the `/v1/search` endpoint on the AI Gateway.
 
 **Get API Key:** [https://serper.dev](https://serper.dev)
 
@@ -23,9 +30,9 @@ response = search(
 
 ```yaml showLineNumbers title="config.yaml"
 model_list:
-  - model_name: gpt-5
+  - model_name: {{openai_large}}
     litellm_params:
-      model: gpt-5
+      model: {{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 search_tools:
@@ -47,7 +54,7 @@ litellm --config /path/to/config.yaml
 
 ```bash showLineNumbers title="Test Request"
 curl http://0.0.0.0:4000/v1/search/serper-search \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "latest AI developments",

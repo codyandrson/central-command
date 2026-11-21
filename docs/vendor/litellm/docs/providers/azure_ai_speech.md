@@ -1,3 +1,9 @@
+---
+title: "Azure AI Speech Text to Speech with LiteLLM"
+sidebar_label: "Azure AI Speech (Cognitive Services)"
+description: "Turn text into speech with Azure AI Speech neural voices from the Python SDK or AI Gateway, with OpenAI voice mapping, raw SSML and per-character costs."
+---
+
 # Azure AI Speech (Cognitive Services)
 
 Azure AI Speech is Azure's Cognitive Services text-to-speech API, separate from Azure OpenAI. It provides high-quality neural voices with broader language support and advanced speech customization.
@@ -208,7 +214,7 @@ response.stream_to_file("speech.mp3")
 
 ```bash
 curl http://0.0.0.0:4000/v1/audio/speech \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "azure-speech",
@@ -315,7 +321,7 @@ model_list:
 
 ```bash
 curl http://0.0.0.0:4000/v1/audio/speech \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "azure-speech",
@@ -329,7 +335,7 @@ curl http://0.0.0.0:4000/v1/audio/speech \
 
 ```bash
 curl http://0.0.0.0:4000/v1/audio/speech \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "azure-speech",
@@ -344,7 +350,7 @@ curl http://0.0.0.0:4000/v1/audio/speech \
 
 ```bash
 curl http://0.0.0.0:4000/v1/audio/speech \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "azure-speech",
@@ -361,7 +367,7 @@ curl http://0.0.0.0:4000/v1/audio/speech \
 
 ```bash
 curl http://0.0.0.0:4000/v1/audio/speech \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "azure-speech",

@@ -1,3 +1,8 @@
+---
+title: "PostHog Logging for LiteLLM AI Gateway"
+sidebar_label: "PostHog"
+description: "Send LiteLLM completion, embedding and error events to PostHog from the Python SDK or AI Gateway, with team-based logging and custom instances."
+---
 # PostHog
 
 ## What is PostHog?
@@ -10,9 +15,9 @@ PostHog is an open-source product analytics platform that helps you track and an
 
 ```yaml
 model_list:
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
-      model: gpt-3.5-turbo
+      model: {{openai_small}}
 
 litellm_settings:
   success_callback: ["posthog"]
@@ -41,7 +46,7 @@ Test Request
 curl --location 'http://0.0.0.0:4000/chat/completions' \
     --header 'Content-Type: application/json' \
     --data '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [
         {
         "role": "user",
@@ -61,7 +66,7 @@ Configure different PostHog credentials per team using the team callback setting
 
 ```bash
 curl -X POST 'http://localhost:4000/team/{team_id}/callback' \
-  -H 'Authorization: Bearer sk-1234' \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "callback_name": "posthog",
@@ -102,7 +107,7 @@ litellm.success_callback = ["posthog"]
 
 # openai call
 response = litellm.completion(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages=[
         {"role": "user", "content": "Hi - i'm openai"}
     ],
@@ -126,7 +131,7 @@ import litellm
 litellm.success_callback = ["posthog"]
 
 response = litellm.completion(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages=[
         {"role": "user", "content": "Hello world"}
     ],
@@ -143,12 +148,12 @@ response = litellm.completion(
 import openai
 
 client = openai.OpenAI(
-    api_key="sk-1234",  # Your LiteLLM Proxy API key
+    api_key="sk-<your-litellm-api-key>",  # Your LiteLLM Proxy API key
     base_url="http://0.0.0.0:4000"  # Your LiteLLM Proxy URL
 )
 
 response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages=[
         {"role": "user", "content": "Hello world"}
     ],
@@ -173,7 +178,7 @@ litellm.success_callback = ["posthog"]
 
 # Use custom PostHog credentials for this specific request
 response = litellm.completion(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages=[
         {"role": "user", "content": "Hello world"}
     ],
@@ -197,7 +202,7 @@ import litellm
 litellm.success_callback = ["posthog"]
 
 response = litellm.completion(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages=[
         {"role": "user", "content": "This won't be logged"}
     ],

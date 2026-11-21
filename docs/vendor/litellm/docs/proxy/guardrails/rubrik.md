@@ -1,3 +1,8 @@
+---
+title: "Rubrik Guardrails on LiteLLM AI Gateway"
+sidebar_label: "Rubrik Guardrail"
+description: "Screen prompts and responses with Rubrik moderation on the LiteLLM AI Gateway in OpenAI and Anthropic formats, and batch-log every LLM request."
+---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -26,9 +31,9 @@ Credentials can be set directly in the YAML config or via environment variables.
 
 ```yaml
 model_list:
-  - model_name: gpt-4
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -68,9 +73,9 @@ With a minimal config:
 
 ```yaml
 model_list:
-  - model_name: gpt-4
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -95,9 +100,9 @@ litellm --config config.yaml --port 4000
 ```bash
 curl -X POST http://localhost:4000/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gpt-4",
+    "model": "{{openai_large}}",
     "messages": [{"role": "user", "content": "What is the weather in SF?"}],
     "tools": [
       {
@@ -163,7 +168,7 @@ On `post_call` the guardrail sends a JSON envelope:
 {
   "request": {
     "messages": [...],
-    "model": "gpt-4",
+    "model": "{{openai_large}}",
     "tools": [...]
   },
   "response": {

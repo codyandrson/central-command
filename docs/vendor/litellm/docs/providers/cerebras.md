@@ -1,7 +1,16 @@
+---
+title: "Cerebras API with LiteLLM: Python SDK and Gateway"
+sidebar_label: "Cerebras"
+description: "Call Cerebras models such as llama3-70b-instruct from the Python SDK or AI Gateway, with streaming and JSON mode through response_format."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 # Cerebras
+
+LiteLLM calls every Cerebras model with the `cerebras/` prefix from the Python SDK or AI Gateway; set `CEREBRAS_API_KEY` to authenticate.
+
 https://inference-docs.cerebras.ai/api-reference/chat-completions
 
 :::tip
@@ -108,7 +117,7 @@ Here's how to call a Cerebras model with the LiteLLM Proxy Server
   ```python
   import openai
   client = openai.OpenAI(
-      api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+      api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
       base_url="http://0.0.0.0:4000" # litellm-proxy-base url
   )
 
@@ -130,7 +139,7 @@ Here's how to call a Cerebras model with the LiteLLM Proxy Server
 
   ```shell
   curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
       "model": "my-model",

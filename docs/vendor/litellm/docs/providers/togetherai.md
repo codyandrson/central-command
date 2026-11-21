@@ -1,3 +1,9 @@
+---
+title: "Together AI API with LiteLLM AI Gateway"
+sidebar_label: "Together AI"
+description: "Call Llama, CodeLlama, Qwen and GLM models on Together AI, toggle thinking with chat_template_kwargs, use -latest aliases and rerank documents via LiteLLM."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -76,6 +82,19 @@ Example TogetherAI Usage - Note: liteLLM supports all models deployed on Togethe
 | upstage/SOLAR-0-70b-16bit           | `completion('together_ai/upstage/SOLAR-0-70b-16bit', messages)`           | `os.environ['TOGETHERAI_API_KEY']` |
 | WizardLM/WizardLM-70B-V1.0          | `completion('together_ai/WizardLM/WizardLM-70B-V1.0', messages)`          | `os.environ['TOGETHERAI_API_KEY']` |
 
+## Latest model aliases
+
+<SinceVersion v="1.109.0" />
+
+`together_ai/<family>-latest` names follow a model family as LiteLLM moves them to newer models, so your application keeps one model string. Use them like any other Together AI model name. LiteLLM sends Together AI the current target model and bills at that model's price. See [Latest model aliases](../model_latest_aliases.md) for how aliases work and the full list across providers.
+
+| Alias | Model family |
+| --- | --- |
+| `together_ai/kimi-latest` | Kimi |
+| `together_ai/glm-latest` | GLM |
+| `together_ai/glm-flash-latest` | GLM Flash |
+| `together_ai/deepseek-pro-latest` | DeepSeek Pro |
+| `together_ai/qwen-flash-latest` | Qwen Flash |
 
 ## Prompt Templates
 
@@ -97,7 +116,7 @@ completion(model="together_ai/togethercomputer/Llama-2-7B-32K-Instruct", message
 
 ### Using another model
 
-You can create a custom prompt template on LiteLLM (and we [welcome PRs](https://github.com/BerriAI/litellm) to add them to the main repo 🤗)
+You can create a custom prompt template on LiteLLM (and we [welcome PRs](https://github.com/BerriAI/litellm) to add them to the main repo)
 
 Let's make one for `OpenAssistant/llama2-70b-oasst-sft-v10`!
 
@@ -208,6 +227,81 @@ print(response)
 ```
 
 
+## Reasoning controls via `chat_template_kwargs`
+
+Together steers its reasoning models through a request-level `chat_template_kwargs` object ([Together docs](https://docs.together.ai/docs/deepseek-v3-1#hybrid-reasoning-model)). LiteLLM passes it through untouched on the SDK and on every proxy endpoint (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`), streaming included, so any key Together documents for your model works as is. Together validates the keys server-side and silently ignores ones a model does not support.
+
+### Toggling thinking on hybrid models
+
+Hybrid reasoning models (e.g. `Qwen/Qwen3.5-9B`) think by default; `{"thinking": false}` turns it off.
+
+<Tabs>
+<TabItem value="sdk" label="LiteLLM SDK Usage">
+
+```python
+from litellm import completion
+import os
+
+os.environ["TOGETHERAI_API_KEY"] = "your-api-key"
+
+response = completion(
+    model="together_ai/Qwen/Qwen3.5-9B",
+    messages=[{"role": "user", "content": "What is 17*23? Answer with just the number."}],
+    chat_template_kwargs={"thinking": False},
+)
+print(response.choices[0].message.content)  # direct answer, no reasoning_content
+```
+</TabItem>
+
+<TabItem value="proxy" label="LiteLLM Proxy Usage">
+
+```bash
+curl http://0.0.0.0:4000/v1/chat/completions \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3.5-9B",
+    "messages": [{"role": "user", "content": "What is 17*23? Answer with just the number."}],
+    "chat_template_kwargs": {"thinking": false}
+  }'
+```
+
+</TabItem>
+</Tabs>
+
+### Preserved thinking across turns
+
+Models like `zai-org/GLM-5.2` clear prior-turn reasoning from the prompt by default. Sending `{"clear_thinking": false}` keeps it, provided you replay each assistant turn's `reasoning_content` unmodified alongside its `content`. LiteLLM forwards the replayed `reasoning_content` to Together and strips its own bookkeeping fields (`thinking_blocks`, `provider_specific_fields`) from the outbound request, so replaying a LiteLLM response object verbatim is safe.
+
+```python
+from litellm import completion
+import os
+
+os.environ["TOGETHERAI_API_KEY"] = "your-api-key"
+
+first = completion(
+    model="together_ai/zai-org/GLM-5.2",
+    messages=[{"role": "user", "content": "Pick a secret two-digit number. Reply with only the sum of its digits."}],
+)
+
+followup = completion(
+    model="together_ai/zai-org/GLM-5.2",
+    messages=[
+        {"role": "user", "content": "Pick a secret two-digit number. Reply with only the sum of its digits."},
+        {
+            "role": "assistant",
+            "content": first.choices[0].message.content,
+            "reasoning_content": first.choices[0].message.reasoning_content,
+        },
+        {"role": "user", "content": "What was the secret number? Reply with only the number."},
+    ],
+    chat_template_kwargs={"clear_thinking": False},
+)
+print(followup.choices[0].message.content)  # recalls the number from the replayed reasoning
+```
+
+Anthropic-SDK clients pointed at the proxy's `/v1/messages` endpoint get the same behavior by replaying the assistant `thinking` blocks and passing `chat_template_kwargs: {"clear_thinking": false}` at the top level of the request.
+
 ## Rerank 
 
 ### Usage
@@ -269,7 +363,7 @@ Test request
 
 ```bash
 curl http://0.0.0.0:4000/rerank \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Salesforce/Llama-Rank-V1",

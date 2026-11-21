@@ -1,4 +1,11 @@
+---
+title: "Firecrawl Search API with LiteLLM: Search + Scrape"
+sidebar_label: "Firecrawl Search"
+description: "Add Firecrawl search to LiteLLM: call search() in the Python SDK or /v1/search on the AI Gateway, with web, news and image sources plus page scraping."
+---
 # Firecrawl Search
+
+[Firecrawl](https://firecrawl.dev) is a web search and scraping API that can return the page content of each result; LiteLLM exposes it through one `search()` call in the Python SDK and the `/v1/search` endpoint on the AI Gateway.
 
 **Get API Key:** [https://firecrawl.dev](https://firecrawl.dev)
 
@@ -23,9 +30,9 @@ response = search(
 
 ```yaml showLineNumbers title="config.yaml"
 model_list:
-  - model_name: gpt-4
+  - model_name: {{openai_large}}
     litellm_params:
-      model: gpt-4
+      model: {{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 search_tools:
@@ -47,7 +54,7 @@ litellm --config /path/to/config.yaml
 
 ```bash showLineNumbers title="Test Request"
 curl http://0.0.0.0:4000/v1/search/firecrawl-search \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "latest AI developments",

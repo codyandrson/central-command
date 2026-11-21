@@ -1,3 +1,7 @@
+---
+sidebar_label: "Audio"
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -23,7 +27,7 @@ os.environ["OPENAI_API_KEY"] = "your-api-key"
 
 # openai call
 completion = await litellm.acompletion(
-    model="gpt-4o-audio-preview",
+    model="gpt-audio-1.5",
     modalities=["text", "audio"],
     audio={"voice": "alloy", "format": "wav"},
     messages=[{"role": "user", "content": "Is a golden retriever a good family dog?"}],
@@ -41,9 +45,9 @@ with open("dog.wav", "wb") as f:
 
 ```yaml
 model_list:
-  - model_name: gpt-4o-audio-preview # OpenAI gpt-4o-audio-preview
+  - model_name: gpt-audio-1.5 # OpenAI gpt-audio-1.5
     litellm_params:
-      model: openai/gpt-4o-audio-preview
+      model: openai/gpt-audio-1.5
       api_key: os.environ/OPENAI_API_KEY 
 
 ```
@@ -62,12 +66,12 @@ import base64
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="LITELLM_PROXY_KEY", # sk-1234
+    api_key="LITELLM_PROXY_KEY", # sk-<your-litellm-api-key>
     base_url="LITELLM_PROXY_BASE" # http://0.0.0.0:4000
 )
 
 completion = client.chat.completions.create(
-    model="gpt-4o-audio-preview",
+    model="gpt-audio-1.5",
     modalities=["text", "audio"],
     audio={"voice": "alloy", "format": "wav"},
     messages=[
@@ -110,7 +114,7 @@ wav_data = response.content
 encoded_string = base64.b64encode(wav_data).decode("utf-8")
 
 completion = litellm.completion(
-    model="gpt-4o-audio-preview",
+    model="gpt-audio-1.5",
     modalities=["text", "audio"],
     audio={"voice": "alloy", "format": "wav"},
     messages=[
@@ -139,9 +143,9 @@ print(completion.choices[0].message)
 
 ```yaml
 model_list:
-  - model_name: gpt-4o-audio-preview # OpenAI gpt-4o-audio-preview
+  - model_name: gpt-audio-1.5 # OpenAI gpt-audio-1.5
     litellm_params:
-      model: openai/gpt-4o-audio-preview
+      model: openai/gpt-audio-1.5
       api_key: os.environ/OPENAI_API_KEY 
 
 ```
@@ -157,10 +161,11 @@ litellm --config config.yaml
 
 ```python
 import base64
+import requests
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="LITELLM_PROXY_KEY", # sk-1234
+    api_key="LITELLM_PROXY_KEY", # sk-<your-litellm-api-key>
     base_url="LITELLM_PROXY_BASE" # http://0.0.0.0:4000
 )
 
@@ -173,7 +178,7 @@ wav_data = response.content
 encoded_string = base64.b64encode(wav_data).decode('utf-8')
 
 completion = client.chat.completions.create(
-    model="gpt-4o-audio-preview",
+    model="gpt-audio-1.5",
     modalities=["text", "audio"],
     audio={"voice": "alloy", "format": "wav"},
     messages=[
@@ -213,24 +218,24 @@ Use `litellm.supports_audio_output(model="")` -> returns `True` if model can gen
 Use `litellm.supports_audio_input(model="")` -> returns `True` if model can accept audio input
 
 ```python
-assert litellm.supports_audio_output(model="gpt-4o-audio-preview") == True
-assert litellm.supports_audio_input(model="gpt-4o-audio-preview") == True
+assert litellm.supports_audio_output(model="gpt-audio-1.5") == True
+assert litellm.supports_audio_input(model="gpt-audio-1.5") == True
 
-assert litellm.supports_audio_output(model="gpt-3.5-turbo") == False
-assert litellm.supports_audio_input(model="gpt-3.5-turbo") == False
+assert litellm.supports_audio_output(model="{{openai_small}}") == False
+assert litellm.supports_audio_input(model="{{openai_small}}") == False
 ```
 </TabItem>
 
 <TabItem label="LiteLLM Proxy Server" value="proxy">
 
 
-1. Define vision models on config.yaml
+1. Define audio models on config.yaml
 
 ```yaml
 model_list:
-  - model_name: gpt-4o-audio-preview # OpenAI gpt-4o-audio-preview
+  - model_name: gpt-audio-1.5 # OpenAI gpt-audio-1.5
     litellm_params:
-      model: openai/gpt-4o-audio-preview
+      model: openai/gpt-audio-1.5
       api_key: os.environ/OPENAI_API_KEY
   - model_name: llava-hf          # Custom OpenAI compatible model
     litellm_params:
@@ -248,37 +253,39 @@ model_list:
 litellm --config config.yaml
 ```
 
-3. Call `/model_group/info` to check if your model supports `vision`
+3. Call `/model/info` to check if your model supports audio input and output. The flags are returned under each deployment's `model_info`, either from `litellm.model_cost` or from what you set in `config.yaml`. `/model_group/info` does not return `supports_audio_input` or `supports_audio_output`
 
 ```shell
 curl -X 'GET' \
-  'http://localhost:4000/model_group/info' \
+  'http://localhost:4000/model/info' \
   -H 'accept: application/json' \
-  -H 'x-api-key: sk-1234'
+  -H "x-api-key: $LITELLM_API_KEY"
 ```
 
-Expected Response 
+Expected Response (trimmed)
 
 ```json
 {
   "data": [
     {
-      "model_group": "gpt-4o-audio-preview",
-      "providers": ["openai"],
-      "max_input_tokens": 128000,
-      "max_output_tokens": 16384,
-      "mode": "chat",
-      "supports_audio_output": true, # 👈 supports_audio_output is true
-      "supports_audio_input": true, # 👈 supports_audio_input is true
+      "model_name": "gpt-audio-1.5",
+      "model_info": {
+        "max_input_tokens": 128000,
+        "max_output_tokens": 16384,
+        "mode": "chat",
+        "supports_audio_input": true,
+        "supports_audio_output": true
+      }
     },
     {
-      "model_group": "llava-hf",
-      "providers": ["openai"],
-      "max_input_tokens": null,
-      "max_output_tokens": null,
-      "mode": null,
-      "supports_audio_output": true, # 👈 supports_audio_output is true
-      "supports_audio_input": true, # 👈 supports_audio_input is true
+      "model_name": "llava-hf",
+      "model_info": {
+        "max_input_tokens": null,
+        "max_output_tokens": null,
+        "mode": null,
+        "supports_audio_input": true,
+        "supports_audio_output": true
+      }
     }
   ]
 }

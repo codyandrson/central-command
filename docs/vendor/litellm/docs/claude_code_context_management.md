@@ -5,17 +5,24 @@ sidebar_label: Claude Code - Context Management
 
 # Claude Code - Context Management
 
-LiteLLM supports Anthropic's `context_management` beta natively across **all providers** - not just Anthropic.
+LiteLLM supports Anthropic's `context_management` beta on Anthropic and on many other providers. Where a provider has no native support, an **in-gateway polyfill** applies the edits.
 
-When you send a request to `/v1/messages` (or via `litellm.anthropic.messages.*`) with a `context_management` spec, LiteLLM handles it in one of two ways depending on where the request is routed:
+When you send a request to `/v1/messages` (or via `litellm.anthropic.messages.*`) with a `context_management` spec, LiteLLM handles it in one of these ways depending on where the request is routed:
 
 | Routing path | How context_management is applied |
 |---|---|
-| **Anthropic API** | Passed through to the Anthropic server, which applies edits natively |
-| **OpenAI Responses API** (e.g. `gpt-5.x-*`) | Passed through; handled by the Responses API |
-| **Any other provider** (OpenAI, xAI, Gemini, Azure, Bedrock non-Anthropic, …) | **In-gateway polyfill** - LiteLLM applies the edits to the message array before forwarding |
+| **Anthropic API**, and Claude on Bedrock Invoke, Vertex AI, Azure AI, and Databricks | Passed through to the provider, which applies edits natively. On Azure AI, LiteLLM drops the `compact-2026-01-12` beta header, so Azure answers `compact_20260112` with a 400 |
+| **OpenAI Responses API** (`openai/*` models, and a few Responses-only deployments of other providers, such as `perplexity/perplexity/sonar`) | `compact_20260112` becomes the Responses API's native compaction. Every other edit, such as `clear_tool_uses_20250919`, runs in the **in-gateway polyfill** |
+| **Other providers that LiteLLM calls through their own `/v1/messages` endpoint** (DeepSeek, Tencent, MiniMax, BigModel, EdenAI, DashScope's Anthropic endpoint, Claude on GitHub Copilot and Bedrock Mantle, …) | Passed through as sent. LiteLLM runs no polyfill and does not check the edits, so the provider decides what to do with them |
+| **Any other provider** (OpenAI chat completions, xAI, Gemini, Azure, Bedrock Converse, Bedrock non-Anthropic, …) | **In-gateway polyfill** - LiteLLM applies the edits to the message array before forwarding |
 
-The polyfill means you write your Claude Code tool-loop once, pass `context_management` as you normally would, and it works regardless of which model is behind the proxy.
+Claude on Databricks <SinceVersion v="1.109.0" /> is passed through for endpoint names that start with `databricks-claude-` or `system.ai.claude-`. Any other Databricks endpoint name runs the polyfill. DashScope's Anthropic endpoint <SinceVersion v="1.109.0" /> is passed through when the deployment's `api_base` points at it. A deployment whose `model_info.supported_endpoints` lists `/v1/messages` is passed through as sent, whatever its provider.
+
+On `openai/*` models, `clear_tool_uses_20250919` runs in the gateway on `/v1/messages` and on `/v1/messages/count_tokens` <SinceVersion v="1.109.0" />, so the count matches the history that `/v1/messages` sends. Earlier versions drop the edit on this path without a warning.
+
+An `openai/*` request with `stop_sequences` goes through chat completions instead, where both edits run in the polyfill. So does every `openai/*` request when the proxy runs with `LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES=true`.
+
+Where the polyfill runs, you write your Claude Code tool loop once and pass `context_management` as you normally would, whichever model is behind the proxy.
 
 ## Supported Edit Types
 
@@ -23,7 +30,7 @@ The polyfill means you write your Claude Code tool-loop once, pass `context_mana
 |---|---|---|
 | `clear_tool_uses_20250919` | ✅ **Supported** | Clears old `tool_result` content from conversation history when a trigger threshold is met, keeping only the most recent `N` tool results intact |
 | `clear_thinking_20251015` | ❌ Coming soon | Clears extended-thinking blocks from history |
-| `compact_20260112` | ✅ **Supported** | Summarisation edit - LiteLLM calls a configured summary model, injects the summary as a system prefix, and returns a `compaction` block in the response |
+| `compact_20260112` | ✅ **Supported** | Summarisation edit - LiteLLM calls a configured summary model, injects the summary as a system prefix, and returns a `compaction` block in the response. On the OpenAI Responses API path, OpenAI compacts instead |
 
 ## How It Works
 
@@ -38,9 +45,9 @@ Claude Code client
 │  1. Detect routing target                               │
 │                                                         │
 │  ┌──────────────────────┐   ┌────────────────────────┐  │
-│  │  Anthropic / Bedrock │   │  Any other provider    │  │
-│  │  Anthropic / OpenAI  │   │  (OpenAI, xAI, Gemini, │  │
-│  │  Responses API       │   │   Azure, …)            │  │
+│  │  Anthropic and other │   │  Any other provider    │  │
+│  │  native /v1/messages │   │  (OpenAI, xAI, Gemini, │  │
+│  │  endpoints           │   │   Azure, …)            │  │
 │  │                      │   │                        │  │
 │  │  Pass context_mgmt   │   │  In-gateway polyfill:  │  │
 │  │  spec through as-is  │   │                        │  │
@@ -62,8 +69,8 @@ Claude Code client
 │             └────────────┬─────────────┘                 │
 │                          │                               │
 │  2. Forward to provider  │                               │
-│     (without context_    │                               │
-│      management key)     │                               │
+│     (polyfill path drops │                               │
+│      context_management) │                               │
 └──────────────────────────┼──────────────────────────────┘
                            ▼
                     Upstream model
@@ -80,6 +87,8 @@ Claude Code client
                            ▼
                     Claude Code client
 ```
+
+On the OpenAI Responses API path, LiteLLM sends `compact_20260112` to OpenAI as the Responses API's own compaction setting, and every other edit takes the right branch.
 
 ## Usage
 
@@ -113,7 +122,7 @@ response = await litellm.anthropic.messages.acreate(
 
 You can also trigger on tool-use count instead of tokens:
 
-```python
+```python nolint
 "trigger": {"type": "tool_uses", "value": 10}   # activate after 10 tool calls
 ```
 
@@ -124,7 +133,7 @@ curl -X POST http://localhost:4000/v1/messages \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gpt-5.4-mini",
+    "model": "{{openai_small}}",
     "max_tokens": 1024,
     "messages": [...],
     "tools": [...],
@@ -144,7 +153,9 @@ curl -X POST http://localhost:4000/v1/messages \
 
 ## `compact_20260112` - Conversation Compaction
 
-The `compact_20260112` edit type summarizes the conversation history when the input token count exceeds a threshold. LiteLLM's polyfill makes this work on **any provider**, not just Anthropic.
+The `compact_20260112` edit type summarizes the conversation history when the input token count exceeds a threshold. LiteLLM's polyfill makes this work on every provider where the polyfill runs, not just Anthropic.
+
+On the OpenAI Responses API path, LiteLLM sends only `trigger.value` to OpenAI, as the Responses API's `compact_threshold`, and OpenAI compacts the conversation itself. OpenAI answers a `trigger.value` under 1,000 with a 400. Without `trigger.value`, OpenAI uses its own default threshold instead of `150000`. LiteLLM's response on this path has no `compaction` block, so the client sends the full history again on the next request and OpenAI compacts it again. The summary model, `instructions`, the 50,000-token minimum, and the `compaction` block and `applied_edits` below apply only where the polyfill runs.
 
 ### Setup - configure a summary model
 
@@ -153,7 +164,7 @@ The polyfill calls a separately-configured model to generate the summary. Add `c
 ```yaml
 # proxy_server_config.yaml
 general_settings:
-  context_management_summary_model: claude-sonnet-4-5   # any model alias in your model_list
+  context_management_summary_model: {{anthropic}}   # any model alias in your model_list
 ```
 
 Without this setting, the polyfill is a no-op and `applied_edits[0].error: "summary_model_not_configured"` is returned.
@@ -164,7 +175,7 @@ Without this setting, the polyfill is a no-op and `applied_edits[0].error: "summ
 import litellm
 
 response = await litellm.anthropic.messages.acreate(
-    model="gpt-5.4-mini",          # any non-Anthropic provider
+    model="gemini/{{gemini_flash}}",   # any provider that runs the polyfill
     max_tokens=1024,
     messages=[...],                # multi-turn history
     context_management={
@@ -188,7 +199,7 @@ curl -X POST http://localhost:4000/v1/messages \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gpt-5.4-mini",
+    "model": "{{gemini_flash}}",
     "max_tokens": 1024,
     "messages": [...],
     "context_management": {
@@ -261,7 +272,7 @@ When compaction fires, the response includes `context_management.applied_edits` 
     },
     {"type": "text", "text": "Sure, here's the output formatter..."}
   ],
-  "model": "gpt-5.4-mini",
+  "model": "{{gemini_flash}}",
   "stop_reason": "end_turn",
   "usage": {"input_tokens": 420, "output_tokens": 120},
   "context_management": {
@@ -298,15 +309,29 @@ If the request does **not** include a `compact_20260112` edit but the message hi
 
 | Field | Required | Default | Description |
 |---|---|---|---|
+| `trigger` | No | `{"type": "input_tokens", "value": 100000}` | Must be an object |
 | `trigger.type` | No | `"input_tokens"` | `"input_tokens"` or `"tool_uses"` |
 | `trigger.value` | No | `100000` | Threshold; edits fire when current value **exceeds** this |
+| `keep` | No | `{"type": "tool_uses", "value": 3}` | Must be an object |
 | `keep.type` | No | `"tool_uses"` | Must be `"tool_uses"` |
 | `keep.value` | No | `3` | Number of most-recent tool results to preserve |
-| `clear_at_least` | Accepted | - | Accepted in request but ignored by polyfill (v0) |
-| `exclude_tools` | Accepted | - | Accepted in request but ignored by polyfill (v0) |
-| `clear_tool_inputs` | Accepted | - | Accepted in request but ignored by polyfill (v0) |
+| `clear_at_least.type` | No | - | Must be `"input_tokens"` |
+| `clear_at_least.value` | No | - | Clear old tool uses in batches that each free at least this many tokens |
+| `exclude_tools` | No | - | Tool names whose uses are never cleared |
+| `clear_tool_inputs` | No | `false` | `true`, or a list of tool names, to also empty the `input` of each cleared `tool_use` |
 
 > **Hard floor:** regardless of `keep`, LiteLLM's polyfill never clears the most recently completed `tool_result` - the one the model is about to reply to.
+
+`clear_at_least`, `exclude_tools` and `clear_tool_inputs` work <SinceVersion v="1.109.0" />. Earlier versions accept them and ignore them.
+
+The polyfill accepts some values that Anthropic's API answers with a 400, so send only the values in the table. It treats a `null` `trigger` or `keep` as missing, and counts input tokens for any other `trigger.type`. A `trigger.value` that is not an integer uses `100000` for an `input_tokens` trigger and never fires a `tool_uses` trigger. Any other `keep.type`, or a `keep.value` that is not a non-negative integer, keeps 3 tool results. A `value` of `true` counts as 1.
+
+The polyfill handles `clear_at_least`, `exclude_tools`, small results and malformed fields like this:
+
+- **Batches.** With `clear_at_least`, old tool uses are cleared oldest first in batches. Each batch frees at least `clear_at_least.value` tokens, counting the cleared result and the cleared input with `litellm.token_counter`. An incomplete batch waits for a later request, so the requests in between send the same history and keep hitting the prompt cache.
+- **Excluded tools.** Uses of a tool in `exclude_tools` are never cleared, and they do not count toward `keep`, a `tool_uses` trigger, or a batch.
+- **Small results.** A tool use whose result is 1 to 46 bytes of text is skipped, unless `clear_tool_inputs` covers that tool.
+- **Malformed values.** A malformed field, such as `exclude_tools: "memory"` or a `trigger` or `keep` that is not an object <SinceVersion v="1.109.0" />, gets an HTTP 400 that names the edit and the field, for example `context_management.edits.0.clear_tool_uses_20250919.trigger: Input should be an object`. With `drop_params: true`, which Claude Code and Codex requests get by default, LiteLLM drops only that field instead, uses its default, and still applies the edit and the other edits.
 
 ## Responses
 
@@ -320,7 +345,7 @@ When at least one edit fires, the response includes a `context_management` field
   "type": "message",
   "role": "assistant",
   "content": [{"type": "text", "text": "Based on the latest weather data..."}],
-  "model": "gpt-5.4-mini",
+  "model": "{{openai_small}}",
   "stop_reason": "end_turn",
   "usage": {
     "input_tokens": 620,
@@ -346,7 +371,7 @@ The `context_management.applied_edits` field is included in the final `message_d
 
 ```
 event: message_start
-data: {"type":"message_start","message":{"id":"msg_01...","type":"message","role":"assistant","content":[],"model":"gpt-5.4-mini","stop_reason":null,"usage":{"input_tokens":620,"output_tokens":0}}}
+data: {"type":"message_start","message":{"id":"msg_01...","type":"message","role":"assistant","content":[],"model":"{{openai_small}}","stop_reason":null,"usage":{"input_tokens":620,"output_tokens":0}}}
 
 event: content_block_start
 data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
@@ -386,43 +411,55 @@ data: {"type":"message_stop"}
 
 Simply don't include `context_management` in the request body.
 
-### Proxy-wide - `drop_params: true`
+### Per-model - `additional_drop_params`
 
-When `drop_params: true` is set in your proxy config (or passed as a litellm setting), LiteLLM will silently strip `context_management` from any request instead of running the polyfill:
+To opt a model out of the polyfill, list `context_management` in that model's `additional_drop_params`. LiteLLM will silently strip `context_management` from requests to that model instead of running the polyfill:
 
 ```yaml
 # proxy_server_config.yaml
-litellm_settings:
-  drop_params: true
+model_list:
+  - model_name: {{openai_large}}
+    litellm_params:
+      model: openai/{{openai_large}}
+      additional_drop_params: ["context_management"]
 ```
 
 Or at call time:
 
 ```python
 import litellm
-litellm.drop_params = True
+litellm.completion(..., additional_drop_params=["context_management"])
 ```
 
-This is useful when you have a global `drop_params` policy to suppress unsupported parameters - context management is treated like any other unsupported parameter and dropped rather than polyfilled.
+`drop_params: true` does not disable the polyfill. `context_management` is a LiteLLM-supported parameter (passed through on native `/v1/messages` endpoints, polyfilled elsewhere), so `drop_params` keeps it. Inside a `clear_tool_uses_20250919` edit that the polyfill runs, `drop_params` drops only the malformed fields, such as a `trigger` or `keep` that is not an object, and the edit runs with their defaults. On pass-through routes the edit goes to the provider as sent, so Anthropic still answers a malformed field with its own 400.
+
+Requests from Claude Code and Codex, found by their user agent, get `drop_params: true` by default. A request that sets `drop_params` itself, or `litellm_settings.drop_params: false` in the proxy config, turns that off. So Claude Code and Codex get the drop behavior on this page where other clients get a 400. See [Claude Code and Codex on the proxy](/docs/completion/drop_params#claude-code-and-codex-on-the-proxy).
+
+A `tool_result` text part whose `text` is not a string gets an HTTP 400 <SinceVersion v="1.109.0" />, with or without an edit, on a `/v1/messages` request that runs the polyfill and on every `/v1/messages/count_tokens` request. Where LiteLLM sends the count to Claude, as on Vertex AI and Azure AI, the 400 comes from Claude. With `drop_params: true`, LiteLLM drops that text part instead, before any edit runs.
 
 ## Provider Support Matrix
 
 | Provider | `clear_tool_uses_20250919` | `compact_20260112` |
 |---|---|---|
 | `anthropic/*` | Native pass-through | Native pass-through |
-| `bedrock/anthropic.*` | Native pass-through | Native pass-through |
-| `openai/*` (Responses API) | Native pass-through | Native pass-through |
+| `bedrock/anthropic.*` (Invoke) | Native pass-through | Native pass-through |
+| `bedrock/converse/*` | Polyfill | Polyfill |
+| `openai/*` (Responses API, the default on `/v1/messages`) | Polyfill | OpenAI compacts, no `compaction` block returned |
 | `openai/*` (chat completions) | Polyfill | Polyfill |
 | `azure/*` | Polyfill | Polyfill |
 | `xai/*` | Polyfill | Polyfill |
 | `gemini/*` | Polyfill | Polyfill |
-| `vertex_ai/*` | Polyfill | Polyfill |
-| All other providers | Polyfill | Polyfill |
+| Claude on `vertex_ai/*`, and on `databricks/*` (`databricks-claude-*`, `system.ai.claude-*`) | Native pass-through | Native pass-through |
+| Claude on `azure_ai/*` | Native pass-through | Azure answers 400, since LiteLLM drops the beta header |
+| `vertex_ai/*` (other models) | Polyfill | Polyfill |
+| `deepseek/*`, `tencent/*`, `minimax/*`, `dashscope/*` on DashScope's Anthropic endpoint, and other providers with a native `/v1/messages` endpoint | Passed through as sent | Passed through as sent |
+| `dashscope/*` on DashScope's OpenAI-compatible endpoint | Polyfill | Polyfill |
+| All other providers without a native `/v1/messages` endpoint | Polyfill | Polyfill |
 
 ## Notes
 
-- **`compact_20260112` requires `context_management_summary_model`** to be set in `general_settings`. Without it, the edit is acknowledged but no compaction is performed.
+- **`compact_20260112` requires `context_management_summary_model`** to be set in `general_settings` wherever the polyfill runs. Without it, the edit is acknowledged but no compaction is performed.
 - **Token counting** for polyfill threshold checks uses `litellm.token_counter` (tiktoken `cl100k_base` fallback for unknown models).
-- **`clear_tool_uses_20250919`** preserves the message array structure: same number of messages, same role order. Only `tool_result.content` inside matching messages is replaced with `"[Cleared by context management]"`.
-- **`compact_20260112`** collapses the entire prior history to a single system-prefix summary + the last user question. The `compaction` block in the response gives the Claude Code client the summary text to carry forward into the next turn.
-- The 50,000-token minimum for `compact_20260112` trigger is enforced at the proxy; requests with a lower value are rejected with HTTP 400.
+- **`clear_tool_uses_20250919`** preserves the message array structure: same number of messages, same role order. Only `tool_result.content` inside matching messages is replaced with `"[Cleared by context management]"`, and the `tool_use.input` of those uses is emptied when `clear_tool_inputs` covers the tool.
+- **`compact_20260112`**, where the polyfill runs, collapses the entire prior history to a single system-prefix summary + the last user question. The `compaction` block in the response gives the Claude Code client the summary text to carry forward into the next turn.
+- The 50,000-token minimum for `compact_20260112` trigger is enforced at the proxy wherever the polyfill runs; requests with a lower value are rejected with HTTP 400.

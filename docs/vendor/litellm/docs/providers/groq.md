@@ -1,7 +1,16 @@
+---
+title: "Groq API with LiteLLM: Python SDK and Gateway"
+sidebar_label: "Groq"
+description: "Run Llama 3.3, Llama 4 Scout and Maverick, and Qwen3 on Groq from the Python SDK or AI Gateway, with streaming, tools, vision and Whisper transcription."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
 # Groq
+
+LiteLLM calls every Groq model, including Llama chat models and Whisper speech to text, with the `groq/` prefix through one OpenAI-format API from the Python SDK or AI Gateway.
+
 https://groq.com/
 
 :::tip
@@ -324,11 +333,11 @@ import os
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="sk-1234", # your litellm proxy api key
+    api_key="sk-<your-litellm-api-key>", # your litellm proxy api key
 )
 
 response = client.chat.completions.create(
-    model = "gpt-4-vision-preview",  # use model="llava-hf" to test your custom OpenAI endpoint
+    model = "{{openai_large}}",  # use model="llava-hf" to test your custom OpenAI endpoint
     messages=[
         {
             "role": "user",

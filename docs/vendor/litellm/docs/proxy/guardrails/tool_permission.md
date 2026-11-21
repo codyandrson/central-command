@@ -1,3 +1,8 @@
+---
+title: "Tool Permission Guardrail on LiteLLM AI Gateway"
+sidebar_label: "LiteLLM Tool Permission Guardrail"
+description: "Control which tool calls a model may make on the LiteLLM AI Gateway with allow and deny rules for OpenAI tool_calls, Anthropic tool_use and MCP."
+---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -137,7 +142,7 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-master-key-here" \
   -d '{
-    "model": "gpt-5-mini",
+    "model": "{{openai_small}}",
     "messages": [{"role": "user","content": "What is the weather like in Tokyo today?"}],
     "tools": [
       {
@@ -176,7 +181,7 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-master-key-here" \
   -d '{
-    "model": "gpt-5-mini",
+    "model": "{{openai_small}}",
     "messages": [{"role": "user","content": "What is the weather like in Tokyo today?"}],
     "tools": [
       {
@@ -196,7 +201,7 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
 {
 	"id": "chatcmpl-xxxxxxxxxxxxxxx",
 	"created": 1757716050,
-	"model": "gpt-5-mini-2025-08-07",
+	"model": "{{openai_small}}",
 	"object": "chat.completion",
 	"choices": [
 		{
@@ -214,8 +219,8 @@ curl -X POST "http://localhost:4000/v1/chat/completions" \
 		"prompt_tokens": 112,
 		"total_tokens": 735,
 		"completion_tokens_details": {
-			"reasoning_tokens": 384,
-		},
+			"reasoning_tokens": 384
+		}
 	},
 	"service_tier": "default"
 }

@@ -1,3 +1,9 @@
+---
+title: "Hugging Face API with LiteLLM: Inference Setup"
+sidebar_label: "HuggingFace"
+description: "Call Hugging Face Inference Providers and dedicated Inference Endpoints via LiteLLM from the Python SDK or AI Gateway, with streaming, tools and embedding."
+---
+
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -53,17 +59,17 @@ Examples:
 
 ```python
 # Run DeepSeek-R1 inference through Together AI
-completion(model="huggingface/together/deepseek-ai/DeepSeek-R1",...)
+completion(model="huggingface/together/deepseek-ai/DeepSeek-R1", messages=messages)
 
 # Run Qwen2.5-72B-Instruct inference through Sambanova
-completion(model="huggingface/sambanova/Qwen/Qwen2.5-72B-Instruct",...)
+completion(model="huggingface/sambanova/Qwen/Qwen2.5-72B-Instruct", messages=messages)
 
 # Run Llama-3.3-70B-Instruct inference through HF Inference API
-completion(model="huggingface/meta-llama/Llama-3.3-70B-Instruct",...)
+completion(model="huggingface/meta-llama/Llama-3.3-70B-Instruct", messages=messages)
 ```
 
 
-<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/main/cookbook/LiteLLM_HuggingFace.ipynb">
+<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/89a6b5fbb26b632ef0faf633b0d3cf317d73deaa/cookbook/LiteLLM_HuggingFace.ipynb">
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
@@ -194,7 +200,7 @@ print(response)
 
 <TabItem value="endpoints" label="Inference Endpoints">
 
-<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/main/cookbook/LiteLLM_HuggingFace.ipynb">
+<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/89a6b5fbb26b632ef0faf633b0d3cf317d73deaa/cookbook/LiteLLM_HuggingFace.ipynb">
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
@@ -259,7 +265,7 @@ messages=[
 response = completion(
     model="huggingface/tgi",
     messages=messages,
-    api_base="https://my-endpoint.endpoints.huggingface.cloud/v1/""
+    api_base="https://my-endpoint.endpoints.huggingface.cloud/v1/"
 )
 print(response.choices[0])
 ```
@@ -376,7 +382,7 @@ response = embedding(
 )
 ```
 
-# FAQ
+## FAQ
 
 **How does billing work with Hugging Face Inference Providers?**
 

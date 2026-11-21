@@ -1,3 +1,8 @@
+---
+title: "Guardrails for Batch API Files on LiteLLM"
+sidebar_label: "Batch API Guardrails"
+description: "Run guardrails on every record in a Batch API input file on the LiteLLM AI Gateway, so batch jobs cannot skip checks that apply to chat calls."
+---
 # Batch API Guardrails
 
 Guard the records inside a batch input file, so a batch job cannot move content past a guardrail that would have blocked the same content on `/chat/completions`
@@ -32,9 +37,9 @@ Nothing to turn on. Any guardrail that runs on `pre_call` is applied to batch up
 
 ```yaml
 model_list:
-  - model_name: gpt-4o-mini
+  - model_name: {{openai_small}}
     litellm_params:
-      model: openai/gpt-4o-mini
+      model: openai/{{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -61,7 +66,7 @@ The response is the usual file object with one extra field, `litellm_batch_guard
 
 ```bash
 curl -sS http://localhost:4000/v1/files \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -F purpose=batch \
   -F file=@batch_input.jsonl
 ```

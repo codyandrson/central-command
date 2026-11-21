@@ -1,3 +1,8 @@
+---
+title: "Route Sensitive Data to On-Prem Models in LiteLLM"
+sidebar_label: "Sensitive Data Routing (Built-in Guardrail)"
+description: "Detect sensitive data in a request on the LiteLLM AI Gateway and reroute it to an on-premise model instead of blocking it, with session stickiness."
+---
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -34,7 +39,7 @@ With `sticky_session` enabled (the default), the first time sensitive data is se
 model_list:
   - model_name: cloud-model
     litellm_params:
-      model: openai/gpt-4o-mini
+      model: openai/{{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
   - model_name: on-prem-model
@@ -78,7 +83,7 @@ litellm --config config.yaml --detailed_debug
 
 ```bash showLineNumbers
 curl http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "cloud-model",
@@ -93,7 +98,7 @@ The response `model` field reflects the cloud model.
 
 ```bash showLineNumbers
 curl http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "cloud-model",

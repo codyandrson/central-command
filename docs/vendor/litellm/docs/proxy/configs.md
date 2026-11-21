@@ -1,9 +1,19 @@
+---
+title: YAML configuration
+sidebar_label: YAML
+description: Configure LiteLLM models, routing, logging, and server settings in config.yaml.
+---
+
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+import SinceVersion from '@site/src/components/SinceVersion';
 
-# Overview
-Set model list, `api_base`, `api_key`, `temperature` & proxy server settings (`master-key`) on the config.yaml. 
+# YAML configuration {#configyaml}
+
+Use `config.yaml` to define models, provider credentials, routing, logging, and server settings. Keep the file with your deployment configuration. Use environment variables for secrets.
+
+This guide covers the main sections and examples. The [settings reference](./config_settings.md) lists all options. Use [file management](./config_management.md) to split the configuration into files. See the [CLI reference](./cli.md) for startup flags. The [Configuration overview](./configuration/overview.md) helps you choose YAML, the Admin UI, the Management API, or Terraform.
 
 | Param Name           | Description                                                   |
 |----------------------|---------------------------------------------------------------|
@@ -28,28 +38,28 @@ In the config below:
 
 E.g.: 
 - `model=vllm-models` will route to `openai/facebook/opt-125m`. 
-- `model=gpt-4o` will load balance between `azure/gpt-4o-eu` and `azure/gpt-4o-ca`
+- `model={{openai_large}}` will load balance between `azure/{{openai_large}}-eu` and `azure/{{openai_large}}-ca`
 
 ```yaml
 model_list:
-  - model_name: gpt-4o ### RECEIVED MODEL NAME ###
+  - model_name: {{openai_large}} ### RECEIVED MODEL NAME ###
     litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
-      model: azure/gpt-4o-eu ### MODEL NAME sent to `litellm.completion()` ###
+      model: azure/{{openai_large}}-eu ### MODEL NAME sent to `litellm.completion()` ###
       api_base: https://my-endpoint-europe-berri-992.openai.azure.com/
       api_key: "os.environ/AZURE_API_KEY_EU" # does os.getenv("AZURE_API_KEY_EU")
       rpm: 6      # [OPTIONAL] Rate limit for this deployment: in requests per minute (rpm)
   - model_name: bedrock-claude-v1 
     litellm_params:
-      model: bedrock/anthropic.claude-instant-v1
-  - model_name: gpt-4o
+      model: bedrock/us.anthropic.{{anthropic}}
+  - model_name: {{openai_large}}
     litellm_params:
-      model: azure/gpt-4o-ca
+      model: azure/{{openai_large}}-ca
       api_base: https://my-endpoint-canada-berri992.openai.azure.com/
       api_key: "os.environ/AZURE_API_KEY_CA"
       rpm: 6
   - model_name: anthropic-claude
     litellm_params: 
-      model: bedrock/anthropic.claude-instant-v1
+      model: bedrock/us.anthropic.{{anthropic}}
       ### [OPTIONAL] SET AWS REGION ###
       aws_region_name: us-east-1
   - model_name: vllm-models
@@ -61,7 +71,7 @@ model_list:
     model_info: 
       version: 2
   
-  # Use this if you want to make requests to `claude-3-haiku-20240307`,`claude-3-opus-20240229`,`claude-2.1` without defining them on the config.yaml
+  # Use this if you want to make requests to `{{anthropic}}`,`{{anthropic_large}}` without defining them on the config.yaml
   # Default models
   # Works for ALL Providers and needs the default provider credentials in .env
   - model_name: "*" 
@@ -73,7 +83,7 @@ litellm_settings: # module level litellm settings - https://github.com/BerriAI/l
   success_callback: ["langfuse"] # OPTIONAL - if you want to start sending LLM Logs to Langfuse. Make sure to set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in your env
 
 general_settings: 
-  master_key: sk-1234 # [OPTIONAL] Only use this if you to require all calls to contain this key (Authorization: Bearer sk-1234)
+  master_key: os.environ/LITELLM_MASTER_KEY # [OPTIONAL] Only use this if you to require all calls to contain this key (Authorization: Bearer $LITELLM_API_KEY)
   alerting: ["slack"] # [OPTIONAL] If you want Slack Alerts for Hanging LLM requests, Slow llm responses, Budget Alerts. Make sure to set `SLACK_WEBHOOK_URL` in your env
 ```
 :::info
@@ -100,9 +110,9 @@ $ litellm --config /path/to/config.yaml --detailed_debug
 
 #### Step 3: Test it
 
-Sends request to model where `model_name=gpt-4o` on config.yaml. 
+Sends request to model where `model_name={{openai_large}}` on config.yaml. 
 
-If multiple with `model_name=gpt-4o` does [Load Balancing](https://docs.litellm.ai/docs/proxy/load_balancing)
+If multiple with `model_name={{openai_large}}` does [Load Balancing](https://docs.litellm.ai/docs/proxy/load_balancing)
 
 **[Langchain, OpenAI SDK Usage Examples](../proxy/user_keys#request-format)**
 
@@ -110,7 +120,7 @@ If multiple with `model_name=gpt-4o` does [Load Balancing](https://docs.litellm.
 curl --location 'http://0.0.0.0:4000/chat/completions' \
 --header 'Content-Type: application/json' \
 --data ' {
-      "model": "gpt-4o",
+      "model": "{{openai_large}}",
       "messages": [
         {
           "role": "user",
@@ -123,9 +133,31 @@ curl --location 'http://0.0.0.0:4000/chat/completions' \
 
 ## config.yaml vs database settings
 
-Once `store_model_in_db` is enabled (via `general_settings.store_model_in_db: true` or `STORE_MODEL_IN_DB="True"`), the Admin UI and the `/config/update` API write settings into the `LiteLLM_Config` table, and the database becomes the source of truth for whatever they wrote. On startup and on every config refresh, the proxy loads your `config.yaml` first and then overlays the database rows for `general_settings`, `router_settings`, `litellm_settings`, and `environment_variables`. The overlay is a deep merge in which the database value wins on any key that exists in both places, so editing that key in the YAML and restarting your pods will not change the running value. Treat the YAML as bootstrap for these four sections, and change UI-written keys in the UI (or delete the row from `LiteLLM_Config`) rather than in the file
+<SinceVersion v="1.103.0" />
 
-A few specifics are worth knowing. Database values of `null` and empty lists are treated as "no value" and do not overwrite what the YAML provides, so a key you never set in the UI still comes from the file. The overlay also applies to those four settings sections only; `model_list` is not merged this way, since models added through the UI or API are stored in `LiteLLM_ProxyModelTable` and served alongside your YAML models, meaning a database model never replaces a same-named YAML entry but becomes an additional deployment that gets load balanced with it (see [Model Management](./model_management.md)). And with `store_model_in_db` off, the database is never read for config, so your `config.yaml` is fully authoritative
+Settings in `general_settings`, `router_settings`, `litellm_settings`, and `environment_variables` are owned key by key. A key you declare in `config.yaml` is owned by the file, and the proxy always runs with the file's value. A key the file does not declare is owned by the database. Once `store_model_in_db` is enabled (via `general_settings.store_model_in_db: true` or `STORE_MODEL_IN_DB="True"`), the Admin UI and the `/config/update` API write those keys into the `LiteLLM_Config` table, and the proxy applies them on startup and on every config refresh.
+
+Writes to a config-owned key are refused. Changing one from the Admin UI, `/config/update`, or `/config/field/update` returns a 400 that names the key, its section, whether a value already stored in the database for it is being ignored, and how to resolve it. This is the response from `/config/field/update`:
+
+```json
+{
+  "detail": {
+    "error": "general_settings key 'store_model_in_db' is set in the config file and cannot be changed here.",
+    "keys": ["store_model_in_db"],
+    "section": "general_settings",
+    "stored_database_values_ignored": [],
+    "resolution": "edit /app/config.yaml to change it, or remove it from the file to let the database own it"
+  }
+}
+```
+
+`/config/update` returns the same fields inside `error.message`. When the database already holds a value for the key, the error adds that the stored value is ignored and will never be applied, and lists the key in `stored_database_values_ignored`.
+
+A request that resends the value the file already holds is accepted, since it changes nothing. If the database still holds a value for a key the file now declares, for example one saved from the UI before you added the key to the YAML, that stored value is ignored and never applied. To change a config-owned key, edit `config.yaml` and restart or reload. To hand a key over to the UI, remove it from `config.yaml`, after which the database value (if any) takes effect.
+
+The ownership rule applies to those four settings sections only. `model_list` is not merged this way, since models added through the UI or API are stored in `LiteLLM_ProxyModelTable` and served alongside your YAML models, meaning a database model never replaces a same-named YAML entry but becomes an additional deployment that gets load balanced with it (see [Model Management](./model_management.md)). With `store_model_in_db` off, the database is never read for config, so your `config.yaml` is fully authoritative.
+
+Before v1.103.0 the precedence was the reverse. The proxy deep-merged the database rows over `config.yaml`, so the database value won on any key that existed in both places, and editing that key in the YAML and restarting did not change the running value. If you run an older version, change UI-written keys in the UI (or delete the row from `LiteLLM_Config`) rather than in the file.
 
 ## LLM configs `model_list`
 
@@ -134,8 +166,8 @@ You can use the config to save model-specific information like api_base, api_key
 
 [**All input params**](https://docs.litellm.ai/docs/completion/input#input-params-1)
 
-**Step 1**: Create a `config.yaml` file
-```yaml
+**Step 1**: Create a `config.yaml` file. The deployments that set `temperature` use gpt-5.4-mini, since the newer default OpenAI models only accept a temperature of 1 unless reasoning is turned off.
+```yaml keep-model-ids
 model_list:
   - model_name: gpt-4-team1
     litellm_params: # params for litellm.completion() - https://docs.litellm.ai/docs/completion/input#input---request-body
@@ -147,13 +179,13 @@ model_list:
       max_tokens: 20
   - model_name: gpt-4-team2
     litellm_params:
-      model: azure/gpt-4
+      model: azure/gpt-5.4-mini
       api_key: sk-123
       api_base: https://openai-gpt-4-test-v-2.openai.azure.com/
       temperature: 0.2
-  - model_name: openai-gpt-4o
+  - model_name: openai-gpt-5.4-mini
     litellm_params:
-      model: openai/gpt-4o
+      model: openai/gpt-5.4-mini
       extra_headers: {"AI-Resource Group": "ishaan-resource"}
       api_key: sk-123
       organization: org-ikDc4ex8NB
@@ -224,7 +256,7 @@ model_list:
       api_version: "2023-07-01-preview"
 
 general_settings:
-  master_key: sk-1234 # [OPTIONAL] if set all calls to proxy will require either this key or a valid generated token
+  master_key: os.environ/LITELLM_MASTER_KEY # [OPTIONAL] if set all calls to proxy will require either this key or a valid generated token
 ```
 
 </TabItem>
@@ -343,7 +375,7 @@ curl --location 'http://0.0.0.0:4000/chat/completions' \
 Add all openai models across all OpenAI organizations with just 1 model definition 
 
 ```yaml
-  - model_name: *
+  - model_name: "*"
     litellm_params:
       model: openai/*
       api_key: os.environ/OPENAI_API_KEY
@@ -376,7 +408,7 @@ For optimal performance:
 - Select your optimal routing strategy in `router_settings:routing_strategy`.
 
 LiteLLM supports
-```python
+```text
 ["simple-shuffle", "least-busy", "usage-based-routing","latency-based-routing"], default="simple-shuffle"`
 ```
 
@@ -401,27 +433,27 @@ model_list:
         model: huggingface/HuggingFaceH4/zephyr-7b-beta
         api_base: http://0.0.0.0:8003
         rpm: 60000      
-  - model_name: gpt-4o
+  - model_name: {{openai_small}}
     litellm_params:
-        model: gpt-4o
+        model: {{openai_small}}
         api_key: <my-openai-key>
         rpm: 200      
-  - model_name: gpt-3.5-turbo-16k
+  - model_name: {{openai_large}}
     litellm_params:
-        model: gpt-3.5-turbo-16k
+        model: {{openai_large}}
         api_key: <my-openai-key>
         rpm: 100      
 
 litellm_settings:
   num_retries: 3 # retry call 3 times on each model_name (e.g. zephyr-beta)
   request_timeout: 10 # raise Timeout error if call takes longer than 10s. Sets litellm.request_timeout 
-  fallbacks: [{"zephyr-beta": ["gpt-4o"]}] # fallback to gpt-4o if call fails num_retries 
-  context_window_fallbacks: [{"zephyr-beta": ["gpt-3.5-turbo-16k"]}, {"gpt-4o": ["gpt-3.5-turbo-16k"]}] # fallback to gpt-3.5-turbo-16k if context window error
-  allowed_fails: 3 # cooldown model if it fails > 1 call in a minute. 
+  fallbacks: [{"zephyr-beta": ["{{openai_small}}"]}] # fallback to {{openai_small}} if call fails num_retries 
+  context_window_fallbacks: [{"zephyr-beta": ["{{openai_large}}"]}, {"{{openai_small}}": ["{{openai_large}}"]}] # fallback to {{openai_large}} if context window error
 
 router_settings: # router_settings are optional
+  allowed_fails: 3 # cooldown a deployment once it fails more than 3 calls within cooldown_time
   routing_strategy: simple-shuffle # Literal["simple-shuffle", "least-busy", "usage-based-routing","latency-based-routing"], default="simple-shuffle"
-  model_group_alias: {"gpt-4": "gpt-4o"} # all requests with `gpt-4` will be routed to models with `gpt-4o`
+  model_group_alias: {"gpt-5.6": "{{openai_small}}"} # all requests with `gpt-5.6` will be routed to models with `{{openai_small}}`
   num_retries: 2
   timeout: 30                                  # 30 seconds
   redis_host: <your redis host>                # set this when using multiple litellm proxy deployments, load balancing state stored in redis
@@ -447,7 +479,7 @@ model_list:
       model: azure/chatgpt-v-2
       api_base: https://openai-gpt-4-test-v-1.openai.azure.com/
       api_version: "2023-05-15"
-      api_key: os.environ/AZURE_NORTH_AMERICA_API_KEY # 👈 KEY CHANGE
+      api_key: os.environ/AZURE_NORTH_AMERICA_API_KEY # KEY CHANGE
 ```
 
 [**See Code**](https://github.com/BerriAI/litellm/blob/c12d6c3fe80e1b5e704d9846b246c059defadce7/litellm/utils.py#L2366)
@@ -462,9 +494,9 @@ Define credentials once and reuse them across multiple models. This helps with:
 
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: {{openai_large}}
     litellm_params:
-      model: azure/gpt-4o
+      model: azure/{{openai_large}}
       litellm_credential_name: default_azure_credential  # Reference credential below
 
 credential_list:
@@ -482,6 +514,21 @@ credential_list:
 - `credential_name`: Unique identifier for the credential set
 - `credential_values`: Key-value pairs of credentials/secrets (supports `os.environ/` syntax)
 - `credential_info`: Key-value pairs of user provided credentials information.  No key-value pairs are required, but the dictionary must exist.
+
+#### Credential names are permanent
+
+Models and vector stores reference a credential by `credential_name`, so it can't change after creation. A `PATCH` with a different `credential_name` returns 400
+
+To relabel a credential in the Admin UI, set `display_name` instead. It is optional, doesn't need to be unique, and is capped at 255 characters. On a `PATCH`, omit it to keep the current label or send `null` to clear it:
+
+```bash
+curl -X PATCH http://localhost:4000/credentials/default_azure_credential \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"display_name": "Azure EU (prod)", "credential_info": {}}'
+```
+
+Credentials in `credential_list` can only be changed in `config.yaml`. `PATCH` and `DELETE` on them return 405, the UI disables Edit and Delete, and a `display_name` set there is ignored. `GET /credentials` returns each credential's `display_name` and its `source`, either `db` or `config`
 
 ### Load API Keys from Secret Managers (Azure Vault, etc)
 
@@ -503,22 +550,22 @@ Supported Environments:
 2. For each model set the list of supported environments in `model_info.supported_environments`
 ```yaml
 model_list:
- - model_name: gpt-3.5-turbo-16k
+ - model_name: {{openai_small}}
    litellm_params:
-     model: openai/gpt-3.5-turbo-16k
+     model: openai/{{openai_small}}
      api_key: os.environ/OPENAI_API_KEY
    model_info:
      supported_environments: ["development", "production", "staging"]
- - model_name: gpt-4
+ - model_name: {{openai_large}}
    litellm_params:
-     model: openai/gpt-4
+     model: openai/{{openai_large}}
      api_key: os.environ/OPENAI_API_KEY
    model_info:
      supported_environments: ["production", "staging"]
- - model_name: gpt-4o
+ - model_name: {{anthropic}}
    litellm_params:
-     model: openai/gpt-4o
-     api_key: os.environ/OPENAI_API_KEY
+     model: anthropic/{{anthropic}}
+     api_key: os.environ/ANTHROPIC_API_KEY
    model_info:
      supported_environments: ["production"]
 ```
@@ -541,7 +588,7 @@ model_list:
       roles: {"system":{"pre_message":"<|im_start|>system\n", "post_message":"<|im_end|>"}, "assistant":{"pre_message":"<|im_start|>assistant\n","post_message":"<|im_end|>"}, "user":{"pre_message":"<|im_start|>user\n","post_message":"<|im_end|>"}}
       final_prompt_value: "\n"
       bos_token: " "
-      eos_token: " "
+      eos_token: " "
       max_tokens: 4096
 ```
 
@@ -553,7 +600,7 @@ $ litellm --config /path/to/config.yaml
 
 ### Set custom tokenizer 
 
-If you're using the [`/utils/token_counter` endpoint](https://litellm-api.up.railway.app/#/llm%20utils/token_counter_utils_token_counter_post), and want to set a custom huggingface tokenizer for a model, you can do so in the `config.yaml`
+If you're using the [`/utils/token_counter` endpoint](https://docs.litellm.ai/api-reference/#/llm%20utils/token_counter_utils_token_counter_post), and want to set a custom huggingface tokenizer for a model, you can do so in the `config.yaml`
 
 ```yaml
 model_list:
@@ -629,6 +676,7 @@ general_settings:
 - `database_socket_timeout` is the main knob for capping idle DB connections from LiteLLM.
 - `database_connect_timeout` and `database_socket_timeout` are omitted from the URL when unset, so Prisma's defaults apply.
 - `database_extra_connection_params` is an untyped passthrough: any key you set here **overrides** the LiteLLM-set defaults for that key (e.g. you can override `pool_timeout` from this dict). Use it for `sslmode`, `pgbouncer`, `statement_cache_size`, or any other Prisma URL param.
+- To verify the database server certificate against a custom CA (e.g. AWS RDS), set `sslmode: "verify-full"` and `sslrootcert: "/certs/global-bundle.pem"` here or on the URL; LiteLLM translates them into Prisma's `sslcert` + `sslaccept=strict`. See [Verify the database server certificate](./prod.md#verify-the-database-server-certificate-custom-ca-eg-aws-rds).
 
 ### Bounding Statement and Lock Time
 
@@ -674,7 +722,7 @@ To enable [LiteLLM Enterprise features](https://docs.litellm.ai/docs/enterprise)
 export LITELLM_LICENSE="eyJ..."
 ```
 
-The license key is a JWT token provided when you purchase a LiteLLM Enterprise license. Once set, LiteLLM will automatically detect and activate enterprise features.
+LiteLLM gives you the license key when you buy a LiteLLM Enterprise license (see [Activate your license](../enterprise/activate.md)). Once set, LiteLLM will automatically detect and activate enterprise features.
 
 You can also add it to your `.env` file:
 
@@ -705,15 +753,37 @@ NO_REDOC="True"
 
 in your environment, and restart the proxy. 
 
+### Disable OpenAPI schema
+
+To disable the raw OpenAPI schema (defaults to `<your-proxy-url>/openapi.json`), set 
+
+```env
+NO_OPENAPI="True"
+```
+
+in your environment, and restart the proxy. 
+
+### Restrict all API documentation for production/air-gapped deployments
+
+Swagger, Redoc and the raw OpenAPI schema are three independent surfaces, each disabled by its own env var. To fully lock down a production or air-gapped deployment, set all three: 
+
+```env
+NO_DOCS="True"
+NO_REDOC="True"
+NO_OPENAPI="True"
+```
+
+Restart the proxy after setting these. `/redoc` and `/openapi.json` then 404 with no schema in the response, `/` returns only the plain `"LiteLLM: RUNNING"` status string, and inference and management routes are unaffected.
+
 ### Use CONFIG_FILE_PATH for proxy (Easier Azure container deployment)
 
 1. Setup config.yaml
 
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: {{openai_large}}
     litellm_params:
-      model: gpt-4o
+      model: {{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 ```
 
@@ -757,7 +827,7 @@ docker run --name litellm-proxy \
    -e LITELLM_CONFIG_BUCKET_OBJECT_KEY="<object_key>> \
    -e LITELLM_CONFIG_BUCKET_TYPE="gcs" \
    -p 4000:4000 \
-   docker.litellm.ai/berriai/litellm-database:latest --detailed_debug
+   docker.litellm.ai/berriai/litellm:latest --detailed_debug
 ```
 
 </TabItem>
@@ -778,7 +848,7 @@ docker run --name litellm-proxy \
    -e LITELLM_CONFIG_BUCKET_NAME=<bucket_name> \
    -e LITELLM_CONFIG_BUCKET_OBJECT_KEY="<object_key>> \
    -p 4000:4000 \
-   docker.litellm.ai/berriai/litellm-database:latest
+   docker.litellm.ai/berriai/litellm:latest
 ```
 </TabItem>
 </Tabs>

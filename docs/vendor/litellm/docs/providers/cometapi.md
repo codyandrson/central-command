@@ -1,7 +1,13 @@
+---
+title: "CometAPI in Python with LiteLLM"
+sidebar_label: "CometAPI"
+description: "Access GPT-5, gpt-oss, Claude Opus 4.1 and more of CometAPI's 500+ models from the LiteLLM Python SDK, with sync and async streaming and error handling."
+---
+
 # CometAPI
 LiteLLM supports all AI models from [CometAPI](https://www.cometapi.com/). CometAPI provides access to 500+ AI models through a unified API interface, including cutting-edge models like GPT-5, Claude Opus 4.1, and various other state-of-the-art language models.
 
-<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/main/cookbook/LiteLLM_CometAPI.ipynb">
+<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/89a6b5fbb26b632ef0faf633b0d3cf317d73deaa/cookbook/LiteLLM_CometAPI.ipynb">
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
@@ -25,7 +31,7 @@ messages = [{"content": "Hello, how are you?", "role": "user"}]
 
 # Method 1: Using environment variable (recommended)
 response = completion(
-    model="cometapi/gpt-5", 
+    model="cometapi/{{openai_large}}", 
     messages=messages
 )
 
@@ -45,7 +51,7 @@ messages = [{"content": "Hello, how are you?", "role": "user"}]
 
 # Method 2: Explicitly passing API key
 response = completion(
-    model="cometapi/gpt-4o", 
+    model="cometapi/{{openai_large}}", 
     messages=messages, 
     api_key="your_comet_api_key_here"
 )
@@ -66,7 +72,7 @@ os.environ["COMETAPI_KEY"] = "your_comet_api_key_here"
 messages = [{"content": "Hello, how are you?", "role": "user"}]
 
 response = completion(
-    model="cometapi/gpt-5",
+    model="cometapi/{{openai_large}}",
     messages=messages,
     stream=True
 )
@@ -89,7 +95,7 @@ async def completion_call():
         
         print("test acompletion + streaming")
         response = await acompletion(
-            model="cometapi/chatgpt-4o-latest", 
+            model="cometapi/{{openai_large}}", 
             messages=[{"content": "Hello, how are you?", "role": "user"}], 
             stream=True
         )
@@ -137,7 +143,7 @@ try:
     messages = [{"content": "Hello, how are you?", "role": "user"}]
     
     response = completion(
-        model="cometapi/gpt-5",
+        model="cometapi/{{openai_large}}",
         messages=messages
     )
     

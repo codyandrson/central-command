@@ -3,7 +3,7 @@
 * [Supported OpenAI LLMs](https://docs.litellm.ai/docs/providers/openai)
 * [Supported Azure OpenAI LLMs](https://docs.litellm.ai/docs/providers/azure)
 
-<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/main/cookbook/LiteLLM_Azure_and_OpenAI_example.ipynb">
+<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/89a6b5fbb26b632ef0faf633b0d3cf317d73deaa/cookbook/LiteLLM_Azure_and_OpenAI_example.ipynb">
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
@@ -24,7 +24,7 @@ os.environ["AZURE_API_VERSION"] = "2023-05-15"
 
 # openai call
 response = completion(
-    model = "gpt-3.5-turbo", 
+    model = "{{openai_small}}", 
     messages = [{ "content": "Hello, how are you?","role": "user"}]
 )
 print("Openai Response\n")
@@ -56,7 +56,7 @@ os.environ["AZURE_API_VERSION"] = "2023-05-15"
 
 # openai call
 response = completion(
-    model = "gpt-3.5-turbo", 
+    model = "{{openai_small}}", 
     messages = [{ "content": "Hello, how are you?","role": "user"}],
     stream=True
 )
@@ -93,7 +93,7 @@ os.environ["AZURE_API_VERSION"] = "2023-05-15"
 
 # openai call
 response = acompletion(
-    model = "gpt-3.5-turbo", 
+    model = "{{openai_small}}", 
     messages = [{ "content": "Hello, how are you?","role": "user"}],
     stream=True
 )
@@ -132,7 +132,7 @@ os.environ["AZURE_API_KEY"] = "YOUR_AZURE_API_KEY"
 messages = [{"content": "Hello, how are you?", "role": "user"}]
 
 # Create threads for making the completions
-thread1 = threading.Thread(target=make_completion, args=("gpt-3.5-turbo", messages))
+thread1 = threading.Thread(target=make_completion, args=("{{openai_small}}", messages))
 thread2 = threading.Thread(target=make_completion, args=("azure/your-azure-deployment", messages))
 
 # Start both threads

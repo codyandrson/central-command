@@ -1,3 +1,7 @@
+---
+sidebar_label: "Knowledge Bases"
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import Image from '@theme/IdealImage';
@@ -8,9 +12,7 @@ import Image from '@theme/IdealImage';
   img={require('../../img/kb.png')}
   style={{width: '100%', display: 'block', margin: '2rem auto'}}
 />
-<p style={{textAlign: 'left', color: '#666'}}>
-  Use Vector Stores with any LiteLLM supported model
-</p>
+<p style={{textAlign: 'left', color: '#666'}}>Use Vector Stores with any LiteLLM supported model</p>
 
 
 LiteLLM integrates with vector stores, allowing your models to access your organization's data for more accurate and contextually relevant responses.
@@ -22,6 +24,7 @@ LiteLLM integrates with vector stores, allowing your models to access your organ
 - [Azure AI Search](/docs/providers/azure_ai_vector_stores) (Vector search with Azure AI Search indexes)
 - [Vertex AI RAG API](https://cloud.google.com/vertex-ai/generative-ai/docs/rag-overview)
 - [Gemini File Search](https://ai.google.dev/gemini-api/docs/file-search)
+- [MongoDB Vector Search (BETA)](../providers/mongodb_vector_stores.md#use-mongodb-in-chat-completions) (Use an existing Atlas or self-managed MongoDB index as context for chat completions)
 - [RAGFlow Datasets](/docs/providers/ragflow_vector_store.md) (Dataset management only, search not supported)
 
 ## Quick Start
@@ -54,7 +57,7 @@ litellm.vector_store_registry = VectorStoreRegistry(
 
 # Make a completion request with vector_store_ids parameter
 response = await litellm.acompletion(
-    model="anthropic/claude-3-5-sonnet", 
+    model="anthropic/{{anthropic}}", 
     messages=[{"role": "user", "content": "What is litellm?"}],
     tools=[
         {
@@ -78,9 +81,9 @@ To use a vector store with LiteLLM, you need to configure your vector_store_regi
 
 ```yaml showLineNumbers title="config.yaml"
 model_list:
-  - model_name: claude-3-5-sonnet
+  - model_name: {{anthropic}}
     litellm_params:
-      model: anthropic/claude-3-5-sonnet
+      model: anthropic/{{anthropic}}
       api_key: os.environ/ANTHROPIC_API_KEY
 
 vector_store_registry:
@@ -121,7 +124,7 @@ curl http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "claude-3-5-sonnet",
+    "model": "{{anthropic}}",
     "messages": [{"role": "user", "content": "What is litellm?"}],
     "tools": [
         {
@@ -147,7 +150,7 @@ client = OpenAI(
 
 # Make a completion request with vector_store_ids parameter
 response = client.chat.completions.create(
-    model="claude-3-5-sonnet",
+    model="{{anthropic}}",
     messages=[{"role": "user", "content": "What is litellm?"}],
     tools=[
         {
@@ -235,12 +238,12 @@ LiteLLM provides a server that exposes OpenAI-compatible `vector_store` endpoint
 
 ```env
 DATABASE_URL="postgresql://neondb_owner:xxxx"
-SERVER_API_KEY="sk-1234"
+SERVER_API_KEY="sk-<your-litellm-api-key>"
 HOST="0.0.0.0"
 PORT=8001
 EMBEDDING__MODEL="text-embedding-ada-002"
 EMBEDDING__BASE_URL="http://localhost:4000"
-EMBEDDING__API_KEY="sk-1234"
+EMBEDDING__API_KEY="sk-<your-litellm-api-key>"
 EMBEDDING__DIMENSIONS=1536
 DB_FIELDS__ID_FIELD="id"
 DB_FIELDS__CONTENT_FIELD="content"
@@ -289,6 +292,89 @@ Once your litellm-pg-vector-store is deployed:
 
 
 
+## Define Vector Store Fallbacks
+
+Configure an ordered list of backup vector stores for proxy search requests. LiteLLM tries the primary first, then the configured backups when a search fails with a retryable error. Callers keep using the primary store ID or the existing passthrough URL.
+
+:::note Config only
+
+Define the primary and every backup in `config.yaml` under `vector_store_registry`. Fallbacks cannot currently be configured through the management API or Admin UI, and database-only stores cannot be used as fallback targets. Database-backed stores still support ordinary searches.
+
+:::
+
+### Configure the primary and backups
+
+Add `fallbacks` under the primary store's `litellm_params`. Each entry is another registration's **`vector_store_id`**, not its `vector_store_name`. Use the existing provider store IDs in this OpenAI example:
+
+```yaml title="config.yaml"
+vector_store_registry:
+  - vector_store_name: documents-primary
+    litellm_params:
+      vector_store_id: vs_primary
+      custom_llm_provider: openai
+      api_key: os.environ/PRIMARY_OPENAI_API_KEY
+      fallbacks: [vs_backup]
+
+  - vector_store_name: documents-backup
+    litellm_params:
+      vector_store_id: vs_backup
+      custom_llm_provider: openai
+      api_key: os.environ/BACKUP_OPENAI_API_KEY
+
+router_settings:
+  cooldown_time: 5
+```
+
+Replace `vs_primary` and `vs_backup` with your real store IDs. Deploy or reload the proxy configuration after changes. Each attempt uses the target store's own provider settings and credentials. The caller must have access to the primary and all configured backups; fallback routing does not bypass store or index permissions.
+
+Backup IDs must be unique and refer to existing YAML registrations that support search. A store cannot fall back to itself, and a backup cannot define another fallback chain. Keep equivalent data in the stores yourself. LiteLLM does not copy documents, replicate writes, or synchronize indexes.
+
+### Search through the unified API
+
+```bash
+curl -i 'http://localhost:4000/v1/vector_stores/vs_primary/search' \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "What is our refund policy?"}'
+```
+
+The [unified search API](../vector_stores/search.md) can fall back across providers, provided each store supports search and has compatible data and search settings. These fallbacks apply to the proxy search endpoint and the native routes below; they do not configure chat-completion model fallbacks or provider-managed file-search tools.
+
+### Search through native passthrough APIs
+
+Native search uses the same `litellm_params.fallbacks` configuration. All targets must use the **same provider and API type** so the original request and response formats remain valid.
+
+| Provider | Native requests that support fallback |
+| --- | --- |
+| Azure AI Search | `POST /azure_ai/indexes/{name}/docs/search`, `GET /azure_ai/indexes/{name}/docs`. The `/azure/` prefix is also supported. |
+| Milvus | `POST /milvus/v2/vectordb/entities/search` |
+| OpenSearch | `GET` or `POST /opensearch/{name}/_search` |
+| Vertex AI Search | `POST /vertex_ai/discovery/v1*/projects/{project}/locations/{location}/collections/{collection}/dataStores/{store}/servingConfigs/{config}:search` |
+
+For Azure, Milvus, and OpenSearch, retain the existing index registration pointing to the primary store. You do not need a second LiteLLM index registration for the backup. The backup must contain the same physical index or collection name used by the native request. Vertex supports `vertex_ai/search_api` datastore searches, not engine routes, and uses each target's project and datastore settings. Milvus hybrid search and other native reads are outside this fallback support.
+
+**Writes do not fail over.** Document uploads, inserts, updates, deletes, and index lifecycle operations keep their existing passthrough routing. A primary write failure does not send the write to a backup, even when searches use that backup during cooldown.
+
+### Failover, cooldown, and response headers
+
+HTTP `408`, `429`, and `5xx` responses, plus connection failures and timeouts, trigger search failover. Other `4xx` responses, including authentication, authorization, and missing-index errors, are terminal. Query-embedding failures do not trigger vector-store failover; configure embedding resiliency on the [embedding model group](../providers/azure_ai_vector_stores.md#embed-queries-through-a-model-group).
+
+A retryable store failure immediately puts that store in cooldown for `router_settings.cooldown_time` seconds (5 by default). Searches skip it during cooldown. Once the time expires, it becomes eligible again and live traffic tests it. This does not use model-routing failure-count thresholds. If every target is in cooldown, LiteLLM returns `503` with `Retry-After`.
+
+For cooldown shared across proxy workers and instances, point `general_settings.coordination_redis` at the same Redis instance in every proxy's configuration:
+
+```yaml
+general_settings:
+  coordination_redis:
+    host: os.environ/REDIS_HOST
+    port: os.environ/REDIS_PORT
+    password: os.environ/REDIS_PASSWORD
+```
+
+Without coordination Redis, or if it is unavailable, cooldown relies on each worker's local cache.
+
+Successful responses expose `x-litellm-vector-store-id` for the serving store and `x-litellm-attempted-fallbacks` for the number of backup attempts. Native responses keep the provider's response body. These headers do not provide a full attempt history.
+
 ## Advanced
 
 ### Logging Vector Store Usage
@@ -301,9 +387,7 @@ After completing a request with a vector store, navigate to the `Logs` page on L
   img={require('../../img/kb_4.png')}
   style={{width: '80%'}}
 />
-<p style={{textAlign: 'left', color: '#666'}}>
-  LiteLLM Logs Page: Vector Store Usage
-</p>
+<p style={{textAlign: 'left', color: '#666'}}>LiteLLM Logs Page: Vector Store Usage</p>
 
 
 ### Listing available vector stores
@@ -354,7 +438,7 @@ In this config, we add `vector_store_ids` to the claude-3-5-sonnet-with-vector-s
 model_list:
   - model_name: claude-3-5-sonnet-with-vector-store
     litellm_params:
-      model: anthropic/claude-3-5-sonnet
+      model: anthropic/{{anthropic}}
       vector_store_ids: ["T37J8R4WTM"]
 
 vector_store_registry:
@@ -384,7 +468,7 @@ When you pass `vector_store_ids=["YOUR_KNOWLEDGE_BASE_ID"]`, your request flows 
 **1. Original Request to LiteLLM:**
 ```json
 {
-    "model": "anthropic/claude-3-5-sonnet",
+    "model": "anthropic/{{anthropic}}",
     "messages": [
         {"role": "user", "content": "What is litellm?"}
     ],
@@ -405,7 +489,7 @@ This is sent to: `https://bedrock-agent-runtime.{aws_region}.amazonaws.com/knowl
 **3. Final Request to LiteLLM:**
 ```json
 {
-    "model": "anthropic/claude-3-5-sonnet",
+    "model": "anthropic/{{anthropic}}",
     "messages": [
         {"role": "user", "content": "What is litellm?"},
         {"role": "user", "content": "Context: \n\nLiteLLM is an open-source SDK to simplify LLM API calls across providers (OpenAI, Claude, etc). It provides a standardized interface with robust error handling, streaming, and observability tools."}
@@ -467,7 +551,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="claude-3-5-sonnet",
+    model="{{anthropic}}",
     messages=[{"role": "user", "content": "What is litellm?"}],
     tools=[{"type": "file_search", "vector_store_ids": ["T37J8R4WTM"]}]
 )
@@ -496,7 +580,7 @@ const client = new OpenAI({
 });
 
 const response = await client.chat.completions.create({
-  model: 'claude-3-5-sonnet',
+  model: '{{anthropic}}',
   messages: [{ role: 'user', content: 'What is litellm?' }],
   tools: [{ type: 'file_search', vector_store_ids: ['T37J8R4WTM'] }]
 });
@@ -557,7 +641,7 @@ client = OpenAI(
 )
 
 stream = client.chat.completions.create(
-    model="claude-3-5-sonnet",
+    model="{{anthropic}}",
     messages=[{"role": "user", "content": "What is litellm?"}],
     tools=[{"type": "file_search", "vector_store_ids": ["T37J8R4WTM"]}],
     stream=True
@@ -586,7 +670,7 @@ for chunk in stream:
 import OpenAI from 'openai';
 
 const stream = await client.chat.completions.create({
-  model: 'claude-3-5-sonnet',
+  model: '{{anthropic}}',
   messages: [{ role: 'user', content: 'What is litellm?' }],
   tools: [{ type: 'file_search', vector_store_ids: ['T37J8R4WTM'] }],
   stream: true
@@ -694,5 +778,3 @@ vector_store_registry:
 ```
 
 The `litellm_params` section accepts all the same parameters as the `LiteLLM_ManagedVectorStore` constructor in the Python SDK.
-
-

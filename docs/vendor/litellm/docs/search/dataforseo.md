@@ -1,4 +1,11 @@
+---
+title: "DataForSEO SERP API with LiteLLM: Setup"
+sidebar_label: "DataForSEO Search"
+description: "Add DataForSEO results to LiteLLM: call search() in the Python SDK or /v1/search on the AI Gateway, with country, language, device and depth options."
+---
 # DataForSEO Search
+
+[DataForSEO](https://dataforseo.com/) provides a SERP API that returns search engine results pages as structured data; LiteLLM exposes it through one `search()` call in the Python SDK and the `/v1/search` endpoint on the AI Gateway.
 
 **Get API Access:** [DataForSEO](https://dataforseo.com/)
 
@@ -35,17 +42,18 @@ response = search(
 
 ```yaml showLineNumbers title="config.yaml"
 model_list:
-  - model_name: gpt-4
+  - model_name: {{openai_large}}
     litellm_params:
-      model: gpt-4
+      model: {{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 search_tools:
   - search_tool_name: dataforseo-search
     litellm_params:
       search_provider: dataforseo
-      api_key: "os.environ/DATAFORSEO_LOGIN:os.environ/DATAFORSEO_PASSWORD"
 ```
+
+The proxy reads `DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD` from its environment, so no `api_key` is needed. To pass credentials explicitly, set `api_key` to a single `login:password` string, either literally or from one env var such as `api_key: os.environ/DATAFORSEO_API_KEY` where `DATAFORSEO_API_KEY=your-login:your-password`. Two `os.environ/` references joined by `:` are not resolved
 
 ### 2. Start the proxy
 
@@ -59,7 +67,7 @@ litellm --config /path/to/config.yaml
 
 ```bash showLineNumbers title="Test Request"
 curl http://0.0.0.0:4000/v1/search/dataforseo-search \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "latest AI developments",

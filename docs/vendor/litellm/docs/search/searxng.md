@@ -1,4 +1,11 @@
+---
+title: "SearXNG Search API with LiteLLM: Self-Hosted"
+sidebar_label: "SearXNG Search"
+description: "Add SearXNG metasearch to LiteLLM: call search() in the Python SDK or /v1/search on the AI Gateway, on a self-hosted or public instance, by category."
+---
 # SearXNG Search
+
+[SearXNG](https://github.com/searxng/searxng) is an open-source metasearch engine that you can self-host or use through public instances; LiteLLM exposes it through one `search()` call in the Python SDK and the `/v1/search` endpoint on the AI Gateway.
 
 **Open Source:** [https://github.com/searxng/searxng](https://github.com/searxng/searxng)
 
@@ -32,9 +39,9 @@ response = search(
 
 ```yaml showLineNumbers title="config.yaml"
 model_list:
-  - model_name: gpt-4
+  - model_name: {{openai_large}}
     litellm_params:
-      model: gpt-4
+      model: {{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 search_tools:
@@ -56,7 +63,7 @@ litellm --config /path/to/config.yaml
 
 ```bash showLineNumbers title="Test Request"
 curl http://0.0.0.0:4000/v1/search/searxng-search \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "latest AI developments",

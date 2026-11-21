@@ -19,24 +19,14 @@ uv add claude-agent-sdk
 
 ```yaml title="config.yaml" showLineNumbers
 model_list:
-  - model_name: bedrock-claude-sonnet-3.5
+  - model_name: bedrock-claude-sonnet-5
     litellm_params:
-      model: "bedrock/us.anthropic.claude-3-5-sonnet-20240620-v1:0"
+      model: "bedrock/us.anthropic.{{anthropic}}"
       aws_region_name: "us-east-1"
 
-  - model_name: bedrock-claude-sonnet-4
+  - model_name: bedrock-claude-opus-5
     litellm_params:
-      model: "bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0"
-      aws_region_name: "us-east-1"
-
-  - model_name: bedrock-claude-sonnet-4.5
-    litellm_params:
-      model: "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      aws_region_name: "us-east-1"
-
-  - model_name: bedrock-claude-opus-4.5
-    litellm_params:
-      model: "bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0"
+      model: "bedrock/us.anthropic.{{anthropic_large}}"
       aws_region_name: "us-east-1"
 
   - model_name: bedrock-nova-premier
@@ -54,7 +44,7 @@ litellm --config config.yaml
 | Environment Variable | Value | Description |
 |---------------------|-------|-------------|
 | `ANTHROPIC_BASE_URL` | `http://localhost:4000` | LiteLLM proxy URL |
-| `ANTHROPIC_API_KEY` | `sk-1234` | Your LiteLLM API key (not Anthropic key) |
+| `ANTHROPIC_API_KEY` | `sk-<your-api-key>` | Your LiteLLM API key (not Anthropic key) |
 
 ```python title="agent.py" showLineNumbers
 import os
@@ -62,12 +52,12 @@ from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
 
 # Point to LiteLLM proxy (not Anthropic)
 os.environ["ANTHROPIC_BASE_URL"] = "http://localhost:4000"
-os.environ["ANTHROPIC_API_KEY"] = "sk-1234"  # Your LiteLLM key
+os.environ["ANTHROPIC_API_KEY"] = "sk-<your-api-key>"  # Your LiteLLM key
 
 # Configure agent with any model from your config
 options = ClaudeAgentOptions(
     system_prompt="You are a helpful AI assistant.",
-    model="bedrock-claude-sonnet-4",  # Use any model from config.yaml
+    model="bedrock-claude-sonnet-5",  # Use any model from config.yaml
     max_turns=20,
 )
 
@@ -95,21 +85,25 @@ async with ClaudeSDKClient(options=options) as client:
 
 ## Complete Example
 
-See our [cookbook example](https://github.com/BerriAI/litellm/tree/main/cookbook/anthropic_agent_sdk) for a complete interactive CLI agent that:
+See our [archived cookbook example](https://github.com/BerriAI/litellm/tree/89a6b5fbb26b632ef0faf633b0d3cf317d73deaa/cookbook/anthropic_agent_sdk) for a complete interactive CLI agent that:
 - Streams responses in real-time
 - Switches between models dynamically
 - Fetches available models from the proxy
 
+The cookbook was removed from `main`. Check out the archived commit before entering the example directory:
+
 ```bash
-# Clone and run the example
 git clone https://github.com/BerriAI/litellm.git
-cd litellm/cookbook/anthropic_agent_sdk
-uv add -r requirements.txt
-python main.py
+cd litellm
+git checkout 89a6b5fbb26b632ef0faf633b0d3cf317d73deaa
+cd cookbook/anthropic_agent_sdk
+uv venv
+uv pip install -r requirements.txt
+uv run --no-project python main.py
 ```
 
 ## Related Resources
 
 - [Claude Agent SDK Documentation](https://github.com/anthropics/anthropic-agent-sdk)
 - [LiteLLM Proxy Quick Start](../proxy/quick_start)
-- [Complete Cookbook Example](https://github.com/BerriAI/litellm/tree/main/cookbook/anthropic_agent_sdk)
+- [Complete Cookbook Example](https://github.com/BerriAI/litellm/tree/89a6b5fbb26b632ef0faf633b0d3cf317d73deaa/cookbook/anthropic_agent_sdk)

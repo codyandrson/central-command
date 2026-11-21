@@ -13,6 +13,8 @@ For example, if you send `temperature=0.2` to a model that doesn't support the `
 
 **When `drop_params=True` is set**, LiteLLM will drop the unsupported parameter instead of raising an exception. This lets your code work across different providers without having to customize parameters for each one.
 
+On the proxy, requests from Claude Code and Codex drop unsupported params by default. See [Claude Code and Codex on the proxy](#claude-code-and-codex-on-the-proxy).
+
 ## Quick Start 
 
 ```python 
@@ -22,7 +24,7 @@ import os
 # set keys 
 os.environ["COHERE_API_KEY"] = "co-.."
 
-litellm.drop_params = True # 👈 KEY CHANGE
+litellm.drop_params = True # KEY CHANGE
 
 response = litellm.completion(
                 model="command-r",
@@ -44,6 +46,17 @@ If a provider/model doesn't support a particular param, you can drop it.
 litellm_settings:
     drop_params: true
 ```
+
+### Claude Code and Codex on the proxy
+
+Requests from Claude Code and Codex, found by their user agent, drop unsupported params by default even when `drop_params` is unset, so their client-specific params do not fail on other providers. Set `drop_params: false` in `litellm_settings` to raise for them too. A `drop_params: false` on a single model in `model_list` does not turn this default off.
+
+```yaml
+litellm_settings:
+    drop_params: false
+```
+
+On v1.103.0 to v1.108.x a bug makes these requests ignore `drop_params: false` in `litellm_settings`, and v1.109.0 fixes it.
 
 ## Pass drop_params in `completion(..)`
 
@@ -73,7 +86,7 @@ response = litellm.completion(
 - litellm_params:
     api_base: my-base
     model: openai/my-model
-    drop_params: true # 👈 KEY CHANGE
+    drop_params: true # KEY CHANGE
   model_name: my-model
 ```
 </TabItem>
@@ -109,7 +122,7 @@ response = litellm.completion(
 - litellm_params:
     api_base: my-base
     model: openai/my-model
-    additional_drop_params: ["response_format"] # 👈 KEY CHANGE
+    additional_drop_params: ["response_format"] # KEY CHANGE
   model_name: my-model
 ```
 </TabItem>
@@ -128,7 +141,7 @@ Drop nested fields within complex objects using JSONPath-like notation:
 import litellm
 
 response = litellm.completion(
-    model="bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    model="bedrock/us.anthropic.{{anthropic}}",
     messages=[{"role": "user", "content": "Hello"}],
     tools=[{
         "name": "search",
@@ -147,7 +160,7 @@ response = litellm.completion(
 model_list:
   - model_name: my-bedrock-model
     litellm_params:
-      model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      model: bedrock/us.anthropic.{{anthropic}}
       additional_drop_params: ["tools[*].input_examples"]  # Remove from all tools
 ```
 
@@ -184,7 +197,7 @@ await litellm.acompletion(
     api_key="xxxxx",
     api_base=api_base,
     messages=[{"role": "user", "content": "Hello! return a json object"}],
-    tools=[{"type": "function", "function": {"name": "get_current_time", "description": "Get the current time in a given location.", "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "The city name, e.g. San Francisco"}}, "required": ["location"]}}}]
+    tools=[{"type": "function", "function": {"name": "get_current_time", "description": "Get the current time in a given location.", "parameters": {"type": "object", "properties": {"location": {"type": "string", "description": "The city name, e.g. San Francisco"}}, "required": ["location"]}}}],
     allowed_openai_params=["tools"],
 )
 ```
@@ -210,7 +223,7 @@ client = openai.OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages = [
         {
             "role": "user",

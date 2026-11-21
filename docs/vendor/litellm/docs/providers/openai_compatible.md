@@ -1,3 +1,9 @@
+---
+title: "OpenAI-Compatible Endpoints with LiteLLM"
+sidebar_label: "OpenAI-Compatible Endpoints"
+description: "Call any OpenAI-compatible endpoint via LiteLLM with the openai/ prefix and your api_base, from the Python SDK or AI Gateway, for completion and embedding."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -32,7 +38,7 @@ import os
 
 response = litellm.completion(
     model="openai/mistral",               # add `openai/` prefix to model so litellm knows to route to OpenAI
-    api_key="sk-1234",                  # api key to your openai compatible endpoint
+    api_key="sk-<your-litellm-api-key>",                  # api key to your openai compatible endpoint
     api_base="http://0.0.0.0:4000",     # set API Base of your Custom OpenAI Endpoint
     messages=[
                 {
@@ -52,7 +58,7 @@ import os
 
 response = litellm.embedding(
     model="openai/GPT-J",               # add `openai/` prefix to model so litellm knows to route to OpenAI
-    api_key="sk-1234",                  # api key to your openai compatible endpoint
+    api_key="sk-<your-litellm-api-key>",                  # api key to your openai compatible endpoint
     api_base="http://0.0.0.0:4000",     # set API Base of your Custom OpenAI Endpoint
     input=["good morning from litellm"]
 )
@@ -99,7 +105,7 @@ Here's how to call an OpenAI-Compatible Endpoint with the LiteLLM Proxy Server
   ```python
   import openai
   client = openai.OpenAI(
-      api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+      api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
       base_url="http://0.0.0.0:4000" # litellm-proxy-base url
   )
 
@@ -121,7 +127,7 @@ Here's how to call an OpenAI-Compatible Endpoint with the LiteLLM Proxy Server
 
   ```shell
   curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
       "model": "my-model",
@@ -138,6 +144,26 @@ Here's how to call an OpenAI-Compatible Endpoint with the LiteLLM Proxy Server
   </Tabs>
 
 
+### Calling `/v1/messages` (Anthropic format)
+
+LiteLLM routes `/v1/messages` requests for `openai/` models through the OpenAI Responses API, so the proxy calls `/responses` on your `api_base`. If your endpoint only serves `/chat/completions`, the request fails with the endpoint's error for that route, usually a 404 or a 400, while `/chat/completions` requests to the same model keep working.
+
+To send `/v1/messages` requests through `/chat/completions` instead, turn on `use_chat_completions_url_for_anthropic_messages`.
+
+```yaml
+model_list:
+  - model_name: my-model
+    litellm_params:
+      model: openai/<your-model-name>
+      api_base: <model-api-base>
+      api_key: api-key
+
+litellm_settings:
+  use_chat_completions_url_for_anthropic_messages: true
+```
+
+You can also set the env var `LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES=true`. The setting applies to the whole proxy, so `/v1/messages` requests for models hosted by OpenAI itself also go through `/chat/completions` once it is on. See the [`/v1/messages` to `/responses` parameter mapping](../anthropic_unified/messages_to_responses_mapping.md) for how the default route translates a request.
+
 ### Advanced - Disable System Messages
 
 Some VLLM models (e.g. gemma) don't support system messages. To map those requests to 'user' messages, use the `supports_system_message` flag. 
@@ -145,9 +171,9 @@ Some VLLM models (e.g. gemma) don't support system messages. To map those reques
 ```yaml
 model_list:
 - model_name: my-custom-model
-   litellm_params:
+  litellm_params:
       model: openai/google/gemma
       api_base: http://my-custom-base
       api_key: "" 
-      supports_system_message: False # 👈 KEY CHANGE
+      supports_system_message: False # KEY CHANGE
 ```

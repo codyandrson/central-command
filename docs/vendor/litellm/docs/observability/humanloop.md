@@ -1,3 +1,8 @@
+---
+title: "Humanloop Prompt Management for LiteLLM"
+sidebar_label: "Humanloop"
+description: "Use Humanloop prompts with LiteLLM: call a managed prompt by prompt_id with variables from the Python SDK or AI Gateway, and pick where the model is set."
+---
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -26,7 +31,7 @@ os.environ["HUMANLOOP_API_KEY"] = "" # [OPTIONAL] set here or in `.completion`
 litellm.set_verbose = True # see raw request to provider
 
 resp = litellm.completion(
-    model="humanloop/gpt-3.5-turbo",
+    model="humanloop/{{openai_small}}",
     prompt_id="test-chat-prompt",
     prompt_variables={"user_message": "this is used"}, # [OPTIONAL]
     messages=[{"role": "user", "content": "<IGNORED>"}],
@@ -43,9 +48,9 @@ resp = litellm.completion(
 
 ```yaml
 model_list:
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
-      model: humanloop/gpt-3.5-turbo
+      model: humanloop/{{openai_small}}
       prompt_id: "<humanloop_prompt_id>"
       api_key: os.environ/OPENAI_API_KEY
 ```
@@ -64,9 +69,9 @@ litellm --config config.yaml --detailed_debug
 ```bash
 curl -L -X POST 'http://0.0.0.0:4000/v1/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -d '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [
         {
             "role": "user",
@@ -90,7 +95,7 @@ client = openai.OpenAI(
 
 # request sent to model set on litellm proxy, `litellm --model`
 response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages = [
         {
             "role": "user",
@@ -120,7 +125,7 @@ print(response)
 POST Request Sent from LiteLLM:
 curl -X POST \
 https://api.openai.com/v1/ \
--d '{'model': 'gpt-3.5-turbo', 'messages': <YOUR HUMANLOOP PROMPT TEMPLATE>}'
+-d '{'model': '{{openai_small}}', 'messages': <YOUR HUMANLOOP PROMPT TEMPLATE>}'
 ```
 
 ## How to set model 
@@ -137,8 +142,8 @@ You can do `humanloop/<litellm_model_name>`
 
 ```python
 litellm.completion(
-    model="humanloop/gpt-3.5-turbo", # or `humanloop/anthropic/claude-3-5-sonnet`
-    ...
+    model="humanloop/{{openai_small}}", # or `humanloop/anthropic/{{anthropic}}`
+    # ...
 )
 ```
 
@@ -147,9 +152,9 @@ litellm.completion(
 
 ```yaml
 model_list:
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
-      model: humanloop/gpt-3.5-turbo # OR humanloop/anthropic/claude-3-5-sonnet
+      model: humanloop/{{openai_small}} # OR humanloop/anthropic/{{anthropic}}
       prompt_id: <humanloop_prompt_id>
       api_key: os.environ/OPENAI_API_KEY
 ```
@@ -170,7 +175,7 @@ This also returns the template model set on Humanloop.
       ... # your prompt template
     }
   ],
-  "model": "gpt-3.5-turbo" # your template model
+  "model": "{{openai_small}}" # your template model
 }
 ```
 

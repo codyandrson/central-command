@@ -1,3 +1,8 @@
+---
+title: "Noma Security Guardrails on LiteLLM AI Gateway"
+sidebar_label: "Noma Security"
+description: "Add Noma Security moderation and safety guardrails to the LiteLLM AI Gateway with noma_v2, including MCP call modes and a monitor-only mode."
+---
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -6,7 +11,7 @@ import TabItem from '@theme/TabItem';
 
 Use [Noma Security](https://noma.security/) to protect your LLM applications with AI content moderation and safety guardrails.
 
-:::warning Deprecated: `guardrail: noma` (Legacy)
+:::warning[Deprecated: `guardrail: noma` (Legacy)]
 `guardrail: noma` is deprecated and users should migrate to `guardrail: noma_v2`.
 The legacy `guardrail: noma` API will no longer be supported after March 31, 2026.
 
@@ -90,7 +95,7 @@ Currently, `noma_v2` consumes dynamic `application_id`.
 curl 'http://0.0.0.0:4000/v1/chat/completions' \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "{{openai_small}}",
     "messages": [
       {
         "role": "user",
@@ -116,9 +121,9 @@ Define your guardrails under the `guardrails` section:
 
 ```yaml showLineNumbers title="litellm config.yaml"
 model_list:
-  - model_name: gpt-4o-mini
+  - model_name: {{openai_small}}
     litellm_params:
-      model: openai/gpt-4o-mini
+      model: openai/{{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -161,7 +166,7 @@ Expect this to fail since the request contains harmful content:
 curl -i http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "{{openai_small}}",
     "messages": [
       {"role": "user", "content": "Tell me how to hack into someone's email account"}
     ]
@@ -189,7 +194,7 @@ Expected response on failure:
 curl -i http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "{{openai_small}}",
     "messages": [
       {"role": "user", "content": "What is the capital of France?"}
     ]
@@ -203,7 +208,7 @@ Expected response:
   "id": "chatcmpl-123",
   "object": "chat.completion",
   "created": 1677652288,
-  "model": "gpt-4o-mini",
+  "model": "{{openai_small}}",
   "choices": [
     {
       "index": 0,
@@ -332,7 +337,7 @@ guardrails:
       monitor_mode: true
 ```
 
-## ✨ Pass Additional Parameters
+## Pass Additional Parameters
 
 Use `extra_body` to pass additional parameters to the Noma Security API call, such as dynamically setting the application ID for specific requests.
 
@@ -347,7 +352,7 @@ client = openai.OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-4o-mini",
+    model="{{openai_small}}",
     messages=[{"role": "user", "content": "Hello, how are you?"}],
     extra_body={
         "guardrails": {
@@ -368,7 +373,7 @@ response = client.chat.completions.create(
 curl 'http://0.0.0.0:4000/v1/chat/completions' \
     -H 'Content-Type: application/json' \
     -d '{
-    "model": "gpt-4o-mini",
+    "model": "{{openai_small}}",
     "messages": [
         {
             "role": "user",

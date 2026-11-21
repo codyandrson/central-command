@@ -1,6 +1,7 @@
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+import NavigationCards from '@site/src/components/NavigationCards';
 
 # CLI - Quick Start
 
@@ -16,8 +17,8 @@ LiteLLM Server (LLM Gateway) manages:
 $ uv tool install 'litellm[proxy]'
 ```
 
-:::warning Requires Python 3.10+
-LiteLLM 1.84.0 and newer require Python 3.10 or higher (`requires-python >=3.10`). `uv tool install` handles this for you by provisioning a compatible Python automatically. A bare `pip install 'litellm[proxy]'` does not; on Python 3.9 pip silently resolves down to the last release that still allowed 3.9, which is 1.83.9, with no error. If you pinned to an old version unexpectedly, check `python --version` and upgrade to 3.10+ (or use uv), then reinstall
+:::warning[Minimum Python version]
+LiteLLM 1.84.0 and newer require Python {{python_min_version}} or higher (`requires-python >={{python_min_version}}`). `uv tool install` handles this for you by provisioning a compatible Python automatically. A bare `pip install 'litellm[proxy]'` does not; on an older interpreter pip silently resolves down to the last release whose `requires-python` still allowed it (1.83.9 for the previous floor), with no error. If you pinned to an old version unexpectedly, check `python --version` and upgrade to {{python_min_version}}+ (or use uv), then reinstall {/* keep-version-note */}
 :::
 
 ## Quick Start - LiteLLM Proxy CLI
@@ -36,6 +37,7 @@ Run with `--detailed_debug` if you need detailed debug logs
 
 ```shell
 $ litellm --model huggingface/bigcode/starcoder --detailed_debug
+```
 :::
 
 ### Test
@@ -58,7 +60,7 @@ $ export AWS_SECRET_ACCESS_KEY=
 ```
 
 ```shell
-$ litellm --model bedrock/anthropic.claude-v2
+$ litellm --model bedrock/us.anthropic.{{anthropic}}
 ```
 </TabItem>
 <TabItem value="azure" label="Azure OpenAI">
@@ -79,7 +81,7 @@ $ export OPENAI_API_KEY=my-api-key
 ```
 
 ```shell
-$ litellm --model gpt-3.5-turbo
+$ litellm --model {{openai_small}}
 ```
 </TabItem>
 <TabItem value="ollama" label="Ollama">
@@ -108,7 +110,7 @@ $ export VERTEX_LOCATION="us-west"
 ```
 
 ```shell
-$ litellm --model vertex_ai/gemini-pro
+$ litellm --model vertex_ai/{{gemini_flash}}
 ```
 </TabItem>
 
@@ -148,7 +150,7 @@ $ litellm --model sagemaker/jumpstart-dft-meta-textgeneration-llama-2-7b
 $ export ANTHROPIC_API_KEY=my-api-key
 ```
 ```shell
-$ litellm --model claude-instant-1
+$ litellm --model {{anthropic}}
 ```
 
 </TabItem>
@@ -190,13 +192,13 @@ $ litellm --model petals/meta-llama/Llama-2-70b-chat-hf
 
 </TabItem>
 
-<TabItem value="palm" label="Palm">
+<TabItem value="gemini" label="Gemini (Google AI Studio)">
 
 ```shell
-$ export PALM_API_KEY=my-palm-key
+$ export GEMINI_API_KEY=my-gemini-key
 ```
 ```shell
-$ litellm --model palm/chat-bison
+$ litellm --model gemini/{{gemini_flash}}
 ```
 
 </TabItem>
@@ -235,12 +237,12 @@ Example config
 
 ```yaml
 model_list: 
-  - model_name: gpt-3.5-turbo # user-facing model alias
+  - model_name: {{openai_small}} # user-facing model alias
     litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
       model: azure/<your-deployment-name>
       api_base: <your-azure-api-endpoint>
       api_key: <your-azure-api-key>
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
       model: azure/gpt-turbo-small-ca
       api_base: https://my-endpoint-canada-berri992.openai.azure.com/
@@ -274,7 +276,7 @@ LiteLLM is compatible with several SDKs - including OpenAI SDK, Anthropic SDK, M
 curl --location 'http://0.0.0.0:4000/chat/completions' \
 --header 'Content-Type: application/json' \
 --data ' {
-      "model": "gpt-3.5-turbo",
+      "model": "{{openai_small}}",
       "messages": [
         {
           "role": "user",
@@ -295,7 +297,7 @@ client = openai.OpenAI(
 )
 
 # request sent to model set on litellm proxy, `litellm --model`
-response = client.chat.completions.create(model="gpt-3.5-turbo", messages = [
+response = client.chat.completions.create(model="{{openai_small}}", messages = [
     {
         "role": "user",
         "content": "this is a test request, write a short poem"
@@ -309,18 +311,12 @@ print(response)
 <TabItem value="langchain" label="Langchain">
 
 ```python
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts.chat import (
-    ChatPromptTemplate,
-    HumanMessagePromptTemplate,
-    SystemMessagePromptTemplate,
-)
-from langchain.schema import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
 chat = ChatOpenAI(
     openai_api_base="http://0.0.0.0:4000", # set openai_api_base to the LiteLLM Proxy
-    model = "gpt-3.5-turbo",
-    temperature=0.1
+    model = "{{openai_small}}"
 )
 
 messages = [
@@ -331,7 +327,7 @@ messages = [
         content="test from litellm. tell me why it's amazing in 1 sentence"
     ),
 ]
-response = chat(messages)
+response = chat.invoke(messages)
 
 print(response)
 ```
@@ -379,7 +375,7 @@ This is **not recommended**. There is duplicate logic as the proxy also uses the
 from litellm import completion 
 
 response = completion(
-    model="openai/gpt-3.5-turbo", 
+    model="openai/{{openai_small}}", 
     messages = [
         {
             "role": "user",
@@ -415,7 +411,7 @@ message = client.messages.create(
             "content": "Hello, Claude",
         }
     ],
-    model="claude-3-opus-20240229",
+    model="{{anthropic}}",
 )
 print(message.content)
 ```
@@ -428,7 +424,7 @@ print(message.content)
 
 
 
-## 📖 Proxy Endpoints - [Swagger Docs](https://litellm-api.up.railway.app/)
+## Proxy Endpoints - [Swagger Docs](https://docs.litellm.ai/api-reference/)
 - POST `/chat/completions` - chat completions endpoint to call 100+ LLMs
 - POST `/completions` - completions endpoint
 - POST `/embeddings` - embedding endpoint for Azure, OpenAI, Huggingface endpoints
@@ -440,12 +436,12 @@ print(message.content)
 
 Events that occur during normal operation
 ```shell
-litellm --model gpt-3.5-turbo --debug
+litellm --model {{openai_small}} --debug
 ```
 
 Detailed information
 ```shell
-litellm --model gpt-3.5-turbo --detailed_debug
+litellm --model {{openai_small}} --detailed_debug
 ```
 
 ### Set Debug Level using env variables
@@ -460,7 +456,53 @@ Detailed information
 export LITELLM_LOG=DEBUG
 ```
 
-No Logs
+Errors only
 ```shell
-export LITELLM_LOG=None
+export LITELLM_LOG=ERROR
 ```
+
+`LITELLM_LOG` must be a valid Python logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`). Setting it to `None` makes `import litellm` fail.
+
+## Add virtual keys and the Admin UI
+
+The commands on this page start the proxy without a database. To create virtual keys, track spend, and use the [Admin UI](/docs/proxy/ui), add `database_url` under `general_settings` in `config.yaml`. Then refer to [Virtual keys](/docs/proxy/virtual_keys) for keys and budgets. For a setup that starts the proxy, a database, and the Admin UI with one command, use the [Quickstart](/docs/proxy/docker_quick_start).
+
+## Next steps
+
+<NavigationCards
+columns={3}
+items={[
+  {
+    title: "Make LLM requests",
+    description: "Point LiteLLM or OpenAI-compatible clients to the gateway.",
+    to: "/docs/proxy/user_keys",
+  },
+  {
+    title: "Model config",
+    description: "Add more models and gateway settings.",
+    to: "/docs/proxy/configs",
+  },
+  {
+    title: "Virtual keys",
+    description: "Create keys, budgets, and access controls.",
+    to: "/docs/proxy/virtual_keys",
+  },
+  {
+    title: "Add logging",
+    description: "Capture logs, spend, and traces.",
+    to: "/docs/proxy/logging",
+  },
+  {
+    title: "Load balance",
+    description: "Route across deployments, regions, or providers.",
+    to: "/docs/proxy/load_balancing",
+  },
+  {
+    title: "Add guardrails",
+    description: "Add safety checks and policy enforcement.",
+    to: "/docs/proxy/guardrails/quick_start",
+  },
+]}
+/>
+
+If you only need to call models from one application and do not need central auth or shared infrastructure, use the [SDK Quickstart](/docs/learn/sdk_quickstart) instead.

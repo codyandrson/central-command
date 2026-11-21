@@ -12,7 +12,7 @@ Anthropic-compatible token counting endpoint. Count tokens for messages before s
 | Cost Tracking | ❌ | Token counting only, no cost incurred |
 | Logging | ✅ | Works across all integrations |
 | End-user Tracking | ✅ | |
-| Supported Providers | Anthropic, Vertex AI (Claude), Bedrock (Claude), Gemini, Vertex AI | Auto-routes to provider-specific token counting APIs |
+| Supported Providers | Anthropic, Vertex AI (Claude), Bedrock (Claude), Gemini, Vertex AI, Mistral | Auto-routes to provider-specific token counting APIs |
 
 ## Quick Start
 
@@ -32,9 +32,9 @@ litellm --config /path/to/config.yaml
 ```bash
 curl -X POST "http://localhost:4000/v1/messages/count_tokens" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "claude-3-5-sonnet-20241022",
+    "model": "{{anthropic}}",
     "messages": [
       {"role": "user", "content": "Hello, how are you?"}
     ]
@@ -51,10 +51,10 @@ response = httpx.post(
     "http://localhost:4000/v1/messages/count_tokens",
     headers={
         "Content-Type": "application/json",
-        "Authorization": "Bearer sk-1234"
+        "Authorization": "Bearer sk-<your-litellm-api-key>"
     },
     json={
-        "model": "claude-3-5-sonnet-20241022",
+        "model": "{{anthropic}}",
         "messages": [
             {"role": "user", "content": "Hello, how are you?"}
         ]
@@ -82,22 +82,27 @@ Add models to your `config.yaml`:
 
 ```yaml
 model_list:
-  - model_name: claude-3-5-sonnet
+  - model_name: {{anthropic}}
     litellm_params:
-      model: anthropic/claude-3-5-sonnet-20241022
+      model: anthropic/{{anthropic}}
       api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: claude-vertex
     litellm_params:
-      model: vertex_ai/claude-3-5-sonnet-v2@20241022
+      model: vertex_ai/{{anthropic}}
       vertex_project: my-project
       vertex_location: us-east5
       vertex_count_tokens_location: us-east5 # Optional: Override location for token counting (count_tokens not available on global location)
 
   - model_name: claude-bedrock
     litellm_params:
-      model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+      model: bedrock/us.anthropic.{{anthropic}}
       aws_region_name: us-west-2
+
+  - model_name: mistral-large-4
+    litellm_params:
+      model: mistral/mistral-large-4
+      api_key: os.environ/MISTRAL_API_KEY
 ```
 
 ## Request Parameters
@@ -123,7 +128,7 @@ model_list:
 
 ```json
 {
-  "input_tokens": <number>
+  "input_tokens": "<number>"
 }
 ```
 
@@ -139,8 +144,9 @@ The `/v1/messages/count_tokens` endpoint automatically routes to the appropriate
 |----------|----------------------|
 | Anthropic | [Anthropic Token Counting API](https://docs.anthropic.com/en/docs/build-with-claude/token-counting) |
 | OpenAI | [OpenAI Responses API `/input_tokens`](https://platform.openai.com/docs/api-reference/responses/input-tokens) — see [Token Counting](./count_tokens.md) |
+| Mistral | [Mistral Responses API `/v1/responses/input_tokens`](https://docs.mistral.ai/api/endpoint/responses#operation-count_input_tokens_v1_responses_input_tokens_post) — see [Token Counting](./count_tokens.md) |
 | Vertex AI (Claude) | Vertex AI Partner Models Token Counter |
-| Bedrock (Claude) | AWS Bedrock CountTokens API |
+| Bedrock (Claude) | AWS Bedrock CountTokens API, then bedrock-mantle for a Claude model it rejects, see [Bedrock Claude models](./count_tokens.md#bedrock-claude-models) |
 | Gemini | Google AI Studio countTokens API |
 | Vertex AI (Gemini) | Vertex AI countTokens API |
 
@@ -151,9 +157,9 @@ The `/v1/messages/count_tokens` endpoint automatically routes to the appropriate
 ```bash
 curl -X POST "http://localhost:4000/v1/messages/count_tokens" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "claude-3-5-sonnet-20241022",
+    "model": "{{anthropic}}",
     "messages": [
       {"role": "user", "content": "You are a helpful assistant. Please help me write a haiku about programming."}
     ]
@@ -165,9 +171,9 @@ curl -X POST "http://localhost:4000/v1/messages/count_tokens" \
 ```bash
 curl -X POST "http://localhost:4000/v1/messages/count_tokens" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "claude-3-5-sonnet-20241022",
+    "model": "{{anthropic}}",
     "messages": [
       {"role": "user", "content": "What is the capital of France?"},
       {"role": "assistant", "content": "The capital of France is Paris."},
@@ -181,7 +187,7 @@ curl -X POST "http://localhost:4000/v1/messages/count_tokens" \
 ```bash
 curl -X POST "http://localhost:4000/v1/messages/count_tokens" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "claude-vertex",
     "messages": [
@@ -195,7 +201,7 @@ curl -X POST "http://localhost:4000/v1/messages/count_tokens" \
 ```bash
 curl -X POST "http://localhost:4000/v1/messages/count_tokens" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
     "model": "claude-bedrock",
     "messages": [
@@ -225,7 +231,7 @@ curl --request POST \
     --header "anthropic-beta: token-counting-2024-11-01" \
     --header "content-type: application/json" \
     --data '{
-        "model": "claude-3-5-sonnet-20241022",
+        "model": "{{anthropic}}",
         "messages": [
             {"role": "user", "content": "Hello, world"}
         ]

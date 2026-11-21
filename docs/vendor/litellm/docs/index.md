@@ -7,16 +7,20 @@ sidebar_label: Quickstart
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import NavigationCards from '@site/src/components/NavigationCards';
-import Image from '@theme/IdealImage';
+import LiteLLMFlow from '@site/src/components/LiteLLMFlow';
+import QuickStartBox from '@site/src/components/QuickStartBox';
+import ThemedVideo from '@site/src/components/ThemedVideo';
 
-<Image style={{padding: '10px', margin: '0 0 2.5rem'}} img={require('../img/hero.png')} />
+<LiteLLMFlow copyCommand={false} agentPrompt={false} />
+
+<QuickStartBox source="docs-index" />
 
 **LiteLLM** is an open-source library that gives you a single, unified interface to call 100+ LLMs (OpenAI, Anthropic, Vertex AI, Bedrock, and more) using the OpenAI format.
 
 - Call any provider using the same `completion()` interface, with no API to re-learn for each one
 - Consistent output format regardless of which provider or model you use
 - Built-in retry / fallback logic across multiple deployments via the [Router](./routing.md)
-- Self-hosted [LLM Gateway (Proxy)](./simple_proxy) with virtual keys, cost tracking, and an admin UI
+- Self-hosted [LLM Gateway (Proxy)](/docs/simple_proxy) with virtual keys, cost tracking, and an admin UI
 
 [![PyPI](https://img.shields.io/pypi/v/litellm.svg)](https://pypi.org/project/litellm/)
 [![GitHub Stars](https://img.shields.io/github/stars/BerriAI/litellm?style=social)](https://github.com/BerriAI/litellm)
@@ -29,7 +33,23 @@ import Image from '@theme/IdealImage';
 uv add litellm
 ```
 
-To deploy the full AI Gateway (Proxy) with the Admin UI, follow the [Quickstart](./proxy/docker_quick_start.md); it runs as a container and needs no Python setup. To run it from the CLI instead, see the [Gateway Quickstart](./learn/gateway_quickstart.md).
+### A leaner SDK installation
+
+For applications that use the Python SDK directly, `litellm-core` provides the shared SDK with fewer mandatory dependencies and without the bundled dashboard or gateway CLI entry points. Python imports remain unchanged: continue using `litellm`
+
+Install `litellm-core` in a fresh environment instead of installing `litellm`. Add AWS and Python Hugging Face tokenizer packages when your application needs them. The two distributions cannot be installed together because they share the same Python files
+
+See [LiteLLM Core](https://docs.litellm.ai/docs/litellm_core) for installation, package selection, and optional dependencies. Existing `litellm` installations retain their current dependency defaults
+
+To deploy the full AI Gateway (Proxy) with the Admin UI, follow the [Quickstart](./proxy/docker_quick_start.md); it runs as a container and needs no Python setup. To run it from the CLI instead, see the [CLI Quickstart](./proxy/quick_start.md).
+
+To have Claude Code set up the Gateway for you, install the LiteLLM setup skill and then type `/litellm-setup` in Claude Code:
+
+```shell
+npx skills add BerriAI/litellm -g
+```
+
+The skill asks which providers and models you want, installs the Gateway with uv or Docker, writes the config and keys, starts it, and finishes with a test chat completion.
 
 ---
 
@@ -47,7 +67,7 @@ import os
 os.environ["OPENAI_API_KEY"] = "your-api-key"
 
 response = completion(
-  model="openai/gpt-4o",
+  model="openai/{{openai_large}}",
   messages=[{"role": "user", "content": "Hello, how are you?"}]
 )
 print(response.choices[0].message.content)
@@ -63,7 +83,7 @@ import os
 os.environ["ANTHROPIC_API_KEY"] = "your-api-key"
 
 response = completion(
-  model="anthropic/claude-3-5-sonnet-20241022",
+  model="anthropic/{{anthropic}}",
   messages=[{"role": "user", "content": "Hello, how are you?"}]
 )
 print(response.choices[0].message.content)
@@ -81,7 +101,7 @@ os.environ["VERTEXAI_PROJECT"] = "your-project-id"
 os.environ["VERTEXAI_LOCATION"] = "us-central1"
 
 response = completion(
-  model="vertex_ai/gemini-1.5-pro",
+  model="vertex_ai/{{gemini_pro}}",
   messages=[{"role": "user", "content": "Hello, how are you?"}]
 )
 print(response.choices[0].message.content)
@@ -99,7 +119,7 @@ os.environ["AWS_SECRET_ACCESS_KEY"] = "your-secret"
 os.environ["AWS_REGION_NAME"] = "us-east-1"
 
 response = completion(
-  model="bedrock/anthropic.claude-haiku-4-5-20251001:0",
+  model="bedrock/us.anthropic.{{anthropic}}",
   messages=[{"role": "user", "content": "Hello, how are you?"}]
 )
 print(response.choices[0].message.content)
@@ -151,7 +171,7 @@ Non-streaming responses return a `ModelResponse` object:
   "id": "chatcmpl-abc123",
   "object": "chat.completion",
   "created": 1677858242,
-  "model": "gpt-4o",
+  "model": "{{openai_large}}",
   "choices": [
     {
       "index": 0,
@@ -177,7 +197,7 @@ Streaming responses (`stream=True`) yield `ModelResponseStream` chunks:
   "id": "chatcmpl-abc123",
   "object": "chat.completion.chunk",
   "created": 1677858242,
-  "model": "gpt-4o",
+  "model": "{{openai_large}}",
   "choices": [
     {
       "index": 0,
@@ -191,10 +211,10 @@ Streaming responses (`stream=True`) yield `ModelResponseStream` chunks:
 }
 ```
 
-📖 [Full output format reference →](./completion/output)
+[Full output format reference →](/docs/completion/output)
 
-:::tip Open in Colab
-<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/main/cookbook/liteLLM_Getting_Started.ipynb">
+:::tip[Open in Colab]
+<a target="_blank" href="https://colab.research.google.com/github/BerriAI/litellm/blob/89a6b5fbb26b632ef0faf633b0d3cf317d73deaa/cookbook/liteLLM_Getting_Started.ipynb">
 <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 :::
@@ -215,7 +235,6 @@ Streaming responses (`stream=True`) yield `ModelResponseStream` chunks:
 columns={2}
 items={[
 {
-icon: "🐍",
 title: "Python SDK",
 description: "Integrate LiteLLM directly into your Python application. Drop-in replacement for the OpenAI client.",
 listDescription: [
@@ -227,7 +246,6 @@ listDescription: [
 to: "#litellm-python-sdk",
 },
 {
-icon: "🖥️",
 title: "Proxy Server (LLM Gateway)",
 description: "Self-hosted gateway for platform teams managing LLM access across an organization.",
 listDescription: [
@@ -256,7 +274,7 @@ import os
 os.environ["OPENAI_API_KEY"] = "your-api-key"
 
 for chunk in completion(
-  model="openai/gpt-4o",
+  model="openai/{{openai_large}}",
   messages=[{"role": "user", "content": "Write a short poem"}],
   stream=True,
 ):
@@ -272,7 +290,7 @@ import litellm
 
 try:
     litellm.completion(
-      model="anthropic/claude-instant-1",
+      model="anthropic/{{anthropic}}",
       messages=[{"role": "user", "content": "Hey!"}]
     )
 except litellm.AuthenticationError as e:
@@ -293,12 +311,12 @@ import litellm
 litellm.success_callback = ["langfuse", "mlflow", "helicone"]
 
 response = litellm.completion(
-  model="gpt-4o",
+  model="{{openai_large}}",
   messages=[{"role": "user", "content": "Hi!"}]
 )
 ```
 
-📖 [See all observability integrations →](/docs/observability/opentelemetry_v2)
+[See all observability integrations →](/docs/observability/opentelemetry_v2)
 
 ### Track Costs & Usage
 
@@ -313,13 +331,13 @@ def track_cost(kwargs, completion_response, start_time, end_time):
 litellm.success_callback = [track_cost]
 
 litellm.completion(
-  model="gpt-4o",
+  model="{{openai_large}}",
   messages=[{"role": "user", "content": "Hello!"}],
   stream=True
 )
 ```
 
-📖 [Custom callback docs →](./observability/custom_callback)
+[Custom callback docs →](/docs/observability/custom_callback)
 
 ---
 
@@ -327,7 +345,13 @@ litellm.completion(
 
 The proxy is a self-hosted OpenAI-compatible gateway. Any client that works with OpenAI works with the proxy, with no code changes.
 
-![LiteLLM Proxy Dashboard](https://github.com/BerriAI/litellm/assets/29436595/47c97d5e-b9be-4839-b28c-43d7f4f10033)
+<ThemedVideo
+  src={require('../img/gateway_dashboard_loop.mp4')}
+  dark={require('../img/gateway_dashboard_loop_dark.mp4')}
+  poster={require('../img/gateway_dashboard_loop_poster.png')}
+  darkPoster={require('../img/gateway_dashboard_loop_poster_dark.png')}
+  title="LiteLLM Admin UI: virtual keys with budgets, daily spend by model, and request logs with cost"
+/>
 
 #### Step 1: Start the proxy
 
@@ -344,7 +368,7 @@ litellm --model huggingface/bigcode/starcoder
 
 ```yaml title="litellm_config.yaml"
 model_list:
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
       model: azure/your-deployment
       api_base: os.environ/AZURE_API_BASE
@@ -373,19 +397,19 @@ import openai
 client = openai.OpenAI(api_key="anything", base_url="http://0.0.0.0:4000")
 
 response = client.chat.completions.create(
-  model="gpt-3.5-turbo",
+  model="{{openai_small}}",
   messages=[{"role": "user", "content": "Write a short poem"}]
 )
 print(response.choices[0].message.content)
 ```
 
-👉 [Full proxy quickstart →](./proxy/docker_quick_start)
+[Full proxy quickstart →](/docs/proxy/docker_quick_start)
 
-:::tip Debugging tool
+:::tip[Debugging tool]
 Use **`/utils/transform_request`** to inspect exactly what LiteLLM sends to any provider. It helps when debugging prompt formatting, header issues, and provider-specific parameters.
 :::
 
-🔗 [Interactive API explorer (Swagger) →](https://litellm-api.up.railway.app/)
+[Interactive API explorer (Swagger) →](https://docs.litellm.ai/api-reference/)
 
 ---
 
@@ -397,20 +421,17 @@ LiteLLM is a unified gateway for **LLMs, agents, and MCP**, so you don't need a 
 columns={3}
 items={[
 {
-icon: "🔗",
 title: "A2A Agents",
 description: "Add and invoke A2A agents via the LiteLLM gateway.",
 to: "/docs/a2a",
 },
 {
-icon: "🛠️",
 title: "MCP Gateway",
 description: "Central MCP endpoint with per-key access control.",
 to: "/docs/mcp",
 },
 {
-icon: "✨",
-title: "✨ Enterprise Quickstart",
+title: "Enterprise Quickstart",
       description: "Quickstart guide for trial customers: LLM, MCP, and Agent gateway.",
 to: "/docs/learn/enterprise_quickstart",
 },
@@ -425,37 +446,31 @@ to: "/docs/learn/enterprise_quickstart",
 columns={3}
 items={[
 {
-icon: "🔀",
 title: "Routing & Load Balancing",
 description: "Load balance across deployments and set automatic fallbacks.",
-to: "/docs/routing-load-balancing",
+to: "/docs/proxy/load_balancing",
 },
 {
-icon: "🔑",
 title: "Virtual Keys",
 description: "Manage access, budgets, and rate limits per team or user.",
 to: "/docs/proxy/virtual_keys",
 },
 {
-icon: "📊",
 title: "Spend Tracking",
 description: "Track costs per key, team, and user across all providers.",
 to: "/docs/proxy/cost_tracking",
 },
 {
-icon: "🛡️",
 title: "Guardrails",
 description: "Add content filtering, PII masking, and safety checks.",
 to: "/docs/proxy/guardrails/quick_start",
 },
 {
-icon: "📡",
 title: "Observability",
 description: "Integrate with Langfuse, MLflow, Helicone, and more.",
 to: "/docs/observability/opentelemetry_v2",
 },
 {
-icon: "🏭",
 title: "Enterprise",
 description: "SSO/SAML, audit logs, and advanced security for production.",
 to: "/docs/enterprise",

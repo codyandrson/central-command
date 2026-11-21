@@ -1,3 +1,8 @@
+---
+title: "Aim Security Guardrails on LiteLLM AI Gateway"
+sidebar_label: "Aim Security"
+description: "Add Aim Security guardrails to the LiteLLM AI Gateway: create an Aim Guard, tune its detections, and set per-key policies by virtual key alias."
+---
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -34,9 +39,9 @@ Only the aliases of your virtual keys (and not the actual key secrets) will be s
 Define your guardrails under the `guardrails` section
 ```yaml
 model_list:
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
-      model: openai/gpt-3.5-turbo
+      model: openai/{{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -47,6 +52,7 @@ guardrails:
       api_key: os.environ/AIM_API_KEY
       api_base: os.environ/AIM_API_BASE # Optional, use only when using a self-hosted Aim Outpost
       ssl_verify: False # Optional, set to False to disable SSL verification or a string path to a custom CA bundle
+      inspect_embeddings: false # Optional, set to true to inspect /embeddings input
 ```
 
 Under the `api_key`, insert the API key you were issued. The key can be found in the guard's page.
@@ -77,7 +83,7 @@ When using LiteLLM with virtual keys, an `Authorization` header with the virtual
 curl -i http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [
       {"role": "user", "content": "hi my email is ishaan@berri.ai"}
     ],
@@ -110,7 +116,7 @@ When using LiteLLM with virtual keys, an `Authorization` header with the virtual
 curl -i http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [
       {"role": "user", "content": "hi what is the weather"}
     ],
@@ -122,7 +128,7 @@ The above request should not be blocked, and you should receive a regular LLM re
 
 ```json
 {
-  "model": "gpt-3.5-turbo-0125",
+  "model": "{{openai_small}}",
   "choices": [
     {
       "finish_reason": "stop",
@@ -151,7 +157,7 @@ curl -i http://localhost:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "x-aim-user-email: ishaan@berri.ai" \
   -d '{
-    "model": "gpt-3.5-turbo",
+    "model": "{{openai_small}}",
     "messages": [
       {"role": "user", "content": "hi what is the weather"}
     ],

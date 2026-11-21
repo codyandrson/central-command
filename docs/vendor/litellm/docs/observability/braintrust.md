@@ -1,3 +1,8 @@
+---
+title: "Braintrust Logging for LiteLLM AI Gateway"
+sidebar_label: "Braintrust"
+description: "Log LiteLLM calls to Braintrust from the Python SDK or AI Gateway, set the project ID or name per request, and add custom span names and attributes."
+---
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -23,9 +28,9 @@ litellm.callbacks = ["braintrust"]
 
 # openai call
 response = litellm.completion(
-  model="gpt-3.5-turbo",
+  model="{{openai_small}}",
   messages=[
-    {"role": "user", "content": "Hi 👋 - i'm openai"}
+    {"role": "user", "content": "Hi - i'm openai"}
   ]
 )
 ```
@@ -43,9 +48,9 @@ BRAINTRUST_API_BASE="https://api.braintrustdata.com/v1"
 
 ```yaml
 model_list:
-  - model_name: gpt-3.5-turbo
+  - model_name: {{openai_small}}
     litellm_params:
-      model: gpt-3.5-turbo
+      model: {{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
 litellm_settings:
@@ -57,7 +62,7 @@ litellm_settings:
 ```bash
 curl -X POST 'http://0.0.0.0:4000/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -D '{
     "model": "groq-llama3",
     "messages": [
@@ -86,9 +91,9 @@ You can customize the span id, root span name and span parents in Braintrust log
 
 ```python
 response = litellm.completion(
-  model="gpt-3.5-turbo",
+  model="{{openai_small}}",
   messages=[
-    {"role": "user", "content": "Hi 👋 - i'm openai"}
+    {"role": "user", "content": "Hi - i'm openai"}
   ],
   metadata={
     "project_id": "1234",
@@ -105,9 +110,9 @@ Note: Other `metadata` can be included here as well when using the SDK.
 
 ```python
 response = litellm.completion(
-  model="gpt-3.5-turbo",
+  model="{{openai_small}}",
   messages=[
-    {"role": "user", "content": "Hi 👋 - i'm openai"}
+    {"role": "user", "content": "Hi - i'm openai"}
   ],
   metadata={
     "project_id": "1234",
@@ -126,7 +131,7 @@ response = litellm.completion(
 ```bash
 curl -X POST 'http://0.0.0.0:4000/chat/completions' \
 -H 'Content-Type: application/json' \
--H 'Authorization: Bearer sk-1234' \
+-H "Authorization: Bearer $LITELLM_API_KEY" \
 -D '{
     "model": "groq-llama3",
     "messages": [
@@ -151,7 +156,7 @@ client = openai.OpenAI(
 
 # request sent to model set on litellm proxy, `litellm --model`
 response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
+    model="{{openai_small}}",
     messages = [
         {
             "role": "user",
@@ -159,7 +164,7 @@ response = client.chat.completions.create(
         }
     ],
     extra_body={ # pass in any provider-specific param, if not supported by openai, https://docs.litellm.ai/docs/completion/input#provider-specific-params
-        "metadata": { # 👈 use for logging additional params (e.g. to braintrust)
+        "metadata": { # use for logging additional params (e.g. to braintrust)
             "project_id": "my-special-project",
             "span_name": "Poetry Generation"
         }

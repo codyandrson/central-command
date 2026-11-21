@@ -1,5 +1,6 @@
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
+import SinceVersion from '@site/src/components/SinceVersion';
 
 # /v1/messages
 
@@ -16,7 +17,7 @@ Use LiteLLM to call all your LLM APIs in the Anthropic `v1/messages` format.
 | Streaming | ✅ | |
 | Fallbacks | ✅ | Works between supported models |
 | Loadbalancing | ✅ | Works between supported models |
-| Guardrails | ✅ | Applies to input and output text (non-streaming only) |
+| Guardrails | ✅ | Applies to input and output text. On streamed output a guardrail can block the response, but text rewrites such as masking only apply to non-streaming responses |
 | Supported Providers | **All LiteLLM supported providers** | `openai`, `anthropic`, `bedrock`, `vertex_ai`, `gemini`, `azure`, `azure_ai`, etc. |
 
 ## Usage 
@@ -33,7 +34,7 @@ import litellm
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
     api_key=api_key,
-    model="anthropic/claude-3-haiku-20240307",
+    model="anthropic/{{anthropic}}",
     max_tokens=100,
 )
 ```
@@ -44,7 +45,7 @@ import litellm
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
     api_key=api_key,
-    model="anthropic/claude-3-haiku-20240307",
+    model="anthropic/{{anthropic}}",
     max_tokens=100,
     stream=True,
 )
@@ -66,7 +67,7 @@ os.environ["OPENAI_API_KEY"] = "your-openai-api-key"
 
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
-    model="openai/gpt-4",
+    model="openai/{{openai_large}}",
     max_tokens=100,
 )
 ```
@@ -81,7 +82,7 @@ os.environ["OPENAI_API_KEY"] = "your-openai-api-key"
 
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
-    model="openai/gpt-4",
+    model="openai/{{openai_large}}",
     max_tokens=100,
     stream=True,
 )
@@ -103,7 +104,7 @@ os.environ["GEMINI_API_KEY"] = "your-gemini-api-key"
 
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
-    model="gemini/gemini-2.0-flash-exp",
+    model="gemini/{{gemini_flash}}",
     max_tokens=100,
 )
 ```
@@ -118,7 +119,7 @@ os.environ["GEMINI_API_KEY"] = "your-gemini-api-key"
 
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
-    model="gemini/gemini-2.0-flash-exp",
+    model="gemini/{{gemini_flash}}",
     max_tokens=100,
     stream=True,
 )
@@ -142,7 +143,7 @@ os.environ["VERTEXAI_LOCATION"] = "us-central1"
 
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
-    model="vertex_ai/gemini-2.0-flash-exp",
+    model="vertex_ai/{{gemini_flash}}",
     max_tokens=100,
 )
 ```
@@ -159,7 +160,7 @@ os.environ["VERTEXAI_LOCATION"] = "us-central1"
 
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
-    model="vertex_ai/gemini-2.0-flash-exp",
+    model="vertex_ai/{{gemini_flash}}",
     max_tokens=100,
     stream=True,
 )
@@ -183,7 +184,7 @@ os.environ["AWS_REGION_NAME"] = "us-west-2"  # or your AWS region
 
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
-    model="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+    model="bedrock/us.anthropic.{{anthropic}}",
     max_tokens=100,
 )
 ```
@@ -200,7 +201,7 @@ os.environ["AWS_REGION_NAME"] = "us-west-2"  # or your AWS region
 
 response = await litellm.anthropic.messages.acreate(
     messages=[{"role": "user", "content": "Hello, can you tell me a short joke?"}],
-    model="bedrock/anthropic.claude-3-sonnet-20240229-v1:0",
+    model="bedrock/us.anthropic.{{anthropic}}",
     max_tokens=100,
     stream=True,
 )
@@ -221,7 +222,7 @@ Example response:
     }
   ],
   "id": "msg_013Zva2CMHLNnXjNJJKqJ2EF",
-  "model": "claude-3-7-sonnet-20250219",
+  "model": "{{anthropic}}",
   "role": "assistant",
   "stop_reason": "end_turn",
   "stop_sequence": null,
@@ -246,7 +247,7 @@ Example response:
 model_list:
     - model_name: anthropic-claude
       litellm_params:
-        model: claude-3-7-sonnet-latest
+        model: {{anthropic}}
         api_key: os.environ/ANTHROPIC_API_KEY
 ```
 
@@ -264,7 +265,7 @@ import anthropic
 # point anthropic sdk to litellm proxy 
 client = anthropic.Anthropic(
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234",
+    api_key="sk-<your-litellm-api-key>",
 )
 
 response = client.messages.create(
@@ -284,7 +285,7 @@ response = client.messages.create(
 model_list:
     - model_name: openai-gpt4
       litellm_params:
-        model: openai/gpt-4
+        model: openai/{{openai_large}}
         api_key: os.environ/OPENAI_API_KEY
 ```
 
@@ -302,7 +303,7 @@ import anthropic
 # point anthropic sdk to litellm proxy 
 client = anthropic.Anthropic(
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234",
+    api_key="sk-<your-litellm-api-key>",
 )
 
 response = client.messages.create(
@@ -322,7 +323,7 @@ response = client.messages.create(
 model_list:
     - model_name: gemini-2-flash
       litellm_params:
-        model: gemini/gemini-2.0-flash-exp
+        model: gemini/{{gemini_flash}}
         api_key: os.environ/GEMINI_API_KEY
 ```
 
@@ -340,7 +341,7 @@ import anthropic
 # point anthropic sdk to litellm proxy 
 client = anthropic.Anthropic(
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234",
+    api_key="sk-<your-litellm-api-key>",
 )
 
 response = client.messages.create(
@@ -360,7 +361,7 @@ response = client.messages.create(
 model_list:
     - model_name: vertex-gemini
       litellm_params:
-        model: vertex_ai/gemini-2.0-flash-exp
+        model: vertex_ai/{{gemini_flash}}
         vertex_project: your-gcp-project-id
         vertex_location: us-central1
 ```
@@ -379,7 +380,7 @@ import anthropic
 # point anthropic sdk to litellm proxy 
 client = anthropic.Anthropic(
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234",
+    api_key="sk-<your-litellm-api-key>",
 )
 
 response = client.messages.create(
@@ -399,7 +400,7 @@ response = client.messages.create(
 model_list:
     - model_name: bedrock-claude
       litellm_params:
-        model: bedrock/anthropic.claude-3-sonnet-20240229-v1:0
+        model: bedrock/us.anthropic.{{anthropic}}
         aws_access_key_id: os.environ/AWS_ACCESS_KEY_ID
         aws_secret_access_key: os.environ/AWS_SECRET_ACCESS_KEY
         aws_region_name: us-west-2
@@ -419,7 +420,7 @@ import anthropic
 # point anthropic sdk to litellm proxy 
 client = anthropic.Anthropic(
     base_url="http://0.0.0.0:4000",
-    api_key="sk-1234",
+    api_key="sk-<your-litellm-api-key>",
 )
 
 response = client.messages.create(
@@ -436,7 +437,7 @@ response = client.messages.create(
 ```bash showLineNumbers title="Example using LiteLLM Proxy Server"
 curl -L -X POST 'http://0.0.0.0:4000/v1/messages' \
 -H 'content-type: application/json' \
--H 'x-api-key: $LITELLM_API_KEY' \
+-H "x-api-key: $LITELLM_API_KEY" \
 -H 'anthropic-version: 2023-06-01' \
 -d '{
   "model": "anthropic-claude",
@@ -453,6 +454,72 @@ curl -L -X POST 'http://0.0.0.0:4000/v1/messages' \
 </TabItem>
 </Tabs>
 
+## Message threads (beta)
+
+Anthropic [message threads](https://platform.claude.com/docs/en/build-with-claude/message-threads) keep the conversation on Anthropic's servers between turns. The first request creates the thread with the full prompt, and each later request sends only the new messages plus the `id` of the previous response, so the model starts answering sooner and you stop paying to resend history. <SinceVersion v="1.111.0" />
+
+LiteLLM forwards the `thread` body field on native Anthropic deployments (`anthropic/`, Microsoft Foundry `azure_ai/` Claude deployments, and Claude Platform on AWS `bedrock/claude_platform/` deployments), adds the `message-threads-2026-08-12` beta header for you, and returns the response `id` unchanged, so the id a client gets from the proxy is the one it continues from. Streaming works the same way.
+
+Create the thread with the full prompt:
+
+```bash
+curl -X POST http://0.0.0.0:4000/v1/messages \
+  -H "x-api-key: $LITELLM_API_KEY" \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "anthropic/claude-sonnet-5-5",
+    "max_tokens": 1024,
+    "system": "You are a terse assistant.",
+    "messages": [{"role": "user", "content": "My name is Ada."}],
+    "thread": {"type": "create"}
+  }'
+```
+
+Continue it with only the new messages and the `id` of the response you just got. A continue request must not carry `system` or `tools`, since the thread already stores them:
+
+```bash
+curl -X POST http://0.0.0.0:4000/v1/messages \
+  -H "x-api-key: $LITELLM_API_KEY" \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "anthropic/claude-sonnet-5-5",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "What is my name?"}],
+    "thread": {"type": "continue", "previous_message_id": "msg_01XFDUDYJgAACzvnptvVoYEL"}
+  }'
+```
+
+The Anthropic SDK thread helpers (`client.beta.messages.threads` in the Python and TypeScript SDKs) work through the proxy as they do against Anthropic directly. When Anthropic cannot continue a thread it answers a 404 with `error.details.error_code` set to `thread_not_found`, and the proxy relays that status and code, so the helper's replay of the full conversation keeps working.
+
+On a deployment without native thread support, which is every translated provider such as `openai/`, Bedrock and Vertex AI, and any deployment whose `model_info.supported_endpoints` forwards `/v1/messages` to an OpenAI-compatible server, a create request gets a 400 with `error.details.error_code` set to `thread_unsupported_request` before any upstream call, the same answer Anthropic gives a request it cannot thread. The SDK thread helpers created with `unsupported_request_behavior="continue_unthreaded"` then send the conversation without a thread. With `drop_params` on, LiteLLM instead serves the create without the thread and logs a warning:
+
+```yaml
+litellm_settings:
+  drop_params: true
+```
+
+A continue request on such a deployment always gets the 404 `thread_not_found` before any upstream call, so the SDK thread helpers replay the full conversation instead of getting an answer that ignores the earlier turns.
+
+Every key on the proxy shares the deployment's Anthropic credential, so LiteLLM binds each thread response `id` to the virtual key that received it, or to the signed-in user, team, end user, org and agent when the request has no key. A continue from another key gets the 404 `thread_not_found` on every route, and the SDK helper starts a new thread with the full conversation. On `/v1/messages`, `/v1/chat/completions` and `/v1/responses`, a continue naming an `id` this proxy never returned in a thread gets the same 404, so a thread started outside the proxy or on a pass-through route cannot be continued there. Only threads started on `/v1/messages` are bound, so pass-through routes such as `/anthropic/v1/messages`, which forward requests with the deployment's credential, forward an `id` the proxy never bound as it is. The first key to receive an `id` keeps it, so a response cache hit that returns the same `id` to another key does not hand the thread over. A binding lasts one hour, longer than Anthropic keeps an idle thread.
+
+With several proxy workers or pods, configure Redis for the proxy so every worker sees the bindings. Without it, a continue that reaches another worker gets the 404 and the SDK helper replays the conversation. Setting the Redis environment variables is enough:
+
+```bash
+export REDIS_HOST=redis.internal
+export REDIS_PORT=6379
+export REDIS_PASSWORD=<your-redis-password>
+litellm --config config.yaml --num_workers 4
+```
+
+A model group with several deployments can send a continue to a deployment whose Anthropic credential cannot see the thread, which answers the 404 `thread_not_found` and makes the SDK helper replay the conversation. Turn on deployment affinity so each key keeps reaching the deployment that created its threads:
+
+```yaml
+router_settings:
+  optional_pre_call_checks: ["deployment_affinity"]
+```
+
+The set of `anthropic-beta` values is one of the fixed fields of a thread, and Anthropic rejects a turn whose set differs from the create request with `thread_fingerprint_mismatch`. A create request still gets the beta headers LiteLLM adds based on its `tools` and `messages`, such as the advisor tool's. The proxy stores the full set the create sent with the thread binding and adds it to every continue on `/v1/messages`, `/v1/chat/completions` and `/v1/responses`, so a continue matches its create without you sending those headers. When you call the LiteLLM Python SDK directly, with no proxy, nothing stores that set, so send the create's beta headers yourself on every continue.
+
 ## Request Format
 ---
 
@@ -462,7 +529,7 @@ Request body will be in the Anthropic messages API format. **litellm follows the
 
 ```json
 {
-  "model": "claude-3-7-sonnet-20250219",
+  "model": "{{anthropic}}",
   "max_tokens": 1024,
   "messages": [
     {
@@ -475,7 +542,7 @@ Request body will be in the Anthropic messages API format. **litellm follows the
 
 #### Required Fields
 - **model** (string):  
-  The model identifier (e.g., `"claude-3-7-sonnet-20250219"`).
+  The model identifier (e.g., `"{{anthropic}}"`).
 - **max_tokens** (integer):  
   The maximum number of tokens to generate before stopping.  
   _Note: The model may stop before reaching this limit; value must be greater than 1._
@@ -514,7 +581,7 @@ Request body will be in the Anthropic messages API format. **litellm follows the
     E.g., `"enabled"`.
   - **summary** (string, optional):
     Enables the summary style for thinking blocks. Possible values: `"auto"`, `"concise"`, `"detailed"`, `"disabled"`.
-    When routing to non-Anthropic providers (e.g., `openai/gpt-5.1`), the `summary` value is preserved and forwarded to the downstream API.
+    When routing to non-Anthropic providers (e.g., `openai/{{openai_large}}`), the `summary` value is preserved and forwarded to the downstream API.
 - **tool_choice** (object):  
   Instructs how the model should use any provided tools.
 - **tools** (array of objects):  
@@ -547,7 +614,7 @@ Responses will be in the Anthropic messages API format.
     }
   ],
   "id": "msg_013Zva2CMHLNnXjNJJKqJ2EF",
-  "model": "claude-3-7-sonnet-20250219",
+  "model": "{{anthropic}}",
   "role": "assistant",
   "stop_reason": "end_turn",
   "stop_sequence": null,

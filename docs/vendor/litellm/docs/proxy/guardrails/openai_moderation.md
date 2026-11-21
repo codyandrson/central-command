@@ -1,3 +1,8 @@
+---
+title: "OpenAI Moderation Guardrails on LiteLLM Gateway"
+sidebar_label: "OpenAI Moderation"
+description: "Block hate speech, harassment, self-harm, sexual content and violence with the OpenAI Moderation API on the LiteLLM AI Gateway, with streaming."
+---
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -26,9 +31,9 @@ Define your guardrails under the `guardrails` section:
 
 ```yaml showLineNumbers title="config.yaml"
 model_list:
-  - model_name: gpt-4
+  - model_name: {{openai_large}}
     litellm_params:
-      model: openai/gpt-4
+      model: openai/{{openai_large}}
       api_key: os.environ/OPENAI_API_KEY
 
 guardrails:
@@ -36,7 +41,7 @@ guardrails:
     litellm_params:
       guardrail: openai_moderation
       mode: "pre_call"
-      api_key: os.environ/OPENAI_API_KEY  # Optional if already set globally
+      api_key: os.environ/OPENAI_API_KEY  # Optional if already set globally, or if OPENAI_IDENTITY_* federation is set (v1.108.0+)
       model: "omni-moderation-latest"     # Optional, defaults to omni-moderation-latest
       api_base: "https://api.openai.com/v1"  # Optional, defaults to OpenAI API
 ```
@@ -81,9 +86,9 @@ Expect this to fail since the request contains harmful content:
 ```shell
 curl -i http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gpt-4",
+    "model": "{{openai_large}}",
     "messages": [
       {"role": "user", "content": "I hate all people and want to hurt them"}
     ],
@@ -123,9 +128,9 @@ Expected response on failure:
 ```shell
 curl -i http://0.0.0.0:4000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -d '{
-    "model": "gpt-4",
+    "model": "{{openai_large}}",
     "messages": [
       {"role": "user", "content": "What is the capital of France?"}
     ],
@@ -139,7 +144,7 @@ Expected response:
 {
   "id": "chatcmpl-4a1c1a4a-3e1d-4fa4-ae25-7ebe84c9a9a2",
   "created": 1741082354,
-  "model": "gpt-4",
+  "model": "{{openai_large}}",
   "object": "chat.completion",
   "choices": [
     {

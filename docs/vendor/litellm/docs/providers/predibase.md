@@ -1,3 +1,9 @@
+---
+title: "Predibase API with LiteLLM: Python SDK and Gateway"
+sidebar_label: "Predibase"
+description: "Call Llama 3 and Mistral models on Predibase, register custom prompt templates, and pass Predibase's adapter_id and adapter_source with each request."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -64,7 +70,7 @@ response = completion(
   ```python
   import openai
   client = openai.OpenAI(
-      api_key="sk-1234",             # pass litellm proxy key, if you're using virtual keys
+      api_key="sk-<your-litellm-api-key>",             # pass litellm proxy key, if you're using virtual keys
       base_url="http://0.0.0.0:4000" # litellm-proxy-base url
   )
 
@@ -91,7 +97,7 @@ response = completion(
 
   ```shell
   curl --location 'http://0.0.0.0:4000/chat/completions' \
-      --header 'Authorization: Bearer sk-1234' \
+      --header "Authorization: Bearer $LITELLM_API_KEY" \
       --header 'Content-Type: application/json' \
       --data '{
       "model": "llama-3",
@@ -134,7 +140,7 @@ os.environ["PREDIBASE_API_KEY"] = ""
 # Create your own custom prompt template 
 litellm.register_prompt_template(
 	    model="togethercomputer/LLaMA-2-7B-32K",
-        initial_prompt_value="You are a good assistant" # [OPTIONAL]
+        initial_prompt_value="You are a good assistant", # [OPTIONAL]
 	    roles={
             "system": {
                 "pre_message": "[INST] <<SYS>>\n", # [OPTIONAL]
@@ -145,10 +151,10 @@ litellm.register_prompt_template(
                 "post_message": " [/INST]" # [OPTIONAL]
             }, 
             "assistant": {
-                "pre_message": "\n" # [OPTIONAL]
+                "pre_message": "\n", # [OPTIONAL]
                 "post_message": "\n" # [OPTIONAL]
             }
-        }
+        },
         final_prompt_value="Now answer as best you can:" # [OPTIONAL]
 )
 

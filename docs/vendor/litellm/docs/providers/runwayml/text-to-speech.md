@@ -1,3 +1,9 @@
+---
+title: "RunwayML Text to Speech with LiteLLM"
+sidebar_label: "RunwayML - Text-to-Speech"
+description: "Convert text to speech with RunwayML eleven_multilingual_v2 using OpenAI voice names or presets like Maya and Bernard, with async calls and cost tracking."
+---
+
 # RunwayML - Text-to-Speech
 
 ## Overview
@@ -150,7 +156,7 @@ Generate speech through the proxy:
 ```bash showLineNumbers title="Proxy Request"
 curl --location 'http://localhost:4000/v1/audio/speech' \
 --header 'Content-Type: application/json' \
---header 'x-litellm-api-key: sk-1234' \
+--header 'x-litellm-api-key: sk-<your-litellm-api-key>' \
 --data '{
     "model": "runwayml/eleven_multilingual_v2",
     "input": "Hello from the LiteLLM proxy!",
@@ -163,7 +169,7 @@ With RunwayML-specific voice:
 ```bash showLineNumbers title="Proxy Request with RunwayML Voice"
 curl --location 'http://localhost:4000/v1/audio/speech' \
 --header 'Content-Type: application/json' \
---header 'x-litellm-api-key: sk-1234' \
+--header 'x-litellm-api-key: sk-<your-litellm-api-key>' \
 --data '{
     "model": "runwayml/eleven_multilingual_v2",
     "input": "Hello with a custom RunwayML voice!",

@@ -1,15 +1,21 @@
+---
+title: "Anthropic Tool Input Examples in LiteLLM"
+sidebar_label: "Anthropic Tool Input Examples"
+description: "Add input_examples to tool definitions so Claude learns valid inputs. LiteLLM adds the beta header for you, with examples for nested and formatted inputs."
+---
+
 # Anthropic Tool Input Examples
 
 Provide concrete examples of valid tool inputs to help Claude understand how to use your tools more effectively. This is particularly useful for complex tools with nested objects, optional parameters, or format-sensitive inputs.
 
 :::info
-Tool input examples is a beta feature. LiteLLM automatically detects tools with the `input_examples` field and adds the appropriate beta header based on your provider:
+Tool input examples is a beta feature. On the Anthropic API and Microsoft Foundry, LiteLLM detects tools with the `input_examples` field and adds the beta header for you:
 
 - **Anthropic API & Microsoft Foundry**: `advanced-tool-use-2025-11-20`
-- **Amazon Bedrock**: `advanced-tool-use-2025-11-20` (Claude Opus 4.5 only)
+- **Amazon Bedrock**: LiteLLM does not add this header, so pass `anthropic-beta: tool-examples-2025-10-29` yourself on `/chat/completions` (Claude Opus 4.5 only)
 - **Google Cloud Vertex AI**: Not supported
 
-You don't need to manually specify beta headers; LiteLLM handles this automatically.
+Outside Bedrock you don't need to specify beta headers, since LiteLLM handles this automatically.
 :::
 
 ## When to Use Input Examples
@@ -34,7 +40,7 @@ Add an `input_examples` field to your tool definition with an array of example i
 import litellm
 
 response = litellm.completion(
-    model="anthropic/claude-sonnet-4-5-20250929",
+    model="anthropic/{{anthropic}}",
     messages=[
         {"role": "user", "content": "What's the weather like in San Francisco?"}
     ],
@@ -248,12 +254,14 @@ Examples add to your prompt tokens:
 
 Input examples work with all Claude models that support the `advanced-tool-use-2025-11-20` beta header:
 
+- Claude Sonnet 5 (`{{anthropic}}`)
+- Claude Opus 5 (`claude-opus-5`)
 - Claude Opus 4.5 (`claude-opus-4-5-20251101`)
 - Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`)
 - Claude Opus 4.1 (`claude-opus-4-1-20250805`)
 
 :::note
-On Google Cloud's Vertex AI and Amazon Bedrock, only Claude Opus 4.5 supports tool input examples.
+On Amazon Bedrock, only Claude Opus 4.5 supports tool input examples.
 :::
 
 ## Best Practices
@@ -262,7 +270,7 @@ On Google Cloud's Vertex AI and Amazon Bedrock, only Claude Opus 4.5 supports to
 
 Include examples that demonstrate different use cases:
 
-```python
+```python nolint
 "input_examples": [
     {"location": "San Francisco, CA", "unit": "fahrenheit"},  # US city
     {"location": "Tokyo, Japan", "unit": "celsius"},          # International
@@ -274,7 +282,7 @@ Include examples that demonstrate different use cases:
 
 Show when optional parameters should and shouldn't be included:
 
-```python
+```python nolint
 "input_examples": [
     {
         "query": "machine learning",
@@ -290,7 +298,7 @@ Show when optional parameters should and shouldn't be included:
 
 Make format expectations clear through examples:
 
-```python
+```python nolint
 "input_examples": [
     {
         "phone": "+1-555-123-4567",  # Shows expected phone format
@@ -304,7 +312,7 @@ Make format expectations clear through examples:
 
 Use realistic, production-like examples rather than placeholder data:
 
-```python
+```python nolint
 # ✅ Good - realistic examples
 "input_examples": [
     {"email": "alice@company.com", "role": "admin"},
@@ -386,12 +394,12 @@ Input examples work together with other Anthropic tool features:
 
 LiteLLM supports input examples across the following Anthropic-compatible providers:
 
-- **Standard Anthropic API** (`anthropic/claude-sonnet-4-5-20250929`) ✅
-- **Azure Anthropic / Microsoft Foundry** (`azure/claude-sonnet-4-5-20250929`) ✅
-- **Amazon Bedrock** (`bedrock/invoke/anthropic.claude-opus-4-5-20251101-v1:0`) ✅ (Opus 4.5 only)
-- **Google Cloud Vertex AI** (`vertex_ai/claude-sonnet-4-5-20250929`) ❌ Not supported
+- **Standard Anthropic API** (`anthropic/{{anthropic}}`) ✅
+- **Azure Anthropic / Microsoft Foundry** (`azure_ai/{{anthropic}}`) ✅
+- **Amazon Bedrock** (`bedrock/invoke/global.anthropic.claude-opus-4-5-20251101-v1:0`) ✅ (Opus 4.5 only, with the beta header below)
+- **Google Cloud Vertex AI** (`vertex_ai/{{anthropic}}`) ❌ Not supported
 
-The beta header (`advanced-tool-use-2025-11-20`) is automatically added when LiteLLM detects tools with the `input_examples` field.
+On the Anthropic API and Microsoft Foundry, the beta header (`advanced-tool-use-2025-11-20`) is added automatically when LiteLLM detects tools with the `input_examples` field. On Bedrock, pass `extra_headers={"anthropic-beta": "tool-examples-2025-10-29"}` to `litellm.completion`, or on the proxy set the same header under the deployment's `litellm_params.extra_headers` and call `/chat/completions`. The proxy's `/v1/messages` route drops this header on Bedrock today, so Anthropic SDK and Claude Code clients get the 400 there. Without the header, Bedrock answers with a 400 (`Extra inputs are not permitted`). Bare Opus 4.5 needs an inference profile such as `global.` for on-demand calls.
 
 ## Troubleshooting
 

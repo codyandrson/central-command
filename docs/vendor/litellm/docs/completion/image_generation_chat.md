@@ -1,3 +1,7 @@
+---
+sidebar_label: "Image Generation in Chat"
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
@@ -5,11 +9,7 @@ import TabItem from '@theme/TabItem';
 
 This guide covers how to generate images when using the `chat/completions`. Note - if you want this on Responses API please file a Feature Request [here](https://github.com/BerriAI/litellm/issues/new).
 
-:::info
-
-Requires LiteLLM v1.76.1+
-
-:::
+<SinceVersion v="1.76.1" />
 
 Supported Providers:
 - Google AI Studio (`gemini`)
@@ -17,7 +17,7 @@ Supported Providers:
 
 LiteLLM will standardize the `images` response in the assistant message for models that support image generation during chat completions.
 
-```python title="Example response from litellm"
+```json title="Example response from litellm"
 "message": {
     ...
     "content": "Here's the image you requested:",
@@ -231,7 +231,7 @@ asyncio.run(generate_image())
 
 The `images` field in the response follows this structure:
 
-```python
+```json
 "images": [
     {
         "image_url": {

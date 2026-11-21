@@ -1,3 +1,8 @@
+---
+title: "Grounding with Bing Search API with LiteLLM"
+sidebar_label: "Grounding with Bing Search (Microsoft Foundry)"
+description: "Use Grounding with Bing Search in LiteLLM: call search() in the Python SDK or /v1/search on the AI Gateway, through a Microsoft Foundry project."
+---
 # Grounding with Bing Search (Microsoft Foundry)
 
 [Grounding with Bing Search](https://learn.microsoft.com/en-us/azure/ai-foundry/agents/how-to/tools/bing-grounding) runs a web search through a model deployment in a [Microsoft Foundry](https://learn.microsoft.com/en-us/azure/ai-foundry/) project, using the project's Responses API. The model performs the search and returns cited results, so search traffic stays inside your Foundry project and is billed by Azure
@@ -28,7 +33,7 @@ import os
 from litellm import search
 
 os.environ["BING_GROUNDING_PROJECT_ENDPOINT"] = "https://<account>.services.ai.azure.com/api/projects/<project>"
-os.environ["BING_GROUNDING_MODEL"] = "gpt-4.1"
+os.environ["BING_GROUNDING_MODEL"] = "{{openai_large}}"
 os.environ["BING_GROUNDING_TOKEN"] = "<entra bearer token>"
 
 response = search(
@@ -98,7 +103,7 @@ litellm --config /path/to/config.yaml
 
 ```bash showLineNumbers title="Test Request"
 curl http://0.0.0.0:4000/v1/search/bing-grounding-search \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "latest AI developments",
@@ -112,9 +117,9 @@ Grounding with Bing Search is a natural backend for [web search interception](..
 
 ```yaml showLineNumbers title="config.yaml"
 model_list:
-  - model_name: gpt-5-mini
+  - model_name: {{openai_small}}
     litellm_params:
-      model: openai/gpt-5-mini
+      model: openai/{{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
 search_tools:

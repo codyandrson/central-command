@@ -1,3 +1,9 @@
+---
+title: "RunwayML Video Generation with LiteLLM"
+sidebar_label: "RunwayML - Video Generation"
+description: "Generate videos from text and images with RunwayML Gen-4 through LiteLLM from the Python SDK or AI Gateway. Check status, download content and track cost."
+---
+
 # RunwayML - Video Generation
 
 LiteLLM supports RunwayML's Gen-4 video generation API, allowing you to generate videos from text prompts and images.
@@ -158,7 +164,7 @@ Generate videos through the proxy:
 ```bash showLineNumbers title="Proxy Request"
 curl --location 'http://localhost:4000/v1/videos' \
 --header 'Content-Type: application/json' \
---header 'x-litellm-api-key: sk-1234' \
+--header 'x-litellm-api-key: sk-<your-litellm-api-key>' \
 --data '{
     "model": "runwayml/gen4_turbo",
     "prompt": "A high quality demo video of litellm ai gateway",
@@ -171,14 +177,14 @@ Check video status:
 
 ```bash showLineNumbers title="Check Status"
 curl --location 'http://localhost:4000/v1/videos/{video_id}' \
---header 'x-litellm-api-key: sk-1234'
+--header 'x-litellm-api-key: sk-<your-litellm-api-key>'
 ```
 
 Download video content:
 
 ```bash showLineNumbers title="Download Video"
 curl --location 'http://localhost:4000/v1/videos/{video_id}/content' \
---header 'x-litellm-api-key: sk-1234' \
+--header 'x-litellm-api-key: sk-<your-litellm-api-key>' \
 --output video.mp4
 ```
 

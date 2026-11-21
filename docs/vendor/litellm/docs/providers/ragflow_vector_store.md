@@ -1,3 +1,9 @@
+---
+title: "RAGFlow Vector Stores with LiteLLM"
+sidebar_label: "RAGFlow Vector Stores"
+description: "Create and manage RAGFlow datasets as LiteLLM vector stores from the Python SDK or AI Gateway, with chunk methods, ingestion pipelines and parser config."
+---
+
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 import Image from '@theme/IdealImage';
@@ -50,9 +56,9 @@ print(f"Dataset name: {response.name}")
 
 ```yaml
 model_list:
-  - model_name: gpt-4o-mini
+  - model_name: {{openai_small}}
     litellm_params:
-      model: gpt-4o-mini
+      model: {{openai_small}}
       api_key: os.environ/OPENAI_API_KEY
 
 vector_store_registry:

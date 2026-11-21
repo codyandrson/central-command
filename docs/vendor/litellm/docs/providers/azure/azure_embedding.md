@@ -1,3 +1,9 @@
+---
+title: "Azure OpenAI Embeddings with LiteLLM"
+sidebar_label: "Azure OpenAI Embeddings"
+description: "Create text-embedding-ada-002 embeddings on your Azure OpenAI deployment with litellm.embedding() or the /embeddings route on the LiteLLM AI Gateway."
+---
+
 import Image from '@theme/IdealImage';
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -8,9 +14,9 @@ import TabItem from '@theme/TabItem';
 This can be set as env variables or passed as **params to litellm.embedding()**
 ```python
 import os
-os.environ['AZURE_API_KEY'] = 
-os.environ['AZURE_API_BASE'] = 
-os.environ['AZURE_API_VERSION'] = 
+os.environ['AZURE_API_KEY'] = ""
+os.environ['AZURE_API_BASE'] = ""
+os.environ['AZURE_API_VERSION'] = ""
 ```
 
 ### Usage

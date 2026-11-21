@@ -1,3 +1,8 @@
+---
+title: "Tag-Based Guardrail Policies in LiteLLM"
+sidebar_label: "Tag-Based Policy Attachments"
+description: "Attach guardrail policies on the LiteLLM AI Gateway to every key or team that carries a tag, with wildcard tag patterns and an impact preview first."
+---
 # Tag-Based Policy Attachments
 
 Apply guardrail policies automatically to any key or team that has a specific tag. Instead of attaching policies one-by-one, tag your keys and let the policy engine handle the rest.
@@ -119,7 +124,7 @@ curl -v http://localhost:4000/chat/completions \
   -H "Authorization: Bearer <your-tagged-key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o",
+    "model": "{{openai_large}}",
     "messages": [{"role": "user", "content": "say hi"}]
   }'
 ```

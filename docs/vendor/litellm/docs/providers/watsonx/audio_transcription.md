@@ -1,3 +1,9 @@
+---
+title: "IBM watsonx.ai Audio Transcription with LiteLLM"
+sidebar_label: "WatsonX Audio Transcription"
+description: "Transcribe audio with Whisper models on IBM watsonx through LiteLLM's /v1/audio/transcriptions, from the Python SDK or the AI Gateway with config.yaml."
+---
+
 # WatsonX Audio Transcription
 
 ## Overview
@@ -40,7 +46,7 @@ model_list:
 
 ```bash title="Request"
 curl http://localhost:4000/v1/audio/transcriptions \
-  -H "Authorization: Bearer sk-1234" \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
   -F file="@audio.mp3" \
   -F model="whisper-large-v3-turbo"
 ```
