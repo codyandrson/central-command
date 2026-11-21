@@ -5,20 +5,26 @@ Neo4j Python Driver |version|
 The Official Neo4j Driver for Python.
 
 
-Neo4j versions supported:
+Bolt protocol versions supported:
 
-* Neo4j 5.0 - |version|
-* Neo4j 4.4
+.. # [bolt-version-bump] search tag when changing bolt version support
+
+* Bolt 6.0 - 6.1
+* Bolt 5.0 - 5.8
+* Bolt 4.4
+
+See https://7687.org/bolt-compatibility/ for what Neo4j DBMS versions support which Bolt versions.
+See https://neo4j.com/developer/kb/neo4j-supported-versions/ for a driver-server compatibility matrix.
+
 
 Python versions supported:
 
-* Python 3.13 (added in driver version 5.26.0)
-* Python 3.12 (added in driver version 5.14.0)
-* Python 3.11 (added in driver version 5.3.0)
+* Python 3.15
+* Python 3.14
+* Python 3.13
+* Python 3.12
+* Python 3.11
 * Python 3.10
-* Python 3.9
-* Python 3.8
-* Python 3.7
 
 
 ******
@@ -33,6 +39,10 @@ Topics
 
 + :ref:`temporal-data-types`
 
++ :ref:`vector-data-types`
+
++ :ref:`other-data-types`
+
 + :ref:`breaking-changes`
 
 
@@ -44,12 +54,26 @@ Topics
    async_api.rst
    types/spatial.rst
    types/temporal.rst
+   types/vector.rst
+   types/other.rst
    breaking_changes.rst
 
 
 ************
 Installation
 ************
+
+.. TODO: 7.0 - remove this note
+
+.. note::
+
+    ``neo4j-driver`` is the old name for this package. It is now deprecated and
+    and will receive no further updates starting with 6.0.0. Make sure to
+    install ``neo4j`` as shown here.
+
+.. note::
+
+   It is always recommended to install python packages for user space in a :ref:`virtual environment <virtual-environment>`.
 
 To install the latest stable release, use:
 
@@ -65,18 +89,17 @@ To install the latest pre-release, use:
     python -m pip install --pre neo4j
 
 
-.. TODO: 7.0 - remove this note
+Alternative Installation for Better Performance
+===============================================
 
-.. note::
+You may want to have a look at the available Rust extensions for this driver
+for better performance. The Rust extensions are not installed by default. For
+more information, see `neo4j-rust-ext`_.
 
-    ``neo4j-driver`` is the old name for this package. It is now deprecated and
-    and will receive no further updates starting with 6.0.0. Make sure to
-    install ``neo4j`` as shown above.
+.. _neo4j-rust-ext: https://github.com/neo4j/neo4j-python-driver-rust-ext
 
-.. note::
 
-   It is always recommended to install python packages for user space in a virtual environment.
-
+.. _virtual-environment:
 
 Virtual Environment
 ===================
@@ -112,8 +135,6 @@ Specifically for this driver, this will:
  * enable :class:`DeprecationWarning`, which the driver emits if deprecated APIs are used.
  * enable the driver's debug mode (this can also be achieved by setting the environment variable ``PYTHONNEO4JDEBUG``):
 
-   * **This is experimental**.
-     It might be changed or removed any time even without prior notice.
    * the driver will raise an exception if non-concurrency-safe methods are used concurrently.
    * the driver will emit warnings if the server sends back notification
      (see also :ref:`driver-warn-notification-severity-ref`).
@@ -122,6 +143,9 @@ Specifically for this driver, this will:
 
      .. versionchanged:: 5.21
          Added functionality to automatically emit warnings on server notifications.
+
+     .. versionchanged:: 6.0
+         Stabilized from preview.
 
 .. _development mode: https://docs.python.org/3/library/devmode.html
 

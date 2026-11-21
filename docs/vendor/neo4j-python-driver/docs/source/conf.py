@@ -17,13 +17,12 @@
 
 import os
 import sys
-import typing
 
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-sys.path.insert(0, os.path.abspath(os.path.join("..", "..")))
+sys.path.insert(0, os.path.abspath(os.path.join("..", "..", "src")))
 
 
 from neo4j import __version__ as project_version
@@ -80,7 +79,7 @@ release = ".".join(project_version.split(".")[0:3])
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = "en"
 
 # There are two options for replacing |today|: either, you set today to some
 # non-false value, then it is used:
@@ -123,17 +122,7 @@ todo_include_todos = True
 # Don't include type hints in function signatures
 autodoc_typehints = "description"
 
-autodoc_type_aliases = {
-    # The code-base uses `import typing_extensions as te`.
-    # Re-write these to use `typing` instead, as Sphinx always resolves against
-    # the latest version of the `typing` module.
-    # This is a work-around to make Sphinx resolve type hints correctly, even
-    # though we're using `from __future__ import annotations`.
-    "te": typing,
-    # Type alias that's only defined and imported if `typing.TYPE_CHECKING`
-    # is `True`.
-    "_TAuth": "typing.Tuple[typing.Any, typing.Any] | Auth | None",
-}
+autodoc_type_aliases = {}
 
 # -- Options for HTML output ----------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
@@ -356,6 +345,9 @@ texinfo_documents = [
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "dateutil": ("https://dateutil.readthedocs.io/en/stable/", None),
+    "numpy": ("https://numpy.org/doc/stable/", None),
+    "pandas": ("https://pandas.pydata.org/docs/", None),
+    "pyarrow": ("https://arrow.apache.org/docs/", None),
 }
 
 autodoc_default_options = {

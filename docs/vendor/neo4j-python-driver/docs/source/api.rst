@@ -68,6 +68,8 @@ Available valid URIs:
 + ``neo4j://host[:port][?routing_context]``
 + ``neo4j+ssc://host[:port][?routing_context]``
 + ``neo4j+s://host[:port][?routing_context]``
++ ``http://host[:port]/db-name``
++ ``https://host[:port]/db-name``
 
 .. code-block:: python
 
@@ -77,27 +79,45 @@ Available valid URIs:
 
     uri = "neo4j://example.com:7687?policy=europe"
 
+.. code-block:: python
+
+    uri = "https://example.com/neo4j"
+
 Each supported scheme maps to a particular :class:`neo4j.Driver` subclass that implements a specific behaviour.
 
 +------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
 | URI Scheme             | Driver Object and Setting                                                                                                             |
 +========================+=======================================================================================================================================+
-| bolt                   | :ref:`bolt-driver-ref` with no encryption.                                                                                            |
+| bolt                   | :ref:`bolt-driver-ref` with no encryption or with custom encryption configuration, see :ref:`driver-configuration-ref`.               |
 +------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
 | bolt+ssc               | :ref:`bolt-driver-ref` with encryption (accepts self signed certificates).                                                            |
 +------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
 | bolt+s                 | :ref:`bolt-driver-ref` with encryption (accepts only certificates signed by a certificate authority), full certificate checks.        |
 +------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
-| neo4j                  | :ref:`neo4j-driver-ref` with no encryption.                                                                                           |
+| neo4j                  | :ref:`neo4j-driver-ref` with no encryption or with custom encryption configuration, see :ref:`driver-configuration-ref`.              |
 +------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
 | neo4j+ssc              | :ref:`neo4j-driver-ref` with encryption (accepts self signed certificates).                                                           |
 +------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
 | neo4j+s                | :ref:`neo4j-driver-ref` with encryption (accepts only certificates signed by a certificate authority), full certificate checks.       |
 +------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
+| http                   | :ref:`http-driver-ref` with no encryption. (**preview**)                                                                              |
++------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
+| https                  | :ref:`http-driver-ref` with encryption. (**preview**)                                                                                 |
++------------------------+---------------------------------------------------------------------------------------------------------------------------------------+
+
+
+.. note::
+
+    See also :ref:`encryption-config-note-ref` to understand how the URI scheme relates to other encryption configuration options.
+
 
 .. note::
 
     See https://neo4j.com/docs/operations-manual/current/configuration/ports/ for Neo4j ports.
+
+
+.. versionchanged:: 6.4
+    Added support for ``http`` and ``https`` schemes.
 
 
 .. _auth-ref:
@@ -260,9 +280,10 @@ Closing a driver will immediately shut down all connections in the pool.
         :param database\_:
             Database to execute the query against.
 
-            None (default) uses the database configured on the server side.
+            :data:`None` (default) uses the database configured on the server
+            side.
 
-            .. Note::
+            .. note::
                 It is recommended to always specify the database explicitly
                 when possible. This allows the driver to work more efficiently,
                 as it will not have to resolve the default database first.
@@ -369,6 +390,8 @@ Closing a driver will immediately shut down all connections in the pool.
         :returns: the result of the ``result_transformer_``
         :rtype: T
 
+        :raises DriverError: if the driver has been closed.
+
         .. versionadded:: 5.5
 
         .. versionchanged:: 5.8
@@ -383,6 +406,9 @@ Closing a driver will immediately shut down all connections in the pool.
             The ``query_`` parameter now also accepts a :class:`.Query` object
             instead of only :class:`str`.
 
+        .. versionchanged:: 6.0
+            Raise :exc:`DriverError` if the driver has been closed.
+
 
 .. _driver-configuration-ref:
 
@@ -393,6 +419,7 @@ Additional configuration can be provided via the :class:`neo4j.Driver` construct
 
 + :ref:`connection-acquisition-timeout-ref`
 + :ref:`connection-timeout-ref`
++ :ref:`connection-write-timeout-ref`
 + :ref:`encrypted-ref`
 + :ref:`keep-alive-ref`
 + :ref:`max-connection-lifetime-ref`
@@ -400,15 +427,18 @@ Additional configuration can be provided via the :class:`neo4j.Driver` construct
 + :ref:`max-connection-pool-size-ref`
 + :ref:`max-transaction-retry-time-ref`
 + :ref:`resolver-ref`
-+ :ref:`trust-ref`
 + :ref:`ssl-context-ref`
 + :ref:`trusted-certificates-ref`
 + :ref:`client-certificate-ref`
 + :ref:`user-agent-ref`
 + :ref:`driver-notifications-min-severity-ref`
 + :ref:`driver-notifications-disabled-categories-ref`
++ :ref:`driver-notifications-disabled-classifications-ref`
 + :ref:`driver-warn-notification-severity-ref`
 + :ref:`telemetry-disabled-ref`
++ :ref:`disable-auto-commit-retries-ref`
+
+:ref:`encryption-config-note-ref`
 
 
 .. _connection-acquisition-timeout-ref:
@@ -425,6 +455,11 @@ it should be chosen larger than :ref:`connection-timeout-ref`.
 :Type: ``float``
 :Default: ``60.0``
 
+.. versionchanged:: 6.0
+    The setting now entails *anything* required to acquire a connection.
+    This includes potential fetching of routing tables which in itself requires acquiring a connection.
+    Previously, the timeout would be restarted for such auxiliary connection acquisitions.
+
 
 .. _connection-timeout-ref:
 
@@ -440,15 +475,27 @@ connection can be used to perform database related work.
 :Default: ``30.0``
 
 
+.. _connection-write-timeout-ref:
+
+``connection_write_timeout``
+----------------------------
+The maximum amount of time in seconds to wait for TCP write operations to complete.
+
+:Type: ``float``
+:Default: ``30.0``
+
+
 .. _encrypted-ref:
 
 ``encrypted``
 -------------
 Specify whether to use an encrypted connection between the driver and server.
 
-This setting is only available for URI schemes ``bolt://`` and ``neo4j://`` (:ref:`uri-ref`).
+.. note::
+    This setting is only available for URI schemes ``bolt://``, ``neo4j://``, ``http://`` (:ref:`uri-ref`).
 
-This setting does not have any effect if a custom ``ssl_context`` is configured.
+.. note::
+    This setting does not have any effect if a custom ``ssl_context`` is configured.
 
 :Type: ``bool``
 :Default: ``False``
@@ -469,6 +516,10 @@ Specify whether TCP keep-alive should be enabled.
 ``max_connection_lifetime``
 ---------------------------
 The maximum duration in seconds that the driver will keep a connection for before being removed from the pool.
+
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme and using the synchronous API.
 
 :Type: ``float``
 :Default: ``3600``
@@ -494,6 +545,10 @@ You normally should not need to tune this parameter.
 No connection liveliness check is done by default (:data:`None`).
 A value of ``0`` means connections will always be tested for validity.
 Negative values are not allowed.
+
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
 
 :Type: :class:`float` or :data:`None`
 :Default: :data:`None`
@@ -563,41 +618,13 @@ For example:
                                        resolver=custom_resolver)
 
 
-:Type: ``Callable`` or  :data:`None`
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
+
+
+:Type: ``Callable`` or :data:`None`
 :Default: :data:`None`
-
-
-.. _trust-ref:
-
-``trust``
----------
-Specify how to determine the authenticity of encryption certificates provided by the Neo4j instance on connection.
-
-This setting is only available for URI schemes ``bolt://`` and ``neo4j://`` (:ref:`uri-ref`).
-
-This setting does not have any effect if ``encrypted`` is set to ``False`` or a
-custom ``ssl_context`` is configured.
-
-:Type: ``neo4j.TRUST_SYSTEM_CA_SIGNED_CERTIFICATES``, ``neo4j.TRUST_ALL_CERTIFICATES``
-
-.. py:attribute:: neo4j.TRUST_ALL_CERTIFICATES
-
-   Trust any server certificate (default). This ensures that communication
-   is encrypted but does not verify the server certificate against a
-   certificate authority. This option is primarily intended for use with
-   the default auto-generated server certificate.
-
-.. py:attribute:: neo4j.TRUST_SYSTEM_CA_SIGNED_CERTIFICATES
-
-   Trust server certificates that can be verified against the system
-   certificate authority. This option is primarily intended for use with
-   full certificates.
-
-:Default: ``neo4j.TRUST_SYSTEM_CA_SIGNED_CERTIFICATES``.
-
-.. deprecated:: 5.0
-    This configuration option is deprecated and will be removed in a future
-    release. Please use :ref:`trusted-certificates-ref` instead.
 
 
 .. _ssl-context-ref:
@@ -606,7 +633,10 @@ custom ``ssl_context`` is configured.
 ---------------
 Specify a custom SSL context to use for wrapping connections.
 
-This setting is only available for URI schemes ``bolt://`` and ``neo4j://`` (:ref:`uri-ref`).
+The driver offers other, easier APIs for common encryption configurations (see :ref:`encryption-config-note-ref`).
+It's likely that your use-case doesn't actually require this options.
+
+This setting is only available for URI schemes ``bolt://``, ``neo4j://``, and ``http://`` (:ref:`uri-ref`).
 
 If given, ``encrypted``, ``trusted_certificates``, and ``client_certificate`` have no effect.
 
@@ -627,7 +657,7 @@ If given, ``encrypted``, ``trusted_certificates``, and ``client_certificate`` ha
 ------------------------
 Specify how to determine the authenticity of encryption certificates provided by the Neo4j instance on connection.
 
-This setting is only available for URI schemes ``bolt://`` and ``neo4j://`` (:ref:`uri-ref`).
+This setting is only available for URI schemes ``bolt://``, ``neo4j://``, and ``http://`` (:ref:`uri-ref`).
 
 This setting does not have any effect if ``encrypted`` is set to ``False`` or a
 custom ``ssl_context`` is configured.
@@ -651,17 +681,14 @@ custom ``ssl_context`` is configured.
 Specify a client certificate or certificate provider for mutual TLS (mTLS) authentication.
 
 This setting does not have any effect if ``encrypted`` is set to ``False``
-(and the URI scheme is ``bolt://`` or ``neo4j://``) or a custom ``ssl_context`` is configured.
-
-**This is a preview** (see :ref:`filter-warnings-ref`).
-It might be changed without following the deprecation policy.
-See also
-https://github.com/neo4j/neo4j-python-driver/wiki/preview-features
+(and the URI scheme is ``bolt://``, ``neo4j://``, or ``http://``) or a custom ``ssl_context`` is configured.
 
 :Type: :class:`.ClientCertificate`, :class:`.ClientCertificateProvider` or :data:`None`.
 :Default: :data:`None`
 
 .. versionadded:: 5.19
+
+.. versionchanged:: 5.27 Stabilized from preview.
 
 .. autoclass:: neo4j.auth_management.ClientCertificate
     :members:
@@ -701,10 +728,14 @@ See also :attr:`.GqlStatusObject.is_notification`.
 
 :data:`None` will apply the server's default setting.
 
-.. Note::
+.. note::
     If configured, the server or all servers of the cluster need to support notifications filtering
     (server version 5.7 and newer).
     Otherwise, the driver will raise a :exc:`.ConfigurationError` as soon as it encounters a server that does not.
+
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
 
 :Type: :data:`None`, :class:`.NotificationMinimumSeverity`, or :class:`str`
 :Default: :data:`None`
@@ -718,8 +749,32 @@ See also :attr:`.GqlStatusObject.is_notification`.
 
 ``notifications_disabled_categories``
 -------------------------------------
-Set categories/classifications of notifications the server should not send to the client.
-Disabling categories allows the server to skip analysis for those, which can speed up query execution.
+Identical to :ref:`driver-notifications-disabled-classifications-ref`.
+
+This alias is provided for a consistent naming with :attr:`.SummaryNotification.category`.
+
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
+
+:Type: :data:`None`, :term:`iterable` of :class:`.NotificationDisabledCategory` and/or :class:`str`
+:Default: :data:`None`
+
+.. versionadded:: 5.7
+
+.. deprecated:: 6.0
+    This setting is deprecated in favor of :ref:`driver-notifications-disabled-classifications-ref`.
+    It will be removed in a future release.
+
+.. seealso:: :class:`.NotificationDisabledCategory`, session config :ref:`session-notifications-disabled-categories-ref`, :attr:`.SummaryNotification.category`
+
+
+.. _driver-notifications-disabled-classifications-ref:
+
+``notifications_disabled_classifications``
+------------------------------------------
+Set classifications/categories of notifications the server should not send to the client.
+Disabling classifications allows the server to skip analysis for those, which can speed up query execution.
 
 Notifications are available via :attr:`.ResultSummary.notifications` and :attr:`.ResultSummary.summary_notifications`.
 Further, they are surfaced (alongside other status objects) through :attr:`.ResultSummary.gql_status_objects`:
@@ -727,40 +782,25 @@ See also :attr:`.GqlStatusObject.is_notification`.
 
 :data:`None` will apply the server's default setting.
 
-If specified together with :ref:`driver-notifications-disabled-classifications-ref`, the settings will be merged.
+If specified together with :ref:`driver-notifications-disabled-categories-ref`, the settings will be merged.
 
-.. Note::
+.. note::
     If configured, the server or all servers of the cluster need to support notifications filtering
     (server version 5.7 and newer).
     Otherwise, the driver will raise a :exc:`.ConfigurationError` as soon as it encounters a server that does not.
 
-:Type: :data:`None`, :term:`iterable` of :class:`.NotificationDisabledCategory` and/or :class:`str`
-:Default: :data:`None`
-
-.. versionadded:: 5.7
-
-.. seealso:: :class:`.NotificationDisabledCategory`, session config :ref:`session-notifications-disabled-categories-ref`
-
-
-.. _driver-notifications-disabled-classifications-ref:
-
-``notifications_disabled_classifications``
-------------------------------------------
-Identical to :ref:`driver-notifications-disabled-categories-ref`.
-
-This alias is provided for a consistent naming with :attr:`.GqlStatusObject.classification`.
-
-**This is a preview** (see :ref:`filter-warnings-ref`).
-It might be changed without following the deprecation policy.
-See also
-https://github.com/neo4j/neo4j-python-driver/wiki/preview-features
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
 
 :Type: :data:`None`, :term:`iterable` of :class:`.NotificationDisabledClassification` and/or :class:`str`
 :Default: :data:`None`
 
 .. versionadded:: 5.22
 
-.. seealso:: :class:`.NotificationDisabledClassification`, session config :ref:`session-notifications-disabled-classifications-ref`
+.. versionchanged:: 6.0 Stabilized from preview.
+
+.. seealso:: :class:`.NotificationDisabledClassification`, session config :ref:`session-notifications-disabled-classifications-ref`, :attr:`.GqlStatusObject.classification`
 
 
 .. _driver-warn-notification-severity-ref:
@@ -774,13 +814,12 @@ Setting it to :data:`None` will be equivalent to ``OFF``, unless Python runs in 
 (e.g., with ``python -X dev ...``) or the environment variable ``PYTHONNEO4JDEBUG`` is set, in which case the driver
 defaults to emitting warnings on all notification (currently equivalent to :attr:`.NotificationMinimumSeverity.INFORMATION`).
 
-**This is experimental** (see :ref:`filter-warnings-ref`).
-It might be changed or removed any time even without prior notice.
-
 :Type: :data:`None`, :class:`.NotificationMinimumSeverity`, or :class:`str`
 :Default: :data:`None`
 
 .. versionadded:: 5.21
+
+.. versionchanged:: 6.0 Stabilized from preview.
 
 .. seealso:: :ref:`development-environment-ref`
 
@@ -803,10 +842,58 @@ The driver transmits the following information:
   * :meth:`.Session.run`
   * the async counterparts of the above methods
 
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
+
 :Type: :class:`bool`
 :Default: :data:`False`
 
 .. versionadded:: 5.13
+
+
+.. _disable-auto-commit-retries-ref:
+
+``disable_auto_commit_retries``
+-------------------------------
+Disables retries using :meth:`neo4j.Session.run`.
+
+Retries on :meth:`neo4j.Session.run` are limited to a specific set of errors.
+Namely those errors marked as *idempotent* by the DBMS, i.e.,
+errors that are guaranteed to not have altered the state of any database.
+At the time of writing, this set encompasses only admission control errors.
+
+When set to :data:`True`, calls to :meth:`neo4j.Session.run` will fail
+without retrying when receiving an error from the server,
+even when only idempotent work has occurred.
+By default, these calls will be rerun with a one-shot retry to avoid friction
+when encountering rate limiting and other errors that can be safely retried.
+
+:Type: :class:`bool`
+:Default: :data:`False`
+
+.. versionadded:: 6.2
+
+
+.. _encryption-config-note-ref:
+
+Note on Encryption Configuration
+--------------------------------
+There are different *mutually exclusive* ways of configuring TLS/SSL encryption behavior of the driver:
+
+* Use a URI scheme ending in ``+s`` or ``https://``. This auto-configures the driver to use TLS and only trust system CAs.
+* Use a URI scheme ending in ``+ssc``. This auto-configures the driver to use TLS and trust any certificate.
+* Use a URI scheme without suffix (i.e. ``neo4j://``, ``bolt://``, or ``http://``) and one of the following mutually exclusive options:
+
+  * set :ref:`encrypted-ref` to ``True`` and optionally configure :ref:`trusted-certificates-ref` and/or
+    :ref:`client-certificate-ref` to enable TLS with custom security settings.
+  * or set :ref:`ssl-context-ref` to gain full control (and responsibility) over the TLS configuration.
+  * or set ``encrypted=False`` (default) to disable TLS.
+
+All options except for configuring a custom :ref:`ssl-context-ref` will check the
+environment variable ``SSLKEYLOGFILE``.
+If the variable is set, its value will be assinged to
+:attr:`ssl.SSLContext.keylog_filename` to enable key logging.
 
 
 Driver Object Lifetime
@@ -830,9 +917,8 @@ For example:
             self.driver.close()
 
 Connection details held by the :class:`neo4j.Driver` are immutable.
-Therefore if, for example, a password is changed, a replacement :class:`neo4j.Driver` object must be created.
-More than one :class:`.Driver` may be required if connections to multiple remotes, or connections as multiple users, are required,
-unless when using impersonation (:ref:`impersonated-user-ref`).
+Therefore if, for example, the server URI is changed, a replacement :class:`neo4j.Driver` object must be created.
+More than one :class:`.Driver` may be required if connections to multiple remotes.
 
 :class:`neo4j.Driver` objects are thread-safe but cannot be shared across processes.
 Therefore, ``multithreading`` should generally be preferred over ``multiprocessing`` for parallel database access.
@@ -865,6 +951,19 @@ Will result in:
 .. autoclass:: neo4j.Neo4jDriver
 
 
+.. _http-driver-ref:
+
+HttpDriver
+==========
+
+URI schemes:
+    ``http``, ``https``
+
+Will result in:
+
+.. autoclass:: neo4j.HttpDriver
+
+
 ***********************
 Sessions & Transactions
 ***********************
@@ -875,7 +974,7 @@ All database activity is co-ordinated through two mechanisms:
 A **session** is a logical container for any number of causally-related transactional units of work.
 Sessions automatically provide guarantees of causal consistency within a clustered environment but multiple sessions can also be causally chained if required.
 Sessions provide the top level of containment for database activity.
-Session creation is a lightweight operation and *sessions are not thread safe*.
+Session creation is a lightweight operation and *sessions are not thread-safe*.
 
 Connections are drawn from the :class:`neo4j.Driver` connection pool as required.
 
@@ -938,15 +1037,9 @@ Session
 
     .. automethod:: last_bookmarks
 
-    .. automethod:: last_bookmark
-
     .. automethod:: begin_transaction
 
-    .. automethod:: read_transaction
-
     .. automethod:: execute_read
-
-    .. automethod:: write_transaction
 
     .. automethod:: execute_write
 
@@ -969,12 +1062,15 @@ To construct a :class:`neo4j.Session` use the :meth:`neo4j.Driver.session` metho
 
 + :ref:`bookmarks-ref`
 + :ref:`database-ref`
++ :ref:`impersonated-user-ref`
 + :ref:`default-access-mode-ref`
 + :ref:`fetch-size-ref`
 + :ref:`bookmark-manager-ref`
 + :ref:`session-auth-ref`
 + :ref:`session-notifications-min-severity-ref`
 + :ref:`session-notifications-disabled-categories-ref`
++ :ref:`session-notifications-disabled-classifications-ref`
++ :ref:`session-disable-auto-commit-retries-ref`
 
 
 .. _bookmarks-ref:
@@ -985,12 +1081,18 @@ Optional :class:`neo4j.Bookmarks`. Use this to causally chain sessions.
 See :meth:`.Session.last_bookmarks` or :meth:`.AsyncSession.last_bookmarks` for
 more information.
 
+:Type: ``None``, ``neo4j.Bookmarks``
+
 :Default: :data:`None`
 
 .. deprecated:: 5.0
     Alternatively, an iterable of strings can be passed. This usage is
     deprecated and will be removed in a future release. Please use a
     :class:`neo4j.Bookmarks` object instead.
+
+.. versionchanged:: 6.0
+    No longer accepts an iterable of strings.
+    Pass a :class:`neo4j.Bookmarks` objects or :data:`None` instead.
 
 
 .. _database-ref:
@@ -999,11 +1101,11 @@ more information.
 ------------
 Name of the database to query.
 
-.. Note::
+.. note::
 
     The default database can be set on the Neo4j instance settings.
 
-.. Note::
+.. note::
 
     This option has no explicit value by default, but it is recommended to set
     one if the target database is known in advance. This has the benefit of
@@ -1011,7 +1113,7 @@ Name of the database to query.
     straightforward way and potentially simplifies driver logic as well as
     reduces network communication resulting in better performance.
 
-    Usage of Cypher clauses like `USE` is not a replacement for this option.
+    Usage of Cypher clauses like ``USE`` is not a replacement for this option.
     The driver does not parse any Cypher.
 
 When no explicit name is set, the driver behavior depends on the connection
@@ -1037,7 +1139,7 @@ Specifically, the following applies:
   all queries within that session are executed with the explicit database
   name 'movies' supplied. Any change to the user’s home database is
   reflected only in sessions created after such change takes effect. This
-  behavior requires additional network communication. In clustered
+  behavior may require additional network communication. In clustered
   environments, it is strongly recommended to avoid a single point of
   failure. For instance, by ensuring that the connection URI resolves to
   multiple endpoints. For older Bolt protocol versions the behavior is the
@@ -1058,8 +1160,11 @@ Specifically, the following applies:
 
     This will use the default database on the Neo4j instance.
 
-:Type: ``str``, ``neo4j.DEFAULT_DATABASE``
+.. note::
+    A string value must be provided when connected via
+    ``http://`` or ``https://`` scheme.
 
+:Type: ``str``, ``neo4j.DEFAULT_DATABASE``
 :Default: ``neo4j.DEFAULT_DATABASE``
 
 
@@ -1072,7 +1177,7 @@ This means that all actions in the session will be executed in the security
 context of the impersonated user. For this, the user for which the
 :class:`.Driver` has been created needs to have the appropriate permissions.
 
-.. Note::
+.. note::
 
     If configured, the server or all servers of the cluster need to support impersonation.
     Otherwise, the driver will raise :exc:`.ConfigurationError`
@@ -1093,7 +1198,6 @@ context of the impersonated user. For this, the user for which the
    Will not perform impersonation.
 
 :Type: ``str``, None
-
 :Default: :data:`None`
 
 
@@ -1127,7 +1231,6 @@ access mode passed to that session on construction.
     :noindex:
 
 :Type: ``neo4j.WRITE_ACCESS``, ``neo4j.READ_ACCESS``
-
 :Default: ``neo4j.WRITE_ACCESS``
 
 
@@ -1136,6 +1239,10 @@ access mode passed to that session on construction.
 ``fetch_size``
 --------------
 The fetch size used for requesting records from Neo4j.
+
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
 
 :Type: ``int``
 :Default: ``1000``
@@ -1201,10 +1308,14 @@ See also :attr:`.GqlStatusObject.is_notification`.
 
 :data:`None` will apply the driver's configuration setting (:ref:`driver-notifications-min-severity-ref`).
 
-.. Note::
+.. note::
     If configured, the server or all servers of the cluster need to support notifications filtering
     (server version 5.7 and newer).
     Otherwise, the driver will raise a :exc:`.ConfigurationError` as soon as it encounters a server that does not.
+
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
 
 :Type: :data:`None`, :class:`.NotificationMinimumSeverity`, or :class:`str`
 :Default: :data:`None`
@@ -1218,49 +1329,82 @@ See also :attr:`.GqlStatusObject.is_notification`.
 
 ``notifications_disabled_categories``
 -------------------------------------
-Set categories of notifications the server should not send to the client.
-Disabling categories allows the server to skip analysis for those, which can speed up query execution.
+Identical to :ref:`session-notifications-disabled-classifications-ref`.
 
-Notifications are available via :attr:`.ResultSummary.notifications` and :attr:`.ResultSummary.summary_notifications`.
-Further, they are surfaced (alongside other status objects) through :attr:`.ResultSummary.gql_status_objects`:
-See also :attr:`.GqlStatusObject.is_notification`.
+This alias is provided for a consistent naming with :attr:`.SummaryNotification.category`.
 
-:data:`None` will apply the driver's configuration setting (:ref:`driver-notifications-disabled-categories-ref`).
-
-If specified together with :ref:`session-notifications-disabled-classifications-ref`, the settings will be merged.
-
-.. Note::
-    If configured, the server or all servers of the cluster need to support notifications filtering
-    (server version 5.7 and newer).
-    Otherwise, the driver will raise a :exc:`.ConfigurationError` as soon as it encounters a server that does not.
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
 
 :Type: :data:`None`, :term:`iterable` of :class:`.NotificationDisabledCategory` and/or :class:`str`
 :Default: :data:`None`
 
 .. versionadded:: 5.7
 
-.. seealso:: :class:`.NotificationDisabledCategory`
+.. deprecated:: 6.0
+    This setting is deprecated in favor of :ref:`session-notifications-disabled-classifications-ref`.
+    It will be removed in a future release.
+
+.. seealso:: :class:`.NotificationDisabledCategory`, :attr:`.SummaryNotification.category`
 
 
 .. _session-notifications-disabled-classifications-ref:
 
 ``notifications_disabled_classifications``
 ------------------------------------------
-Identical to :ref:`session-notifications-disabled-categories-ref`.
+Set classifications/categories of notifications the server should not send to the client.
+Disabling classifications allows the server to skip analysis for those, which can speed up query execution.
 
-This alias is provided for a consistent naming with :attr:`.GqlStatusObject.classification`.
+Notifications are available via :attr:`.ResultSummary.notifications` and :attr:`.ResultSummary.summary_notifications`.
+Further, they are surfaced (alongside other status objects) through :attr:`.ResultSummary.gql_status_objects`:
+See also :attr:`.GqlStatusObject.is_notification`.
 
-**This is a preview** (see :ref:`filter-warnings-ref`).
-It might be changed without following the deprecation policy.
-See also
-https://github.com/neo4j/neo4j-python-driver/wiki/preview-features
+:data:`None` will apply the driver's configuration setting (:ref:`driver-notifications-disabled-classifications-ref`).
+
+If specified together with :ref:`session-notifications-disabled-categories-ref`, the settings will be merged.
+
+.. note::
+    If configured, the server or all servers of the cluster need to support notifications filtering
+    (server version 5.7 and newer).
+    Otherwise, the driver will raise a :exc:`.ConfigurationError` as soon as it encounters a server that does not.
+
+.. note::
+    This setting does not have any effect when connected
+    via ``http://`` or ``https://`` scheme.
 
 :Type: :data:`None`, :term:`iterable` of :class:`.NotificationDisabledClassification` and/or :class:`str`
 :Default: :data:`None`
 
 .. versionadded:: 5.22
 
-.. seealso:: :class:`.NotificationDisabledClassification`
+.. versionchanged:: 6.0 Stabilized from preview.
+
+.. seealso:: :class:`.NotificationDisabledClassification`, :attr:`.GqlStatusObject.classification`
+
+.. _session-disable-auto-commit-retries-ref:
+
+``disable_auto_commit_retries``
+-------------------------------
+Allows session level override of the driver config :ref:`disable-auto-commit-retries-ref`.
+
+Retries on :meth:`neo4j.Session.run` are limited to a specific set of errors.
+Namely those errors marked as *idempotent* by the DBMS, i.e.,
+errors that are guaranteed to not have altered the state of any database.
+At the time of writing, this set encompasses only admission control errors.
+
+When set to :data:`True`, calls to :meth:`neo4j.Session.run` will fail
+without retrying when receiving an error from the server,
+even when only idempotent work has occurred.
+By default, these calls will be rerun with a one-shot retry to avoid friction
+when encountering rate limiting and other errors that can be safely retried.
+
+:data:`None` will apply the driver's configuration setting (:ref:`disable-auto-commit-retries-ref`).
+
+:Type: :class:`bool`, :data:`None`
+:Default: :data:`None`
+
+.. versionadded:: 6.2
 
 
 
@@ -1321,6 +1465,33 @@ Read example:
             for record in result:
                 numbers.append(record["x"])
         return numbers
+
+
+.. _auto-commit-caveats-ref:
+
+Auto-commit Usage Caveats
+-------------------------
+
+.. Note::
+
+    A common pitfall with auto-commit transactions is misunderstanding its
+    transactional guarantees.
+
+    The transaction is guaranteed to be committed anywhere between the start of
+    it (i.e., calling :meth:`neo4j.Session.run`) and fully consuming the
+    returned :class:`neo4j.Result`. Consuming means either fully iterating
+    over all records of the result or calling a consuming method, e.g.
+    :meth:`neo4j.Result.consume`. Anywhere in between these two events, the
+    transaction might or might not be committed yet.
+
+    If the Result isn't fully consumed by the time the client code moves on
+    (e.g. by closing the containing session or starting another auto-commit
+    transaction within the same session), the driver will automatically consume
+    the outstanding Result. **However**, any exception during this will be
+    silenced, so a failure to commit the transaction might go unnoticed.
+
+    It is therefore strongly recommended to always explicitly consume the Result
+    fully.
 
 
 .. _explicit-transactions-ref:
@@ -1409,7 +1580,7 @@ Example:
 
 .. _managed-transactions-ref:
 
-Managed Transactions (`transaction functions`)
+Managed Transactions (*transaction functions*)
 ==============================================
 Transaction functions are the most powerful form of transaction, providing access mode override and retry capabilities.
 
@@ -1679,7 +1850,7 @@ The core types with their general mappings are listed below:
 | Map                    | :class:`dict`                                                                                                             |
 +------------------------+---------------------------------------------------------------------------------------------------------------------------+
 
-.. Note::
+.. note::
 
    1. ``Bytes`` is not an actual Cypher type but is transparently passed through when used in parameters or query results.
 
@@ -1733,7 +1904,7 @@ Which in this case would yield::
 | pandas ``Array``                  | List                            | :class:`list`                         |
 +-----------------------------------+---------------------------------+---------------------------------------+
 
-.. Note::
+.. note::
 
    2. ``void`` and ``complexfloating`` typed numpy ``ndarray``\s are not supported.
    3. ``Period``, ``Interval``, and ``pyarrow`` pandas types are not supported.
@@ -1929,6 +2100,14 @@ Temporal Data Types
 See topic :ref:`temporal-data-types` for more details.
 
 
+Vector Data Types
+=================
+
+.. include:: types/_vector_overview.rst
+
+See topic :ref:`vector-data-types` for more details.
+
+
 *********
 Bookmarks
 *********
@@ -1940,9 +2119,6 @@ Bookmarks
 .. autoclass:: neo4j.Bookmarks
     :members:
     :special-members: __bool__, __add__, __iter__
-
-.. autoclass:: neo4j.Bookmark
-    :members:
 
 
 BookmarkManager
@@ -1993,7 +2169,9 @@ GQL Errors
 ==========
 .. autoexception:: neo4j.exceptions.GqlError()
     :show-inheritance:
-    :members: gql_status, message, gql_status_description, gql_raw_classification, gql_classification, diagnostic_record, __cause__
+    :members:
+        gql_status, message, gql_status_description, gql_raw_classification, gql_classification, diagnostic_record,
+        find_by_gql_status, __cause__
 
 .. autoclass:: neo4j.exceptions.GqlErrorClassification()
     :show-inheritance:
@@ -2035,7 +2213,7 @@ Server-side errors
 
 .. autoexception:: neo4j.exceptions.Neo4jError()
     :show-inheritance:
-    :members: message, code, is_retriable, is_retryable
+    :members: message, code, is_retryable
 
 .. autoexception:: neo4j.exceptions.ClientError()
     :show-inheritance:
@@ -2118,6 +2296,12 @@ Client-side errors
 
     * :class:`neo4j.exceptions.CertificateConfigurationError`
 
+    * :class:`neo4j.exceptions.UnsupportedServerProduct`
+
+  * :class:`neo4j.exceptions.ConnectionPoolError`
+
+    * :class:`neo4j.exceptions.ConnectionAcquisitionTimeoutError`
+
 
 .. autoexception:: neo4j.exceptions.DriverError()
     :show-inheritance:
@@ -2177,6 +2361,9 @@ Client-side errors
 .. autoexception:: neo4j.exceptions.CertificateConfigurationError()
     :show-inheritance:
 
+.. autoexception:: neo4j.exceptions.UnsupportedServerProduct()
+    :show-inheritance:
+
 
 
 Internal Driver Errors
@@ -2213,9 +2400,9 @@ The Python Driver uses the built-in :class:`python:ResourceWarning` class to war
 .. _development mode: https://docs.python.org/3/library/devmode.html#devmode
 
 
-.. autoclass:: neo4j.PreviewWarning
-
-.. autoclass:: neo4j.ExperimentalWarning
+.. autoclass:: neo4j.warnings.PreviewWarning
+    :show-inheritance:
+    :members:
 
 .. autoclass:: neo4j.warnings.Neo4jWarning
     :show-inheritance:
@@ -2231,12 +2418,12 @@ The Python Driver uses the built-in :class:`python:ResourceWarning` class to war
 Filtering Warnings
 ==================
 
-This example shows how to suppress the :class:`neo4j.PreviewWarning` using the :func:`python:warnings.filterwarnings` function.
+This example shows how to suppress the :class:`neo4j.warnings.PreviewWarning` using the :func:`python:warnings.filterwarnings` function.
 
 .. code-block:: python
 
     import warnings
-    from neo4j import PreviewWarning
+    from neo4j.warnings import PreviewWarning
 
     ...
 
@@ -2246,7 +2433,7 @@ This example shows how to suppress the :class:`neo4j.PreviewWarning` using the :
 
     ...
 
-This will only mute the :class:`neo4j.PreviewWarning` for everything inside
+This will only mute the :class:`neo4j.warnings.PreviewWarning` for everything inside
 the ``with``-block. This is the preferred way to mute warnings, as warnings
 triggerd by new code will still be visible.
 
@@ -2259,7 +2446,7 @@ following code:
 .. code-block:: python
 
     import warnings
-    from neo4j import PreviewWarning
+    from neo4j.warnings import PreviewWarning
 
     warnings.filterwarnings("ignore", category=PreviewWarning)
 

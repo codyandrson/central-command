@@ -1,6 +1,8 @@
 name: neo4j-python-driver
 source_repo: https://github.com/neo4j/neo4j-python-driver
-source_ref: 5.26.0
-fetched_url: https://codeload.github.com/neo4j/neo4j-python-driver/tar.gz/5.26.0
-fetched_date: 2026-08-25
+source_ref: 6.4.1
+fetched_url: https://codeload.github.com/neo4j/neo4j-python-driver/tar.gz/6.4.1
+fetched_date: 2026-11-21
 subpaths: [docs README.md LICENSE*]
+note: >
+  Project pins the neo4j Python driver 6.4.1; vendored at the matching release tag 6.4.1 (the previous set was the 5.26.0 tag).
