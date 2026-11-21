@@ -541,12 +541,13 @@ def _carried_state(region):
 def render_for_summary(messages, part_cap: int = 4000) -> str:
     from pydantic_ai.messages import (
         ModelResponse,
-        RetryPromptPart,
         TextPart,
         ToolCallPart,
         ToolReturnPart,
         UserPromptPart,
     )
+
+    from central_command.runtime.durable import retry_text
 
     lines = []
     for m in messages:
@@ -558,10 +559,11 @@ def render_for_summary(messages, part_cap: int = 4000) -> str:
                 body = p.content
             elif isinstance(p, ToolCallPart):
                 body = f"called {p.tool_name}({p.args_as_json_str()})"
+            elif (retried := retry_text(p)) is not None:
+                # Before ToolReturnPart: a retry answering a call is one (2.60+).
+                body = f"retry: {retried}"
             elif isinstance(p, ToolReturnPart):
                 body = f"{p.tool_name} returned: {p.model_response_str()}"
-            elif isinstance(p, RetryPromptPart):
-                body = f"retry: {p.model_response()}"
             else:
                 continue  # thinking and system prompt do not belong in a summary
             lines.append(f"{who}: {body[:part_cap]}")

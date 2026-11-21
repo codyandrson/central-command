@@ -17,7 +17,6 @@ from pydantic_ai.messages import (
     ModelMessagesTypeAdapter,
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     ToolCallPart,
     ToolReturnPart,
 )
@@ -204,6 +203,33 @@ def full_messages(run_state: dict) -> list[dict]:
     return list(run_state.get("archived") or []) + list(run_state.get("messages") or [])
 
 
+RETRY_KINDS = ("retry-prompt", "retry-feedback")
+
+
+def retry_text(part) -> str | None:
+    """The text a RETRY part carries, or None when `part` is not a retry.
+
+    The one reader of "is this a retry" for both tiers, for a part given as a
+    pydantic-ai object or as its persisted dict. Three shapes are retries:
+    `retry-prompt` (pydantic-ai before 2.60, still in stored histories as
+    dicts), and since 2.60 a `tool-return` with `outcome='retried'` (a retry
+    answering a tool call — what a `ModelRetry` raised in a tool becomes) or a
+    `retry-feedback` part (a retry answering no call, e.g. an output
+    validator's). A reader that looked for `retry-prompt` alone found nothing
+    after 2.60, silently. Loading an old history at 2.60+ turns its
+    `retry-prompt` parts into the two new shapes, so objects never carry it."""
+    if isinstance(part, dict):
+        kind, outcome, content = part.get("part_kind"), part.get("outcome"), part.get("content")
+    else:
+        kind = getattr(part, "part_kind", None)
+        outcome, content = getattr(part, "outcome", None), getattr(part, "content", None)
+    if kind not in RETRY_KINDS and not (kind == "tool-return" and outcome == "retried"):
+        return None
+    if content is None:
+        return ""
+    return content if isinstance(content, str) else json.dumps(content, default=str)
+
+
 def load_messages(run_state: dict):
     """Rebuild the message history from persisted state."""
     return ModelMessagesTypeAdapter.validate_python(repair_messages(run_state["messages"]))
@@ -245,8 +271,9 @@ def unanswered_calls(messages) -> list[ToolCallPart]:
     call in the parking response ("Tool call results need to be provided for
     all deferred tool calls"), and refuses one that covers a call the request
     after it already returned ("already executed"). So: the last response's
-    calls, minus the ids that have a `ToolReturnPart`/`RetryPromptPart` in the
-    messages after it.
+    calls, minus the ids that have a `ToolReturnPart` (since pydantic-ai 2.60 a
+    retry answering a call is one too, `outcome='retried'`) in the messages
+    after it.
     """
     last = None
     for i in range(len(messages) - 1, -1, -1):
@@ -258,7 +285,9 @@ def unanswered_calls(messages) -> list[ToolCallPart]:
     answered = {
         part.tool_call_id
         for m in messages[last + 1:] if isinstance(m, ModelRequest)
-        for part in m.parts if isinstance(part, ToolReturnPart | RetryPromptPart)
+        for part in m.parts
+        if isinstance(part, ToolReturnPart) or (retry_text(part) is not None
+                                                and getattr(part, "tool_call_id", None))
     }
     return [
         part for part in messages[last].parts
@@ -433,7 +462,13 @@ def simplify_messages(run_state: dict, max_chars: int = 6000) -> list[dict]:
                 content = str(part.get("content", ""))
             elif kind == "tool-call":
                 content = str(part.get("args", ""))
-            elif kind in ("tool-return", "retry-prompt"):
+            elif (retried := retry_text(part)) is not None:
+                # One label for every retry shape, the one stored before
+                # pydantic-ai 2.60: readers of these turns (the reflection's
+                # quote corpus, the Workspace) tell a retry — our own words
+                # back to the model — from a tool's result by it.
+                kind, content = "retry-prompt", retried
+            elif kind == "tool-return":
                 content = str(part.get("content", ""))
             else:
                 content = str({k: v for k, v in part.items() if k != "part_kind"})

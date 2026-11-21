@@ -227,11 +227,11 @@ async def test_a_coach_run_drafting_without_rationale_is_handed_back_and_redraft
     """The coach's first draft drops `rationale`: the run gets a ModelRetry
     naming it (recorded as `proposal.rejected_in_run`), redrafts in the same
     run, and only the redraft reaches the Inbox."""
-    from pydantic_ai.messages import RetryPromptPart, ToolCallPart
+    from pydantic_ai.messages import ToolCallPart
     from pydantic_ai.models.function import FunctionModel
 
     from central_command.config import settings
-    from central_command.runtime import spike_model
+    from central_command.runtime import durable, spike_model
     from central_command.runtime.run import run_coach
     from tests.test_coach_loop import _seeded_agent
 
@@ -240,7 +240,7 @@ async def test_a_coach_run_drafting_without_rationale_is_handed_back_and_redraft
 
     def respond(messages, info):
         sent_back = [p for m in messages for p in getattr(m, "parts", [])
-                     if isinstance(p, RetryPromptPart)]
+                     if durable.retry_text(p) is not None]
         retries[:] = [str(p.content) for p in sent_back]
         response = spike_model._respond_coach(messages, info)
         if not sent_back:

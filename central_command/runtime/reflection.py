@@ -68,6 +68,7 @@ from central_command.runtime.durable import (
     extract_deferred,
     deferred_proposal,
     full_messages,
+    retry_text,
     simplify_messages,
 )
 from central_command.runtime.proposals import park_proposal
@@ -168,7 +169,8 @@ def loaded_skills(run_state: dict | None) -> list[str]:
                 cap = _call_args(part).get("id")
                 if isinstance(cap, str) and cap:
                     calls[part.get("tool_call_id") or ""] = cap
-            elif kind == "tool-return":
+            elif kind == "tool-return" and retry_text(part) is None:
+                # A refused load (2.60+: a retried tool-return) loaded nothing.
                 cap = calls.get(part.get("tool_call_id") or "")
                 if cap and cap not in loaded:
                     loaded.append(cap)

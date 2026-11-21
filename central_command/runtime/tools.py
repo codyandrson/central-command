@@ -1822,10 +1822,11 @@ def _iso_day(value) -> date | None:
 
 
 def _route_check(ctx: RunContext, proposal: Proposal) -> str | None:
+    from central_command.runtime.durable import retry_text
+
     for message in getattr(ctx, "messages", None) or []:
         for part in getattr(message, "parts", ()):
-            if (getattr(part, "part_kind", "") == "retry-prompt"
-                    and _ROUTE_CHECK_MARK in str(getattr(part, "content", ""))):
+            if _ROUTE_CHECK_MARK in (retry_text(part) or ""):
                 return None
     found: list[str] = []
     for a in proposal.actions:

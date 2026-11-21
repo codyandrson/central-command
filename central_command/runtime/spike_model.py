@@ -16,6 +16,14 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
+
+def _returned(part) -> bool:
+    """A tool's RESULT. Since pydantic-ai 2.60 a retry answering a call (a
+    `ModelRetry`, an argument validation error) is a `ToolReturnPart` too, with
+    `outcome='retried'`; the scripts below read a result as "the call went
+    through", which a retry is not."""
+    return isinstance(part, ToolReturnPart) and getattr(part, "outcome", None) != "retried"
+
 _PROPOSAL = {
     "intent": "Set the due date on DEMO-1 to Aug 3 — the email says the deadline slipped.",
     "actions": [
@@ -49,7 +57,7 @@ def _respond(messages, info: AgentInfo) -> ModelResponse:
     # If the deferred tool has a return (post-approval), we're resuming → finish.
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart) and part.tool_name == "propose_action":
+            if _returned(part) and part.tool_name == "propose_action":
                 return ModelResponse(parts=[TextPart(content=f"Done — {part.content}")])
     # Otherwise this is the initial prompt → emit the proposal tool call.
     return ModelResponse(
@@ -72,11 +80,11 @@ _SIBLING_RE = re.compile(r"sibling message_id: (\S+)")
 def _respond_folding(messages, info: AgentInfo) -> ModelResponse:
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart) and part.tool_name == "propose_action":
+            if _returned(part) and part.tool_name == "propose_action":
                 return ModelResponse(parts=[TextPart(content=f"Done — {part.content}")])
 
     decided = any(
-        isinstance(part, ToolReturnPart) and part.tool_name == "record_thread_decision"
+        _returned(part) and part.tool_name == "record_thread_decision"
         for message in messages
         for part in getattr(message, "parts", [])
     )
@@ -144,7 +152,7 @@ _SC1_PROPOSAL = {
 def _respond_sc1(messages, info: AgentInfo) -> ModelResponse:
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart) and part.tool_name == "propose_action":
+            if _returned(part) and part.tool_name == "propose_action":
                 return ModelResponse(parts=[TextPart(content=f"Done — {part.content}")])
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_action", args={"proposal": _SC1_PROPOSAL})]
@@ -321,7 +329,7 @@ def _respond_task(messages, info: AgentInfo) -> ModelResponse:
     )
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart) and part.tool_name == "propose_action":
+            if _returned(part) and part.tool_name == "propose_action":
                 return ModelResponse(parts=[TextPart(content=f"Task done — {part.content}")])
     if "no change" in text.lower():
         return ModelResponse(parts=[TextPart(content="No Jira change needed: advice only.")])
@@ -362,7 +370,7 @@ def make_jira_task_model() -> FunctionModel:
 def _respond_litellm(messages, info: AgentInfo) -> ModelResponse:
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart) and part.tool_name == "propose_litellm_change":
+            if _returned(part) and part.tool_name == "propose_litellm_change":
                 return ModelResponse(parts=[TextPart(content=f"Task done — {part.content}")])
     proposal = {
         "intent": "Register alias cc-triage → anthropic/claude-haiku-4-5 per the operator's task.",
@@ -396,7 +404,7 @@ def make_litellm_model() -> FunctionModel:
 def _respond_litellm_update(messages, info: AgentInfo) -> ModelResponse:
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart) and part.tool_name == "propose_litellm_change":
+            if _returned(part) and part.tool_name == "propose_litellm_change":
                 return ModelResponse(parts=[TextPart(content=f"Task done — {part.content}")])
     proposal = {
         "intent": "Set native created_at/created_by on claude-sonnet-5 in place, key preserved.",
@@ -434,7 +442,7 @@ def make_litellm_update_model() -> FunctionModel:
 def _respond_litellm_create_key(messages, info: AgentInfo) -> ModelResponse:
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart) and part.tool_name == "propose_litellm_change":
+            if _returned(part) and part.tool_name == "propose_litellm_change":
                 return ModelResponse(parts=[TextPart(content=f"Task done — {part.content}")])
     proposal = {
         "intent": "Issue a virtual key cc-triage-key scoped to claude-haiku-4-5 for attribution.",
@@ -468,7 +476,7 @@ def make_litellm_create_key() -> FunctionModel:
 def _respond_litellm_fallbacks(messages, info: AgentInfo) -> ModelResponse:
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart) and part.tool_name == "propose_litellm_change":
+            if _returned(part) and part.tool_name == "propose_litellm_change":
                 return ModelResponse(parts=[TextPart(content=f"Task done — {part.content}")])
     proposal = {
         "intent": "Set claude-sonnet-5 to fall back to claude-opus-4-8 on failure.",
@@ -598,7 +606,7 @@ def _respond_coach(
     )
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart) and part.tool_name == "propose_action":
+            if _returned(part) and part.tool_name == "propose_action":
                 return ModelResponse(parts=[TextPart(content=f"Coached — {part.content}")])
     m = re.search(r"'agent_id': '([a-z0-9-]+)'", text)
     agent_id = m.group(1) if m else "inbox-triage"
@@ -701,7 +709,7 @@ def make_steward_model(
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         for message in messages:
             for part in getattr(message, "parts", []):
-                if isinstance(part, ToolReturnPart) and part.tool_name == "propose_action":
+                if _returned(part) and part.tool_name == "propose_action":
                     return ModelResponse(
                         parts=[TextPart(content=f"Recorded — {part.content}")]
                     )
@@ -752,7 +760,7 @@ def make_steward_multifact_model(facts: list[str]) -> FunctionModel:
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         done = sum(
             1 for m in messages for p in getattr(m, "parts", [])
-            if isinstance(p, ToolReturnPart) and p.tool_name == "propose_action"
+            if _returned(p) and p.tool_name == "propose_action"
         )
         if done >= len(facts):
             return ModelResponse(parts=[TextPart(content=(
@@ -890,7 +898,7 @@ def _latest_returns(messages) -> dict[str, str]:
     returns: dict[str, str] = {}
     for message in messages:
         for part in getattr(message, "parts", []):
-            if isinstance(part, ToolReturnPart):
+            if _returned(part):
                 returns[part.tool_name] = str(part.content)
     return returns
 
@@ -1083,7 +1091,7 @@ def make_ea_conclude_model() -> FunctionModel:
 def _respond_ea_episode(messages, info: AgentInfo) -> ModelResponse:
     for m in messages:
         for p in getattr(m, "parts", []):
-            if isinstance(p, ToolReturnPart) and p.tool_name == "propose_action":
+            if _returned(p) and p.tool_name == "propose_action":
                 return ModelResponse(parts=[TextPart(content="Work log recorded.")])
     return ModelResponse(parts=[
         ToolCallPart(tool_name="propose_action",

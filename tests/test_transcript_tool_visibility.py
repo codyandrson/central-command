@@ -61,6 +61,21 @@ def test_a_tool_return_carries_its_call_id_and_name():
     assert tool_result_msg["content"] == "3 issues found"
 
 
+def test_a_retried_tool_return_carries_call_id_name_and_the_retry_text():
+    """pydantic-ai 2.60+ stores a ModelRetry answering a call as a tool-return
+    with `outcome: retried` (the test below is the shape stored before it)."""
+    run_state = {"messages": [{"kind": "request", "parts": [{
+        "part_kind": "tool-return", "outcome": "retried",
+        "retry": {"cause": "validation_error", "attempt": 1, "max_retries": 10},
+        "tool_call_id": "call_789", "tool_name": "propose_dismiss",
+        "content": [{"type": "missing", "loc": ["rationale"], "msg": "Field required"}],
+        "timestamp": "2026-11-21T09:05:00Z",
+    }]}]}
+    out = _transcript_to_chat_messages(run_state)
+    assert out[0]["toolCallId"] == "call_789" and out[0]["toolName"] == "propose_dismiss"
+    assert '"msg": "Field required"' in out[0]["content"]
+
+
 def test_a_retry_prompt_also_carries_call_id_and_name():
     run_state = {
         "messages": [

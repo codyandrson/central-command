@@ -297,7 +297,7 @@ def _transcript_to_chat_messages(run_state: dict) -> list[dict]:
     is a human-read surface, so it shows the whole transcript even after
     compaction has moved older turns out of what the model sees.
     """
-    from central_command.runtime.durable import full_messages
+    from central_command.runtime.durable import full_messages, retry_text
 
     out: list[dict] = []
     for message in full_messages(run_state):
@@ -333,10 +333,11 @@ def _transcript_to_chat_messages(run_state: dict) -> list[dict]:
             elif pk == "user-prompt":
                 text = content if isinstance(content, str) else str(content)
                 out.append({"role": "user", "content": text, "timestamp": ts})
-            elif pk in ("tool-return", "retry-prompt"):
+            elif pk == "tool-return" or retry_text(part) is not None:
+                retried = retry_text(part)
                 out.append({
                     "role": "toolResult",
-                    "content": str(content),
+                    "content": str(content) if retried is None else retried,
                     "timestamp": ts,
                     "toolCallId": part.get("tool_call_id"),
                     "toolName": part.get("tool_name"),
@@ -1680,6 +1681,8 @@ async def _tool_stream_frames(event: dict, cursors: dict) -> list[dict]:
         }
         return []
 
+    from central_command.runtime.durable import retry_text
+
     run_state = await repo.get_session_run_state(session_id) or {}
     messages = run_state.get("messages") or []
     # The live window only, matching what `session.step` counts. Compaction
@@ -1703,7 +1706,7 @@ async def _tool_stream_frames(event: dict, cursors: dict) -> list[dict]:
                     "name": part["tool_name"],
                     "args": _tool_args(part.get("args")),
                 }
-            elif pk in ("tool-return", "retry-prompt"):
+            elif pk == "tool-return" or retry_text(part) is not None:
                 # No result content by design — the frontend's declared frame
                 # carries none; results arrive with the transcript (Phase 1).
                 data = {"phase": "result", "toolCallId": tool_call_id}

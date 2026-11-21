@@ -42,7 +42,6 @@ from neo4j.exceptions import ServiceUnavailable
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -920,9 +919,8 @@ def _retry_or_return(messages, call_id: str):
     for m in messages:
         if isinstance(m, ModelRequest):
             for p in m.parts:
-                if getattr(p, "tool_call_id", None) == call_id and isinstance(
-                    p, (ToolReturnPart, RetryPromptPart)
-                ):
+                # A retry answering a call is a ToolReturnPart since 2.60.
+                if getattr(p, "tool_call_id", None) == call_id and isinstance(p, ToolReturnPart):
                     return p
     return None
 
@@ -1036,8 +1034,8 @@ async def test_a_deletion_whose_episode_is_gone_on_resume_hands_back_the_retry(
     assert not await _session_proposals(session_id)
     rs = await repo.get_session_run_state(session_id)
     retry = _retry_or_return(durable.load_messages(rs), "call_del")
-    assert isinstance(retry, RetryPromptPart)
-    assert "list_graph_group_episodes" in str(retry.content)
+    assert durable.retry_text(retry) is not None, "the NO is a retry, not a result"
+    assert "list_graph_group_episodes" in durable.retry_text(retry)
     row = await repo.get_task(task["id"])
     assert row["status"] == "DONE" and "list_graph_group_episodes" in row["outcome"]
 

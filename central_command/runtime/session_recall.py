@@ -38,7 +38,7 @@ from datetime import UTC, datetime
 from typing import NamedTuple
 
 from central_command.db import repo
-from central_command.runtime.durable import full_messages
+from central_command.runtime.durable import full_messages, retry_text
 
 log = logging.getLogger(__name__)
 
@@ -212,15 +212,17 @@ def _message_parts(mi: int, message) -> list[tuple]:
                     continue
                 row_kind = "tool_call"
                 text = f"{tool or 'unknown'} {_args_text(part.get('args'))}".strip()
-            elif kind == "tool-return":
-                if tool == SELF_TOOL:
-                    continue
-                row_kind, text = "tool_return", _text_of(part.get("content"))
-            elif kind == "retry-prompt":
+            elif retry_text(part) is not None:
+                # Before the plain tool-return branch: since pydantic-ai 2.60 a
+                # retry answering a call IS a tool-return (`outcome='retried'`).
                 if tool == SELF_TOOL:
                     continue
                 row_kind = "tool_return"
                 text = "[the call was refused or malformed] " + _text_of(part.get("content"))
+            elif kind == "tool-return":
+                if tool == SELF_TOOL:
+                    continue
+                row_kind, text = "tool_return", _text_of(part.get("content"))
             else:  # system-prompt, thinking, anything not worth recalling
                 continue
             body = _body(text)

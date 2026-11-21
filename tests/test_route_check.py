@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic_ai import ModelRetry
+from pydantic_ai.messages import ModelMessagesTypeAdapter, ModelRequest, ToolReturnPart
 
 from central_command.contract.models import Proposal
 from central_command.runtime import tools
@@ -86,11 +87,78 @@ def test_it_is_asked_once_per_session_from_the_record():
     proposal = _proposal(_episode("Jane Doe flies to Tampa on 2026-08-25."))
     first = tools._route_check(_ctx(), proposal)
     assert first is not None
-    earlier = SimpleNamespace(parts=[SimpleNamespace(part_kind="retry-prompt", content=first)])
+    # Since pydantic-ai 2.60 the ModelRetry answering the call is recorded as a
+    # retried tool return; a history stored before that holds a `retry-prompt`,
+    # which loads as the same thing.
+    earlier = ModelRequest(parts=[ToolReturnPart("propose_action", first, tool_call_id="c1",
+                                                 outcome="retried")])
     assert tools._route_check(_ctx([earlier]), proposal) is None
-    # Some other retry in the record does not count as having asked.
-    other = SimpleNamespace(parts=[SimpleNamespace(part_kind="retry-prompt", content="fix the args")])
+    stored = ModelMessagesTypeAdapter.validate_python([{"kind": "request", "parts": [{
+        "part_kind": "retry-prompt", "tool_name": "propose_action", "tool_call_id": "c1",
+        "content": first}]}])
+    assert tools._route_check(_ctx(stored), proposal) is None
+    # Some other retry in the record does not count as having asked, nor does
+    # the mark in an ordinary tool result (a mail quoting it, say).
+    other = ModelRequest(parts=[ToolReturnPart("propose_action", "fix the args", tool_call_id="c1",
+                                               outcome="retried")])
     assert tools._route_check(_ctx([other]), proposal) is not None
+    quoted = ModelRequest(parts=[ToolReturnPart("mail_read", first, tool_call_id="c2")])
+    assert tools._route_check(_ctx([quoted]), proposal) is not None
+
+
+async def test_a_real_run_asks_once_across_a_redraft_and_a_resume(monkeypatch):
+    """Through pydantic-ai itself: the first draft is handed back with the
+    question, the redraft parks, and after the operator's decision a SECOND
+    episode proposal in the same session parks without being asked again.
+    Under pydantic-ai 2.60+ the retry is no `retry-prompt`, and a check that
+    looked for one asked on every draft until `max_retries` failed the run."""
+    from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, Tool
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    from central_command import events
+
+    emitted: list[str] = []
+
+    async def emit(kind, **kw):
+        emitted.append(kind)
+    monkeypatch.setattr(events, "emit", emit)
+    first = _proposal(_episode("Jane Doe flies to Tampa on 2026-08-25.", name="Tampa trip"))
+    second = _proposal(_episode("Jane Doe's lodging is booked for 2026-08-26.", name="Tampa lodging"))
+    drafts = iter([first, first, second])
+    seen: list = []
+
+    def model(messages, info: AgentInfo):
+        seen.append(messages)
+        p = next(drafts)
+        return ModelResponse(parts=[ToolCallPart(
+            "propose_action", {"proposal": p.model_dump(mode="json")},
+            tool_call_id=f"draft-{len(seen)}")])
+
+    agent = Agent(FunctionModel(model), output_type=[str, DeferredToolRequests],
+                  tools=[Tool(tools.propose_action, max_retries=10)])
+    deps = SimpleNamespace(session_id="sess_route_real", agent_id="inbox-triage")
+    run1 = await agent.run("mail: Jane Doe flies to Tampa", deps=deps)
+    assert isinstance(run1.output, DeferredToolRequests), "the redraft parks"
+    assert emitted.count("proposal.route_checked") == 1
+    handed_back = [p for p in seen[1][-1].parts if isinstance(p, ToolReturnPart)]
+    assert handed_back and handed_back[0].outcome == "retried"
+    assert str(handed_back[0].content).startswith(tools._ROUTE_CHECK_MARK)
+
+    results = DeferredToolResults()
+    results.calls[run1.output.calls[0].tool_call_id] = "approved: executed"
+    run2 = await agent.run(message_history=run1.all_messages(), deferred_tool_results=results,
+                           deps=deps)
+    assert isinstance(run2.output, DeferredToolRequests), "the second proposal parks unasked"
+    assert durable_proposal(run2) == "Tampa lodging"
+    assert emitted.count("proposal.route_checked") == 1, "asked once per session"
+
+
+def durable_proposal(result) -> str:
+    from central_command.runtime import durable
+
+    call = durable.extract_deferred(result)
+    return durable.proposal_from_call(call).actions[0].arguments["name"]
 
 
 def test_a_proposal_without_an_episode_or_a_readable_reference_time_is_left_alone():

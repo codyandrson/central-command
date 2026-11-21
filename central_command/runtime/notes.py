@@ -162,12 +162,17 @@ def transcript_corpus(messages: list[dict]) -> list[str]:
     call arguments, the propose_note call itself included, which would
     otherwise "verify" any quote it carried."""
     from central_command.runtime.context import SUMMARY_LEAD
+    from central_command.runtime.durable import retry_text
 
     out: list[str] = []
     for message in messages:
         for part in message.get("parts", []) or []:
             kind = part.get("part_kind")
             if kind not in ("user-prompt", "tool-return"):
+                continue
+            if retry_text(part) is not None:
+                # Our own words back to the model (since pydantic-ai 2.60 a
+                # retry answering a call is a tool-return): never grounding.
                 continue
             text = _part_text(part)
             if kind == "user-prompt" and text.startswith(SUMMARY_LEAD):

@@ -15,7 +15,6 @@ import pytest
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
-    RetryPromptPart,
     SystemPromptPart,
     TextPart,
     ToolCallPart,
@@ -234,7 +233,7 @@ class _Persistent:
                    for p in parts)
         last = messages[-1]
         fresh = [str(p.content) for p in (last.parts if isinstance(last, ModelRequest) else [])
-                 if isinstance(p, ToolReturnPart | RetryPromptPart)
+                 if isinstance(p, ToolReturnPart)  # a retry is one too, since pydantic-ai 2.60
                  and p.tool_name == "propose_action"]
         self.calls.append(fresh)
         if any("redraft limit" in r for r in fresh):
