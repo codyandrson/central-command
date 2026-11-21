@@ -4,6 +4,19 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.112.1: The vendored documentation matches the versions now pinned
+
+- **Fifteen vendored documentation sets were refetched** for the dependencies the releases since v2.108.1
+  moved, so an agent on a network with no route out reads the manual for the version it is running:
+  pydantic-ai v2.66.0, fastapi 0.162.2, hono v4.13.17 and its node server v2.1.6, asyncpg v0.32.0, the
+  neo4j Python driver 6.4.1, zod v4.6.7, dompurify 3.4.17, vite v7.3.7 and VictoriaLogs v1.54.0 at their
+  release tags; and LiteLLM, n8n, Fluent Bit and the two Neo4j 5 manuals from their documentation
+  repositories' branches, which carry no release tags (each set's `MANIFEST.yaml` names the release the
+  project pins). Each set was cleared before the refetch, so files upstream removed are gone.
+  `docs/vendor/MANIFEST` is regenerated; `docs/vendor` grows by about 17.6 MB.
+- The LiteLLM set's note no longer says the proxy follows a rolling tag: it is pinned to v1.110.2.
+- No code, schema, unit or manifest change.
+
 ## 2026-11-21 — v2.112.0: Security floors that reach every install, a crawler that checks certificates, the sandbox image on Debian 13, and the cockpit server's static-path fix
 
 - **A security pin in the lock alone did not reach a networked deployment.** Outside an air gap, setup and
