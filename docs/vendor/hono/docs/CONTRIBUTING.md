@@ -4,9 +4,9 @@ Contributions Welcome! We will be glad for your help.
 You can contribute in the following ways.
 
 - Create an Issue - Propose a new feature. Report a bug.
-- Pull Request - Fix a bug or typo. Refactor the code.
-- Create third-party middleware - See instructions below.
+- Build middleware and libraries - Grow the Hono ecosystem.
 - Share - Share your thoughts on the Blog, X, and others.
+- Sponsor - Support the maintainers through GitHub Sponsors: [@yusukebe](https://github.com/sponsors/yusukebe) and [@usualoma](https://github.com/sponsors/usualoma).
 - Make your application - Please try to use Hono.
 
 Note:
@@ -18,39 +18,20 @@ So, if you propose great ideas, but I do not appropriate them, the idea may not 
 Although, don't worry!
 Hono is tested well, polished by the contributors, and used by many developers. And I'll try my best to make Hono cool and hot, beautiful, and ultrafast.
 
-## Installing dependencies
+## AI Usage Policy
 
-The `honojs/hono` project uses [Bun](https://bun.sh/) as its package manager. Developers should install Bun.
+You may use AI to contribute, but it must never waste a maintainer's time or make their work unpleasant.
 
-After that, please install the dependency environment.
+To enforce this, and regardless of whether AI was actually used, a maintainer may close your issue without notice and block your account.
 
-```bash
-bun install --frozen-lockfile
-```
+## Issues instead of Pull Requests
 
-## PRs
-
-Please ensure your PR passes tests with `bun run test`.
-
-## Third-party middleware
-
-Third-party middleware is not in the core.
-It is allowed to depend on other libraries or work only in specific environments, such as Cloudflare Workers. For example:
-
-- GraphQL Server middleware
-- Firebase Auth middleware
-- Sentry middleware
-
-You can make a third-party middleware by yourself.
-It may be under the "honojs organization" and distributed in the `@honojs` namespace.
-
-The monorepo "[honojs/middleware](https://github.com/honojs/middleware)" manages these middleware.
-If you want to do it, create an issue about your middleware.
+Pull requests are limited to maintainers. If you find a bug or want a change, please create an issue instead. A clear issue with a minimal reproduction helps us more than a pull request.
 
 ## Local Development
 
+The `honojs/hono` project uses [pnpm](https://pnpm.io/) as its package manager, and [Bun](https://bun.sh/) to run the build and some of the tests. Developers should install both.
+
 ```bash
-git clone git@github.com:honojs/hono.git && cd hono/.devcontainer && bun install --frozen-lockfile
-docker compose up -d --build
-docker compose exec hono bash
+git clone git@github.com:honojs/hono.git && cd hono && pnpm install --frozen-lockfile
 ```

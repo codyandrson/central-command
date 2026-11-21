@@ -34,7 +34,7 @@ There are some breaking changes.
 - Hono - `app.head()` is no longer used. `app.get()` implicitly handles the HEAD method.
 - Hono - `app.handleEvent()` is obsolete. Use `app.fetch()` instead.
 - HonoRequest - `req.cookie()` is obsolete. Use `getCookie()` in `hono/cookie` instead.
-- HonoRequest - `headers()`, `body()`, `bodyUsed()`, `integrity()`, `keepalive()`, `referrer()`, and `signal()` are obsolete. Use the methods in `req.raw` such as `req.raw.headers()`.
+- HonoRequest - `headers()`, `body()`, `bodyUsed()`, `integrity()`, `keepalive()`, `referrer()`, and `signal()` are obsolete. Use the equivalent properties on `req.raw` such as `req.raw.headers`.
 
 ### `serveStatic` in Cloudflare Workers Adapter requires `manifest`
 
@@ -129,7 +129,7 @@ const app = new Hono<{ Bindings: Bindings }>()
 At the next major version, Validator Middleware will be changed with "breaking changes". Therefore, the current Validator Middleware will be deprecated; please use 3rd-party Validator libraries such as [Zod](https://zod.dev) or [TypeBox](https://github.com/sinclairzx81/typebox).
 
 ```ts
-import { z } from 'zod'
+import * as z from 'zod'
 
 //...
 

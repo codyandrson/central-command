@@ -1,6 +1,8 @@
 name: hono
 source_repo: https://github.com/honojs/hono
-source_ref: v4.11.7
-fetched_url: https://codeload.github.com/honojs/hono/tar.gz/v4.11.7
-fetched_date: 2026-08-29
+source_ref: v4.13.17
+fetched_url: https://codeload.github.com/honojs/hono/tar.gz/v4.13.17
+fetched_date: 2026-11-21
 subpaths: [docs README* LICENSE*]
+note: >
+  Project pins hono 4.13.17; vendored at the matching release tag v4.13.17.
