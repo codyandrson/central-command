@@ -36,6 +36,10 @@ layout:
 
 # OpenAI Chat Model
 
+{% hint style="info" %}
+On n8n Cloud, you can use the OpenAI Chat Model node with [Gateway credits](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/use-n8n-cloud/gateway-credits) instead of your own OpenAI API key. Select **Use Gateway credits** in the node's credential field to run the node without an OpenAI account.
+{% endhint %}
+
 Use the OpenAI Chat Model node to use OpenAI's chat models with conversational agents[^1].
 
 On this page, you'll find the node parameters for the OpenAI Chat Model node and links to more resources.
@@ -43,7 +47,7 @@ On this page, you'll find the node parameters for the OpenAI Chat Model node and
 {% hint style="info" %}
 **Credentials**
 
-You can find authentication information for this node [here](../../../credentials/openai.md).
+Refer to the [OpenAI credentials documentation](../../../credentials/openai.md) for authentication information for this node.
 {% endhint %}
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/X6JM1Mgg5iwvZLDpGEB0/" %}
@@ -155,7 +159,7 @@ Configure the prompt filled with a unique ID, its version, and substitutable var
 
 ## Related resources <a href="#related-resources" id="related-resources"></a>
 
-Refer to [LangChains's OpenAI documentation](https://js.langchain.com/docs/integrations/chat/openai/) for more information about the service.
+Refer to [LangChain's OpenAI documentation](https://docs.langchain.com/oss/javascript/integrations/chat/openai) for more information about the service.
 
 Refer to [OpenAI documentation](https://platform.openai.com/docs/api-reference/responses/create) for more information about the parameters.
 

@@ -10,8 +10,7 @@ originalUrl: https://docs.n8n.io/integrations/builtin/credentials/whatsapp
 url: https://docs.n8n.io/integrations/builtin/credentials/whatsapp
 description: >-
   Documentation for WhatsApp Business Cloud credentials. Use these credentials
-  to authenticate WhatsApp Business Cloud in n8n, a workflow automation
-  platform.
+  to authenticate with WhatsApp Business Cloud in n8n.
 layout:
   width: default
   title:
@@ -57,7 +56,7 @@ To create credentials for WhatsApp, you need the following Meta assets:
 
 </details>
 
-\- A Meta \[business portfolio]\(https://www.facebook.com/business/help/1710077379203657?id=180505742745347): WhatsApp messaging services require a Meta business portfolio, formerly called a Business Manager account. The UI may still show either option.
+* A Meta [business portfolio](https://www.facebook.com/business/help/1710077379203657?id=180505742745347): WhatsApp messaging services require a Meta business portfolio, formerly called a Business Manager account. The UI may still show either option.
 
 <details>
 
@@ -73,7 +72,7 @@ To create credentials for WhatsApp, you need the following Meta assets:
 
 </details>
 
-\- A Meta \[business app]\(https://developers.facebook.com/docs/development/create-an-app/) configured with WhatsApp: Once you have a developer account, you will create a Meta business app.
+* A Meta [business app](https://developers.facebook.com/documentation/development/create-an-app) configured with WhatsApp: Once you have a developer account, you'll create a Meta business app.
 
 <details>
 
@@ -81,7 +80,7 @@ To create credentials for WhatsApp, you need the following Meta assets:
 
 1. Visit the [Meta for Developers Apps dashboard](https://developers.facebook.com/apps/)
 2. Select **Create app**.
-3. In **Add products to your app**, select **Set up** in the WhatsApp tile. Refer to [Add the WhatsApp Product](https://developers.facebook.com/docs/whatsapp/solution-providers/get-started-for-tech-providers#step-3--add-the-whatsapp-product) for more detail.
+3. In **Add products to your app**, select **Set up** in the WhatsApp tile. Refer to Meta's [WhatsApp Cloud API get started guide](https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started) for more detail.
 4. This opens the WhatsApp **Quickstart** page. Select your business portfolio.
 5. Select **Continue**.
 6. In the left-side menu, go to **App settings** > **Basic**.
@@ -97,9 +96,9 @@ To create credentials for WhatsApp, you need the following Meta assets:
 
 ## Related resources <a href="#related-resources" id="related-resources"></a>
 
-Refer to [WhatsApp's API documentation](https://developers.facebook.com/docs/whatsapp/#platform-apis) for more information about the service.
+Refer to [WhatsApp's API documentation](https://developers.facebook.com/documentation/business-messaging/whatsapp/overview) for more information about the service.
 
-Meta classifies users who create WhatsApp business apps as Tech Providers; refer to Meta's [Get Started for Tech Providers](https://developers.facebook.com/docs/whatsapp/solution-providers/get-started-for-tech-providers) for more information.
+Meta classifies users who create WhatsApp business apps as Tech Providers. Refer to Meta's [Become a Tech Provider](https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/get-started-for-tech-providers) for more information.
 
 ## Using API key <a href="#using-api-key" id="using-api-key"></a>
 
@@ -119,9 +118,9 @@ To generate an access token, follow these steps:
 5. Copy the **Access token** and add it to n8n as the **Access Token**.
 6. Copy the **WhatsApp Business Account ID** and add it to n8n as the **Business Account ID**.
 
-Refer to [Test Business Messaging on WhatsApp](https://developers.facebook.com/docs/whatsapp/solution-providers/become-a-tech-provider-legacy-flow#step-4--test-business-messaging-on-whatsapp) for more information on the above steps.
+Refer to Meta's [WhatsApp Cloud API get started guide](https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started) for more information on generating an access token and finding your WhatsApp Business Account ID.
 
-Fully verifying and launching your app will take further configuration. Refer to Meta's [Get Started for Tech Providers](https://developers.facebook.com/docs/whatsapp/solution-providers/become-a-tech-provider-legacy-flow#step-5--scale-your-solution) Steps 5 and beyond for more information. Refer to [App Review](https://developers.facebook.com/docs/resp-plat-initiatives/app-review) for more information on the Meta App Review process.
+Fully verifying and launching your app takes further configuration, including business verification and App Review. Refer to Meta's [Become a Tech Provider](https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/get-started-for-tech-providers) for more information. Refer to [App Review](https://developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/app-review) for more information on the Meta App Review process.
 
 ## Using OAuth2 <a href="#using-oauth2" id="using-oauth2"></a>
 
@@ -140,4 +139,4 @@ To retrieve these items, follow these steps:
 4. Copy the **App ID** and enter it as the **Client ID** within the n8n credential.
 5. Copy the **App Secret** and enter it as the **Client Secret** within the n8n credential.
 
-Fully verifying and launching your app will take further configuration. Refer to Meta's [Get Started for Tech Providers](https://developers.facebook.com/docs/whatsapp/solution-providers/become-a-tech-provider-legacy-flow#step-5--scale-your-solution) Steps 5 and beyond for more information. Refer to [App Review](https://developers.facebook.com/docs/resp-plat-initiatives/app-review) for more information on the Meta App Review process.
+Fully verifying and launching your app takes further configuration, including business verification and App Review. Refer to Meta's [Become a Tech Provider](https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/get-started-for-tech-providers) for more information. Refer to [App Review](https://developers.facebook.com/documentation/resp-plat-initiatives/individual-processes/app-review) for more information on the Meta App Review process.

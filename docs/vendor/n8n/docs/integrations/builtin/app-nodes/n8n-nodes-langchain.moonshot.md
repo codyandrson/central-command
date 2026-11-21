@@ -35,12 +35,16 @@ layout:
 
 # Moonshot Kimi
 
+{% hint style="info" %}
+On n8n Cloud, you can use the Moonshot Kimi node with [Gateway credits](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/use-n8n-cloud/gateway-credits) instead of your own Moonshot API key. Select **Use Gateway credits** in the node's credential field to run the node without a Moonshot account.
+{% endhint %}
+
 The Moonshot Kimi node connects n8n workflows to Moonshot Kimi AI models. Use it to send prompts and receive model responses, attach images to messages, or analyze images with an image-analysis model.
 
 {% hint style="info" %}
 **Credentials**
 
-You can find authentication information for this node [here](../credentials/moonshot.md).
+Refer to the [Moonshot credentials documentation](../credentials/moonshot.md) for authentication information for this node.
 {% endhint %}
 
 ## Resources and operations <a href="#resources-and-operations" id="resources-and-operations"></a>

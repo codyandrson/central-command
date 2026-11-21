@@ -21,6 +21,10 @@ layout:
 
 # Google Gemini Chat Model node <a href="#google-gemini-chat-model-node" id="google-gemini-chat-model-node"></a>
 
+{% hint style="info" %}
+On n8n Cloud, you can use the Google Gemini Chat Model node with [Gateway credits](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/use-n8n-cloud/gateway-credits) instead of your own Google API key. Select **Use Gateway credits** in the node's credential field to run the node without a Google account.
+{% endhint %}
+
 Use the Google Gemini Chat Model node to use Google's Gemini chat models with conversational agents.
 
 On this page, you'll find the node parameters for the Google Gemini Chat Model node, and links to more resources.
@@ -28,7 +32,7 @@ On this page, you'll find the node parameters for the Google Gemini Chat Model n
 {% hint style="info" %}
 **Credentials**
 
-You can find authentication information for this node [here](../../credentials/googleai.md).
+Refer to the [Google Gemini(PaLM) credentials documentation](../../credentials/googleai.md) for authentication information for this node.
 {% endhint %}
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/X6JM1Mgg5iwvZLDpGEB0/" %}
@@ -64,7 +68,7 @@ If you need to proxy your connection, as a work around, you can set up a dedicat
 
 ## Related resources <a href="#related-resources" id="related-resources"></a>
 
-Refer to [LangChain's Google Gemini documentation](https://js.langchain.com/docs/integrations/chat/google_generativeai) for more information about the service.
+Refer to [LangChain's Google Gemini documentation](https://docs.langchain.com/oss/javascript/integrations/chat/google_generative_ai) for more information about the service.
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/mjXhKRIw98UJ5hk9LWBl/" %}
 

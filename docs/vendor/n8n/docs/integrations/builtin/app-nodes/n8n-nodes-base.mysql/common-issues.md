@@ -60,7 +60,7 @@ If only n8n is running in Docker, configure MySQL to listen on all interfaces by
 If you are running n8n in Docker on **Linux**, use the `--add-host` flag to map `host.docker.internal` to `host-gateway` when you start the container. For example:
 
 ```shell
-docker run -it --rm --add-host host.docker.internal:host-gateway --name n8n -p 5678:5678 -v n8n_data:/home/node/.n8n docker.n8n.io/n8nio/n8n
+docker run -it --rm --add-host host.docker.internal:host-gateway --name n8n -p 5678:5678 -v n8n_data:/home/node/.n8n n8nio/n8n
 ```
 
 If you are using Docker Desktop, this is automatically configured for you.
@@ -83,6 +83,6 @@ If MySQL and n8n are running in the same Docker container, the `localhost` addre
 
 By default, the MySQL node returns [`DECIMAL` values](https://dev.mysql.com/doc/refman/8.4/en/fixed-point-types.html) as strings. This is done intentionally to avoid loss of precision that can occur due to limitation with the way JavaScript represents numbers. You can learn more about the decision in the documentation for the [MySQL library](https://sidorares.github.io/node-mysql2/docs/api-and-configurations) that n8n uses.
 
-To output decimal values as numbers instead of strings and ignore the risks in loss of precision, enable the **Output Decimals as Numbers** option. This will output the values as numbers instead of strings.
+Turn on the **Output Decimals as Numbers** option and n8n converts the value to a JavaScript number instead. A JavaScript number holds about 15 significant digits, and MySQL stores `DECIMAL` to 65 digits without rounding. The conversion rounds values past that limit to the nearest number, and it doesn't warn you. Leave the option off for money, identifiers, and any other value you compare or store again. MySQL treats `NUMERIC` as another name for `DECIMAL`, so this option controls both.
 
 As an alternative, you can manually	convert from the string to a decimal using the `toFloat()` function with [`toFixed()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/toFixed) or with the [Edit Fields (Set) node](../../core-nodes/n8n-nodes-base.set.md) after the MySQL node. Be aware that you may still need to account for a potential loss of precision.

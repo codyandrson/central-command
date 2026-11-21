@@ -46,9 +46,11 @@ The version of the node (v1) that has the agent type setting **will be removed f
 
 ## Related resources <a href="#related-resources" id="related-resources"></a>
 
-Refer to [LangChain's documentation on agents](https://js.langchain.com/docs/concepts/agents/) for more information about the service.
+Refer to [LangChain's documentation on agents](https://docs.langchain.com/oss/javascript/langchain/agents) for more information about the service.
 
 New to AI Agents? Read the [n8n blog introduction to AI agents](https://blog.n8n.io/ai-agents/).
+
+To connect a registry MCP server as a tool with one click, see [MCP servers](https://app.gitbook.com/s/rPN1zU5jaYNvwH7RzxqA/integrate-ai/mcp-servers).
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/mjXhKRIw98UJ5hk9LWBl/" %}
 

@@ -1,8 +1,8 @@
 ---
 title: n8n Hosting Documentation and Guides
 description: >-
-  Access n8n hosting documentation and guides. Find comprehensive resources to
-  help you set up and manage your self-hosted n8n instances.
+  Access n8n hosting documentation and guides for setting up and managing
+  self-hosted n8n instances.
 contentType: overview
 hide:
   - toc
@@ -19,9 +19,29 @@ layout:
 
 # Self-hosting n8n <a href="#self-hosting-n8n" id="self-hosting-n8n"></a>
 
-You can self-host n8n on your own infrastructure, on-premises or in a private cloud, using Docker Compose, one-line setup, or other deployment methods.
+You can self-host n8n on your own infrastructure, on-premises, or in a private cloud, using Docker Compose, one-line setup, or other deployment methods. Not sure if self-hosting is right for you? See [Choose how to use n8n](https://app.gitbook.com/s/CxSeOtVxqqhfxMSac0AV/choose-how-to-use-n8n).
 
-All self-hosted installations use the same core product. Without a license key, n8n runs as the free Community edition. Adding a Business or Enterprise license key enables those editions. See [Compare editions](community-edition-features.md) for the differences between the self-hosted editions.
+{% hint style="success" %}
+**Don't want to read the docs? Run this:**
+
+```bash
+curl -fsSL https://get.n8n.io | sh
+```
+
+Requires Docker on Linux or macOS (or WSL on Windows). Sets up n8n locally in one step. See the [one-line setup guide](install-options/one-line-setup.md) for what it does, or keep reading to compare every installation method.
+{% endhint %}
+
+All self-hosted installations use the same core product. Without a license key, n8n runs as the free Community edition. Adding a Business or Enterprise license key enables those editions. See [Compare editions](community-edition-features.md) for the differences between the self-hosted editions. For Enterprise rollout guidance, see the [Enterprise Hub](https://app.gitbook.com/s/CxSeOtVxqqhfxMSac0AV/enterprise-hub).
+
+## In this section
+
+* [Install options](install-options/README.md): set up n8n with Docker, npm, Docker Compose, or a cloud provider.
+* [Configure n8n](configure-n8n/README.md): manage databases, environment variables, users, licenses, and security settings.
+* [Keep n8n running](keep-n8n-running/README.md): monitor, log, trace, and update your instance.
+* [Understand the architecture](understand-the-architecture/README.md): learn how n8n works and how it structures its database.
+* [Deploy as an OEM integration](deploy-as-an-oem-integration/README.md): embed n8n's interface inside your own product's UI.
+* [Deploy with the AI starter kit](deploy-with-the-ai-starter-kit.md): use n8n's curated self-hosted AI Starter Kit.
+* [Compare editions](community-edition-features.md): compare the self-hosted Community, Business, and Enterprise editions.
 
 ## Choose your installation method <a href="#choose-your-installation-method" id="choose-your-installation-method"></a>
 
@@ -95,8 +115,13 @@ Select the installation method that best fits your technical requirements and in
 	
 	**Requirements:** Node.js installed on your system.
 	
-	**Note:** npm installation is deprecated from n8n 3.0. Consider using Docker Compose or one-line setup instead.
+	npm installation is deprecated from n8n 3.0. Consider using Docker Compose or one-line setup instead.
 	
 	Installs n8n directly using Node Package Manager. Quick to set up but requires managing Node.js versions and dependencies yourself.
 
 	[npm installation guide](install-options/install-with-npm.md)
+
+## Related resources
+
+* [Deploy](../)
+* [Use n8n Cloud](../use-n8n-cloud/README.md)

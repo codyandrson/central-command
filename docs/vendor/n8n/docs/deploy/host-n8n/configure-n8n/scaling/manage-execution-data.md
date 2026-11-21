@@ -52,7 +52,7 @@ docker run -it --rm \
  -e EXECUTIONS_DATA_SAVE_ON_SUCCESS=none \
  -e EXECUTIONS_DATA_SAVE_ON_PROGRESS=true \
  -e EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=false \
- docker.n8n.io/n8nio/n8n
+ n8nio/n8n
 ```
 
 ```yaml
@@ -98,7 +98,7 @@ docker run -it --rm \
  -p 5678:5678 \
  -e EXECUTIONS_DATA_PRUNE=true \
  -e EXECUTIONS_DATA_MAX_AGE=168 \
- docker.n8n.io/n8nio/n8n
+ n8nio/n8n
 ```
 
 ```yaml
@@ -117,3 +117,13 @@ If you run n8n using the default SQLite database, the disk space of any pruned d
 {% endhint %}
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/kct3MUrE5xSbDyeytQIX/" %}
+
+## Related resources
+
+* [Scaling](../scaling.md)
+* [Measure performance](measure-performance.md)
+* [Enable queue mode](enable-queue-mode.md)
+* [Control concurrency](control-concurrency.md)
+* [Handle binary data](handle-binary-data.md)
+* [Use external storage](use-external-storage.md)
+* [Fix memory issues](fix-memory-issues.md)

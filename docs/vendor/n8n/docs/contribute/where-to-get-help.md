@@ -37,12 +37,10 @@ When posting to the forum or emailing customer support, you'll get help faster i
 
 To collect basic information about your n8n instance:
 
-1. Open the left-side panel.
-2. Select **Help**.
-3. Select **About n8n**.
-4. The **About n8n** modal opens to display your current information.
-5. Select **Copy debug information** to copy your information.
-6. Include this information in your forum post or support email.
+1. Select your name or avatar at the bottom of the left menu.
+2. Select **Help** > **About n8n**. The **About n8n** modal opens with your version and instance details.
+3. Select **Copy** next to **Debug information**.
+4. Include this information in your forum post or support email.
 
 ### Details about your problem <a href="#details-about-your-problem" id="details-about-your-problem"></a>
 
@@ -55,3 +53,8 @@ To help resolve your issues more efficiently, here are some things you can inclu
 * 📂 **Workflow or Configuration files**: Sharing relevant workflows or configuration files can be a huge help.
 
 It may also be helpful to include a [HAR (HTTP Archive) file](https://en.wikipedia.org/wiki/HAR_(file_format)) in your message. You can learn how to generate a HAR file in your browser and how to redact sensitive details before posting using the [Har Analizer](https://toolbox.googleapps.com/apps/har_analyzer/).
+
+## Related resources
+
+* [Contribute to n8n](./)
+* [Contribution guide for n8n Docs](contribution-guide-for-n8n-docs/README.md)

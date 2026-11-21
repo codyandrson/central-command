@@ -15,6 +15,8 @@ layout:
 
 # OEM deployment <a href="#oem-deployment" id="oem-deployment"></a>
 
+OEM deployment lets you embed n8n's interface in your own product, so your users build and run workflows without leaving it. It requires a separate OEM agreement and n8n branding.
+
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/6kdIvlPPl0XWVn5z8UJh/" %}
 
 n8n's OEM deployment option lets you embed and surface n8n's interface inside your own product's UI. This allows your users to build workflows, configure connections, and run workflow automation without leaving your product. n8n branding is required as part of an OEM integration.
@@ -33,3 +35,13 @@ This is distinct from [using n8n as a backend](../README.md), where workflows ex
 ## Support <a href="#support" id="support"></a>
 
 Contact [n8n support](mailto:support@n8n.io) using the email provided when you signed your OEM agreement. The [community forum](https://community.n8n.io/) is also available for general questions.
+
+## Related resources
+
+* [Host n8n](../)
+* [Install options](../install-options/README.md)
+* [Configure n8n](../configure-n8n/README.md)
+* [Keep n8n running](../keep-n8n-running/README.md)
+* [Understand the architecture](../understand-the-architecture/README.md)
+* [Deploy with the AI starter kit](../deploy-with-the-ai-starter-kit.md)
+* [Compare editions](../community-edition-features.md)

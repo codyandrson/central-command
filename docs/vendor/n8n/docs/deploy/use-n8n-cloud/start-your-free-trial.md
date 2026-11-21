@@ -24,7 +24,7 @@ When you create a new n8n Cloud trial, you have 14 days to try all the features 
 - Global variables
 - Insights dashboard
 - Execution search
-- 5 days of workflow history to roll back
+- Five days of workflow history to roll back
 
 The trial gives you Pro plan features with a limit of 1000 executions and the same computing power as the [Starter plan](https://n8n.io/pricing/).
 
@@ -49,16 +49,19 @@ Exact features, usage limits, and prices for each plan can change. For the curre
 
 ## Upgrade to a paid plan <a href="#upgrade-to-a-paid-account" id="upgrade-to-a-paid-account"></a>
 
-You can upgrade to a paid n8n account at any time. To upgrade:
+You can upgrade to a paid plan at any time during your trial. To upgrade from the n8n Cloud console:
 
-1. Log in to your account.
-2. Select the **Upgrade** button in the upper-right corner.
-3. Select your plan and whether to pay annually or by the month.
-4. Select a payment method.
+1. Open the [Cloud console](use-the-cloud-console.md).
+2. Select **Upgrade plan** in the trial banner at the top of the page. You can also go to **Billing** and select **Upgrade plan**. n8n opens the **Choose a plan** page.
+3. Choose **Monthly** or **Annual** billing.
+4. Select **Select plan** on the plan you want.
+5. Enter your payment details and complete the checkout.
 
-## Trial expiration <a href="#trial-expiration" id="trial-expiration"></a>
+In the n8n editor, the upgrade button in the trial banner at the top of the page opens the same **Choose a plan** page in the Cloud console.
 
-If you don't upgrade by the end of your trial, the trial automatically expires and n8n deletes your workspace.
+## When your trial ends <a href="#trial-expiration" id="trial-expiration"></a>
+
+If you don't upgrade by the end of your trial, the trial automatically expires and n8n deletes your instance.
 
 {% hint style="info" %}
 **Download your workflows**
@@ -74,10 +77,21 @@ You don't need to cancel your trial. Your trial automatically expires at the end
 
 To test the [Enterprise plan](https://n8n.io/pricing/), contact the sales team. The Enterprise plan includes features such as:
 
-- SSO SAML and LDAP
-- Different environments
-- External secret store integration
+- SSO (SAML and LDAP)
+- Environments
+- External secrets
 - Log streaming
 - Version control using Git
 
-Select the **Contact** button on the [n8n website](https://n8n.io/pricing/).
+Select the **Contact** button on the [n8n website](https://n8n.io/pricing/). For guidance on rolling out Enterprise after you subscribe, see the [Enterprise Hub](https://app.gitbook.com/s/CxSeOtVxqqhfxMSac0AV/enterprise-hub).
+
+## Related resources
+
+* [Use n8n Cloud](./)
+* [Use the Cloud console](use-the-cloud-console.md)
+* [Update your version](update-your-version.md)
+* [Configure Cloud](configure-cloud/README.md)
+* [Gateway credits](gateway-credits/README.md)
+* [Assistant credits](assistant-credits/README.md)
+* [Understand concurrency](understand-concurrency.md)
+* [Download workflows](download-workflows.md)

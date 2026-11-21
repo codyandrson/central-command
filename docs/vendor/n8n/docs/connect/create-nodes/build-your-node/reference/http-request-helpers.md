@@ -19,6 +19,7 @@ n8n provides a flexible helper for making HTTP requests, which abstracts away mo
 
 The information in this document is for node building using the programmatic style. It doesn't apply to declarative style nodes.
 {% endhint %}
+
 ## Usage <a href="#usage" id="usage"></a>
 
 Call the helper inside the `execute` function. 
@@ -114,3 +115,7 @@ New nodes should all use the new helper. You should strongly consider migrating 
 - `rejectUnauthorized: false` is now `skipSslCertificateValidation: true`
 - Use `body` according to `content-type` headers to clarify the payload.
 - `resolveWithFullResponse` is now `returnFullResponse` and has similar behavior
+
+## Related resources
+
+* [Node building reference](./)

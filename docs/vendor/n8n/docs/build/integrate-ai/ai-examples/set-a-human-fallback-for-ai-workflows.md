@@ -29,6 +29,8 @@ layout:
 
 # Set a human fallback for AI workflows
 
+This example adds a human fallback to an AI agent: when the agent can't answer, it calls a second workflow that asks a person for help in Slack.
+
 This is a workflow that tries to answer user queries using the standard GPT-4 model. If it can't answer, it sends a message to Slack to ask for human help. It prompts the user to supply an email address.
 
 This workflow uses the [Chat Trigger](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/core-nodes/n8n-nodes-langchain.chattrigger) to provide the chat interface, and the [Call n8n Workflow Tool](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.toolworkflow) to call a second workflow that handles checking for email addresses and sending the Slack message.
@@ -46,3 +48,12 @@ This workflow uses:
 ## Using the example <a href="#using-the-example" id="using-the-example"></a>
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/vKIIq31qrlay3ovXTvUj/" %}
+
+## Related resources
+
+* [AI examples](../ai-examples.md)
+* [Use Google Sheets as a data source](use-google-sheets-as-a-data-source.md)
+* [Call APIs](call-apis.md)
+* [Use website content](use-website-content.md)
+* [Human-in-the-loop for tools](human-in-the-loop-for-tools.md)
+* [Use AI for parameters](use-ai-for-parameters.md)

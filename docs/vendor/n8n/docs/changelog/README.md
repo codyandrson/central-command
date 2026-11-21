@@ -1,3 +1,29 @@
+---
+description: >-
+  A curated, narrative summary of the most important new n8n features as they
+  roll out.
+layout:
+  width: default
+  title:
+    visible: true
+  description:
+    visible: false
+  tableOfContents:
+    visible: true
+  outline:
+    visible: true
+  pagination:
+    visible: true
+  metadata:
+    visible: true
+  tags:
+    visible: true
+  actions:
+    visible: true
+  anchors:
+    visible: true
+---
+
 # Changelog
 
 Every n8n release moves the platform forward. The changelog is where we call out the changes that matter most to the technical teams who build on n8n: new capabilities, more control over how your workflows run, and clearer visibility into what they're actually doing. Each entry is tied to the version it shipped in, newest first, and written to stand on its own, so it's easy to share the one update your team has been waiting for.
@@ -10,9 +36,185 @@ Use this page alongside n8n's other release resources depending on what you need
 * [GitHub releases](https://github.com/n8n-io/n8n/releases): full change detail of each release, linked to commits, including bug fixes and minor changes.
 
 Old-style release notes pages for [2.x](release-notes-2.x.md), [1.x](release-notes-1.x.md), and [0.x](release-notes-0.x.md) remain archived. Everything in the 2.x archive is covered by this changelog and the Release notes.
+
+For guidance on major version upgrades, see [v3.0 breaking changes](v30-breaking-changes.md), [v3.0 migration tool](v30-migration-tool.md), [v2.0 breaking changes](v20-breaking-changes.md), [v2.0 migration tool](v20-migration-tool.md), and [v1.0 migration guide](v10-migration-guide.md).
 {% endhint %}
 
+For what Preview, GA, deprecated, and removed mean, what Enterprise readiness means, and how n8n's version numbers work, refer to [Understand feature availability](https://app.gitbook.com/s/wMJrGrimpx3PxCJpUswm/understand-feature-availability).
+
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/iFLUKG9zJaouigaM7IOo/" %}
+
+## Use your personal credentials in team projects
+
+**Released:** 2026-10-27 in n8n 2.46.0
+
+You can now select your own personal credentials in any team project you're a member of, without sharing them first. Every workflow run acts as a person, and can only use the credentials that person is allowed to use. Teammates who can't use your credential can see that a workflow uses it. They can't run or publish the workflow with it, or see the execution data it produced. The credential selector groups credentials into **Available to you** and **Available in** _project name_.
+
+After you upgrade, you may notice:
+
+* **Disabled Execute and Publish buttons:** if a workflow uses someone else's credential that you can't use, n8n names the credential and its owner. You can still edit the workflow and switch to a credential you can use.
+* **Publish checks:** you can't publish a workflow with a credential you can't use. The check tells you which credential blocks it.
+* **Hidden execution data:** n8n hides the data of executions that used a credential you can't use, including data returned from sub-workflows.
+* **A clearer Sharing tab:** it lists people and projects together, shows projects that use the credential without a share as **Can view**, and lets you share with them in one step.
+
+Existing published workflows keep running. Learn more in [Use personal credentials in projects](https://app.gitbook.com/s/wMJrGrimpx3PxCJpUswm/manage-credentials/use-personal-credentials-in-projects).
+
+## Durable scheduler on by default for Schedule Trigger nodes
+
+**Released:** 2026-10-20 in n8n 2.45
+
+Schedule Trigger nodes now run on the durable scheduler by default, on every instance, with no environment variable to set. The scheduler stores each run in the database before it's due, so a restart no longer drops pending runs. A run missed during downtime still fires within its grace period. Past that, the trigger's [misfire policy](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/configure-n8n/durable-scheduler#misfire-policy) decides what happens. In a multi-main setup, one main claims each run, instead of a single leader firing them all.
+
+Existing Schedule Trigger nodes switch over on upgrade, without republishing. One timing detail changes: "every N seconds" and "every N minutes" schedules now run a steady N apart, counted from when you published the workflow. They no longer align to clock boundaries. Hourly, daily, weekly, monthly, and custom cron schedules fire as before in everyday use. They differ only in rare leap-year, 53rd-week, and daylight-saving edge cases, where the durable scheduler fixes an off-by-one-period error.
+
+You can keep the previous behavior while you adapt:
+
+* Set `N8N_SCHEDULER_TRIGGER_NODE_MODE=legacy` to keep clock-aligned timing on the durable scheduler.
+* Set `N8N_SCHEDULER_ENABLED=false` to return the whole instance to the in-memory scheduler.
+
+Both variables are now deprecated, and n8n logs a warning at startup if you set either one. A future version will remove them, along with the in-memory scheduler. This release also removes the Skip Durable Scheduler node setting and its `N8N_ENV_FEAT_SKIP_DURABLE_SCHEDULER` flag.
+
+Poll triggers and system tasks stay on their current schedulers. Learn more in the [durable scheduler documentation](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/configure-n8n/durable-scheduler).
+
+## Control which nodes users can add and run, per instance or per project
+
+**Released:** 2026-10-13 in [n8n 2.44](release-notes.md#n8n244)
+
+You can now set rules that control which nodes users can add, publish, and run, either across the whole instance or within individual projects. Node type policies let instance and project admins enforce governance requirements through the public API without removing nodes from the instance entirely.
+
+Each policy is an ordered list of rules plus a default action. A rule can allow, deny, or delegate one node type or every node in a package. n8n evaluates the instance policy first. A deny there is final: no project can override it. An allow lets the project policy decide, so a project can only restrict further. A delegate blocks the node by default, but a project admin can turn it on for their team with an explicit allow rule. Without any policy, every node remains available.
+
+n8n checks policies when workflows are saved, published, and run, and when agents use tools in configuration or chat. CLI imports, source control pulls, and credential tests are checked too. In the editor, blocked nodes show a lock icon in search and their node details become read-only. If you try to publish or run a workflow that uses one, n8n refuses and lists each blocked node with a link to find it. Every block also sends an audit event to your log streaming destinations.
+
+To get started, create an API key with the `nodeTypePolicy:manage` scope and read the current policy with `GET /api/v1/node-type-policies/instance`. Add your rules, then send the whole policy back with `PUT`, including the `version` you read. Changes take effect within about one second.
+
+Learn more in the [Node Type Policies documentation](https://app.gitbook.com/s/wMJrGrimpx3PxCJpUswm/manage-users-and-access/control-node-availability).
+
+{% hint style="info" %}
+**Availability:** Enterprise.
+{% endhint %}
+
+## TypeSafe AI node for smarter workflow routing with Jev
+
+**Released:** 2026-09-30&#x20;
+
+You can now use TypeSafe AI's Jev model in n8n to make decisions from unstructured data, without using a general-purpose LLM to generate and parse text.
+
+Think of Jev as an **If** or **Switch** for the fuzzy parts of a workflow. Give it some input, a question, and the possible outcomes. It returns a decision with its confidence, which you can use to branch, sort, route, or decide when a human should take over.
+
+For example, you could use it to decide:
+
+* **Priority:** Is this support ticket critical, high, medium, or low priority?
+* **Routing:** Is this inbound email a complaint, a question, or spam?
+* **Review:** Does this deal need executive review?
+* **Confidence gating:** Is the model confident enough to continue automatically, or should this go to a human?
+
+Unlike a text-generating LLM, Jev is designed for decisions rather than writing. If you already have a deterministic rule such as `amount > 10000`, an **If** node is still the right tool. If the decision depends on unstructured input, Jev gives you a new way to turn that judgment into workflow logic.
+
+**Availability:** The TypeSafe AI node is availalble to n8n Cloud and self-hosted users with your own TypeSafe AI API key. n8n Cloud users (Starter, Pro and new trials) can also use Jev via Gateway credits without setting up a seperate TypeSafe AI account or API key.
+
+<figure><img src=".gitbook/assets/typesafe Jev 2 square.png" alt=""><figcaption></figcaption></figure>
+
+## Build agents you set up once and use anywhere
+
+**Released:** 2026-09-21 in [n8n 2.40](release-notes.md#n8n240)
+
+You can now build agents in n8n. Describe what an agent should do, give it a model and the tools and workflows it can use, and it works out the steps itself. Open the **Agents** tab and select **Create Agent**, or describe what you want to n8n Assistant and it drafts the agent for you.
+
+Agents suit jobs where the next step depends on the last answer: a question in Slack that takes a few rounds, a support ticket, a new GitHub issue. Each agent has:
+
+* **A model:** any model you have credentials for, or Gateway credits.
+* **Instructions:** its role, tone, and what it should and shouldn't do, written in plain language.
+* **Tools:** n8n nodes, MCP servers, and your own workflows.
+* **Skills, sub-agents, knowledge files, and memory,** plus a stored session for every conversation.
+
+Agents and workflows call each other. An agent can use any workflow as a tool: the agent decides when the workflow runs, and the workflow runs the way you built it, with its own credentials. For example, an agent can add a note to your CRM through a workflow without ever holding write access to the CRM. In the other direction, the [Message an Agent](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/core-nodes/n8n-nodes-base.messageanagent) node calls an agent from inside a workflow and passes its answer to the next node.
+
+Connect one agent to Slack, Telegram, Linear, or Discord, run it on a schedule, and call it from your workflows. Edit a draft while your team keeps using the published version. When you publish, every place the agent is connected gets the update. Mark sensitive tools to require approval before the agent runs them, and review each session's tool calls, inputs, and outputs.
+
+One turn with an agent counts as one execution. Calls to workflow tools and sub-agents don't count separately. The AI Agent node hasn't changed, and everything you've built with it keeps working.
+
+{% hint style="warning" %}
+**Preview status**
+
+Agents are in Preview. They can make mistakes, and their behavior may change while they're in development. Test before you publish, and require approval on tools that write to your systems.
+{% endhint %}
+
+Learn more in [Build and manage agents](https://app.gitbook.com/s/rPN1zU5jaYNvwH7RzxqA/build-and-manage-agents) and the [launch blog post](https://blog.n8n.io/introducing-n8n-agents/). On self-hosted n8n, agents need some extra setup from n8n 2.32.3: refer to [Self-hosted](https://app.gitbook.com/s/rPN1zU5jaYNvwH7RzxqA/build-and-manage-agents#self-hosted).
+
+{% hint style="info" %}
+**Availability:** All plans. On Enterprise, agents are in Preview, with additional governance features on the way.
+{% endhint %}
+
+## Error workflow executions no longer count towards your quota
+
+**Released:** 2026-09-01 in [n8n 2.38](release-notes.md#n8n2381)
+
+Runs of your error workflows are now excluded from your execution quota, on every plan. An error workflow is the one n8n runs when another workflow fails. It receives the details of the failure (which workflow, which node, what went wrong) and does something useful with them: post to a Slack channel, send an email, open a ticket, or retry the run.
+
+Until now each of those runs counted like any other execution. Handling a failure cost you an execution on top of the failure itself, and some people left error workflows out to protect their quota. Every production workflow should have one, so n8n stopped counting them.
+
+Attach an error workflow to a workflow in its **Workflow Settings** and its runs are excluded from the count. One error workflow can serve as many workflows as you like.
+
+The change applies on Cloud from 2.38, and on self-hosted Business and Enterprise instances from 2.28.0, or 1.123.60 if you're still on v1. If some of your workflows still run without an error workflow, refer to [Handle errors gracefully](https://app.gitbook.com/s/rPN1zU5jaYNvwH7RzxqA/flow-logic/handle-errors-gracefully) to set one up.
+
+## Use AI models and tool services without setting up provider accounts or credentials
+
+**Released:** 2026-09-02 in [n8n 2.36](release-notes.md#n8n235)
+
+You can now use supported AI models and services in n8n Cloud without first creating an account with each provider, setting up billing, or adding an API key. [Gateway credits](https://docs.n8n.io/deploy/use-n8n-cloud/gateway-credits) let you start building with a prepaid balance managed through n8n.
+
+Supported AI providers include OpenAI, Anthropic, Google Gemini, Alibaba Cloud Qwen, MiniMax, and Moonshot Kimi. You can also use credits with Brave Search, Firecrawl, Browserbase, LlamaParse, and PDF.co.
+
+![Agent using tool services available with Gateway credits](<.gitbook/assets/form hero 3.png>)
+
+On a supported node, select **Gateway credits** when setting up the credential and run your workflow. The choice is made per node, so the same workflow can use Gateway credits for one service and your own provider credentials for another.
+
+![Select Gateway credits in the Credetial dropdown](<.gitbook/assets/select credits.png>)
+
+Usage is deducted from a shared prepaid balance for the n8n instance. We align Gateway credit rates with publicly listed provider pricing wherever possible, and publish the rates for every supported service on our [service pricing page](https://app.n8n.cloud/service-pricing).
+
+Instance owners can add funds manually or configure automatic top-ups based on a balance threshold, target balance, and optional monthly limit. You can track your remaining balance and spend from **Cloud Admin Panel>Manage > Gateway credits**, including breakdowns by model and workflow.
+
+You can continue using your own provider credentials as before. Gateway credits give you another option when you want to get started without setting up and managing a separate provider account first.
+
+For more details, see the [Forum post](https://community.n8n.io/t/310859).
+
+## n8n Assistant on self-hosted n8n: set up in minutes
+
+**Released:** 2026-08-18 in [n8n 2.35](release-notes.md#n8n235)
+
+n8n Assistant [arrived on n8n Cloud in July](./#n8n-assistant-describe-a-goal-get-a-working-automation) and has worked on self-hosted n8n since then, but getting there meant enabling the `instance-ai` module and configuring a sandbox, a model, and web search through environment variables. n8n 2.35 enables the module by default, adds a one-line install that pre-configures the pieces you would otherwise assemble yourself, and allows you to choose your model provider, sandbox, and search directly in the UI.
+
+Self-hosted setup needs two things, plus one worth adding:
+
+* **A model provider.** Bring an API key for Anthropic, OpenAI, or OpenRouter, or point n8n at any OpenAI-compatible endpoint, including a local one. You pay the provider directly, and your prompts, workflow content, and the execution data the assistant reads go to that provider.
+* **A sandbox.** The assistant runs code to build and test what you ask for, and that code executes in an isolated sandbox, never on your n8n server. n8n's bundled sandbox runs on your own Docker host and suits local development and testing. For production, we recommend you use Daytona's managed sandbox with an API key.
+* **Web search, optional but worth adding.** With it the assistant reads current docs and APIs instead of relying on what its model remembers, through a bundled SearXNG instance or a Brave Search API key.
+
+On a brand-new instance, one command sets up everything except the model key:
+
+```bash
+curl -fsSL https://get.n8n.io | sh
+```
+
+It installs n8n with Docker Compose and pre-configures the sandbox and SearXNG web search, both free. Open the editor, add your model API key in the instance's AI settings, and start building. On an existing Docker install, the [n8n Assistant setup guide](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/configure-n8n/set-up-n8n-assistant) covers the sandbox and search options for each deployment shape, in environment variables or in the UI.
+
+n8n Assistant requires Docker. npm installs will stop working with n8n 3.0 in October, so new installs should use the [one-line setup](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/install-options/one-line-setup) or [Docker Compose](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/install-options/install-using-docker-compose).
+
+{% hint style="warning" %}
+**Preview status**
+
+n8n Assistant is in Preview. It can make mistakes, and its behavior may change while it's in development. Always review generated workflows before using them in production.
+{% endhint %}
+
+Learn more in the [n8n Assistant documentation](https://app.gitbook.com/s/rPN1zU5jaYNvwH7RzxqA/ways-of-building-workflows/n8n-assistant).
+
+{% hint style="info" %}
+**Feature availability**
+
+Self-hosted Enterprise support is coming. Enterprise customers who want to try n8n Assistant before then can contact their Customer Success Manager about preview access.
+{% endhint %}
 
 ## Return webhook responses of any size from your workers
 
@@ -35,6 +237,41 @@ You can now read and write Excel workbooks stored in SharePoint document librari
 The node supports two authentication methods: sign in as a person using a Microsoft OAuth2 credential with the `Sites.ReadWrite.All` (or `Sites.Read.All`) scope, or sign in as an app using a Microsoft Entra Service Principal credential for unattended workflows that require no user interaction.
 
 Learn more in the [Microsoft Excel (SharePoint) node documentation](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/app-nodes/n8n-nodes-base.microsoftexcelsharepoint).
+
+## Schedule Trigger runs survive restarts and scale across mains
+
+**Released:** 2026-07-21 in [n8n 2.32](release-notes.md#n8n232)
+
+You can now run Schedule Trigger nodes from a database-backed queue instead of from each instance's memory. The durable scheduler records every upcoming run in the database before it's due, so a restart or crash no longer silently drops pending schedules.
+
+In a multi-main setup, every main instance shares the same queue and claims runs from it. Only one instance picks up each run, so scheduling load spreads across your whole fleet instead of depending on a single leader instance. Dispatch fires at the exact scheduled instant: the scheduler claims each run ahead of time and holds it with a precision timer, so steady-state timing is not limited to a polling cadence.
+
+To opt in, set two environment variables and restart your instance:
+
+1. Set `N8N_SCHEDULER_ENABLED=true` to enable the durable scheduler.
+2. Set `N8N_USE_WORKFLOW_PUBLICATION_SERVICE=true` so the scheduler takes over Schedule Trigger nodes. Without this second flag, Schedule Trigger nodes keep running on the in-memory scheduler and n8n logs a warning.
+
+Your existing Schedule Trigger nodes switch automatically without republishing. The defaults suit most instances, but you can tune timing precision, storage, and load with additional environment variables including `N8N_SCHEDULER_MATERIALIZATION_WINDOW`, `N8N_SCHEDULER_EXECUTOR_INTERVAL`, `N8N_SCHEDULER_RETENTION`, and `N8N_SCHEDULER_FAILED_RETENTION`. See the [Scheduler environment variables](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/configure-n8n/basic-configuration/use-environment-variables/scheduler) page for the full set. To monitor the scheduler, set `N8N_METRICS=true` and `N8N_METRICS_INCLUDE_SCHEDULER_METRICS=true` to expose Prometheus metrics for queue depth, scheduling lag, dispatch throughput, retries, and dead-letters.
+
+The durable scheduler shipped as a Preview feature in this release and became generally available in n8n 2.36. n8n recommends testing in a non-production environment first. How a run that was missed during downtime is handled depends on the trigger's misfire policy.
+
+Learn more in the [durable scheduler documentation](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/configure-n8n/durable-scheduler).
+
+## Configure instance settings programmatically via REST API
+
+**Released:** 2026-07-14 in [n8n 2.31](release-notes.md#n8n231)
+
+You can now read and update instance-level settings through the n8n public REST API, starting with the security policy. Instead of clicking through the settings panel on every instance, you can drive configuration from a CI/CD pipeline, an infrastructure-as-code tool, or any HTTP client. Every write goes through the same validation as the UI, so an API-driven change takes effect exactly as it would if you clicked Save.
+
+`GET /api/v1/settings/security-policy` and `PUT /api/v1/settings/security-policy` read and update personal-space publishing and sharing, plus the execution-data redaction enforcement floor. The PUT takes the full configuration object: partial bodies are rejected with a 400, so you always know exactly what you're writing. The read-only usage counts that GET returns are ignored on write, so you can send a GET response straight back as a PUT body. If the policy is managed through environment variables, the API returns a 409 Conflict and leaves the values untouched, so declarative config is never silently overwritten.
+
+To use these endpoints, generate an API key with the `securitySettings:manage` scope. Scopes are fixed on a key when you create it, so an existing key won't pick up a new scope: issue a new one. Settings endpoints for log streaming and SAML followed in n8n 2.32, OpenTelemetry in n8n 2.33, and OIDC and LDAP in n8n 2.34.
+
+Learn more in the [security policy API documentation](https://app.gitbook.com/s/r7wKI4I1BgdBCuq5Cvcx/n8n-api/instance-settings/security-policy).
+
+{% hint style="info" %}
+**Availability:** Enterprise.
+{% endhint %}
 
 ## Capture who approved and when in human-in-the-loop steps
 
@@ -64,15 +301,15 @@ _OneDrive and Outlook support released in n8n 2.29 (2026-06-30)._
 
 The [Kafka credential](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/credentials/kafka) now supports mutual TLS: provide a CA certificate, client certificate, and private key (PEM) to connect to brokers that require client-certificate authentication. mTLS applies to the Kafka node, the Kafka Trigger, and the credential test, and n8n validates that certificate and key match before you save.
 
-## AI Assistant: describe a goal, get a working automation
+## n8n Assistant: describe a goal, get a working automation
 
 **Released:** 2026-07-09 in [n8n 2.29.9](release-notes.md#n8n229)
 
-You can now describe an automation in plain language and have AI Assistant plan, build, test, and iterate on it until it actually runs. Open the chat from anywhere in your instance, or expand it into a side-by-side view with the workflow canvas, and tell it what you want to automate. It proposes a structured plan, asks clarifying questions, builds the workflow in your selected project, executes it as it goes, and fixes the errors it finds.
+You can now describe an automation in plain language and have n8n Assistant plan, build, test, and iterate on it until it actually runs. Open the chat from anywhere in your instance, or expand it into a side-by-side view with the workflow canvas, and tell it what you want to automate. It proposes a structured plan, asks clarifying questions, builds the workflow in your selected project, executes it as it goes, and fixes the errors it finds.
 
-<figure><img src=".gitbook/assets/ai-assistant-entry-point.png" alt="The AI Assistant entry point: a chat box asking what to automate, with suggestions like Score my leads."><figcaption><p>Describe what you want to automate, or start from a suggestion.</p></figcaption></figure>
+<figure><img src=".gitbook/assets/ai-assistant-entry-point.png" alt="The n8n Assistant entry point: a chat box asking what to automate, with suggestions like Score my leads."><figcaption><p>Describe what you want to automate, or start from a suggestion.</p></figcaption></figure>
 
-AI Assistant supersedes the AI Workflow Builder, and the difference is autonomy. The AI Workflow Builder generated a workflow and handed off, leaving you to run it and debug failures yourself. AI Assistant works toward your goal: it runs what it builds, detects failures, and retries until the automation works. Its scope is broader than building, too. It can manage executions, credentials, nodes, and Data Tables, run one-off tasks, and research the web when web access is enabled. Credential setup happens progressively as it builds: fill values in manually, let it fetch what it can, or mock and skip where needed, with secrets never exposed in the chat.
+n8n Assistant supersedes the AI Workflow Builder, and the difference is autonomy. The AI Workflow Builder generated a workflow and handed off, leaving you to run it and debug failures yourself. n8n Assistant works toward your goal: it runs what it builds, detects failures, and retries until the automation works. Its scope is broader than building, too. It can manage executions, credentials, nodes, and Data Tables, run one-off tasks, and research the web when web access is enabled. Credential setup happens progressively as it builds: fill values in manually, let it fetch what it can, or mock and skip where needed, with secrets never exposed in the chat.
 
 Every workflow it builds is a normal n8n workflow: a visible canvas you can open, inspect, edit, and publish, with step-by-step execution logs to audit, built on the 400+ integrations n8n already ships instead of rebuilt API connections. You stay in control throughout: high-impact actions such as publishing wait for your approval. This is an early first step, and we want your feedback on where to take it next.
 
@@ -82,10 +319,10 @@ Every workflow it builds is a normal n8n workflow: a visible canvas you can open
 This feature is in Preview. It can make mistakes, and its behavior may change while it's in development. Always review generated workflows before using them in production.
 {% endhint %}
 
-Learn more in the [AI Assistant documentation](https://app.gitbook.com/s/rPN1zU5jaYNvwH7RzxqA/ways-of-building-workflows/ai-assistant).
+Learn more in the [n8n Assistant documentation](https://app.gitbook.com/s/rPN1zU5jaYNvwH7RzxqA/ways-of-building-workflows/n8n-assistant).
 
 {% hint style="info" %}
-**Availability:** n8n Cloud only. Self-hosted support is coming.
+**Availability:** n8n Cloud at release. Self-hosted setup followed in n8n 2.35: refer to [n8n Assistant on self-hosted n8n](./#n8n-assistant-on-self-hosted-n8n-set-up-in-minutes).
 {% endhint %}
 
 ## MCP server updates
@@ -267,7 +504,7 @@ Connect to MCP servers with less setup
 
 You can now attach custom span attributes to OpenTelemetry traces at the node, workflow, and project level, letting you filter and group execution spans by tenant, environment, customer ID, or any other dimension. Attribute values support expressions, so they can pull live data from webhook payloads or API responses at runtime rather than relying on hardcoded values. Configure tags in node or workflow settings when tracing is enabled (`N8N_OTEL_ENABLED=true`).
 
-Learn more in the [custom span attributes documentation](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/keep-n8n-running/trace-executions-with-opentelemetry#custom-span-attributes).
+Learn more in the [custom span attributes documentation](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/keep-n8n-running/trace-executions-with-opentelemetry/add-custom-span-attributes).
 
 {% hint style="info" %}
 **Availability:** Enterprise.

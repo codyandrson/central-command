@@ -14,6 +14,8 @@ layout:
 
 # Environments in n8n <a href="#environments-in-n8n" id="environments-in-n8n"></a>
 
+Environments in n8n let you change and test workflows in a development instance without breaking production: each environment is an n8n instance linked to a Git branch.
+
 n8n has built its environments feature on top of Git, a version control software. This document helps you understand:
 
 * The purpose of environments.
@@ -49,3 +51,16 @@ How you copy work between environments depends on your branch and n8n instance c
 For detailed guidance on pushing and pulling work, refer to [Push and pull](push-and-pull-changes.md).
 
 Refer to [Set up source control](set-up-source-control.md) to learn more about linking your n8n instance to Git, or follow the [Tutorial: Create environments with source control](tutorial-create-environments-with-source-control.md) to set up your environments using one of n8n's recommended configurations.
+
+## Related resources
+
+* [Use source control and environments](./)
+* [Understand source control](understand-source-control.md)
+* [Use Git in n8n](use-git-in-n8n.md)
+* [Choose branching patterns](choose-branching-patterns.md)
+* [Set up source control](set-up-source-control.md)
+* [Push and pull changes](push-and-pull-changes.md)
+* [Compare versions](compare-versions.md)
+* [Move work between environments](move-work-between-environments.md)
+* [Use environments programmatically with the public API](use-environments-via-api.md)
+* [Tutorial: Create environments with source control](tutorial-create-environments-with-source-control.md)

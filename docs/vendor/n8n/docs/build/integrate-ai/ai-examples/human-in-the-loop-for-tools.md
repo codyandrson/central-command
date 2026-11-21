@@ -15,6 +15,8 @@ layout:
 
 # Human-in-the-loop for AI tool calls <a href="#human-in-the-loop-for-ai-tool-calls" id="human-in-the-loop-for-ai-tool-calls"></a>
 
+You can make an AI agent wait for human approval, in Slack, n8n Chat, or another channel, before it runs a specific tool.
+
 You can require human approval before an AI Agent executes a specific tool. When a tool requires human review, the workflow pauses and waits for a person to take one of the following actions:
 
 - **Approve**: The tool executes with the input specified by the AI.
@@ -124,13 +126,18 @@ Consider including:
 
 
 
-## Chaining and subagents <a href="#chaining-and-subagents" id="chaining-and-subagents"></a>
+## Chaining and sub-agents <a href="#chaining-and-subagents" id="chaining-and-subagents"></a>
 
-When using an AI Agent as a tool for another AI Agent, human review steps in the subagent work correctly.
+When using an AI Agent as a tool for another AI Agent, human review steps in the sub-agent work correctly.
 
 ## Related resources <a href="#related-resources" id="related-resources"></a>
 
+- [AI examples](../ai-examples.md)
+- [Use Google Sheets as a data source](use-google-sheets-as-a-data-source.md)
+- [Call APIs](call-apis.md)
+- [Use website content](use-website-content.md)
+- [Set a human fallback for AI workflows](set-a-human-fallback-for-ai-workflows.md)
+- [Use AI for parameters](use-ai-for-parameters.md)
 - [AI Agent node](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.agent)
 - [Tools Agent](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.agent/tools-agent)
 - [What is a tool in AI?](../understand-ai-components/how-tools-work.md)
-- [Let AI specify tool parameters with $fromAI()](use-ai-for-parameters.md)

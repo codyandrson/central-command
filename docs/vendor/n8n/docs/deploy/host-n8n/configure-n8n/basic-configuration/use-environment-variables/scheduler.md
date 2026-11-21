@@ -19,7 +19,7 @@ layout:
 
 # Scheduler environment variables <a href="#scheduler-environment-variables" id="scheduler-environment-variables"></a>
 
-These environment variables configure the durable scheduler, which runs time-based workflows from a database-backed queue instead of from each instance's memory. For what the durable scheduler changes, how to turn it on, and how it works, see [Durable scheduler](../../durable-scheduler.md).
+These environment variables configure the durable scheduler, which runs time-based workflows from a database-backed queue instead of from each instance's memory. It's on by default from n8n 2.45.0. For what it changes, how it works, and how to use the in-memory scheduler, see [Durable scheduler](../../durable-scheduler.md).
 
 Turn on Prometheus metrics for the durable scheduler with `N8N_METRICS_INCLUDE_SCHEDULER_METRICS` and `N8N_METRICS_SCHEDULER_INTERVAL`, which live with the other metrics variables on the [Endpoints](endpoints.md) page. For what each metric means, see [Durable scheduler observability](../../durable-scheduler.md#observability).
 
@@ -33,9 +33,11 @@ The durable scheduler is available from n8n 2.36.0. Earlier versions back to n8n
 
 | Variable | Type | Default | Description |
 | :------- | :--- | :------ | :---------- |
-| `N8N_SCHEDULER_ENABLED` | Boolean | `false` | Whether to turn on the durable scheduler. When on, the scheduler stores scheduled runs in the database before they execute, so a restart doesn't drop them and, across multiple instances, each run executes once. Requires `N8N_USE_WORKFLOW_PUBLICATION_SERVICE` to take over Schedule Trigger nodes. |
+| `N8N_SCHEDULER_ENABLED` | Boolean | `true` | Whether to use the durable scheduler. Defaults to `true` from n8n 2.45.0 (`false` in earlier versions). Set to `false` to use the in-memory scheduler. Requires `N8N_USE_WORKFLOW_PUBLICATION_SERVICE`, also on by default, to take over Schedule Trigger nodes. Deprecated from n8n 2.45.0: a future version will remove this variable and the in-memory scheduler. |
 | `N8N_SCHEDULER_POLL_TRIGGERS_ENABLED` | Boolean | `false` | Whether the durable scheduler also takes over polling triggers (trigger nodes with a Poll Times parameter). Requires `N8N_SCHEDULER_ENABLED` and `N8N_USE_WORKFLOW_PUBLICATION_SERVICE`. Available from n8n 2.33.0. |
-| `N8N_ENV_FEAT_SKIP_DURABLE_SCHEDULER` | Boolean | `false` | Whether Schedule Trigger nodes show a **Skip Durable Scheduler** setting that keeps an individual trigger on the in-memory scheduler while the durable scheduler is on. A temporary escape hatch for migrating gradually; a future release will remove it. |
+| `N8N_SCHEDULER_SYSTEM_TASKS_ENABLED` | Boolean | `false` | Whether the durable scheduler runs n8n's internal maintenance jobs instead of the leader main's in-process timers. Requires `N8N_SCHEDULER_ENABLED`. Give every main the same value for both variables, and run the same n8n version on every main. A main with either flag off removes the durable schedules for these jobs at startup. Use it from n8n 2.45.0, the first version that runs every system task on the durable scheduler. See [System tasks](../../system-tasks.md#run-system-tasks-on-the-durable-scheduler). |
+
+n8n 2.45.0 removes `N8N_ENV_FEAT_SKIP_DURABLE_SCHEDULER` and the **Skip Durable Scheduler** node setting. To use the in-memory scheduler for all Schedule Trigger nodes, set `N8N_SCHEDULER_ENABLED=false` and restart n8n. See [Use the in-memory scheduler](../../durable-scheduler.md#use-the-in-memory-scheduler).
 
 {% hint style="warning" %}
 Poll trigger support isn't 100% stable yet. Keep `N8N_SCHEDULER_POLL_TRIGGERS_ENABLED` off in production unless you're prepared to keep a close watch on your polling workflows: check their execution lists for gaps or duplicate runs, and turn on scheduler metrics to watch scheduling lag, retries, and dead-letters (see [Durable scheduler observability](../../durable-scheduler.md#observability)). This doesn't affect Schedule Trigger support, which is stable.
@@ -93,6 +95,25 @@ Controls how long the scheduler keeps finished runs as history and how often it 
 | `N8N_SCHEDULER_RETENTION_INTERVAL` | Number | `3600` | How often, in seconds, the scheduler deletes finished runs older than the retention windows. Defaults to one hour. Must be greater than 0. |
 | `N8N_SCHEDULER_RETENTION_TIMEOUT` | Number | `300` | How long, in seconds, a single cleanup pass may run before it's abandoned and retried on the next interval. Defaults to five minutes. Must be greater than 0. |
 
+## Owner reconciliation
+
+Controls the sweep that retires schedules whose owner no longer exists, such as a workflow that's no longer published. The sweep stops them right away and deletes them after a grace period. See [How the durable scheduler works](../../durable-scheduler.md#how-it-works).
+
+{% hint style="info" %}
+**Feature availability**
+
+Owner reconciliation is available from n8n 2.39.0.
+{% endhint %}
+
+| Variable | Type | Default | Description |
+| :------- | :--- | :------ | :---------- |
+| `N8N_SCHEDULER_OWNER_RECONCILIATION_ENABLED` | Boolean | `true` | Whether the scheduler periodically checks that every schedule's owner still exists and retires the schedules whose owner is missing. Turning it off leaves those schedules in place. |
+| `N8N_SCHEDULER_OWNER_RECONCILIATION_INTERVAL` | Number | `900` | How often, in seconds, the sweep runs. Defaults to 15 minutes. It's a safety net rather than the usual cleanup path, so a long interval is fine. Must be greater than 0. |
+| `N8N_SCHEDULER_OWNER_RECONCILIATION_TIMEOUT` | Number | `300` | How long, in seconds, a single sweep may run before it's abandoned and retried on the next interval. Defaults to five minutes. Must be greater than 0. |
+| `N8N_SCHEDULER_OWNER_RECONCILIATION_BATCH_SIZE` | Number | `500` | How many owners the sweep checks per database query. Larger batches finish a sweep in fewer queries; smaller ones keep each query light. Must be between 1 and 1000. |
+| `N8N_SCHEDULER_OWNER_QUARANTINE_GRACE` | Number | `86400` | How long, in seconds, the sweep keeps a stopped schedule before deleting it. Defaults to one day. The schedule stops firing as soon as the sweep finds it, so this only delays the delete. Must be greater than 0. |
+| `N8N_SCHEDULER_OWNER_SETTLE_PERIOD` | Number | `300` | How old, in seconds, a schedule must be before the sweep considers it. Defaults to five minutes. n8n can write a schedule a moment before its owner, so this stops the sweep from mistaking a brand-new schedule for an abandoned one. Must be greater than 0. |
+
 ## Coordination across instances <a href="#coordination-vars" id="coordination-vars"></a>
 
 Controls how the scheduler overlaps its background passes and spreads database load across instances.
@@ -106,6 +127,9 @@ Controls how the scheduler overlaps its background passes and spreads database l
 
 | Variable | Type | Default | Description |
 | :------- | :--- | :------ | :---------- |
-| `N8N_SCHEDULER_MIN_INTERVAL` | Number | `0` | The smallest gap, in seconds, allowed between consecutive runs of the same schedule. n8n slows a schedule set to run more often down to this gap. Defaults to `0`, which disables the limit and honors whatever interval each schedule specifies. Set it to stop a runaway every-second schedule from overloading the instance. |
-| `N8N_SCHEDULER_TRIGGER_NODE_MODE` | Enum (`legacy`, `new`) | `legacy` | How a Schedule Trigger node's "every N seconds" and "every N minutes" schedules fire. `legacy` keeps clock-aligned timing matching the in-memory scheduler; `new` spaces runs a steady N apart from activation time. Only affects second and minute intervals. See [Schedule Trigger timing](../../durable-scheduler.md#trigger-node-mode). |
+| `N8N_SCHEDULER_TRIGGER_NODE_MODE` | Enum (`legacy`, `new`) | `new` | How a Schedule Trigger node's "every N seconds" and "every N minutes" schedules fire. `new` spaces runs a steady N apart from workflow publication. It's the default from n8n 2.45.0. `legacy` keeps clock-aligned timing matching the in-memory scheduler and is the default in earlier versions. Only affects second and minute intervals. Deprecated from n8n 2.45.0: a future version will remove this variable and the `legacy` mode. See [Schedule Trigger timing](../../durable-scheduler.md#trigger-node-mode). |
 | `N8N_SCHEDULER_MISFIRE_GRACE` | Number | `60` | How late, in seconds, a run may start and still count as on time. A run later than this counts as missed, and its trigger's misfire policy decides what happens to it and to any backlog behind it. This is the default a schedule inherits; from n8n 2.36.0, a Schedule Trigger node can set its own grace period instead. Should exceed `N8N_SCHEDULER_EXECUTOR_INTERVAL` and be at least `N8N_SCHEDULER_MATERIALIZATION_WINDOW`; n8n warns at startup if it doesn't. Capped at 30 days. See [Misfire policy](../../durable-scheduler.md#misfire-policy). Available from n8n 2.34.0. |
+
+## Related resources
+
+* [Environment variables](./)

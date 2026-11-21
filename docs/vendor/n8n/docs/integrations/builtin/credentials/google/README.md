@@ -7,7 +7,7 @@ originalUrl: https://docs.n8n.io/integrations/builtin/credentials/google
 url: https://docs.n8n.io/integrations/builtin/credentials/google
 description: >-
   Documentation for Google credentials. Use these credentials to authenticate
-  Google in n8n, a workflow automation platform.
+  with Google in n8n.
 layout:
   width: default
   title:
@@ -41,20 +41,31 @@ This section contains:
 
 ## OAuth2 and Service Account <a href="#oauth2-and-service-account" id="oauth2-and-service-account"></a>
 
-There are two authentication methods available for Google services nodes:
+Google service nodes support two authentication methods:
 
 * [OAuth2](https://developers.google.com/identity/protocols/oauth2): Recommended because it's more widely available and easier to set up.
 * [Service Account](https://cloud.google.com/iam/docs/understanding-service-accounts): Refer to the [Google documentation: Understanding service accounts](https://cloud.google.com/iam/docs/understanding-service-accounts) for guidance on when you need a service account.
 
 ### Managed OAuth2 for n8n Cloud users <a href="#managed-oauth2-for-n8n-cloud-users" id="managed-oauth2-for-n8n-cloud-users"></a>
 
-[Managed OAuth2](oauth-single-service.md#managed-oauth2) is available for the following Google nodes, for n8n Cloud users. This provides a simplified credential creation process:
+{% hint style="info" %}
+**Feature availability**
+
+Managed OAuth2 for the Google nodes listed below is available on:
+
+- **n8n Cloud:** All plans
+
+It isn't available on self-hosted. For self-hosted, configure your own OAuth2 credentials instead.
+
+{% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/OI5s27oyRBdDvpwcuMQF/" %}
+
+{% endhint %}
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/OI5s27oyRBdDvpwcuMQF/" %}
 
 ## Compatible nodes <a href="#compatible-nodes" id="compatible-nodes"></a>
 
-Once configured, you can use your credentials to authenticate the following nodes. Most nodes are compatible with OAuth2 authentication. Support for Service Account authentication is limited.
+Once configured, you can use your credentials to authenticate the following nodes. Most nodes are compatible with OAuth2 authentication. n8n has limited support for Service Account authentication.
 
 | Node                                                                                            | OAuth | Service Account |
 | ----------------------------------------------------------------------------------------------- | :---: | :-------------: |

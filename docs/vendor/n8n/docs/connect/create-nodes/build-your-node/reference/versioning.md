@@ -24,6 +24,7 @@ Be aware of how n8n decides which node version to load:
 
 If you build a node using the declarative style, you can't use full versioning.
 {% endhint %}
+
 ## Light versioning <a href="#light-versioning" id="light-versioning"></a>
 
 This is available for all node types.
@@ -143,3 +144,7 @@ Full versioning summary:
 - n8n recommends using `v1`, `v2`, and so on, for version folder names.
 
 
+
+## Related resources
+
+* [Node building reference](./)

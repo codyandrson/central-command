@@ -33,12 +33,16 @@ layout:
 
 # MiniMax
 
+{% hint style="info" %}
+On n8n Cloud, you can use the MiniMax node with [Gateway credits](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/use-n8n-cloud/gateway-credits) instead of your own MiniMax API key. Select **Use Gateway credits** in the node's credential field to run the node without a MiniMax account.
+{% endhint %}
+
 The MiniMax node connects n8n workflows to MiniMax AI models. Use it to generate images from text prompts, synthesize speech, create videos from text or images, and send messages to MiniMax language models.
 
 {% hint style="info" %}
 **Credentials**
 
-You can find authentication information for this node [here](../credentials/minimax.md).
+Refer to the [MiniMax credentials documentation](../credentials/minimax.md) for authentication information for this node.
 {% endhint %}
 
 ## Resources and operations <a href="#resources-and-operations" id="resources-and-operations"></a>

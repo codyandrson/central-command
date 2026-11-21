@@ -33,6 +33,7 @@ Support for basic auth and JWT authentication was removed from n8n 1.0.
 
 The `N8N_USER_MANAGEMENT_DISABLED` environment variable was also removed from n8n 1.0. No supported way to disable the login screen exists in recent versions of n8n, including for local or development use. If you need to simplify login for local development, consider using a password manager, setting a simple local password, or scripting the standard login flow.
 {% endhint %}
+
 ## Setup <a href="#setup" id="setup"></a>
 
 There are three stages to set up user management in n8n:
@@ -118,3 +119,7 @@ This variable expects a pre-hashed bcrypt value. Setting a plaintext password br
 ### Step three: Invite users <a href="#step-three-invite-users" id="step-three-invite-users"></a>
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/8qoOEjsLz4RnydVBogNy/" %}
+
+## Related resources
+
+* [Configure n8n](./)

@@ -44,9 +44,9 @@ Refer to [External storage](../../scaling/use-external-storage.md) for more info
 
 Storing execution data or binary data in Azure Blob Storage is available on:
 
-- **Self-hosted:** Enterprise
+- **Self-hosted:** Business, Enterprise
 
-It isn't available on n8n Cloud. Add an [Enterprise license key](../../manage-your-license.md) to unlock this feature.
+It isn't available on n8n Cloud. Add your [license key](../../manage-your-license.md) to unlock this feature.
 {% endhint %}
 
 To store execution data in Azure Blob Storage, set `N8N_EXECUTION_DATA_STORAGE_MODE` to `azure`. To store binary data in Azure Blob Storage, set `N8N_DEFAULT_BINARY_DATA_MODE` to `azure` (refer to [External storage](../../scaling/use-external-storage.md#storing-n8ns-binary-data-in-azure-blob-storage)). A single container can hold both. Configure the variables below; `N8N_EXTERNAL_STORAGE_AZURE_CONTAINER_NAME` is always required.
@@ -67,3 +67,7 @@ Set `N8N_EXTERNAL_STORAGE_AZURE_ENDPOINT` only if you use a custom endpoint, suc
 | `N8N_EXTERNAL_STORAGE_AZURE_CONTAINER_NAME` | String | - | Name of the blob container to store execution data and/or binary data in. Required for Azure Blob Storage. |
 | `N8N_EXTERNAL_STORAGE_AZURE_ENDPOINT` | String | - | Custom blob endpoint, for example for Azurite or sovereign clouds. |
 | `N8N_EXTERNAL_STORAGE_AZURE_AUTH_AUTO_DETECT` | Boolean | `false` | Authenticate via `DefaultAzureCredential` (managed identity, environment, or Azure CLI) instead of an account key. Ignores the account key when enabled. |
+
+## Related resources
+
+* [Environment variables](./)

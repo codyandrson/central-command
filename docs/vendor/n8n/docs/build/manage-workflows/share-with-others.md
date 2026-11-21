@@ -12,13 +12,15 @@ layout:
 
 # Workflow sharing <a href="#workflow-sharing" id="workflow-sharing"></a>
 
+Workflow sharing gives other users of your instance editor access to a workflow with least privilege: editors can't share or delete it, or edit nodes using unshared credentials.
+
 {% hint style="info" %}
 **Feature availability**
 
 Workflow sharing is available on:
 
 - **n8n Cloud:** All plans
-- **Self-hosted:** Enterprise
+- **Self-hosted:** Business, Enterprise
 {% endhint %}
 
 Workflow sharing allows you to share workflows between users of the same n8n instance.
@@ -60,6 +62,7 @@ You can't change the workflow owner, except when deleting the user.
 
 Workflow sharing allows editors to use all credentials[^1] used in the workflow. This includes credentials that aren't explicitly shared with them using [credential sharing](https://app.gitbook.com/s/wMJrGrimpx3PxCJpUswm/manage-credentials/share-credentials-securely).
 {% endhint %}
+
 ### Permissions <a href="#permissions" id="permissions"></a>
 
 | Permissions | Creator | Editor | 
@@ -79,3 +82,14 @@ Sharing in n8n works on the principle of least privilege. This means that if a u
 Refer to [Credential sharing](https://app.gitbook.com/s/wMJrGrimpx3PxCJpUswm/manage-credentials/share-credentials-securely) for guidance on sharing credentials.
 
 [^1]: In n8n, credentials store authentication information to connect with specific apps and services. After creating credentials with your authentication information (username and password, API key, OAuth secrets, etc.), you can use the associated app node to interact with the service.
+
+## Related resources
+
+* [Manage workflows](./)
+* [Configure workflow settings](configure-workflow-settings.md)
+* [Tag workflows](tag-workflows.md)
+* [Favorite items](favorite-items.md)
+* [View change history](view-change-history.md)
+* [Review workflows](workflow-reviews.md)
+* [Export and import](export-and-import.md)
+* [n8n packages](n8n-packages/README.md)

@@ -1,9 +1,8 @@
 ---
 title: n8n public REST API Documentation and Guides
 description: >-
-  Access n8n public REST API documentation and guides. Find comprehensive
-  resources to programmatically perform tasks with the public API instead of the
-  GUI.
+  Use n8n's public REST API to perform tasks programmatically instead of
+  through the GUI.
 contentType: overview
 search:
   boost: 5
@@ -24,32 +23,41 @@ layout:
 {% hint style="info" %}
 **Feature availability**
 
-The n8n API isn't available during the free trial. Please upgrade to access this feature.
+The n8n API is available on:
+
+- **n8n Cloud:** Starter, Pro, Enterprise
+- **Self-hosted:** All editions
+
+It isn't available on the free trial.
 {% endhint %}
 
-Using n8n's public API[^1], you can programmatically perform many of the same tasks as you can in the GUI. This section introduces n8n's REST API, including:
-
-* How to [authenticate](authentication.md)
-* [Paginating](pagination.md) results
-* Using the [built-in API playground](use-an-api-playground.md) (self-hosted n8n only)
-* The [endpoint reference](api-reference.md)
+Using n8n's public API[^1], you can programmatically perform many of the same tasks as you can in the GUI. For supported POSTs, an [idempotency key](idempotency.md) returns the first successful response instead of running the request again.
 
 n8n provides an [n8n API node](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/core-nodes/n8n-nodes-base.n8n) to access the API in your workflows.
 
+## In this section
+
+* [Authentication](authentication.md): how to authenticate requests to the n8n API.
+* [Pagination](pagination.md): paginate large result sets.
+* [Idempotency](idempotency.md): retry a POST with an `Idempotency-Key` header.
+* [Rate limits](rate-limits.md): stay under the request limits and handle a `429` response.
+* [Use an API playground](use-an-api-playground.md): try out the API in a built-in playground (self-hosted n8n only).
+* [Endpoint reference](api-reference.md): the complete endpoint reference, generated from the OpenAPI specification.
+
 ## Choose your interaction method <a href="#choose-your-interaction-method" id="choose-your-interaction-method"></a>
 
-### REST API (This section) <a href="#rest-api-this-section" id="rest-api-this-section"></a>
+### REST API (this section) <a href="#rest-api-this-section" id="rest-api-this-section"></a>
 Interact with n8n directly using HTTP requests. Ideal for:
-- Custom integrations and applications
-- Language-agnostic HTTP calls
-- Direct REST API usage in workflows
+* Custom integrations and applications
+* Language-agnostic HTTP calls
+* Direct REST API usage in workflows
 
-### n8n CLI (Recommended for developers) <a href="#n8n-cli-recommended-for-developers" id="n8n-cli-recommended-for-developers"></a>
-Use [n8n CLI](../README.md) for a command-line experience. It wraps the public API and is optimized for:
-- Command-line automation and scripting
-- CI/CD pipeline integration
-- AI agent integration (Claude Code, Cursor, etc.)
-- Developers who prefer CLI tools
+### n8n CLI (recommended for developers) <a href="#n8n-cli-recommended-for-developers" id="n8n-cli-recommended-for-developers"></a>
+Use [n8n CLI](../n8n-cli.md) for a command-line experience. It wraps the public API and is a good fit for:
+* Command-line automation and scripting
+* CI/CD pipeline integration
+* AI agent integration (Claude Code, Cursor, etc.)
+* Developers who prefer CLI tools
 
 ## Learn about REST APIs <a href="#learn-about-rest-apis" id="learn-about-rest-apis"></a>
 
@@ -67,3 +75,11 @@ Trying out the API in the [playground](use-an-api-playground.md) can help you un
 {% endhint %}
 
 [^1]: APIs, or application programming interfaces, offer programmatic access to a service's data and functionality. APIs make it easier for software to interact with external systems. They're often offered as an alternative to traditional user-focused interfaces accessed through web browsers or UI.
+
+## Related resources
+
+* [Connect](../)
+* [n8n CLI](../n8n-cli.md)
+* [Connect to n8n MCP server](../connect-to-n8n-mcp-server.md)
+* [Connect to the n8n docs MCP server](../connect-to-n8n-docs-mcp-server.md)
+* [Create nodes](../create-nodes/README.md)

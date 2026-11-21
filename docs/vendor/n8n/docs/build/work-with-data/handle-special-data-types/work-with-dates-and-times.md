@@ -109,6 +109,7 @@ You can convert date strings and other date formats to a Luxon DateTime object. 
 
 With vanilla JavaScript, you can convert a string to a date with `new Date('2019-06-23')`. In Luxon, you must use a function explicitly stating the format, such as `DateTime.fromISO('2019-06-23')` or `DateTime.fromFormat("23-06-2019", "dd-MM-yyyy")`.
 {% endhint %}
+
 #### If you have a date in a supported standard technical format: <a href="#if-you-have-a-date-in-a-supported-standard-technical-format" id="if-you-have-a-date-in-a-supported-standard-technical-format"></a>
 
 Most dates use `fromISO()`. This creates a Luxon DateTime from an ISO 8601 string. For example:
@@ -297,3 +298,9 @@ A detailed explanation of what the code does:
 * `.days` uses JMESPath syntax to retrieve just the number of days from the object. For more information on using JMESPath with n8n, refer to our [JMESpath](query-json-data.md) documentation. This gives you the number of days to Christmas, as a negative number.
 * `.toString().substring(1)` turns the number into a string and removes the `-`.
 * `+ " days to Christmas!"`: another string, with a `+` to join it to the previous string.
+
+## Related resources
+
+* [Handle special data types](./)
+* [Work with files and images](work-with-files-and-images.md)
+* [Query JSON data](query-json-data.md)

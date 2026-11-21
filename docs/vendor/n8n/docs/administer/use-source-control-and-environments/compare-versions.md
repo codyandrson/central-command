@@ -22,7 +22,7 @@ Workflow diffs allow you to visually compare changes between the workflow you ha
 Workflow diffs are available on:
 
 - **n8n Cloud:** Enterprise
-- **Self-hosted:** Enterprise
+- **Self-hosted:** Business, Enterprise
 
 Workflow diffs are only available when you [enable the environments features](set-up-source-control.md) on an instance.
 {% endhint %}
@@ -75,3 +75,16 @@ Only users who can push or pull commits for an instance can access workflow diff
 * instance owners
 * instance admins
 * project admins
+
+## Related resources
+
+* [Use source control and environments](./)
+* [Understand source control](understand-source-control.md)
+* [Work with environments](work-with-environments.md)
+* [Use Git in n8n](use-git-in-n8n.md)
+* [Choose branching patterns](choose-branching-patterns.md)
+* [Set up source control](set-up-source-control.md)
+* [Push and pull changes](push-and-pull-changes.md)
+* [Move work between environments](move-work-between-environments.md)
+* [Use environments programmatically with the public API](use-environments-via-api.md)
+* [Tutorial: Create environments with source control](tutorial-create-environments-with-source-control.md)

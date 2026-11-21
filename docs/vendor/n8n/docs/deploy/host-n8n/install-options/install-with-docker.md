@@ -31,7 +31,7 @@ layout:
 **This content is outdated.** Please refer to [Install using Docker Compose](install-using-docker-compose.md) for the recommended installation method.
 {% endhint %}
 
-## Docker Installation <a href="#docker-installation" id="docker-installation"></a>
+## Docker installation <a href="#docker-installation" id="docker-installation"></a>
 
 n8n recommends using [Docker](https://www.docker.com/) for most self-hosting needs. It provides a clean, isolated environment, avoids operating system and tooling incompatibilities, and makes database and environment management simpler.
 
@@ -39,7 +39,7 @@ You can also use n8n in Docker with [Docker Compose](use-a-cloud-provider/use-do
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/YLv7Cqg70tj1alDgktSX/" %}
 
-You can also follow along with our video guide here:
+You can also follow along with this video guide:
 
 {% embed url="https://www.youtube.com/embed/6ET3G7GiqZA?si=mwCKbtyLqNCRc2pa" %}
 
@@ -65,9 +65,8 @@ docker run -it --rm \
  -e GENERIC_TIMEZONE="<YOUR_TIMEZONE>" \
  -e TZ="<YOUR_TIMEZONE>" \
  -e N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true \
- -e N8N_RUNNERS_ENABLED=true \
  -v n8n_data:/home/node/.n8n \
- docker.n8n.io/n8nio/n8n
+ n8nio/n8n
 ```
 
 This command creates a volume to store persistent data, downloads the required n8n image, and starts the container with the following settings:
@@ -77,7 +76,6 @@ This command creates a volume to store persistent data, downloads the required n
   * the `TZ` environment variable sets the system timezone to control what scripts and commands like `date` return.
   * the [`GENERIC_TIMEZONE` environment variable](../configure-n8n/basic-configuration/use-environment-variables/timezone-and-localization.md) sets the correct timezone for schedule-oriented nodes like the [Schedule Trigger node](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/core-nodes/n8n-nodes-base.scheduletrigger).
 * Enforces secure file permissions for the n8n configuration file.
-* Enables [task runners](../configure-n8n/set-up-task-runners.md), the recommended way of executing tasks in n8n.
 * Mounts the `n8n_data` volume to the `/home/node/.n8n` directory to persist your data across container restarts.
 
 {% hint style="warning" %}
@@ -109,7 +107,6 @@ docker run -it --rm \
  -e GENERIC_TIMEZONE="<YOUR_TIMEZONE>" \
  -e TZ="<YOUR_TIMEZONE>" \
  -e N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true \
- -e N8N_RUNNERS_ENABLED=true \
  -e DB_TYPE=postgresdb \
  -e DB_POSTGRESDB_DATABASE=<POSTGRES_DATABASE> \
  -e DB_POSTGRESDB_HOST=<POSTGRES_HOST> \
@@ -118,7 +115,7 @@ docker run -it --rm \
  -e DB_POSTGRESDB_SCHEMA=<POSTGRES_SCHEMA> \
  -e DB_POSTGRESDB_PASSWORD=<POSTGRES_PASSWORD> \
  -v n8n_data:/home/node/.n8n \
- docker.n8n.io/n8nio/n8n
+ n8nio/n8n
 ```
 
 You can find a complete `docker-compose` file for PostgreSQL in the [n8n hosting repository](https://github.com/n8n-io/n8n-hosting/tree/main/docker-compose/withPostgres).
@@ -133,13 +130,13 @@ You can also use the command line to pull the latest, or a specific version:
 
 ```shell
 # Pull latest (stable) version <a href="#pull-latest-stable-version" id="pull-latest-stable-version"></a>
-docker pull docker.n8n.io/n8nio/n8n
+docker pull n8nio/n8n
 
 # Pull specific version <a href="#pull-specific-version" id="pull-specific-version"></a>
-docker pull docker.n8n.io/n8nio/n8n:1.81.0
+docker pull n8nio/n8n:1.81.0
 
 # Pull next (unstable) version <a href="#pull-next-unstable-version" id="pull-next-unstable-version"></a>
-docker pull docker.n8n.io/n8nio/n8n:next
+docker pull n8nio/n8n:next
 ```
 
 After pulling the updated image, stop your n8n container and start it again. You can also use the command line. Replace `<container_id>` in the commands below with the container ID you find in the first command:
@@ -155,7 +152,7 @@ docker stop <container_id>
 docker rm <container_id>
 
 # Start the container <a href="#start-the-container" id="start-the-container"></a>
-docker run --name=<container_name> [options] -d docker.n8n.io/n8nio/n8n
+docker run --name=<container_name> [options] -d n8nio/n8n
 ```
 
 #### Updating Docker Compose <a href="#updating-docker-compose" id="updating-docker-compose"></a>
@@ -189,7 +186,7 @@ The `services` command:
 1. Starts cloudflared pointing at `host.docker.internal:5678` (your local n8n).
 2. Fetches the public tunnel URL from cloudflared's metrics endpoint.
 3. Writes a `.env` file to `packages/cli/bin/.env` with `WEBHOOK_URL` and `N8N_PROXY_HOPS=1`.
-4. `pnpm dev` and `pnpm start` pick up that `.env` automatically via dotenv.
+4. `pnpm dev` and `pnpm start` pick up that `.env` automatically using dotenv.
 
 Clean up when done:
 
@@ -204,3 +201,12 @@ pnpm --filter n8n-containers services:clean
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/GtC2RL8itCPuNiwv5UUW/" %}
 
 [^1]: In n8n, credentials store authentication information to connect with specific apps and services. After creating credentials with your authentication information (username and password, API key, OAuth secrets, etc.), you can use the associated app node to interact with the service.
+
+## Related resources
+
+* [Install options](./)
+* [One-line setup](one-line-setup.md)
+* [Install using Docker Compose](install-using-docker-compose.md)
+* [Install with npm](install-with-npm.md)
+* [Production requirements](production-requirements.md)
+* [Use a cloud provider](use-a-cloud-provider/README.md)

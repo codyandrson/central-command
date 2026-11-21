@@ -29,6 +29,10 @@ layout:
 
 Credentials are securely stored authentication information used to connect n8n workflows to external services such as APIs, or databases.
 
+{% hint style="info" %}
+On n8n Cloud, supported AI models and services don't need a credential at all: select **Use Gateway credits** on the node to run it with [Gateway credits](use-gateway-credits.md) instead of your own API key.
+{% endhint %}
+
 ## Create a credential <a href="#create-a-credential" id="create-a-credential"></a>
 
 1. Select the <img src="../.gitbook/assets/universal-resource-button (1).png" alt="universal create resource icon" data-size="line"> **Create** button in the upper-left corner of the side menu. Select credential.
@@ -93,3 +97,12 @@ You can use expressions[^2] to set credentials dynamically as your workflow runs
 
 [^1]: n8n projects allow you to separate workflows, variables, and credentials into separate groups for easier management. Projects make it easier for teams to collaborate by sharing and compartmentalizing related resources.
 [^2]: In n8n, expressions allow you to populate node parameters dynamically by executing JavaScript code. Instead of providing a static value, you can use the n8n expression syntax to define the value using data from previous nodes, other workflows, or your n8n environment.
+
+## Related resources
+
+* [Understand workflows](./)
+* [Create and run workflows](create-and-run-workflows.md)
+* [Save and publish workflows](save-and-publish-workflows.md)
+* [Use Gateway credits](use-gateway-credits.md)
+* [Workflow components](workflow-components/README.md)
+* [Understand executions](understand-executions/README.md)

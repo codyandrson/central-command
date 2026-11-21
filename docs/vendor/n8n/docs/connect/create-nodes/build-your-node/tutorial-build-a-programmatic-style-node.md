@@ -37,6 +37,7 @@ In this section, you'll clone n8n's node starter repository, and build a node th
 
 n8n has a built-in SendGrid node. To avoid clashing with the existing node, you'll give your version a different name.
 {% endhint %}
+
 ### Step 1: Set up the project <a href="#step-1-set-up-the-project" id="step-1-set-up-the-project"></a>
 
 n8n provides a starter repository for node development. Using the starter ensures you have all necessary dependencies. It also provides a linter. 
@@ -74,7 +75,7 @@ npm i
 
 ### Step 2: Add an icon <a href="#step-2-add-an-icon" id="step-2-add-an-icon"></a>
 
-Save the SendGrid SVG logo from [here](https://github.com/n8n-io/n8n/blob/master/packages/nodes-base/nodes/SendGrid/sendGrid.svg) as `friendGrid.svg` in `nodes/FriendGrid/`.
+Save [the SendGrid SVG logo](https://github.com/n8n-io/n8n/blob/master/packages/nodes-base/nodes/SendGrid/sendGrid.svg) as `friendGrid.svg` in `nodes/FriendGrid/`.
 
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/dGOXJYk0OQgOLlRpyJnn/" %}
@@ -504,3 +505,11 @@ You need to update the `package.json` to include your own information, such as y
 * Make sure you understand key concepts: [item linking](https://app.gitbook.com/s/rPN1zU5jaYNvwH7RzxqA/work-with-data/reference-data/link-data-items/how-items-link-through-workflows) and [data structures](https://app.gitbook.com/s/rPN1zU5jaYNvwH7RzxqA/work-with-data/understand-n8ns-data-structure).
 
 [^1]: In n8n, expressions allow you to populate node parameters dynamically by executing JavaScript code. Instead of providing a static value, you can use the n8n expression syntax to define the value using data from previous nodes, other workflows, or your n8n environment.
+
+## Related resources
+
+* [Build your node](./)
+* [Set up your development environment](set-up-your-development-environment.md)
+* [Using the n8n-node tool](using-the-n8n-node-tool.md)
+* [Tutorial: Build a declarative-style node](tutorial-build-a-declarative-style-node.md)
+* [Reference](reference/README.md)

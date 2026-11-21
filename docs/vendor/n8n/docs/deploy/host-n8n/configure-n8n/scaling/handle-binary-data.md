@@ -23,10 +23,20 @@ When handling binary data, n8n keeps the data in memory by default. This can cau
 
 To avoid this, change the `N8N_DEFAULT_BINARY_DATA_MODE` [environment variable](../basic-configuration/use-environment-variables/binary-data.md) to `filesystem`. This causes n8n to save data to disk, instead of using memory.
 
-If you're using queue mode, switch this to `database`. n8n doesn't support `filesystem` mode with queue mode.
+In queue mode, n8n uses `database` by default. If you use `filesystem` in queue mode, all main instances, workers, and webhook processors that handle binary data must access the same shared volume at the same configured path.
 
 ## Binary data pruning <a href="#binary-data-pruning" id="binary-data-pruning"></a>
 
 n8n executes binary data pruning as part of execution data pruning. Refer to [Execution data | Enable executions pruning](manage-execution-data.md#enable-executions-pruning) for details. 
 
 If you configure multiple binary data modes, binary data pruning operates on the active binary data mode. For example, if your instance stored data in S3, and you later switched to filesystem mode, n8n only prunes binary data in the filesystem. Refer to [External storage](use-external-storage.md#usage) for details. 
+
+## Related resources
+
+* [Scaling](../scaling.md)
+* [Measure performance](measure-performance.md)
+* [Enable queue mode](enable-queue-mode.md)
+* [Control concurrency](control-concurrency.md)
+* [Manage execution data](manage-execution-data.md)
+* [Use external storage](use-external-storage.md)
+* [Fix memory issues](fix-memory-issues.md)

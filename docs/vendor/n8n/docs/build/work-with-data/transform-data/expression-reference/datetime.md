@@ -276,6 +276,28 @@ This applies to any method on this page marked **Source: Custom n8n functionalit
   dt.isBetween('2020', $now) //=> true
   ```
 
+## _`DateTime`_.**`isEmpty()`** <a href="#datetimeisempty" id="datetimeisempty"></a>
+
+**Description:** Returns <code>false</code> for all DateTimes. Returns <code>true</code> for <code>null</code> or <code>undefined</code>.
+
+**Syntax:** _`DateTime`_.isEmpty()
+
+**Returns:** Boolean
+
+**Source:**  Custom n8n functionality
+
+**Examples:**
+
+  ```javascript
+  // dt = '2023-03-30T18:49:07.234'.toDateTime()
+  dt.isEmpty() // => false
+  ```
+
+  ```javascript
+  // dt = null
+  dt.isEmpty() // => true
+  ```
+
 ## _`DateTime`_.**`isInDST`** <a href="#datetimeisindst" id="datetimeisindst"></a>
 
 **Description:** Whether the DateTime is in daylight saving time
@@ -285,6 +307,28 @@ This applies to any method on this page marked **Source: Custom n8n functionalit
 **Returns:** Boolean
 
 **Type:** Luxon
+
+## _`DateTime`_.**`isNotEmpty()`** <a href="#datetimeisnotempty" id="datetimeisnotempty"></a>
+
+**Description:** Returns <code>true</code> for all DateTimes. Returns <code>false</code> for <code>null</code> or <code>undefined</code>.
+
+**Syntax:** _`DateTime`_.isNotEmpty()
+
+**Returns:** Boolean
+
+**Source:**  Custom n8n functionality
+
+**Examples:**
+
+  ```javascript
+  // dt = '2023-03-30T18:49:07.234'.toDateTime()
+  dt.isNotEmpty() // => true
+  ```
+
+  ```javascript
+  // dt = null
+  dt.isNotEmpty() // => false
+  ```
 
 ## _`DateTime`_.**`locale`** <a href="#datetimelocale" id="datetimelocale"></a>
 
@@ -331,7 +375,7 @@ This applies to any method on this page marked **Source: Custom n8n functionalit
 
 **Parameters:**
 
-  * `n` (Number|Object) - The number of units to subtract. Or use a Luxon <a href=”https://moment.github.io/luxon/api-docs/index.html#duration”>Duration</a> object to subtract multiple units at once.
+  * `n` (Number|Object) - The number of units to subtract. Or use a Luxon <a href="https://moment.github.io/luxon/api-docs/index.html#duration">Duration</a> object to subtract multiple units at once.
   * `unit` (String) - optional - The units of the number. One of: <code>years</code>, <code>months</code>, <code>weeks</code>, <code>days</code>, <code>hours</code>, <code>minutes</code>, <code>seconds</code>, <code>milliseconds</code>
 
 **Examples:**
@@ -440,7 +484,7 @@ This applies to any method on this page marked **Source: Custom n8n functionalit
 
 **Parameters:**
 
-  * `n` (Number|Object) - The number of units to add. Or use a Luxon <a href=”https://moment.github.io/luxon/api-docs/index.html#duration”>Duration</a> object to add multiple units at once.
+  * `n` (Number|Object) - The number of units to add. Or use a Luxon <a href="https://moment.github.io/luxon/api-docs/index.html#duration">Duration</a> object to add multiple units at once.
   * `unit` (String) - optional - The units of the number. One of: <code>years</code>, <code>months</code>, <code>weeks</code>, <code>days</code>, <code>hours</code>, <code>minutes</code>, <code>seconds</code>, <code>milliseconds</code>
 
 **Examples:**
@@ -526,7 +570,7 @@ This applies to any method on this page marked **Source: Custom n8n functionalit
 
 **Parameters:**
 
-  * `locale ` (String) - The locale to assign, e.g. ‘en-GB’ for British English or ‘pt-BR’ for Brazilian Portuguese. <a href=”https://www.localeplanet.com/icu/”>List</a> (unofficial)
+  * `locale ` (String) - The locale to assign, e.g. ‘en-GB’ for British English or ‘pt-BR’ for Brazilian Portuguese. <a href="https://www.localeplanet.com/icu/">List</a> (unofficial)
 
 **Examples:**
 
@@ -601,7 +645,7 @@ This applies to any method on this page marked **Source: Custom n8n functionalit
 
 **Parameters:**
 
-  * `opts ` (Object) - optional - Configuration options. See <a href=”https://moment.github.io/luxon/api-docs/index.html#datetimetoiso”>Luxon docs</a> for more info.
+  * `opts ` (Object) - optional - Configuration options. See <a href="https://moment.github.io/luxon/api-docs/index.html#datetimetoiso">Luxon docs</a> for more info.
 
 **Examples:**
 
@@ -638,7 +682,7 @@ This applies to any method on this page marked **Source: Custom n8n functionalit
 
 **Parameters:**
 
-  * `formatOpts ` (Object) - optional - Configuration options for the rendering. See <a href=”https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/DateTimeFormat#parameters”>Intl.DateTimeFormat</a> for a full list. Defaults to rendering a short date.
+  * `formatOpts ` (Object) - optional - Configuration options for the rendering. See <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/DateTimeFormat#parameters">Intl.DateTimeFormat</a> for a full list. Defaults to rendering a short date.
 
 **Examples:**
 
@@ -893,3 +937,6 @@ This applies to any method on this page marked **Source: Custom n8n functionalit
   ```javascript
   $now.zone //=> {"zoneName": "Europe/Berlin", "valid": true}
   ```
+## Related resources
+
+* [Expression reference](./)

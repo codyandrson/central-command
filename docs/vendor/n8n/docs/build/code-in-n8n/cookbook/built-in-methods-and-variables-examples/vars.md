@@ -19,7 +19,7 @@ layout:
 `vars` is available on:
 
 - **n8n Cloud:** Pro, Enterprise
-- **Self-hosted:** Enterprise
+- **Self-hosted:** Business, Enterprise
 
 You need access to the n8n instance owner account to create variables.
 {% endhint %}
@@ -47,3 +47,7 @@ _vars.<variable-name>
 
 `vars` gives access to user-created variables. It's part of the [Environments](https://app.gitbook.com/s/wMJrGrimpx3PxCJpUswm/use-source-control-and-environments) feature. `env` gives access to the [configuration environment variables](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/host-n8n/configure-n8n/basic-configuration/use-environment-variables) for your n8n instance.
 {% endhint %}
+
+## Related resources
+
+* [Built-in methods and variables examples](./)

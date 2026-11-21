@@ -27,7 +27,7 @@ On this page, you'll find the node parameters for the AWS Bedrock Chat Model nod
 {% hint style="info" %}
 **Credentials**
 
-You can find authentication information for this node [here](../../credentials/aws.md).
+Refer to the [AWS credentials documentation](../../credentials/aws.md) for authentication information for this node.
 
 If you route Bedrock through a [VPC interface endpoint (PrivateLink)](https://docs.aws.amazon.com/bedrock/latest/userguide/vpc-interface-endpoints.html) without private DNS, set the **Bedrock Endpoint** and **Bedrock Runtime Endpoint** custom endpoints in the credential.
 {% endhint %}
@@ -39,7 +39,11 @@ If you route Bedrock through a [VPC interface endpoint (PrivateLink)](https://do
 * **Authentication**: Select the authentication method:
     * **AWS (IAM)**: Use an IAM access key. Select an **AWS** credential.
     * **AWS (Assume Role)**: Temporarily assume an IAM role. Select an **AWS (Assume Role)** credential.
-* **Model**: Select the model that generates the completion.
+* **Model**: Select the model or [inference profile](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles.html) that generates the completion. The dropdown lists on-demand foundation models and cross-region inference profiles together. The newest models (for example Claude Sonnet 4.x) are only available as inference profiles. If part of the list is missing, your IAM role may lack the `bedrock:ListFoundationModels` or `bedrock:ListInferenceProfiles` permission. You can also switch the field to **Expression** mode and enter a model ID, inference profile ID, or ARN directly.
+
+{% hint style="info" %}
+On node version 1.1, the dropdown shows one list at a time: use the **Model Source** parameter to switch between on-demand foundation models and inference profiles. Node version 1 only supports on-demand foundation models.
+{% endhint %}
 
 Learn more about available models in the [Amazon Bedrock model documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html).
 
@@ -81,7 +85,7 @@ This node doesn't support the [`NO_PROXY` environment variable](https://app.gitb
 
 ## Related resources <a href="#related-resources" id="related-resources"></a>
 
-Refer to [LangChains's AWS Bedrock Chat Model documentation](https://js.langchain.com/docs/integrations/chat/bedrock/) for more information about the service.
+Refer to [LangChain's AWS Bedrock Chat Model documentation](https://docs.langchain.com/oss/javascript/integrations/chat/bedrock_converse) for more information about the service.
 
 {% include "https://app.gitbook.com/s/GixZThfitWP21x2gQFpD/~/reusable/mjXhKRIw98UJ5hk9LWBl/" %}
 

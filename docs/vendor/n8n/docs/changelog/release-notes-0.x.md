@@ -41,7 +41,7 @@ tags:
 
 These release notes are now archived and won't receive further updates. For the latest releases, including every patch version, see the [n8n releases on GitHub](https://github.com/n8n-io/n8n/releases).
 
-For a curated summary of the changes that matter most, see the [Changelog](README.md).
+For a curated summary of the changes that matter most, see the [Changelog](./).
 {% endhint %}
 
 Features and bug fixes for n8n before the release of 1.0.0.
@@ -3481,7 +3481,7 @@ This release adds Sticky Notes, a new feature that allows you to annotate and co
 
 ### Contributors <a href="#contributors" id="contributors"></a>
 
-[Basit Ali](https://github.com/BasitAli) [the operator Stamps](https://github.com/crstamps2) [Luiz Eduardo de Oliveira](https://github.com/luizeof) [Oliver Trajceski](https://github.com/SchnapsterDog) [pemontto](https://github.com/pemontto) [Ryan Goggin](https://github.com/Goggin)
+[Basit Ali](https://github.com/BasitAli) [Cody Stamps](https://github.com/crstamps2) [Luiz Eduardo de Oliveira](https://github.com/luizeof) [Oliver Trajceski](https://github.com/SchnapsterDog) [pemontto](https://github.com/pemontto) [Ryan Goggin](https://github.com/Goggin)
 
 ## n8n@0.173.1 <a href="#n8n01731" id="n8n01731"></a>
 
@@ -3669,7 +3669,7 @@ This release changes n8n's license, from [Apache 2.0 with Commons Clause](https:
 
 This change aims to clarify n8n's license terms, and n8n's position as a fair-code project.
 
-Read more about the new license in [License](https://app.gitbook.com/s/ukPPOMQ6NId4gpAIkPXa/sustainable-use-license).
+Read more about the new license in [Community license](https://app.gitbook.com/s/WcrJOYW6B9JlV5aiivMA).
 
 ### New nodes <a href="#new-nodes" id="new-nodes"></a>
 
@@ -4768,7 +4768,7 @@ For a comprehensive list of changes, check out the [commits](https://github.com/
 
 ### Contributors <a href="#contributors" id="contributors"></a>
 
-[Kyle Mohr](https://github.com/kylefmohr)
+Kyle Mohr
 
 ## n8n@0.135.2 <a href="#n8n01352" id="n8n01352"></a>
 

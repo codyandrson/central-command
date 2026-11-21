@@ -20,6 +20,10 @@ layout:
 
 # OpenAI node <a href="#openai-node" id="openai-node"></a>
 
+{% hint style="info" %}
+On n8n Cloud, you can use the OpenAI node with [Gateway credits](https://app.gitbook.com/s/jm0ZYRpZIPWge2ZSiDYO/use-n8n-cloud/gateway-credits) instead of your own OpenAI API key. Select **Use Gateway credits** in the node's credential field to run the node without an OpenAI account.
+{% endhint %}
+
 Use the OpenAI node to automate work in OpenAI and integrate OpenAI with other applications. n8n has built-in support for a wide range of OpenAI features, including creating images and assistants, as well as chatting with models. 
 
 On this page, you'll find a list of operations the OpenAI node supports and links to more resources.
@@ -72,7 +76,7 @@ Refer to [OpenAI credentials](../../credentials/openai.md) for guidance on setti
 
 ## Related resources <a href="#related-resources" id="related-resources"></a>
 
-Refer to [OpenAI's documentation](https://beta.openai.com/docs/introduction) for more information about the service.
+Refer to [OpenAI's documentation](https://developers.openai.com/api/docs) for more information about the service.
 
 Refer to [OpenAI's assistants documentation](https://platform.openai.com/docs/assistants/how-it-works/objects) for more information about how assistants work.
 
@@ -98,6 +102,6 @@ Once you add a tool connection, the OpenAI node becomes a [root node](#user-cont
 
 For common questions or issues and suggested solutions, refer to [Common issues](common-issues.md).
 
-[^1]: Each n8n cluster node contains a single root nodes that defines the main functionality of the cluster. One or more sub nodes attach to the root node to extend its functionality.
-[^2]: In n8n, cluster nodes are groups of nodes that work together to provide functionality in a workflow. They consist of a root node and one or more sub nodes that extend the node's functionality.
-[^3]: n8n cluster nodes consist of one or more sub nodes connected to a root node. Sub nodes extend the functionality of the root node, providing access to specific services or resources or offering specific types of dedicated processing, like calculator functionality, for example.
+[^1]: Each n8n cluster node contains a single root node that defines the main functionality of the cluster. One or more sub-nodes attach to the root node to extend its functionality.
+[^2]: In n8n, cluster nodes are groups of nodes that work together to provide functionality in a workflow. They consist of a root node and one or more sub-nodes that extend the node's functionality.
+[^3]: n8n cluster nodes consist of one or more sub-nodes connected to a root node. Sub-nodes extend the functionality of the root node, providing access to specific services or resources or offering specific types of dedicated processing, like calculator functionality, for example.

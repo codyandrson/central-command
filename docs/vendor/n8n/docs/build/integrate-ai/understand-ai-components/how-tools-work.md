@@ -27,7 +27,8 @@ Here are a couple of other ways of expressing it:
 
 ## AI tools in n8n <a href="#ai-tools-in-n8n" id="ai-tools-in-n8n"></a>
 
-n8n provides tool sub-nodes[^1] that you can connect to your [AI agent](#user-content-fn-2)[^2]. As well as providing some popular tools, such as [Wikipedia](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.toolwikipedia) and [SerpAPI](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.toolserpapi), n8n provides three especially powerful tools:
+n8n provides built in nodes[^1] and a registry of [MCP servers](../mcp-servers.md) that you can connect to your [AI agent](#user-content-fn-2)[^2] as tools. Built-in nodes include popular services such as [Wikipedia](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.toolwikipedia) and [SerpAPI](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.toolserpapi).
+Apart from these, n8n provides three especially powerful tools:
 
 * [Call n8n Workflow Tool](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.toolworkflow): use this to load any n8n workflow as a tool.
 * [Custom Code Tool](https://app.gitbook.com/s/BKcbOzIWja8NfqKDcqHc/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.toolcode): write code that your agent can run.
@@ -41,5 +42,15 @@ The next three examples highlight the Call n8n Workflow Tool:
 
 You can also learn how to [let AI dynamically specify parameters for tools with the `$fromAI()` function](../ai-examples/use-ai-for-parameters.md).
 
-[^1]: n8n cluster nodes consist of one or more sub nodes connected to a root node. Sub nodes extend the functionality of the root node, providing access to specific services or resources or offering specific types of dedicated processing, like calculator functionality, for example.
+[^1]: n8n cluster nodes consist of one or more sub-nodes connected to a root node. Sub-nodes extend the functionality of the root node, providing access to specific services or resources or offering specific types of dedicated processing, like calculator functionality, for example.
 [^2]: AI agents are artificial intelligence systems capable of responding to requests, making decisions, and performing real-world tasks for users. They use large language models (LLMs) to interpret user input and make decisions about how to best process requests using the information and resources they have available.
+
+## Related resources
+
+* [Understand AI components](./)
+* [What chains do](what-chains-do.md)
+* [What agents do](what-agents-do.md)
+* [How memory works](how-memory-works.md)
+* [Store and search data with vectors](store-and-search-data-with-vectors.md)
+* [Retrieve relevant context](retrieve-relevant-context.md)
+* [Agents vs chains](agents-vs-chains.md)

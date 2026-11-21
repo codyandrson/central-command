@@ -1,6 +1,5 @@
 ---
 contentType: guide
-status: beta
 nodeTitle: n8n CLI
 originalFilePath: api/n8n-cli/index.md
 originalUrl: https://docs.n8n.io/api/n8n-cli
@@ -75,3 +74,5 @@ Best for:
 Start with [Connect to n8n MCP server](connect-to-n8n-mcp-server.md).
 {% endtab %}
 {% endtabs %}
+
+You can also describe workflows as code with the [Workflow SDK](workflow-sdk/README.md). To let AI tools search the docs, connect an MCP client to [the n8n docs MCP server](connect-to-n8n-docs-mcp-server.md). To add a custom integration to n8n, [create your own node](create-nodes/README.md).

@@ -63,7 +63,7 @@ layout:
 
 ## _`Number`_.**`format()`** <a href="#numberformat" id="numberformat"></a>
 
-**Description:** Returns a formatted string representing the number. Useful for formatting for a specific language or currency. The same as <a href=”https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat”><code>Intl.NumberFormat()</code></a>.
+**Description:** Returns a formatted string representing the number. Useful for formatting for a specific language or currency. The same as <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat"><code>Intl.NumberFormat()</code></a>.
 
 **Syntax:** _`Number`_.format(locale?, options?)
 
@@ -73,7 +73,7 @@ layout:
 
 **Parameters:**
 
-  * `locale` (String) - optional - A <a href=”https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl#locales_argument”>locale tag</a> for formatting the number, e.g. <code>fr-FR</code>, <code>en-GB</code>, <code>pr-BR</code>
+  * `locale` (String) - optional - A <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl#locales_argument">locale tag</a> for formatting the number, e.g. <code>fr-FR</code>, <code>en-GB</code>, <code>pr-BR</code>
   * `options` (Object) - optional - Configuration options for number formatting. <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat" target="_blank">More info</a>
 
 **Examples:**
@@ -90,7 +90,11 @@ layout:
 
 ## _`Number`_.**`isEmpty()`** <a href="#numberisempty" id="numberisempty"></a>
 
-**Description:** Returns <code>false</code> for all numbers. Returns <code>true</code> for <code>null</code>.
+**Description:** Returns <code>true</code> if the number is <code>0</code>, <code>NaN</code>, <code>null</code>, or <code>undefined</code>. Returns <code>false</code> for every other number.
+
+{% hint style="warning" %}
+`isEmpty()` isn't a null check. On a number it treats `0` as empty, so `{{ $json.count.isEmpty() }}` returns `true` for both a missing field and a field set to `0`. To test only for a missing value, compare directly, for example `{{ $json.count === null }}`, or use the **exists** operator in the **If** node.
+{% endhint %}
 
 **Syntax:** _`Number`_.isEmpty()
 
@@ -107,7 +111,7 @@ layout:
 
   ```javascript
   // num = 0
-  num.isEmpty() // => false
+  num.isEmpty() // => true
   ```
 
   ```javascript
@@ -152,6 +156,33 @@ layout:
   ```javascript
   // number = 4.12
   number.isInteger() //=> false
+  ```
+
+## _`Number`_.**`isNotEmpty()`** <a href="#numberisnotempty" id="numberisnotempty"></a>
+
+**Description:** Returns <code>true</code> for every number except <code>0</code> and <code>NaN</code>. Returns <code>false</code> if the number is <code>0</code>, <code>NaN</code>, <code>null</code>, or <code>undefined</code>. This is the inverse of <code>isEmpty()</code>.
+
+**Syntax:** _`Number`_.isNotEmpty()
+
+**Returns:** Boolean
+
+**Source:**  Custom n8n functionality
+
+**Examples:**
+
+  ```javascript
+  // num = 10
+  num.isNotEmpty() // => true
+  ```
+
+  ```javascript
+  // num = 0
+  num.isNotEmpty() // => false
+  ```
+
+  ```javascript
+  // num = null
+  num.isNotEmpty() // => false
   ```
 
 ## _`Number`_.**`isOdd()`** <a href="#numberisodd" id="numberisodd"></a>
@@ -261,8 +292,8 @@ layout:
 
 **Parameters:**
 
-  * `locales` (String|Array<String>) - optional - The locale to assign, e.g. ‘en-GB’ for British English or ‘pt-BR’ for Brazilian Portuguese. See <a href=”https://www.localeplanet.com/icu/”>full list</a> (unofficial). Also accepts an array of locales. Defaults to the system locale if not specified.
-  * `options` (Object) - optional - An object with <a href=”https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat#parameters”>formatting options</a>
+  * `locales` (String|Array<String>) - optional - The locale to assign, e.g. ‘en-GB’ for British English or ‘pt-BR’ for Brazilian Portuguese. See <a href="https://www.localeplanet.com/icu/">full list</a> (unofficial). Also accepts an array of locales. Defaults to the system locale if not specified.
+  * `options` (Object) - optional - An object with <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/NumberFormat/NumberFormat#parameters">formatting options</a>
 
 **Examples:**
 
@@ -307,3 +338,7 @@ layout:
   num.toString(16) //=> '7a120.2'
   ```
 
+
+## Related resources
+
+* [Expression reference](./)
