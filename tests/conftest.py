@@ -225,19 +225,27 @@ def _no_live_tracker_read():
     # The delegated block reads the tracker too (DL-221 step 6): held
     # unconfigured, so a test that fakes the tracker for the backlog does not
     # grow a `delegated` block; tests/test_staffing.py puts the real one back.
+    # The review of work blocks against the tracker (DL-221) reads it too:
+    # held unconfigured; tests/test_block_review.py puts the real one back.
+    async def no_block_review(today=None) -> dict:
+        return {"available": False, "reason": "not configured"}
+
     real = ea_followups.tracked
     real_backlog = ea_backlog.backlog
     real_deadlines = ea_plan.deadlines
     real_delegated = ea_team.delegated
+    real_block_review = ea_plan.block_review
     ea_followups.tracked = unconfigured
     ea_backlog.backlog = no_backlog
     ea_plan.deadlines = no_deadlines
     ea_team.delegated = no_delegated
+    ea_plan.block_review = no_block_review
     yield
     ea_followups.tracked = real
     ea_backlog.backlog = real_backlog
     ea_plan.deadlines = real_deadlines
     ea_team.delegated = real_delegated
+    ea_plan.block_review = real_block_review
 
 
 @pytest.fixture(scope="session", autouse=True)

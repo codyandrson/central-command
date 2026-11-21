@@ -250,6 +250,14 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
             "confluence.create_page confluence.update_page confluence.move_page "
             "confluence.trash_page confluence.upload_attachment "
             "confluence.set_labels confluence.create_space"),
+    # `calendar.create_event` with a work-block `plan` also reads the issue from
+    # the tracker before it creates anything (DL-221), and so does
+    # `calendar.update_event` on a work block. The registry has no per-argument
+    # form, so they keep `calendar`, and a DOWN tracker there stamps `jira` on the
+    # error it re-raises (`ea_plan.issue_state`), the same way `plan.record_day`
+    # below does: the retry then waits on Jira, not on the calendar.
+    # `plan.remove_finished_block` always needs both.
+    **_each((JIRA, CALENDAR), "plan.remove_finished_block"),
     **_each((CALENDAR,),
             "calendar.create_event calendar.update_event calendar.delete_event "
             "calendar.adopt_event calendar.list_events"),

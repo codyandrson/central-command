@@ -9258,22 +9258,39 @@ async def operator_words_for_session(session_id: str, *,
 
 # --- the calendar plan ledger (the EA planning design, D5; DL-221 step 3) -------
 # Which calendar events the assistant created or adopted, and as what. The ONLY
-# writers are `record_calendar_plan_event` and `retire_calendar_plan_event`, and
+# writers are `record_calendar_plan_event`, `retire_calendar_plan_event`,
+# `move_calendar_plan_event_date`, `set_calendar_plan_event_snapshot` (the
+# Executor) and `advance_calendar_plan_event_snapshots` (the EA contact), and
 # their only callers are the Executor's calendar handlers, after an approved
-# action ran (a source walk in tests/test_calendar_plan_ledger.py pins that).
+# action ran, and for the last one `heartbeat/actions.py` once a planning run
+# that was handed the changes finished (a source walk in
+# tests/test_calendar_plan_ledger.py pins that).
 # A row is never deleted; retirement is a timestamp.
 
 PLAN_EVENT_KINDS = ("placeholder", "work_block")
 
 
+def _ledger_row(r) -> dict:
+    """A ledger row as a dict, its `issue_snapshot` (jsonb, which asyncpg hands
+    back as text) parsed."""
+    out = dict(r)
+    if isinstance(out.get("issue_snapshot"), str):
+        out["issue_snapshot"] = json.loads(out["issue_snapshot"])
+    return out
+
+
 async def record_calendar_plan_event(
     *, event_id: str, calendar_id: str, kind: str, issue_key: str | None = None,
-    plan_date=None, proposal_id: str | None = None,
+    plan_date=None, proposal_id: str | None = None, issue_snapshot: dict | None = None,
 ) -> dict:
     """Write the ledger row for one event, idempotently: when the event already
     has an ACTIVE row (a retried create that read its own event back, a re-run
     adoption) nothing is written and that row comes back with `created: False`.
-    The caller decides whether an existing row is a replay or a refusal."""
+    The caller decides whether an existing row is a replay or a refusal.
+
+    `issue_snapshot` is what the tracker held about the issue when a work block
+    was recorded (`ea_plan.issue_snapshot`); the Executor reads it, it is never an
+    agent's."""
     from datetime import date as _date
 
     if kind not in PLAN_EVENT_KINDS:
@@ -9285,19 +9302,21 @@ async def record_calendar_plan_event(
         row = await conn.fetchrow(
             """
             insert into calendar_plan_event
-                   (event_id, calendar_id, kind, issue_key, plan_date, proposal_id)
-            values ($1, $2, $3, $4, $5, $6)
+                   (event_id, calendar_id, kind, issue_key, plan_date, proposal_id,
+                    issue_snapshot)
+            values ($1, $2, $3, $4, $5, $6, $7::jsonb)
             on conflict (calendar_id, event_id) where retired_at is null do nothing
             returning *
             """,
             event_id, calendar_id, kind, issue_key, plan_date, proposal_id,
+            json.dumps(issue_snapshot) if issue_snapshot is not None else None,
         )
         if row is not None:
-            return {**dict(row), "created": True}
+            return {**_ledger_row(row), "created": True}
         existing = await conn.fetchrow(
             "select * from calendar_plan_event where calendar_id = $1 and event_id = $2 "
             "and retired_at is null", calendar_id, event_id)
-        return {**dict(existing), "created": False}
+        return {**_ledger_row(existing), "created": False}
     finally:
         await conn.close()
 
@@ -9309,7 +9328,7 @@ async def get_calendar_plan_event(event_id: str, calendar_id: str = "primary") -
         r = await conn.fetchrow(
             "select * from calendar_plan_event where calendar_id = $1 and event_id = $2 "
             "and retired_at is null", calendar_id, event_id)
-        return dict(r) if r else None
+        return _ledger_row(r) if r else None
     finally:
         await conn.close()
 
@@ -9339,7 +9358,7 @@ async def list_calendar_plan_events(
         rows = await conn.fetch(
             "select * from calendar_plan_event where " + " and ".join(clauses)
             + " order by created_at, id", *params)
-        return [dict(r) for r in rows]
+        return [_ledger_row(r) for r in rows]
     finally:
         await conn.close()
 
@@ -9358,7 +9377,7 @@ async def retire_calendar_plan_event(
             returning *
             """,
             calendar_id, event_id, proposal_id)
-        return dict(r) if r else None
+        return _ledger_row(r) if r else None
     finally:
         await conn.close()
 
@@ -9383,9 +9402,59 @@ async def move_calendar_plan_event_date(
             returning *
             """,
             calendar_id, event_id, plan_date)
-        return dict(r) if r else None
+        return _ledger_row(r) if r else None
     finally:
         await conn.close()
+
+
+async def set_calendar_plan_event_snapshot(
+    event_id: str, calendar_id: str = "primary", *, issue_snapshot: dict | None,
+) -> dict | None:
+    """Replace an ACTIVE work block's issue snapshot with one the Executor just
+    read from the tracker (a moved block). None when the ledger holds no active
+    work block for the event. Called only by the Executor."""
+    conn = await _conn()
+    try:
+        r = await conn.fetchrow(
+            """
+            update calendar_plan_event set issue_snapshot = $3::jsonb
+             where calendar_id = $1 and event_id = $2 and retired_at is null
+               and kind = 'work_block'
+            returning *
+            """,
+            calendar_id, event_id,
+            json.dumps(issue_snapshot) if issue_snapshot is not None else None)
+        return _ledger_row(r) if r else None
+    finally:
+        await conn.close()
+
+
+async def advance_calendar_plan_event_snapshots(advances: list[dict]) -> int:
+    """Advance work blocks' snapshots to the state a planning run was SHOWN
+    (DL-221): each `{event_id, calendar_id, from, to}` sets `to` only while the
+    row still holds `from` (a snapshot the Executor refreshed in between is
+    newer than what was shown and is left alone), on an ACTIVE work block. Returns
+    how many rows moved. Called only by the heartbeat's EA contact, after the
+    run that was handed the changes finished without error."""
+    moved = 0
+    conn = await _conn()
+    try:
+        for a in advances:
+            r = await conn.fetchval(
+                """
+                update calendar_plan_event set issue_snapshot = $4::jsonb
+                 where calendar_id = $1 and event_id = $2 and retired_at is null
+                   and kind = 'work_block'
+                   and issue_snapshot is not distinct from $3::jsonb
+                returning 1
+                """,
+                a.get("calendar_id") or "primary", a["event_id"],
+                json.dumps(a["from"]) if a.get("from") is not None else None,
+                json.dumps(a["to"]))
+            moved += 1 if r else 0
+    finally:
+        await conn.close()
+    return moved
 
 
 async def calendar_plan_event_retired_by(event_id: str, calendar_id: str,
@@ -9421,7 +9490,7 @@ async def list_calendar_plan_events_for_date(plan_date, calendar_id: str | None 
         rows = await conn.fetch(
             "select * from calendar_plan_event where " + " and ".join(clauses)
             + " order by created_at, id", *params)
-        return [dict(r) for r in rows]
+        return [_ledger_row(r) for r in rows]
     finally:
         await conn.close()
 
@@ -9622,7 +9691,7 @@ async def list_active_work_blocks_from(first_date) -> list[dict]:
             "select * from calendar_plan_event where kind = 'work_block' "
             "and retired_at is null and plan_date >= $1 order by plan_date, created_at, id",
             _as_date_arg(first_date))
-        return [dict(r) for r in rows]
+        return [_ledger_row(r) for r in rows]
     finally:
         await conn.close()
 

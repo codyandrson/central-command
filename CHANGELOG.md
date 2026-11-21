@@ -4,7 +4,44 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
-## 2026-11-20 — v2.107.1: A deferral moves the due date, and the comment records the move
+## 2026-11-20 — v2.108.0: The assistant checks its planned work blocks against the tracker at every planning run, removes finished ones and judges the rest
+
+- **Blocks stayed on the calendar after their issue moved.** On a live deployment the operator moved two
+  issues' due dates to the following week; their work blocks stayed on the calendar and in the plan
+  ledger, and nothing put them to him. His ruling (DL-221): the assistant behaves like an assistant on a
+  cadence. Every planning run (the morning plan, the check-in, the weekly plan and the evening review)
+  re-checks each planned work block against the tracker.
+- **The ledger keeps what the issue looked like.** `calendar_plan_event.issue_snapshot` (jsonb, additive
+  and idempotent in `schema.sql`) holds the issue as the tracker reported it when the block was recorded:
+  summary, status, due date, priority, estimate, assignee, labels, the planning fields, a hash of the
+  description (never the text), the tracker's `updated` stamp and a marker for the comments. The Executor
+  reads it before a work block's event is created (a tracker outage parks the action on Jira with nothing
+  created; an issue the tracker does not have refuses the block; no tracker configured stores null) and
+  refreshes it when `calendar.update_event` moves the block. It is never taken from the proposal.
+- **Two lists, computed by the control plane.** `blocks_to_review` in the briefs carries `finished`
+  (the issue is closed, or the tracker says it does not exist: fact) and `changed` (for the other blocks,
+  each field that differs from the snapshot, and comments newer than it, quoted as data and capped).
+  One batched search by key reads the issues; an issue is read in full only when the tracker's `updated`
+  stamp differs from the block's snapshot. A null snapshot is a baseline to fill, never a change. An outage
+  is never read as "missing": the key degrades to `available: false`, and an issue it could not answer for
+  is named under `issues_not_read`.
+- **Finished blocks are removed, narrowly.** The new gated `plan.remove_finished_block` (`event_id`,
+  optional `calendar_id`; the assistant's `plan-propose` pack) deletes a work block's event, as
+  `calendar.delete_event` does, and retires its ledger row. The Executor refuses, writing and deleting
+  nothing, unless it reads at execution that the ledger has an active work block for the event, that the
+  proposal which created it was drafted by the same agent, and that the issue is closed or gone in the
+  tracker. It is not `calendar.release_event`, which only drops the ledger row and leaves the event on the
+  calendar. The assistant proposes the removal straight away and names a replacement for the freed time;
+  the replacement block is proposed once the operator agrees.
+- **Every other change is the assistant's to judge.** For each `changed` entry it decides, from what it
+  knows of the plan, whether the change affects the block, raises only the relevant ones, and ends its
+  message with one line listing what it reviewed and judged not relevant. A move is
+  `calendar.update_event`, a removal `calendar.delete_event`, each after the operator answers.
+- **Shown once.** After the run that was handed `changed` entries finishes its turn, the contact advances
+  those blocks' snapshots to the state it showed; a run that failed, parked, was stopped or never started
+  advances nothing, so the change is shown again. A finished block stays listed until it is retired.
+
+ A deferral moves the due date, and the comment records the move
 
 - **The assistant's charter listed the due date and the reason as two separate records and never said
   a deferral needs both.** At its first quarterly review after v2.107.0's rule was drafted, the

@@ -1222,6 +1222,44 @@ REGISTRY: list[Capability] = [
             "and issue; idempotent on the action key."
         ),
     ),
+    Capability(
+        name="plan.remove_finished_block",
+        target_args=("event_id",),
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="irreversible",
+        acknowledge=True,
+        risk=(
+            "external, IRREVERSIBLE in effect — it cancels the calendar event of a "
+            "work block the assistant created, as calendar.delete_event does (the "
+            "event's copy is recoverable from Deleted Items or as a cancelled "
+            "event, an attendee's notification is not). Narrow by construction: "
+            "the Executor refuses unless the block's issue is closed or gone in "
+            "the tracker and the agent drafting it created the block"
+        ),
+        holder="Executor",
+        route=("integrations/jira.py get_issue (the issue's status category, read at "
+               "execution) → integrations/calendar_facade.py get_event and delete_event "
+               "(as calendar.delete_event) → db/repo.py retire_calendar_plan_event"),
+        arguments=["event_id", "calendar_id?"],
+        description=(
+            "Remove a work block whose issue is FINISHED (DL-221): the issue's status "
+            "category is Done, or the tracker says it does not exist. Unlike "
+            "calendar.release_event, which only retires the plan-ledger row and "
+            "leaves the event on the calendar, this deletes the event itself (the "
+            "result line is the restore record) and retires the row once the delete "
+            "succeeds. The Executor reads, at execution and never from the "
+            "proposal: that the ledger holds an active work block for the event, "
+            "that the proposal which created it was drafted by the same agent as "
+            "this one, and the issue's state in the tracker; any miss refuses and "
+            "writes nothing. A tracker outage parks the action. It is the only "
+            "calendar delete an agent proposes for its own block without asking "
+            "the operator first; any other change of a block goes through "
+            "calendar.update_event or calendar.delete_event after the operator "
+            "answers."
+        ),
+    ),
     # --- lines of effort (2026-08-12) -----------------------------------------
     Capability(
         name="loe.record_checkin",

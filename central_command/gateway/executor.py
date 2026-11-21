@@ -237,6 +237,12 @@ async def _calendar_create_event(args: dict, approver: str, proposer: str | None
                        if key and calendar_facade._exchange() is None else None)
     extra = {"client_event_id": client_event_id} if client_event_id else {}
     calendar_id = args.get("calendar_id", "primary")
+    plan = args.get("plan")
+    # A work block records its issue as the TRACKER holds it now, read BEFORE
+    # anything is created: an outage parks the action on `jira` with nothing on
+    # the calendar, and an issue the tracker does not know is refused before an
+    # event exists. Never taken from the proposal (DL-221).
+    snapshot = await _work_block_snapshot(plan) if plan else None
     # `plan` is control-plane metadata (the EA planning design, D5): it is never
     # passed to the façade, which sends exactly the event's own fields.
     ev = await calendar_facade.create_event(
@@ -247,13 +253,48 @@ async def _calendar_create_event(args: dict, approver: str, proposer: str | None
     earlier = " (already created by an earlier attempt)" if ev.get("already_existed") else ""
     line = (f"calendar event '{args['title']}' created {args['start']} → "
             f"{args['end']} (id {ev.get('event_id')}){earlier}")
-    plan = args.get("plan")
     if plan:
-        line += await _record_plan_event(ev.get("event_id"), calendar_id, plan, line)
+        line += await _record_plan_event(ev.get("event_id"), calendar_id, plan, line,
+                                         issue_snapshot=snapshot)
     return line
 
 
-async def _record_plan_event(event_id, calendar_id: str, plan: dict, created: str) -> str:
+async def _tracker_issue_state(issue_key: str, capability: str, consequence: str, *,
+                               full: bool = True, missing_ok: bool = False) -> dict:
+    """`ea_plan.issue_state` for the ledger paths: an outage raises stamped `jira`
+    (the action parks), and a 404 (the tracker has no such issue) is a refusal
+    naming `consequence`, or with `missing_ok` the answer `{missing: True}`."""
+    from central_command.reports import ea_plan
+
+    try:
+        return await ea_plan.issue_state(issue_key, full=full)
+    except jira.JiraError as e:
+        if e.status_code == 404:
+            if missing_ok:
+                return {"status_category": None, "snapshot": None, "missing": True}
+            raise ExecutorError(
+                f"{capability}: the tracker has no issue {issue_key} (not found), "
+                f"{consequence}") from e
+        raise
+
+
+async def _work_block_snapshot(plan: dict):
+    """The snapshot to record with a work block: the issue as the tracker holds
+    it now (`ea_plan.issue_state`), or None for a placeholder and for a
+    deployment with no tracker configured (nothing to ask). A tracker outage
+    raises stamped `jira` (transient: the action parks and retries, never a null
+    stored in its place); an issue the tracker answers 404 for is a NO and
+    refuses the block, with nothing created."""
+    if plan.get("kind") != "work_block" or not jira.configured():
+        return None
+    issue_key = str(plan.get("issue_key") or "").strip()
+    return (await _tracker_issue_state(
+        issue_key, "calendar.create_event",
+        "so no work block was created; plan the block for an issue that exists"))["snapshot"]
+
+
+async def _record_plan_event(event_id, calendar_id: str, plan: dict, created: str,
+                             issue_snapshot=None) -> str:
     """The plan-ledger row for an event this action just created, from the id
     IN THE RESULT, never one an agent wrote. After the create on purpose: a
     ledger write that fails raises, the action is retried, and on Google the
@@ -268,7 +309,7 @@ async def _record_plan_event(event_id, calendar_id: str, plan: dict, created: st
     row = await repo.record_calendar_plan_event(
         event_id=str(event_id), calendar_id=calendar_id, kind=plan["kind"],
         issue_key=plan.get("issue_key"), plan_date=plan.get("date"),
-        proposal_id=_current_proposal_id.get(),
+        proposal_id=_current_proposal_id.get(), issue_snapshot=issue_snapshot,
     )
     what = (f"work block for {row['issue_key']} on {row['plan_date']}"
             if row["kind"] == "work_block" else "placeholder")
@@ -282,11 +323,31 @@ async def _calendar_update_event(args: dict, approver: str, proposer: str | None
     if not changed:
         raise ExecutorError("calendar.update_event: no field to change was supplied")
     calendar_id = args.get("calendar_id", "primary")
+    # An update of one of the assistant's work blocks refreshes the issue
+    # snapshot on its row (DL-221): the operator has just answered for the block,
+    # so what the tracker holds now is what the block now stands on. Read BEFORE
+    # the provider call (an outage parks with nothing changed; an issue the
+    # tracker does not have refuses it) and recorded after it. No tracker
+    # configured: the snapshot is left as it was.
+    from central_command.db import repo
+
+    block = await repo.get_calendar_plan_event(str(args["event_id"]), calendar_id)
+    refresh = block is not None and block["kind"] == "work_block" and jira.configured()
+    snapshot = None
+    if refresh:
+        snapshot = (await _tracker_issue_state(
+            block["issue_key"], "calendar.update_event",
+            "so the event was not changed; remove the block "
+            "(calendar.delete_event) instead"))["snapshot"]
     ev = await calendar_facade.update_event(args["event_id"], calendar_id=calendar_id, **changed)
     line = (f"calendar event {ev.get('event_id') or args['event_id']} updated "
             f"({', '.join(sorted(changed))})")
     if "start" in changed:
         line += await _move_plan_date(str(args["event_id"]), calendar_id, changed["start"])
+    if refresh:
+        await repo.set_calendar_plan_event_snapshot(
+            str(args["event_id"]), calendar_id, issue_snapshot=snapshot)
+        line += f" — ledger: {block['issue_key']}'s issue snapshot refreshed from the tracker"
     return line
 
 
@@ -342,6 +403,63 @@ async def _calendar_release_event(args: dict, approver: str, proposer: str | Non
         what += f" for {retired['issue_key']} on {retired['plan_date']}"
     return (f"calendar event {event_id} released from the plan ledger (was a {what}) — "
             "ledger row retired, calendar unchanged")
+
+
+async def _plan_remove_finished_block(args: dict, approver: str, proposer: str | None) -> str:
+    """Delete a work block whose issue is finished (DL-221): the one calendar
+    delete the assistant may propose for its own block without asking first.
+    Everything it depends on is read here, at execution, and any miss writes
+    nothing and deletes nothing: the ledger has an ACTIVE work block for the
+    event; the proposal that created that block was drafted by the SAME agent as
+    this one (`proposer`, from the gateway, against the creating proposal's
+    `agent_id`: never an argument); and the tracker says the block's issue is
+    closed (status category Done) or does not exist. An issue still open is a
+    refusal. A tracker outage raises stamped `jira` and the action parks. The
+    delete is `_calendar_delete_event`'s (read first, the restore record in the
+    result, the ledger row retired after it succeeds). Unlike
+    `calendar.release_event`, which only retires the ledger row and leaves the
+    event on the calendar, this removes the event itself."""
+    from central_command.db import repo
+
+    calendar_id = args.get("calendar_id", "primary")
+    event_id = str(args["event_id"])
+    row = await repo.get_calendar_plan_event(event_id, calendar_id)
+    if row is None or row["kind"] != "work_block":
+        pid = _current_proposal_id.get()
+        if pid and await repo.calendar_plan_event_retired_by(event_id, calendar_id, pid):
+            return (f"calendar event {event_id} already removed by this proposal "
+                    "(its ledger row is retired)")
+        raise ExecutorError(
+            f"plan.remove_finished_block: event {event_id} has no active work block in "
+            "the plan ledger (it is not one of the assistant's work blocks, or it was "
+            "already removed or released); nothing was deleted")
+    creator = await repo.load_proposal(row["proposal_id"]) if row.get("proposal_id") else None
+    if creator is None or not proposer or creator["agent_id"] != proposer:
+        raise ExecutorError(
+            f"plan.remove_finished_block: event {event_id} is a work block "
+            f"{'this agent did not create' if creator else 'whose creating proposal is not on record'}; "
+            "only the agent that created a block may remove it this way; nothing was deleted")
+    if not jira.configured():
+        raise ExecutorError(
+            "plan.remove_finished_block: no tracker is configured, so it cannot be "
+            "checked that the issue is finished; nothing was deleted")
+    key = row["issue_key"]
+    state = await _tracker_issue_state(
+        key, "plan.remove_finished_block", "", full=False, missing_ok=True)
+    if state.get("missing"):
+        why = "does not exist in the tracker"
+    elif state["status_category"] == "done":
+        why = "is closed (its status category is Done)"
+    else:
+        raise ExecutorError(
+            f"plan.remove_finished_block: {key} is not closed (its status category is "
+            f"{state['status_category'] or 'unknown'}), so its block on {row['plan_date']} "
+            "is not removed this way; nothing was deleted")
+    deleted = await _calendar_delete_event(
+        {"event_id": event_id, "calendar_id": calendar_id,
+         "reason": f"the work block for {key} on {row['plan_date']}: the issue {why}"},
+        approver, proposer)
+    return f"work block for {key} on {row['plan_date']} removed, its issue {why} — {deleted}"
 
 
 async def _plan_record_day(args: dict, approver: str, proposer: str | None) -> str:
@@ -2920,6 +3038,7 @@ HANDLERS = {
     "calendar.adopt_event": _calendar_adopt_event,
     "calendar.release_event": _calendar_release_event,
     "plan.record_day": _plan_record_day,
+    "plan.remove_finished_block": _plan_remove_finished_block,
     "plan.record_review": _plan_record_review,
     "charter.update": _charter_update,
     "loe.create": _loe_create,

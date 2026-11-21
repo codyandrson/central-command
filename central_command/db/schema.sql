@@ -1938,6 +1938,21 @@ create unique index if not exists calendar_plan_event_active_uq
 create index if not exists calendar_plan_event_date_idx
     on calendar_plan_event (plan_date) where retired_at is null;
 
+-- What the tracker held about the block's issue when the block was recorded (or
+-- last shown to the operator), so a later read can be diffed against it (DL-221,
+-- the review of blocks when their issue changes). A work block only. Written by
+-- the Executor from a tracker read made before the event is created (and again
+-- when it moves the block) and, after a planning run has shown the changes, by
+-- the heartbeat's advance step; never from an agent argument. Fields:
+-- `summary`, `status`, `status_category`, `due_date`, `priority`,
+-- `estimate_hours`, `assignee`, `labels` (sorted), the planning fields by their
+-- names (`stakes`, `value`, `lateness_loss`, `deadline_type`), `description_hash`
+-- (a hash, never the text), `updated` (the tracker's own stamp) and `comments`
+-- (`count`, `latest_id`, `latest_created`). Null on a placeholder, with no
+-- tracker configured, and on rows made before this column existed: a null is a
+-- baseline to fill, never a change.
+alter table calendar_plan_event add column if not exists issue_snapshot jsonb;
+
 -- The stored day plan (the EA planning design, D6; DL-221 step 4a): what the
 -- operator approved as the day's ranked list, so the evening review compares a
 -- RECORD with what happened instead of the model's memory of the morning.

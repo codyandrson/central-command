@@ -414,6 +414,10 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # retired and the calendar is untouched. Whether the event HAS an active row
     # is world state, checked by the Executor.
     "calendar.release_event": ArgSpec(required=("event_id",)),
+    # Removing a work block whose issue is finished (DL-221): whether the event
+    # has an active work block, who created it and the issue's state are world
+    # state, read by the Executor at execution.
+    "plan.remove_finished_block": ArgSpec(required=("event_id",)),
     # The stored day plan and the review's outcome record (D6).
     "plan.record_day": ArgSpec(required=("date", "items"), checks=(_plan_day_shape,)),
     "plan.record_review": ArgSpec(required=("date", "outcomes"),

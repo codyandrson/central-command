@@ -130,7 +130,7 @@ Rows for the same package are grouped by what the modules are for.
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py` (the cap is `settings.attachment_max_bytes`, `CC_ATTACHMENT_MAX_BYTES`, default 50 MiB, read at call time; a validator refuses a cap whose base64 size would pass the transport ceiling `config.WS_MAX_SIZE_BYTES`, the `--ws-max-size` both API launchers, the k3s unit and the single-node `boot.sh`, pass uvicorn), `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (108 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `rerun.py` (`rerun_session`, `eligibility`), `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
+| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (109 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `rerun.py` (`rerun_session`, `eligibility`), `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `session_recall.py` (the episodic-recall index and `search_my_sessions`' four shapes), `notes.py` (the note store's one rendering seam `standing_sections` and the `propose_note` / `propose_note_retire` builders, DL-217), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic per-agent doubles `resolve_model` swaps in under `settings.test_model`, which only the test suite sets; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
@@ -575,8 +575,9 @@ process's environ.
 - **The calendar plan ledger: which events are the EA's own** (DL-221 step 3,
   FR-54). One table, `calendar_plan_event` (`event_id` as the provider returned
   it, `calendar_id`, `kind` `placeholder` | `work_block`, `issue_key` and the
-  local `plan_date` for a work block only, `proposal_id`, `created_at`,
-  `retired_at`, `retired_by`), one ACTIVE row per (calendar, event) by a
+  local `plan_date` for a work block only, `issue_snapshot` (jsonb: the issue as
+  the tracker held it when the block was recorded or last shown, see below),
+  `proposal_id`, `created_at`, `retired_at`, `retired_by`), one ACTIVE row per (calendar, event) by a
   partial unique index; never deleted, retirement is a timestamp. Every event
   not in it is a commitment. Its only writers are `repo.record_calendar_plan_event`
   and `repo.retire_calendar_plan_event`, called only by the Executor (a source
@@ -611,6 +612,51 @@ process's environ.
   proposed. The morning contact proposes the day's blocks as one proposal (one
   create per block); the mid-day check-in proposes moving the EA's own blocks
   only on a slip.
+  **Blocks are checked against the tracker at every planning run** (DL-221).
+  `issue_snapshot` is `ea_plan.snapshot_of()`: `summary`, `status`,
+  `status_category`, `due_date`, `priority`, `estimate_hours`, `assignee`,
+  `labels` (sorted), the planning fields by name (`stakes`, `value`,
+  `lateness_loss`, `deadline_type`), `description_hash` (never the text),
+  `updated` (the tracker's stamp) and `comments` (`count`, `latest_id`,
+  `latest_created`). The Executor writes it from a tracker read made BEFORE a
+  work block's `calendar.create_event` (an outage parks the action on `jira`
+  with nothing created, the capability's table entry staying `calendar` and the
+  error carrying the `jira` stamp as `plan.record_day`'s does; a 404 refuses the
+  block; no tracker stores null) and refreshes it when `calendar.update_event`
+  moves an active work block (the same rules); it is never an argument.
+  `ea_plan.blocks_to_review()` is pure and returns `finished` (status category
+  Done, or the tracker says the issue does not exist: fact), `changed` (for the
+  other blocks, `snapshot_changes` field by field and the comments newer than
+  the snapshot's marker, capped and quoted as data; a null snapshot is a
+  baseline and reports nothing) and `advance`. Its read `block_review()` takes
+  the ledger and ONE `key in (...)` search bounded by `plan_backlog_limit`,
+  reads an issue in full (`get_issue`, `list_comments`) only when the search's
+  `updated` differs from a block's snapshot or the snapshot is null, asks alone
+  any key the search did not return (only that read can say "deleted"), and fails
+  closed: an outage raises (the brief's `blocks_to_review` key degrades to
+  `available: false`) and is never "missing", and issues it could not answer
+  for are named in `issues_not_read` with `complete: false`. All four planning
+  briefs (`morning_report`, `check_in`, `week_ahead`, `digest`) carry the key,
+  with one shared framing: a `finished` block is removed with
+  `plan.remove_finished_block` straight away (with a suggested replacement for
+  the freed time, proposed only once the operator agrees), every `changed`
+  entry is reviewed and judged by the assistant, a move or a removal of an open
+  issue's block is proposed only after the operator answers, and the message
+  ends with the changes judged not relevant. `plan.remove_finished_block` (the
+  `plan-propose` pack; dependencies `jira` and `calendar`; irreversible like
+  `calendar.delete_event`, of which it reuses the delete, the restore record
+  and the ledger retirement) refuses, deleting nothing, unless the Executor
+  reads at execution that the ledger holds an active work block for the event,
+  that its creating proposal's `agent_id` is the `proposer` the gateway
+  passes, and that the issue is closed or gone (an open issue is a refusal; an
+  outage parks); `calendar.release_event`, by contrast, only retires the row.
+  **Shown once:** after `_ea_contact`'s run returns (it is awaited) and did not
+  park, stop or fail to start, the contact calls
+  `repo.advance_calendar_plan_event_snapshots`, which moves each block's
+  snapshot to the state the brief SHOWED (compare-and-set on the snapshot it
+  read, so a refresh by the Executor in between is kept); a run that raised
+  advances nothing. A finished block is never advanced: it stays listed until
+  retired.
 - **The stored day plan and its review** (DL-221 step 4a, FR-54; design record
   D6). Two tables, both written only by the Executor after approval (a source
   walk in `tests/test_day_plan.py` pins `repo.record_day_plan` and

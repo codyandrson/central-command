@@ -40,6 +40,15 @@ time audit of a window from the stored plans, the recorded outcomes and the
 ledger's work blocks; `audit()` is its Postgres read, with no calendar listing
 of the past.
 
+`blocks_to_review()` is PURE: the active future work blocks against the
+tracker's current reading of their issues, as two lists. `finished` is fact:
+the issue is closed (status category Done) or the tracker says it does not
+exist. `changed` is everything else that moved since the block was recorded or
+last shown (the fields of its stored snapshot, and newer comments), handed to
+the assistant to judge. `block_review()` is its read, the ledger and ONE
+tracker search by key; it also returns what the snapshots should advance to once
+a planning run has shown the changes (the heartbeat does that, after the run).
+
 `padding_ratio()` is PURE: the sum of actual hours over the sum of planned
 estimate hours across the samples that carry both, 1.0 below the minimum
 sample count, clamped to 1.0-3.0. `padding()` is its Postgres read.
@@ -186,6 +195,142 @@ async def planning_numbers(issue_keys: list[str]) -> dict[str, dict]:
         out[key] = {"readable": True, "summary": r["summary"],
                     **{n: r[n] for n in PLANNED_NUMBERS}}
     return out
+
+
+async def _tracker_call(call):
+    """Await a tracker call; an outage is re-raised stamped `jira` so the action
+    that asked parks on the tracker, and a NO propagates as the client raised it."""
+    try:
+        return await call
+    except Exception as e:  # noqa: BLE001 — a NO propagates as it is, an outage is stamped
+        if is_down(e):
+            raise _down_on_jira(e)
+        raise
+
+
+# --- a work block's issue, as the tracker held it (DL-221) -----------------------------
+
+# The fields a snapshot carries and `snapshot_changes` compares, in the order a
+# change is reported. `status_category`, `description_hash`, `updated` and
+# `comments` ride beside them (see `snapshot_of`).
+SNAPSHOT_FIELDS = ("summary", "status", "due_date", "priority", "estimate_hours",
+                   "assignee", "labels", "stakes", "value", "lateness_loss",
+                   "deadline_type")
+
+# How many new comments one block's change carries, and how much of each.
+CHANGE_COMMENTS = 3
+COMMENT_QUOTE_CHARS = 400
+
+
+def _description_hash(text) -> str | None:
+    import hashlib
+
+    if not isinstance(text, str) or not text.strip():
+        return None
+    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()[:16]
+
+
+def comment_marker(page: dict | None) -> dict | None:
+    """Where an issue's comments stood: `{count, latest_id, latest_created}` from
+    a `jira.list_comments` page (newest first), or None when none was read."""
+    if page is None:
+        return None
+    newest = (page.get("comments") or [None])[0]
+    return {"count": page.get("total", 0),
+            "latest_id": newest.get("id") if newest else None,
+            "latest_created": newest.get("created") if newest else None}
+
+
+def snapshot_of(issue: dict, names: dict, page: dict | None = None) -> dict:
+    """PURE. The snapshot of an issue as `jira.get_issue` returns it: `summary`,
+    `status`, `status_category`, `due_date`, `priority`, `estimate_hours`,
+    `assignee`, `labels` (sorted), the planning fields under their field names
+    (`names`: `{stakes, value, lateness_loss, deadline_type}` to the tracker's
+    display names; omitted when the tracker could not list them, so an unreadable
+    field never reads as a change), `description_hash` (a hash, never the text),
+    `updated` (the tracker's stamp) and `comments` (`comment_marker` of `page`)."""
+    labels = issue.get("labels")
+    snap = {
+        "summary": issue.get("summary"), "status": issue.get("status"),
+        "status_category": issue.get("status_category"),
+        "due_date": issue.get("due_date"), "priority": issue.get("priority"),
+        "estimate_hours": issue.get("estimate_hours"), "assignee": issue.get("assignee"),
+        "labels": sorted(str(x) for x in labels) if isinstance(labels, list) else None,
+        "description_hash": _description_hash(issue.get("description")),
+        "updated": issue.get("updated"),
+    }
+    if not issue.get("custom_fields_error"):
+        custom = issue.get("custom_fields") or {}
+        for field, name in names.items():
+            snap[field] = custom.get(name)
+    marker = comment_marker(page)
+    if marker is not None:
+        snap["comments"] = marker
+    return snap
+
+
+def snapshot_changes(old: dict, new: dict) -> list[dict]:
+    """PURE. The field differences between two snapshots, `[{field, was, now}]`
+    in `SNAPSHOT_FIELDS` order, a description edit last (the hash proves an edit
+    and the text is not kept). A field one side does not carry is not compared:
+    absent is "not recorded", never "empty"."""
+    out = [{"field": f, "was": old[f], "now": new[f]}
+           for f in SNAPSHOT_FIELDS if f in old and f in new and old[f] != new[f]]
+    was, now = old.get("description_hash"), new.get("description_hash")
+    if "description_hash" in old and "description_hash" in new and was != now:
+        out.append({"field": "description", "was": "an earlier version",
+                    "now": "edited (the text is not kept here; read the issue)"})
+    return out
+
+
+def _comment_is_newer(comment: dict, marker: dict) -> bool:
+    latest = marker.get("latest_id")
+    if latest is None:
+        return True                              # there were no comments then
+    cid = comment.get("id")
+    try:
+        return int(cid) > int(latest)
+    except (TypeError, ValueError):
+        return str(comment.get("created") or "") > str(marker.get("latest_created") or "")
+
+
+def new_comments(page_comments: list[dict], old: dict | None, now: dict | None) -> tuple[list, int]:
+    """PURE. The comments newer than the snapshot's marker, newest first, at most
+    `CHANGE_COMMENTS`, each `{author, created, text}` with the text cut to
+    `COMMENT_QUOTE_CHARS` (`text_truncated` says so), and how many newer ones are
+    not shown. No marker on the old snapshot means nothing to compare with: none."""
+    if old is None:
+        return [], 0
+    newer = [c for c in page_comments if _comment_is_newer(c, old)]
+    shown = []
+    for c in newer[:CHANGE_COMMENTS]:
+        body = str(c.get("body") or "")
+        shown.append({"author": c.get("author"), "created": c.get("created"),
+                      "text": body[:COMMENT_QUOTE_CHARS],
+                      **({"text_truncated": True} if len(body) > COMMENT_QUOTE_CHARS else {})})
+    delta = 0
+    if now is not None and isinstance(old.get("count"), int) and isinstance(now.get("count"), int):
+        delta = now["count"] - old["count"]
+    return shown, max(0, max(delta, len(newer)) - len(shown))
+
+
+async def issue_state(issue_key: str, *, full: bool = True) -> dict:
+    """What the Executor needs of an issue NOW: `{status_category, snapshot}`
+    (`snapshot_of`, with the comment marker), or with `full` False just the
+    status category and `snapshot` None (one read, for a check that needs only
+    "is it closed"). `jira.get_issue` like `planning_numbers`. An OUTAGE raises,
+    stamped `jira`, so the action that asked parks and retries; a NO (no such
+    issue, a malformed key, a refusal) raises as the client raised it, never a
+    null."""
+    from central_command.reports import ea_backlog
+
+    issue = (await _tracker_call(jira.get_issue(issue_key)))["issue"]
+    if not full:
+        return {"status_category": issue.get("status_category"), "snapshot": None}
+    names = await _tracker_call(ea_backlog.tracker_field_names())
+    page = await _tracker_call(jira.list_comments(issue_key, limit=CHANGE_COMMENTS))
+    return {"status_category": issue.get("status_category"),
+            "snapshot": snapshot_of(issue, names, page)}
 
 
 # --- the brief form of the stored plan ---------------------------------------------
@@ -451,6 +596,212 @@ async def deadlines(days: int) -> dict:
                "reason": b["unread"]} for b in blocks if b.get("minutes") is None]
     return {"available": True, **out, "truncated": read["truncated"],
             **({"blocks_unread": unread} if unread else {})}
+
+
+# --- work blocks whose issue moved (DL-221) ---------------------------------------------
+
+
+def blocks_to_review(blocks: list[dict], current: dict, today: date) -> dict:
+    """PURE. `{finished, changed, advance}` for the ACTIVE work blocks planned
+    for `today` or later (a retired or past row is never judged), each list by
+    plan date, then issue key, then event id.
+
+    `current` is the tracker's reading by issue key: None (the tracker says there
+    is no such issue) or `{status_category, snapshot, comments}`, where
+    `snapshot` is a fresh `snapshot_of` and `comments` the newest comments page
+    (newest first); `snapshot` None means "not read: nothing moved since the
+    block's own snapshot" (the loader's `updated` check). A block whose key is not
+    in `current` is not judged: the caller must say the keys it could not read
+    (`block_review`'s `issues_not_read`).
+
+    - `finished`: fact, no judgement. `issue_closed` (status category `done`,
+      never a status name) or `issue_missing`. A finished block is never
+      advanced: it stays listed until the block is retired.
+    - `changed`: for any other block whose snapshot is not null, its field
+      differences (`changes`: `[{field, was, now}]`) and the comments newer than
+      the snapshot's marker (`comments`, with `comments_omitted` when more exist);
+      an entry only when there is something to say. A NULL snapshot (a block made
+      before snapshots, with no tracker, or a placeholder row) is a baseline to
+      fill: it reports no change.
+    - `advance`: `{event_id, calendar_id, from, to}` for each block whose stored
+      snapshot should become the fresh one once the run that was handed the
+      changes finishes: the baseline to fill, the changes shown, and a block the
+      tracker touched whose fields did not move."""
+    finished, changed, advance = [], [], []
+    for b in blocks:
+        if b.get("retired_at") is not None:
+            continue
+        planned = _date_or_none(b.get("plan_date"))
+        if planned is None or planned < today:
+            continue
+        key = b.get("issue_key")
+        if key not in current:
+            continue
+        cur = current[key]
+        row = {"event_id": b["event_id"], "calendar_id": b.get("calendar_id") or "primary",
+               "issue_key": key, "plan_date": planned.isoformat()}
+        if cur is None:
+            finished.append({**row, "reason": "issue_missing"})
+            continue
+        if cur.get("status_category") == "done":
+            finished.append({**row, "reason": "issue_closed"})
+            continue
+        fresh = cur.get("snapshot")
+        if fresh is None:
+            continue
+        old = b.get("issue_snapshot")
+        if old is None:
+            advance.append({"event_id": b["event_id"], "calendar_id": row["calendar_id"],
+                            "from": None, "to": fresh})
+            continue
+        changes = snapshot_changes(old, fresh)
+        shown, omitted = new_comments(cur.get("comments") or [], old.get("comments"),
+                                      fresh.get("comments"))
+        if changes or shown:
+            changed.append({**row, "changes": changes, "comments": shown,
+                            **({"comments_omitted": omitted} if omitted else {})})
+        if fresh != old:
+            advance.append({"event_id": b["event_id"], "calendar_id": row["calendar_id"],
+                            "from": old, "to": fresh})
+    order = lambda r: (r["plan_date"], str(r["issue_key"]), str(r["event_id"]))  # noqa: E731
+    finished.sort(key=order)
+    changed.sort(key=order)
+    advance.sort(key=lambda a: str(a["event_id"]))
+    return {"finished": finished, "changed": changed, "advance": advance}
+
+
+def _date_or_none(raw) -> date | None:
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            return date.fromisoformat(raw.strip()[:10])
+        except ValueError:
+            return None
+    return None
+
+
+# The JQL of one `key in (...)` read stays well under the client's 2000-character cap.
+_KEY_JQL_CHARS = 1800
+
+
+async def _read_issues_by_key(keys: list[str]) -> tuple[dict, list[dict]]:
+    """The tracker's answer for each of `keys`: `{key: issue | None}` (None is
+    the tracker's NO: no such issue) and the keys it could not answer, as
+    `[{issue_key, reason}]`. ONE bounded search by key; a key that search does
+    not return is asked on its own (`get_issue`), because only that read can
+    tell a deleted issue from one the search missed, and a search with a key the
+    tracker does not know can be refused whole. An OUTAGE raises, stamped `jira`,
+    and is never read as "missing"."""
+    found: dict = {}
+    unread: list[dict] = []
+    jql = f"key in ({', '.join(keys)})"
+    try:
+        out = await jira.search_issues(jql, limit=len(keys))
+    except Exception as e:  # noqa: BLE001 — a NO falls back to per-key reads, an outage raises
+        if is_down(e):
+            raise _down_on_jira(e)
+        rows = []
+    else:
+        rows = out.get("issues") or []
+    answered = {r.get("issue_key"): r for r in rows if r.get("issue_key")}
+    for key in keys:
+        if key in answered:
+            found[key] = answered[key]
+            continue
+        try:
+            found[key] = (await _tracker_call(jira.get_issue(key)))["issue"]
+        except Exception as e:  # noqa: BLE001 — a NO is said, an outage raises
+            if is_down(e):
+                raise
+            if getattr(e, "status_code", None) == 404:
+                found[key] = None
+            else:
+                unread.append({"issue_key": key, "reason": _reason(e)})
+    return found, unread
+
+
+async def block_review(today: date | None = None) -> dict:
+    """The `blocks_to_review` block of the EA's brief: `finished` and `changed`
+    (`blocks_to_review`) for the ledger's active future work blocks, with `counts`.
+    `complete` is False and `issues_not_read` names the issues the read could
+    not answer for (an invalid key, a key past this read's bound, a refusal), so
+    nothing is ever "fine" for a read that failed. An issue is read in full (its
+    fields and comments) only when the search's `updated` differs from the
+    block's snapshot or the snapshot is null. The result carries `_advance`, the
+    snapshots to advance after the run (the caller pops it: it is not for the
+    brief). Raises on an outage of the tracker or Postgres (the caller degrades
+    this one key); `available: false` with `reason: not configured` when no
+    tracker is."""
+    from central_command.db import repo
+    from central_command.reports import ea_backlog
+
+    if not jira.configured():
+        return {"available": False, "reason": "not configured"}
+    today = today or ea_backlog._today()
+    rows = await repo.list_active_work_blocks_from(today)
+    base = {"available": True, "as_of": today.isoformat(), "blocks_checked": len(rows)}
+    keys: list[str] = []
+    for r in rows:                              # soonest block first, each key once
+        key = r.get("issue_key")
+        if key and key not in keys:
+            keys.append(key)
+    valid = [k for k in keys if jira.KEY_RE.match(k) and "\n" not in k]
+    unread = [{"issue_key": k, "reason": "not a valid issue key"} for k in keys if k not in valid]
+    asked: list[str] = []
+    size = 0
+    for key in valid:
+        size += len(key) + 2
+        if len(asked) >= max(1, int(settings.plan_backlog_limit)) or size > _KEY_JQL_CHARS:
+            unread.append({"issue_key": key, "reason": "beyond the bound of one read"})
+            continue
+        asked.append(key)
+    current: dict = {}
+    if asked:
+        found, more = await _read_issues_by_key(asked)
+        unread += more
+        names = None
+        for key in asked:
+            if key in (m["issue_key"] for m in more):
+                continue
+            issue = found[key]
+            if issue is None:
+                current[key] = None
+                continue
+            if issue.get("status_category") == "done":
+                current[key] = {"status_category": "done"}
+                continue
+            stale = any(b.get("issue_snapshot") is None
+                        or b["issue_snapshot"].get("updated") != issue.get("updated")
+                        for b in rows if b.get("issue_key") == key)
+            if not stale:
+                current[key] = {"status_category": issue.get("status_category"),
+                                "snapshot": None}
+                continue
+            try:
+                if names is None:
+                    names = await _tracker_call(ea_backlog.tracker_field_names())
+                full = (await _tracker_call(jira.get_issue(key)))["issue"]
+                page = await _tracker_call(jira.list_comments(key, limit=CHANGE_COMMENTS))
+            except Exception as e:  # noqa: BLE001 — a NO is said, an outage raises
+                if is_down(e):
+                    raise
+                if getattr(e, "status_code", None) == 404:
+                    current[key] = None
+                else:
+                    unread.append({"issue_key": key, "reason": _reason(e)})
+                continue
+            current[key] = {"status_category": full.get("status_category"),
+                            "snapshot": snapshot_of(full, names, page),
+                            "comments": page.get("comments") or []}
+    out = blocks_to_review(rows, current, today)
+    return {**base, "complete": not unread,
+            "counts": {"finished": len(out["finished"]), "changed": len(out["changed"])},
+            "finished": out["finished"], "changed": out["changed"],
+            **({"issues_not_read": unread} if unread else {}),
+            "_advance": out["advance"]}
 
 
 # --- the time audit, from the record (DL-221 step 5) -------------------------------------

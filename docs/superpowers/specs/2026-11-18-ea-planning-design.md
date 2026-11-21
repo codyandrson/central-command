@@ -339,6 +339,25 @@ open (the charter tells the EA to ask until the operator states one), and the
 Exchange ledger case of "What can only be proven at a team deployment" is
 unproven: a retried Exchange create can still make a second event.
 
+**As built (2026-11-20, planned blocks are checked against the tracker at every
+planning run).** Found live: two issues' due dates moved a week and their blocks
+stayed on the calendar and in the ledger. The ruling: the EA behaves like an
+assistant on a cadence. The ledger gains `issue_snapshot`, the issue as the
+tracker held it (summary, status, due date, priority, estimate, assignee, labels,
+the planning fields, a hash of the description, the `updated` stamp, a comment
+marker), written by the Executor from a read made before a work block's event is
+created and refreshed when it moves the block, never by the agent. A pure
+`ea_plan.blocks_to_review()` returns `finished` (closed or deleted issue: fact)
+and `changed` (field differences and newer comments, for the assistant to judge;
+a null snapshot is a baseline), its read fails closed, and all four planning
+briefs carry both lists under one framing. A finished block is removed by the new
+gated `plan.remove_finished_block` (the Executor re-checks that the issue is
+finished and that the same agent created the block), proposed straight away with
+a suggested replacement for the freed time; the assistant reviews every other
+change, raises only the relevant ones for discussion and lists the rest in one
+closing line. A change is shown once: the snapshots advance after a run that
+finished its turn, and not after one that failed.
+
 ### D6. The plan is a stored object, so the review compares against a record
 
 A day plan (the date, the ranked items, the blocks, the proposal that

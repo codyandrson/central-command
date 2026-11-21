@@ -117,6 +117,13 @@ def tracker(monkeypatch):
     monkeypatch.setattr(jira, "configured", lambda: True)
     monkeypatch.setattr(jira, "get_issue", t.get_issue)
     monkeypatch.setattr(jira, "search_issues", t.search_issues)
+
+    # A planned work block records its issue's snapshot (DL-221): the comment
+    # marker is one more tracker read, held to the fake here.
+    async def list_comments(key, limit=5, offset=0):
+        return {"ok": True, "total": 0, "comments": [], "count": 0}
+
+    monkeypatch.setattr(jira, "list_comments", list_comments)
     return t
 
 
@@ -1120,6 +1127,7 @@ def test_the_plan_pack_and_the_release_capability_are_offered():
     pack = packs.PACKS["plan-propose"]
     # jira.set_planning_fields joined the pack at step 4b (the planning fields).
     assert {c.name for c in pack.capabilities} == {"plan.record_day", "plan.record_review",
+                                                   "plan.remove_finished_block",
                                                    "jira.set_planning_fields"}
     assert pack.tool_names == ("propose_action",)
     assert "calendar.release_event" in {c.name for c in packs.PACKS["calendar-propose"].capabilities}

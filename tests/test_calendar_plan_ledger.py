@@ -498,9 +498,13 @@ def test_only_the_executor_writes_the_ledger():
             continue
         src = path.read_text(encoding="utf-8")
         for name in ("record_calendar_plan_event", "retire_calendar_plan_event",
-                     "move_calendar_plan_event_date"):
+                     "move_calendar_plan_event_date", "set_calendar_plan_event_snapshot"):
             if re.search(rf"\b{name}\(", src):
                 offenders.append((rel, name))
+        # The advance step (DL-221) is the EA contact's alone.
+        if rel != "heartbeat/actions.py" and re.search(
+                r"\badvance_calendar_plan_event_snapshots\(", src):
+            offenders.append((rel, "advance_calendar_plan_event_snapshots"))
         if re.search(r"(insert into|update)\s+calendar_plan_event", src, re.I):
             offenders.append((rel, "sql"))
     assert offenders == []

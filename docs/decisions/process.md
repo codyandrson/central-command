@@ -3100,7 +3100,29 @@ hygiene, and how the test suite itself must be written. See
   and `jira_planning_gaps` leaves it out. An already-hired EA gets the charter
   paragraph only as a revision the operator saves. Source: the design record's
   D4, "As built, changed 2026-11-19".
-- **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`, `tests/test_planning_fields.py`, `tests/test_ea_week_quarter.py`, `tests/test_staffing.py`
+- **Note (2026-11-20, planned blocks are checked against the tracker at every
+  planning run):** The operator moved two issues' due dates to the following
+  week and their work blocks stayed on the calendar and in the ledger, with
+  nothing to put them to him. His ruling: the assistant behaves like an assistant
+  on a cadence. Every planning run (`morning_report`, `check_in`, `week_ahead`,
+  and the evening `digest`) re-checks each planned work block against the
+  tracker. `calendar_plan_event.issue_snapshot` holds the issue as the tracker
+  reported it when the block was recorded (written by the Executor from a read
+  made before the event is created, an outage parking on `jira` and a 404
+  refusing the block, and refreshed when `calendar.update_event` moves the
+  block; never an argument). `ea_plan.blocks_to_review()` returns `finished`
+  (closed or deleted issue: fact) and `changed` (field differences and newer
+  comments; a null snapshot is a baseline) from one batched search, fail-closed.
+  A finished block is removed by `plan.remove_finished_block` (irreversible, the
+  `plan-propose` pack), proposed straight away: the Executor refuses unless it
+  reads that the ledger has an active work block, that the proposal which created
+  it was drafted by the same agent, and that the issue is closed or gone;
+  `calendar.release_event` still only retires the ledger row. The assistant
+  judges every `changed` entry from what it knows of the plan, raises only the
+  relevant ones, and ends with one line naming those it judged not relevant. A
+  change is shown once: the contact advances the snapshots after the run that was
+  handed them returned without failing, parking or stopping.
+- **Enforced:** test: `tests/test_block_review.py`, `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`, `tests/test_planning_fields.py`, `tests/test_ea_week_quarter.py`, `tests/test_staffing.py`
 - **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D3, D4, D5, D6, D8, D9, D10, "Build order" 1 to 6); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`, `_jira_set_planning_fields`); `central_command/integrations/jira.py` (`set_planning_fields`, `create_issue`); `central_command/runtime/packs.py` (`_SET_PLANNING_FIELDS`); `central_command/runtime/tools.py` (`jira_planning_gaps`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`, the `jira-hygiene` seed); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`); `central_command/reports/ea_team.py`; `central_command/runtime/staffing_profile.py`; `central_command/runtime/templates.py` (`TEMPLATES["staffing"]`); `central_command/api/routes.py` (`hire_agent`)
 
 ### DL-222 — Work is recorded in the tracker and the stored plan; the graph holds what remains when the work is closed

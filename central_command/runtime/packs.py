@@ -1261,7 +1261,8 @@ PACKS: dict[str, Pack] = {
     "plan-propose": Pack(
         name="plan-propose",
         description=("Propose storing the day's plan, recording the evening "
-                     "review's outcomes and setting an issue's planning fields "
+                     "review's outcomes, removing a work block whose issue is "
+                     "finished and setting an issue's planning fields "
                      "(written by the control plane after approval)."),
         tool_names=("propose_action",),
         guidance=(
@@ -1277,6 +1278,9 @@ PACKS: dict[str, Pack] = {
             "`propose_calendar_change` with the blocks, and a plan with no "
             "blocks is a proposal of its own. Never claim a plan is stored, or "
             "an outcome recorded, before you are told the action executed. "
+            "A REMOVED BLOCK (plan.remove_finished_block): target_ref = {'system': "
+            "'calendar', 'id': '<the event_id>'}, reversibility = 'irreversible' "
+            "(the event is deleted). "
             "THE PLANNING FIELDS (jira.set_planning_fields) are the one tracker "
             "write in this pack: an issue's stakes, value, lateness loss, "
             "deadline type, estimate and due date, nothing else; its own "
@@ -1309,6 +1313,21 @@ PACKS: dict[str, Pack] = {
                        "plan is accepted and stored as unplanned work. A later "
                        "record for the same date and issue replaces the earlier "
                        "one. The actual hours are what pads future estimates."),
+            ),
+            GatedCapability(
+                name="plan.remove_finished_block",
+                arguments="{'event_id': '<id from a read>', 'calendar_id'?: 'primary'}",
+                notes=("Removes one of YOUR work blocks whose issue is FINISHED: "
+                       "listed under `blocks_to_review.finished` (closed, or no "
+                       "longer in the tracker). It deletes the event from the "
+                       "calendar, which cannot be undone, and retires its row in "
+                       "your ledger; calendar.release_event, by contrast, only "
+                       "drops the ledger row and leaves the event on the calendar. "
+                       "Propose it for a finished block straight away; the control "
+                       "plane checks at execution that the issue is closed or gone "
+                       "and that you created the block, and refuses otherwise. "
+                       "Never use it for a block whose issue is still open: that "
+                       "is calendar.delete_event, after the operator answers."),
             ),
             # The planning fields (DL-221 step 4b): the one tracker write the
             # assistant holds. Also in jira-propose (see _SET_PLANNING_FIELDS).
