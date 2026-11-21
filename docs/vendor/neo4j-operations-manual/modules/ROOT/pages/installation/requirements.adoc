@@ -113,6 +113,19 @@ For personal use and software development:
 | *Windows 10, 11* footnote:1[]   | OracleJDK 17/21, ZuluJDK 17/21
 |===
 
+.Known issue
+[WARNING]
+====
+Avoid running Neo4j on the following Linux kernel versions, which contain a bug that can cause network transfers to stall:
+
+* 6.17.x
+* 6.18.0 to 6.18.16
+* 6.19.0 to 6.19.6
+
+On affected hosts, network transfers, such as backups or store copies, can become extremely slow but never fail or time out.
+To confirm that a host is affected, inspect the connection with `ss -tinm`.
+A receive buffer stuck at a few kilobytes (the `rb` value in the `skmem:(...)` field) on the receiving side indicates this kernel problem.
+====
 
 [[deployment-requirements-filesystem]]
 == Filesystem
@@ -164,3 +177,12 @@ It is recommended to move to **Java SE 21**, which is supported in Neo4j 5.14 on
 xref:installation/neo4j-desktop.adoc[Neo4j Desktop] is available for developers and personal users.
 Neo4j Desktop is bundled with a JVM.
 For more information on how to use Neo4j Desktop and its capabilities, see the link:https://neo4j.com/docs/desktop/current/[Neo4j Desktop documentation].
+
+[[deployment-requirements-network]]
+== Network
+
+Neo4j supports IPv4, IPv6, and dual-stack (IPv4 and IPv6 simultaneously) network configurations.
+The host operating system must have IPv6 enabled and configured on the relevant network interface when using IPv6.
+
+For more information on configuring Neo4j with IPv6, see your relevant operating system documentation, or xref:configuration/connectors.adoc[Configure network connectors].
+

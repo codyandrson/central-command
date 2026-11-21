@@ -2,5 +2,9 @@ name: neo4j-operations-manual
 source_repo: https://github.com/neo4j/docs-operations
 source_ref: 5.x
 fetched_url: https://codeload.github.com/neo4j/docs-operations/tar.gz/5.x
-fetched_date: 2026-08-25
+fetched_date: 2026-11-21
 subpaths: [modules README.adoc]
+note: >
+  The project runs Neo4j 5.26.33 (Community, 5.26 LTS line). docs-operations
+  has no tag for 5.26 patch releases; its 5.x branch is the manual for the 5
+  series, vendored as of the fetch date.
