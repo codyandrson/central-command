@@ -29,7 +29,7 @@
 #                   7.4-alpine and rejects 7.4 and 7.4-alpine3.22; 16 rejects
 #                   16.10-alpine3.22; 5.26.33 rejects 5.26.34-enterprise.
 #     locked-digest what the locked tag must hash to, or `-` when the tag is
-#                   ROLLING (a series: 3.12-slim-bookworm).
+#                   ROLLING (a series: 3.12-slim-trixie).
 #                   Those move on every upstream rebuild, so the TAG is the pin
 #                   and a digest there would fail weekly on a healthy registry.
 #                   An exact-version tag gets a real digest, and a mismatch on
@@ -85,6 +85,6 @@ dockerio  library/redis               7                     7.4.12-alpine      -
 # in place of the lock (a memory-growth bug in both).
 ghcr      berriai/litellm-database    v1.110                v1.110.2           sha256:3b239acc68e601c436e5feeec7ca0f01a41cd5dffe50975142b7fa7155c1b2ff  core
 dockerio  n8nio/n8n                   2                     2.48.7             sha256:fabce3e9678a07d2dde83bd8f5124017f3ec457d0a3fc6b63bb4cec465d63861  n8n
-dockerio  library/python              3.12                  3.12-slim-bookworm -                                                                        sandbox-base
+dockerio  library/python              3.12                  3.12-slim-trixie   -                                                                        sandbox-base
 mcr       playwright/python           v1.64                 v1.64.1-noble      sha256:330d401ae23c905896a0c26c66c36fc971b621519e7b11b435a8328d7bf6e031  crawler-base
 ghcr      speaches-ai/speaches        0.8                   0.8.3-cpu          sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8  speech

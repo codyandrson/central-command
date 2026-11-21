@@ -101,7 +101,7 @@ CTX = {
     "service.py": b"print('hi')\n",
     "patches/a.patch": b"--- a\n+++ b\n",
 }
-ARGS = "CC_IMG_PYTHON=docker.io/library/python:3.12-slim-bookworm\nPIP_INDEX_URL=\n"
+ARGS = "CC_IMG_PYTHON=docker.io/library/python:3.12-slim-trixie\nPIP_INDEX_URL=\n"
 
 
 def test_same_inputs_give_the_same_hash(tmp_path):
@@ -459,7 +459,7 @@ def test_an_env_seam_change_rebuilds(tree: Tree):
     tree.fetch()
     assert tree.probe()
     with (tree.repo / ".env").open("a", encoding="utf-8") as f:
-        f.write("CC_IMG_PYTHON=registry.example.com/library/python:3.12.9-slim-bookworm\n")
+        f.write("CC_IMG_PYTHON=registry.example.com/library/python:3.12.9-slim-trixie\n")
     assert not tree.probe()
 
 

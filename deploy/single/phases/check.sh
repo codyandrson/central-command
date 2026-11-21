@@ -803,13 +803,13 @@ check_indexes() {
   probe_http "index-npm" "${npm%/}/${INDEX_PROBE_NPM_PACKAGE}" "the npm registry (${npm})" "CC_NPM_REGISTRY"
 
   # apt runs INSIDE the local image builds, and the suite comes from each base
-  # image: library/python:3.12-slim-bookworm is Debian BOOKWORM, mcr
+  # image: library/python:3.12-slim-trixie is Debian TRIXIE (13), mcr
   # playwright/python:v1.64.1-noble is Ubuntu NOBLE
   # (images.txt's locked tags say so). Hardcoded here on purpose — a suite is a
   # property of the base image, not an operator answer.
   local apt="${CC_APT_MIRROR:-https://deb.debian.org/debian}"
-  probe_http "index-apt" "${apt%/}/dists/bookworm/Release" \
-    "the Debian bookworm archive (${apt}) — apt runs inside the sandbox build" "CC_APT_MIRROR"
+  probe_http "index-apt" "${apt%/}/dists/trixie/Release" \
+    "the Debian trixie archive (${apt}) — apt runs inside the sandbox build" "CC_APT_MIRROR"
   if [[ "$CC_ENABLE_CRAWLER" == "1" ]]; then
     probe_http "index-apt-ubuntu" "http://archive.ubuntu.com/ubuntu/dists/noble/Release" \
       "the Ubuntu noble archive — apt runs inside the CRAWLER build (its base is Microsoft's Playwright image, Ubuntu noble). CC_APT_MIRROR is a DEBIAN path and cannot stand in" "CC_ENABLE_CRAWLER=0, or an archive.ubuntu.com mirror"

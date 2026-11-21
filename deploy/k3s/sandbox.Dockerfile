@@ -23,7 +23,7 @@
 # two drift, which is what keeps a bare `podman build` (and the k3s build
 # script, which passes no image arg) on the tested base.
 ARG CC_REGISTRY_DOCKERIO=docker.io
-ARG CC_IMG_PYTHON=${CC_REGISTRY_DOCKERIO}/library/python:3.12-slim-bookworm
+ARG CC_IMG_PYTHON=${CC_REGISTRY_DOCKERIO}/library/python:3.12-slim-trixie
 FROM ${CC_IMG_PYTHON}
 ARG CC_APT_MIRROR=
 ARG CC_APT_SECURITY_MIRROR=
@@ -81,7 +81,11 @@ RUN if [ -n "$CC_APT_MIRROR" ]; then \
         "$CC_APT_SECURITY_MIRROR" "$VERSION_CODENAME" >>/etc/apt/sources.list.d/debian.sources; \
     fi
 
-# The apt packages ride Debian stable's own versioning (bookworm only moves
+# The base is trixie (Debian 13) because its nodejs is 20.19, which satisfies
+# sandbox-runtime 0.0.74's engines (node >=20.11); bookworm's 18.20 did not (npm
+# warned EBADENGINE). Newer sandbox-runtime wants node >=22.12, which no Debian
+# release packages — a move there needs a new package source, an operator call.
+# The apt packages ride Debian stable's own versioning (trixie only moves
 # them for security fixes); the npm package is PINNED because npm's `latest`
 # is a moving tag and a mirror rebuild must reproduce the same bytes.
 # The npm step honours the insecure knob inline rather than through a global
