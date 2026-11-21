@@ -299,6 +299,35 @@ def _notes_section(max_notes: int) -> str:
     )
 
 
+# What a lesson may be. A lesson becomes a graph episode, and until 2026-11-20
+# the prompt said only "durable" and asked for "the issue keys, dates and
+# people": an assistant whose sessions are planning conversations distilled
+# the conversation's DECISIONS ABOUT WORK (an issue to close, six issues
+# slipped a week, a quarter's deferrals, an issue's stakes) and each came to
+# the operator as an episode, beside the tracker change that already recorded
+# it. The graph holds what remains when the work is closed; the tracker holds
+# the work (DL-222, and `packs._EPISODE_ROUTING_RULE`, the same rule where an
+# agent proposes for itself).
+LESSON_ROUTING = (
+    "A LESSON IS A FACT THAT OUTLIVES THE WORK. Each lesson you return is "
+    "proposed as an entry in the team's knowledge graph, which holds what "
+    "will still be true and worth knowing after the work in this session is "
+    "closed: who and what exists, relationships, standing arrangements, "
+    "preferences, and the OUTCOME of work that has finished (delivered, "
+    "installed, bought, sold, replaced, cancelled), with its date. It never "
+    "holds work in flight, which lives in the issue tracker and the stored "
+    "plan. So NEVER return as a lesson: the status, due date, stakes, value, "
+    "estimate, priority, schedule or owner of an issue; a decision ABOUT work "
+    "(to close, slip, defer, drop, re-scope or re-date an issue, or who takes "
+    "it); what was planned for a day, a week or a quarter; a gap or fault in a "
+    "tool or in the tracker's set-up; or anything this session already "
+    "recorded, proposed or handed to a teammate, in any store. The test: a "
+    "sentence that needs an issue key to make sense is about the work, not "
+    "about the world, and is not a lesson. A session that only planned, "
+    "reviewed or updated work has no lesson.\n\n"
+)
+
+
 def _distill_prompt(
     charter: str, transcript: str, skill_texts: dict[str, str] | None = None,
     lessons: bool = True, max_notes: int = 0,
@@ -309,8 +338,10 @@ def _distill_prompt(
     `note-propose` and the setting allows notes."""
     if not lessons:
         return (
-            "YOUR SESSION JUST CLOSED. You cannot record lessons in the team's "
-            "memory, so return an empty `episodes` list and no nomination; the "
+            "YOUR SESSION JUST CLOSED. No lesson is recorded from this session "
+            "(you cannot record one, or the run this conversation answered "
+            "records what it settled), so return an empty `episodes` list and "
+            "no nomination; the "
             "only thing you may return is the skill correction described below"
             + (" and a standing note" if max_notes > 0 else "") + "."
             + _correction_section(skill_texts or {})
@@ -323,10 +354,11 @@ def _distill_prompt(
         "few DURABLE lessons worth keeping — things that would make you or the "
         "team better next time. Most sessions teach nothing durable; an empty "
         "list is the right answer then, and padding is worse than silence.\n\n"
+        + LESSON_ROUTING +
         "For each lesson:\n"
         "  episode_body — a DISTILLED claim of 1-3 sentences, self-contained, "
-        "naming the issue keys, dates and people it depends on. Never pasted "
-        "source text.\n"
+        "about the thing itself, naming the people, things and dates it "
+        "depends on. Never pasted source text.\n"
         "  scope — 'shared' for every fact about the world (people, "
         "relationships, projects, systems, dates), no matter whose role "
         "surfaced it. 'private' is RARE: only an operating rule about how YOU "
@@ -723,7 +755,7 @@ async def _nominate(
     )
 
 
-async def _reflect(session_id: str, agent_id: str, model) -> None:
+async def _reflect(session_id: str, agent_id: str, model, handed_back: bool = False) -> None:
     from pydantic_ai import Agent
 
     from central_command.config import settings
@@ -746,7 +778,12 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
     if len(transcript) < settings.reflection_min_transcript_chars:
         return
     granted = await granted_packs(agent_id)
-    lessons = "graph-propose" in granted
+    # A CONCLUDED discussion lane hands its answer back to the run that asked,
+    # and THAT run records what the conversation settled (every charter's
+    # conclude-before-you-propose rule). Distilling the lane as well proposed
+    # the same thing twice, once from each session (2026-11-20: one fact about
+    # one issue, three proposals). So the lane yields no episode.
+    lessons = "graph-propose" in granted and not handed_back
     loaded: list[str] = []
     skill_texts: dict[str, str] = {}
     if settings.reflection_skill_corrections and "skill-propose" in granted:
@@ -851,7 +888,8 @@ async def _reflect(session_id: str, agent_id: str, model) -> None:
         )
 
 
-async def reflect_on_close(session_id: str, agent_id: str, model=None) -> None:
+async def reflect_on_close(session_id: str, agent_id: str, model=None,
+                           reason: str | None = None) -> None:
     """THE entry point, run as a background task off `converse.close_session`.
 
     A reflection is an afterthought to a close that already succeeded, so it can
@@ -859,7 +897,7 @@ async def reflect_on_close(session_id: str, agent_id: str, model=None) -> None:
     and stops there.
     """
     try:
-        await _reflect(session_id, agent_id, model)
+        await _reflect(session_id, agent_id, model, handed_back=reason == "concluded")
     except Exception as exc:  # noqa: BLE001 — a failed reflection is recorded, never raised
         try:
             await events.emit(

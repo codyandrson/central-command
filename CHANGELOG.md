@@ -4,6 +4,45 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-20 — v2.107.0: Work is recorded in the tracker, lasting facts in the graph, and an issue's comments can be read
+
+- **Decisions about work were being proposed as graph episodes.** On a live deployment the executive
+  assistant proposed ten episodes in one day that were decisions about issues (one to close, six
+  slipped a week, a quarter's deferrals, an issue's stakes), each beside or instead of the tracker
+  change that records it; the operator rejected or dismissed all ten. Three instructions pointed
+  there: session-close reflection asked for any "durable lesson" named by issue key, the assistant's
+  charter said to record "what the operator DECIDED" (a priority call, a deadline, who owns what) as
+  an episode, and the quarterly review's framing asked for one outright. The rule now, in all three
+  (DL-222): each thing has ONE home. Work in flight (status, dates, stakes, a decision to close,
+  slip, defer or re-scope) lives in the tracker and the stored plan; the graph holds what is still
+  true after the work is closed, including the OUTCOME of finished work.
+- **Reflection.** The distill prompt carries that rule (`reflection.LESSON_ROUTING`) and no longer
+  asks for issue keys. A discussion lane closed as `concluded` distills no episode: the run that
+  asked records what the conversation settled, and distilling the lane too proposed the same thing
+  twice.
+- **When work finishes, the assistant asks what it left.** The charter and the evening review's
+  framing add a completion step: for an issue the review shows done, whether finishing it changed
+  something lasting (delivered, installed, bought, sold, replaced, cancelled, with its date and the
+  date the thing it replaced ended) and, only then, one episode. Most finished work leaves none.
+- **An issue's comments can be read, on request.** `jira_get_comments` (`jira-read`; both flavours)
+  returns one page, newest first, each comment clipped at 1,500 characters, with the total and where
+  the next page starts; `jira_get_issue` gains a `comments` pointer (the count and the newest
+  comment's author and time) and never the text. The page's order is checked, and a server that
+  ignored `orderBy=-created` is re-read from the tail.
+- **`jira-comment-propose`: a comment and no other tracker write.** `jira.add_comment` now sits in
+  two packs, the same object in each. The assistant's hire template carries the new pack, so the
+  reason behind a decision about an issue goes on the issue as a comment (one proposal, one action
+  per issue). It is NOT seeded: an assistant already hired gets it from the operator in the cockpit
+  (Agents, the assistant, grants).
+- **The nightly sweep reports what it finds instead of commenting it.** A comment saying an issue is
+  past due restated the due-date field. The seeded instructions now say to propose a fix the issue
+  gives grounds for and report the rest. A running deployment keeps its schedule row:
+  `docs/QUEUE.md` has the text to paste.
+- **For an assistant that runs a saved charter:** the built-in charter changed (the "WHAT TO RECORD,
+  AND WHERE", "WHEN WORK FINISHES" and "COMMENTS ARE READ ON REQUEST" paragraphs, and the two
+  tracker exceptions); a saved charter keeps its text until the operator saves a revision.
+- No schema, unit or manifest change.
+
 ## 2026-11-20 — v2.106.0: Setup can accept a cockpit npm tree the operator installed
 
 - **A mirror lacking one pinned npm version left no way to finish an install.** `npm ci` installs

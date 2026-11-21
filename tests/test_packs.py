@@ -84,6 +84,8 @@ def test_toolset_assembly_dedupes_and_fails_loud():
     # propose_jira_update dropped from every toolset 2026-08-21 (durable.py
     # keeps a pre-drop paused session resumable without it being callable).
     assert names == {"propose_action", "jira_get_issue",
+                     # An issue's comments, read on request (DL-222).
+                     "jira_get_comments",
                      "jira_search_issues", "jira_get_transitions",
                      "jira_list_projects", "jira_list_issue_types",
                      "jira_list_fields", "jira_list_filters", "jira_list_dashboards",

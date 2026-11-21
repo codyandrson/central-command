@@ -70,6 +70,12 @@ async def test_transient_then_success_retries_once_and_returns_the_result(
     spy = _Spy(_transient(), {"key": "TASKS-1", "status": "To Do"})
     monkeypatch.setattr(jira, "get_issue", spy)
 
+    async def _no_comments(issue_key, limit=5, offset=0):
+        # The issue read also asks for the comment pointer (DL-222).
+        return {"total": 0, "comments": []}
+
+    monkeypatch.setattr(jira, "list_comments", _no_comments)
+
     out = await tools.jira_get_issue(None, "TASKS-1")
 
     assert spy.calls == 2

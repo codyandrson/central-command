@@ -633,10 +633,12 @@ def test_the_evening_framing_enriches_unscored_issues():
         assert phrase in text, phrase
 
 
-def test_the_charter_makes_the_planning_fields_the_one_tracker_exception():
+def test_the_charter_makes_the_planning_fields_a_tracker_exception():
+    # ONE exception until 2026-11-20; a comment on an issue is the second
+    # (DL-222, `tests/test_tracker_vs_graph.py`).
     charter = ea_profile.CHARTER
     for phrase in ("Every other change to the tracker goes to that teammate as a task too, "
-                   "with ONE exception: an issue's PLANNING FIELDS",
+                   "with TWO exceptions: an issue's PLANNING FIELDS",
                    "jira.set_planning_fields",
                    "AN UNSCORED ISSUE IS SCORED FROM ITS STAKES",
                    "ask for the stakes where there are none: never invent them",

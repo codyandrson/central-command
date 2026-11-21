@@ -356,10 +356,13 @@ EA_TEMPLATE = HireTemplate(
     # plan is stored as a record and the evening review records the outcomes,
     # both gated. NOT seeded in schema.sql either: a database that already
     # hired the assistant gets the grant from the operator in the cockpit.
+    # jira-comment-propose added 2026-11-20 (DL-222): the reason behind a
+    # decision about an issue is a comment on the issue, never a graph episode.
+    # NOT seeded in schema.sql either, for the same reason.
     default_packs=("record-read", "activity-read", "graph-read", "graph-propose",
                    "ask-operator", "consult", "calendar-read", "calendar-propose",
                    "loe-read", "task-create", "mail-read", "session-recall", "skill-propose", "note-propose",
-                   "jira-read", "plan-propose"),
+                   "jira-read", "plan-propose", "jira-comment-propose"),
     taskable=True,
     conversational=True,
 )

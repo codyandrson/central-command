@@ -861,6 +861,69 @@ async def create_issue(
     }}
 
 
+# One comment's text as an agent is shown it. A comment is free text of any
+# length and an issue can carry hundreds, so the read is a PAGE of clipped
+# comments, newest first, and the answer says what it left out.
+COMMENT_BODY_CEILING = 1500
+COMMENTS_PAGE_MAX = 20
+
+
+def _comment_row(c: dict) -> dict:
+    body = c.get("body")
+    text = _adf_to_text(body) if isinstance(body, dict) else (body or "")
+    text = re.sub(r"\n{3,}", "\n\n", str(text)).strip()
+    row = {
+        "id": c.get("id"),
+        "author": (c.get("author") or {}).get("displayName"),
+        "created": c.get("created"),
+        "body": text[:COMMENT_BODY_CEILING],
+    }
+    if c.get("updated") and c.get("updated") != c.get("created"):
+        row["updated"] = c.get("updated")
+    if len(text) > COMMENT_BODY_CEILING:
+        row["body_truncated"] = True
+        row["body_characters"] = len(text)
+    return row
+
+
+@_requires_native
+async def list_comments(issue_key: str, limit: int = 5, offset: int = 0) -> dict:
+    """One page of an issue's comments, NEWEST FIRST, with the total.
+
+    `offset` counts from the newest comment. Both flavors take `startAt`,
+    `maxResults` and `orderBy` on this endpoint (Cloud REST v3 lists
+    `-created`; the Data Center reference says only that results "can be
+    ordered by the created field"), so the order is CHECKED on the page that
+    came back: a server that ignored `orderBy=-created` returned its oldest
+    comments, and the page is then re-read from the tail by `startAt`.
+    """
+    key = _key(issue_key)
+    limit = max(1, min(int(limit), COMMENTS_PAGE_MAX))
+    offset = max(0, int(offset))
+    base = f"/issue/{key}/comment"
+    resp = await _call(
+        "GET", _api(f"{base}?orderBy=-created&startAt={offset}&maxResults={limit}"))
+    _check(resp, "getComments", key)
+    page = resp.json()
+    total = int(page.get("total") or 0)
+    raw = list(page.get("comments") or [])
+    stamps = [str(c.get("created") or "") for c in raw]
+    if len(raw) > 1 and stamps == sorted(stamps) and stamps[0] != stamps[-1]:
+        # Oldest first: the ordering was not applied. Read the same window
+        # counted from the newest end, and turn it round.
+        start = max(0, total - offset - limit)
+        size = min(limit, max(0, total - offset))
+        resp = await _call("GET", _api(f"{base}?startAt={start}&maxResults={size}"))
+        _check(resp, "getComments", key)
+        raw = list(reversed(resp.json().get("comments") or []))
+    comments = [_comment_row(c) for c in raw]
+    older = max(0, total - offset - len(comments))
+    return {"ok": True, "kind": "jira", "operation": "getComments",
+            "issue": {"issue_key": key}, "total": total, "offset": offset,
+            "comments": comments, "count": len(comments), "older": older,
+            **({"next_offset": offset + len(comments)} if older else {})}
+
+
 @_requires_native
 async def add_comment(issue_key: str, body: str) -> dict:
     key = _key(issue_key)

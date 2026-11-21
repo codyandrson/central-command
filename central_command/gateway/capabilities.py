@@ -1685,6 +1685,21 @@ REGISTRY: list[Capability] = [
         ),
     ),
     Capability(
+        name="jira.get_comments",
+        kind="read",
+        gate="ungated read",
+        default_gate="none",
+        risk="none to the world",
+        holder="agents (jira_get_comments tool; jira_get_issue carries only the count and the newest comment's author and time)",
+        route="integrations/jira.py → Jira REST getComments (native only, no n8n façade fallback)",
+        arguments=["issue_key", "limit?", "offset?"],
+        description=(
+            "One page of an issue's comments, newest first, each clipped, with "
+            "the total and where the next page starts. Comments are read on "
+            "request, never with the issue: an issue can carry hundreds."
+        ),
+    ),
+    Capability(
         name="jira.get_transitions",
         kind="read",
         gate="ungated read",

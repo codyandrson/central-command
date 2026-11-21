@@ -690,7 +690,7 @@ async def close_session(
 
     # asyncio holds only a weak reference to a bare task, so a fire-and-forget
     # reflection can be collected mid-flight; the set is what keeps it alive.
-    task = asyncio.create_task(reflect_on_close(session_id, agent_id))
+    task = asyncio.create_task(reflect_on_close(session_id, agent_id, reason=reason))
     _REFLECTIONS.add(task)
     task.add_done_callback(_REFLECTIONS.discard)
 

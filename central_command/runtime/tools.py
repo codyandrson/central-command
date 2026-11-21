@@ -1096,14 +1096,58 @@ async def jira_get_issue(ctx: RunContext, issue_key: str) -> str:
     Use it before advising on or proposing a change to a specific issue, so your
     answer reflects reality rather than assumption — and ALWAYS before proposing
     jira.link_issues, to check the link does not already exist. Read-only.
+
+    `comments` is a POINTER, never the comments: how many the issue has and
+    who wrote the newest and when. Open them with `jira_get_comments` when
+    the count is not zero and what was said matters to what you are about to
+    do; the issue read never carries their text.
     """
     # Reads are ungated by design. After one bounded retry a DOWN dependency
     # PARKS the run here (`@parkable_read`, FR-40) rather than degrading the
     # answer; only a NO from Jira comes back as text.
     try:
         data = await _read_with_retry(lambda: jira.get_issue(issue_key))
+        page = await _read_with_retry(lambda: jira.list_comments(issue_key, limit=1))
     except Exception as e:  # noqa: BLE001
         return _read_failed("jira read", e)
+    if isinstance(data.get("issue"), dict):
+        data["issue"]["comments"] = _comment_pointer(page)
+    return _clip(json.dumps(data, default=str))
+
+
+def _comment_pointer(page: dict) -> dict:
+    """What an issue read says about its comments: a count and the newest
+    one's author and time. The text is `jira_get_comments`'s to return."""
+    pointer: dict = {"count": page.get("total", 0)}
+    newest = (page.get("comments") or [None])[0]
+    if newest:
+        pointer["latest"] = {"created": newest.get("created"),
+                             "author": newest.get("author")}
+        pointer["read_with"] = "jira_get_comments"
+    return pointer
+
+
+@parkable_read
+async def jira_get_comments(ctx: RunContext, issue_key: str, limit: int = 5,
+                            offset: int = 0) -> str:
+    """Read an issue's comments, NEWEST FIRST: each with its id, author, time
+    and text. One page at a time: `limit` comments (at most 20, 5 unless you
+    ask), starting `offset` comments back from the newest. The answer gives
+    the `total`, how many `older` ones it did not show and the `next_offset`
+    that continues. A long comment is cut and marked `body_truncated`.
+
+    Comments hold what the fields cannot: why an issue slipped or was
+    deferred, what it is waiting on, what was tried. Read them before you
+    propose closing, re-dating or re-scoping an issue, and when a question is
+    WHY an issue is where it is. `jira_get_issue` tells you whether there are
+    any (`comments.count`); do not open them for an issue you are only
+    listing. Read-only.
+    """
+    try:
+        data = await _read_with_retry(
+            lambda: jira.list_comments(issue_key, limit=limit, offset=offset))
+    except Exception as e:  # noqa: BLE001
+        return _read_failed("jira comments read", e)
     return _clip(json.dumps(data, default=str))
 
 

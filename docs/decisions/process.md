@@ -3102,3 +3102,49 @@ hygiene, and how the test suite itself must be written. See
   D4, "As built, changed 2026-11-19".
 - **Enforced:** test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py`, `tests/test_ea_backlog.py`, `tests/test_calendar_plan_ledger.py`, `tests/test_day_plan.py`, `tests/test_planning_fields.py`, `tests/test_ea_week_quarter.py`, `tests/test_staffing.py`
 - **Source:** `docs/superpowers/specs/2026-11-18-ea-planning-design.md` (D1, D2, D3, D4, D5, D6, D8, D9, D10, "Build order" 1 to 6); `central_command/reports/ea_report.py`; `central_command/reports/ea_backlog.py`; `central_command/reports/ea_calendar.py`; `central_command/heartbeat/actions.py` (`_EA_FRAMING`, `_ea_contact`, `_annotate_plan_kinds`); `central_command/runtime/ea_profile.py`; `central_command/gateway/executor.py` (`_calendar_create_event`, `_calendar_adopt_event`, `_calendar_delete_event`, `_calendar_update_event`, `_calendar_release_event`, `_plan_record_day`, `_plan_record_review`, `_jira_set_planning_fields`); `central_command/integrations/jira.py` (`set_planning_fields`, `create_issue`); `central_command/runtime/packs.py` (`_SET_PLANNING_FIELDS`); `central_command/runtime/tools.py` (`jira_planning_gaps`); `central_command/reports/ea_plan.py`; `central_command/db/schema.sql` (`calendar_plan_event`, `day_plan`, `day_plan_outcome`, the `jira-hygiene` seed); `central_command/config.py` (`ea_contact_budget_per_day`, `plan_*`); `central_command/reports/ea_team.py`; `central_command/runtime/staffing_profile.py`; `central_command/runtime/templates.py` (`TEMPLATES["staffing"]`); `central_command/api/routes.py` (`hire_agent`)
+
+### DL-222 — Work is recorded in the tracker and the stored plan; the graph holds what remains when the work is closed
+
+- **Status:** active
+- **Date:** 2026-11-20
+- **Rule:** (recorded here) Each thing an agent learns or the operator decides
+  has ONE home. Work in flight (an issue's status, dates, stakes and
+  estimate; a decision to close, slip, defer, drop or re-scope it; who takes
+  it; a day's or a quarter's plan) is recorded in the tracker and the stored
+  plan, and the REASON behind a decision about an issue is a comment on that
+  issue. The graph holds what will still be true after the work is closed,
+  including the OUTCOME of finished work with its dates. A decision about work
+  is never a graph episode, in a proposal or as a session-close lesson; a
+  sentence that needs an issue key to make sense is about the work.
+- **Why:** On a live deployment the executive assistant proposed ten graph
+  episodes in one day that were decisions about issues, each beside or instead
+  of the tracker change that records it (the same issue's closing was
+  transitioned in the tracker AND proposed to the graph three times). The
+  operator rejected or dismissed all ten and stated the rule: updates to work
+  belong in the tracker; persistent facts belong in the graph; when work
+  completes, the graph gains its outcome (a delivery's date; the old version
+  ends, the new one starts). DL-213 had put this rule in the `graph-propose`
+  pack for an agent drafting an episode; three other instructions still
+  contradicted it: session-close reflection ("durable lessons", named by issue
+  key), the assistant's charter ("what the operator DECIDED ... a priority
+  call, a deadline, who owns what", left in place when follow-ups left the
+  graph on 2026-10-03) and the quarterly review's framing.
+- **Decision:** (1) `reflection.LESSON_ROUTING` states the rule in the distill
+  prompt, and a lane closed `concluded` distills no episode (the run that
+  asked records what it settled). (2) The assistant's charter replaces its
+  work-log paragraph with the one-home rule, adds a completion step (when a
+  review shows work done, ask what lasting fact it left; most leaves none) and
+  names a comment as its second tracker write beside the planning fields. (3)
+  The quarterly and evening framings follow. (4) Comments become readable on
+  request: `jira_get_comments`, a bounded newest-first page, and a count-and-
+  newest pointer on `jira_get_issue`; never the text with the issue, the mail
+  pattern (`mail_search` lists, `mail_read` opens one, attachments page). (5)
+  `jira-comment-propose` carries `jira.add_comment` alone, in the assistant's
+  hire template and not seeded (the `calendar-propose` precedent). (6) The
+  nightly sweep reports what it finds and proposes no comment that restates a
+  field. Not decided here: how a DEFERRAL reaches the ranking. A far-off due
+  date takes an issue out of `must_start` but `standard` still ranks it on
+  value, so today the comment records the deferral and the ranking does not
+  act on it.
+- **Enforced:** test: `tests/test_tracker_vs_graph.py`, `tests/test_planning_fields.py`, `tests/test_ea.py`, `tests/test_packs.py`
+- **Source:** the operator's rulings in session, 2026-11-20; `central_command/runtime/reflection.py` (`LESSON_ROUTING`, `_reflect`); `central_command/runtime/ea_profile.py`; `central_command/heartbeat/actions.py` (the `digest` and `quarter_ahead` framings); `central_command/integrations/jira.py` (`list_comments`); `central_command/runtime/tools.py` (`jira_get_comments`, `_comment_pointer`); `central_command/runtime/packs.py` (`_ADD_COMMENT`, `jira-comment-propose`); `central_command/db/schema.sql` (the `jira-hygiene` seed); DL-213 (route first), DL-221 (the planner)

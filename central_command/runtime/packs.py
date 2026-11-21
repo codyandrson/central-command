@@ -197,14 +197,32 @@ _SET_PLANNING_FIELDS = GatedCapability(
            "left out, never guessed."),
 )
 
+# A comment on an issue. ONE capability in TWO packs, the planning fields'
+# arrangement above and for its reason: `jira-propose` (the agent that owns the
+# tracker) and `jira-comment-propose` (an agent that may say something on an
+# issue and change nothing else about it: the executive assistant, which
+# records WHY the operator decided what they decided about an issue where the
+# issue is, never in the graph). The same object sits in both.
+_ADD_COMMENT = GatedCapability(
+    name="jira.add_comment",
+    arguments="{'issue_key': '<KEY>', 'body': '<text>'}",
+    notes=("Append-only and visible to others — there is no delete. "
+           "Write comments you would sign. A comment says what the issue's "
+           "fields cannot: why it slipped or was deferred, what it is waiting "
+           "on, what the operator decided about it and when. Never a comment "
+           "that only restates a field (that it is past due, its status, its "
+           "due date): the field already says it."),
+)
+
 PACKS: dict[str, Pack] = {
     "jira-read": Pack(
         name="jira-read",
         description=("Read live Jira state: projects, a project's issue types, one "
-                     "issue, JQL search, legal transitions, custom fields, the "
+                     "issue, its comments, JQL search, legal transitions, custom fields, the "
                      "backlog's planning gaps, the team's load, users (filters, "
                      "dashboards, gadgets on Cloud)."),
-        tool_names=("jira_get_issue", "jira_search_issues", "jira_get_transitions",
+        tool_names=("jira_get_issue", "jira_get_comments", "jira_search_issues",
+                    "jira_get_transitions",
                     "jira_list_projects", "jira_list_issue_types", "jira_list_fields",
                     "jira_planning_gaps", "jira_team_load", "jira_find_users",
                     "jira_list_filters",
@@ -276,12 +294,7 @@ PACKS: dict[str, Pack] = {
                        "when the loss lands once at the date, soft when it "
                        "grows."),
             ),
-            GatedCapability(
-                name="jira.add_comment",
-                arguments="{'issue_key': '<KEY>', 'body': '<text>'}",
-                notes=("Append-only and visible to others — there is no delete. "
-                       "Write comments you would sign."),
-            ),
+            _ADD_COMMENT,
             GatedCapability(
                 name="jira.update_attributes",
                 arguments=("{'issue_key': '<KEY>', 'priority'?: '<name>', "
@@ -374,6 +387,24 @@ PACKS: dict[str, Pack] = {
                 flavors=("cloud",),
             ),
         ),
+    ),
+    # jira-comment-propose (2026-11-20, DL-222): a comment and nothing else.
+    # The reason behind a decision about an issue lives ON the issue; before
+    # this pack an agent without the whole tracker could only put it in the
+    # graph, where it was noise, or hand a one-line comment to the tracker's
+    # owner as a task (two approvals).
+    "jira-comment-propose": Pack(
+        name="jira-comment-propose",
+        description=("Propose a comment on a Jira issue (posted by the control "
+                     "plane after approval). No other tracker write."),
+        tool_names=("propose_action",),
+        guidance=(
+            "A COMMENT (jira.add_comment) is the one thing this pack lets you "
+            "write to the tracker: " + _JIRA_TARGET + ". You propose it; a "
+            "human approves and it is posted for you. Several comments settled "
+            "in one conversation ride ONE proposal, one action per issue."
+        ),
+        capabilities=(_ADD_COMMENT,),
     ),
     "jira-project-propose": Pack(
         name="jira-project-propose",
