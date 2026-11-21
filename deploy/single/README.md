@@ -629,7 +629,7 @@ under their live tags, from the warm cache), `./setup.sh llm`, `./setup.sh
 stack` (so a changed `compose.yaml`, a new third-party ref or a rebuilt local
 image is actually DEPLOYED — the containers that need it are recreated, named —
 and, with `CC_ENABLE_N8N=1`, the n8n façade workflows applied),
-`./setup.sh app` (deps from `requirements.lock`, honoring `CC_AIRGAP`; cockpit
+`./setup.sh app` (deps resolved from `pyproject.toml`'s ranges; cockpit
 rebuild), then `./setup.sh verify`. It always ends with a `USERACTION restart` (exit 3): a
 merged change is not live until the API, the cockpit and the sandbox runner
 start again on it — run `./setup.sh`, which resumes at `boot`, then confirm with

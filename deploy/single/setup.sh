@@ -958,15 +958,9 @@ local_image_state() { # local_image_state <ref> <build-script>
 # what check proves is the resolution fetch performs. Needs a target
 # environment in VIRTUAL_ENV.
 resolve_python_deps() {
-  if [[ "$CC_AIRGAP" == "1" ]]; then
-    in_repo uv pip install --dry-run -r "$REPO_ROOT/requirements.lock" >&2 \
-      && pass "python" "requirements.lock resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
-      || fail "python" "requirements.lock does not resolve — seam: CC_PYPI_INDEX_URL"
-  else
-    in_repo uv pip install --dry-run -e ".[dev,runtime]" >&2 \
-      && pass "python" "[dev,runtime] resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
-      || fail "python" "the Python dependencies do not resolve — seam: CC_PYPI_INDEX_URL; or CC_AIRGAP=1 (lock only)"
-  fi
+  in_repo uv pip install --dry-run -e ".[dev,runtime]" >&2 \
+    && pass "python" "[dev,runtime] resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
+    || fail "python" "the Python dependencies do not resolve — seam: CC_PYPI_INDEX_URL"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

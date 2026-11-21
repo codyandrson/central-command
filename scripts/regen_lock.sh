@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Regenerate requirements.lock as a UNIVERSAL lock (v2.46.0).
 #
-# The lock used to be a `pip freeze` of the Linux venv: no platform markers,
-# so `CC_AIRGAP=1` (which installs from the lock instead of resolving) could
-# not install on Windows — uvloop has no Windows wheels, and magika 0.6.3 caps
-# onnxruntime at 1.20.1 on win32 only. A universal resolution carries the
-# markers, so ONE file installs on every platform the app supports.
+# The lock is the RECORD of the exact set the test gate ran against; no install,
+# update or check reads it (every install resolves from pyproject.toml's
+# ranges). It used to be a `pip freeze` of the Linux venv, with no platform
+# markers; a universal resolution carries them (uvloop has no Windows wheels,
+# and magika 0.6.3 caps onnxruntime at 1.20.1 on win32 only), so ONE file
+# records the set on every platform the app supports.
 #
 # The CURRENT pins are the constraints: regenerating must not move a version
 # that was not deliberately bumped (the lock is the suite-tested graph). To
@@ -26,18 +27,17 @@ uv pip compile pyproject.toml --extra dev --extra runtime --universal \
 [[ -s "$out" ]] || { echo "uv pip compile produced nothing — lock left untouched" >&2; exit 1; }
 {
   cat <<'HDR'
-# requirements.lock — the air-gap reproducibility pin: pyproject.toml's loose
-# >= bounds resolve to WHATEVER a mirror serves; this file resolves to the
-# exact graph the offline suite passed against.
+# requirements.lock — the RECORD of the exact set the test gate ran against.
+# No install, update or check reads it: every install resolves from the ranges
+# in pyproject.toml (`uv pip install -e ".[dev,runtime]"`), so a mirror needs a
+# version inside each range, not these pins. This file is what a release was
+# tested on, for comparing a deployment's installed versions with it.
 #
 # UNIVERSAL since v2.46.0 (2026-09-25): `uv pip compile --universal`, so a
 # pin that only applies on one platform carries its marker (uvloop is not
-# for win32; magika 0.6.3 caps onnxruntime at 1.20.1 on win32 only). Before
-# that it was a Linux `pip freeze` and `CC_AIRGAP=1` could not install on
-# Windows at all. `tests/test_requirements_lock.py` pins the markers.
+# for win32; magika 0.6.3 caps onnxruntime at 1.20.1 on win32 only).
+# `tests/test_requirements_lock.py` pins the markers.
 #
-# Install with:
-#   uv pip install -r requirements.lock && uv pip install -e . --no-deps
 # Regenerate with:  scripts/regen_lock.sh   (a deliberate act — see AGENTS.md)
 HDR
   cat "$out"

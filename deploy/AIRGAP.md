@@ -109,7 +109,7 @@ and `deploy/discovery.conf` are retired; an existing install's are merged into
 | mcr.microsoft.com | the crawler base (Microsoft's Playwright image: browsers + OS libs baked in) | `CC_REGISTRY_MCR` | replaces Debian + Microsoft's browser CDN for that build |
 | one image at a path this mirror renames, or a tag you verified yourself | any image, including the build bases | `CC_IMG_<NAME>` | THE seam a host variable cannot express. An operator pin WINS: the resolver verifies that exact ref exists (manifest HEAD by tag, or by digest for a `…@sha256:…` ref, parsed from YOUR ref), `WARN`s that it honoured a pin, records it as `pinned`, and never rewrites it. A pin the registry does not have is a `FAIL` naming the key — a pin is checked, not trusted. Unset it to resolve against `images.txt` again |
 | Debian archive | `apt-get` inside the sandbox build | `CC_APT_MIRROR`, `CC_APT_SECURITY_MIRROR` | build-args; the deb822 sources file is REWRITTEN from `/etc/os-release` (slim images ship no `sources.list`; security is a separate path on every mirror). The suite is the sandbox base's own, **trixie (Debian 13)** — the mirror must carry `trixie` and `trixie-updates` (and `trixie-security` behind `CC_APT_SECURITY_MIRROR`); a mirror holding only bookworm fails the `index-apt` check |
-| PyPI | the app's venv (uv) — the knowledge-graph client `graphiti-core` and its `posthog` and `backoff` dependencies included, since it runs in the app (design record 2026-10-04) — and the crawler's `pip` | `CC_PYPI_INDEX_URL` | fanned out to `PIP_INDEX_URL` AND `UV_DEFAULT_INDEX` — uv reads no `PIP_*`, and `UV_INDEX_URL` is deprecated. Under `CC_AIRGAP=1` the venv installs exactly `requirements.lock`, so a mirror is COMPLETE when it serves every pin in that file — graphiti-core included; the carried patches (`deploy/graphiti-patches/`) are in the tree and need no download |
+| PyPI | the app's venv (uv) — the knowledge-graph client `graphiti-core` and its `posthog` and `backoff` dependencies included, since it runs in the app (design record 2026-10-04) — and the crawler's `pip` | `CC_PYPI_INDEX_URL` | fanned out to `PIP_INDEX_URL` AND `UV_DEFAULT_INDEX` — uv reads no `PIP_*`, and `UV_INDEX_URL` is deprecated. The venv resolves `pyproject.toml`'s declared ranges (`uv pip install -e ".[dev,runtime]"`), with or without `CC_AIRGAP=1`, so a mirror is COMPLETE when it serves, for every package in the dependency graph, at least one version inside the range its dependent declares — not one exact pin. `graphiti-core` alone is exact (`==`, the carried patches are written against it); the carried patches (`deploy/graphiti-patches/`) are in the tree and need no download |
 | python-build-standalone | uv, only when the host has no CPython 3.12 | `CC_PYTHON_MIRROR` | `UV_PYTHON_INSTALL_MIRROR`; a `file://` directory works |
 | registry.npmjs.org | the cockpit build (`npm ci`), `sandbox-runtime` inside the sandbox build | `CC_NPM_REGISTRY` | `NPM_CONFIG_REGISTRY`; the lockfile's `resolved` URLs point at npmjs and npm rewrites them to the configured registry (its `replace-registry-host` default) — a lock regenerated AGAINST a mirror would not be rewritten back |
 | huggingface.co | the speech engine's models (Kokoro TTS + faster-whisper STT), fetched by `cc-speech` when the `llm` phase installs them | `CC_HF_ENDPOINT`, or pre-place the hub snapshots in the `speech-models` volume | `HF_HUB_CACHE` is the volume; a present snapshot is not re-fetched. `CC_ENABLE_SPEECH=0` removes the source entirely (point `cc-tts`/`cc-stt` at your own engines) |
@@ -378,7 +378,7 @@ are reachable and which mirrors can stand in.
 | NodeSource (apt-based Node) | Node ≥ 22 is a HOST prerequisite (it *runs* the cockpit). Pre-stage the official self-contained tarball — `node-v22.x-linux-<arch>.tar.xz` from nodejs.org or its mirror, untarred onto PATH — no apt involved. |
 | registry.npmjs.org | `CC_NPM_REGISTRY` at the npm mirror (the lockfile's `resolved` URLs are rewritten automatically). |
 | One npm version the mirror lacks (`npm ci` answers 404 for a tarball) | `CC_NPM_REGISTRY` changes the host, never the version: `npm ci` installs exactly `web/package-lock.json`'s pins. Report the package and version so a release pins one your mirror carries. Until that release: install the tree yourself in `web/` with `npm install --no-package-lock` (it honours `package.json`'s ranges and leaves the lockfile as released, which the pristine-tree check requires), set `CC_COCKPIT_NPM_PREINSTALLED=1`, and re-run `./setup.sh`. Setup and update then never run `npm ci`: they accept the tree when `npm ls --all --offline` finds every declared dependency inside its range (a `WARN`, since the versions are then yours and not the release's pins) and `FAIL` without touching it otherwise. After an update that changes the lockfile the tree is checked again against the new `package.json`; repair it the same way if it no longer fits. Turn the key off once a release installs cleanly. |
-| PyPI | `CC_PYPI_INDEX_URL` at the PyPI mirror — it must carry every pin in `requirements.lock`, graphiti-core (the graph client, in the app's venv since 2026-10-04) among them; the pip install inside the crawler build rides the same seam as a build-arg. |
+| PyPI | `CC_PYPI_INDEX_URL` at the PyPI mirror — it must carry a version inside each range `pyproject.toml` declares (and the exact `graphiti-core`, the graph client, in the app's venv since 2026-10-04); the pip install inside the crawler build rides the same seam as a build-arg and takes ranges too. |
 | A container registry | `CC_REGISTRY_DOCKERIO`/`_GHCR`/`_MCR` at the registry mirror. A mirror that renames PATHS, or one tag that is simply absent: `CC_IMG_<NAME>`. |
 | python-build-standalone | Install CPython 3.12 on the host, or point `CC_PYTHON_MIRROR` at a `file://` directory holding the archive. Under `CC_AIRGAP=1` neither being true is a `check` FAIL, not a warning — the download is known to be impossible. |
 | huggingface.co | Speech: `CC_HF_ENDPOINT` at an HF mirror, or pre-place the two hub snapshots in the `speech-models` volume, or `CC_ENABLE_SPEECH=0` and register `cc-tts`/`cc-stt` at engines you already have. Cockpit-local Whisper (k3s only): pre-place `ggml-*.bin` in `WHISPER_MODEL_DIR` (default `~/.nerve/models`), or set `WHISPER_MODELS_BASE_URL`. |
@@ -414,12 +414,14 @@ The locally BUILT images resolve their base through the same manifest
 (v2.43.0): the resolver writes `CC_IMG_PYTHON` and
 `CC_IMG_PLAYWRIGHT_PYTHON`, each `build-*-image.sh` passes
 its one as a `--build-arg`, and each Dockerfile's `ARG` default must equal its
-`images.txt` row (a test fails the suite if they drift). `requirements.lock` is
-the frozen Python resolution and `web/package-lock.json` the cockpit's: a mirror
-that "gets updated regularly" changes nothing until a release bumps a pin —
-that is the point. The knowledge-graph client (graphiti-core) is a Python
-dependency of the app, so it arrives through the PyPI seam with everything
-else in `requirements.lock`.
+`images.txt` row (a test fails the suite if they drift). The Python and cockpit
+dependencies are resolved from their declared ranges (`pyproject.toml`,
+`web/package.json`) at install time, so a mirror that "gets updated regularly"
+moves an install to the newest version inside each range; `requirements.lock`
+and `web/package-lock.json` are the records of the exact sets the test gate ran
+against, and no install reads them. The knowledge-graph client (graphiti-core)
+is a Python dependency of the app, so it arrives through the PyPI seam with
+everything else, and is the one exact (`==`) pin.
 
 ## Open items (owed — to be decided on the testbed)
 

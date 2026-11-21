@@ -778,9 +778,9 @@ check_images() {
 # ITSELF NEEDS — its metadata, by the same GET pip/uv and npm make, through the
 # configured seam with the CA/insecure/proxy settings applied. That is what the
 # probe proves: this index serves package metadata from here. The project is
-# taken from the lockfiles on purpose, because a MIRROR is only obliged to hold
-# what the install resolves: an offline mirror seeded from requirements.lock
-# and web/package-lock.json answers for these two, and would 404 for an
+# taken from the lockfiles on purpose (they record what the install resolves),
+# because a MIRROR is only obliged to hold what the install resolves: one
+# serving the declared ranges answers for these two, and may 404 for an
 # arbitrary one. The old choices were exactly that kind: `pip` and `npm` are in
 # NEITHER lockfile, and `npm`'s packument is 25.8 MB — under the 20 s cap a
 # slow evening FAILed the gate on a healthy registry (the same trap as the

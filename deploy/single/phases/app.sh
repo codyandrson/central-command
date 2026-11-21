@@ -229,18 +229,12 @@ phase_app() {
   fi
   export VIRTUAL_ENV="$REPO_ROOT/.venv"
 
-  # Air-gapped installs resolve nothing: requirements.lock is the frozen,
-  # suite-tested resolution, and `-e . --no-deps` adds the package itself
-  # without letting pip re-resolve against a mirror.
-  if [[ "$CC_AIRGAP" == "1" ]]; then
-    step "install" "installed from requirements.lock (air-gapped)" \
-      in_repo uv pip install -r "$REPO_ROOT/requirements.lock" || return 1
-    step "install-editable" "central_command installed editable, no dependency resolution" \
-      in_repo uv pip install -e . --no-deps || return 1
-  else
-    step "install" "central_command installed editable with [dev,runtime]" \
-      in_repo uv pip install -e ".[dev,runtime]" || return 1
-  fi
+  # Every install resolves from pyproject.toml's declared ranges against the
+  # configured index (CC_PYPI_INDEX_URL), air-gapped or not: a mirror needs a
+  # version inside each range, not one exact pin. requirements.lock is not
+  # read here; it records the set the test gate ran against.
+  step "install" "central_command installed editable with [dev,runtime]" \
+    in_repo uv pip install -e ".[dev,runtime]" || return 1
 
   # app/graphiti-patches: the five carried graphiti-core fixes (design record
   # 2026-10-04, D7) onto the package the install just put down — after EVERY

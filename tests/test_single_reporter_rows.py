@@ -39,10 +39,6 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     # content that failed to ship. phases/fetch.sh is outside the P5 change
     # that added this guard; naming it `resolve-images` is the obvious fix.
     ("fetch.sh", "images-txt"): "outside the P5 change (fetch.sh)",
-    # The air-gapped half of app/install (`uv pip install -e . --no-deps`
-    # after the lock). phases/app.sh is outside the P5 change that added this
-    # guard; printing it under `install` is the obvious fix.
-    ("app.sh", "install-editable"): "outside the P5 change (app.sh)",
     # The interactive wait timing out AFTER demo-approve's USERACTION: the row
     # is the gate it already said it was, and a FAIL under its name would turn
     # "waiting on the operator" into "broken".

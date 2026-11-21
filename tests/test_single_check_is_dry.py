@@ -202,9 +202,9 @@ def test_an_index_is_asked_with_head_and_a_refused_head_falls_back_to_get(
 # ── the indexes section asks for ONE SMALL PROJECT THE INSTALL NEEDS ─────────
 # `npm`'s packument is 25.8 MB and `pip`/`npm` are in neither lockfile, so the
 # old probes downloaded tens of megabytes under a 20 s FAIL cap and would 404 on
-# an offline mirror seeded from the lockfiles. The names below must stay in the
-# lockfiles (a mirror is only obliged to hold what the install resolves), and
-# discover.sh's PyPI row asks for the same project.
+# a mirror that holds only what the install resolves. The names below must stay
+# in the lockfiles (which record what the install resolves; no install reads
+# them), and discover.sh's PyPI row asks for the same project.
 def _shell_constant(path: Path, name: str) -> str:
     m = re.search(rf"^{name}=([A-Za-z0-9._-]+)", path.read_text(encoding="utf-8"), re.MULTILINE)
     assert m, f"{name} is gone from {path.relative_to(ROOT)}"

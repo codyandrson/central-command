@@ -615,7 +615,7 @@ phase_preflight() {
   if (( reach )); then
     pass "package-indexes" "pypi and npm are reachable"
   elif [[ "$CC_AIRGAP" == "1" ]]; then
-    pass "package-indexes" "unreachable, as expected with CC_AIRGAP=1 (installs come from requirements.lock)"
+    pass "package-indexes" "unreachable, as expected with CC_AIRGAP=1 (installs resolve from the declared ranges against the configured mirrors)"
   else
     warn "package-indexes" "pypi and/or npm unreachable — set CC_AIRGAP=1 and see deploy/AIRGAP.md (and registries.yaml.example for images)"
   fi
@@ -1038,18 +1038,12 @@ phase_app() {
   fi
   export VIRTUAL_ENV="$REPO_ROOT/.venv"
 
-  # Air-gapped installs resolve nothing: requirements.lock is the frozen,
-  # suite-tested resolution, and `-e . --no-deps` adds the package itself
-  # without letting pip re-resolve against a mirror.
-  if [[ "$CC_AIRGAP" == "1" ]]; then
-    step "install" "installed from requirements.lock (air-gapped)" \
-      in_repo uv pip install -r "$REPO_ROOT/requirements.lock" || return 1
-    step "install-editable" "central_command installed editable, no dependency resolution" \
-      in_repo uv pip install -e . --no-deps || return 1
-  else
-    step "install" "central_command installed editable with [dev,runtime]" \
-      in_repo uv pip install -e ".[dev,runtime]" || return 1
-  fi
+  # Every install resolves from pyproject.toml's declared ranges against the
+  # configured index (CC_PYPI_INDEX_URL), air-gapped or not: a mirror needs a
+  # version inside each range, not one exact pin. requirements.lock is not
+  # read here; it records the set the test gate ran against.
+  step "install" "central_command installed editable with [dev,runtime]" \
+    in_repo uv pip install -e ".[dev,runtime]" || return 1
   # The five carried graphiti-core fixes (deploy/graphiti-patches/, design
   # record 2026-10-04 D7), applied after EVERY dependency install — an install
   # puts back a pristine package. Idempotent; a hunk that matches neither the

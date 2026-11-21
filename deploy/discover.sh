@@ -454,7 +454,8 @@ record_note() { # record_note <key> <label> <group> <class> <detail> [extra k=v 
 # in whatever order the parallel jobs happened to finish.
 CATALOG=()
 # The PyPI project the `pypi` row (and a configured PyPI mirror) is asked for —
-# small, and in requirements.lock. deploy/single/phases/check.sh's
+# small, and a package the install resolves (requirements.lock records the
+# resolved set). deploy/single/phases/check.sh's
 # INDEX_PROBE_PYPI_PROJECT is the same name; tests/test_single_check_is_dry.py
 # holds the two together and to the lockfile.
 PYPI_PROBE_PROJECT=h11
@@ -472,7 +473,7 @@ build_catalog() {
   # lists every project on PyPI (46.7 MB measured 2026-10-02, 5-6.5 s on the
   # testbed), which an 8 s probe timed out on with nothing wrong but the
   # bandwidth. The project is one the install itself resolves
-  # (requirements.lock), so a mirror probed the same way holds it too; the
+  # resolves, so a mirror probed the same way holds it too; the
   # same choice as `./setup.sh check`'s index-pypi row.
   add pypi          "PyPI simple index"        "https://pypi.org/simple/${PYPI_PROBE_PROJECT}/" python
   add pythonhosted  "PyPI package files"       "https://files.pythonhosted.org" python

@@ -1,12 +1,13 @@
 """requirements.lock is UNIVERSAL (v2.46.0) — the markers are load-bearing.
 
-The lock used to be a Linux ``pip freeze``: no platform markers at all. With
-``CC_AIRGAP=1`` the single-node installer installs from the lock instead of
-resolving, so on Windows it tried to install uvloop (no Windows wheels exist)
-and onnxruntime 1.29.0 (magika 0.6.3 caps it at 1.20.1 on win32 only) and
-failed before the first package landed (work-site report, 2026-09-24). A
-universal resolution carries each platform-specific pin with its marker.
-These tests fail the suite if a regeneration drops them again.
+The lock used to be a Linux ``pip freeze``: no platform markers at all. It
+is now the record of the exact set the test gate ran against (no install
+reads it; every install resolves from pyproject.toml's ranges), and it
+stays universal: a Linux-only record would lose uvloop's and onnxruntime's
+platform-specific pins (no Windows wheels for uvloop; magika 0.6.3 caps
+onnxruntime at 1.20.1 on win32 only). A universal resolution carries each
+platform-specific pin with its marker. These tests fail the suite if a
+regeneration drops them again.
 """
 
 from __future__ import annotations

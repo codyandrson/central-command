@@ -278,8 +278,9 @@ answer in conversation (then you write the answer into `.env`).
   1, a plain HTTP fetch, works without it), `CC_ENABLE_SANDBOX` (default 1;
   this profile's sandbox backend is rootless podman, not the k3s profile's
   gVisor — weaker isolation, say so plainly), `CC_AIRGAP` (default 0; 1 when
-  no public package index is reachable — the install then uses
-  `requirements.lock` instead of resolving).
+  no public package index is reachable — the reachability probes then
+  inform instead of warn; installs resolve from the declared version ranges
+  against the mirrors either way).
 - **Mirrors, CA and proxy on a restricted network.** Mirrors, CA bundles and
   internal URLs are facts only the operator knows. If discovery ran, its
   report already verified these answers — offer each as a pre-fill to

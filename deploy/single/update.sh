@@ -591,8 +591,8 @@ cmd_plan() {
   grep -q '^central_command/db/schema.sql$' <<<"$names" \
     && pass "flag-schema" "schema.sql changed — apply will re-run it against the live spine (additive-only, idempotent)" \
     || pass "flag-schema" "no schema change"
-  grep -q '^requirements.lock$' <<<"$names" \
-    && pass "flag-deps" "requirements.lock changed — apply will re-install python deps from the lock" \
+  grep -q '^pyproject.toml$' <<<"$names" \
+    && pass "flag-deps" "pyproject.toml changed — apply will re-resolve python deps from its ranges" \
     || pass "flag-deps" "no python dependency change"
   grep -q '^web/' <<<"$names" \
     && pass "flag-cockpit" "web/ changed — apply will rebuild the cockpit (needs node >= 22, else skipped with a WARN)" \
@@ -742,8 +742,7 @@ STAGE_PATHS=(
   central_command    # what `uv pip install --dry-run -e .` builds metadata from
                      # (hatchling: packages = ["central_command"]), and
                      # central_command/crawler/, the crawler image's context
-  pyproject.toml     # the Python graph fetch resolves...
-  requirements.lock  # ...or, with CC_AIRGAP=1, the frozen one it installs
+  pyproject.toml     # the ranges the Python graph is resolved from
   VERSION            # which release the staged run names in its output
   web/package.json   # what `npm ci` installs, exactly
   web/package-lock.json
