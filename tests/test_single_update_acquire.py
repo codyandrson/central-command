@@ -415,7 +415,7 @@ def test_a_mirror_missing_one_tag_stops_before_the_merge_with_nothing_changed(de
 @drives_installer
 def test_a_failed_staged_artifact_is_a_fail_and_still_changes_nothing(dep: Dep):
     dep.fill_ledger()
-    write_lf(dep.flags / "pull-fails", "docker.io/library/redis:7-alpine\n")
+    write_lf(dep.flags / "pull-fails", "docker.io/library/redis:7.4.12-alpine\n")
     head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
 
     r = dep.update("apply")
@@ -877,7 +877,7 @@ def test_update_run_does_not_roll_back_a_stop_before_the_merge(dep: Dep):
     subprocess.run(["git", "-C", str(dep.repo), "tag", "pre-update-20200101T000000Z",
                     "local"], check=True)
     old_tags = dep.git("tag", "-l")
-    write_lf(dep.flags / "pull-fails", "docker.io/library/redis:7-alpine\n")
+    write_lf(dep.flags / "pull-fails", "docker.io/library/redis:7.4.12-alpine\n")
     head = dep.head()
 
     r, status = _run_runner(dep)

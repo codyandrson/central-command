@@ -979,7 +979,7 @@ resolve_python_deps() {
 # compose_up, read at the v1.6.0 tag on 2026-10-02). The image REF string is in
 # that dict; the image ID behind it is not. So since this release made a
 # changed Dockerfile REBUILD `localhost/cc-crawler:1` under the same tag —
-# and equally when a third-party tag such as `postgres:16` is re-pulled to a new
+# and equally when a third-party tag such as `main-stable` is re-pulled to a new
 # digest — `up` left the OLD container running and reported it healthy.
 # (podman-compose's main branch has since added an image-ID comparison, still
 # unreleased as 1.6.0, so the floor may not assume it. docker compose compares

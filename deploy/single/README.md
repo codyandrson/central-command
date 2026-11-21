@@ -286,7 +286,7 @@ never `7.4` or `7.4-alpine3.22`; `5.26.33` never admits `5.26.34-enterprise`). `
   poisoned); on a configured mirror it is a `WARN` naming both digests, because
   a mirror seeded by push re-serialises manifests (v2.45.4) — the tag is the
   pin there. A tag that
-  is a series or a channel (`16`, `7-alpine`, `main-stable`) is declared
+  is a series or a channel (`main-stable`, `3.12-slim-bookworm`) is declared
   ROLLING with a `-` in the digest column: it moves on every upstream rebuild,
   so the tag is the pin and the observed digest is recorded as provenance;
 - otherwise the newest tag satisfying the constraint → `WARN` naming the
@@ -393,7 +393,7 @@ alone, a changed one is recreated. Running `./setup.sh` again after a
 config change is the supported way to apply it — the ledger re-runs only
 the steps whose `.env` inputs changed. What `up` does NOT notice is a NEW
 image behind an UNCHANGED ref — a local image a release rebuilt under its
-fixed tag, a re-pulled `postgres:16` — because podman-compose 1.6.0 compares
+fixed tag, a re-pulled `main-stable` — because podman-compose 1.6.0 compares
 the service definition, not the image ID (docker compose does compare it). So
 `stack` (and `llm`, for LiteLLM and its database and redis) then compares each
 container's image ID with the ID its ref resolves to now and recreates exactly

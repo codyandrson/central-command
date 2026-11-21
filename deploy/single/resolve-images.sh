@@ -15,7 +15,7 @@
 #                          recorded locked-mirror: pushes re-serialise manifests.)
 #                          Unless the lock's digest column is `-`, which
 #                          declares the tag ROLLING (a series or a channel:
-#                          postgres:16, main-stable) — those move on every
+#                          main-stable, 3.12-slim-bookworm) — those move on every
 #                          upstream rebuild, so the tag is the pin and the
 #                          digest is provenance only.
 #     another tag fits     WARN naming the substitution — use the highest by
@@ -506,7 +506,7 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
             | sed -n 's/^[Dd]ocker-[Cc]ontent-[Dd]igest: *//p' | tail -1)" && [[ -n "$dig" ]]; then
     chosen="$lock"; mode=locked
     if [[ "$ldig" == "-" ]]; then
-      # A ROLLING tag (a series or a channel: postgres:16, redis:7-alpine,
+      # A ROLLING tag (a series or a channel: main-stable, 3.12-slim-bookworm,
       # main-stable). Its digest moves every upstream rebuild, so there is
       # nothing to lock and a mismatch would fire weekly on a healthy
       # registry. The tag itself is the pin; the digest is recorded in

@@ -170,7 +170,7 @@ phase_llm() {
     compose up -d --wait litellm || return 1
   # ...and on the image their refs resolve to NOW: `up` leaves a running
   # container alone when only the image behind its ref changed (a re-pulled
-  # main-stable, a new postgres:16 digest). See image_drift.
+  # main-stable channel). See image_drift.
   catch_up_images "up-litellm" litellm-db litellm-redis litellm || return 1
 
   # LiteLLM runs its Prisma migrations at boot; 5 minutes is the honest budget.

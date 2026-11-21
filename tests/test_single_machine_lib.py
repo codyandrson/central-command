@@ -168,7 +168,7 @@ def test_an_operator_pin_host_is_marked_insecure_too():
     env = {
         "CC_REGISTRY_DOCKERIO": "mirror.corp.example",
         "CC_TLS_INSECURE": "1",
-        "CC_IMG_POSTGRES": "other.corp.example/mirrored/library/postgres:16",
+        "CC_IMG_POSTGRES": "other.corp.example/mirrored/library/postgres:16.16-trixie",
         "CC_IMG_NEO4J": "mirror.corp.example/library/neo4j:5.26.33",
     }
     out = run("cc_render_registries_conf", env)
@@ -183,8 +183,8 @@ def test_a_localhost_or_hostless_pin_is_not_a_registry():
     out = run("cc_pin_hosts", {
         "CC_TLS_INSECURE": "1",
         "CC_IMG_A": "localhost/cc-crawler:1",
-        "CC_IMG_B": "postgres:16",
-        "CC_IMG_C": "mirror.corp.example:5000/library/redis:7-alpine",
+        "CC_IMG_B": "postgres:16.16-trixie",
+        "CC_IMG_C": "mirror.corp.example:5000/library/redis:7.4.12-alpine",
     })
     assert out.strip() == "mirror.corp.example:5000"
 

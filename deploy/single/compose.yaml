@@ -72,7 +72,7 @@ services:
     # cc-postgres-postgres, not cc-postgres: update.sh (phase 2) execs this
     # container by the kube-play name. Renamed there, not here.
     container_name: ${CC_POD_PREFIX:-cc-}postgres-postgres
-    image: ${CC_IMG_POSTGRES:-docker.io/library/postgres:16}
+    image: ${CC_IMG_POSTGRES:-docker.io/library/postgres:16.16-trixie}
     restart: always
     environment:
       POSTGRES_USER: central_command
@@ -99,7 +99,7 @@ services:
   # setup's pause.
   litellm-db:
     container_name: ${CC_POD_PREFIX:-cc-}litellm-db
-    image: ${CC_IMG_POSTGRES:-docker.io/library/postgres:16}
+    image: ${CC_IMG_POSTGRES:-docker.io/library/postgres:16.16-trixie}
     restart: always
     environment:
       POSTGRES_DB: litellm
@@ -119,7 +119,7 @@ services:
 
   litellm-redis:
     container_name: ${CC_POD_PREFIX:-cc-}litellm-redis
-    image: ${CC_IMG_REDIS:-docker.io/library/redis:7-alpine}
+    image: ${CC_IMG_REDIS:-docker.io/library/redis:7.4.12-alpine}
     restart: always
     command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
     volumes:
@@ -253,7 +253,7 @@ services:
   n8n-db:
     profiles: [n8n]
     container_name: ${CC_POD_PREFIX:-cc-}n8n-db
-    image: ${CC_IMG_POSTGRES:-docker.io/library/postgres:16}
+    image: ${CC_IMG_POSTGRES:-docker.io/library/postgres:16.16-trixie}
     restart: always
     environment:
       POSTGRES_USER: ${N8N_DB_USER:-n8n}

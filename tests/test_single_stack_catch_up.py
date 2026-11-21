@@ -119,8 +119,8 @@ class Stack:
             "CC_STATE_DIR": (tmp / "state").as_posix(),
             "CC_ENABLE_N8N": "0", "CC_ENABLE_CRAWLER": "1", "CC_ENABLE_SPEECH": "0",
             "CC_ENABLE_SANDBOX": "0",
-            "CC_IMG_POSTGRES": "docker.io/library/postgres:16",
-            "CC_IMG_REDIS": "docker.io/library/redis:7-alpine",
+            "CC_IMG_POSTGRES": "docker.io/library/postgres:16.16-trixie",
+            "CC_IMG_REDIS": "docker.io/library/redis:7.4.12-alpine",
             "CC_IMG_NEO4J": "docker.io/library/neo4j:5.26.33",
             "CC_IMG_BERRIAI_LITELLM_DATABASE": "ghcr.io/berriai/litellm-database:main-stable",
         }
@@ -144,9 +144,9 @@ class Stack:
         write_lf(b / "curl", "#!/usr/bin/env bash\nexit 0\n", mode=0o755)
         # Every enabled service, on the image its ref names, everything current.
         self.refs = {
-            "postgres": "docker.io/library/postgres:16",
-            "litellm-db": "docker.io/library/postgres:16",
-            "litellm-redis": "docker.io/library/redis:7-alpine",
+            "postgres": "docker.io/library/postgres:16.16-trixie",
+            "litellm-db": "docker.io/library/postgres:16.16-trixie",
+            "litellm-redis": "docker.io/library/redis:7.4.12-alpine",
             "litellm": "ghcr.io/berriai/litellm-database:main-stable",
             "neo4j": "docker.io/library/neo4j:5.26.33",
             "crawler": "localhost/cc-crawler:1",
@@ -315,11 +315,11 @@ def _expand(stack: Stack, ref: str, **extra: str):
 
 @drives_installer
 def test_compose_expand_follows_compose_interpolation(stack: Stack):
-    r = _expand(stack, "${CC_IMG_POSTGRES:-docker.io/library/postgres:16}")
-    assert r.stdout == "docker.io/library/postgres:16"
+    r = _expand(stack, "${CC_IMG_POSTGRES:-docker.io/library/postgres:16.16-trixie}")
+    assert r.stdout == "docker.io/library/postgres:16.16-trixie"
     stack.env_lines["CC_IMG_POSTGRES"] = "mirror.example.com/library/postgres:16.9"
     stack.write_env()
-    r = _expand(stack, "${CC_IMG_POSTGRES:-docker.io/library/postgres:16}")
+    r = _expand(stack, "${CC_IMG_POSTGRES:-docker.io/library/postgres:16.16-trixie}")
     assert r.stdout == "mirror.example.com/library/postgres:16.9"
     r = _expand(stack, "localhost/cc-local:${CC_LOCAL_TAG:-1.0.2-test}")
     assert r.stdout == "localhost/cc-local:1.0.2-test"
@@ -352,7 +352,7 @@ def test_a_rebuilt_local_image_behind_its_fixed_tag_is_drift(stack: Stack):
 
 @drives_installer
 def test_a_re_pulled_third_party_tag_is_drift_for_every_service_on_it(stack: Stack):
-    stack.rebuild("docker.io/library/postgres:16")
+    stack.rebuild("docker.io/library/postgres:16.16-trixie")
     rc, kinds = stack.drift()
     assert rc == 1 and kinds == {"postgres": "differs", "litellm-db": "differs"}, kinds
 
@@ -407,7 +407,7 @@ def test_podman_that_cannot_be_asked_is_never_current(stack: Stack):
 @drives_installer
 def test_the_up_litellm_probe_reads_false_on_a_stale_trio_member(stack: Stack):
     assert stack.call("p_up_litellm").returncode == 0
-    stack.rebuild("docker.io/library/redis:7-alpine")
+    stack.rebuild("docker.io/library/redis:7.4.12-alpine")
     assert stack.call("p_up_litellm").returncode != 0, (
         "a done llm/up-litellm row hid a container on an image its ref no longer names"
     )
@@ -485,9 +485,9 @@ def test_a_stale_local_image_is_recreated_by_name_and_said_so(stack: Stack):
 
 @drives_installer
 def test_stateful_services_on_named_volumes_are_recreated_in_one_call(stack: Stack):
-    """A re-pulled postgres:16 moves the spine AND the LiteLLM database: both
+    """A re-pulled postgres:16.16-trixie moves the spine AND the LiteLLM database: both
     keep their data on named volumes, so both are recreated — together."""
-    stack.rebuild("docker.io/library/postgres:16")
+    stack.rebuild("docker.io/library/postgres:16.16-trixie")
     r = stack.call("catch_up_images", "up-stack")
     assert r.returncode == 0, r.stdout + r.stderr
     assert [sorted(x) for x in stack.recreates()] == [["litellm-db", "postgres"]]
@@ -497,7 +497,7 @@ def test_stateful_services_on_named_volumes_are_recreated_in_one_call(stack: Sta
 
 @drives_installer
 def test_the_llm_phase_catches_up_only_its_trio(stack: Stack):
-    stack.rebuild("docker.io/library/postgres:16")
+    stack.rebuild("docker.io/library/postgres:16.16-trixie")
     r = stack.call("catch_up_images", "up-litellm", "litellm-db", "litellm-redis", "litellm")
     assert r.returncode == 0, r.stdout + r.stderr
     assert stack.recreates() == [["litellm-db"]], "the llm phase touched a service it does not own"
@@ -514,7 +514,7 @@ def test_a_stateful_service_without_a_named_volume_is_reported_never_recreated(s
     assert "      - pgdata:/var/lib/postgresql/data\n" in text
     write_lf(compose, text.replace("      - pgdata:/var/lib/postgresql/data\n",
                                     "      - ./pgdata:/var/lib/postgresql/data\n"))
-    stack.rebuild("docker.io/library/postgres:16")
+    stack.rebuild("docker.io/library/postgres:16.16-trixie")
 
     r = stack.call("catch_up_images", "up-stack")
 

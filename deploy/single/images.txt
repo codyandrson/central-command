@@ -29,7 +29,7 @@
 #                   7.4-alpine and rejects 7.4 and 7.4-alpine3.22; 16 rejects
 #                   16.10-alpine3.22; 5.26.33 rejects 5.26.34-enterprise.
 #     locked-digest what the locked tag must hash to, or `-` when the tag is
-#                   ROLLING (a series or a channel: 16, 7-alpine, main-stable).
+#                   ROLLING (a series or a channel: main-stable, 3.12-slim-bookworm).
 #                   Those move on every upstream rebuild, so the TAG is the pin
 #                   and a digest there would fail weekly on a healthy registry.
 #                   An exact-version tag gets a real digest, and a mismatch on
@@ -72,9 +72,9 @@
 #       https://<registry>/v2/<path>/manifests/<tag> | grep -i docker-content-digest
 #   (docker.io needs a bearer token from auth.docker.io first.) Locked 2026-08-30.
 
-dockerio  library/postgres            16                    16                 -                                                                        core
+dockerio  library/postgres            16                    16.16-trixie       sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f  core
 dockerio  library/neo4j               5.26                  5.26.33            sha256:51d0314ef86074f519003da8dd4daaa9fff72b8479672b742d7cab7f3064e3ed  core
-dockerio  library/redis               7                     7-alpine           -                                                                        core
+dockerio  library/redis               7                     7.4.12-alpine      sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe  core
 ghcr      berriai/litellm-database    main-stable           main-stable        -                                                                        core
 dockerio  n8nio/n8n                   2                     2.29.0             sha256:846f0248604d82d989e30457277da9004cdf8a69ad7b6a27ae2ad811841cf25d  n8n
 dockerio  library/python              3.12                  3.12-slim-bookworm -                                                                        sandbox-base

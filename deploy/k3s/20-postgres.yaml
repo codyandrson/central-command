@@ -68,7 +68,7 @@ spec:
         cc-role/anchor: "true"
       containers:
         - name: postgres
-          image: docker.io/library/postgres:16
+          image: docker.io/library/postgres:16.16-trixie
           env:
             - name: POSTGRES_USER
               value: central_command

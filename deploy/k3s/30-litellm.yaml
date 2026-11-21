@@ -100,7 +100,7 @@ spec:
         cc-role/anchor: "true"
       containers:
         - name: postgres
-          image: docker.io/library/postgres:16
+          image: docker.io/library/postgres:16.16-trixie
           # Loopback-only hostPort, same pattern as cc-postgres:5442 — the
           # spine's autodiscovery reads LiteLLM's stored credentials from
           # here (decrypted with the salt key). Safe to hostPort a pinned
@@ -157,7 +157,7 @@ spec:
         cc-role/anchor: "true"
       containers:
         - name: redis
-          image: docker.io/library/redis:7-alpine
+          image: docker.io/library/redis:7.4.12-alpine
           args: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
           volumeMounts:
             - name: data
