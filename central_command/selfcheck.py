@@ -492,7 +492,7 @@ async def check_completion_as_app(ctx: Context) -> Outcome:
     alias = _default_alias()
     try:
         # The seam a real run takes — same provider, key, base URL, output cap
-        # and admission gate (WindowedModel) — not a curl beside it.
+        # and admission gate (limit_concurrency) — not a curl beside it.
         model = await models.resolve_model()
     except models.LLMProviderNotConfigured:
         return _llm_missing_fail("resolve_model cannot build the agents' client")

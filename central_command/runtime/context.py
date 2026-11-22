@@ -27,6 +27,9 @@ from typing import Any
 
 from pydantic_ai import RunContext
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.concurrency import ConcurrencyLimiter
+from pydantic_ai.models import Model
+from pydantic_ai.models.concurrency import ConcurrencyLimitedModel
 from pydantic_ai.models.wrapper import WrapperModel
 
 from central_command.config import settings
@@ -842,44 +845,46 @@ def parse_concurrency_spec(spec: str | int) -> dict[str, tuple[str, int]]:
     return out
 
 
-# One admission gate per (event loop, pool, limit): an asyncio.Semaphore
-# binds to the first loop that awaits it and raises from every other (the
-# module-scope asyncio.Event bite mark), and pytest runs one loop per test.
-# Keyed on the limit too, so a changed setting takes effect without a restart.
-_gates: dict[tuple[int, str, int], asyncio.Semaphore] = {}
+# One limiter per (event loop, pool, limit), shared by every model built on
+# an alias of that pool — pydantic-ai's `ConcurrencyLimiter` (DL-227): the
+# admission gate is the framework's, the alias-pool spec is ours. Per loop so
+# a limiter never carries waiters across loops (pytest runs one loop per
+# test); keyed on the limit too, so a changed setting takes effect at the next
+# model built without a restart.
+_limiters: dict[tuple[int, str, int], ConcurrencyLimiter] = {}
 
 
-@asynccontextmanager
-async def model_turn_slot(model_name: str | None):
-    """Hold one of the slots of `model_name`'s backend pool for the duration
-    of a model request; a no-op for an alias the spec does not cover."""
+def limit_concurrency(model: Model) -> Model:
+    """`model` wrapped in pydantic-ai's `ConcurrencyLimitedModel` under its
+    backend pool's shared limiter, which holds one slot for the duration of
+    each model request (a streamed one until its stream closes) and queues the
+    rest first-in first-out, unbounded, with no timeout. `model` unchanged for
+    an alias the spec does not cover (or a limit of 0)."""
     table = parse_concurrency_spec(settings.model_concurrency)
-    entry = table.get(model_name or "") or table.get("*")
+    entry = table.get(model.model_name or "") or table.get("*")
     if entry is None or entry[1] <= 0:
-        yield
-        return
+        return model
     pool, n = entry
     key = (id(asyncio.get_running_loop()), pool, n)
-    gate = _gates.get(key)
-    if gate is None:
-        gate = _gates[key] = asyncio.Semaphore(n)
-    async with gate:
-        yield
+    limiter = _limiters.get(key)
+    if limiter is None:
+        # max_queued stays None: a busy backend makes a request WAIT, never fail.
+        limiter = _limiters[key] = ConcurrencyLimiter(max_running=n, name=f"model pool {pool}")
+    return ConcurrencyLimitedModel(model, limiter)
 
 
 class WindowedModel(WrapperModel):
-    """Sends the request to the wrapped model under the admission gate
-    (`model_turn_slot`), and calibrates the density from what was sent.
-    Wrapped around every live model at `resolve_model` — the one model seam —
-    so no path can submit a turn the backend has no slot for. The working
-    window itself is applied before the request gets here, by the
-    `WorkingWindow` capability; this wrapper is where a request that missed it
-    is caught (`_unwindowed`)."""
+    """Calibrates the density from what was sent, and catches a request that
+    missed the working window (`_unwindowed`). Wrapped around every live model
+    at `resolve_model` — the one model seam — OUTSIDE the admission gate
+    (`limit_concurrency`), so no path can submit a turn the backend has no slot
+    for, and the window check runs before a slot is taken. The working window
+    itself is applied before the request gets here, by the `WorkingWindow`
+    capability."""
 
     async def request(self, messages, model_settings, model_request_parameters):
         sent = await _unwindowed(messages, self.wrapped.model_name)
-        async with model_turn_slot(self.wrapped.model_name):
-            response = await self.wrapped.request(sent, model_settings, model_request_parameters)
+        response = await self.wrapped.request(sent, model_settings, model_request_parameters)
         try:
             record_density(self.wrapped.model_name, sent, getattr(response, "usage", None))
         except Exception:  # noqa: BLE001 — a calibration miss is never a failed turn
@@ -890,7 +895,7 @@ class WindowedModel(WrapperModel):
     async def request_stream(self, messages, model_settings, model_request_parameters,
                              run_context=None):
         sent = await _unwindowed(messages, self.wrapped.model_name, run_context)
-        async with model_turn_slot(self.wrapped.model_name), self.wrapped.request_stream(
+        async with self.wrapped.request_stream(
             sent, model_settings, model_request_parameters, run_context,
         ) as stream:
             yield stream

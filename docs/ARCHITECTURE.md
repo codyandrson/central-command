@@ -1503,7 +1503,12 @@ draft step, no separate invitation step and no mail trash.
   proxy on a configured deployment; `runtime/models.resolve_model()` is the one
   seam that builds a live model; under `settings.test_model` (set only by the
   test suite, never by a deployment) the per-agent deterministic doubles are
-  chosen beside it, at the same seam. The alias
+  chosen beside it, at the same seam. A live model is
+  `WindowedModel(ConcurrencyLimitedModel(OpenAIChatModel))`: the inner wrapper,
+  present only when `CC_MODEL_CONCURRENCY` names the alias's pool, is
+  pydantic-ai's admission gate, one shared `ConcurrencyLimiter` per pool that
+  holds a slot per model request and queues the rest first-in first-out
+  (`limit_concurrency` in `runtime/context.py`, DL-070, DL-227). The alias
   is a deployment fact, not a code default. See
   [models rules](../.claude/rules/models.md).
 - **Knowledge graph.** graphiti-core runs inside the API process, imported only

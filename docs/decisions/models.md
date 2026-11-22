@@ -122,6 +122,9 @@ to add one.
 - **Rule:** (recorded here) A per-backend, per-alias-pool admission gate
   bounds how many model turns run concurrently; it is explicitly never a
   global concurrency limit (PRD FR-35: limits are per model; admission is per backend and pool).
+  **Amended 2026-11-21 (DL-227):** the gate is now pydantic-ai's
+  `ConcurrencyLimitedModel`, one shared `ConcurrencyLimiter` per pool; the
+  alias-pool spec and its semantics are unchanged.
 - **Why:** CHANGELOG `2026-09-13 — v2.28.1: model turns are admitted, not
   just submitted`: an afternoon of approving a hundred autodiscovery
   proposals left 40 sessions competing for the same backend.

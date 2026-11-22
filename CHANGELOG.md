@@ -4,6 +4,24 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.120.0: The limit on concurrent model turns uses the framework's limiter
+
+- **Why.** The application kept its own registry of semaphores to limit how many model requests run at
+  once per backend pool (`CC_MODEL_CONCURRENCY`, DL-070). Pydantic AI ships a limiter that does the
+  same job at the pinned version. The operator ruled in the system review of 2026-11-21 to use it, and
+  to prefer a framework feature over custom code wherever it does the same job (DL-227).
+- **What changed.** `_live_model` wraps the model in the framework's `ConcurrencyLimitedModel`, with
+  one shared limiter per pool, inside the existing context-window wrapper. The bespoke semaphore
+  registry and `model_turn_slot` are gone. The spec parser, the setting and what it means are
+  unchanged: no spec means no gate, and aliases named in one pool share one limit.
+- **Checked equal before the change.** One slot per model request, held until a stream closes and not
+  across tool execution; waiting is first-in first-out with no timeout and no rejection when busy; a
+  cancelled waiter or holder releases cleanly. The tests cover each of these, and six of the eleven
+  fail when the wrapper is disabled.
+- **Two differences, neither reachable today.** A request made inside another request on the same
+  pool now raises instead of waiting on itself forever. The setting is read when a model is built
+  (once per run) instead of at every request.
+
 ## 2026-11-21 — v2.119.0: The k3s model policy layer is cut; a model's values live on its row in the proxy
 
 - **Why.** The k3s profile declared specific models, with their timeouts, costs and capability flags,

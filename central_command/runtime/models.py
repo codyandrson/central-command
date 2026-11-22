@@ -200,7 +200,7 @@ async def _live_model(model_name: str, agent_id=None, thinking: str | None = Non
     # its proxy entry, via `context.output_cap_for`) — the deployment ceiling
     # is the local model's, and a hosted model with a smaller cap rejects
     # anything above it rather than clamping. Undeclared means the ceiling.
-    from central_command.runtime.context import WindowedModel, output_cap_for
+    from central_command.runtime.context import WindowedModel, limit_concurrency, output_cap_for
 
     cap = await output_cap_for(model_name)
     max_tokens = min(settings.max_output_tokens, cap) if cap else settings.max_output_tokens
@@ -210,10 +210,12 @@ async def _live_model(model_name: str, agent_id=None, thinking: str | None = Non
         if body:
             model_settings["extra_body"] = body
 
-    # The wrapper is the admission gate, and where a request that missed the
-    # working window is caught (runtime/context.py, slice 2).
-    return WindowedModel(OpenAIChatModel(model_name, provider=provider, settings=model_settings,
-                                         profile=dict(WIRE_PROFILE)))
+    # Inside: pydantic-ai's ConcurrencyLimitedModel, the admission gate, when
+    # CC_MODEL_CONCURRENCY names this alias's pool (DL-227). Outside: the
+    # wrapper where a request that missed the working window is caught
+    # (runtime/context.py, slice 2), before a slot is taken.
+    return WindowedModel(limit_concurrency(OpenAIChatModel(
+        model_name, provider=provider, settings=model_settings, profile=dict(WIRE_PROFILE))))
 
 
 # ONE system message, and only at the start. pydantic-ai 2.59+ delivers a

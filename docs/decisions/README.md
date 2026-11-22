@@ -315,3 +315,4 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-224 | The cockpit is owned code; dead inherited code is removed, not quarantined | active | 2026-11-21 | code structure only | [process.md](process.md) |
 | DL-225 | LiteLLM caches in its own memory; the Redis that held the cache is removed | active | 2026-11-21 | test: `tests/test_litellm_cache_call_types.py::test_the_response_cache_is_in_the_proxys_memory` | [process.md](process.md) |
 | DL-226 | Per-model LiteLLM values live on the proxy's rows; the k3s policy layer is cut | active | 2026-11-21 | test: `tests/test_single_models_declaration.py::test_k3s_declaration_is_the_role_aliases_only` | [process.md](process.md) |
+| DL-227 | The model admission gate is pydantic-ai's limiter; the alias-pool spec stays ours | active | 2026-11-21 | test: `tests/test_model_concurrency.py::test_the_live_seam_puts_the_gate_inside_the_window_wrapper` | [process.md](process.md) |

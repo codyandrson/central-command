@@ -3277,3 +3277,29 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** test: `tests/test_single_models_declaration.py::test_k3s_declaration_is_the_role_aliases_only`, `tests/test_register_models_upstream.py::test_a_fresh_k3s_catalog_requires_exactly_the_role_aliases`, `tests/test_deploy_pi_boundary.py::test_the_other_k3s_scripts_name_the_shared_litellm_files_and_the_moved_unit`
 - **Source:** the operator's ruling in the system review, 2026-11-21; `deploy/shared/litellm/model-preferences.yaml`; `deploy/shared/litellm/register-models.py`; `central_command/runtime/litellm_manager_profile.py`
 - **Supersedes:** DL-164
+
+### DL-227 — The model admission gate is pydantic-ai's limiter; the alias-pool spec stays ours
+
+- **Status:** active
+- **Date:** 2026-11-21
+- **Rule:** `.claude/rules/runtime-resilience.md` — "The model admission gate is pydantic-ai's limiter; only the alias-pool spec is ours"
+- **Why:** The gate DL-070 records was a hand-built `asyncio.Semaphore`
+  registry (`model_turn_slot`) held around each request inside
+  `WindowedModel`. pydantic-ai ships the same mechanism as
+  `ConcurrencyLimitedModel` with a shareable `ConcurrencyLimiter`, and the
+  operator ruled in the system review that a framework feature replaces custom
+  code that does the same job. Compared before the change: both admit one
+  model request at a time (a stream until it closes), not a turn, so tool
+  execution and consults run outside the slot; both share one gate across every
+  alias of a pool; both wait first-in first-out (the framework's semaphore
+  hands a released slot to the oldest waiter) with no timeout and, with
+  `max_queued` unset, no rejection; both release on an exception and on
+  cancellation. What changes: the spec is read when a model is built (once per
+  run) rather than per request; the framework also gates `count_tokens` and
+  `compact_messages`, which nothing here calls; a wait opens an OpenTelemetry
+  span, a no-op with no tracer configured; and a request nested inside a
+  request through the same limiter raises `UserError` where the old gate would
+  have waited on itself. The parser, `CC_MODEL_CONCURRENCY` and its meaning for
+  the operator are unchanged, and the test model stays ungated.
+- **Enforced:** test: `tests/test_model_concurrency.py::test_the_live_seam_puts_the_gate_inside_the_window_wrapper`, `::test_aliases_in_one_pool_share_its_single_slot`, `::test_waiting_is_first_in_first_out_with_no_rejection`, `::test_a_cancelled_request_releases_its_slot_and_its_place`, `::test_a_streamed_request_holds_its_slot_until_the_stream_closes`, `::test_the_test_model_path_stays_ungated`
+- **Source:** the operator's ruling in the system review, 2026-11-21; `central_command/runtime/context.py` (`limit_concurrency`); `central_command/runtime/models.py` (`_live_model`); pydantic-ai 2.66 `pydantic_ai/models/concurrency.py` and `pydantic_ai/concurrency.py`

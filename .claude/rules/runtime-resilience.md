@@ -23,6 +23,17 @@ when a matching file is read.
   behind the first (DL-204, the 2026-11-02 queue storm). Likewise a resume
   is an orphan only if armed before `orchestration.PROCESS_STARTED_AT` —
   never by age; a queued resume looks exactly like a dead one by status.
+- **The model admission gate is pydantic-ai's limiter; only the alias-pool
+  spec is ours** (DL-227). `context.limit_concurrency` builds one
+  `ConcurrencyLimiter` per `CC_MODEL_CONCURRENCY` pool, shared by every alias
+  in it, and `models._live_model` wraps it as `ConcurrencyLimitedModel` INSIDE
+  `WindowedModel`. A slot is one model request (a streamed one holds it until
+  the stream closes), never a whole turn, so a consult run from a tool never
+  waits on its caller's slot. Never set `max_queued` or add a wait limit: a
+  busy backend makes a request wait first-in first-out, never fail. Wrap a
+  model in a pool's limiter once — the framework raises `UserError` on a
+  nested request through the same limiter rather than deadlock — and keep the
+  test model ungated.
 - **An attachment reaches the agent as content, or the SEND fails — there is
   no third state** (`api/attachments.py`). Attachments are extracted to text
   at the GATEWAY (model-agnostic); nothing sends native multimodal blocks,
