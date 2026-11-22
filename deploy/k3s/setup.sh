@@ -957,7 +957,7 @@ phase_stack() {
     "$HERE/make-sandbox-kubeconfig.sh" || return 1
   step "kubeconfig-mcp" "~/.cc-mcp-deployer.kubeconfig written (0600)" \
     "$HERE/make-mcp-kubeconfig.sh" || return 1
-  step "kubeconfig-litellm" "~/.cc-litellm-operator.kubeconfig + ~/.cc-litellm-logreader.kubeconfig written (0600)" \
+  step "kubeconfig-litellm" "~/.cc-litellm-logreader.kubeconfig written (0600)" \
     "$HERE/make-litellm-kubeconfig.sh" || return 1
 
   # Idempotent: reports-and-exits when runsc is already installed. Run here
@@ -1094,7 +1094,7 @@ phase_app() {
   set_kv_if_unset "$APP_ENV" CC_LITELLM_SALT_KEY    "${LITELLM_SALT_KEY:-}"       "app-litellm-salt"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_DB_URL \
     "postgresql://llmproxy:${LITELLM_POSTGRES_PASSWORD:-}@127.0.0.1:5443/litellm" "app-litellm-db-url"
-  # The three minted kubeconfig paths. The sandbox one is deliberately absent:
+  # The two minted kubeconfig paths. The sandbox one is deliberately absent:
   # it is pinned in cc-sandbox-runner.service, not in the app's env. They live in
   # the checkout owner's home (the make-*-kubeconfig.sh scripts write them there).
   local owner_home
@@ -1104,7 +1104,6 @@ phase_app() {
     return 1
   fi
   set_kv_if_unset "$APP_ENV" CC_MCP_DEPLOY_KUBECONFIG  "$owner_home/.cc-mcp-deployer.kubeconfig"       "app-mcp-kubeconfig"
-  set_kv_if_unset "$APP_ENV" CC_LITELLM_KUBECONFIG     "$owner_home/.cc-litellm-operator.kubeconfig"   "app-litellm-kubeconfig"
   set_kv_if_unset "$APP_ENV" CC_LITELLM_LOG_KUBECONFIG "$owner_home/.cc-litellm-logreader.kubeconfig"  "app-litellm-log-kubeconfig"
 
   # Settings with a value THIS profile needs, added only when the key is
@@ -1629,7 +1628,7 @@ phase_status() {
 
   local k
   for k in CC_LLM_API_KEY CC_EMBED_DIM CC_NEO4J_PASSWORD CC_LITELLM_SALT_KEY \
-           CC_MCP_DEPLOY_KUBECONFIG CC_LITELLM_KUBECONFIG; do
+           CC_MCP_DEPLOY_KUBECONFIG; do
     if is_placeholder "$(get_kv "$APP_ENV" "$k")"; then
       fail "app-${k}" "$k is unset in the app's .env — run: ./deploy/k3s/setup.sh app"
     else

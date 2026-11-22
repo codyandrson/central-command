@@ -47,7 +47,7 @@ def test_every_row_declares_a_default_gate_from_the_closed_vocabulary():
         if c.default_gate != "auditor":
             assert c.default_gate == ("human" if c.gate == "human approval" else "none"), c.name
     counts = {v: sum(c.default_gate == v for c in REGISTRY) for v in DEFAULT_GATES}
-    assert counts == {"human": 71, "auditor": 1, "none": 37}  # +jira.get_comments (DL-222), +plan.remove_finished_block (DL-221)
+    assert counts == {"human": 70, "auditor": 1, "none": 37}  # +jira.get_comments (DL-222), +plan.remove_finished_block (DL-221), -litellm.apply_config_change (DL-223)
     assert gated_write_names() == {c.name for c in REGISTRY if c.default_gate != "none" and c.kind == "write"}
     with pytest.raises(ValueError):
         dataclasses.replace(REGISTRY[0], default_gate="maybe")
@@ -135,9 +135,8 @@ _TEN = {"graph.merge_nodes", "graph.delete_node", "graph.delete_edge",
         "graph.delete_episode", "jira.delete_issue", "jira.create_project",
         "confluence.create_space", "calendar.delete_event", "mail.unsubscribe",
         "mail.send"}
-_LIVE_SIX = {"litellm.delete_model", "litellm.delete_team", "litellm.delete_key",
-             "litellm.set_fallbacks", "litellm.delete_fallbacks",
-             "litellm.apply_config_change"}
+_LIVE_FIVE = {"litellm.delete_model", "litellm.delete_team", "litellm.delete_key",
+              "litellm.set_fallbacks", "litellm.delete_fallbacks"}
 
 
 def _writes():
@@ -169,9 +168,9 @@ def test_the_marks_follow_the_risk_text():
     irreversible = {c.name for c in _writes() if c.reversibility == "irreversible"}
     assert irreversible == _TEN | {"mcp.tool_call", "plan.remove_finished_block"}
     assert ({c.name for c in _writes() if c.acknowledge}
-            == _TEN | {"mcp.tool_call", "plan.remove_finished_block"} | _LIVE_SIX)
+            == _TEN | {"mcp.tool_call", "plan.remove_finished_block"} | _LIVE_FIVE)
     # reversible-but-LIVE stays marked reversible: the mark informs, it is not the rule
-    assert all(c.reversibility == "reversible" for c in _writes() if c.name in _LIVE_SIX)
+    assert all(c.reversibility == "reversible" for c in _writes() if c.name in _LIVE_FIVE)
     assert {c.name: c.reversibility for c in _writes()}["jira.add_comment"] == "reversible"
     assert {c.name: c.reversibility for c in _writes()}["jira.transition_issue"] == "reversible"
 
@@ -184,17 +183,17 @@ def test_the_acknowledgement_set_is_printed_for_the_operator(capsys):
               f"{sum(c.reversibility == 'reversible' for c in rows)} LIVE/blast)")
         for c in rows:
             print(f"  {c.name:34} {c.reversibility:13} {c.risk[:70]}")
-    assert len(rows) == 18
+    assert len(rows) == 17
 
 
 def test_requires_acknowledgement_and_the_shadow_floor():
-    for name in ("mail.send", "graph.delete_node", "mcp.tool_call", *_LIVE_SIX):
+    for name in ("mail.send", "graph.delete_node", "mcp.tool_call", *_LIVE_FIVE):
         assert requires_acknowledgement(name), name
     assert not requires_acknowledgement("catalog.tag")
     assert not requires_acknowledgement("no.such.capability")
     assert requires_acknowledgement("mail.send@2")
     assert effective_shadow_runs("mail.send", 0) == 1
-    assert effective_shadow_runs("litellm.apply_config_change", 0) == 1
+    assert effective_shadow_runs("litellm.delete_fallbacks", 0) == 1
     assert effective_shadow_runs("mail.send", 5) == 5
     assert effective_shadow_runs("catalog.tag", 0) == 0
     assert effective_shadow_runs("catalog.tag", 5) == 5
@@ -601,14 +600,14 @@ async def test_a_row_naming_the_auditor_is_never_honoured(granted):
 
 from central_command.contract import ARG_SPECS  # noqa: E402
 
-_NO_ARG_SPECS = ["work.bulk_dismiss", "litellm.apply_config_change", "litellm.delete_key",
+_NO_ARG_SPECS = ["work.bulk_dismiss", "litellm.delete_key",
                  "loe.create", "loe.record_checkin", "loe.update", "skill.create"]
 # Gated writes with no world target (nothing they name is a thing in the world):
 # they take no target scope.
 _NO_TARGET = {
     "graph.add_episode", "jira.create_filter", "jira.create_dashboard",
     "calendar.create_event", "mail.create_rule", "work.bulk_dismiss",
-    "litellm.apply_config_change", "litellm.delete_key", "loe.create",
+    "litellm.delete_key", "loe.create",
     "loe.record_checkin", "loe.update", "skill.create",
     # The note store (DL-217): a note is not a world target an override would
     # be scoped by; an argument scope (scope='private') is the narrowing.
@@ -1807,7 +1806,7 @@ async def _refusal(coro) -> overrides.AuthoringRefused:
     (DRAFTER, SANDBOX_WRITE, None, 422, "no gate to relax"),
     (DRAFTER, "jira.list_fields", None, 422, "no gate to relax"),
     (DRAFTER, "mail.send", None, 422, "acknowledgement"),
-    (DRAFTER, "litellm.apply_config_change", None, 422, "acknowledgement"),
+    (DRAFTER, "litellm.delete_fallbacks", None, 422, "acknowledgement"),
     (DRAFTER, "work.bulk_dismiss", {"argument": {"name": "ids", "values": ["x"]}},
      422, "no argument shape"),
 ])
@@ -1819,7 +1818,7 @@ async def test_authoring_refuses(agent_id, capability, scope, status, needle):
 
 
 @needs_pg
-@pytest.mark.parametrize("capability", ["mail.send", "litellm.apply_config_change"])
+@pytest.mark.parametrize("capability", ["mail.send", "litellm.delete_fallbacks"])
 async def test_an_acknowledgement_class_is_authored_with_the_tick_and_a_shadow_floor(
         authored, capability):
     out = await authored(DRAFTER, capability, ack=True, pack=False, shadow=0)

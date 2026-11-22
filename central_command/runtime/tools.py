@@ -2190,14 +2190,11 @@ _LITELLM_CONFIG_FILES = (
 
 async def litellm_read_config(ctx: RunContext, path: str) -> str:
     """Read a LiteLLM config or deployment file. `deploy/shared/litellm/config.yaml`
-    and `deploy/shared/litellm/model-preferences.yaml` are the two files a
-    `litellm.apply_config_change` proposal may carry — read the CURRENT content
-    before proposing either: the proposal carries the FULL new file, so
-    authoring it from memory instead of the real current state is how a change
-    clobbers someone else's lines. `deploy/k3s/30-litellm.yaml` (the k8s
-    Deployment manifest) is readable for TROUBLESHOOTING ONLY — it references
-    secret NAMES via secretKeyRef, never values, but it is not proposable
-    through `litellm.apply_config_change`. Any other path is refused. Read-only.
+    is the proxy's config file and `deploy/shared/litellm/model-preferences.yaml`
+    the declared routing policy; `deploy/k3s/30-litellm.yaml` (the k8s
+    Deployment manifest) is readable for TROUBLESHOOTING — it references
+    secret NAMES via secretKeyRef, never values. No capability writes any of
+    the three. Any other path is refused. Read-only.
     """
     if path not in _LITELLM_CONFIG_FILES:
         return (
@@ -2242,8 +2239,8 @@ async def litellm_read_logs(
     Use `previous=True` to read the PRIOR container's logs — the way to
     diagnose a crash (CrashLoopBackOff, OOMKilled): the current container's
     logs start fresh after a restart and won't show what killed the last one.
-    Read-only, via a scoped read-only kubeconfig separate from the Executor's
-    write identity — this tool can never modify anything in the cluster.
+    Read-only, via a scoped read-only kubeconfig — this tool can never modify
+    anything in the cluster.
     Logs may contain request metadata but never virtual-key plaintext (LiteLLM
     masks keys in its own logs).
     """
@@ -2436,10 +2433,8 @@ async def litellm_probe_model(
 
 async def propose_litellm_change(ctx: RunContext, proposal: ProposalArg) -> str:
     """Propose a change to the LiteLLM proxy — a model, key, team or fallback
-    change, or a CONFIG-FILE change (litellm.apply_config_change: routing
-    strategy and everything else the admin API cannot reach, carrying the full
-    new file content). Reviewed and, once approved, applied by the
-    control-plane Executor — this tool does not perform the change.
+    change. Reviewed and, once approved, applied by the control-plane
+    Executor — this tool does not perform the change.
     """
     await _validate_proposal(ctx, proposal, agent_authored=True)
     raise CallDeferred(metadata={"kind": "litellm_change"})

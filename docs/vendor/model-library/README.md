@@ -22,8 +22,8 @@ rest of `docs/vendor/`.
   only reachable through the Airtable API (needs a key); skipped in favor of
   the CSV export above, which needs none.
 
-See `MANIFEST.yaml` for exact source URLs, fetch timestamp, and a sha256 per
-file. `*_LICENSE.md`/`.txt` alongside each source are the upstream license
+See `MANIFEST.yaml` for exact source URLs and the fetch timestamp.
+`*_LICENSE.md`/`.txt` alongside each source are the upstream license
 texts. Public numbers here are a HYPOTHESIS for a private/gated variant, never
 a substitute for `litellm_probe_model` — see
 `skills/model-evaluation/references/public-library.md`.

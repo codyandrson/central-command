@@ -182,9 +182,8 @@ when a matching file is read.
   `deploy/n8n/apply-workflows.sh` (the reader release A missed) source
   `deploy/k3s/env-path.sh` and call `cc_k3s_env_file` — never a literal path;
   `policy.py` and `register-models.py` mirror the same two-step lookup in
-  Python because the Executor runs them with no `LITELLM_MASTER_KEY` in the
-  environment, and `scripts/graph_inspect.py` (operator tooling, for
-  `NEO4J_PASSWORD`) mirrors it too. The
+  Python because a caller may run them with no `LITELLM_MASTER_KEY` in the
+  environment. The
   file is UNTRACKED (no merge moves it, no `reset --hard` restores it), so
   `cc_k3s_env_migrate` does the move once — `mv`, mode kept, a relative
   symlink left at `deploy/pi/.env` for any release that still reads it —

@@ -83,10 +83,9 @@ fetch "https://raw.githubusercontent.com/ShishirPatil/gorilla/gh-pages/data_over
 fetch "https://raw.githubusercontent.com/ShishirPatil/gorilla/main/LICENSE" \
   "$dest/bfcl_LICENSE.txt"
 
-# --- MANIFEST.yaml: source url, fetched_at, sha256, license --------------
+# --- MANIFEST.yaml: source url, fetched_at, license ----------------------
 manifest="$dest/MANIFEST.yaml"
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-sha() { sha256sum "$1" | cut -d' ' -f1; }
 
 {
   echo "# Regenerate with scripts/model_library_fetch.sh. Every entry below is"
@@ -96,15 +95,12 @@ sha() { sha256sum "$1" | cut -d' ' -f1; }
   echo "  - name: litellm_model_prices.json"
   echo "    url: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
   echo "    license: MIT"
-  echo "    sha256: $(sha "$dest/litellm_model_prices.json")"
   echo "  - name: models_dev_api.json"
   echo "    url: https://models.dev/api.json"
   echo "    license: MIT"
-  echo "    sha256: $(sha "$dest/models_dev_api.json")"
   echo "  - name: aider_polyglot_leaderboard.yml"
   echo "    url: https://raw.githubusercontent.com/Aider-AI/aider/main/aider/website/_data/polyglot_leaderboard.yml"
   echo "    license: Apache-2.0"
-  echo "    sha256: $(sha "$dest/aider_polyglot_leaderboard.yml")"
   echo "  - name: llmstats/"
   echo "    url: https://github.com/AchilleasDrakou/LLMStats"
   echo "    license: CC-BY-4.0"
@@ -116,11 +112,9 @@ sha() { sha256sum "$1" | cut -d' ' -f1; }
   echo "  - name: lmarena_leaderboard_latest.parquet"
   echo "    url: https://huggingface.co/datasets/lmarena-ai/leaderboard-dataset/resolve/main/text/latest-00000-of-00001.parquet"
   echo "    license: CC-BY-4.0"
-  echo "    sha256: $(sha "$dest/lmarena_leaderboard_latest.parquet")"
   echo "  - name: bfcl_data_overall.csv"
   echo "    url: https://raw.githubusercontent.com/ShishirPatil/gorilla/gh-pages/data_overall.csv"
   echo "    license: Apache-2.0"
-  echo "    sha256: $(sha "$dest/bfcl_data_overall.csv")"
 } > "$manifest"
 
 cat > "$dest/README.md" <<'EOF'
@@ -148,8 +142,8 @@ rest of `docs/vendor/`.
   only reachable through the Airtable API (needs a key); skipped in favor of
   the CSV export above, which needs none.
 
-See `MANIFEST.yaml` for exact source URLs, fetch timestamp, and a sha256 per
-file. `*_LICENSE.md`/`.txt` alongside each source are the upstream license
+See `MANIFEST.yaml` for exact source URLs and the fetch timestamp.
+`*_LICENSE.md`/`.txt` alongside each source are the upstream license
 texts. Public numbers here are a HYPOTHESIS for a private/gated variant, never
 a substitute for `litellm_probe_model` — see
 `skills/model-evaluation/references/public-library.md`.

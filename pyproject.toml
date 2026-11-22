@@ -38,9 +38,7 @@ dependencies = [
     # act: bump here AND `graphiti_patches.PINNED_VERSION` (a test pins them
     # equal), re-cut both patches, run the full suite.
     "graphiti-core==0.30.2",
-    # The Executor parses proposed LiteLLM config files before writing them
-    # (litellm.apply_config_change); deploy/shared/litellm/policy.py reads the
-    # routing declaration with it too.
+    # deploy/shared/litellm/policy.py reads the routing declaration with it.
     # >=6.0.4: exponential merge-key expansion on crafted YAML.
     "pyyaml>=6.0.4,<7",
     # HTML mail -> the text an agent reads (ingest/mailtext.py). Layout-table

@@ -521,7 +521,7 @@ def test_backup_takes_the_owner_from_repo_when_repo_is_given(backup_tree: Path, 
 
 
 @pytest.mark.parametrize(("script", "outputs"), [
-    ("make-litellm-kubeconfig.sh", [".cc-litellm-operator.kubeconfig", ".cc-litellm-logreader.kubeconfig"]),
+    ("make-litellm-kubeconfig.sh", [".cc-litellm-logreader.kubeconfig"]),
     ("make-mcp-kubeconfig.sh", [".cc-mcp-deployer.kubeconfig"]),
     ("make-sandbox-kubeconfig.sh", [".cc-sandbox-runner.kubeconfig"]),
 ])
@@ -550,7 +550,7 @@ def test_a_kubeconfig_script_stops_when_the_home_cannot_be_resolved(tree: Path, 
     assert not called.exists()
 
 
-# ── setup.sh's three rows ───────────────────────────────────────────────────
+# ── setup.sh's two rows ─────────────────────────────────────────────────────
 
 
 def _setup_rows() -> str:
@@ -575,11 +575,10 @@ def _run_rows(tree: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
     return subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=30)
 
 
-def test_setup_writes_the_three_paths_under_the_owners_home(tree: Path, stubs: Path, fake_home: Path):
+def test_setup_writes_the_two_paths_under_the_owners_home(tree: Path, stubs: Path, fake_home: Path):
     r = _run_rows(tree, _clean_env(stubs))
     assert r.stdout.splitlines() == [
         f"CC_MCP_DEPLOY_KUBECONFIG={fake_home}/.cc-mcp-deployer.kubeconfig",
-        f"CC_LITELLM_KUBECONFIG={fake_home}/.cc-litellm-operator.kubeconfig",
         f"CC_LITELLM_LOG_KUBECONFIG={fake_home}/.cc-litellm-logreader.kubeconfig",
         "rc=0",
     ], r.stderr

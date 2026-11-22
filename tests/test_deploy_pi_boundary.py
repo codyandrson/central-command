@@ -128,10 +128,6 @@ def test_the_other_k3s_scripts_name_the_shared_litellm_files_and_the_moved_unit(
 
 
 def test_the_app_and_the_single_profile_name_the_shared_files():
-    executor = (ROOT / "central_command" / "gateway" / "executor.py").read_text(encoding="utf-8")
-    for const in ("_LITELLM_CONFIG_FILE", "_LITELLM_PREFS_FILE", "_LITELLM_CHECKS_SCRIPT", "_LITELLM_POLICY_SCRIPT"):
-        m = re.search(rf'^{const} = "([^"]+)"', executor, re.M)
-        assert m and m.group(1).startswith("deploy/shared/litellm/"), const
     tools = (ROOT / "central_command" / "runtime" / "tools.py").read_text(encoding="utf-8")
     assert "deploy/pi/litellm" not in tools
     llm = _code(ROOT / "deploy" / "single" / "phases" / "llm.sh")
@@ -141,21 +137,20 @@ def test_the_app_and_the_single_profile_name_the_shared_files():
         assert "deploy/pi/" not in (ROOT / rel).read_text(encoding="utf-8"), rel
 
 
-PYTHON_RESOLVER_MIRRORS = (SHARED / "policy.py", SHARED / "register-models.py",
-                           ROOT / "scripts" / "graph_inspect.py")
+PYTHON_RESOLVER_MIRRORS = (SHARED / "policy.py", SHARED / "register-models.py")
 
 
 def test_operator_tooling_resolves_the_env_like_the_resolver():
-    """The three Python mirrors of cc_k3s_env_file build the path from
+    """The two Python mirrors of cc_k3s_env_file build the path from
     segments, which no literal-string guard sees; each must prefer
     deploy/k3s/.env — taken when it exists OR is a symlink, like the shell
-    resolver — and fall back to the old path only after. The Executor runs
+    resolver — and fall back to the old path only after. A caller may run
     policy.py and register-models.py without LITELLM_MASTER_KEY in the
     environment, so the file fallback is load-bearing: release B's first
     story deleted the test that pinned the two shared files, and flipping
     their order or dropping is_symlink() passed the suite until this."""
     fallback_kept = ("the resolver's deploy/pi fallback is kept by decision until a release drops it "
-                     "from all three mirrors and this test together")
+                     "from both mirrors and this test together")
     for path in PYTHON_RESOLVER_MIRRORS:
         src = path.read_text(encoding="utf-8")
         name = str(path.relative_to(ROOT))
@@ -313,7 +308,6 @@ def test_no_tracked_file_names_deploy_pi_outside_history_and_the_kept_seam():
 SEGMENT_ALLOWED = {
     "deploy/shared/litellm/policy.py": ("the resolver's Python mirror", _block("def _env_path(")),
     "deploy/shared/litellm/register-models.py": ("the resolver's Python mirror", _block("def _env_path(")),
-    "scripts/graph_inspect.py": ("the resolver's Python mirror", _block("def _env_path(")),
     "tests/test_k3s_env_path.py": ("builds every env layout under tmp_path", None),
     "tests/test_k3s_mint_key_scope.py": ("builds the pre-move layout under tmp_path", None),
     "tests/test_k3s_reset_phase.py": ("builds the pre-move layout under tmp_path", None),
@@ -324,12 +318,12 @@ SEGMENT_ALLOWED = {
 
 
 def test_no_tracked_code_builds_deploy_pi_from_segments_outside_the_allowlist():
-    """The literal guard above never saw scripts/graph_inspect.py, which built
-    the old path as `"deploy" / "pi" / ".env"` — release A's move table missed
+    """The literal guard above never saw an operator script (since deleted)
+    that built the old path as `"deploy" / "pi" / ".env"` — release A's move table missed
     it for the same reason. This greps every tracked .py and .sh for the forms
     the languages build the path from (`"deploy" / "pi"`, `"deploy", "pi"`,
     either quote style); what may carry them is enumerated in SEGMENT_ALLOWED
-    with its reason — the three resolver mirrors' _env_path blocks and the
+    with its reason — the two resolver mirrors' _env_path blocks and the
     tests that lay the old tree out under tmp_path or assert it is gone — so
     the shape planted anywhere else fails here naming its file and line."""
     r = subprocess.run(["git", "grep", "-n", "-I", "-E", "-e",
@@ -344,8 +338,8 @@ def test_no_tracked_code_builds_deploy_pi_from_segments_outside_the_allowlist():
         hits.setdefault(path, []).append(int(line))
     # the canary: the grep sees what the literal guard could not. It holds as
     # long as the resolver's fallback is kept (by decision); the release that
-    # drops it from the three mirrors retires this line with them.
-    assert "scripts/graph_inspect.py" in hits, "canary gone: the segment grep no longer matches graph_inspect.py"
+    # drops it from the two mirrors retires this line with them.
+    assert "deploy/shared/litellm/policy.py" in hits, "canary gone: the segment grep no longer matches policy.py"
     offenders = []
     for path, numbers in sorted(hits.items()):
         lines = (ROOT / path).read_text(encoding="utf-8", errors="replace").split("\n")

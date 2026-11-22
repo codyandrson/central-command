@@ -42,6 +42,10 @@ RETIRED_ENV_KEYS = {
         "the per-process token budget valve is gone; LiteLLM owns spend "
         "limits (per-key budgets), so a ceiling set here is not honoured"
     ),
+    "CC_LITELLM_KUBECONFIG": (
+        "litellm.apply_config_change is removed, and nothing uses its write "
+        "kubeconfig; CC_LITELLM_LOG_KUBECONFIG (litellm_read_logs) stays"
+    ),
 }
 
 # The websocket frame limit the API is started with (uvicorn --ws-max-size):
@@ -893,19 +897,11 @@ class Settings(BaseSettings):
     mcp_build_host: str = ""
     mcp_deploy_kubeconfig: str = ""
 
-    # litellm.apply_config_change (2026-08-06): the SCOPED kubeconfig the
-    # Executor re-renders the cc-litellm ConfigMap and restarts the proxy
-    # with (deploy/k3s/make-litellm-kubeconfig.sh writes one). Empty or
-    # missing = refuse BEFORE anything is written — a config change that
-    # cannot be rendered and verified must never leave a half-applied repo.
-    litellm_kubeconfig: str = ""
-
-    # litellm-manager troubleshooting (2026-08-06): a SEPARATE, read-only
-    # kubeconfig (deploy/k3s/make-litellm-kubeconfig.sh also writes this one)
-    # for runtime/tools.py's litellm_read_logs — pods get/list + pods/log get
-    # ONLY, no configmaps/deployments/secrets. Kept distinct from
-    # litellm_kubeconfig (the Executor's write identity) because runtime/
-    # tools may hold READ credentials only.
+    # litellm-manager troubleshooting (2026-08-06): a read-only kubeconfig
+    # (deploy/k3s/make-litellm-kubeconfig.sh writes it) for runtime/tools.py's
+    # litellm_read_logs — pods get/list + pods/log get ONLY, no
+    # configmaps/deployments/secrets, because runtime/ tools may hold READ
+    # credentials only.
     litellm_log_kubeconfig: str = ""
 
     # cc-crawler (2026-08-07): the browser-rendering crawl service, a

@@ -98,7 +98,6 @@ async def _approve(model) -> tuple[dict, dict]:
 def test_every_write_capable_integration_is_held_at_nothing():
     for name, value in NO_LIVE_WORLD.items():
         assert getattr(settings, name) == value, name
-    assert settings.litellm_kubeconfig == ""
     assert settings.email_facade_url == ""
     assert settings.calendar_facade_url == ""
 

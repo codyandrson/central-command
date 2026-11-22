@@ -80,14 +80,13 @@ current answer, not a remembered one.** Read the deployed image tag in
 ## Reading logs
 
 Two read tools cover troubleshooting: `litellm_read_config` (accepts
-`deploy/k3s/30-litellm.yaml`, the deployment manifest — read-only,
-not proposable through `litellm.apply_config_change`) and
+`deploy/k3s/30-litellm.yaml`, the deployment manifest — read-only) and
 `litellm_read_logs(tail_lines=200, previous=False)` for the proxy pod's
 recent log lines. Use `previous=True` when diagnosing a crash
 (CrashLoopBackOff, OOMKilled) — the current container's logs start fresh
 after a restart, so the thing that killed the last one is only in the
 previous container's log. `litellm_read_logs` goes through a read-only
-kubeconfig separate from the Executor's write identity; if it answers "log
+kubeconfig; if it answers "log
 reader not provisioned", the operator needs to run
 `deploy/k3s/make-litellm-kubeconfig.sh` and set `CC_LITELLM_LOG_KUBECONFIG`.
 

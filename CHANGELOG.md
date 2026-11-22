@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.114.0: The LiteLLM config-change capability is removed
+
+- **Why.** `litellm.apply_config_change` let an approved proposal overwrite the proxy's config files in
+  the application's own checkout, commit and push them, re-render the ConfigMap, restart the proxy and
+  roll back on a failed check. It was built when the proxy had no write route for router settings. It
+  has never been used, LiteLLM since v1.103 accepts any setting the config file does not name through
+  its admin API with no restart, and the handler tied the application to running from a writable git
+  checkout. The operator ruled the cut in the system review of 2026-11-21 (DL-223).
+- **Removed.** The capability, its policy entry, its Executor handler and the three
+  `litellm.config_*` events; the `CC_LITELLM_KUBECONFIG` setting (now a retired key: an environment
+  that still sets it gets a startup warning and nothing else); the write identity in the cluster
+  (`cc-litellm-operator` ServiceAccount, Role, RoleBinding and token Secret, tombstoned in
+  `deploy/k3s/removed.txt`); the half of `make-litellm-kubeconfig.sh` that minted its kubeconfig. The
+  LiteLLM manager's charter and the bundled skill docs no longer describe it.
+- **Kept.** The two read tools, `litellm_read_config` and `litellm_read_logs`, and the read-only log
+  identity they use. `deploy/shared/litellm/checks.sh` stays as a by-hand check; nothing calls it now.
+- **At the update.** The capability is listed in `deploy/k3s/removed-capabilities.txt`, so the updater
+  refuses the apply while a proposal of it is still undecided. A leftover
+  `~/.cc-litellm-operator.kubeconfig` on an existing install is unused and can be deleted.
+- **Also removed.** `scripts/graph_inspect.py` (the cockpit's graph panel and Neo4j Browser cover it);
+  two spent scripts under `scripts/oneoff/` (`repair_spend_prices.py` stays: it is not spent until
+  every deployment that booked the bad prices has run it); the per-file sha256 lines that
+  `scripts/model_library_fetch.sh` wrote into the model-library manifest, which nothing verified.
+
 ## 2026-11-21 — v2.113.0: Installs resolve from declared version ranges, not exact pins
 
 - **Why.** An install tied to one exact version fails when a mirror does not carry that version, and a

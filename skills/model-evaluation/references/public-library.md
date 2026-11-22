@@ -3,7 +3,7 @@
 `docs/vendor/model-library/` is a pre-staged, offline bundle of public
 model-fact sources (fetched by `scripts/model_library_fetch.sh`; nothing in
 it is Central Command's own writing — see its `README.md`/`MANIFEST.yaml` for
-exact source URLs, fetch date, and a sha256 per file). It exists so a probed
+exact source URLs and fetch date). It exists so a probed
 private model can be sanity-checked against a public model with a similar
 name, without a live internet call from inside a proposal-writing session.
 

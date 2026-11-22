@@ -1,37 +1,26 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Extract the cc-litellm-operator ServiceAccount's token + cluster CA from
+# Extract the cc-litellm-logreader ServiceAccount's token + cluster CA from
 # deploy/k3s/31-litellm-rbac.yaml's Secret, and write a standalone kubeconfig
-# for settings.litellm_kubeconfig (CC_LITELLM_KUBECONFIG) — the credential
-# gateway/executor.py's litellm.apply_config_change handler re-renders
-# configmap/cc-litellm-config and restarts deploy/cc-litellm with.
+# for settings.litellm_log_kubeconfig (CC_LITELLM_LOG_KUBECONFIG) — the
+# runtime's read-only identity for litellm_read_logs (pods get/list +
+# pods/log get ONLY, no configmaps/deployments/secrets; runtime/ tools may
+# hold READ credentials only).
 #
-#   Namespace-scoped by construction: the token IS the cc-litellm-operator
-#   SA's token (Role, no ClusterRole) — it can update ONE ConfigMap
-#   (cc-litellm-config), patch ONE Deployment (cc-litellm) and read pods in
-#   `central-command`, and nothing else, anywhere. It holds no secrets access at
-#   all. Sibling of make-mcp-kubeconfig.sh, same idiom including the
-#   go-template `{{index .data "ca.crt"}}` form — the naive `.data."ca.crt"`
-#   form does not resolve the dotted key and is a live-found bug (do not
-#   "simplify" back to it).
+#   Namespace-scoped by construction: the token IS the cc-litellm-logreader
+#   SA's token (Role, no ClusterRole). Sibling of make-mcp-kubeconfig.sh, same
+#   idiom including the go-template `{{index .data "ca.crt"}}` form — the
+#   naive `.data."ca.crt"` form does not resolve the dotted key and is a
+#   live-found bug (do not "simplify" back to it).
 #
-#   Written to <checkout owner's home>/.cc-litellm-operator.kubeconfig, mode 0600.
+#   Written to <checkout owner's home>/.cc-litellm-logreader.kubeconfig, mode 0600.
 #   Idempotent: re-running rewrites the file with whatever the Secret
 #   currently holds (a token rotation is picked up by re-running this, not by
 #   editing the file).
 #
-#   2026-08-06: also mints a SECOND kubeconfig for cc-litellm-logreader — the
-#   runtime's read-only identity for litellm_read_logs (pods get/list +
-#   pods/log get ONLY, no configmaps/deployments/secrets). Kept distinct from
-#   the write identity above because runtime/ tools may hold READ credentials
-#   only; the Executor's write kubeconfig must never reach a runtime tool.
-#   Written to <checkout owner's home>/.cc-litellm-logreader.kubeconfig, mode 0600.
-#
 #   Usage:  ./deploy/k3s/make-litellm-kubeconfig.sh
 #           then put the path in the REPO-ROOT .env as
-#           CC_LITELLM_KUBECONFIG=<checkout owner's home>/.cc-litellm-operator.kubeconfig
-#           and restart cc-uvicorn (a merged change is not live until its
-#           process restarts).
+#           CC_LITELLM_LOG_KUBECONFIG=<checkout owner's home>/.cc-litellm-logreader.kubeconfig
 # ============================================================================
 set -euo pipefail
 
@@ -46,10 +35,7 @@ SERVER="https://127.0.0.1:6443"
 KUBECTL=(sudo k3s kubectl)
 
 # Mints ONE kubeconfig for a (ServiceAccount, token Secret, output path)
-# triple. Called twice below: once for the Executor's write identity
-# (cc-litellm-operator), once for the runtime's read-only log identity
-# (cc-litellm-logreader, added 2026-08-06 for litellm-manager troubleshooting
-# reads) — same shape, different Role, so one function instead of copy-paste.
+# triple.
 mint() {
   local sa="$1" secret="$2" out="$3"
 
@@ -80,11 +66,6 @@ mint() {
   chown "$OWNER:" "$out"
   echo "wrote $out (namespace=$NS, server=$SERVER)"
 }
-
-# Write identity — the Executor's, WRITE verbs (configmaps, deployments).
-# Put the path in the REPO-ROOT .env as CC_LITELLM_KUBECONFIG.
-mint cc-litellm-operator cc-litellm-operator-token \
-  "$OWNER_HOME/.cc-litellm-operator.kubeconfig"
 
 # Read-only identity — the runtime's, pods get/list + pods/log get ONLY.
 # Put the path in the REPO-ROOT .env as CC_LITELLM_LOG_KUBECONFIG.

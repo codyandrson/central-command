@@ -4,7 +4,7 @@ Redacted 2026-10-30: instance facts replaced by placeholders (FR-47); the record
 
 > **Status:** diverged — rungs 1-3 built with the spec; curation writes built later but not through the Executor/proposal gate as the spec's "next increment" proposed — this record's own inline correction (below) already reflects that
 > **As-built:** `central_command/integrations/neo4j_writer.py`
-> **As-built note (2026-09-20):** Rungs 1-3 built with the spec (browse recipe, `graph_inspect.py`, cockpit Graph panel); curation writes built 2026-08-15, but not as the spec's 'next increment' originally proposed — not a proposal through the Executor, but a closed write set in `integrations/neo4j_writer.py` the API tier calls directly. Graphistry integration remains the one deferred increment.
+> **As-built note (2026-09-20):** Rungs 1-3 built with the spec (browse recipe, `graph_inspect.py` (deleted 2026-11-21 in the system review), cockpit Graph panel); curation writes built 2026-08-15, but not as the spec's 'next increment' originally proposed — not a proposal through the Executor, but a closed write set in `integrations/neo4j_writer.py` the API tier calls directly. Graphistry integration remains the one deferred increment.
 
 > **Status (corrected 2026-09-20):** the "recorded next increments" section
 > below is stale — curation writes shipped 2026-08-15, and NOT through the

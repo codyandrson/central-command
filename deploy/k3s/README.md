@@ -353,7 +353,7 @@ each reads a ServiceAccount token Secret the manifests create:
 ```bash
 ./deploy/k3s/make-sandbox-kubeconfig.sh    # -> ~/.cc-sandbox-runner.kubeconfig
 ./deploy/k3s/make-mcp-kubeconfig.sh        # -> ~/.cc-mcp-deployer.kubeconfig
-./deploy/k3s/make-litellm-kubeconfig.sh    # -> ~/.cc-litellm-operator.kubeconfig + ~/.cc-litellm-logreader.kubeconfig
+./deploy/k3s/make-litellm-kubeconfig.sh    # -> ~/.cc-litellm-logreader.kubeconfig
 ```
 
 If the compute node is freshly built (or you skipped the gVisor prerequisite):
@@ -362,8 +362,8 @@ If the compute node is freshly built (or you skipped the gVisor prerequisite):
 ./deploy/k3s/install-gvisor.sh   # idempotent; with the RuntimeClass now applied it also runs the pod-level proof
 ```
 
-Put those four paths in the **repo-root `.env`** as `CC_MCP_DEPLOY_KUBECONFIG`,
-`CC_LITELLM_KUBECONFIG`, `CC_LITELLM_LOG_KUBECONFIG` (the sandbox one is pinned
+Put those three paths in the **repo-root `.env`** as `CC_MCP_DEPLOY_KUBECONFIG`,
+`CC_LITELLM_LOG_KUBECONFIG` (the sandbox one is pinned
 in the systemd unit). All 0600, all re-runnable — a token rotation is picked up
 by re-running the script, never by editing the file.
 

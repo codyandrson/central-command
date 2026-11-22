@@ -53,8 +53,8 @@ const CATALOG = [
   cap({}),
   cap({ name: 'mail.send', reversibility: 'irreversible', requires_acknowledgement: true,
     risk: 'sends real mail', scope_forms: ['argument', 'schedule'] }),
-  cap({ name: 'litellm.apply_config_change', requires_acknowledgement: true,
-    risk: 'rewrites the gateway', scope_forms: ['schedule'] }),
+  cap({ name: 'litellm.delete_key', requires_acknowledgement: true,
+    risk: 'revokes a live key', scope_forms: ['schedule'] }),
   cap({ name: 'sandbox.exec', default_gate: 'none', overridable: false }),
 ];
 
@@ -89,7 +89,7 @@ describe('AuthorOverrideDialog', () => {
       'catalog.tag', { target: ['DOE', 'RIV'], schedule: 'nightly' }, false);
   });
 
-  it.each(['mail.send', 'litellm.apply_config_change'])(
+  it.each(['mail.send', 'litellm.delete_key'])(
     'refuses %s until the acknowledgement is ticked', async (name) => {
       const onAuthor = vi.fn().mockResolvedValue({ override: row({}), warnings: [], overrides: [] });
       dialog(onAuthor);

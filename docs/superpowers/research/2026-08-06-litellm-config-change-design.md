@@ -1,8 +1,9 @@
 # Gated LiteLLM config change with verified restart + auto-rollback (2026-08-06)
 
-> **Status:** superseded — explicitly self-superseded by the DB-based model-management reversal
+> **Status:** superseded — explicitly self-superseded by the DB-based model-management reversal; the capability itself was removed 2026-11-21, never used (DL-223)
 > **As-built:** `deploy/shared/litellm/model-preferences.yaml`
 > **As-built note (2026-09-20):** Superseded 2026-08-30 by the DB-based model-management reversal — models now live in LiteLLM's own database, and the config file is the fallback path only.
+> **Removed (2026-11-21):** `litellm.apply_config_change` is gone from the registry, the Executor and the litellm-manager's packs, with its write kubeconfig (`CC_LITELLM_KUBECONFIG`) and the `cc-litellm-operator` ServiceAccount. It was never used; a setting the config file does not name is changed through LiteLLM's admin API with no restart. This record is history.
 
 > **Superseded 2026-08-30 by the DB-based model-management reversal**: models
 > now live in LiteLLM's own database (`store_model_in_db: true`), and

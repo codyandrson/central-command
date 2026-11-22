@@ -268,7 +268,7 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
             "litellm.add_model litellm.update_model litellm.delete_model "
             "litellm.create_key litellm.update_key litellm.create_team "
             "litellm.delete_team litellm.delete_key litellm.set_fallbacks "
-            "litellm.delete_fallbacks litellm.apply_config_change "
+            "litellm.delete_fallbacks "
             "autodiscovery.skip litellm.list_models litellm.list_credentials "
             "litellm.list_keys litellm.get_routing litellm.list_teams "
             "litellm.get_health litellm.check_model_health litellm.get_spend "

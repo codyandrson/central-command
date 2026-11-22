@@ -3170,3 +3170,24 @@ hygiene, and how the test suite itself must be written. See
   act on it.
 - **Enforced:** test: `tests/test_tracker_vs_graph.py`, `tests/test_planning_fields.py`, `tests/test_ea.py`, `tests/test_packs.py`
 - **Source:** the operator's rulings in session, 2026-11-20; `central_command/runtime/reflection.py` (`LESSON_ROUTING`, `_reflect`); `central_command/runtime/ea_profile.py`; `central_command/heartbeat/actions.py` (the `digest` and `quarter_ahead` framings); `central_command/integrations/jira.py` (`list_comments`); `central_command/runtime/tools.py` (`jira_get_comments`, `_comment_pointer`); `central_command/runtime/packs.py` (`_ADD_COMMENT`, `jira-comment-propose`); `central_command/db/schema.sql` (the `jira-hygiene` seed); DL-213 (route first), DL-221 (the planner)
+
+### DL-223 — The LiteLLM config file is not an agent's write; the config-change capability is removed
+
+- **Status:** active
+- **Date:** 2026-11-21
+- **Rule:** (recorded here) No capability writes `deploy/shared/litellm/config.yaml`
+  or `model-preferences.yaml`: `litellm.apply_config_change` is removed from the
+  registry, the Executor and the litellm-manager's packs, with its write
+  kubeconfig (`CC_LITELLM_KUBECONFIG`, now a retired setting) and the
+  `cc-litellm-operator` ServiceAccount, Role, RoleBinding and token Secret
+  (tombstoned in `deploy/k3s/removed.txt`). The read tools `litellm_read_config`
+  and `litellm_read_logs` and the read-only log kubeconfig stay. The release
+  lists the capability in `deploy/k3s/removed-capabilities.txt`, so the updater
+  refuses the apply while a proposal of it is undecided.
+- **Why:** The capability was never used. LiteLLM (since v1.103) lets any
+  setting the config file does not name be changed through its admin API with no
+  restart. The handler tied the application to running from a writable git
+  checkout and committed and pushed on that checkout's branch. The operator ruled the cut in the system review on
+  2026-11-21.
+- **Enforced:** test: `tests/test_governance.py`, `tests/test_update_precondition.py`, `tests/test_k3s_removed.py`
+- **Source:** the operator's ruling in the system review, 2026-11-21; `docs/superpowers/research/2026-08-06-litellm-config-change-design.md` (the removed design); `deploy/k3s/removed-capabilities.txt`; `deploy/k3s/removed.txt`; `central_command/config.py` (`RETIRED_ENV_KEYS`)

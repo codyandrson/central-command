@@ -9,8 +9,7 @@ before the repair). The fix is `cache_params.supported_call_types` listing
 only chat-completion call types.
 
 The proxy config exists in TWO tracked places (the k3s configmap source and
-the single-node file compose.yaml bind-mounts), and `litellm.apply_config_change`
-lets the litellm-manager agent rewrite the former — so this walks both files
+the single-node file compose.yaml bind-mounts), so this walks both files
 rather than trusting anyone to remember.
 """
 

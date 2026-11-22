@@ -92,9 +92,9 @@ CAPABILITY_FIELDS = ("default_gate", "reversibility", "requires_acknowledgement"
     ("sandbox.exec", {"default_gate": "none", "reversibility": "reversible",
                       "requires_acknowledgement": False, "overridable": False}),
     # No ARG_SPECS entry: no argument form (and no target form).
-    ("litellm.apply_config_change", {"default_gate": "human",
-                                     "requires_acknowledgement": True,
-                                     "scope_forms": ["schedule"], "overridable": True}),
+    ("litellm.delete_key", {"default_gate": "human",
+                            "requires_acknowledgement": True,
+                            "scope_forms": ["schedule"], "overridable": True}),
 ])
 async def test_get_capabilities_carries_the_override_facts(name, expect):
     body = jsonable_encoder(await routes.get_capabilities())

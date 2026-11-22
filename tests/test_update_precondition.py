@@ -54,9 +54,11 @@ def _fn(name: str) -> str:
 # ── the shipped list and the status set ─────────────────────────────────────
 
 
-def test_the_shipped_list_names_exactly_task_create():
-    # Release B removes task.create; release A shipped the list empty.
-    assert check.parse_list(LIST_FILE.read_text(encoding="utf-8")) == ["task.create"]
+def test_the_shipped_list_names_exactly_the_removed_capabilities():
+    # Release B removes task.create; release A shipped the list empty. The
+    # 2026-11-21 system review removes litellm.apply_config_change.
+    assert check.parse_list(LIST_FILE.read_text(encoding="utf-8")) == [
+        "task.create", "litellm.apply_config_change"]
 
 
 def test_pending_means_before_a_verdict():

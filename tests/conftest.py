@@ -421,7 +421,6 @@ NO_LIVE_WORLD = {
     "sandbox_runner_url": "",
     "sandbox_runner_token": "",
     "mcp_build_host": "",
-    "litellm_kubeconfig": "",
 }
 
 REAL_SUBPROCESS_REFUSED = (

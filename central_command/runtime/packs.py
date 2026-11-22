@@ -1917,16 +1917,7 @@ PACKS: dict[str, Pack] = {
             "every Claude model unauthenticated — litellm.update_model "
             "preserves the stored key by construction, so for ANY edit to an "
             "existing model prefer update_model; reserve delete+add for a true "
-            "replacement where the model row itself must go. CONFIG CHANGES "
-            "(litellm.apply_config_change) carry the FULL new content of the "
-            "file(s) you change, captured when you propose — what you send is "
-            "exactly what executes, so review your own diff before proposing. "
-            "model-preferences.yaml must move in the SAME proposal when the "
-            "routing intent changes, or the post-check's policy.py --check "
-            "fails and your change is rolled back. Never touch a secret or an "
-            "`os.environ/…` reference you do not understand — the salt key and "
-            "every provider key live outside these files, and a literal key "
-            "shape in the content is refused."
+            "replacement where the model row itself must go."
         ),
         capabilities=(
             GatedCapability(
@@ -2025,23 +2016,6 @@ PACKS: dict[str, Pack] = {
                 name="litellm.delete_fallbacks",
                 arguments="{'model': '<alias>'} plus optional 'fallback_type'",
                 notes="The model runs without that fallback until re-set.",
-            ),
-            GatedCapability(
-                name="litellm.apply_config_change",
-                arguments=("{'files': {'deploy/shared/litellm/config.yaml': '<the FULL new "
-                           "file content>'}} — and/or the same for "
-                           "'deploy/shared/litellm/model-preferences.yaml'. Those two "
-                           "paths, nothing else"),
-                notes=("THE config-file lever: routing STRATEGY, num_retries, "
-                       "cooldowns (allowed_fails/cooldown_time), per-deployment "
-                       "rpm/tpm/order, callbacks and cache settings — everything the "
-                       "admin API cannot reach. HIGHEST BLAST RADIUS: a bad config "
-                       "takes ALL inference down, and the arc RESTARTS the proxy. It "
-                       "is verified — pre-check, write+commit, re-render, restart, "
-                       "post-check — and AUTO-ROLLS-BACK to the previous content if "
-                       "the post-check fails, so a bad change costs a restart, not "
-                       "the day. Send whole files, never a patch; read the current "
-                       "file first so you are editing what is actually there."),
             ),
         ),
     ),

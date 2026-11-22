@@ -999,43 +999,6 @@ REGISTRY: list[Capability] = [
         ),
     ),
     Capability(
-        name="litellm.apply_config_change",
-        kind="write",
-        gate="human approval",
-        default_gate="human",
-        reversibility="reversible",
-        acknowledge=True,
-        risk=(
-            "internal, HIGHEST BLAST RADIUS in the registry — a bad config "
-            "takes ALL inference down for the whole team; the arc RESTARTS the "
-            "proxy (a short gap even when it works), and a failing post-check "
-            "AUTO-ROLLS-BACK to the previous file contents, re-renders and "
-            "restarts again. Rollback that itself fails is an operator incident"
-        ),
-        holder="Executor",
-        route=(
-            "gateway/executor.py → write deploy/shared/litellm/*.yaml + git commit → "
-            "re-render configmap/cc-litellm-config (and policy.py --apply for "
-            "model-preferences.yaml) → kubectl rollout restart deploy/cc-litellm "
-            "→ deploy/shared/litellm/checks.sh"
-        ),
-        arguments=["files ({path: full new content}, only deploy/shared/litellm/config.yaml "
-                   "and deploy/shared/litellm/model-preferences.yaml)"],
-        description=(
-            "Change the LiteLLM settings that have NO admin API — routing "
-            "strategy, num_retries, cooldowns, per-deployment rpm/tpm/order, "
-            "callbacks, cache settings — by editing the config FILES and "
-            "restarting the proxy under a verified arc: validate (YAML parses, "
-            "no secret shapes, required aliases intact) → pre-check the running "
-            "proxy (a failing pre-check ABORTS, nothing is written) → snapshot "
-            "→ write + commit → re-render + restart + wait Ready → post-check → "
-            "auto-rollback on failure. Content is captured at PROPOSE time and "
-            "written verbatim (the mcp.sync_source doctrine). model-preferences.yaml "
-            "must move in the SAME proposal when routing intent changes, or the "
-            "post-check's policy.py --check fails and the change rolls back."
-        ),
-    ),
-    Capability(
         name="calendar.create_event",
         kind="write",
         gate="human approval",
@@ -1964,11 +1927,10 @@ REGISTRY: list[Capability] = [
         arguments=["path"],
         description=(
             "Current content of a LiteLLM config or deployment file. "
-            "config.yaml and model-preferences.yaml are the two files a "
-            "litellm.apply_config_change proposal may carry — read-before-"
-            "propose for full-file changes. 30-litellm.yaml (the k8s "
-            "Deployment manifest) is readable for TROUBLESHOOTING ONLY and is "
-            "not proposable through that capability. Any other path is "
+            "config.yaml and model-preferences.yaml are the proxy's config "
+            "and the declared routing policy; 30-litellm.yaml (the k8s "
+            "Deployment manifest) is readable for TROUBLESHOOTING. None of "
+            "the three is written by any capability. Any other path is "
             "refused."
         ),
     ),
@@ -2859,32 +2821,6 @@ POLICIES: list[Policy] = [
             "admin key, and the recorded litellm id is what deregistration "
             "will use. Removal auto-couples deregistration (operator "
             "decision 2026-08-03), a deregister-only lever stays separate."
-        ),
-    ),
-    Policy(
-        name="A LiteLLM config change is verified, or it is rolled back",
-        status="enforced",
-        enforced_at=(
-            "gateway/executor.py's litellm.apply_config_change handler: file "
-            "content is captured at PROPOSE time and written verbatim; only "
-            "deploy/shared/litellm/config.yaml and model-preferences.yaml may be "
-            "written; secret shapes in content are refused (these files "
-            "reference env vars — LITELLM_SALT_KEY and every key live in the "
-            "Secret, never here); a failing PRE-check aborts before anything "
-            "is written; the rollback trigger is the POST-check's exit code, "
-            "never the Executor's or an agent's judgment"
-        ),
-        guard="tests/test_litellm_config_change.py::test_post_check_failure_restores_the_files_and_fails_the_proposal",
-        description=(
-            "The highest-blast-radius capability in the registry carries its "
-            "own undo: a config that does not pass deploy/shared/litellm/checks.sh "
-            "after the restart is reverted to the snapshotted bytes, "
-            "re-rendered, restarted and re-checked, and the proposal FAILS with "
-            "both check outputs so the agent redrafts from real evidence. A "
-            "rollback that is itself red stops everything and becomes a loud "
-            "operator item plus litellm.config_rollback_failed — a proxy that "
-            "will not come back under its previous known-good config is an "
-            "incident, not an agent loop."
         ),
     ),
     Policy(

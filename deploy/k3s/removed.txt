@@ -17,3 +17,11 @@ central-command deployment cc-graphiti
 central-command service graphiti
 central-command configmap cc-graphiti-config
 central-command secret cc-graphiti
+# litellm.apply_config_change left the registry: the Executor's write identity
+# for it (31-litellm-rbac.yaml's cc-litellm-operator ServiceAccount, Role,
+# RoleBinding and token Secret) goes with it. The read-only cc-litellm-logreader
+# identity in the same file stays.
+central-command rolebinding cc-litellm-operator
+central-command role cc-litellm-operator
+central-command secret cc-litellm-operator-token
+central-command serviceaccount cc-litellm-operator

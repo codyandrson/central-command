@@ -10,3 +10,4 @@
 # into a release is run by the installed tree's updater. Blank lines and lines
 # starting with # are ignored.
 task.create
+litellm.apply_config_change
