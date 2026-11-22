@@ -42,9 +42,14 @@ for the entry format and how to add one.
   source — but only on recorded agreement evidence, one class at a time, and
   revocably: "graduation is configuration, never code." A fresh install is
   fully human-gated. Doctrine: the trust-tier graduation spec.
-- **Enforced:** code structure only — `central_command/gateway/auditor.py:1-50` (doctrine docstring and class constants) and `:285-340` (`approve_and_execute` call site, `approver="auditor"` at `:328`); `central_command/config.py:468-483,500-515` (`auditor_enabled`/`auditor_mode`/`auditor_document_mode`/`graph_auditor_enabled`/`graph_auditor_mode`, all default off/"shadow"); test: `tests/test_graph_verification.py::test_invalidations_always_park_and_carry_their_own_class` pins the invalidation carve-out
-- **Source:** code comment `central_command/gateway/auditor.py:1-50`; code comment `central_command/config.py:468-483,500-515`
+- **Enforced:** code structure only — `central_command/gateway/auditor.py:1-55` (doctrine docstring and class constants) and `:335-390` (`approve_and_execute` call site, `approver="auditor"` at `:378`); `central_command/config.py:468-483,500-515` (`auditor_enabled`/`auditor_mode`/`auditor_document_mode`/`graph_auditor_enabled`/`graph_auditor_mode`, all default off/"shadow"); test: `tests/test_graph_verification.py::test_invalidations_always_park_and_carry_their_own_class` pins the invalidation carve-out
+- **Source:** code comment `central_command/gateway/auditor.py:1-55`; code comment `central_command/config.py:468-483,500-515`
 - **Note (2026-10-26):** A gate override is a third decider beside the operator and the auditor, but it is never graduation: it is the operator's own standing rule, and an override approval never counts as operator agreement; see DL-187.
+- **Note (2026-11-22):** Amended by DL-231: what the auditor is given. It
+  receives the same time context triage does (one age calculation), and the
+  triage agent's reason is presented as a claim to test, never as evidence; a
+  dismissal resting on a fact the mail does not contain is challenged. A
+  challenge still falls through to the human gate exactly as above.
 
 ### DL-003 — Some deterministic writes are gated by the operator's own click, not by propose/approve
 
@@ -207,6 +212,13 @@ for the entry format and how to add one.
 - **Why:** Not recorded beyond the stated invariant. The checker lives in
   `contract/`, not `gateway/`, because BOTH `runtime/` and `gateway/` need it
   and `runtime/` may never import `gateway/`.
+  **Amended 2026-11-22 (DL-230):** a quote of a mail or of the operator is
+  judged by `contract.quote_supported` (ordered verbatim segments of at least
+  four words, or one contiguous passage), against every mail the session's
+  record shows it read and every word the record attributes to the operator in
+  the session; the after-question park is checked too, and tool-built
+  descriptions are not quotes. None still means NOT CHECKED, and recorded
+  verdicts are never backfilled.
 - **Enforced:** test: `tests/test_reflection.py::test_a_nomination_quote_is_always_checked`
 - **Source:** AGENTS.md bite marks
 

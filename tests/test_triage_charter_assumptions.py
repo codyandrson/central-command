@@ -51,7 +51,7 @@ def test_the_charter_keeps_its_placeholders_and_step_numbers():
     for placeholder in (
         "<what this email is>",
         "source_ref=<message id or sender>",
-        "claim=<the exact thing the email states>",
+        "claim=<ONE passage copied exactly from the email",
         "claim=<their words, QUOTED VERBATIM>",
     ):
         assert placeholder in CHARTER, placeholder

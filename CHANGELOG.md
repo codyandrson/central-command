@@ -4,6 +4,41 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-22 — v2.125.0: The quote check accepts real passages and looks in the right places; the dismissal auditor knows the date and tests the drafter's reason
+
+- **Why.** A read-only analysis of the record on 2026-11-22 looked at two review aids. Most checked
+  mail quotes were flagged "unverified", and the operator approved most flagged proposals anyway: of
+  118 false flags none was a formatting artefact, 33 were real passages joined together, 3 were real
+  quotes from mail the agent had opened with a tool, and 70 were paraphrase, which the evidence
+  field's own description invited. Of 31 flagged operator quotes, 17 were the operator's real words
+  from earlier in the same session. A sample of the dismissal auditor's concurrences found it reading
+  an old mail's own date as today, and concurring on facts the mail did not contain. The operator
+  ruled: fix both (DL-230 amending DL-016, DL-231 amending DL-002).
+- **A quote may be passages joined.** A mail or operator quote is supported if it is one contiguous
+  passage, as before, or a sequence of passages of at least four words each that appear in the source
+  in order, joined by an ellipsis or run together. Framing words, paraphrase, reordering and shorter
+  fragments are still flagged.
+- **The check looks where the words can be.** A mail quote is also checked against every mail the run
+  opened with `mail_read` or found with `mail_search`, proven from the tool returns in the run's own
+  record, never from what the agent says it read. An operator quote is checked against all the
+  operator's words in the session, and its evidence points at the event it matched. A proposal parked
+  after the operator answers a question is now checked; it was not before.
+- **Tool-built descriptions are not quotes.** The "from X: subject" evidence that the mail report,
+  move, unsubscribe and send tools build is no longer judged as a quote.
+- **Agents are told what a quote is.** The evidence field and the built-in charters say: one passage
+  copied exactly, omissions marked with an ellipsis, one entry per passage, no summary. An
+  operator-saved charter is not changed by a release. The sentence to add to a saved triage charter's
+  evidence step: "When you cite an email, set claim to ONE passage copied exactly from the email, word
+  for word: contiguous, or with omitted words marked by an ellipsis (...). Use one evidence entry per
+  passage you rely on; never a summary, a paraphrase or words of your own."
+- **The auditor gets the date.** Its input carries today's date and the mail's age, from the same
+  function mail triage uses.
+- **The auditor tests the reason instead of trusting it.** The triage agent's stated reason is
+  presented to it as a claim. A concurrence must rest on what the mail shows; a dismissal that depends
+  on a fact the mail does not contain (already closed, tracked, paid, decided) is challenged, and the
+  challenge says which fact could not be verified. Expect more old backlog mail to reach the operator.
+- **Not changed.** Flags already recorded on decided proposals are never rewritten.
+
 ## 2026-11-22 — v2.124.0: Every rule states its reason; the decision-log index is generated; prose guards and unread records go
 
 - **Why.** The process layer (the instructions, rules, records and guard tests that govern how

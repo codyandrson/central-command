@@ -235,10 +235,14 @@ def test_both_tiers_share_one_checker():
     """The gateway and the runtime must never fork this logic — and the runtime
     may not import the gateway (the trust boundary), which is why it lives in
     `contract/`. If someone re-forks it, this fails."""
+    from central_command import contract
     from central_command.gateway import gateway as gw
 
-    assert gw.claim_supported is claim_supported
+    # The gateway's quote check is the contract's (DL-230: `quote_supported`,
+    # built on `claim_supported`'s normalisation), never a fork of its own.
+    assert gw.quote_supported is contract.quote_supported
     assert not hasattr(gw, "_claim_supported")
+    assert not hasattr(gw, "_quote_supported")
 
 
 # --- what the prompt SHOWS must be what the checker ACCEPTS -------------------

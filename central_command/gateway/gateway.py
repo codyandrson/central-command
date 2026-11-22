@@ -19,9 +19,9 @@ from central_command.contract import (
     Action,
     Proposal,
     ProposalStatus,
-    claim_supported,
     classify_failure,
     classify_failure_text,
+    quote_supported,
     retry_not_before,
 )
 from central_command.db import repo
@@ -40,7 +40,7 @@ from central_command.runtime.durable import (
     proposal_from_call,
     resume,
 )
-from central_command.runtime.proposals import park_proposal, verified_email_evidence
+from central_command.runtime.proposals import park_proposal
 from pydantic_ai import ToolDenied
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
@@ -79,7 +79,7 @@ async def redraft_link(parent_id: str, cause: str) -> dict:
 
 
 async def _recheck_against_session_sources(
-    session_id: str, evidence
+    session_id: str, evidence, *, messages=None, proposal=None,
 ) -> list[dict] | None:
     """Re-check a later leg's quotes against the sources the session was fed.
 
@@ -88,44 +88,29 @@ async def _recheck_against_session_sources(
     every later leg — a redraft after a Reject or a failed execution, a
     follow-on after an Approve — parks from here, and the session→work-item
     link is what carries the source to it. A document quote is checked against
-    the stored document (`payload["text"]`, nothing else) and an email quote
-    against each mail's stored text on its own. An unchecked majority would gut
-    the anti-hallucination defence precisely on the sessions rich enough to
-    need it (the follow-on lesson of 2026-08-13; the email gap of 2026-11-04).
+    the stored document (`payload["text"]`, nothing else), an email quote
+    against each mail's stored text on its own and against every mail the run's
+    own record shows a mail read tool returned (`messages`), and an operator
+    quote against every operator-attributed word of the session (DL-230). An
+    unchecked majority would gut the anti-hallucination defence precisely on
+    the sessions rich enough to need it (the follow-on lesson of 2026-08-13;
+    the email gap of 2026-11-04).
+
+    The one copy lives in the runtime tier
+    (`proposals.session_source_evidence`) because the after-question path
+    parks from there and `runtime/` may never import `gateway/`.
 
     Returns None unless a verdict was actually recorded — a session with no
-    source at all (a chat, a task, the coach), or one whose later leg cites
-    nothing the sources can judge — so `park_proposal` keeps its own
-    `charter.update` citation check on those paths: it runs that check only
-    when it is given None, and a list that judged nothing would bypass it.
+    source at all, or one whose later leg cites nothing the sources can judge —
+    so `park_proposal` keeps its own `charter.update` citation check on those
+    paths: it runs that check only when it is given None, and a list that
+    judged nothing would bypass it.
     """
-    items = await repo.work_items_for_session(session_id)
-    doc_texts = [
-        (i.get("payload") or {}).get("text") or ""
-        for i in items if i.get("kind") == "document"
-    ]
-    from central_command.ingest import mail_attachments
+    from central_command.runtime.proposals import session_source_evidence
 
-    # A mail's stored text and each read attachment's whole text (DL-216).
-    mail_texts = [
-        t
-        for i in items if (i.get("kind") or "email") == "email"
-        for t in mail_attachments.source_texts(i.get("payload") or {})
-    ]
-    doc_texts = [t for t in doc_texts if t]
-    mail_texts = [t for t in mail_texts if t]
-    if not doc_texts and not mail_texts:
-        return None
-    out = evidence
-    if doc_texts:
-        # gateway → runtime is the allowed import direction.
-        from central_command.runtime.steward import verified_evidence
-
-        out = verified_evidence(out, doc_texts[0])
-    judged = verified_email_evidence(out, mail_texts)
-    if any(e.get("claim_matches_source") is not None for e in judged):
-        return judged
-    return None
+    return await session_source_evidence(
+        session_id, evidence, messages=messages, proposal=proposal,
+    )
 
 
 async def _park_redraft(
@@ -351,7 +336,8 @@ async def _continue_if_conversation(session_id: str, final, after: str, proposal
 
 
 async def _redraft_evidence(
-    redraft: Proposal, after: str, feedback: str | None, decided_event_id
+    redraft: Proposal, after: str, feedback: str | None, decided_event_id,
+    session_id: str | None = None,
 ) -> list[dict]:
     """The evidence a redraft is persisted with.
 
@@ -362,8 +348,16 @@ async def _redraft_evidence(
     hallucinated "the operator said X" is flagged before review. This re-check
     is why the post-resume tail is ONE function — a retry driver with its own
     copy of the redraft branch would quietly ship redrafts that skipped it.
+
+    The current feedback is tried first (`quote_supported`, DL-230). A quote it
+    does not hold is then tried against every other word the record attributes
+    to the operator in this session — an earlier answer to `ask_operator`, an
+    earlier rejection — and, when one holds it, the pointer names THAT event
+    (`proposals.verified_operator_evidence`). Only a quote found nowhere in the
+    operator's recorded words is False.
     """
     evidence = []
+    unmatched = False
     for e in redraft.evidence:
         d = e.model_dump()
         if after == "rejected" and d["kind"] == "operator" and decided_event_id:
@@ -371,8 +365,26 @@ async def _redraft_evidence(
             d["locator"] = (
                 f"GET /api/events → id {decided_event_id}, payload.feedback"
             )
-            d["claim_matches_source"] = claim_supported(d["claim"], feedback or "")
+            if quote_supported(d["claim"], feedback or ""):
+                d["claim_matches_source"] = True
+            else:
+                # Left unjudged for the session-wide pass below.
+                unmatched = True
         evidence.append(d)
+    if unmatched:
+        from central_command.runtime.proposals import verified_operator_evidence
+
+        words = (
+            await repo.operator_words_for_session(session_id) if session_id else []
+        )
+        for n, d in enumerate(evidence):
+            if not (d["kind"] == "operator" and d.get("claim_matches_source") is None
+                    and d.get("source_ref") == f"event:{decided_event_id}"):
+                continue
+            judged = verified_operator_evidence([d], words)[0] if words else d
+            if judged.get("claim_matches_source") is None:
+                judged = {**d, "claim_matches_source": False}
+            evidence[n] = judged
     return evidence
 
 
@@ -477,7 +489,8 @@ async def finish_decision_resume(
             _meta = final.output.metadata.get(call.tool_call_id)
         follow_on = proposal_from_call(call, metadata=_meta)
         evidence = await _recheck_against_session_sources(
-            session_id, follow_on.evidence
+            session_id, follow_on.evidence,
+            messages=final.all_messages(), proposal=follow_on,
         )
         parked = await park_proposal(
             session_id=session_id, agent_id=agent_id, result=final, call=call,
@@ -510,8 +523,14 @@ async def finish_decision_resume(
         # the authoritative one), then the session's own sources for the email
         # and document quotes a redraft still carries — a redraft that re-cites
         # the mail is checked exactly as the first draft was.
-        evidence = await _redraft_evidence(redraft, after, feedback, decided_event_id)
-        evidence = await _recheck_against_session_sources(session_id, evidence) or evidence
+        evidence = await _redraft_evidence(
+            redraft, after, feedback, decided_event_id, session_id=session_id,
+        )
+        evidence = await _recheck_against_session_sources(
+            session_id, evidence,
+            messages=final.all_messages() if final is not None else None,
+            proposal=redraft,
+        ) or evidence
         parked = await _park_redraft(
             session_id, agent_id, final, call, proposal_id, evidence,
             cause=redraft_cause or after,

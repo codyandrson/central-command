@@ -135,7 +135,7 @@ Rows for the same package are grouped by what the modules are for.
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The agents, one module per entry point and one per built-in charter ("v0"). Several agents have no run path of their own: they are tasked (`run_task`), conversed with or consulted. Agents: EA, knowledge steward, editor, Jira expert, Confluence expert, LiteLLM manager, MCP manager, wiki agent, coach, orchestrator (a router; holds no `propose_*` tools), and the two auditors and the graph curator (charters only), and the staffing agent (a charter only: a hire-menu template, `TEMPLATES["staffing"]`, hired by the operator in the cockpit, never seeded) | `ea.py`, `ea_profile.py`, `steward.py`, `steward_profile.py`, `editor.py`, `editor_profile.py`, `jira_expert.py`, `confluence_expert.py`, `litellm_manager.py`, `litellm_manager_profile.py`, `mcp_manager.py`, `mcp_manager_profile.py`, `wiki_agent.py`, `coach_profile.py`, `orchestrator.py`, `orchestrator_profile.py`, `auditor_profile.py`, `graph_auditor_profile.py`, `graph_curator_profile.py`, `staffing_profile.py` | [models](../.claude/rules/models.md) |
-| `contract/` | shared | none | The vocabulary both tiers speak: proposal models, status enums, `ARG_SPECS` argument shapes, `claim_supported`, the failure taxonomy (DOWN vs NO), the dependencies each live read waits on (`TOOL_DEPENDENCY`), one-click-unsubscribe eligibility | `args.py` (`ARG_SPECS`, `validate_action_args`), `models.py` (`claim_supported`), `enums.py`, `failures.py` (`is_transient`), `dependencies.py` (`DEPENDENCIES`, `TOOL_DEPENDENCY`, `CAPABILITY_DEPENDENCY`), `embedding_text.py` (`embedding_text`, `TEXT_RECIPE`, `CANARY_TEXTS`), `mail.py` | [AGENTS.md](../AGENTS.md), [integrations](../.claude/rules/integrations.md) |
+| `contract/` | shared | none | The vocabulary both tiers speak: proposal models, status enums, `ARG_SPECS` argument shapes, `claim_supported`, the failure taxonomy (DOWN vs NO), the dependencies each live read waits on (`TOOL_DEPENDENCY`), one-click-unsubscribe eligibility | `args.py` (`ARG_SPECS`, `validate_action_args`), `models.py` (`claim_supported`, `quote_supported`), `enums.py`, `failures.py` (`is_transient`), `dependencies.py` (`DEPENDENCIES`, `TOOL_DEPENDENCY`, `CAPABILITY_DEPENDENCY`), `embedding_text.py` (`embedding_text`, `TEXT_RECIPE`, `CANARY_TEXTS`), `mail.py` | [AGENTS.md](../AGENTS.md), [integrations](../.claude/rules/integrations.md) |
 | `db/` | ④ | DSN | The Postgres spine: one asyncpg access layer and the schema | `repo.py` (the access layer — nearly all SQL), `schema.sql` (auto-loaded on a **fresh** database only). SQL outside it: three advisory-lock leases (`heartbeat/engine.py`, `ingest/dispatcher.py`, `integrations/graphiti_ingest.py`), the readiness queries in `selfcheck.py`, and `integrations/litellm_credstore.py`, which reads LiteLLM's own database | [AGENTS.md](../AGENTS.md) |
 | `events/` | ② | none | The append-only event log: write to Postgres, then fan out; WARNING+ log records bridged into events | `log.py` (`events.emit`, the only publish path), `bridge.py` | [AGENTS.md](../AGENTS.md) |
 | `ingest/` | ② | read (mail, files); Confluence write for the gated-by-config annotation | Feeds and the dispatcher: the Work Ledger, the live mail feed, backlog enrollment, the backpressure dispatcher, standing mail rules applied before any model call | `ledger.py` (`enroll_*`, `hydrate_work_item`), `feed.py` (`poll_once`), `dispatcher.py` (`process_claimed`, the one path every item takes), `mail_rules.py` (rules applied before the model; `mail.create_rule` is gated), `mailtext.py` (the one mail-body converter) | [integrations](../.claude/rules/integrations.md), [`QUEUE.md`](QUEUE.md) |
@@ -855,6 +855,30 @@ stateDiagram-v2
   Executor never sees the proposal around its actions, so the check cannot live
   there. `charter.update`'s `rationale` is in `contract.ARG_SPECS`, so both tiers
   check it. The generated propose guidance says to state a confidence.
+- **The claim check (DL-016, DL-230).** A quote of a mail (`kind='email'`) or
+  of the operator (`kind='operator'`) is re-checked against the recorded source
+  and the verdict stored on the evidence as `claim_matches_source` (`true`,
+  `false`, or absent = NOT CHECKED); `false` is the Inbox's "unverified quote"
+  badge and parks an override (`overrides.review_flags`). The rule is
+  `contract.quote_supported`: after `claim_supported`'s normalisation, one
+  contiguous passage of the source (any length), or ordered, non-overlapping
+  verbatim segments of at least four words each, joined in the claim by an
+  ellipsis or run together; framing words, paraphrase, reordering and shorter
+  pieces fail. Each source is tried on its own. The sources: the claimed mail's
+  stored text and read attachments, its surveyed siblings (first draft), and
+  every mail the run's OWN record shows `mail_read` returned (the text after
+  `tools.MAIL_TEXT_MARKER` in a `tool-return` part, never the agent's
+  `source_ref`) or a `mail_search` snippet of a mail outside the queue
+  (`proposals.read_mail_sources`); for an operator quote, every word
+  `repo.operator_words_for_session` attributes to the operator in the session
+  (the current rejection first), and a match repoints the entry at the event it
+  matched. The first draft checks in `run.ingest_and_propose`; every later leg —
+  a redraft, a follow-on, a proposal parked after an operator answer
+  (`questions._settle`) — through `proposals.session_source_evidence`, in the
+  runtime tier so both tiers reach it. A description a tool builds from
+  headers (`mail.report_spam`, `mail.move`, `mail.unsubscribe`, `mail.send`, a
+  bulk dismissal's count) is recorded as `kind='mailbox'` and never judged.
+  Recorded verdicts are never backfilled.
 - **At the gate.** `proposal.decided` is emitted inside
   `approve_and_execute` *before* `executor.execute()` runs. The Executor
   re-runs the same shape validation over every action before the first one
@@ -1229,6 +1253,17 @@ auditor-gated class, `work.bulk_dismiss`, is reversible and is unaffected. The
 dismissal and graph classes are not capabilities and are outside the check. This
 adds to the rule that the auditor never graduates outward-facing writes and
 replaces nothing.
+
+**What the dismissal auditor is given (DL-002, DL-231).** The auditor holds no
+tools and judges from its input alone: the stored mail, a TIME CONTEXT block
+(today's date and the mail's age, written by `dispatcher.email_age_line`, the
+same function and clock seam that write triage's "[queue context]" line, with a
+line that the mail's own dates are in the past), and the triage agent's stated
+reason labelled as a CLAIM to test, not a fact (`auditor.audit_prompt`). A
+concur rests on what the mail shows; a dismissal that depends on a fact the mail
+does not contain is challenged, the rationale naming the fact, so it reaches the
+operator. The rule rides the input as well as the built-in charter, so an
+operator-saved charter does not drop it. The bulk-dismissal prompt is unchanged.
 
 Graduation is **configuration, never code**, one class at a time,
 on recorded agreement evidence (`gateway/auditor.py`,

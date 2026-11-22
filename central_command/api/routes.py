@@ -2743,7 +2743,13 @@ async def get_proposal(proposal_id: str) -> dict:
                 # of what a coach run cites, so reading only `feedback` left the
                 # reviewer's side-by-side pane blank exactly where it was needed.
                 payload = ev.get("payload") or {}
-                e["source_feedback"] = payload.get("feedback") or payload.get("note")
+                # An operator quote the check matched against an earlier answer
+                # or chat turn is repointed at THAT event (DL-230); its words
+                # ride `answer` / `text`, shown only when the operator wrote it.
+                spoken = (payload.get("answer") or payload.get("text")
+                          if ev.get("actor") == "operator" else None)
+                e["source_feedback"] = (payload.get("feedback") or payload.get("note")
+                                        or spoken)
 
     # The auditor's verdict on this proposal (bulk dismissals, graduated
     # 2026-08-17). It lives on the event log — the reviewer sees the same

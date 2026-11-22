@@ -25,7 +25,7 @@ import uuid
 
 from central_command import events
 from central_command.db import repo
-from central_command.contract import claim_supported
+from central_command.contract import quote_supported
 from central_command.runtime.durable import dump_run_state, proposal_from_call
 
 
@@ -165,13 +165,19 @@ def verified_email_evidence(evidence, source_texts: list[str]) -> list[dict]:
 
     `source_texts` is the mail as the agent saw it, one string per message
     (the claimed email, then its surveyed siblings — a folded sibling's words
-    are a legitimate source). Each is checked ON ITS OWN, never a serialized
-    item (`run._event_source_texts`: a quote must not verify against JSON
-    structure or span two messages). Only `kind='email'` entries are judged and
-    only when no verdict is recorded yet, so the gateway may run this over a
-    redraft the operator-quote check already marked. No sources, or another
-    kind, keeps `claim_matches_source` ABSENT — NOT CHECKED, never "checked and
-    inconclusive"; the steward's checker keeps the same rule.
+    are a legitimate source — then every mail the session read with the mail
+    read tools, `read_mail_sources`). Each is checked ON ITS OWN, never a
+    serialized item (`run._event_source_texts`: a quote must not verify against
+    JSON structure or span two messages). The check is `quote_supported`
+    (DL-230): a contiguous passage, or ordered verbatim segments of at least
+    four words joined by an ellipsis or run together. Only `kind='email'`
+    entries are judged and only when no verdict is recorded yet, so the gateway
+    may run this over a redraft the operator-quote check already marked. No
+    sources, or another kind, keeps `claim_matches_source` ABSENT — NOT
+    CHECKED, never "checked and inconclusive"; the steward's checker keeps the
+    same rule. A tool-built description (`mail.report_spam`'s "from X:
+    subject", a bulk dismissal's count) is recorded under another kind for
+    exactly that reason.
     """
     out = []
     for e in evidence:
@@ -183,10 +189,179 @@ def verified_email_evidence(evidence, source_texts: list[str]) -> list[dict]:
         ):
             claim = d.get("claim") or ""
             d["claim_matches_source"] = any(
-                claim_supported(claim, t) for t in source_texts if t
+                quote_supported(claim, t) for t in source_texts if t
             )
         out.append(d)
     return out
+
+
+# The read tools whose recorded returns count as mail the session was given.
+_MAIL_READ_TOOL = "mail_read"
+_MAIL_SEARCH_TOOL = "mail_search"
+_OUTSIDE_QUEUE = "[not in the queue]"
+
+
+def _as_message_dicts(messages) -> list[dict]:
+    """A run's messages as stored JSON (`part_kind` dicts), whether they arrive
+    as pydantic-ai objects (`result.all_messages()`) or already dumped (a
+    stored `run_state["messages"]`)."""
+    if not messages:
+        return []
+    if all(isinstance(m, dict) for m in messages):
+        return list(messages)
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    return ModelMessagesTypeAdapter.dump_python(list(messages), mode="json")
+
+
+def read_mail_sources(messages) -> list[str]:
+    """The mail text the session's OWN RECORD shows a mail read tool returned.
+
+    Proof from the record, never from the agent: only a `tool-return` part —
+    written by the framework with what the tool actually returned, never by the
+    model — counts, and only the part of it that is mail. The agent's
+    `source_ref` plays no part, so naming a mail it never opened cannot widen
+    the set; a quote is checked against every mail the session read, each on
+    its own.
+
+      mail_read   — everything after the LAST `tools.MAIL_TEXT_MARKER` in the
+                    return: the message's stored text, the headers and body read
+                    from the mailbox, or one attachment page. What `mail_read`
+                    prints above the marker (a dismissal rationale, the
+                    auditor's verdict, an operator note) is not mail and never
+                    counts. A return with no marker (an error line, or a read
+                    recorded before the marker existed) contributes nothing.
+      mail_search — the snippet of each match listed as NOT in the queue (the
+                    text after the line's last " — "): a few words of the mail
+                    the agent was shown. Queue lines carry a dismissal reason,
+                    so they contribute nothing.
+    """
+    from central_command.runtime.tools import MAIL_TEXT_MARKER
+
+    out: list[str] = []
+    for msg in _as_message_dicts(messages):
+        for part in msg.get("parts") or []:
+            if part.get("part_kind") != "tool-return":
+                continue
+            content = part.get("content")
+            if not isinstance(content, str):
+                continue
+            tool = part.get("tool_name")
+            if tool == _MAIL_READ_TOOL:
+                at = content.rfind(MAIL_TEXT_MARKER)
+                if at >= 0:
+                    text = content[at + len(MAIL_TEXT_MARKER):].strip()
+                    if text:
+                        out.append(text)
+            elif tool == _MAIL_SEARCH_TOOL:
+                for line in content.splitlines():
+                    if _OUTSIDE_QUEUE in line and " — " in line:
+                        snippet = line.rsplit(" — ", 1)[1].strip()
+                        if snippet:
+                            out.append(snippet)
+    return out
+
+
+def verified_operator_evidence(evidence, operator_words: list[dict]) -> list[dict]:
+    """Re-check an operator quote against EVERY word the record attributes to
+    the operator in this session (`repo.operator_words_for_session`: chat turns,
+    answers to `ask_operator`, a discussion lane, rejection feedback, a reopen
+    note), not only the latest feedback — a redraft that quotes the operator's
+    earlier answer is quoting the operator (DL-230).
+
+    Only `kind='operator'` entries with no verdict yet are judged, each source
+    on its own, with `quote_supported`. A match repoints the entry at the event
+    it actually matches (`source_ref='event:<id>'`, the record's own pointer,
+    replacing the agent's), so the reviewer is shown the words it was checked
+    against. No match records False and leaves the agent's pointer in place.
+    An empty `operator_words` judges nothing: None stays NOT CHECKED.
+    """
+    out = []
+    for e in evidence:
+        d = e.model_dump() if hasattr(e, "model_dump") else dict(e)
+        if (
+            d.get("kind") == "operator"
+            and d.get("claim_matches_source") is None
+            and operator_words
+        ):
+            claim = d.get("claim") or ""
+            hit = next(
+                (w for w in operator_words
+                 if w.get("text") and quote_supported(claim, w["text"])),
+                None,
+            )
+            d["claim_matches_source"] = hit is not None
+            if hit is not None:
+                d["source_ref"] = hit["ref"]
+                d["locator"] = (
+                    f"record {hit['ref']} ({hit['source']}: the operator's words "
+                    "in this session)"
+                )
+        out.append(d)
+    return out
+
+
+def _cites_a_charter_update(proposal) -> bool:
+    return any(
+        a.capability.split("@", 1)[0] == "charter.update"
+        for a in getattr(proposal, "actions", None) or []
+    )
+
+
+async def session_source_evidence(
+    session_id: str, evidence, *, messages=None, proposal=None,
+) -> list[dict] | None:
+    """Check a proposal's quotes against everything the session's record shows
+    it was given — the one copy used by every leg after the first draft (a
+    redraft, a follow-on, a proposal parked after an operator answer).
+
+      document — the stored document of a document work item (the steward).
+      email    — each linked mail's stored text and read attachments, plus every
+                 mail the session read with the mail read tools during the run
+                 (`read_mail_sources` over `messages`, the run's own record).
+      operator — every operator-attributed word of the session
+                 (`verified_operator_evidence`). Skipped for a `charter.update`:
+                 its citations go through the coach's event-pointer check in
+                 `park_proposal`, which runs only when handed None.
+
+    Returns None unless a verdict was actually recorded, so `park_proposal`
+    keeps its own `charter.update` citation check on paths that judged nothing.
+    Runtime-tier on purpose: the gateway calls it for redrafts and follow-ons,
+    `questions._settle` for the after-question path, and `runtime/` may never
+    import `gateway/`.
+    """
+    items = await repo.work_items_for_session(session_id)
+    from central_command.ingest import mail_attachments
+
+    doc_texts = [
+        (i.get("payload") or {}).get("text") or ""
+        for i in items if i.get("kind") == "document"
+    ]
+    # A mail's stored text and each read attachment's whole text (DL-216).
+    mail_texts = [
+        t
+        for i in items if (i.get("kind") or "email") == "email"
+        for t in mail_attachments.source_texts(i.get("payload") or {})
+    ]
+    mail_texts += read_mail_sources(messages)
+    doc_texts = [t for t in doc_texts if t]
+    mail_texts = [t for t in mail_texts if t]
+    out = [e.model_dump() if hasattr(e, "model_dump") else dict(e) for e in evidence]
+    if doc_texts:
+        from central_command.runtime.steward import verified_evidence
+
+        out = verified_evidence(out, doc_texts[0])
+    out = verified_email_evidence(out, mail_texts)
+    if not _cites_a_charter_update(proposal) and any(
+        d.get("kind") == "operator" and d.get("claim_matches_source") is None
+        for d in out
+    ):
+        out = verified_operator_evidence(
+            out, await repo.operator_words_for_session(session_id)
+        )
+    if any(e.get("claim_matches_source") is not None for e in out):
+        return out
+    return None
 
 
 def _server_built(metadata) -> bool:

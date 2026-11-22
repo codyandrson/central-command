@@ -36,6 +36,7 @@ from .models import (
     Provenance,
     claim_supported,
     note_forbidden_char,
+    quote_supported,
 )
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "SessionStatus",
     "Evidence",
     "claim_supported",
+    "quote_supported",
     "note_forbidden_char",
     "Action",
     "Proposal",

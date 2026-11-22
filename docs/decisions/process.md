@@ -3176,3 +3176,61 @@ hygiene, and how the test suite itself must be written. See
   operator levers on a session.
 - **Enforced:** test: `tests/test_session_rename.py::test_a_rename_leaves_the_transcript_untouched`, `::test_renaming_a_conversation_stores_the_name_and_records_it`, `::test_an_agents_root_row_cannot_be_renamed_here`, `::test_a_renamed_conversation_is_labelled_with_the_operators_name`
 - **Source:** the operator's ruling in the system review, 2026-11-21; `central_command/api/nerve_gateway.py` (`_patch_session_label`); `central_command/db/schema.sql`
+
+### DL-230 — A quote is a copied passage, contiguous or with marked omissions, checked against every source the record shows the session was given
+
+- **Status:** active
+- **Date:** 2026-11-22
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "**No agent claim is trusted unverified — on every path that makes one.**"
+- **Why:** Amends DL-016. A read of the live record on 2026-11-22 found the
+  "unverified quote" flag wrong far more often than right, and every miss a
+  content difference no text clean-up clears: of 118 mail claims flagged false,
+  33 were verbatim passages joined by an ellipsis or run together, 7 a verbatim
+  span with a few framing words, 70 reworded or summarised (the `claim` field
+  was described as "what the agent asserts the source shows"), 5 descriptions a
+  tool built from headers (`mail.report_spam`'s "from X: subject") and 3 real
+  quotes from a mail the agent opened with `mail_read` or `mail_search`, which
+  the source set never held; of 31 operator quotes flagged false, 17 were the
+  operator's own words from an earlier answer or rejection in the same session,
+  checked against the current feedback only; and 35 proposals parked after an
+  operator answer were never checked. A false flag shows the reviewer a red
+  badge and stops a standing override, so each false one costs the operator a
+  look for nothing and teaches them to ignore the badge. The operator ruled:
+  fix the check, keep it. So a quote may be ordered verbatim segments of at
+  least four words each (one contiguous passage of any length is still
+  supported as before), searched exactly rather than greedily so the verdict
+  never depends on which split is tried first, and bounded so a pathological
+  input fails closed; framing words, paraphrase and reordering still fail,
+  which is what the check exists to catch. The source set grows only by what
+  the session's own record proves it was given — a `tool-return` part the
+  framework wrote, never the agent's `source_ref` — and, for the operator,
+  every word `repo.operator_words_for_session` attributes to them, the entry
+  repointed at the event it matched. The field description and the triage
+  charter now ask for one copied passage per entry and no words of the agent's
+  own. A tool-built description is recorded as `kind='mailbox'`, the
+  `propose_bulk_dismiss` precedent, so it is never judged as a quote. Recorded
+  verdicts are not backfilled: the record says what was checked then.
+- **Enforced:** test: `tests/test_claim_check_sources.py::test_passages_joined_by_an_ellipsis_are_supported`, `::test_segments_out_of_order_fail`, `::test_a_three_word_segment_fails`, `::test_invented_words_between_real_segments_fail`, `::test_a_phrase_twice_in_the_source_is_two_occurrences_never_one_used_twice`, `::test_only_a_recorded_tool_return_counts_never_the_agents_own_words`, `::test_a_quote_from_a_mail_the_agent_read_verifies_on_the_first_draft`, `::test_a_redraft_quoting_an_earlier_answer_verifies_against_that_answer`, `::test_a_proposal_parked_after_an_operator_answer_is_checked`, `::test_tool_built_mail_descriptions_are_not_recorded_as_quotes`
+- **Source:** the operator's ruling on the review-mechanisms analysis, 2026-11-22; `central_command/contract/models.py` (`quote_supported`); `central_command/runtime/proposals.py` (`read_mail_sources`, `verified_operator_evidence`, `session_source_evidence`); DL-016
+
+### DL-231 — The dismissal auditor is given triage's time context, and the drafter's reason is a claim to test, never evidence
+
+- **Status:** active
+- **Date:** 2026-11-22
+- **Rule:** (recorded here) The dismissal auditor's input carries the reference day and the mail's age, computed by the same function that writes triage's age line (`dispatcher.email_age_line`), and labels the triage agent's stated reason as an unverified claim. A concur rests on what the mail shows plus that time context; a dismissal that depends on a fact the mail does not contain is challenged, the rationale naming the fact, so the item reaches the operator. The rule rides the input as well as the built-in charter, and the auditor stays tool-less with its verdict shape unchanged.
+- **Why:** Amends DL-002 (what the graduated auditor is given, not who may
+  decide). A sample of its concurrences on 2026-11-22 found two reasoning
+  defects. On old mail it read the mail's own date as today and "corrected" a
+  triage agent that had the age right: triage got an explicit age line and a
+  reference time in v2.82.6 and v2.82.9 (DL-208), the auditor never did. And it
+  concurred on facts no mail contained and a tool-less agent cannot check
+  ("claim closed", "already tracked under a ticket", "renewal already
+  decided"), taken from the drafter's reason — an independent re-derivation
+  that leans on the drafter's assertions is not independent. The operator
+  ruled: fix it, keep it. One age calculation, so the two agents can never be
+  told different ages; the rule in the input, because an operator-saved
+  charter replaces the built-in text. The expected consequence, accepted
+  without a setting to tune it: more challenges reach the operator for old
+  backlog mail whose dismissal rests on facts outside the mail.
+- **Enforced:** test: `tests/test_auditor_time_context.py::test_an_old_mails_audit_input_carries_the_reference_time_and_age`, `::test_the_age_comes_from_the_shared_helper`, `::test_the_input_labels_the_reason_as_a_claim`, `::test_the_charter_states_the_claim_not_fact_rule_and_the_time_rule`
+- **Source:** the operator's ruling on the review-mechanisms analysis, 2026-11-22; `central_command/gateway/auditor.py` (`time_context`, `audit_prompt`); `central_command/runtime/auditor_profile.py`; `central_command/ingest/dispatcher.py` (`email_age_line`); CHANGELOG v2.82.6, v2.82.9; DL-002

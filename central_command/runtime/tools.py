@@ -483,6 +483,15 @@ _MODEL_TEXT_CEILING = _settings.max_output_tokens * 4
 # chars/token.
 _MAIL_BODY_CEILING = 8000
 
+# The line `mail_read` writes in front of the mail's own words (body, headers
+# read from the mailbox, an attachment page). Everything after its LAST
+# occurrence in a recorded tool return is mail text, so the quote check can
+# count a mail the session read as a source without counting the dismissal
+# rationale, auditor verdict or operator note printed above it
+# (`proposals.read_mail_sources`, DL-230). The last occurrence, because a mail
+# that happens to contain this line can only shrink what counts, never widen it.
+MAIL_TEXT_MARKER = "----- mail text -----"
+
 
 def _clip(payload: str, limit: int | None = None) -> str:
     """Bound a tool result HONESTLY. A silently cut JSON blob reads to the model
@@ -2625,7 +2634,7 @@ def _mail_attachment_page(row: dict, name: str, offset: int) -> str:
         head += "; END of what was stored (the file itself is longer and the rest was not kept)"
     else:
         head += "; END of the attachment"
-    return f"{head}\n{page}"
+    return f"{head}\n{MAIL_TEXT_MARKER}\n{page}"
 
 
 @parkable_read
@@ -2663,7 +2672,7 @@ async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int
                     "they are read when the queue processes a mail."
                     + _unread_attachment_lines(msg))
         return _clip(
-            f"NOT ENROLLED in the queue (read from the mailbox)\n"
+            f"NOT ENROLLED in the queue (read from the mailbox)\n{MAIL_TEXT_MARKER}\n"
             f"From: {msg.get('from')}\nSubject: {msg.get('subject')}\n"
             f"Date: {msg.get('date')}\n\n"
             + _clip(ledger.provider_body(msg), _MAIL_BODY_CEILING)
@@ -2699,6 +2708,7 @@ async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int
         except email_facade.EmailFacadeError as e:
             _raise_if_down(e)
             text = f"(not yet fetched by the queue, and the mailbox could not return it: {e})"
+    parts.append(MAIL_TEXT_MARKER)
     parts.append(_clip(text or "(no message text recorded)", _MAIL_BODY_CEILING))
     return _clip("\n".join(parts))
 
@@ -2978,7 +2988,12 @@ async def propose_report_spam(ctx: RunContext, rationale: str, message_ref: str 
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
-            kind="email", source_ref=uuid,
+            # Not `email`: that kind means a passage QUOTED from a mail and is
+            # re-checked verbatim (`proposals.verified_email_evidence`). This
+            # line is a description the tool built from the message headers,
+            # never a quote, so it is neither checked nor flagged (DL-230;
+            # the `propose_bulk_dismiss` precedent).
+            kind="mailbox", source_ref=uuid,
             locator="the message itself, as read from the mailbox",
             claim=f"from {sender}: {subject}",
         )],
@@ -3026,7 +3041,12 @@ async def propose_unsubscribe(ctx: RunContext, rationale: str, message_ref: str 
             reversibility=Reversibility.irreversible,
         )],
         evidence=[Evidence(
-            kind="email", source_ref=uuid,
+            # Not `email`: that kind means a passage QUOTED from a mail and is
+            # re-checked verbatim (`proposals.verified_email_evidence`). This
+            # line is a description the tool built from the message headers,
+            # never a quote, so it is neither checked nor flagged (DL-230;
+            # the `propose_bulk_dismiss` precedent).
+            kind="mailbox", source_ref=uuid,
             locator="List-Unsubscribe / List-Unsubscribe-Post headers, DKIM-verified by Gmail",
             claim=f"{sender} offers one-click unsubscribe at {url} — {verdict}",
         )],
@@ -3118,7 +3138,12 @@ async def propose_mail_send(ctx: RunContext, to: list[str], subject: str, body: 
             reversibility=Reversibility.irreversible,
         )],
         evidence=[Evidence(
-            kind="email",
+            # Not `email`: that kind means a passage QUOTED from a mail and is
+            # re-checked verbatim (`proposals.verified_email_evidence`). This
+            # line is a description the tool built from the message headers,
+            # never a quote, so it is neither checked nor flagged (DL-230;
+            # the `propose_bulk_dismiss` precedent).
+            kind="mailbox",
             source_ref=in_reply_to or ", ".join(recipients),
             locator=("the message being replied to, as read from the mailbox"
                      if in_reply_to else "the message text pinned in this proposal"),
@@ -3162,7 +3187,12 @@ async def propose_mail_move(ctx: RunContext, message_ref: str, folder: str,
             reversibility=Reversibility.reversible,
         )],
         evidence=[Evidence(
-            kind="email", source_ref=uuid,
+            # Not `email`: that kind means a passage QUOTED from a mail and is
+            # re-checked verbatim (`proposals.verified_email_evidence`). This
+            # line is a description the tool built from the message headers,
+            # never a quote, so it is neither checked nor flagged (DL-230;
+            # the `propose_bulk_dismiss` precedent).
+            kind="mailbox", source_ref=uuid,
             locator="the message itself, as read from the mailbox",
             claim=f"from {sender}: {subject}",
         )],

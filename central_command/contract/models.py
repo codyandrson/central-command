@@ -30,7 +30,19 @@ class Evidence(BaseModel):
     )
     source_ref: str = Field(..., description="pointer to the ACTUAL source, not a paraphrase")
     locator: str = Field(..., description="how to re-fetch it fresh")
-    claim: str = Field(..., description="what the agent asserts the source shows")
+    # The model reads this description as part of the tool schema. It used to
+    # say "what the agent asserts the source shows", which invited a summary,
+    # and a summary is never found in the source (DL-230).
+    claim: str = Field(
+        ...,
+        description=(
+            "ONE passage copied exactly from the source, word for word: "
+            "contiguous, or with omitted words marked by an ellipsis (...). "
+            "One evidence entry per passage. No summary, no paraphrase and no "
+            "words of your own — the control plane checks the passage against "
+            "the source and flags anything it cannot find."
+        ),
+    )
 
 
 def _normalize(text: str) -> str:
@@ -83,6 +95,111 @@ def claim_supported(claim: str, source: str) -> bool:
     """
     c = _normalize(claim)
     return bool(c) and c in _normalize(source)
+
+
+# The shortest piece a quote with omissions may be assembled from (DL-230).
+# Four words: a run of four consecutive source words in the claim's order is a
+# passage; three scattered words ("the", "invoice", "Friday") are not.
+QUOTE_MIN_SEGMENT_WORDS = 4
+# A ceiling on the substring searches one check may make. These are short
+# strings and the search below is near-linear in practice; the ceiling only
+# makes a pathological input fail CLOSED (unsupported, a false flag the
+# reviewer sees) instead of running long.
+_QUOTE_MAX_SEARCHES = 100_000
+# An ellipsis marking an omission: "...", "…" (NFKC folds it to "..."), and
+# both inside square brackets — the brackets are punctuation, which the
+# normalisation drops, so splitting on the dots is enough. ". . ." counts too.
+_ELLIPSIS = re.compile(r"\.(?:\s?\.){2,}")
+
+
+def quote_supported(claim: str, source: str) -> bool:
+    """Is `claim` a passage copied from `source`, whole or with omissions?
+
+    The rule (DL-230), on the same normalisation as `claim_supported`:
+
+    - A claim that is ONE contiguous substring of the source is supported,
+      whatever its length — exactly `claim_supported`.
+    - Otherwise it is supported only if it splits into SEGMENTS that each
+      appear verbatim in the source, in source order and without overlapping,
+      every segment at least `QUOTE_MIN_SEGMENT_WORDS` words long. Segments
+      are separated in the claim by an ellipsis ("...", "…", "[...]", "[…]"),
+      or simply run together with nothing between them (a quote that joined
+      two passages and dropped the marker).
+    - Every word of the claim belongs to some segment, so framing words, a
+      paraphrase, a reordering, or a piece under four words fails.
+
+    How a silent join is segmented: not greedily (the longest match first can
+    swallow words a later segment needed and refuse a real quote) but by an
+    exact left-to-right search that keeps, for every claim position, the
+    EARLIEST source position at which the claim up to there can end. Ending
+    earlier never closes off a continuation that ending later allows, so the
+    claim is supported exactly when SOME valid segmentation exists, and the
+    answer does not depend on which split is tried first. An ellipsis is a hard
+    boundary: no segment spans one. A phrase that occurs twice in the source
+    may be used twice, never the same occurrence twice.
+
+    Pure and deterministic; it lives in `contract/` beside `claim_supported`
+    because both tiers check quotes and `runtime/` may never import
+    `gateway/`. Use it for quotes of a SOURCE (mail, the operator's words);
+    a note's single-span rule stays on `claim_supported`.
+    """
+    if claim_supported(claim, source):
+        return True
+    hay = f" {_normalize(source)} "
+    if not hay.strip():
+        return False
+    pieces = [
+        _normalize(p).split()
+        for p in _ELLIPSIS.split(unicodedata.normalize("NFKC", claim))
+    ]
+    pieces = [p for p in pieces if p]
+    if not pieces:
+        return False
+    budget = [_QUOTE_MAX_SEARCHES]
+    pos = 0  # index of the space the next segment may start at
+    for words in pieces:
+        pos = _segment_piece(words, hay, pos, budget)
+        if pos is None:
+            return False
+    return True
+
+
+def _segment_piece(words: list[str], hay: str, start: int, budget: list[int]) -> int | None:
+    """The earliest end (the index of the trailing space in `hay`) at which
+    `words` can be matched as consecutive segments of at least
+    `QUOTE_MIN_SEGMENT_WORDS` words each, in order, the first starting at or
+    after `start`; None when no segmentation exists or the budget runs out.
+
+    `best[i]` is the earliest end for `words[:i]`. From each reachable `i`, the
+    segment `words[i:j]` is extended one word at a time; once an extension is
+    not found after `best[i]`, no longer one can be (it contains the shorter
+    one at the same start), so the loop stops — the work per position is the
+    length of the longest match there, not the length of the claim."""
+    m = len(words)
+    if m < QUOTE_MIN_SEGMENT_WORDS:
+        return None
+    best: list[int | None] = [None] * (m + 1)
+    best[0] = start
+    for i in range(m):
+        e = best[i]
+        if e is None:
+            continue
+        needle = " " + " ".join(words[i:i + QUOTE_MIN_SEGMENT_WORDS - 1])
+        k = e
+        for j in range(i + QUOTE_MIN_SEGMENT_WORDS, m + 1):
+            budget[0] -= 1
+            if budget[0] < 0:
+                return None
+            needle += " " + words[j - 1]
+            # The earliest start of a longer segment is never before the
+            # shorter one's, so the search resumes where the last one matched.
+            k = hay.find(needle + " ", k)
+            if k < 0:
+                break
+            end = k + len(needle)
+            if best[j] is None or end < best[j]:
+                best[j] = end
+    return best[m]
 
 
 class Action(BaseModel):

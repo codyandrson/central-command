@@ -459,8 +459,29 @@ async def _settle(
     kind = classify_deferred(call) if call is not None else None
 
     if kind == "proposal":
+        # Its quotes are checked like any later leg's (DL-230): until this
+        # line a proposal parked after an operator answer carried no verdict at
+        # all. The session's mail, the mail its record shows it read, and every
+        # word the record attributes to the operator — the answer it just got
+        # among them (`orchestration.item_answered` is written before this
+        # resume runs). None when nothing was judged, so `park_proposal` keeps
+        # its own `charter.update` citation check.
+        from pydantic_ai import DeferredToolRequests
+
+        from central_command.runtime.durable import proposal_from_call
+        from central_command.runtime.proposals import session_source_evidence
+
+        _meta = None
+        if isinstance(final.output, DeferredToolRequests):
+            _meta = final.output.metadata.get(call.tool_call_id)
+        drafted = proposal_from_call(call, metadata=_meta)
+        evidence = await session_source_evidence(
+            session_id, drafted.evidence,
+            messages=final.all_messages(), proposal=drafted,
+        )
         parked = await park_proposal(
             session_id=session_id, agent_id=agent_id, result=final, call=call,
+            evidence=evidence,
             context={"tasked": True, "after_question": item["id"]},
         )
         return {"deferred": True, "session_id": session_id,

@@ -126,20 +126,21 @@ def _today_local() -> date:
     return datetime.now().astimezone().date()
 
 
-def _with_age_context(prompt: str, item: dict, today: date | None = None) -> str:
-    """The email's AGE, as a fact (DL-208). The Date header is in the prompt and
-    today's date is at the end of the charter, but nothing did the subtraction:
-    read 2026-11-05, months-old mail had its requests proposed as tasks for
-    today and its facts recorded as becoming true today. Same convention as the
-    recurrence note — a fact for the agent to weigh, no directive."""
+def email_age_line(item: dict, today: date | None = None) -> str | None:
+    """The email's AGE as one sentence of fact, or None when no date is known
+    (DL-208): "This email was received on 2026-01-20, 290 days before today
+    (2026-11-06)." The ONE age calculation: the triage prompt
+    (`_with_age_context`) and the dismissal auditor's input
+    (`gateway.auditor.audit_dismissal`, DL-231) both call it, so the two agents
+    are told the same age against the same reference day."""
     received = item.get("received_at")
     if isinstance(received, str):
         try:
             received = datetime.fromisoformat(received)
         except ValueError:
-            return prompt
+            return None
     if not isinstance(received, datetime):
-        return prompt
+        return None
     if received.tzinfo is None:
         received = received.replace(tzinfo=timezone.utc)
     today = today or _today_local()
@@ -151,10 +152,22 @@ def _with_age_context(prompt: str, item: dict, today: date | None = None) -> str
         age = f"{days} day{'s' if days != 1 else ''} before today"
     else:
         age = f"{-days} day{'s' if days != -1 else ''} AFTER today (a clock disagrees)"
-    return prompt + (
-        f"\n\n[queue context] This email was received on {sent.isoformat()}, "
+    return (
+        f"This email was received on {sent.isoformat()}, "
         f"{age} ({today.isoformat()})."
     )
+
+
+def _with_age_context(prompt: str, item: dict, today: date | None = None) -> str:
+    """The email's AGE, as a fact (DL-208). The Date header is in the prompt and
+    today's date is at the end of the charter, but nothing did the subtraction:
+    read 2026-11-05, months-old mail had its requests proposed as tasks for
+    today and its facts recorded as becoming true today. Same convention as the
+    recurrence note — a fact for the agent to weigh, no directive."""
+    line = email_age_line(item, today)
+    if line is None:
+        return prompt
+    return prompt + f"\n\n[queue context] {line}"
 
 
 async def _with_recurrence_context(prompt: str, item: dict) -> str:

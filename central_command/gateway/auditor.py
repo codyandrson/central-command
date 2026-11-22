@@ -3,8 +3,11 @@
 The design rules honoured here:
 
 - **Independent re-derivation.** The auditor judges from the RAW stored email,
-  never from the triage agent's summary — the agent's claimed rationale is
-  shown for comparison only. Evidence is a reference, not the agent's account.
+  never from the triage agent's summary — the agent's stated reason is shown
+  as a CLAIM to test, never as evidence, and a dismissal that rests on a fact
+  the mail does not contain is challenged (DL-231). It is given the same time
+  context triage is (the reference day and the mail's age, one calculation).
+  Evidence is a reference, not the agent's account.
 - **Shadow-first, graduated per action-class, revocable.** `CC_AUDITOR_ENABLED`
   (default false) turns it on in `shadow` mode: verdicts are recorded on the
   log and shown to the operator, but every gate stays exactly as it was.
@@ -102,6 +105,58 @@ async def _resolve_model(model=None):
     return await resolve_model(agent_id="auditor")
 
 
+async def time_context(item_id: str, kind_label: str = "EMAIL") -> str:
+    """The time block of the auditor's input (DL-231): the reference day and,
+    for an email, its age — computed by the SAME code that writes triage's
+    "[queue context]" line (`dispatcher.email_age_line`, on the dispatcher's own
+    clock seam), so the auditor and the agent it checks reason from one
+    reference time. Old backlog mail was being read as if its own date were
+    today, and the auditor "corrected" a triage agent that had the age right."""
+    from central_command.ingest import dispatcher
+
+    today = dispatcher._today_local()
+    age = None
+    if kind_label == "EMAIL":
+        row = await repo.get_work_item(item_id)
+        age = dispatcher.email_age_line(row or {}, today)
+    lines = [
+        "TIME CONTEXT (computed by the control plane, not by either agent):",
+        f"- Reference time: today is {today.isoformat()} ({today.strftime('%A')}).",
+        f"- {age}" if age else
+        f"- The {kind_label.lower()}'s received date is not recorded.",
+        f"- The {kind_label.lower()}'s own dates are in the PAST relative to the "
+        "reference time; never read them as today.",
+    ]
+    return "\n".join(lines)
+
+
+async def audit_prompt(
+    item_id: str, subject: str | None, email_text: str, agent_rationale: str,
+    *, kind_label: str = "EMAIL",
+) -> str:
+    """The auditor's input for one parked dismissal. The triage agent's reason
+    is labelled as what it is — a CLAIM to test against the source, never
+    evidence (DL-231): the auditor had concurred on facts no mail contained and
+    no tool-less agent could check ("claim closed", "already tracked under a
+    ticket"), taken from that reason. The rule rides the input as well as the
+    built-in charter, so it holds under an operator-saved charter too."""
+    noun = kind_label.lower()
+    return (
+        f"{kind_label} (subject: {subject or '(none)'}):\n"
+        f"---\n{email_text}\n---\n\n"
+        f"{await time_context(item_id, kind_label)}\n\n"
+        "THE TRIAGE AGENT'S CLAIM — its stated reason for dismissing, NOT a "
+        f"fact: nothing in it is verified, so test it against the {noun}:\n"
+        f'"{agent_rationale}"\n\n'
+        f"Does 'no action needed' hold? Re-derive from the {noun} itself and "
+        "the time context. A concur must rest on what the "
+        f"{noun} shows. If the dismissal depends on a fact the {noun} does not "
+        "contain (that something is already closed, tracked, paid, decided or "
+        "handled elsewhere), you cannot verify it: challenge, and say in your "
+        "rationale which fact you could not verify."
+    )
+
+
 async def audit_dismissal(
     item_id: str,
     subject: str | None,
@@ -127,14 +182,9 @@ async def audit_dismissal(
     if not settings.auditor_enabled:
         return None
 
-    prompt = (
-        f"{kind_label} (subject: {subject or '(none)'}):\n"
-        f"---\n{email_text}\n---\n\n"
-        f'The triage agent dismissed it, saying: "{agent_rationale}"\n\n'
-        "Does 'no action needed' hold? Re-derive from the "
-        f"{kind_label.lower()} itself."
-    )
     try:
+        prompt = await audit_prompt(item_id, subject, email_text, agent_rationale,
+                                    kind_label=kind_label)
         await ensure_registered()
         governed = await repo.current_charter(AGENT_ID)
         run = await build_auditor(

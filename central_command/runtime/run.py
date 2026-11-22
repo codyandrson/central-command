@@ -445,14 +445,18 @@ async def ingest_and_propose(
     # follow-on) read it through the link in `gateway.finish_decision_resume`.
     from pydantic_ai import DeferredToolRequests
 
-    from central_command.runtime.proposals import verified_email_evidence
+    from central_command.runtime.proposals import read_mail_sources, verified_email_evidence
 
     _meta = None
     if isinstance(result.output, DeferredToolRequests):
         _meta = result.output.metadata.get(call.tool_call_id)
+    # Plus every mail the run's own record shows a mail read tool returned
+    # (DL-230): a quote from a mail the agent opened with `mail_read` is a
+    # quote, and the record — never the agent's `source_ref` — says which.
     judged = verified_email_evidence(
         proposal_from_call(call, metadata=_meta).evidence,
-        source_texts if source_texts is not None else [email_text],
+        [*(source_texts if source_texts is not None else [email_text]),
+         *read_mail_sources(result.all_messages())],
     )
     # Hand the seam a list only when a verdict was recorded: `park_proposal`
     # runs its own `charter.update` citation check when it is given None, and
