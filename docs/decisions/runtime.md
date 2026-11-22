@@ -37,16 +37,17 @@ resilience, and the runtime's context/window handling. See
 ### DL-023 — system_prompt= is load-bearing; never modernise it to instructions=
 
 - **Status:** active
-- **Date:** undated
+- **Date:** 2026-09-19
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**`system_prompt=` is load-bearing — never "modernise" it to `instructions=`.**"
-- **Why:** A system prompt is PERSISTED into the message history, so a
-  session paused at a deferral resumes under the charter it was proposed
-  under; `instructions=` is re-applied from the live agent at every run, so a
-  resume would silently execute under whatever the charter says NOW —
-  rewriting the record of what an agent was told when it proposed is a
-  governance change wearing an idiom cleanup's clothes.
+- **Why:** A system prompt is saved with the session's history, so a session
+  paused at a proposal resumes under the charter it proposed under;
+  `instructions=` is re-applied from the live agent at every run, so "a
+  resume would run under today's charter, not the one it proposed under"
+  (v2.37.14, which added the guard). The charter is the record of what the
+  agent was told when it proposed; changing it on resume rewrites that
+  record. No incident is recorded; the reason is the mechanism.
 - **Enforced:** test: `tests/test_agent_construction_guards.py::test_no_agent_is_built_with_instructions`
-- **Source:** AGENTS.md bite marks
+- **Source:** CHANGELOG v2.37.14 ("Two governance rules get the guard they never had"); module docstring of `tests/test_agent_construction_guards.py`; code comment `central_command/runtime/agent.py` (`build_agent_for`, the resume factory: "the persisted history carries the" original prompt)
 
 ### DL-024 — Agents take deps
 
@@ -64,13 +65,16 @@ resilience, and the runtime's context/window handling. See
 - **Status:** active
 - **Date:** 2026-07-23
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**Sessions are never destroyed.**"
-- **Why:** A UI control implied it could permanently clear an agent's history,
-  which was both untrue and not actually the workflow wanted; separately, the
-  "current session" shortcut kept pointing at an agent's newest conversation
-  even after that conversation was closed, making a closed lane appear to
-  still be live.
-- **Enforced:** code structure only — `central_command/api/nerve_gateway.py:347` (`_latest_conversation(open_only=True)`), called at lines 379/490/898/1400; no dedicated pytest guard found by name
-- **Source:** AGENTS.md bite marks
+- **Why:** A session is the record of what an agent was told and what it
+  proposed, so closing one flips a status and the transcript stays: the
+  cockpit's upstream "reset" and "delete" are mapped to close-with-history
+  because transcripts "are the team's episodic memory and are never deleted
+  (M15)". The `main` alias resolves to the newest conversation only while it
+  is open, so a closed lane is never shown as live, and a message is never
+  sent into an older lane the operator did not pick. (The UI-control incident
+  this entry used to tell, dated 2026-07-23, is unrecorded in the tree.)
+- **Enforced:** test: `tests/test_converse.py::test_close_is_a_flip_never_a_delete`, `tests/test_continue_window.py::test_declining_a_conversation_window_keeps_the_transcript`, `tests/test_discussion_stall.py::test_an_ordinary_closed_conversation_is_still_writable`; the `main` alias by code structure only (`central_command/api/nerve_gateway.py`, `_latest_conversation(open_only=True)`)
+- **Source:** code comments `central_command/api/nerve_gateway.py` (`sessions.reset` / `sessions.delete`: "Nothing is cleared — sessions are never destroyed"); `docs/PRD.md` §3 glossary ("Session — … never destroyed"); `central_command/runtime/converse.py` (`end_conversation`)
 
 ### DL-026 — An attachment reaches the agent as content, or the send fails — no third state
 

@@ -87,20 +87,7 @@ to add one.
 - **Enforced:** discipline only — no fallback chain is set on the proxy; no test asserts that, and since DL-226 no tracked file declares one
 - **Source:** the `fallbacks:` comment in `deploy/shared/litellm/model-preferences.yaml` as it stood at v2.118.0 (`git show v2.118.0:deploy/shared/litellm/model-preferences.yaml`); DL-226
 
-### DL-068 — The router-mode serving unit was never built; model swapping lives outside this repo
-
-- **Status:** active
-- **Date:** 2026-07-26
-- **Rule:** (recorded here) Unit 1 of the local-serving spec (llama-server
-  router mode) is not built and is not planned. Serving one local model at a
-  time is a deployment concern solved in front of llama.cpp by a
-  model-swapping proxy; this repository only addresses `cc-*` aliases through
-  LiteLLM (DL-073) and must not grow a dependency on either mechanism.
-- **Why:** The spec reasoned for router mode over a swapping proxy; practice
-  went the other way, and because every consumer addresses an alias the choice
-  never touched this codebase. Recorded so nobody "finishes" Unit 1.
-- **Enforced:** discipline only
-- **Source:** `docs/superpowers/specs/2026-07-26-local-serving-and-embedding-migration-design.md` (see its Status header)
+- **DL-068** — The router-mode serving unit was never built; model swapping lives outside this repo — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-068)
 
 ### DL-069 — A price is catalog data, never an agent's claim
 

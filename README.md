@@ -151,7 +151,7 @@ approval and survive a restart. The full, as-built picture is
 | [`docs/QUEUE.md`](docs/QUEUE.md) | Operating the inbox queue: reading it, tuning it, choosing the mail provider |
 | [`docs/CONFLUENCE_MACROS.md`](docs/CONFLUENCE_MACROS.md) | Inventorying the Confluence instance's macros and getting the result to agents |
 | [`docs/decisions/`](docs/decisions/README.md) | Why each rule exists: the decision log, with stable ids |
-| [`docs/DESIGN.md`](docs/DESIGN.md) | The founding design, frozen as a record (read the PRD for the vision) |
+| [`docs/archive/`](docs/archive/README.md) | Records kept for history and no longer current: the founding design, superseded design records, archived decision-log entries |
 
 ## Running it
 

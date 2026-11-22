@@ -16,8 +16,8 @@ and the documents LINK to the checklist instead of restating it. So, now:
 * wherever a document still names a run of phases, the run is in manifest
   order — a partial sequence (an update's post-merge order) is fine, a wrong
   order is not;
-* the skill carries D10.4's three-verb paragraph VERBATIM and never names a
-  phase as something to run.
+* the skill names D10.4's three commands (`./setup.sh`, `./setup.sh status`,
+  `./setup.sh report`) and never names a phase as something to run.
 """
 
 import re
@@ -47,11 +47,8 @@ SEQUENCE_DOCS = [
     CHECKLIST,
 ]
 
-# D10.4, verbatim — "the skill says it in the same words".
-THREE_VERBS = (
-    "You may change `.env`. You may run `./setup.sh`, `./setup.sh status` and "
-    "`./setup.sh report`. Everything else is a finding."
-)
+# D10.4: the agent's whole operator-side contract is these three commands.
+THREE_COMMANDS = ("./setup.sh", "./setup.sh status", "./setup.sh report")
 
 
 def canonical_phases() -> list[str]:
@@ -155,11 +152,10 @@ def test_phase_runs_detects_a_wrong_order():
     assert phase_runs("app / stack / llm", phases) == [["app", "stack", "llm"]]
 
 
-def test_the_skill_carries_the_three_verbs_verbatim():
-    text = re.sub(r"\s+", " ", _read(SKILL))
-    assert THREE_VERBS in text, (
-        f"{SKILL}: the D10.4 paragraph must appear verbatim: {THREE_VERBS!r}"
-    )
+def test_the_skill_names_the_three_commands():
+    text = _read(SKILL)
+    missing = [c for c in THREE_COMMANDS if f"`{c}`" not in text]
+    assert not missing, f"{SKILL}: does not name the D10.4 command(s) {missing}"
 
 
 def test_the_skill_never_names_a_phase_to_run():

@@ -8,7 +8,7 @@
 
 > Status: design approved 2026-07-26 (The operator). Units 1–2 are live (see
 > `2026-07-26-adaptive-routing-units-1-2.md`); Unit 3 (the feedback loop) was
-> withdrawn by the quality-router-migration spec — see `docs/DESIGN.md`.
+> withdrawn by the quality-router-migration spec — see `docs/archive/DESIGN.md`.
 > Companion spec: `2026-07-26-local-serving-and-embedding-migration-design.md`.
 
 ## Goal

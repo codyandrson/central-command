@@ -70,27 +70,31 @@ hygiene, and how the test suite itself must be written. See
 - **Status:** active
 - **Date:** undated
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**A fresh database must reproduce the roster.**"
-- **Why:** Not recorded beyond the stated mechanism: `schema.sql`'s founding
-  roster `UPDATE`s are guarded by `where … and role = ''`, so the seeding
-  `INSERT` above them must NOT set `role` itself, or the guard becomes a
-  no-op against an already-seeded value.
-- **Enforced:** sql: `central_command/db/schema.sql:77,81,85,89,93,97,101,104` (`where id = '...' and role = ''` guards, confirmed present)
-- **Source:** AGENTS.md bite marks
+- **Why:** The founding INSERT seeded `role` until 2026-07-25; that
+  satisfied the `role = ''` guard on the first insert and skipped every
+  guarded UPDATE, so a freshly created database booted the whole founding
+  roster with taskable and consultable false. Older databases never showed
+  it (their updates had already run); it surfaced on the 2026-07-26 move to
+  a database built from scratch. So a seeded column is judged against a
+  brand-new database, not the dev box.
+- **Enforced:** sql: `central_command/db/schema.sql:77,81,85,89,93,97,101,104` (`where id = '...' and role = ''` guards, confirmed present); test: `tests/test_coach_agent.py::test_the_coach_is_seeded_in_schema_sql`
+- **Source:** code comment `central_command/db/schema.sql` (above the founding-roster INSERT); docstring of `tests/test_coach_agent.py::test_the_coach_is_seeded_in_schema_sql` ("the 2026-07-26 clean-database failure")
 
 ### DL-098 — schema.sql is applied on a fresh database and by the updater at release, never at process start
 
 - **Status:** active
 - **Date:** undated
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**`schema.sql` is applied on a FRESH database and by the updater at release — never at process start.**"
-- **Why:** The test DB re-executes `schema.sql` on every run, so a new column
-  passes the whole suite and then breaks a dev or hand-run database with an
-  undefined-column error that reads like a code bug. The original rule said
-  nothing applies the file at runtime and additive columns had to be applied
-  by hand; the updater's `schema` phase now re-runs the whole file against
-  the live database on every update (PRD FR-48), which is why every
+- **Why:** The updater applies the schema at release, after its database
+  backup and rollback checkpoint; an apply at process start would change a
+  live database on any restart, rollbacks included, with no rollback point.
+  The updater re-runs the whole file on every update, which is why every
   statement must stay additive and idempotent (`add column if not exists`).
+  Separately, the test DB re-executes the file on every run, so a new column
+  passes the whole suite and then breaks a dev or hand-run database with an
+  undefined-column error that reads like a code bug.
 - **Enforced:** code structure only — `tests/conftest.py` re-executes `central_command/db/schema.sql` every test run, and the updater applies it (`deploy/k3s/cc-update.sh`, `deploy/single/update.sh`); no guard checks that a new statement is idempotent
-- **Source:** AGENTS.md bite marks
+- **Source:** `docs/PRD.md` FR-48(c) and (d) (schema applied by the updater, never at process start; backup and rollback point first); `deploy/k3s/cc-update.sh` (`checkpoint`, `db-backup`, then `schema` phases)
 
 ### DL-099 — Tests must pin test_model=True when they hit resolve_model()
 
@@ -116,33 +120,9 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** code structure only — enforced by `tests/conftest.py` itself, not a separate test
 - **Source:** .claude/rules/tests.md
 
-### DL-101 — One name everywhere: the historical identifiers are gone
+- **DL-101** — One name everywhere: the historical identifiers are gone — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-101)
 
-- **Status:** active
-- **Date:** 2026-08-29
-- **Rule:** (recorded here) The system uses one consistent product/brand
-  identifier throughout code, docs, and deployment artifacts; the earlier,
-  historical identifiers were removed in a single breaking, by-hand release.
-- **Why:** CHANGELOG `2026-08-29 — v2.0.0: one name everywhere — the
-  historical identifiers are gone`: "This release is applied BY HAND, not by
-  the cockpit updater" because of its breaking scope.
-- **Enforced:** discipline only — a naming convention, not independently guarded
-- **Source:** CHANGELOG v2.0.0
-
-### DL-102 — The great scrub: a whole-repo audit is itself a periodic decision
-
-- **Status:** active
-- **Date:** 2026-08-31
-- **Rule:** (recorded here) Periodically, the whole tree is read file-by-file
-  in a dedicated audit release to catch drift and loose ends, rather than
-  relying only on incremental review.
-- **Why:** CHANGELOG `2026-08-31 — v2.17.0: the great scrub — every file
-  read, every loose end pulled`: an exhaustive file-by-file review of the
-  whole tree (~30 read-only audit tasks). This decision log is itself a
-  direct descendant of that practice (the 2026-09 consistency audit that
-  produced its seed data).
-- **Enforced:** discipline only — a process practice, not a guarded invariant
-- **Source:** CHANGELOG v2.17.0
+- **DL-102** — The great scrub: a whole-repo audit is itself a periodic decision — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-102)
 
 ### DL-103 — The runtime's use of credentialed integrations clients is read-only
 
@@ -821,7 +801,7 @@ hygiene, and how the test suite itself must be written. See
   mechanism that replaces it. This is also why `contract.ARG_SPECS` checks
   SHAPE only (AGENTS.md).
 - **Enforced:** test: `tests/test_read_version_retired.py`
-- **Source:** docs/PRD.md FR-5, FR-9; PRD addendum §B (GATE-006, INGEST-045); docs/DESIGN.md §2 contract rule 4
+- **Source:** docs/PRD.md FR-5, FR-9; PRD addendum §B (GATE-006, INGEST-045); docs/archive/DESIGN.md §2 contract rule 4
 
 ### DL-143 — A policy registry as a governed table was never built
 
@@ -909,7 +889,7 @@ hygiene, and how the test suite itself must be written. See
   it with one API call if the operator chooses. Review rulings MODELS-013/015
   confirmed the rejection.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-07-26-adaptive-routing-that-learns-design.md; docs/superpowers/specs/2026-07-26-quality-router-migration-design.md; docs/superpowers/specs/2026-07-27-default-alias-seam-design.md; PRD addendum §B (MODELS-013/015)
+- **Source:** docs/archive/superpowers/specs/2026-07-26-adaptive-routing-that-learns-design.md; docs/archive/superpowers/specs/2026-07-26-quality-router-migration-design.md; docs/superpowers/specs/2026-07-27-default-alias-seam-design.md; PRD addendum §B (MODELS-013/015)
 
 ### DL-148 — The dispatch token-budget valve and the enterprise LiteLLM features are not adopted
 
@@ -978,21 +958,7 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-08-01-self-directed-learning-design.md; PRD addendum §B (GRAPH-028/029)
 
-### DL-151 — Graphiti communities, sagas, triplet writes and bulk ingest are not adopted; no fork of graphiti-core
-
-- **Status:** active
-- **Date:** 2026-10-04
-- **Rule:** (recorded here) One proposal is one episode. Not adopted: communities, sagas,
-  `add_triplet`, message and JSON sources, bulk ingest. graphiti-core is not
-  forked; two fixes ride as patches (DL-132).
-- **Why:** Communities cost one LLM call per member with a long-open clustering bug
-  and no evidence of value. Sagas' summaries were never exercised end to end
-  and do not affect extraction. `add_triplet` creates bare nodes with no
-  type, summary or provenance, and bulk ingest has the same shape problem.
-  Per-episode extraction instructions and excluded entity types stay a
-  deferred, benchmarked experiment.
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md; PRD addendum §B (GRAPH-044..047)
+- **DL-151** — Graphiti communities, sagas, triplet writes and bulk ingest are not adopted; no fork of graphiti-core — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-151)
 
 ### DL-152 — The D16 guaranteed backlog trickle was never built; bulk dismissal drains a backlog by pattern
 
@@ -1060,20 +1026,7 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-09-03-deploy-refactor-design.md; PRD addendum §B (DEPLOY-K3S-020)
 
-### DL-156 — Out-of-cockpit notification (email, push) is out of scope
-
-- **Status:** active
-- **Date:** 2026-10-19
-- **Rule:** (recorded here) Notification tiers are in-app only: interrupt (approvals, errors,
-  agent-initiated conversations), badge (unread and aging items) and digest
-  (everything else, batched daily). Email and push are out of scope for the
-  current version, with no plans.
-- **Why:** The discussion-stall record and the teaming doctrine both chose to
-  notify inside the cockpit and nowhere else; the review confirmed it as the
-  current position (COCKPIT-010). Reversible only by a new operator
-  decision.
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-07-27-discussion-stall-escalation-design.md; docs/superpowers/specs/2026-07-29-teaming-consultation-doctrine-design.md; PRD addendum §B (COCKPIT-010)
+- **DL-156** — Out-of-cockpit notification (email, push) is out of scope — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-156)
 
 ### DL-157 — Build the control plane, adopt the runtime, buy nothing: why not OpenClaw, LangGraph, CrewAI and the rest
 
@@ -1106,7 +1059,7 @@ hygiene, and how the test suite itself must be written. See
   credential split, session trees, durable serialisable interrupts, and
   LLM-proposed human-approved guidance evolution.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record)
+- **Source:** docs/archive/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record)
 
 ### DL-158 — The operator's earlier n8n project could not host the vision; n8n stays a façade, not the platform
 
@@ -1127,7 +1080,7 @@ hygiene, and how the test suite itself must be written. See
   requirements. The "lost" feeling traced to process-artifact weight and a
   fenced reactive-only assistant.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record)
+- **Source:** docs/archive/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record)
 
 ### DL-159 — The nine-row failure-mode catalogue: assume the agent is wrong before assuming it is attacked
 
@@ -1158,7 +1111,7 @@ hygiene, and how the test suite itself must be written. See
   skills only and internal services bound to loopback. Host security (disk
   encryption, hardening, backups of trusted stores) was assumed, not solved.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record); docs/PRD.md §1
+- **Source:** docs/archive/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record); docs/PRD.md §1
 
 ### DL-160 — The threat model is error, not malice, for a single operator; sandboxes, egress allowlists, a vault and anomaly detection were cut
 
@@ -1185,7 +1138,7 @@ hygiene, and how the test suite itself must be written. See
   low-risk graph writes, capability stripping by delegation depth) arrived as
   DL-002 and the consult bounds.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record); docs/PRD.md §1; PRD addendum §C (founding premise NARROWED); review rulings GATE-017..019
+- **Source:** docs/archive/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record); docs/PRD.md §1; PRD addendum §C (founding premise NARROWED); review rulings GATE-017..019
 
 ### DL-161 — Pydantic AI plus Claude was chosen over the Claude Agent SDK, Temporal and microservices; the runtime stays swappable
 
@@ -1208,7 +1161,7 @@ hygiene, and how the test suite itself must be written. See
   a Jira change with evidence, restart the server while it waits, approve,
   and see the ticket updated once with provenance.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record)
+- **Source:** docs/archive/DESIGN.md §0 and §6; founding research and recommendation (2026-07-18, no longer in the repo; summarised in the PRD review record)
 
 ### DL-162 — Approval attaches to what work does, never to how it was started; scheduled work is born disabled
 
@@ -1286,7 +1239,7 @@ hygiene, and how the test suite itself must be written. See
   work was scoped to the seam only: the operator cut it with "I don't want
   to redesign anything at all".
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-07-26-adaptive-routing-that-learns-design.md; docs/superpowers/specs/2026-07-27-default-alias-seam-design.md
+- **Source:** docs/archive/superpowers/specs/2026-07-26-adaptive-routing-that-learns-design.md; docs/superpowers/specs/2026-07-27-default-alias-seam-design.md
 - **Superseded-by:** DL-226
 
 ### DL-165 — The default alias is a deployment row; a verified fallback is not exercised; self-hosted-as-policy is retired
@@ -1352,49 +1305,9 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-07-27-coaching-experiences-design.md
 
-### DL-168 — A discussion stall is typed by who spoke last; nothing auto-concludes a discussion
+- **DL-168** — A discussion stall is typed by who spoke last; nothing auto-concludes a discussion — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-168)
 
-- **Status:** active
-- **Date:** 2026-07-27
-- **Rule:** (recorded here) S1 (the last turn is the agent's, so the operator is blocking) gets an
-  amber flag; S2 (the last turn is the operator's, so the agent is blocking)
-  gets a nudge. "Has the operator ever spoken" is not the test. The sweep is
-  one idempotent heartbeat action (`stalled_at`, `nudged_at`); the threshold
-  is `CC_DISCUSSION_STALL_HOURS` (default 24) from the session's
-  `updated_at`.
-- **Why:** Auto-concluding on the agent's behalf is out of scope: the summary is an
-  agent claim, and synthesising one would fabricate the record. Every close
-  path goes through one seam that marks the session done and emits
-  `conversation.ended` with a stored `closed_reason`, and a concluded
-  discussion is read-only. Seeded governed schedules are born disabled, and
-  notifying outside the cockpit is out of scope (DL-156).
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-07-27-discussion-stall-escalation-design.md
-
-### DL-169 — Knowledge layers: packs permit, skills instruct, the graph holds what is true, MCP is transport
-
-- **Status:** active
-- **Date:** 2026-07-29
-- **Rule:** (recorded here) Capability packs say what an agent may do (permissions only, never
-  knowledge); skills say how; the graph and knowledge base say what is true;
-  MCP is transport. Operator standards are skills if stable and graph facts
-  if they evolve. Every agent reads one shared store: there is no private
-  per-agent memory.
-- **Why:** The steward triages its own confidence: high-confidence routine facts
-  batch into bulk-approval digests and only flagged items escalate.
-  Contradictions surface as gated steward proposals, never silent mutations
-  (the invalidation decision is itself untrusted). Confluence change capture
-  is hybrid: webhooks accelerate and periodic CQL incremental crawls are
-  ground truth. Ingestion is batched and finalised per run, relation
-  extraction is held to a stricter confidence bar than entity extraction,
-  direct graph reads stay ungated and LLM-free with judgment-heavy
-  synthesis going through a librarian consult, and a Confluence supersede is
-  a convention (status metadata plus a link) written as a gated action. Graph
-  content stays disposable until the steward mechanism is judged sound; the
-  mechanism is evaluated, not the corpus (amended: PRD FR-32). Note the
-  private-memory ban was refined by DL-173 into governed private partitions.
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-07-29-knowledge-layer-routing-design.md; docs/PRD.md FR-32
+- **DL-169** — Knowledge layers: packs permit, skills instruct, the graph holds what is true, MCP is transport — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-169)
 
 ### DL-170 — Teaming doctrine: consult bounds are enforced by the runtime, handoffs go through task proposals, the roster grows on observed failure
 
@@ -1498,51 +1411,9 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-08-01-self-directed-learning-design.md; DL-061
 
-### DL-174 — Graph inspection, activity coverage and bulk dismissal: read-only browser, session as the unit, pinned sets
+- **DL-174** — Graph inspection, activity coverage and bulk dismissal: read-only browser, session as the unit, pinned sets — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-174)
 
-- **Status:** active
-- **Date:** 2026-08-09
-- **Rule:** (recorded here) The browser never talks to Neo4j; the API tier's bolt client is
-  read-only with canned queries and no raw-Cypher endpoint. The session is
-  the complete unit of activity, so a faceted session list covers all agent
-  activity by construction, backed by a guard test. A bulk dismissal is a
-  pinned set resolved to ids at propose or claim time, never a standing
-  rule, and new arrivals are not covered.
-- **Why:** Refinding uses server-side paging with "Load more", never infinite
-  scroll, and the sidebar filter ships last. Deliberately not built until
-  evidence: a work-item ledger screen, full-text transcript search, saved
-  views, virtualized rendering. Bulk dismissal is two-step, preview then
-  execute, and execute refuses if the resolved set drifted past a digest;
-  the 2,500-reference cap is stated, never silently truncated. The graph
-  visualiser seam has three states (disabled, unreachable, live); the UI
-  believes the probe, not the flag, and the API never starts or stops the
-  visualiser container. Operator curation writes are DL-003.
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-08-09-graph-inspection-design.md; docs/superpowers/specs/2026-08-11-activity-coverage-design.md; docs/superpowers/specs/2026-08-17-bulk-dismissal-design.md
-
-### DL-175 — The graph auditor is read-only and judges from the raw rows; remediation is a separate agent and never re-ingests
-
-- **Status:** active
-- **Date:** 2026-08-19
-- **Rule:** (recorded here) There is no auditor on the operator path (operator input is trusted
-  evidence). Mechanical checks run in code before any judgment, and a
-  mechanical failure is an ERROR item for the operator, never a question put
-  to the auditor. The auditor judges from the approved episode text and the
-  actual graph rows, never the extractor's summary, and is read-only before
-  and after graduation. Remediation is a separate hired agent
-  (graph-curator), opt-out by default-on checkbox; it never re-ingests an
-  episode, and a re-check keeps the original marker with a `remediation_of`
-  link.
-- **Why:** A fix is never the auditor's job; it goes only through the operator's
-  curation path. Every verdict, ALIGNED included, goes on the event log;
-  auto-closed cases are tallied separately, never counted as agreement; and
-  a sweep tick that finds nothing writes nothing. Rejected: auto-fix,
-  two-phase staging ingestion, batching verifications, and re-ingestion as a
-  fix because it re-rolls extraction. A verification row whose episode was
-  deleted is parked as `episode_deleted` with history kept, and reworking an
-  episode is a deletion plus a new proposal, never an edit in place.
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-08-19-graph-verification-auditor-design.md; docs/superpowers/specs/2026-08-20-graph-remediation-loop-design.md; docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md
+- **DL-175** — The graph auditor is read-only and judges from the raw rows; remediation is a separate agent and never re-ingests — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-175)
 
 ### DL-176 — Staffing, onboarding and scaling: the human roster is graph data, capacity is read live, experts are hired only by the operator
 
@@ -1579,7 +1450,7 @@ hygiene, and how the test suite itself must be written. See
   assistant consults it about who takes what. The onboarding seed of the org
   chart and competency map is the existing team tour; nothing new seeds it.
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-08-21-human-team-staffing-design.md; docs/superpowers/specs/2026-08-21-setup-onboarding-design.md; docs/superpowers/specs/2026-08-21-work-transition-compatibility-design.md; docs/superpowers/specs/2026-08-22-expert-team-scaling-design.md
+- **Source:** docs/superpowers/specs/2026-08-21-human-team-staffing-design.md; docs/archive/superpowers/specs/2026-08-21-setup-onboarding-design.md; docs/superpowers/specs/2026-08-21-work-transition-compatibility-design.md; docs/superpowers/specs/2026-08-22-expert-team-scaling-design.md
 
 ### DL-177 — The onboarding tour is product machinery: each agent introduces itself through a real task and calibration goes through the gate
 
@@ -1602,32 +1473,7 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-08-23-ea-hosted-team-tour-design.md
 
-### DL-178 — The sources catalog is a Postgres table; claims carry versioned evidence pointers; staleness is a deterministic comparison
-
-- **Status:** active
-- **Date:** 2026-08-23
-- **Rule:** (recorded here) The catalog is a Postgres table; Confluence is not the system of
-  record. Sources are first-class governed rows (kind, scope, lookback,
-  cursor, pacing, pause). Extraction happens at watcher time; the content
-  hash is of the extracted text; an exact duplicate is a location link with
-  no enrollment. Documents ride the existing ledger with one work item per
-  version. Every proposal citation becomes a claim row with a versioned
-  evidence pointer; staleness is a deterministic version comparison with no
-  model call and no stored stale flag.
-- **Why:** Three problems, three layers: inventory is deterministic (no LLM),
-  judgment flows through the existing ledger, and publication renders views
-  under the gate. Diffs carry temporality (document-stated dates win, the
-  publish date is the fallback) and supersession lives in episode text,
-  never Graphiti's automatic invalidation. Repair is scheduled by a
-  `wiki.freshness` heartbeat and never event-triggered. Rescission is a
-  catalog tag, never a deletion, and operator statements go stale only
-  through a later superseding statement. Page annotations are a fixed
-  template owned by the renderer and form their own action class. The
-  core layers are never homelab-shaped: per-environment variance lives only
-  in the watcher registry. The portability format (OKF) was deliberately
-  skipped.
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-08-23-sources-catalog-design.md; DL-003
+- **DL-178** — The sources catalog is a Postgres table; claims carry versioned evidence pointers; staleness is a deterministic comparison — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-178)
 
 ### DL-179 — No deployment profile ships less than another: single-node gets the sandbox and crawler, with disclosed weaker isolation
 
@@ -1649,25 +1495,7 @@ hygiene, and how the test suite itself must be written. See
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-08-21-work-transition-compatibility-design.md; docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md
 
-### DL-180 — One tool installs and updates; a running process never replaces its own code; backups track reversibility
-
-- **Status:** active
-- **Date:** 2026-08-27
-- **Rule:** (recorded here) No install means fresh, same version means repair, older means upgrade,
-  newer means refuse. Upgrade is stop, backup, replace, migrate, restart
-  (automatic for daemons). An automatic checkpoint is taken on every update
-  and a database dump before any apply, on by default, with an explicit skip
-  (`CC_SKIP_DB_BACKUP`). The in-app update check is notify-only and the apply
-  is performed by an external updater.
-- **Why:** A running process never replaces its own code or migrates its own
-  database. Non-goals kept dead: in-process self-update from the web UI, a
-  wipe-and-recover update path, general multi-node topology elicitation and
-  policy elicitation. The connected check is notify-only against releases,
-  with an in-process one-hour cache added later (an accepted divergence).
-  Rollback re-applies the previous manifests and the previous image is left
-  on the nodes for that reason.
-- **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
-- **Source:** docs/superpowers/specs/2026-08-27-setup-update-contract.md; docs/superpowers/specs/2026-08-25-deterministic-setup.md
+- **DL-180** — One tool installs and updates; a running process never replaces its own code; backups track reversibility — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-180)
 
 ### DL-181 — Setup design details: the k3s driver shares the single-node output protocol, mirror mismatch is WARN or FAIL by host, `check` has an honest ceiling
 
@@ -1720,12 +1548,12 @@ hygiene, and how the test suite itself must be written. See
 - **Rule:** (recorded here) The index of design records under `docs/superpowers/` is generated
   by `scripts/gen_records_index.py` from the `Status` / `As-built` header each
   record carries; no hand-maintained table of records lives anywhere else.
-- **Why:** The hand-maintained table in `docs/DESIGN.md` drifted from the code
+- **Why:** The hand-maintained table in `docs/archive/DESIGN.md` drifted from the code
   it summarised (two wrong cells and one missing row, found in the 2026-09-20
   consistency audit) because nothing tied its claims back to the records or
   the code they described. A header on each record, checked by a test, does.
 - **Enforced:** test: `tests/test_design_record_headers.py::test_readme_matches_the_generator`
-- **Source:** CHANGELOG v2.38.3; scripts/gen_records_index.py; docs/DESIGN.md (the inline note moved here on 2026-10-21)
+- **Source:** CHANGELOG v2.38.3; scripts/gen_records_index.py; docs/archive/DESIGN.md (the inline note moved here on 2026-10-21)
 
 ### DL-184 — Jira is a native client; an unconfigured client fails loudly and never routes to a webhook
 
@@ -1741,13 +1569,13 @@ hygiene, and how the test suite itself must be written. See
   was a 2026-09-23 incident where a Data Center install was silently sent to
   a webhook that did not exist.
 - **Enforced:** test: `tests/test_jira_client.py::test_unconfigured_client_fails_loudly_instead_of_routing_anywhere`
-- **Source:** CHANGELOG v2.50.0; docs/DESIGN.md (the inline correction of 2026-09-20 moved here on 2026-10-21)
+- **Source:** CHANGELOG v2.50.0; docs/archive/DESIGN.md (the inline correction of 2026-09-20 moved here on 2026-10-21)
 
-### DL-185 — docs/DESIGN.md is the frozen founding record; its vision, as-built facts and reasons each live in one other layer
+### DL-185 — docs/archive/DESIGN.md is the frozen founding record; its vision, as-built facts and reasons each live in one other layer
 
 - **Status:** active
 - **Date:** 2026-10-21
-- **Rule:** (recorded here) `docs/DESIGN.md` is frozen as the founding record: nothing in it is
+- **Rule:** (recorded here) `docs/archive/DESIGN.md` is frozen as the founding record: nothing in it is
   edited except dated superseded notes and pointers. The vision lives in
   `docs/PRD.md`, the system as built in `docs/ARCHITECTURE.md`, and the reasons
   behind rules in `docs/decisions/`. Dated history (the changelog, the
@@ -1760,6 +1588,7 @@ hygiene, and how the test suite itself must be written. See
   exemption".
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/PRD.md FR-49; PRD addendum §C (SHARPENED) and §D (founding record)
+- **Note (2026-11-22):** the file moved to `docs/archive/` with the superseded design records; the rule is unchanged.
 
 ### DL-186 — Task creation is a trigger, not a write and not a gate exemption; the star shape is reversed and every created task is bounded
 
@@ -3196,7 +3025,7 @@ hygiene, and how the test suite itself must be written. See
   checkout and committed and pushed on that checkout's branch. The operator ruled the cut in the system review on
   2026-11-21.
 - **Enforced:** test: `tests/test_governance.py`, `tests/test_update_precondition.py`, `tests/test_k3s_removed.py`
-- **Source:** the operator's ruling in the system review, 2026-11-21; `docs/superpowers/research/2026-08-06-litellm-config-change-design.md` (the removed design); `deploy/k3s/removed-capabilities.txt`; `deploy/k3s/removed.txt`; `central_command/config.py` (`RETIRED_ENV_KEYS`)
+- **Source:** the operator's ruling in the system review, 2026-11-21; `docs/archive/superpowers/research/2026-08-06-litellm-config-change-design.md` (the removed design); `deploy/k3s/removed-capabilities.txt`; `deploy/k3s/removed.txt`; `central_command/config.py` (`RETIRED_ENV_KEYS`)
 
 ### DL-224 — The cockpit is owned code; dead inherited code is removed, not quarantined
 

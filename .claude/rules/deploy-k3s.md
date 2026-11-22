@@ -5,9 +5,7 @@ paths:
 
 # k3s deployment bite marks
 
-Rules below exist because a real failure produced them. Trust the rule even
-where the story is gone. Moved verbatim from the root instructions; they load
-when a matching file is read.
+Moved from the root instructions; loads when a matching file is read. How a rule is held: `AGENTS.md`, "Conventions & gotchas (bite marks)".
 
 - **`deploy/k3s/`** — the multi-node deployment, the operator's instance of the single-node profile (two-node k3s:
   an arm64 "anchor" node and an amd64 "compute" node). `README.md` there is

@@ -5,7 +5,7 @@
 > **As-built note (2026-09-20):** All 12 tasks of the implementation plan are done; skills are DB rows delivered on demand. AS BUILT: stage 4's Gate model (`agent_capability_gate` table) below was never built — no such table exists, and every capability still gates through the existing proposal/executor path. See `../plans/2026-07-26-skills-library.md` for the implementation record.
 
 _Status: shipped — all 12 tasks of the implementation plan are done, skills are
-DB rows delivered on demand (see `docs/DESIGN.md`). AS BUILT: stage 4's Gate
+DB rows delivered on demand (see `docs/archive/DESIGN.md`). AS BUILT: stage 4's Gate
 model (`agent_capability_gate` table, `resolve_gate` seam) below was never
 built — every capability still gates through the existing proposal/executor
 path._

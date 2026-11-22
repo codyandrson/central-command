@@ -11,9 +11,7 @@ paths:
 
 # Mail, ingest, n8n and Jira bite marks
 
-Rules below exist because a real failure produced them. Trust the rule even
-where the story is gone. Moved verbatim from the root instructions; they load
-when a matching file is read.
+Moved from the root instructions; loads when a matching file is read. How a rule is held: `AGENTS.md`, "Conventions & gotchas (bite marks)".
 
 - **An n8n façade never reports a refusal as an outage.** n8n answers any
   thrown sub-workflow error as HTTP 500 "Error in workflow", and the failure

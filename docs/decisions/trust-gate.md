@@ -78,21 +78,23 @@ for the entry format and how to add one.
   import of `gateway` would put write credentials in the tier an agent's own
   tool calls execute in.
 - **Enforced:** test: `tests/test_governance.py::test_runtime_never_imports_the_gateway_tier`
-- **Source:** docs/DESIGN.md (4-tier architecture)
+- **Source:** docs/archive/DESIGN.md (4-tier architecture)
 
 ### DL-005 — The agent sandbox is containment, not restriction
 
 - **Status:** active
 - **Date:** 2026-08-04
 - **Rule:** [AGENTS.md](../../AGENTS.md) — "**The agent sandbox is CONTAINMENT, not restriction.**"
-- **Why:** An early sandbox design blocked all outbound network access;
-  deprived of a way to check a real library's current API, an agent wrote code
-  against its own (stale) training-data assumptions and shipped code that
-  crashed. The operator decided the sandbox exists to contain an agent, not to
-  restrict what it can reach — the gate belongs on capability (credentials,
-  gated writes), not on network reachability.
+- **Why:** The sandbox exists to contain agent code, not to limit what it
+  can reach: the first design blocked all egress (DL-007) and was replaced on
+  2026-08-04 by an ingress-deny, egress-open posture. Write-safety comes from
+  the sandbox holding no credentials, so reach can stay open; giving it a
+  credential would turn reach into ungated writes, outside `propose_*`, the
+  Executor and approval. (An earlier version of this entry told of an agent
+  that, denied egress, wrote stale-API code that crashed; that incident is
+  unrecorded in the tree.)
 - **Enforced:** discipline only — no test asserts egress stays open or that a sandbox tool never becomes credentialed
-- **Source:** AGENTS.md bite marks
+- **Source:** `deploy/k3s/60-sandbox.yaml` (header comment and the `allow-all-egress` policy); code comment `central_command/sandbox/runner.py` ("CREDENTIAL-FREE BY DESIGN"); `docs/PRD.md` FR-14; `docs/ARCHITECTURE.md` credentials table (`sandbox/` holds "Nothing, by design"); DL-007
 - **Supersedes:** DL-007
 
 ### DL-006 — The sandbox's only exit is mcp.sync_source, and content is captured at propose time
@@ -106,28 +108,7 @@ for the entry format and how to add one.
 - **Enforced:** test: `tests/test_mcp_sync.py::test_servers_root_is_the_same_path_on_both_sides`
 - **Source:** docs/superpowers/plans/2026-08-03-sandbox-slice1.md
 
-### DL-007 — srt stays dormant in the sandbox image; bwrap-fs-only ships instead
-
-- **Status:** superseded
-- **Date:** 2026-08-03
-- **Rule:** (recorded here) The sandbox image shipped gVisor plus a deny-all
-  NetworkPolicy and `bwrap --share-net` (filesystem-only isolation) instead
-  of `srt`: `srt`'s network-namespace removal was tested and does not work
-  under gVisor, while `bwrap --share-net` does. `srt` stays dormant as a
-  residual capability until bwrap-fs-only wrapping is proven viable.
-- **Why:** `docs/superpowers/plans/2026-08-03-sandbox-slice1.md` records the
-  direct test result: "srt works under gVisor... TESTED 2026-08-03 — DOES
-  NOT... the incompatibility is srt's netns removal specifically." That
-  finding stands. Superseded 2026-10-21 (review ruling GATE-011): the deny-all
-  egress half was replaced on 2026-08-04 by DL-005 (containment, not
-  restriction). Live posture today: gVisor is the pod's `runtimeClassName`;
-  the namespace NetworkPolicy denies INGRESS only and allows all egress
-  (`deploy/k3s/60-sandbox.yaml`); `srt` and `bubblewrap` are installed in the
-  image and dormant; nothing in the code or manifests wraps a command in
-  `bwrap --share-net`, so the "bwrap-fs-only ships" half was never wired.
-- **Enforced:** discipline only — a recorded residual risk, no test
-- **Source:** docs/superpowers/plans/2026-08-03-sandbox-slice1.md; code comment `deploy/k3s/sandbox.Dockerfile:3-10`
-- **Superseded-by:** DL-005
+- **DL-007** — srt stays dormant in the sandbox image; bwrap-fs-only ships instead — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-007)
 
 ### DL-008 — A proposal's arguments arrive flattened from real Claude, nested from the test model
 
@@ -165,29 +146,7 @@ for the entry format and how to add one.
 - **Enforced:** code structure only — `central_command/contract/args.py` (`ARG_SPECS`), imported by both `runtime/tools._validate_proposal` and `gateway/executor.execute()`; test: `tests/test_proposal_args.py::test_bad_draft_is_handed_back_in_run_and_recorded` and `::test_executor_refuses_the_same_shape_before_any_action_runs` each exercise one tier, but no single test asserts cross-tier parity directly
 - **Source:** code comment `central_command/contract/args.py:9-17`
 
-### DL-011 — ARG_SPECS stays partial by design; added only after a live multi-round rejection
-
-- **Status:** active
-- **Date:** 2026-09-20
-- **Rule:** (recorded here) `contract.ARG_SPECS` deliberately covers only
-  SOME gated-write capabilities: a spec is added when a capability family
-  produces a multi-round rejection in practice, never pre-emptively, because
-  completeness-by-default would contradict that policy. The counts
-  drift with every release, so they are dated, not current. As first measured
-  (v2.38.2): 16 `ARG_SPECS` entries, 89 registered capabilities, 58
-  gated-write capabilities, 42 gated writes without a spec. Re-measured
-  2026-10-21 (v2.67.2, by running `central_command.gateway.capabilities.gated_write_names()`
-  and `len(central_command.contract.args.ARG_SPECS)`): 58 `ARG_SPECS` entries,
-  97 registered capabilities (`gateway.capabilities.REGISTRY`), 65 gated-write
-  capabilities, so 7 gated writes carry no arg spec. Partial-by-design still
-  holds; the spec set grew by incident, as the rule says.
-- **Why:** `central_command/contract/args.py` — "Only SHAPE belongs here...
-  Found live 2026-08-29: one `graph.add_episode` intent took FOUR approvals."
-  The operator confirmed 2026-09-20 that partial-by-design is the intended
-  shape, not a gap to close.
-- **Enforced:** discipline only — deliberately no completeness check
-- **Source:** code comment `central_command/contract/args.py:9-17`
-- **Related:** DL-010
+- **DL-011** — ARG_SPECS stays partial by design; added only after a live multi-round rejection — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-011)
 
 ### DL-012 — Never swap the approval gate for pydantic-ai's approval_required()
 
@@ -274,34 +233,6 @@ for the entry format and how to add one.
 - **Enforced:** test: `tests/test_mcp_grants.py::test_effective_mcp_gates_override_wins_revoke_restores_regrant_reactivates`
 - **Source:** AGENTS.md bite marks
 
-### DL-019 — EA holds read-only mail-read, narrower than the drafting slice it was weighed against
+- **DL-019** — EA holds read-only mail-read, narrower than the drafting slice it was weighed against — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-019)
 
-- **Status:** active
-- **Date:** 2026-09-02
-- **Rule:** (recorded here) The EA's `mail-read` grant (shipped v2.21.1) is
-  read-only ("the triager can read the mail it dismisses") and is a
-  narrower, read-only step relative to the wider thread-reply-drafting
-  capability considered in the same research thread — not an implementation
-  of it.
-- **Why:** CHANGELOG `2026-09-02 — v2.21.1: the triager can read the mail it
-  dismisses`; the wider drafting option is recorded as still a "decision
-  needed" in `docs/superpowers/research/2026-08-06-ea-widening-design.md`
-  ("Slice C — thread reply drafting").
-- **Enforced:** discipline only — no guard specific to the grant boundary
-- **Source:** CHANGELOG v2.21.1; docs/superpowers/research/2026-08-06-ea-widening-design.md
-
-### DL-020 — Build the spot-check before graph.verify_invalidation graduates
-
-- **Status:** active
-- **Date:** undated
-- **Rule:** (recorded here) The graph-verification auditor's invalidation
-  class (`graph.verify_invalidation`) must not graduate to auto-close until
-  a sampled spot-check exists. List item 9 under the (unnumbered) "Decisions"
-  section of `docs/superpowers/specs/2026-08-19-graph-verification-auditor-design.md`
-  states the ladder's post-graduation evidence-starvation problem and defers
-  the spot check "until a class's blast radius warrants it."
-- **Why:** A silently-retired true fact is a compounding world-model change —
-  the deferral is explicit, not an oversight; the class currently always
-  parks for the operator regardless of mode (see DL-002).
-- **Enforced:** discipline only — no `spot_check`/`spot-check` implementation found in `central_command/` or `tests/`; test: `tests/test_graph_verification.py::test_invalidations_always_park_and_carry_their_own_class` confirms the always-parks carve-out that stands in for the spot-check today
-- **Source:** docs/superpowers/specs/2026-08-19-graph-verification-auditor-design.md (list item 9 under "## Decisions")
+- **DL-020** — Build the spot-check before graph.verify_invalidation graduates — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-020)

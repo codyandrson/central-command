@@ -12,9 +12,7 @@ paths:
 
 # LiteLLM / model-fleet bite marks
 
-Rules below exist because a real failure produced them. Trust the rule even
-where the story is gone. Moved verbatim from the root instructions; they load
-when a matching file is read.
+Moved from the root instructions; loads when a matching file is read. How a rule is held: `AGENTS.md`, "Conventions & gotchas (bite marks)".
 
 - **Models live in LiteLLM's DATABASE and belong to the operator; setup
   PAUSES for them.** `store_model_in_db: true`, no `model_list` in the config

@@ -7,9 +7,7 @@ paths:
 
 # Cockpit (web/) bite marks
 
-Rules below exist because a real failure produced them. Trust the rule even
-where the story is gone. Moved verbatim from the root instructions; they load
-when a matching file is read.
+Moved from the root instructions; loads when a matching file is read. How a rule is held: `AGENTS.md`, "Conventions & gotchas (bite marks)".
 
 - **`@container` must sit on a PARENT of whatever uses `@3xl:`.** A container
   query resolves against an ANCESTOR container, never the element's own — so

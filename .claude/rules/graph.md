@@ -11,9 +11,7 @@ paths:
 
 # Graphiti / Neo4j bite marks
 
-Rules below exist because a real failure produced them. Trust the rule even
-where the story is gone. Moved verbatim from the root instructions; they load
-when a matching file is read.
+Moved from the root instructions; loads when a matching file is read. How a rule is held: `AGENTS.md`, "Conventions & gotchas (bite marks)".
 
 - **A bolt driver is built with `neo4j_reader.bolt_driver_kwargs()`, never
   with the defaults.** The pool must test an idle connection before reuse

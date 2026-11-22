@@ -1,6 +1,6 @@
 """Every design record under `docs/superpowers/` carries its own status.
 
-Before 2026-09-20, `docs/DESIGN.md` carried one hand-maintained table
+Before 2026-09-20, `docs/DESIGN.md` (now `docs/archive/DESIGN.md`) carried one hand-maintained table
 summarizing the fate of every spec/plan/research record — 53 files, none of
 which recorded their own status anywhere. The table drifted: the 2026-09-20
 consistency audit found two wrong cells and one missing row, none of which

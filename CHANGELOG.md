@@ -4,6 +4,37 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-22 — v2.124.0: Every rule states its reason; the decision-log index is generated; prose guards and unread records go
+
+- **Why.** The process layer (the instructions, rules, records and guard tests that govern how
+  sessions work on this repository) was reviewed with the rest of the system. The operator ruled on
+  2026-11-21 and 2026-11-22. No application code changes in this release.
+- **How a rule is held.** `AGENTS.md` said to trust each rule "even where the story is gone". It now
+  says: every rule states its reason; a session never drops, weakens or works around a rule on its
+  own; a rule whose reason is missing or no longer holds is raised with the operator, who decides. The
+  eight rule files lose their repeated preamble.
+- **Five rules get their reasons.** DL-005 (the sandbox is containment), DL-023 (`system_prompt=` is
+  load-bearing), DL-025 (sessions are never destroyed), DL-097 (a fresh database reproduces the
+  roster) and DL-098 (the schema is applied on a fresh database and by the updater, never at start)
+  had circular or missing sources. Each now cites the code, test or record that carries its reason;
+  two origin stories that no record holds are marked unrecorded.
+- **The decision-log index is generated.** `scripts/gen_decision_index.py` writes the table in
+  `docs/decisions/README.md` from the area files and has a `--check` mode the suite runs. Three index
+  rows had drifted from their entries and are corrected by it.
+- **The log's test checks structure, not wording.** `tests/test_decision_log.py` no longer compares
+  each entry's quoted rule text word for word with the instruction files, which made rewording any
+  rule break about 1,370 test cases. It checks that ids are unique and ascend, fields and statuses are
+  valid, a superseded entry names a successor that exists, every cited test and file exists, and the
+  index is current.
+- **Prose guards removed.** `tests/test_small_fixes_ledger.py` (docstring bookkeeping for a closed
+  epic) is deleted; two tests that required an exact sentence in a document now require its substance.
+- **Archived.** `docs/DESIGN.md` (the frozen founding design) and five superseded design records move
+  to `docs/archive/`. Fifteen decision-log entries that were enforced by discipline only and cited
+  nowhere move to `docs/archive/decisions-archived.md` under a new `archived` status, each leaving a
+  one-line stub so ids stay findable. `docs/ROADMAP.md` stays where it is: it is a live document.
+- **The suite.** About 1,400 fewer test cases, all from the removed word-for-word comparison and the
+  deleted ledger test.
+
 ## 2026-11-22 — v2.123.0: pgweb runs read-only on the k3s profile too
 
 - **Why.** pgweb has no login. The tailnet and the loopback bind decide who can reach it, but neither

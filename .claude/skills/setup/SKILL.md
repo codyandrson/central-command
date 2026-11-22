@@ -5,7 +5,7 @@ description: Install Central Command from scratch on this machine, or carry an e
 
 # Central Command setup — zero to functioning
 
-**The rule (2026-08-25 redesign, `docs/superpowers/specs/2026-08-25-deterministic-setup.md`):
+**The rule (2026-08-25 redesign, `docs/archive/superpowers/specs/2026-08-25-deterministic-setup.md`):
 if you are composing a command that mutates anything, you are off the rails —
 the script does that.** You conduct; the driver installs. Delegate read-only
 investigation ("where is X defined", multi-file config reads) to an Explore

@@ -10,7 +10,7 @@
 
 ## Central Command
 
-A human-supervised agentic-team framework: a control plane where the operator tasks Claude agents and approves, by default, every action that changes the world. Python 3.12 (FastAPI, Pydantic AI) with a React/Hono cockpit in `web/`, Postgres as the spine, Graphiti/Neo4j, LiteLLM, n8n. Single-operator and self-hosted, with an air-gapped deployment target; the risk model is error, not malice. Why and what: `docs/PRD.md`; how, as built: `docs/ARCHITECTURE.md`; why behind each rule: `docs/decisions/`; what changed: `CHANGELOG.md`; design records: `docs/superpowers/`; the founding design, frozen: `docs/DESIGN.md`.
+A human-supervised agentic-team framework: a control plane where the operator tasks Claude agents and approves, by default, every action that changes the world. Python 3.12 (FastAPI, Pydantic AI) with a React/Hono cockpit in `web/`, Postgres as the spine, Graphiti/Neo4j, LiteLLM, n8n. Single-operator and self-hosted, with an air-gapped deployment target; the risk model is error, not malice. Why and what: `docs/PRD.md`; how, as built: `docs/ARCHITECTURE.md`; why behind each rule: `docs/decisions/`; what changed: `CHANGELOG.md`; design records: `docs/superpowers/`; the founding design, frozen: `docs/archive/DESIGN.md`.
 
 ## Policy
 
@@ -63,8 +63,9 @@ licence to route a new write through it.
 
 ## Conventions & gotchas (bite marks)
 
-Rules below exist because a real failure produced them. Trust the rule even
-where the story is gone.
+Every rule states its reason. A session never drops, weakens or works around
+a rule on its own. A rule whose reason is missing or no longer holds is raised
+with the operator, who decides.
 
 - **The test model is test-only, and there is no executor mode.** The
   deterministic model is `settings.test_model`, set only in-process by the test
@@ -113,7 +114,9 @@ where the story is gone.
   — never at process start.** A fresh database auto-loads it (initdb); a
   running one gets it from the updater's `schema` phase (`cc-update.sh`,
   `update.sh apply`), additive-only and idempotent, on every update. Nothing in
-  the app process applies it. The test DB re-executes it every run, so a new
+  the app process applies it: the updater does so after its backup and
+  rollback checkpoint, and a start-up apply would change a live database on
+  any restart with no rollback point. The test DB re-executes it every run, so a new
   column passes the whole suite and then breaks a dev or hand-run database
   with an undefined-column error that reads like a code bug — apply additive
   columns to any database the updater does not own in the same change that

@@ -19,12 +19,13 @@ once, linked from both sides.
 
 1. Pick the one area file the decision belongs to (see the areas below); a
    decision belongs to exactly one area.
-2. Give it the next `DL-NNN` id in that area's sequence — ids are assigned
-   ascending in this README's index order and are never reused, even if an
-   entry is later retired.
+2. Give it the next `DL-NNN` id in that area's sequence — ids ascend in
+   area-file order (the order of the areas below) and are never reused, even
+   if an entry is later retired or archived.
 3. Write the entry in the exact format below (the guard test,
    `tests/test_decision_log.py`, parses it structurally).
-4. Add a row to the index table below, in `DL-NNN` order.
+4. Regenerate the index table: `python scripts/gen_decision_index.py`. The
+   table is built from the area files; never edit it by hand.
 5. Run `pytest -q tests/test_decision_log.py` before committing.
 
 ## Areas
@@ -49,9 +50,9 @@ followed by exactly these six bullets (two optional ones may follow):
 ```
 ### DL-017 — <short imperative title>
 
-- **Status:** active | superseded | retired
+- **Status:** active | superseded | retired | archived
 - **Date:** YYYY-MM-DD | undated
-- **Rule:** [AGENTS.md](../../AGENTS.md) — "<exact bold lead phrase of the bullet, copied verbatim>"
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "<bold lead phrase of the bullet>"
 - **Why:** 1–3 sentences of the reason/incident, from in-repo evidence only.
 - **Enforced:** test: `tests/<file>::<test_name>` | script: `<path>` | sql: `central_command/db/schema.sql` | code structure only (`<path>`) | discipline only
 - **Source:** CHANGELOG vX.Y.Z / `docs/superpowers/...` record / code comment `path` — at least one
@@ -60,13 +61,14 @@ followed by exactly these six bullets (two optional ones may follow):
 ```
 
 For a rules-file link, use
-`[.claude/rules/<name>.md](../../.claude/rules/<name>.md) — "<verbatim lead phrase>"`.
+`[.claude/rules/<name>.md](../../.claude/rules/<name>.md) — "<lead phrase>"`.
 For a decision with NO rule text anywhere in the tree, write
 `- **Rule:** (recorded here) <one or two sentence statement of the rule>` —
 the log itself is that decision's only durable home.
 
-The quoted `Rule:` phrase must be copied verbatim (whitespace/newlines
-aside) from the target file — the guard test string-matches it. `Why` must
+Quote the bullet's lead phrase so a reader can find it; the guard test
+checks only that the linked file exists, so rewording a rule does not break
+the suite — update the quote when you reword its bullet. `Why` must
 come from in-repo evidence (the rule text's own story, the CHANGELOG, a code
 comment, or a design record); if the repo gives no reason, write "Not
 recorded in-repo." rather than inventing one.
@@ -84,8 +86,19 @@ must stand on its own; the cite names where the operator's ruling is filed.
   `Superseded-by:`.
 - **retired** — no longer in force and not replaced by anything (the
   capability or the constraint it governed is gone).
+- **archived** — moved to
+  [`docs/archive/decisions-archived.md`](../archive/decisions-archived.md)
+  because nothing outside the log read it: enforced by discipline only, cited
+  nowhere else, and its rule stated in no current `AGENTS.md` or rule-file
+  bullet. The area file keeps a one-line stub in the entry's place,
+  `- **DL-NNN** — <title> — archived: [docs/archive/decisions-archived.md](../archive/decisions-archived.md#dl-nnn)`,
+  so the id stays findable and ascending; the full entry, with its status at
+  the time, is in the archive. Archiving is a statement about readership, not
+  that the rule stopped holding (that is `retired`).
 
 ## Index
+
+<!-- BEGIN GENERATED INDEX (scripts/gen_decision_index.py) — do not hand-edit -->
 
 | id | title | status | date | enforced (short) | area file |
 |----|-------|--------|------|-------------------|-----------|
@@ -95,32 +108,32 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-004 | The trust boundary is the import graph: runtime never imports gateway | active | undated | test: `tests/test_governance.py::test_runtime_never_imports_the_gateway_tier` | [trust-gate.md](trust-gate.md) |
 | DL-005 | The agent sandbox is containment, not restriction | active | 2026-08-04 | discipline only | [trust-gate.md](trust-gate.md) |
 | DL-006 | The sandbox's only exit is mcp.sync_source, and content is captured at propose time | active | undated | test: `tests/test_mcp_sync.py::test_servers_root_is_the_same_path_on_both_sides` | [trust-gate.md](trust-gate.md) |
-| DL-007 | srt stays dormant in the sandbox image; bwrap-fs-only ships instead | superseded | 2026-08-03 | discipline only | [trust-gate.md](trust-gate.md) |
+| DL-007 | srt stays dormant in the sandbox image; bwrap-fs-only ships instead | archived | 2026-08-03 | discipline only | [trust-gate.md](trust-gate.md) |
 | DL-008 | A proposal's arguments arrive flattened from real Claude, nested from the test model | active | undated | code structure only | [trust-gate.md](trust-gate.md) |
-| DL-009 | A proposal's agent_id is the drafter, never the subject | active | 2026-07-29 | test: `tests/test_executor_provenance.py::test_the_handler_is_handed_the_gateways_proposer_not_the_agents` | [trust-gate.md](trust-gate.md) |
+| DL-009 | A proposal's agent_id is the drafter, never the subject | active | 2026-07-29 | test: `tests/test_executor_provenance.py::test_the_handler_is_handed_the_gateways_proposer_not_the_agents` (+2 more) | [trust-gate.md](trust-gate.md) |
 | DL-010 | A proposal's argument shape is checked in both tiers from one list | active | 2026-08-29 | code structure only | [trust-gate.md](trust-gate.md) |
-| DL-011 | ARG_SPECS stays partial by design; added only after a live multi-round rejection | active | 2026-09-20 | discipline only | [trust-gate.md](trust-gate.md) |
+| DL-011 | ARG_SPECS stays partial by design; added only after a live multi-round rejection | archived | 2026-09-20 | discipline only | [trust-gate.md](trust-gate.md) |
 | DL-012 | Never swap the approval gate for pydantic-ai's approval_required() | active | undated | test: `tests/test_agent_construction_guards.py::test_nothing_uses_pydantic_ais_approval_required` | [trust-gate.md](trust-gate.md) |
-| DL-013 | Every propose_* tool carries max_retries=10 | active | 2026-09-20 | test: `tests/test_propose_max_retries.py::test_every_literal_toolset_wraps_propose_tools` | [trust-gate.md](trust-gate.md) |
-| DL-014 | Every proposal takes one path: runtime.proposals.park_proposal() | active | undated | test: `tests/test_proposal_created.py::test_only_the_park_path_creates_proposals` | [trust-gate.md](trust-gate.md) |
+| DL-013 | Every propose_* tool carries max_retries=10 | active | 2026-09-20 | test: `tests/test_propose_max_retries.py::test_every_literal_toolset_wraps_propose_tools` (+1 more) | [trust-gate.md](trust-gate.md) |
+| DL-014 | Every proposal takes one path: runtime.proposals.park_proposal() | active | undated | test: `tests/test_proposal_created.py::test_only_the_park_path_creates_proposals` (+2 more) | [trust-gate.md](trust-gate.md) |
 | DL-015 | A proposal has three verdicts; Dismiss withdraws and never resumes the drafter | active | 2026-08-04 | test: `tests/test_dismiss.py::test_dismiss_withdraws_closes_session_and_never_resumes_the_agent` | [trust-gate.md](trust-gate.md) |
 | DL-016 | No agent claim is trusted unverified; claim_matches_source: None means NOT CHECKED | active | undated | test: `tests/test_reflection.py::test_a_nomination_quote_is_always_checked` | [trust-gate.md](trust-gate.md) |
 | DL-017 | Roster membership is a non-empty role column; hire it, don't upsert it | active | 2026-07-22 | test: `tests/test_hiring.py::test_ensure_hired_creates_a_full_roster_member_and_is_idempotent` | [trust-gate.md](trust-gate.md) |
 | DL-018 | Grant revocation is a timestamp, never a delete | active | undated | test: `tests/test_mcp_grants.py::test_effective_mcp_gates_override_wins_revoke_restores_regrant_reactivates` | [trust-gate.md](trust-gate.md) |
-| DL-019 | EA holds read-only mail-read, narrower than the drafting slice it was weighed against | active | 2026-09-02 | discipline only | [trust-gate.md](trust-gate.md) |
-| DL-020 | Build the spot-check before graph.verify_invalidation graduates | active | undated | discipline only | [trust-gate.md](trust-gate.md) |
-| DL-021 | Two run modes: CC_DEMO_MODE and CC_EXECUTOR_MODE | superseded | 2026-07-19 | superseded by DL-141 | [runtime.md](runtime.md) |
-| DL-022 | A fresh run must load the charter; build_agent_for does not | active | 2026-07-29 | test: `tests/test_agent_run_contract.py::test_every_fresh_run_path_loads_a_charter` | [runtime.md](runtime.md) |
-| DL-023 | system_prompt= is load-bearing; never modernise it to instructions= | active | undated | test: `tests/test_agent_construction_guards.py::test_no_agent_is_built_with_instructions` | [runtime.md](runtime.md) |
-| DL-024 | Agents take deps | active | 2026-07-19 | test: `tests/test_agent_run_contract.py::test_every_agent_run_passes_deps` | [runtime.md](runtime.md) |
-| DL-025 | Sessions are never destroyed; agent:<id>:main means the current lane only | active | 2026-07-23 | code structure only | [runtime.md](runtime.md) |
-| DL-026 | An attachment reaches the agent as content, or the send fails — no third state | active | undated | test: `tests/test_attachments.py::test_a_scan_is_refused_rather_than_delivered_as_an_empty_document` | [runtime.md](runtime.md) |
+| DL-019 | EA holds read-only mail-read, narrower than the drafting slice it was weighed against | archived | 2026-09-02 | discipline only | [trust-gate.md](trust-gate.md) |
+| DL-020 | Build the spot-check before graph.verify_invalidation graduates | archived | undated | discipline only | [trust-gate.md](trust-gate.md) |
+| DL-021 | Two run modes: CC_DEMO_MODE and CC_EXECUTOR_MODE | superseded | 2026-07-19 | superseded | [runtime.md](runtime.md) |
+| DL-022 | A fresh run must load the charter; build_agent_for does not | active | 2026-07-29 | test: `tests/test_agent_run_contract.py::test_every_fresh_run_path_loads_a_charter` (+1 more) | [runtime.md](runtime.md) |
+| DL-023 | system_prompt= is load-bearing; never modernise it to instructions= | active | 2026-09-19 | test: `tests/test_agent_construction_guards.py::test_no_agent_is_built_with_instructions` | [runtime.md](runtime.md) |
+| DL-024 | Agents take deps | active | 2026-07-19 | test: `tests/test_agent_run_contract.py::test_every_agent_run_passes_deps` (+1 more) | [runtime.md](runtime.md) |
+| DL-025 | Sessions are never destroyed; agent:<id>:main means the current lane only | active | 2026-07-23 | test: `tests/test_converse.py::test_close_is_a_flip_never_a_delete` (+3 more) | [runtime.md](runtime.md) |
+| DL-026 | An attachment reaches the agent as content, or the send fails — no third state | active | undated | test: `tests/test_attachments.py::test_a_scan_is_refused_rather_than_delivered_as_an_empty_document` (+2 more) | [runtime.md](runtime.md) |
 | DL-027 | A failed=True session must record why | active | undated | test: `tests/test_session_failure_reason.py::test_every_failed_session_records_why` | [runtime.md](runtime.md) |
 | DL-028 | A failure-landing guard that lives in one wrapper is not a landing | active | 2026-09-14 | discipline only | [runtime.md](runtime.md) |
 | DL-029 | A shutdown hook in the FastAPI lifespan runs too late; release from SIGTERM instead | active | 2026-08-15 | discipline only | [runtime.md](runtime.md) |
 | DL-030 | A resume must arm its park record before it runs, not only in the except | active | undated | code structure only | [runtime.md](runtime.md) |
 | DL-031 | The orphan sweep must land the task, not just the session | superseded | undated | discipline only | [runtime.md](runtime.md) |
-| DL-032 | A tool result is bounded by the input window, not the output cap | active | 2026-09-16 | test: `tests/test_context_overflow.py::test_tool_result_ceiling_follows_the_smallest_discovered_window` | [runtime.md](runtime.md) |
+| DL-032 | A tool result is bounded by the input window, not the output cap | active | 2026-09-16 | test: `tests/test_context_overflow.py::test_tool_result_ceiling_follows_the_smallest_discovered_window` (+2 more) | [runtime.md](runtime.md) |
 | DL-033 | A failed compaction degrades to the clip, never to the raw record | active | 2026-09-18 | test: `tests/test_context_overflow.py::test_a_dead_summarizer_still_ends_in_the_clip_not_raw_history` | [runtime.md](runtime.md) |
 | DL-034 | A status-code sniff must match a token, not a substring | active | 2026-09-18 | test: `tests/test_failure_taxonomy.py::test_text_sniffing` | [runtime.md](runtime.md) |
 | DL-035 | A heartbeat action never awaits agent work; the retry sweep dispatches detached | active | 2026-09-11 | test: `tests/test_retry_sweep.py::test_the_sweep_returns_while_an_agent_lane_is_busy` | [runtime.md](runtime.md) |
@@ -132,16 +145,16 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-041 | A Jira gadget's config keys are declared by the gadget, read from its XML | active | 2026-08-10 | code structure only | [ingest-integrations.md](ingest-integrations.md) |
 | DL-042 | n8n import:workflow never activates outside queue mode; the canvas is not the source of truth | active | 2026-09-12 | script: `deploy/n8n/apply-workflows.sh` | [ingest-integrations.md](ingest-integrations.md) |
 | DL-043 | A mail body reaches a model through ingest/mailtext.py, and nowhere else | active | 2026-09-19 | test: `tests/test_mailtext.py::test_nothing_reads_a_mail_body_except_through_the_converter` | [ingest-integrations.md](ingest-integrations.md) |
-| DL-044 | A mail body is converted once at claim time and persisted, not re-fetched on every read | active | 2026-09-19 | test: `tests/test_mailtext.py::test_nothing_reads_a_mail_body_except_through_the_converter` | [ingest-integrations.md](ingest-integrations.md) |
+| DL-044 | A mail body is converted once at claim time and persisted, not re-fetched on every read | active | 2026-09-19 | test: `tests/test_backlog.py::test_refs_enroll_without_content_and_hydrate_at_claim` | [ingest-integrations.md](ingest-integrations.md) |
 | DL-045 | An unsubscribe URL is derived from the mailbox, never from the proposal | active | 2026-09-12 | code structure only | [ingest-integrations.md](ingest-integrations.md) |
 | DL-046 | Ledger invariants live in SQL, not Python, and are never mocked in tests | active | 2026-07-18 | test: `tests/test_ledger.py` | [ingest-integrations.md](ingest-integrations.md) |
 | DL-047 | Header-less email still needs a stable key, synthesised from the content hash | active | 2026-07-18 | test: `tests/test_ledger.py::test_bare_text_gets_a_stable_synthetic_message_id` | [ingest-integrations.md](ingest-integrations.md) |
-| DL-048 | Dispatch is opt-in; the drain loop never starts by surprise | active | 2026-07-18 | test: `tests/test_dispatch_one_path.py::test_app_startup_starts_no_loop_that_was_not_asked_for` | [ingest-integrations.md](ingest-integrations.md) |
-| DL-049 | A fold is a claim of coverage, not an outcome; it goes terminal only on covering-approval | active | undated | test: `tests/test_dismiss.py::test_dismissing_a_covering_proposal_releases_its_folds` | [ingest-integrations.md](ingest-integrations.md) |
-| DL-050 | Every email takes one path: dispatcher.process_claimed() | active | 2026-07-20 | test: `tests/test_dispatch_one_path.py::test_nothing_outside_the_dispatcher_starts_a_work_item_run` | [ingest-integrations.md](ingest-integrations.md) |
-| DL-051 | A Graphiti entity and edge each store their identity twice | active | undated | test: `tests/test_graph_write_shape.py::test_hand_made_writes_have_the_installed_bulk_shape` | [graph.md](graph.md) |
-| DL-052 | Every write re-embeds at exactly 1024 dimensions; a mis-sized vector is dropped | active | 2026-08-21 | test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_refused_loudly` | [graph.md](graph.md) |
-| DL-053 | The suite may not write to the live graph without CC_LIVE_GRAPH_TESTS=1 | active | undated | test: `tests/conftest.py::no_live_graph_writes` | [graph.md](graph.md) |
+| DL-048 | Dispatch is opt-in; the drain loop never starts by surprise | active | 2026-07-18 | test: `tests/test_dispatch_one_path.py::test_a_settings_object_built_from_nothing_has_the_loops_off` (+1 more) | [ingest-integrations.md](ingest-integrations.md) |
+| DL-049 | A fold is a claim of coverage, not an outcome; it goes terminal only on covering-approval | active | undated | test: `tests/test_dismiss.py::test_dismissing_a_covering_proposal_releases_its_folds` (+1 more) | [ingest-integrations.md](ingest-integrations.md) |
+| DL-050 | Every email takes one path: dispatcher.process_claimed() | active | 2026-07-20 | test: `tests/test_dispatch_one_path.py::test_a_registered_handler_is_reachable_only_through_the_registry` (+2 more) | [ingest-integrations.md](ingest-integrations.md) |
+| DL-051 | A Graphiti entity and edge each store their identity twice | active | undated | test: `tests/test_graph_write_shape.py::test_hand_made_writes_have_the_installed_bulk_shape` (+1 more) | [graph.md](graph.md) |
+| DL-052 | Every write re-embeds at exactly 1024 dimensions; a mis-sized vector is dropped | active | 2026-08-21 | test: `tests/test_graph_embedding_width.py::test_a_mis_sized_vector_is_refused_loudly` (+1 more) | [graph.md](graph.md) |
+| DL-053 | The suite may not write to the live graph without CC_LIVE_GRAPH_TESTS=1 | active | undated | test: `tests/conftest.py::no_live_graph_writes` (+2 more) | [graph.md](graph.md) |
 | DL-054 | An async bolt driver cached at module scope is loop-bound | active | undated | discipline only | [graph.md](graph.md) |
 | DL-055 | Graphiti's extraction needs the bridged LiteLLM alias | superseded | 2026-09-19 | discipline only | [graph.md](graph.md) |
 | DL-056 | Graphiti will retire a fact it merely recognises; the guard is the invalidation scope, not the model | active | undated | test: `tests/test_graph_verification.py` | [graph.md](graph.md) |
@@ -149,16 +162,16 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-058 | Episodes name the operator; "the operator" is not a graph subject | active | 2026-09-16 | test: `tests/test_context_overflow.py::test_graph_propose_notes_tell_the_agent_to_name_the_operator` | [graph.md](graph.md) |
 | DL-059 | An edge with expired_at is not necessarily a retired fact | active | 2026-09-15 | discipline only | [graph.md](graph.md) |
 | DL-060 | The ontology needs somewhere for every category; declare high-priority types first | active | 2026-08-15 | discipline only | [graph.md](graph.md) |
-| DL-061 | The curator can see the patient: graph.add_episode takes for_agent | active | 2026-09-01 | test: `tests/test_graph_scope.py::test_executor_private_for_agent_targets_that_agents_partition` | [graph.md](graph.md) |
+| DL-061 | The curator can see the patient: graph.add_episode takes for_agent | active | 2026-09-01 | test: `tests/test_graph_scope.py::test_executor_private_for_agent_targets_that_agents_partition` (+1 more) | [graph.md](graph.md) |
 | DL-062 | An embedding is never served from memory | active | 2026-09-01 | code structure only | [graph.md](graph.md) |
-| DL-063 | Models live in LiteLLM's database and belong to the operator; setup pauses for them | active | undated | script: `register-models.py` | [models.md](models.md) |
+| DL-063 | Models live in LiteLLM's database and belong to the operator; setup pauses for them | active | undated | script: `deploy/shared/litellm/register-models.py` | [models.md](models.md) |
 | DL-064 | A model's capabilities are measured, never guessed; an undeclared flag is not neutral | active | undated | discipline only | [models.md](models.md) |
 | DL-065 | LiteLLM forbids "-" in MCP server names; the translation is duplicated on purpose | active | undated | code structure only | [models.md](models.md) |
-| DL-066 | Autodiscovery has memory; only new/changed/failed ids reach the agent | active | 2026-09-11 | test: `tests/test_heartbeat.py::test_reconcile_only_new_changed_or_failed_reach_the_agent` | [models.md](models.md) |
-| DL-067 | Local→cloud model fallback is deliberately off | active | 2026-07-31 | code structure only | [models.md](models.md) |
-| DL-068 | The router-mode serving unit was never built; model swapping lives outside this repo | active | 2026-07-26 | discipline only | [models.md](models.md) |
-| DL-069 | A price is catalog data, never an agent's claim | active | 2026-09-14 | test: `tests/test_catalog_pricing.py::test_add_prices_from_the_catalog_and_drops_what_the_agent_wrote` | [models.md](models.md) |
-| DL-070 | Model turns are admitted, not just submitted | active | 2026-09-13 | test: `tests/test_model_concurrency.py::test_aliases_in_one_pool_share_its_single_slot` | [models.md](models.md) |
+| DL-066 | Autodiscovery has memory; only new/changed/failed ids reach the agent | active | 2026-09-11 | test: `tests/test_heartbeat.py::test_reconcile_only_new_changed_or_failed_reach_the_agent` (+2 more) | [models.md](models.md) |
+| DL-067 | Local→cloud model fallback is deliberately off | active | 2026-07-31 | discipline only | [models.md](models.md) |
+| DL-068 | The router-mode serving unit was never built; model swapping lives outside this repo | archived | 2026-07-26 | discipline only | [models.md](models.md) |
+| DL-069 | A price is catalog data, never an agent's claim | active | 2026-09-14 | test: `tests/test_catalog_pricing.py::test_add_prices_from_the_catalog_and_drops_what_the_agent_wrote` (+1 more) | [models.md](models.md) |
+| DL-070 | Model turns are admitted, not just submitted | active | 2026-09-13 | test: `tests/test_model_concurrency.py::test_aliases_in_one_pool_share_its_single_slot` (+2 more) | [models.md](models.md) |
 | DL-071 | A missing model alias is an outage, not a verdict | active | 2026-09-12 | test: `tests/test_failure_taxonomy.py::test_semantic_shapes` | [models.md](models.md) |
 | DL-072 | The output ceiling is the model's, not the deployment's | active | 2026-09-13 | test: `tests/test_models.py::test_the_ceiling_clears_the_largest_real_charter` | [models.md](models.md) |
 | DL-073 | Every consumer addresses a cc-* role alias; real models keep their own rows | active | 2026-08-30 | code structure only | [models.md](models.md) |
@@ -166,69 +179,69 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-075 | Every CC_* endpoint must resolve to loopback | active | undated | script: `deploy/k3s/verify.sh` | [deploy.md](deploy.md) |
 | DL-076 | A floating pod needs its image on both nodes | active | undated | discipline only | [deploy.md](deploy.md) |
 | DL-077 | In a unit's ExecStart, "A && B & exec C" backgrounds A and B together | active | 2026-09-18 | test: `tests/test_graph_bolt_unit.py::test_both_relays_get_the_cluster_ip` | [deploy.md](deploy.md) |
-| DL-078 | File-built configmaps are refreshed by the updater, per file | active | undated | script: `deploy/k3s/make-secrets.sh` | [deploy.md](deploy.md) |
+| DL-078 | File-built configmaps are refreshed by the updater, per file | active | undated | script: `deploy/k3s/make-secrets.sh` (+1 more) | [deploy.md](deploy.md) |
 | DL-079 | Neo4j needs enableServiceLinks: false | active | undated | code structure only | [deploy.md](deploy.md) |
 | DL-080 | Use the fully-qualified image ref; podman's localhost/ tag is invisible to Kubernetes | active | 2026-08-01 | script: `grep -qx` | [deploy.md](deploy.md) |
 | DL-081 | ctr images ls piped into grep -q inverts under pipefail | active | undated | discipline only | [deploy.md](deploy.md) |
-| DL-082 | setup.sh runs a dry check and nine deterministic phases with PASS/WARN/FAIL/USERACTION exit codes | active | 2026-09-23 | script: `deploy/single/setup.sh` | [deploy.md](deploy.md) |
-| DL-083 | The single-node install acquires before it deploys, and never falls back on its own | active | undated | test: `tests/test_single_airgap_seams.py::test_images_txt_is_well_formed` | [deploy.md](deploy.md) |
+| DL-082 | setup.sh runs a dry check and nine deterministic phases with PASS/WARN/FAIL/USERACTION exit codes | active | 2026-09-23 | script: `deploy/single/setup.sh` (+1 more) | [deploy.md](deploy.md) |
+| DL-083 | The single-node install acquires before it deploys, and never falls back on its own | active | undated | test: `tests/test_single_airgap_seams.py::test_images_txt_is_well_formed` (+2 more) | [deploy.md](deploy.md) |
 | DL-084 | CC_REGISTRY became three vars: CC_REGISTRY_DOCKERIO / _GHCR / _MCR | active | 2026-08-30 | test: `tests/test_single_airgap_seams.py::test_images_txt_is_well_formed` | [deploy.md](deploy.md) |
-| DL-085 | An update waits for the agents to finish | active | 2026-09-13 | test: `tests/test_update_hold.py::test_engage_waits_while_runs_are_live_then_triggers_unforced` | [deploy.md](deploy.md) |
-| DL-086 | Removing a k3s manifest means adding its tombstone | active | 2026-09-01 | script: `deploy/k3s/cc-update.sh` | [deploy.md](deploy.md) |
+| DL-085 | An update waits for the agents to finish | active | 2026-09-13 | test: `tests/test_update_hold.py::test_engage_waits_while_runs_are_live_then_triggers_unforced` (+2 more) | [deploy.md](deploy.md) |
+| DL-086 | Removing a k3s manifest means adding its tombstone | active | 2026-09-01 | script: `deploy/k3s/cc-update.sh` (+1 more) | [deploy.md](deploy.md) |
 | DL-087 | @container must sit on a parent of whatever uses @3xl: | active | 2026-08-10 | test: `web/src/features/container-query-scope.test.ts` | [cockpit.md](cockpit.md) |
 | DL-088 | tsc does not delete removed sources from server-dist | active | undated | code structure only | [cockpit.md](cockpit.md) |
 | DL-089 | The cockpit hand-declares its own wire interfaces; the defence is a backend wire-shape test | active | undated | test: `tests/test_cc_routes_wire.py::test_tasks_list_carries_every_field_mapTask_reads` | [cockpit.md](cockpit.md) |
 | DL-090 | _COMPOSER_DISABLING is an allowlist, not a check; a new refusal code needs its own guard | active | 2026-07-29 | test: `tests/test_composer_refusal_codes.py::test_every_refusal_code_is_classified` | [cockpit.md](cockpit.md) |
-| DL-091 | The cockpit believes push frames, not hope | active | undated | test: `tests/test_discussion_stall.py::test_concluding_a_discussion_emits_conversation_ended` (per path; no universal guard) | [cockpit.md](cockpit.md) |
-| DL-092 | Secrets live only in .env | active | undated | script: `scripts/prepush-scan.sh`; test: `tests/test_prepush_scan.py::test_new_branch_carrying_a_shape_is_refused` | [process.md](process.md) |
+| DL-091 | The cockpit believes push frames, not hope | active | undated | no universal guard; per-path regression: test: `tests/test_discussion_stall.py::test_concluding_a_discussion_emits_conversation_ended` | [cockpit.md](cockpit.md) |
+| DL-092 | Secrets live only in .env | active | undated | script: `scripts/prepush-scan.sh` (+1 more) | [process.md](process.md) |
 | DL-093 | master is the only branch | active | undated | discipline only | [process.md](process.md) |
 | DL-094 | A release is three things: a CHANGELOG entry, a VERSION bump, and a tag | active | 2026-08-30 | test: `tests/test_version_file.py::test_version_file_matches_the_newest_changelog_release` | [process.md](process.md) |
 | DL-095 | Never change LITELLM_SALT_KEY or N8N_ENCRYPTION_KEY | active | undated | discipline only | [process.md](process.md) |
-| DL-096 | Never edit docs/vendor/ or hand-create anything in servers/ | active | undated | script: `scripts/vendor_docs_fetch.sh` | [process.md](process.md) |
-| DL-097 | A fresh database must reproduce the roster | active | undated | sql: `central_command/db/schema.sql:77,81,85,89,93,97,101,104` | [process.md](process.md) |
+| DL-096 | Never edit docs/vendor/ or hand-create anything in servers/ | active | undated | script: `scripts/vendor_docs_fetch.sh` (+1 more) | [process.md](process.md) |
+| DL-097 | A fresh database must reproduce the roster | active | undated | sql: `central_command/db/schema.sql:77,81,85,89,93,97,101,104` (+1 more) | [process.md](process.md) |
 | DL-098 | schema.sql is applied on a fresh database and by the updater at release, never at process start | active | undated | code structure only | [process.md](process.md) |
 | DL-099 | Tests must pin test_model=True when they hit resolve_model() | active | undated | test: `tests/test_no_live_model.py::test_a_built_live_models_request_is_refused_and_opens_no_socket` | [process.md](process.md) |
 | DL-100 | Assert on rows your test created, never on global counts | active | undated | code structure only | [process.md](process.md) |
-| DL-101 | One name everywhere: the historical identifiers are gone | active | 2026-08-29 | discipline only | [process.md](process.md) |
-| DL-102 | The great scrub: a whole-repo audit is itself a periodic decision | active | 2026-08-31 | discipline only | [process.md](process.md) |
-| DL-103 | The runtime's use of credentialed integrations clients is read-only | active | 2026-09-20 | test: `tests/test_runtime_integration_reads.py::test_runtime_reaches_only_read_functions_on_credentialed_clients` | [process.md](process.md) |
-| DL-104 | Graphiti's LLM client is upstream's; graphiti-llm is a plain alias and the built-in docstrings are the guidance | active | 2026-09-21 | test: `tests/test_graphiti_client.py::test_the_client_is_built_explicitly_and_issues_no_ddl` | [process.md](process.md) |
-| DL-105 | `setup.sh check` executes nothing, and it is the gate | active | 2026-09-23 | test: `tests/test_single_check_is_dry.py::test_nothing_check_can_reach_mutates_anything` | [process.md](process.md) |
-| DL-106 | The LLM catalog is entered in the LiteLLM UI; `.env` may declare it; register-models.py stays create-only | active | 2026-09-24 | test: `tests/test_register_models_upstream.py::test_a_row_the_operator_edited_is_never_touched` | [process.md](process.md) |
-| DL-107 | Every `.env` writer is a row in steps.tsv, and a phase's probe is what "done" means | active | 2026-10-01 | test: `tests/test_single_steps_schema.py` | [process.md](process.md) |
+| DL-101 | One name everywhere: the historical identifiers are gone | archived | 2026-08-29 | discipline only | [process.md](process.md) |
+| DL-102 | The great scrub: a whole-repo audit is itself a periodic decision | archived | 2026-08-31 | discipline only | [process.md](process.md) |
+| DL-103 | The runtime's use of credentialed integrations clients is read-only | active | 2026-09-20 | test: `tests/test_runtime_integration_reads.py::test_runtime_reaches_only_read_functions_on_credentialed_clients` (+3 more) | [process.md](process.md) |
+| DL-104 | Graphiti's LLM client is upstream's; graphiti-llm is a plain alias and the built-in docstrings are the guidance | active | 2026-09-21 | test: `tests/test_graph_ontology.py::test_each_docstring_is_byte_identical_to_the_upstream_builtin` (+4 more) | [process.md](process.md) |
+| DL-105 | `setup.sh check` executes nothing, and it is the gate | active | 2026-09-23 | test: `tests/test_single_check_is_dry.py::test_nothing_check_can_reach_mutates_anything` (+1 more) | [process.md](process.md) |
+| DL-106 | The LLM catalog is entered in the LiteLLM UI; `.env` may declare it; register-models.py stays create-only | active | 2026-09-24 | test: `tests/test_register_models_upstream.py::test_a_row_the_operator_edited_is_never_touched` (+2 more) | [process.md](process.md) |
+| DL-107 | Every `.env` writer is a row in steps.tsv, and a phase's probe is what "done" means | active | 2026-10-01 | test: `tests/test_single_steps_schema.py` (+1 more) | [process.md](process.md) |
 | DL-108 | One exit-code rule, FAIL over USERACTION over WARN, everywhere | active | 2026-10-01 | script: `deploy/env-lib.sh` | [process.md](process.md) |
-| DL-109 | A deployment carries no local patches; a defect travels back as a report | active | 2026-10-01 | test: `tests/test_single_report_redacts.py` | [process.md](process.md) |
-| DL-110 | A PreToolUse hook, not a sentence, holds a session to `.env` | active | 2026-10-01 | test: `tests/test_install_tree_hook.py` | [process.md](process.md) |
-| DL-111 | A step that printed FAIL is never recorded done, and a phase that began reads `started` | active | 2026-10-02 | test: `tests/test_single_driver_ledger.py` | [process.md](process.md) |
-| DL-112 | One run at a time, and the resume command is what clears a stale lock | active | 2026-10-02 | test: `tests/test_single_run_lock.py` | [process.md](process.md) |
-| DL-113 | The self-check proves the install as the app; it is readiness, never liveness, and its result is cached | active | 2026-10-02 | test: `tests/test_single_selfcheck_row.py` | [process.md](process.md) |
-| DL-114 | A report redacts as it collects, from a declared list, and the scan stays as the guard | active | 2026-10-02 | test: `tests/test_single_report_redacts.py` | [process.md](process.md) |
-| DL-115 | `boot` supervises three host processes, and a free port is the only proof of `stop` | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py` | [process.md](process.md) |
-| DL-116 | The Windows logon entry runs the resume command, in a retry loop | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py` | [process.md](process.md) |
-| DL-117 | The updater acquires before it merges, from a staged copy of the new release | active | 2026-10-02 | test: `tests/test_single_update_acquire.py` | [process.md](process.md) |
-| DL-118 | A deployment that predates the ledger is adopted by `./setup.sh`, never failed into a rollback | active | 2026-10-02 | test: `tests/test_single_update_acquire.py` | [process.md](process.md) |
-| DL-119 | Importing the bundled skills at install is a create-only step; an update refreshes and reviews them (DL-198) | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py` | [process.md](process.md) |
-| DL-120 | An update deploys what it acquired: images carry their inputs' hash, and a container runs the image its ref resolves to | active | 2026-10-02 | test: `tests/test_single_stack_catch_up.py` | [process.md](process.md) |
-| DL-121 | The operator's procedure is generated from the manifest, and documents link to it | active | 2026-10-02 | test: `tests/test_single_checklist.py` | [process.md](process.md) |
-| DL-122 | One file per manifest phase, and one helper that defines "the installer's source" | active | 2026-10-02 | test: `tests/test_single_phase_files.py` | [process.md](process.md) |
+| DL-109 | A deployment carries no local patches; a defect travels back as a report | active | 2026-10-01 | test: `tests/test_single_report_redacts.py` (+2 more) | [process.md](process.md) |
+| DL-110 | A PreToolUse hook, not a sentence, holds a session to `.env` | active | 2026-10-01 | test: `tests/test_install_tree_hook.py` (+1 more) | [process.md](process.md) |
+| DL-111 | A step that printed FAIL is never recorded done, and a phase that began reads `started` | active | 2026-10-02 | test: `tests/test_single_driver_ledger.py::test_a_step_that_failed_is_never_recorded_done_even_when_its_probe_holds` (+1 more) | [process.md](process.md) |
+| DL-112 | One run at a time, and the resume command is what clears a stale lock | active | 2026-10-02 | test: `tests/test_single_run_lock.py::test_a_live_holder_refuses_and_names_pid_command_and_start` (+2 more) | [process.md](process.md) |
+| DL-113 | The self-check proves the install as the app; it is readiness, never liveness, and its result is cached | active | 2026-10-02 | test: `tests/test_single_selfcheck_row.py::test_an_empty_spine_key_cannot_reach_boot` (+3 more) | [process.md](process.md) |
+| DL-114 | A report redacts as it collects, from a declared list, and the scan stays as the guard | active | 2026-10-02 | test: `tests/test_single_report_redacts.py` (+1 more) | [process.md](process.md) |
+| DL-115 | `boot` supervises three host processes, and a free port is the only proof of `stop` | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py::test_boot_writes_three_units_and_starts_them_through_systemd_then_stop_and_boot_again` (+3 more) | [process.md](process.md) |
+| DL-116 | The Windows logon entry runs the resume command, in a retry loop | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py::test_the_retry_script_runs_the_resume_command_until_it_can_stop` (+1 more) | [process.md](process.md) |
+| DL-117 | The updater acquires before it merges, from a staged copy of the new release | active | 2026-10-02 | test: `tests/test_single_update_acquire.py::test_a_mirror_missing_one_tag_stops_before_the_merge_with_nothing_changed` (+2 more) | [process.md](process.md) |
+| DL-118 | A deployment that predates the ledger is adopted by `./setup.sh`, never failed into a rollback | active | 2026-10-02 | test: `tests/test_single_update_acquire.py::test_a_pre_ledger_install_is_asked_to_run_setup_once` (+2 more) | [process.md](process.md) |
+| DL-119 | Importing the bundled skills at install is a create-only step; an update refreshes and reviews them (DL-198) | active | 2026-10-02 | test: `tests/test_single_boot_supervision.py::test_skills_are_create_only_and_a_new_bundled_folder_is_imported` (+1 more) | [process.md](process.md) |
+| DL-120 | An update deploys what it acquired: images carry their inputs' hash, and a container runs the image its ref resolves to | active | 2026-10-02 | test: `tests/test_single_local_image_label.py` (+2 more) | [process.md](process.md) |
+| DL-121 | The operator's procedure is generated from the manifest, and documents link to it | active | 2026-10-02 | test: `tests/test_single_checklist.py` (+2 more) | [process.md](process.md) |
+| DL-122 | One file per manifest phase, and one helper that defines "the installer's source" | active | 2026-10-02 | test: `tests/test_single_phase_files.py` (+1 more) | [process.md](process.md) |
 | DL-123 | No operator-facing line names a phase to run | active | 2026-10-02 | test: `tests/test_single_no_phase_hints.py` | [process.md](process.md) |
 | DL-124 | The self-check's mail row asks what the app does, not what the installer generated | active | 2026-10-02 | test: `tests/test_selfcheck.py` | [process.md](process.md) |
-| DL-125 | A row the phase never reached is pending, a pause is a gate, and every reporter line names a row | active | 2026-10-02 | test: `tests/test_single_driver_ledger.py` | [process.md](process.md) |
-| DL-126 | The import unpacks with the install's own Python, never `unzip` | active | 2026-10-02 | test: `tests/test_single_release_zip.py` | [process.md](process.md) |
+| DL-125 | A row the phase never reached is pending, a pause is a gate, and every reporter line names a row | active | 2026-10-02 | test: `tests/test_single_driver_ledger.py::test_a_failed_mint_key_leaves_every_later_app_row_pending` (+2 more) | [process.md](process.md) |
+| DL-126 | The import unpacks with the install's own Python, never `unzip` | active | 2026-10-02 | test: `tests/test_single_release_zip.py` (+1 more) | [process.md](process.md) |
 | DL-127 | The driver's hot paths start no program | active | 2026-10-02 | test: `tests/test_single_driver_forks.py` | [process.md](process.md) |
-| DL-128 | A test that drives the real installer has its own ceiling and cannot end the session | active | 2026-10-02 | script: `tests/installer_source.py` | [process.md](process.md) |
-| DL-129 | graphiti-core runs in the application process; its client is built explicitly and imported lazily | active | 2026-10-04 | test: `tests/test_graphiti_client.py::test_the_client_is_built_explicitly_and_issues_no_ddl` | [process.md](process.md) |
-| DL-130 | Graph ingestion is a durable queue in Postgres, strictly ordered per group, with no global cap | active | 2026-10-04 | test: `tests/test_graph_ingest.py::test_one_group_runs_in_order_and_groups_run_side_by_side` | [process.md](process.md) |
-| DL-131 | Graphiti.search() is never called; every search copies its recipe | active | 2026-10-04 | test: `tests/test_graphiti_search_never_called.py::test_no_graphiti_search_call_anywhere_in_the_package` | [process.md](process.md) |
-| DL-132 | The two graphiti-core fixes are patch files applied to the installed package, and the worker refuses to extract without them | active | 2026-10-04 | test: `tests/test_graph_ingest.py::test_without_the_carried_patches_nothing_is_extracted` | [process.md](process.md) |
-| DL-133 | The ontology is ten models whose docstrings are pinned by hash; only Person carries fields, all Optional | active | 2026-10-04 | test: `tests/test_graph_ontology.py::test_each_docstring_is_byte_identical_to_the_upstream_builtin` | [process.md](process.md) |
-| DL-134 | runtime/ may import the graph's reads and none of its write modules | active | 2026-10-04 | test: `tests/test_governance.py::test_the_graph_write_modules_are_banned_in_every_import_spelling` | [process.md](process.md) |
-| DL-135 | Deleting an episode is upstream's pinned rule, in one transaction of ours, through the group's queue | active | 2026-10-05 | test: `tests/test_graph_delete_episode.py::test_our_deletion_rule_is_pinned_to_the_installed_remove_episode` | [process.md](process.md) |
-| DL-136 | A deletion's preview is captured at propose time and compared, never executed from | active | 2026-10-05 | test: `tests/test_graph_delete_episode.py::test_the_executor_refuses_when_the_set_changed` | [process.md](process.md) |
-| DL-137 | Hand-made writes have the installed bulk path's shape, guarded against the package | active | 2026-10-05 | test: `tests/test_graph_write_shape.py::test_hand_made_writes_have_the_installed_bulk_shape` | [process.md](process.md) |
-| DL-138 | A date filter carries at most one parameter-bearing OR group per field | active | 2026-10-05 | test: `tests/test_graph_search_filters.py::test_a_date_field_never_has_two_parameter_carrying_or_groups` | [process.md](process.md) |
-| DL-139 | Graph search reranks through one optional alias, the best kind the environment has, and the installers probe which | active | 2026-10-05 | test: `tests/test_graph_rerank.py::test_the_chat_question_is_upstreams_verbatim` | [process.md](process.md) |
-| DL-140 | A reranker that fails raises; there is no fallback order and no time budget | active | 2026-10-05 | test: `tests/test_graph_rerank.py::test_an_http_failure_raises_and_is_classified_by_its_status` | [process.md](process.md) |
+| DL-128 | A test that drives the real installer has its own ceiling and cannot end the session | active | 2026-10-02 | script: `tests/installer_source.py` (+1 more) | [process.md](process.md) |
+| DL-129 | graphiti-core runs in the application process; its client is built explicitly and imported lazily | active | 2026-10-04 | test: `tests/test_graphiti_client.py::test_missing_configuration_is_refused_by_name` (+3 more) | [process.md](process.md) |
+| DL-130 | Graph ingestion is a durable queue in Postgres, strictly ordered per group, with no global cap | active | 2026-10-04 | test: `tests/test_graph_ingest.py::test_one_group_runs_in_order_and_groups_run_side_by_side` (+5 more) | [process.md](process.md) |
+| DL-131 | Graphiti.search() is never called; every search copies its recipe | active | 2026-10-04 | test: `tests/test_graphiti_search_never_called.py::test_no_graphiti_search_call_anywhere_in_the_package` (+2 more) | [process.md](process.md) |
+| DL-132 | The two graphiti-core fixes are patch files applied to the installed package, and the worker refuses to extract without them | active | 2026-10-04 | test: `tests/test_graphiti_patches.py::test_each_real_patch_applies_cleanly_or_is_already_applied_to_a_copy` (+5 more) | [process.md](process.md) |
+| DL-133 | The ontology is ten models whose docstrings are pinned by hash; only Person carries fields, all Optional | active | 2026-10-04 | test: `tests/test_graph_ontology.py::test_each_docstring_is_byte_identical_to_the_upstream_builtin` (+3 more) | [process.md](process.md) |
+| DL-134 | runtime/ may import the graph's reads and none of its write modules | active | 2026-10-04 | test: `tests/test_governance.py::test_the_graph_write_modules_are_banned_in_every_import_spelling` (+3 more) | [process.md](process.md) |
+| DL-135 | Deleting an episode is upstream's pinned rule, in one transaction of ours, through the group's queue | active | 2026-10-05 | test: `tests/test_graph_delete_episode.py::test_our_deletion_rule_is_pinned_to_the_installed_remove_episode` (+3 more) | [process.md](process.md) |
+| DL-136 | A deletion's preview is captured at propose time and compared, never executed from | active | 2026-10-05 | test: `tests/test_graph_delete_episode.py::test_the_executor_refuses_when_the_set_changed` (+3 more) | [process.md](process.md) |
+| DL-137 | Hand-made writes have the installed bulk path's shape, guarded against the package | active | 2026-10-05 | test: `tests/test_graph_write_shape.py::test_hand_made_writes_have_the_installed_bulk_shape` (+3 more) | [process.md](process.md) |
+| DL-138 | A date filter carries at most one parameter-bearing OR group per field | active | 2026-10-05 | test: `tests/test_graph_search_filters.py::test_a_date_field_never_has_two_parameter_carrying_or_groups` (+1 more) | [process.md](process.md) |
+| DL-139 | Graph search reranks through one optional alias, the best kind the environment has, and the installers probe which | active | 2026-10-05 | test: `tests/test_graphiti_client.py::test_search_uses_a_deep_copy_with_the_requested_limit` (+4 more) | [process.md](process.md) |
+| DL-140 | A reranker that fails raises; there is no fallback order and no time budget | active | 2026-10-05 | test: `tests/test_graph_rerank.py::test_an_http_failure_raises_and_is_classified_by_its_status` (+4 more) | [process.md](process.md) |
 | DL-141 | The deterministic model is test-only and the dry-run executor mode is removed | active | 2026-10-19 | test: `tests/test_run_modes.py` (+5 more) | [process.md](process.md) |
 | DL-142 | The read-version stale bounce at propose time is retired; world-state checks at execution replace it | active | 2026-10-19 | test: `tests/test_read_version_retired.py` | [process.md](process.md) |
 | DL-143 | A policy registry as a governed table was never built | active | 2026-10-19 | discipline only | [process.md](process.md) |
@@ -239,82 +252,84 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-148 | The dispatch token-budget valve and the enterprise LiteLLM features are not adopted | active | 2026-10-19 | test: `tests/test_token_budget_retired.py::test_no_token_budget_setting_remains_under_central_command` | [process.md](process.md) |
 | DL-149 | Embedding changes: per-vector stamps, a keyword-only freeze, a Postgres embedder record, a heartbeat re-embed, an in-place rewrite visible to live search and a second graph are rejected | active | 2026-10-19 | discipline only | [process.md](process.md) |
 | DL-150 | Provisional write-now-veto-later memory and Letta-style agent self-editing are rejected | active | 2026-08-01 | discipline only | [process.md](process.md) |
-| DL-151 | Graphiti communities, sagas, triplet writes and bulk ingest are not adopted; no fork of graphiti-core | active | 2026-10-04 | discipline only | [process.md](process.md) |
+| DL-151 | Graphiti communities, sagas, triplet writes and bulk ingest are not adopted; no fork of graphiti-core | archived | 2026-10-04 | discipline only | [process.md](process.md) |
 | DL-152 | The D16 guaranteed backlog trickle was never built; bulk dismissal drains a backlog by pattern | active | 2026-10-19 | discipline only | [process.md](process.md) |
 | DL-153 | The surveyed Exchange feature set and a provider abstraction are cut; Exchange is a native client at the seam | active | 2026-09-25 | discipline only | [process.md](process.md) |
 | DL-154 | Ready-made installers and air-gap tools are not adopted; the per-step ledger and one answer file won | active | 2026-09-23 | discipline only | [process.md](process.md) |
 | DL-155 | Flux GitOps for k3s is not adopted; the deployment is numbered manifests with a trigger-file updater | active | 2026-09-03 | discipline only | [process.md](process.md) |
-| DL-156 | Out-of-cockpit notification (email, push) is out of scope | active | 2026-10-19 | discipline only | [process.md](process.md) |
+| DL-156 | Out-of-cockpit notification (email, push) is out of scope | archived | 2026-10-19 | discipline only | [process.md](process.md) |
 | DL-157 | Build the control plane, adopt the runtime, buy nothing: why not OpenClaw, LangGraph, CrewAI and the rest | active | 2026-07-18 | discipline only | [process.md](process.md) |
 | DL-158 | The operator's earlier n8n project could not host the vision; n8n stays a façade, not the platform | active | 2026-07-18 | discipline only | [process.md](process.md) |
 | DL-159 | The nine-row failure-mode catalogue: assume the agent is wrong before assuming it is attacked | active | 2026-07-18 | discipline only | [process.md](process.md) |
 | DL-160 | The threat model is error, not malice, for a single operator; sandboxes, egress allowlists, a vault and anomaly detection were cut | active | 2026-07-19 | discipline only | [process.md](process.md) |
 | DL-161 | Pydantic AI plus Claude was chosen over the Claude Agent SDK, Temporal and microservices; the runtime stays swappable | active | 2026-07-19 | discipline only | [process.md](process.md) |
-| DL-162 | Approval attaches to what work does, never to how it was started; scheduled work is born disabled | active | 2026-07-23 | test: lever allowlist | [process.md](process.md) |
+| DL-162 | Approval attaches to what work does, never to how it was started; scheduled work is born disabled | active | 2026-07-23 | test: `tests/test_heartbeat.py::test_action_registry_parity_with_the_lever_allowlist` | [process.md](process.md) |
 | DL-163 | The orchestrator orchestrates: plan review on, stall detection not budgets, questions parked for the operator, capability gaps are answers | active | 2026-07-24 | discipline only | [process.md](process.md) |
 | DL-164 | Model facts live in one tracked file, applied by script; an absent cost is not zero; routing preferences and cost have fixed homes | superseded | 2026-07-26 | discipline only | [process.md](process.md) |
 | DL-165 | The default alias is a deployment row; a verified fallback is not exercised; self-hosted-as-policy is retired | active | 2026-07-27 | discipline only | [process.md](process.md) |
 | DL-166 | A skill is subject knowledge only; skills are database rows; every agent capability must be declared in the registry | active | 2026-07-26 | discipline only | [process.md](process.md) |
 | DL-167 | The coach has full read access, runs through the normal build path, and is triggered only by the operator | active | 2026-07-27 | discipline only | [process.md](process.md) |
-| DL-168 | A discussion stall is typed by who spoke last; nothing auto-concludes a discussion | active | 2026-07-27 | discipline only | [process.md](process.md) |
-| DL-169 | Knowledge layers: packs permit, skills instruct, the graph holds what is true, MCP is transport | active | 2026-07-29 | discipline only | [process.md](process.md) |
+| DL-168 | A discussion stall is typed by who spoke last; nothing auto-concludes a discussion | archived | 2026-07-27 | discipline only | [process.md](process.md) |
+| DL-169 | Knowledge layers: packs permit, skills instruct, the graph holds what is true, MCP is transport | archived | 2026-07-29 | discipline only | [process.md](process.md) |
 | DL-170 | Teaming doctrine: consult bounds are enforced by the runtime, handoffs go through task proposals, the roster grows on observed failure | active | 2026-07-29 | discipline only | [process.md](process.md) |
 | DL-171 | The graduation ladder: typed judgments, a pure pairing function, nothing tunes itself, and post-graduation starvation is a known blind spot | active | 2026-07-30 | discipline only | [process.md](process.md) |
 | DL-172 | Outage equivalence: an outage delays but never loses, degrades or requires re-creation | active | 2026-07-31 | test: `tests/test_outage_backoff.py` | [process.md](process.md) |
 | DL-173 | No ungoverned private agent memory: private graph partitions, every write gated, the scope visible on the proposal | active | 2026-08-01 | discipline only | [process.md](process.md) |
-| DL-174 | Graph inspection, activity coverage and bulk dismissal: read-only browser, session as the unit, pinned sets | active | 2026-08-09 | discipline only | [process.md](process.md) |
-| DL-175 | The graph auditor is read-only and judges from the raw rows; remediation is a separate agent and never re-ingests | active | 2026-08-19 | discipline only | [process.md](process.md) |
+| DL-174 | Graph inspection, activity coverage and bulk dismissal: read-only browser, session as the unit, pinned sets | archived | 2026-08-09 | discipline only | [process.md](process.md) |
+| DL-175 | The graph auditor is read-only and judges from the raw rows; remediation is a separate agent and never re-ingests | archived | 2026-08-19 | discipline only | [process.md](process.md) |
 | DL-176 | Staffing, onboarding and scaling: the human roster is graph data, capacity is read live, experts are hired only by the operator | active | 2026-08-21 | discipline only | [process.md](process.md) |
 | DL-177 | The onboarding tour is product machinery: each agent introduces itself through a real task and calibration goes through the gate | active | 2026-08-23 | discipline only | [process.md](process.md) |
-| DL-178 | The sources catalog is a Postgres table; claims carry versioned evidence pointers; staleness is a deterministic comparison | active | 2026-08-23 | discipline only | [process.md](process.md) |
+| DL-178 | The sources catalog is a Postgres table; claims carry versioned evidence pointers; staleness is a deterministic comparison | archived | 2026-08-23 | discipline only | [process.md](process.md) |
 | DL-179 | No deployment profile ships less than another: single-node gets the sandbox and crawler, with disclosed weaker isolation | active | 2026-08-21 | discipline only | [process.md](process.md) |
-| DL-180 | One tool installs and updates; a running process never replaces its own code; backups track reversibility | active | 2026-08-27 | discipline only | [process.md](process.md) |
+| DL-180 | One tool installs and updates; a running process never replaces its own code; backups track reversibility | archived | 2026-08-27 | discipline only | [process.md](process.md) |
 | DL-181 | Setup design details: the k3s driver shares the single-node output protocol, mirror mismatch is WARN or FAIL by host, `check` has an honest ceiling | active | 2026-09-23 | discipline only | [process.md](process.md) |
 | DL-182 | The graphiti-core migration: one LiteLLM key, failure classes without exhaustion, verification by recorded episode, benchmarked reranker | active | 2026-10-04 | discipline only | [process.md](process.md) |
 | DL-183 | The design-record index is generated from each record's own Status header, never hand-maintained | active | 2026-09-20 | test: `tests/test_design_record_headers.py::test_readme_matches_the_generator` | [process.md](process.md) |
 | DL-184 | Jira is a native client; an unconfigured client fails loudly and never routes to a webhook | active | 2026-09-26 | test: `tests/test_jira_client.py::test_unconfigured_client_fails_loudly_instead_of_routing_anywhere` | [process.md](process.md) |
-| DL-185 | docs/DESIGN.md is the frozen founding record; its vision, as-built facts and reasons each live in one other layer | active | 2026-10-21 | discipline only | [process.md](process.md) |
-| DL-186 | Task creation is a trigger, not a write and not a gate exemption; the star shape is reversed and every created task is bounded | active | 2026-10-24 | test: `tests/test_task_propose.py::test_task_create_is_no_longer_a_gated_write`, `tests/test_task_backstops.py::test_a_chain_of_agent_created_tasks_stops_at_the_cap` | [process.md](process.md) |
-| DL-187 | A gate override is the operator's standing rule: an override-decided write is a proposal the gateway decides, never operator agreement | active | 2026-10-26 | test: `tests/test_gate_overrides.py::test_the_executor_backstop_refuses_with_nothing_written`, `tests/test_gate_overrides.py::test_the_override_writer_has_one_caller_and_it_is_the_operators` | [process.md](process.md) |
-| DL-188 | A restart lands nothing FAILED; the startup landing re-parks what each orphan owes | active | 2026-10-27 | test: `tests/test_restart_landing.py::test_a_restart_lands_nothing_failed`, `tests/test_outage_requeue.py::test_the_orphan_sweep_lands_the_task_not_just_the_session` | [process.md](process.md) |
-| DL-189 | Outage doctrine: nothing is terminal from DOWN; the operator sees a banner, not a failure | active | 2026-10-27 | test: `tests/test_outage_doctrine.py::test_a_down_graph_search_parks_the_task_run_mid_turn`, `tests/test_turn_parking.py::test_a_chat_turn_whose_model_is_down_parks_and_lands_the_reply`, `tests/test_outage_backoff.py::test_a_task_backs_off_and_never_exhausts`, `tests/test_embedder_outage.py::test_a_create_node_proposal_parks_retry_pending_and_writes_nothing` | [process.md](process.md) |
-| DL-190 | A moved world is a NO that redrafts: typed, re-checked on a fresh read, bounded, and every redraft parks | active | 2026-10-28 | test: `tests/test_world_moved.py`, `tests/test_world_moved_limit.py`, `tests/test_world_moved_wire.py`, `tests/test_world_moved_e2e.py` | [process.md](process.md) |
-| DL-191 | A proposal the agent writes must state its confidence; the check lives in the runtime tier only | active | 2026-10-29 | test: `tests/test_confidence.py::test_an_agent_authored_draft_without_confidence_is_handed_back`, `tests/test_confidence.py::test_every_test_double_proposal_states_a_confidence` | [process.md](process.md) |
-| DL-192 | A coached charter edit is checked against the version its drafter was shown, and a gone Confluence page is world-moved | active | 2026-10-29 | test: `tests/test_world_moved.py::test_a_charter_moved_since_the_draft_lands_failed_world_moved_and_the_coach_redrafts`, `tests/test_world_moved.py::test_a_page_deleted_before_execution_is_world_moved_with_actual_none`, `tests/test_world_moved.py::test_a_jira_404_stays_a_plain_failure` | [process.md](process.md) |
-| DL-193 | Only an answered no-progress stall withdraws plan approval | active | 2026-10-29 | test: `tests/test_orchestration.py::test_an_answered_no_progress_stall_withdraws_plan_approval`, `tests/test_orchestration.py::test_an_answered_fan_out_stall_leaves_plan_approval_alone` | [process.md](process.md) |
-| DL-194 | The resume sweep drives every row under its own guard | active | 2026-10-29 | test: `tests/test_resume_sweep_isolation.py::test_a_raising_unit_in_any_worklist_is_recorded_and_the_rest_run`, `tests/test_resume_sweep_isolation.py::test_a_task_less_row_is_failed_loudly_and_the_good_row_still_resumes` | [process.md](process.md) |
-| DL-195 | propose_delete_episode parks on a graph outage like any live read | active | 2026-10-29 | test: `tests/test_graph_delete_episode.py::test_a_down_graph_parks_the_propose_tool_as_a_read`, `tests/test_outage_doctrine.py::test_a_down_graph_parks_a_deletion_task_and_the_resume_parks_the_proposal` | [process.md](process.md) |
-| DL-196 | The nightly k3s backup also keeps the root and cockpit environment files | active | 2026-10-29 | test: `tests/test_k3s_backup_env.py::test_each_env_file_is_copied_byte_for_byte_at_0600_in_a_0700_directory`, `tests/test_k3s_backup_env.py::test_a_missing_or_empty_env_file_fails_the_run_naming_it_and_no_value` | [process.md](process.md) |
-| DL-197 | A fact is an answer only when it cannot be derived; what only one deployment knows lives in the operator's overlay, never in the public tree | active | 2026-10-30 | test: `tests/test_no_instance_facts.py`, `tests/test_skill_overlay.py::test_every_field_has_a_marker_and_the_count_matches_the_tree`, `tests/test_skill_overlay.py::test_nothing_in_the_runtime_tier_imports_the_overlay`, `tests/test_k3s_compute_ssh.py::test_unset_fails_with_the_one_message_and_no_address`, `tests/test_k3s_unit_templates.py::test_the_release_that_introduces_the_templates_installs_nothing` | [process.md](process.md) |
-| DL-198 | A bundled doc follows the release when the operator did not change it; one they changed is decided, never auto-resolved | active | 2026-10-31 | test: `tests/test_skills_refresh_boundary.py`, `tests/test_skills_update_review.py` | [process.md](process.md) |
-| DL-199 | Reversibility is the server-held mark; the inbox shows it and the auditor never graduates an irreversible class | active | 2026-11-01 | test: `tests/test_graduation_bar.py`, `tests/test_overrides_wire.py` | [process.md](process.md) |
-| DL-200 | Re-run under current charter is a fresh session linked to the closed one | active | 2026-11-01 | test: `tests/test_session_rerun.py` | [process.md](process.md) |
-| DL-201 | The approval gate is the second step for mail and meetings; availability fails closed, a calendar delete is recoverable, and Jira issue types come from the instance | active | 2026-11-01 | test: `tests/test_jira_issue_types.py`, `tests/test_ea_calendar.py`, `tests/test_exchange.py` | [process.md](process.md) |
-| DL-202 | An embedder change is an accepted outage: the graph records its embedder and closes on a mismatch, the model changes in LiteLLM only, and the operator re-embeds offline behind a fresh dump | active | 2026-11-01 | test: `tests/test_embedder_record.py`, `tests/test_embedder_mismatch_outage.py`, `tests/test_graph_reembed.py`, `tests/test_graph_reembed_boundary.py` | [process.md](process.md) |
-| DL-203 | The relatedness lock holds while anything related is short of complete, and "related" includes the things a mail is about | active | 2026-11-02 | test: `tests/test_relatedness_hold.py`, `tests/test_ledger.py` | [process.md](process.md) |
-| DL-204 | The app holds no clock on a model call shorter than LiteLLM's and never re-sends; a resume is an orphan only if armed before this process started | active | 2026-11-03 | test: `tests/test_llm_client_clock.py` | [process.md](process.md) |
-| DL-205 | A façade answers a provider's refusal with 4xx and its own sentence; only a failure is 5xx | active | 2026-11-04 | test: `tests/test_n8n_workflows.py`, `tests/test_mail_read.py` | [process.md](process.md) |
+| DL-185 | docs/archive/DESIGN.md is the frozen founding record; its vision, as-built facts and reasons each live in one other layer | active | 2026-10-21 | discipline only | [process.md](process.md) |
+| DL-186 | Task creation is a trigger, not a write and not a gate exemption; the star shape is reversed and every created task is bounded | active | 2026-10-24 | test: `tests/test_task_propose.py::test_task_create_is_no_longer_a_gated_write` (+1 more) | [process.md](process.md) |
+| DL-187 | A gate override is the operator's standing rule: an override-decided write is a proposal the gateway decides, never operator agreement | active | 2026-10-26 | test: `tests/test_gate_overrides.py::test_the_executor_backstop_refuses_with_nothing_written` (+5 more) | [process.md](process.md) |
+| DL-188 | A restart lands nothing FAILED; the startup landing re-parks what each orphan owes | active | 2026-10-27 | test: `tests/test_restart_landing.py::test_a_restart_lands_nothing_failed` (+1 more) | [process.md](process.md) |
+| DL-189 | Outage doctrine: nothing is terminal from DOWN; the operator sees a banner, not a failure | active | 2026-10-27 | test: `tests/test_outage_doctrine.py::test_a_down_graph_search_parks_the_task_run_mid_turn` (+3 more) | [process.md](process.md) |
+| DL-190 | A moved world is a NO that redrafts: typed, re-checked on a fresh read, bounded, and every redraft parks | active | 2026-10-28 | test: `tests/test_world_moved.py` (+3 more) | [process.md](process.md) |
+| DL-191 | A proposal the agent writes must state its confidence; the check lives in the runtime tier only | active | 2026-10-29 | test: `tests/test_confidence.py::test_an_agent_authored_draft_without_confidence_is_handed_back` (+1 more) | [process.md](process.md) |
+| DL-192 | A coached charter edit is checked against the version its drafter was shown, and a gone Confluence page is world-moved | active | 2026-10-29 | test: `tests/test_world_moved.py::test_a_charter_moved_since_the_draft_lands_failed_world_moved_and_the_coach_redrafts` (+2 more) | [process.md](process.md) |
+| DL-193 | Only an answered no-progress stall withdraws plan approval | active | 2026-10-29 | test: `tests/test_orchestration.py::test_an_answered_no_progress_stall_withdraws_plan_approval` (+1 more) | [process.md](process.md) |
+| DL-194 | The resume sweep drives every row under its own guard | active | 2026-10-29 | test: `tests/test_resume_sweep_isolation.py::test_a_raising_unit_in_any_worklist_is_recorded_and_the_rest_run` (+1 more) | [process.md](process.md) |
+| DL-195 | propose_delete_episode parks on a graph outage like any live read | active | 2026-10-29 | test: `tests/test_graph_delete_episode.py::test_a_down_graph_parks_the_propose_tool_as_a_read` (+1 more) | [process.md](process.md) |
+| DL-196 | The nightly k3s backup also keeps the root and cockpit environment files | active | 2026-10-29 | test: `tests/test_k3s_backup_env.py::test_each_env_file_is_copied_byte_for_byte_at_0600_in_a_0700_directory` (+1 more) | [process.md](process.md) |
+| DL-197 | A fact is an answer only when it cannot be derived; what only one deployment knows lives in the operator's overlay, never in the public tree | active | 2026-10-30 | test: `tests/test_no_instance_facts.py` (+4 more) | [process.md](process.md) |
+| DL-198 | A bundled doc follows the release when the operator did not change it; one they changed is decided, never auto-resolved | active | 2026-10-31 | test: `tests/test_skills_refresh_boundary.py` (+3 more) | [process.md](process.md) |
+| DL-199 | Reversibility is the server-held mark; the inbox shows it and the auditor never graduates an irreversible class | active | 2026-11-01 | test: `tests/test_graduation_bar.py::test_auditor_approval_of_an_irreversible_capability_parks_for_the_operator` (+1 more) | [process.md](process.md) |
+| DL-200 | Re-run under current charter is a fresh session linked to the closed one | active | 2026-11-01 | test: `tests/test_session_rerun.py::test_a_rerun_closes_the_old_session_and_runs_under_the_current_charter` (+3 more) | [process.md](process.md) |
+| DL-201 | The approval gate is the second step for mail and meetings; availability fails closed, a calendar delete is recoverable, and Jira issue types come from the instance | active | 2026-11-01 | test: `tests/test_jira_issue_types.py::test_no_collection_of_issue_type_names_remains_in_the_package` (+3 more) | [process.md](process.md) |
+| DL-202 | An embedder change is an accepted outage: the graph records its embedder and closes on a mismatch, the model changes in LiteLLM only, and the operator re-embeds offline behind a fresh dump | active | 2026-11-01 | test: `tests/test_embedder_record.py::test_each_code_closes_the_read_with_its_reason` (+4 more) | [process.md](process.md) |
+| DL-203 | The relatedness lock holds while anything related is short of complete, and "related" includes the things a mail is about | active | 2026-11-02 | test: `tests/test_relatedness_hold.py` (+1 more) | [process.md](process.md) |
+| DL-204 | The app holds no clock on a model call shorter than LiteLLM's and never re-sends; a resume is an orphan only if armed before this process started | active | 2026-11-03 | test: `tests/test_llm_client_clock.py` (+2 more) | [process.md](process.md) |
+| DL-205 | A façade answers a provider's refusal with 4xx and its own sentence; only a failure is 5xx | active | 2026-11-04 | test: `tests/test_n8n_workflows.py` (+1 more) | [process.md](process.md) |
 | DL-206 | Every bolt pool tests an idle connection before reusing it | active | 2026-11-04 | test: `tests/test_bolt_liveness.py` | [process.md](process.md) |
 | DL-207 | A queued model completion is a busy slot, not an outage | active | 2026-11-05 | test: `tests/test_dependency_probes.py` | [process.md](process.md) |
-| DL-208 | The agent is told a mail's age, and the operator's confirmation is never a fact's time | active | 2026-11-06 | test: `tests/test_email_age_context.py`, `tests/test_policy.py` | [process.md](process.md) |
+| DL-208 | The agent is told a mail's age, and the operator's confirmation is never a fact's time | active | 2026-11-06 | test: `tests/test_email_age_context.py` (+1 more) | [process.md](process.md) |
 | DL-209 | A verification row is judged against its own episode's text, never its proposal's first | active | 2026-11-06 | test: `tests/test_graph_verification.py` | [process.md](process.md) |
 | DL-210 | An episode is drafted about the thing learned; the message that taught it is its source | active | 2026-11-12 | test: `tests/test_packs.py` | [process.md](process.md) |
-| DL-211 | The reviewer is shown what the graph already holds about a proposed episode's subject | active | 2026-11-12 | test: `tests/test_proposal_graph_known.py`, `web/src/features/decisions/DecisionsView.test.tsx` | [process.md](process.md) |
+| DL-211 | The reviewer is shown what the graph already holds about a proposed episode's subject | active | 2026-11-12 | test: `tests/test_proposal_graph_known.py` (+1 more) | [process.md](process.md) |
 | DL-212 | The triage agent confirms an assumption from a stating source or asks; it does not act on one | active | 2026-11-13 | test: `tests/test_triage_charter_assumptions.py` | [process.md](process.md) |
-| DL-213 | The graph is not the tracker's shadow: work in flight has one home, and the agent is asked once when a draft says otherwise | active | 2026-11-13 | test: `tests/test_route_check.py`, `tests/test_packs.py` | [process.md](process.md) |
-| DL-214 | An agent may read its own past sessions through a full-text index kept beside the record; never another agent's | active | 2026-11-15 | test: `tests/test_session_recall.py` | [process.md](process.md) |
-| DL-215 | A skill is corrected by the agent that used it, or by its session's reflection, always through the gate | active | 2026-11-15 | test: `tests/test_skill_corrections.py` | [process.md](process.md) |
-| DL-216 | A mail attachment reaches the agent as text or is named with why not; each file type has a measured reader | active | 2026-11-15 | test: `tests/test_mail_attachments.py`, `tests/test_mail_attachments_claim.py`, `tests/test_n8n_workflows.py`, `tests/test_exchange.py` | [process.md](process.md) |
-| DL-217 | A small note store beside the graph: two scopes, every write a gated reversible proposal, rendered into every fresh prompt | active | 2026-11-15 | test: `tests/test_agent_notes.py` | [process.md](process.md) |
-| DL-218 | The Executor writes the execution cursor around every action; an execution that cannot be shown untouched is never handed back for a fresh approval | active | 2026-11-16 | test: `tests/test_execution_cursor.py` | [process.md](process.md) |
-| DL-219 | Each action carries a control-plane key, and a retried create lands once only where the service enforces it or our own marker records it | active | 2026-11-16 | test: `tests/test_action_key.py`, `tests/test_n8n_workflows.py` | [process.md](process.md) |
-| DL-220 | A CPU-inference pod carries a memory limit and no CPU limit; contention is settled by requests, and speech runs one job at a time, unretried, per alias | active | 2026-11-18 | test: `tests/test_k3s_compute_cpu.py`, `tests/test_single_models_declaration.py` | [process.md](process.md) |
-| DL-221 | The executive assistant plans the operator's work, not only their attention; step 1 fixes the answered-question defect and takes the rationing out | active | 2026-11-18 | test: `tests/test_ea_report.py`, `tests/test_charter_templates.py`, `tests/test_heartbeat.py`, `tests/test_attention.py` | [process.md](process.md) |
-| DL-222 | Work is recorded in the tracker and the stored plan; the graph holds what remains when the work is closed | active | 2026-11-20 | test: `tests/test_tracker_vs_graph.py`, `tests/test_planning_fields.py`, `tests/test_ea.py`, `tests/test_packs.py` | [process.md](process.md) |
-| DL-223 | The LiteLLM config file is not an agent's write; the config-change capability is removed | active | 2026-11-21 | test: `tests/test_governance.py`, `tests/test_update_precondition.py`, `tests/test_k3s_removed.py` | [process.md](process.md) |
+| DL-213 | The graph is not the tracker's shadow: work in flight has one home, and the agent is asked once when a draft says otherwise | active | 2026-11-13 | test: `tests/test_route_check.py` (+1 more) | [process.md](process.md) |
+| DL-214 | An agent may read its own past sessions through a full-text index kept beside the record; never another agent's | active | 2026-11-15 | test: `tests/test_session_recall.py` (+2 more) | [process.md](process.md) |
+| DL-215 | A skill is corrected by the agent that used it, or by its session's reflection, always through the gate | active | 2026-11-15 | test: `tests/test_skill_corrections.py::test_the_widening_is_additive_idempotent_and_respects_history` (+5 more) | [process.md](process.md) |
+| DL-216 | A mail attachment reaches the agent as text or is named with why not; each file type has a measured reader | active | 2026-11-15 | test: `tests/test_mail_attachments.py` (+4 more) | [process.md](process.md) |
+| DL-217 | A small note store beside the graph: two scopes, every write a gated reversible proposal, rendered into every fresh prompt | active | 2026-11-15 | test: `tests/test_agent_notes.py::test_only_the_executor_writes_a_note` (+11 more) | [process.md](process.md) |
+| DL-218 | The Executor writes the execution cursor around every action; an execution that cannot be shown untouched is never handed back for a fresh approval | active | 2026-11-16 | test: `tests/test_execution_cursor.py::test_a_cancel_during_action_three_parks_interrupted_and_retry_now_runs_only_it` (+6 more) | [process.md](process.md) |
+| DL-219 | Each action carries a control-plane key, and a retried create lands once only where the service enforces it or our own marker records it | active | 2026-11-16 | test: `tests/test_action_key.py::test_the_key_names_the_action_by_its_absolute_index_and_only_while_it_runs` (+8 more) | [process.md](process.md) |
+| DL-220 | A CPU-inference pod carries a memory limit and no CPU limit; contention is settled by requests, and speech runs one job at a time, unretried, per alias | active | 2026-11-18 | test: `tests/test_k3s_compute_cpu.py::test_the_speech_container_has_a_memory_limit_and_no_cpu_limit` (+4 more) | [process.md](process.md) |
+| DL-221 | The executive assistant plans the operator's work, not only their attention; step 1 fixes the answered-question defect and takes the rationing out | active | 2026-11-18 | test: `tests/test_block_review.py` (+10 more) | [process.md](process.md) |
+| DL-222 | Work is recorded in the tracker and the stored plan; the graph holds what remains when the work is closed | active | 2026-11-20 | test: `tests/test_tracker_vs_graph.py` (+3 more) | [process.md](process.md) |
+| DL-223 | The LiteLLM config file is not an agent's write; the config-change capability is removed | active | 2026-11-21 | test: `tests/test_governance.py` (+2 more) | [process.md](process.md) |
 | DL-224 | The cockpit is owned code; dead inherited code is removed, not quarantined | active | 2026-11-21 | code structure only | [process.md](process.md) |
 | DL-225 | LiteLLM caches in its own memory; the Redis that held the cache is removed | active | 2026-11-21 | test: `tests/test_litellm_cache_call_types.py::test_the_response_cache_is_in_the_proxys_memory` | [process.md](process.md) |
-| DL-226 | Per-model LiteLLM values live on the proxy's rows; the k3s policy layer is cut | active | 2026-11-21 | test: `tests/test_single_models_declaration.py::test_k3s_declaration_is_the_role_aliases_only` | [process.md](process.md) |
-| DL-227 | The model admission gate is pydantic-ai's limiter; the alias-pool spec stays ours | active | 2026-11-21 | test: `tests/test_model_concurrency.py::test_the_live_seam_puts_the_gate_inside_the_window_wrapper` | [process.md](process.md) |
-| DL-228 | pgweb is on every deployment: the single-node profile ships it, on by default, optional by switch | active | 2026-11-21 | test: `tests/test_single_resolve_carry_forward.py::test_a_mirror_without_pgweb_names_the_image_and_the_switch` | [process.md](process.md) |
-| DL-229 | A conversation can be renamed; the name is a display label on its own column, never the record | active | 2026-11-21 | test: `tests/test_session_rename.py::test_a_rename_leaves_the_transcript_untouched` | [process.md](process.md) |
+| DL-226 | Per-model LiteLLM values live on the proxy's rows; the k3s policy layer is cut | active | 2026-11-21 | test: `tests/test_single_models_declaration.py::test_k3s_declaration_is_the_role_aliases_only` (+2 more) | [process.md](process.md) |
+| DL-227 | The model admission gate is pydantic-ai's limiter; the alias-pool spec stays ours | active | 2026-11-21 | test: `tests/test_model_concurrency.py::test_the_live_seam_puts_the_gate_inside_the_window_wrapper` (+5 more) | [process.md](process.md) |
+| DL-228 | pgweb is on every deployment: the single-node profile ships it, on by default, optional by switch | active | 2026-11-21 | test: `tests/test_single_resolve_carry_forward.py::test_a_mirror_without_pgweb_names_the_image_and_the_switch` (+5 more) | [process.md](process.md) |
+| DL-229 | A conversation can be renamed; the name is a display label on its own column, never the record | active | 2026-11-21 | test: `tests/test_session_rename.py::test_a_rename_leaves_the_transcript_untouched` (+3 more) | [process.md](process.md) |
+
+<!-- END GENERATED INDEX -->

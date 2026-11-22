@@ -12,13 +12,13 @@ materiality allowlist, and the Postgres spine. See
 - **Why:** `central_command/events/log.py` (module docstring) records the
   origin: "Before M8 there were two half-logs: an `audit_event` table
   nothing wrote to, and an in-process pub/sub whose events died with the
-  process." `docs/DESIGN.md` states the architectural intent (one durable
+  process." `docs/archive/DESIGN.md` states the architectural intent (one durable
   append-only event log as the spine for proactivity, collaboration, audit
   and observability). No calendar date is attached to M8 in-repo, and the
   CHANGELOG's tracked window (from 2026-08-27) has no "M8"/"event log"
   heading, so the milestone predates the CHANGELOG's coverage.
 - **Enforced:** test: `tests/test_eventlog.py::test_decision_is_logged_before_execution`
-- **Source:** code comment `central_command/events/log.py:1-18`; docs/DESIGN.md §2 ("Eventing substrate")
+- **Source:** code comment `central_command/events/log.py:1-18`; docs/archive/DESIGN.md §2 ("Eventing substrate")
 
 ### DL-037 — ActionSpec.material is an explicit, non-authorising and self-recording allowlist
 
@@ -43,7 +43,7 @@ materiality allowlist, and the Postgres spine. See
   `proposal.created` landing after the proposal's save is not a violation of
   the emit-before rule.
 - **Enforced:** code structure only — `central_command/events/log.py`; no source-walk test found guarding against a second write path to Postgres/SSE
-- **Source:** docs/DESIGN.md §2 ("Eventing substrate")
+- **Source:** docs/archive/DESIGN.md §2 ("Eventing substrate")
 
 ### DL-039 — asyncio.Event at module scope is loop-bound; use a flag plus a queue sentinel
 

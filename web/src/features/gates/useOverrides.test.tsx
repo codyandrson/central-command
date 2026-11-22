@@ -6,7 +6,7 @@ import { useOverrides } from './useOverrides';
 const gw = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 vi.mock('@/contexts/GatewayContext', () => ({ useGateway: () => gw.value }));
 
-describe('useOverrides subscription (R22)', () => {
+describe('useOverrides subscription', () => {
   it('does not subscribe when neither agentId nor capability is set', () => {
     const subscribe = vi.fn(() => () => {});
     gw.value = { rpc: vi.fn().mockResolvedValue({ overrides: [] }), subscribe };

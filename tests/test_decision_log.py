@@ -1,281 +1,174 @@
-"""Guards `docs/decisions/` — the log that explains WHY a rule exists, not
-what it says.
+"""Guards the STRUCTURE and the citations of `docs/decisions/`, not its wording.
 
-The log's whole value is that its citations are real: a `Rule:` link that
-points at a bullet the target file no longer has, or an `Enforced: test:`
-that names a function nobody wrote, is worse than no citation at all — it
-tells a reader "checked" about something nobody checked. This walks every
-entry in every `docs/decisions/*.md` area file and verifies, by reading the
-actual files on disk, that:
+The log explains why a rule exists; its value is that its citations are real.
+A test it names that nobody wrote, or a file it cites that is gone, tells a
+reader "checked" about something nobody checked. So this reads the area files
+(through `scripts/gen_decision_index.py`, the parser that builds the index)
+and checks, against the files on disk:
 
-- entry ids are the six required bullets, a known `Status:`, a parseable
-  `Date:`, and are numbered DL-001, DL-002, ... with no gaps or repeats
-  (in the order the README's index lists them);
-- every `Rule:` link names a file that exists, and the quoted lead phrase is
-  a verbatim (whitespace-normalised) substring of that file — so a phrase
-  that gets edited or removed from AGENTS.md/.claude/rules/*.md fails this
-  test instead of silently going stale;
-- every `Enforced: test:` path exists and actually defines the named test
-  function (a source-level check, not a pytest collection run — this suite
-  must not need a database);
-- every `Enforced: script:`/`code structure only` backticked path exists;
-- the README's index table lists exactly the ids and titles the area files
-  define, in the same order.
+- ids are unique, run DL-001, DL-002, ... with no gaps, and ascend in
+  area-file order (an archived entry keeps its id through its stub);
+- every entry carries the six required bullets, an allowed `Status:` and a
+  parseable `Date:`;
+- a superseded entry names a successor that exists, and a `Supersedes:`
+  names an entry that exists;
+- every test an `Enforced:` bullet names exists, file and function;
+- every repo file an `Enforced:` or `Source:` bullet cites exists, and every
+  `Rule:` link points at a file that exists;
+- the README's index table is what the generator produces (`--check`).
+
+It does NOT compare an entry's quoted `Rule:` phrase with the rule text:
+rewording a rule must not break the suite. Each check loops over every entry
+and reports every failure at once.
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
-DECISIONS_DIR = ROOT / "docs" / "decisions"
-README = DECISIONS_DIR / "README.md"
+sys.path.insert(0, str(ROOT / "scripts"))
 
-AREA_FILES = [
-    "trust-gate.md",
-    "runtime.md",
-    "events-data.md",
-    "ingest-integrations.md",
-    "graph.md",
-    "models.md",
-    "deploy.md",
-    "cockpit.md",
-    "process.md",
-]
+import gen_decision_index as gdi  # noqa: E402
+
+DECISIONS_DIR = gdi.DECISIONS_DIR
+ARCHIVE = ROOT / "docs" / "archive" / "decisions-archived.md"
 
 REQUIRED_BULLETS = ["Status", "Date", "Rule", "Why", "Enforced", "Source"]
-VALID_STATUSES = {"active", "superseded", "retired"}
-
-ENTRY_HEADING_RE = re.compile(r"^### (DL-\d+) — (.+)$", re.MULTILINE)
-BULLET_RE = re.compile(r"^- \*\*([^:*]+):\*\*\s?(.*)$")
+VALID_STATUSES = {"active", "superseded", "retired", "archived"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+ID_RE = re.compile(r"DL-\d{3}")
+
+# A backticked token that names a repo file: a path with a known extension,
+# optionally followed by `::function` or `:line[,line]`.
+PATH_RE = re.compile(
+    r"^([\w.-]+(?:/[\w.*-]+)+\.(?:py|sh|yaml|yml|md|sql|ts|tsx|js|json|txt|toml))"
+    r"(?:::(\w+))?(?::[\d,-]+)?$"
+)
+
+ENTRIES = gdi.load_entries()
 
 
-def _normalize(text: str) -> str:
-    """Collapse whitespace/newlines so a wrapped bullet still substring-matches
-    a one-line (or differently wrapped) source sentence."""
-    return re.sub(r"\s+", " ", text).strip()
+def _resolve(rel: str) -> Path | None:
+    """A cited path, resolved against the repo root or, for a path written
+    relative to the package (`runtime/tools.py`), against `central_command/`.
+    None for a path outside the repo (a third-party module such as
+    `pydantic_ai/concurrency.py`), which this test does not check."""
+    first = rel.split("/", 1)[0]
+    for base in (ROOT, ROOT / "central_command"):
+        if (base / first).exists():
+            return base / rel
+    return None
 
 
-def _split_entries(md_text: str) -> list[tuple[str, str, str]]:
-    """Return (id, title, body) for every '### DL-NNN — title' block."""
-    matches = list(ENTRY_HEADING_RE.finditer(md_text))
-    entries = []
-    for i, m in enumerate(matches):
-        start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(md_text)
-        entries.append((m.group(1), m.group(2).strip(), md_text[start:end]))
-    return entries
+def _defines(path: Path, name: str) -> bool:
+    return bool(re.search(rf"^\s*(?:async\s+)?def {re.escape(name)}\s*\(", path.read_text(encoding="utf-8"), re.MULTILINE))
 
 
-def _parse_bullets(body: str) -> dict[str, str]:
-    """Parse the '- **Label:** text' bullets of one entry, folding indented
-    continuation lines into the preceding bullet's text."""
-    bullets: dict[str, str] = {}
-    order: list[str] = []
-    current = None
-    for line in body.splitlines():
-        m = BULLET_RE.match(line)
-        if m:
-            label, rest = m.group(1).strip(), m.group(2)
-            current = label
-            bullets[current] = rest
-            order.append(current)
-        elif current is not None and line.startswith("  ") and line.strip():
-            bullets[current] += " " + line.strip()
-        elif line.strip() == "":
-            current = None
-    return bullets
+def test_the_generator_and_the_area_files_agree_on_the_entry_list():
+    assert len(ENTRIES) > 200, f"expected the whole log, parsed {len(ENTRIES)} entries"
+    assert all(e.area in gdi.AREA_FILES for e in ENTRIES)
 
 
-def _all_entries() -> list[tuple[str, str, str, dict[str, str], str]]:
-    """(id, title, area_file, bullets, raw_body) for every entry, across all
-    area files, in AREA_FILES order (which is also the required id order)."""
-    out = []
-    for area in AREA_FILES:
-        path = DECISIONS_DIR / area
-        assert path.exists(), f"docs/decisions/{area} is listed as an area but does not exist"
-        text = path.read_text(encoding="utf-8")
-        for entry_id, title, body in _split_entries(text):
-            out.append((entry_id, title, area, _parse_bullets(body), body))
-    return out
-
-
-ENTRIES = _all_entries()
-
-
-def test_entry_ids_are_contiguous_from_dl_001_with_no_repeats():
-    ids = [int(e[0].split("-")[1]) for e in ENTRIES]
-    assert len(ids) == len(set(ids)), (
-        f"duplicate DL- ids found: {sorted({i for i in ids if ids.count(i) > 1})}"
-    )
-    expected = list(range(1, len(ids) + 1))
-    assert ids == expected, (
+def test_ids_are_unique_contiguous_and_ascend_in_area_file_order():
+    ids = [e.number for e in ENTRIES]
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    assert not dupes, f"duplicate DL- ids: {dupes}"
+    assert ids == list(range(1, len(ids) + 1)), (
         "DL- ids must run DL-001, DL-002, ... with no gaps, in area-file order "
-        f"(trust-gate, runtime, events-data, ingest-integrations, graph, models, "
-        f"deploy, cockpit, process); got {ids[:10]}... expected {expected[:10]}..."
+        f"({', '.join(gdi.AREA_FILES)}); first out of place: "
+        f"{next((f'DL-{i:03d} at position {n + 1}' for n, i in enumerate(ids) if i != n + 1), None)}"
     )
 
 
-@pytest.mark.parametrize("entry_id,title,area,bullets,body", ENTRIES, ids=[e[0] for e in ENTRIES])
-def test_entry_has_all_required_bullets(entry_id, title, area, bullets, body):
-    missing = [b for b in REQUIRED_BULLETS if b not in bullets]
-    assert not missing, (
-        f"{entry_id} ({area}) is missing required bullet(s) {missing} — "
-        f"every entry needs Status, Date, Rule, Why, Enforced, Source"
-    )
-
-
-@pytest.mark.parametrize("entry_id,title,area,bullets,body", ENTRIES, ids=[e[0] for e in ENTRIES])
-def test_entry_status_is_in_vocabulary(entry_id, title, area, bullets, body):
-    if "Status" not in bullets:
-        pytest.skip("missing-bullet case covered by test_entry_has_all_required_bullets")
-    status = bullets["Status"].strip()
-    assert status in VALID_STATUSES, (
-        f"{entry_id} ({area}) has Status {status!r}, must be one of {sorted(VALID_STATUSES)}"
-    )
-
-
-@pytest.mark.parametrize("entry_id,title,area,bullets,body", ENTRIES, ids=[e[0] for e in ENTRIES])
-def test_entry_date_is_iso_or_undated(entry_id, title, area, bullets, body):
-    if "Date" not in bullets:
-        pytest.skip("missing-bullet case covered by test_entry_has_all_required_bullets")
-    date = bullets["Date"].strip()
-    assert date == "undated" or DATE_RE.match(date), (
-        f"{entry_id} ({area}) has Date {date!r}, must be 'undated' or YYYY-MM-DD"
-    )
-
-
-def _rule_targets(rule_text: str) -> list[tuple[Path, str]]:
-    """Extract (target_file, quoted_phrase) pairs from a Rule: bullet. A
-    '(recorded here)' rule cites no external file and returns []."""
-    if rule_text.strip().startswith("(recorded here)"):
-        return []
-    targets = []
-    # [label](relative/link) — "quoted phrase"
-    for link_match in re.finditer(r"\[[^\]]+\]\(([^)]+)\)", rule_text):
-        rel = link_match.group(1)
-        # links are written relative to docs/decisions/
-        target = (DECISIONS_DIR / rel).resolve()
-        remainder = rule_text[link_match.end():]
-        # The quote may itself contain nested straight quotes (e.g. a rule
-        # that quotes a phrase like "the operator"), so take everything
-        # between the FIRST and LAST '"' rather than stopping at the first
-        # closing quote.
-        first = remainder.find('"')
-        last = remainder.rfind('"')
-        if first != -1 and last > first:
-            targets.append((target, remainder[first + 1:last]))
-    return targets
-
-
-@pytest.mark.parametrize("entry_id,title,area,bullets,body", ENTRIES, ids=[e[0] for e in ENTRIES])
-def test_rule_link_target_exists_and_quote_is_verbatim(entry_id, title, area, bullets, body):
-    if "Rule" not in bullets:
-        pytest.skip("missing-bullet case covered by test_entry_has_all_required_bullets")
-    rule_text = bullets["Rule"]
-    for target, quote in _rule_targets(rule_text):
-        assert target.exists(), (
-            f"{entry_id} ({area}): Rule: link target {target} does not exist"
-        )
-        content = _normalize(target.read_text(encoding="utf-8"))
-        needle = _normalize(quote)
-        assert needle in content, (
-            f"{entry_id} ({area}): Rule: quoted phrase {quote!r} is not a verbatim "
-            f"substring of {target.relative_to(ROOT)} (whitespace-normalised)"
-        )
-
-
-def _backticked_paths(text: str) -> list[str]:
-    return re.findall(r"`([^`]+)`", text)
-
-
-def _test_targets(enforced_text: str) -> list[tuple[str, str]]:
-    """Extract (relative_path, function_name) for every 'test: `path::func`'
-    reference in an Enforced: bullet. A path with no '::func' (e.g. a whole
-    test file, not one function) is skipped by design of the entry writer —
-    but if one is given, it is checked."""
-    out = []
-    for m in re.finditer(r"test:\s*`([^`]+)`", enforced_text):
-        ref = m.group(1)
-        if "::" in ref:
-            path, func = ref.split("::", 1)
-            out.append((path, func))
-    return out
-
-
-@pytest.mark.parametrize("entry_id,title,area,bullets,body", ENTRIES, ids=[e[0] for e in ENTRIES])
-def test_enforced_test_paths_and_functions_exist(entry_id, title, area, bullets, body):
-    if "Enforced" not in bullets:
-        pytest.skip("missing-bullet case covered by test_entry_has_all_required_bullets")
-    enforced_text = bullets["Enforced"]
-    for rel_path, func_name in _test_targets(enforced_text):
-        target = (ROOT / rel_path).resolve()
-        assert target.exists(), (
-            f"{entry_id} ({area}): Enforced test path {rel_path!r} does not exist"
-        )
-        source = target.read_text(encoding="utf-8")
-        pattern = re.compile(
-            rf"^\s*(?:async\s+)?def {re.escape(func_name)}\s*\(", re.MULTILINE
-        )
-        assert pattern.search(source), (
-            f"{entry_id} ({area}): Enforced test names `{func_name}` but "
-            f"{rel_path} defines no such function"
-        )
-
-
-@pytest.mark.parametrize("entry_id,title,area,bullets,body", ENTRIES, ids=[e[0] for e in ENTRIES])
-def test_enforced_script_and_structure_paths_exist(entry_id, title, area, bullets, body):
-    if "Enforced" not in bullets:
-        pytest.skip("missing-bullet case covered by test_entry_has_all_required_bullets")
-    enforced_text = bullets["Enforced"]
-    kind = enforced_text.strip().split(" ", 1)[0].rstrip(":").lower()
-    if kind not in ("script", "code"):
-        return
-    # Only a backticked token that plainly names a real repo FILE is checked:
-    # it must end in a recognised extension (with an optional ":line" or
-    # ":line,line,..." suffix). This deliberately excludes function/attribute
-    # references (`gateway.executor.execute()`, `runtime/tools._validate_proposal`),
-    # shell fragments (`grep -qx`), and IP:port strings
-    # (`127.0.0.1:5442/4000/8000`) — none of those are filesystem paths, even
-    # though some contain a "/".
-    path_re = re.compile(
-        r"^([\w./-]+\.(?:py|sh|yaml|yml|md|sql|ts|tsx|js|json))(?::[\d,]+)?$"
-    )
-    for backticked in _backticked_paths(enforced_text):
-        m = path_re.match(backticked)
-        if not m:
+def test_every_entry_has_the_required_bullets_an_allowed_status_and_a_date():
+    problems = []
+    for e in ENTRIES:
+        missing = [b for b in REQUIRED_BULLETS if b not in e.bullets]
+        if missing:
+            problems.append(f"{e.id} ({e.area}): missing {missing}")
             continue
-        candidate = (ROOT / m.group(1)).resolve()
-        assert candidate.exists(), (
-            f"{entry_id} ({area}): Enforced {kind} path `{backticked}` does not exist"
-        )
+        status = e.bullets["Status"].strip()
+        if status not in VALID_STATUSES:
+            problems.append(f"{e.id}: Status {status!r} not in {sorted(VALID_STATUSES)}")
+        date = e.bullets["Date"].strip()
+        if date != "undated" and not DATE_RE.match(date):
+            problems.append(f"{e.id}: Date {date!r} is not YYYY-MM-DD or 'undated'")
+    assert not problems, "\n".join(problems)
 
 
-def test_readme_index_matches_area_file_entries():
-    readme_text = README.read_text(encoding="utf-8")
-    table_rows = re.findall(
-        r"^\|\s*(DL-\d+)\s*\|\s*(.+?)\s*\|\s*\w+\s*\|", readme_text, re.MULTILINE
-    )
-    assert table_rows, "README.md has no parseable index table rows"
+def test_every_archived_stub_has_its_full_entry_in_the_archive():
+    stubs = [e for e in ENTRIES if e.archived_link]
+    if not stubs:
+        return
+    assert ARCHIVE.exists(), f"{len(stubs)} archived stubs but {ARCHIVE.relative_to(ROOT)} is missing"
+    archived_ids = {e.id for e in gdi.split_entries(ARCHIVE.read_text(encoding="utf-8"), "archive")}
+    problems = [f"{e.id}: stub in {e.area} has no full entry in the archive" for e in stubs if e.id not in archived_ids]
+    problems += [f"{e.id}: stub link {e.archived_link!r} does not resolve"
+                 for e in stubs if not (DECISIONS_DIR / e.archived_link.split("#")[0]).exists()]
+    stray = archived_ids - {e.id for e in stubs}
+    problems += [f"{i}: in the archive but has no stub in an area file" for i in sorted(stray)]
+    assert not problems, "\n".join(problems)
 
-    readme_ids = [r[0] for r in table_rows]
-    readme_titles = {r[0]: r[1] for r in table_rows}
 
-    entry_ids = [e[0] for e in ENTRIES]
-    entry_titles = {e[0]: e[1] for e in ENTRIES}
+def test_superseded_entries_name_successors_that_exist():
+    known = {e.id for e in ENTRIES}
+    problems = []
+    for e in ENTRIES:
+        if e.bullets.get("Status", "").strip() == "superseded":
+            successors = ID_RE.findall(e.bullets.get("Superseded-by", ""))
+            if not successors:
+                problems.append(f"{e.id}: superseded but carries no Superseded-by: DL-nnn")
+            problems += [f"{e.id}: Superseded-by {s} does not exist" for s in successors if s not in known]
+        for s in ID_RE.findall(e.bullets.get("Supersedes", "")):
+            if s not in known:
+                problems.append(f"{e.id}: Supersedes {s} does not exist")
+    assert not problems, "\n".join(problems)
 
-    assert readme_ids == entry_ids, (
-        "README.md's index table order/ids do not match the area files' entries.\n"
-        f"README:      {readme_ids}\n"
-        f"Area files:  {entry_ids}"
-    )
-    mismatched = [
-        eid for eid in entry_ids if _normalize(readme_titles[eid]) != _normalize(entry_titles[eid])
-    ]
-    assert not mismatched, (
-        f"README.md's titles differ from the area files' titles for: {mismatched}"
-    )
+
+def test_every_test_an_entry_names_exists():
+    """`test: path::name`, and the `::name` shorthand that continues the path
+    before it, must name a function the file defines (a source check; no
+    collection run, so this needs no database)."""
+    problems = []
+    for e in ENTRIES:
+        last = None
+        for tok in re.findall(r"`([^`]+)`", e.bullets.get("Enforced", "")):
+            m = PATH_RE.match(tok)
+            if m:
+                last, func = m.group(1), m.group(2)
+            elif tok.startswith("::") and last and re.fullmatch(r"::\w+", tok):
+                func = tok[2:]
+            else:
+                continue
+            path = _resolve(last)
+            if path is None or "*" in last or not path.exists() or not func:
+                continue  # existence is the next test's job
+            if not _defines(path, func):
+                problems.append(f"{e.id}: Enforced names `{last}::{func}`, which {last} does not define")
+    assert not problems, "\n".join(problems)
+
+
+def test_every_file_an_entry_cites_exists():
+    """Enforced and Source are citations and must resolve. Why and the notes
+    may name a file that was removed, as history, so they are not checked."""
+    problems = []
+    for e in ENTRIES:
+        for label in ("Enforced", "Source"):
+            for tok in re.findall(r"`([^`]+)`", e.bullets.get(label, "")):
+                m = PATH_RE.match(tok)
+                if not m or "*" in m.group(1):
+                    continue
+                path = _resolve(m.group(1))
+                if path is not None and not path.exists():
+                    problems.append(f"{e.id}: {label} cites `{tok}`, which does not exist")
+        for rel in re.findall(r"\]\(([^)#\s]+)", e.bullets.get("Rule", "")):
+            if not rel.startswith("http") and not (DECISIONS_DIR / rel).exists():
+                problems.append(f"{e.id}: Rule links {rel!r}, which does not exist")
+    assert not problems, "\n".join(problems)
+
+
+def test_the_index_is_what_the_generator_produces():
+    assert gdi.main(["--check"]) == 0, "re-run `python scripts/gen_decision_index.py`"

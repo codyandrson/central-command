@@ -13,7 +13,7 @@ vi.mock('dotenv/config', () => ({}));
 
 const READ_ONLY = { ok: false, error: 'the file browser is read-only' };
 
-describe('R18 / COCKPIT-028 file browser read-only guard', () => {
+describe('file browser read-only guard', () => {
   let homeDir: string;
   let ws: string;
 

@@ -4,7 +4,7 @@
 > packages and what each holds, the lifecycles, the spine mechanics, the cockpit
 > and the deploy surfaces. *Why* the product exists and what it must do is the
 > [PRD](PRD.md) (its §3 is the glossary, its §4 the requirements); this file
-> states only how, and cites the PRD for the rest. [`DESIGN.md`](DESIGN.md) is
+> states only how, and cites the PRD for the rest. [`DESIGN.md`](archive/DESIGN.md) is
 > the *founding* design, frozen; where it and this file disagree, the code and
 > this file win.
 >
@@ -2266,4 +2266,4 @@ another D-number.
 | What is unfinished | [`ROADMAP.md`](ROADMAP.md) |
 | Queue operations | [`QUEUE.md`](QUEUE.md) |
 | What changed, release by release | [`CHANGELOG.md`](../CHANGELOG.md) |
-| The founding intent | [`DESIGN.md`](DESIGN.md) |
+| The founding intent | [`archive/DESIGN.md`](archive/DESIGN.md) |

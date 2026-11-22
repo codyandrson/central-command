@@ -6,9 +6,9 @@
 > where it disagrees with the code the code wins. Each layer of the
 > documentation owns its own content:
 >
-> - the vision, who it is for, and what it must do: [`PRD.md`](PRD.md);
-> - how the system is built, as built: [`ARCHITECTURE.md`](ARCHITECTURE.md);
-> - why each rule exists: [`decisions/`](decisions/README.md).
+> - the vision, who it is for, and what it must do: [`PRD.md`](../PRD.md);
+> - how the system is built, as built: [`ARCHITECTURE.md`](../ARCHITECTURE.md);
+> - why each rule exists: [`decisions/`](../decisions/README.md).
 >
 > A note headed **Superseded** marks a founding position that later changed and
 > names the requirement or decision-log entry that replaced it; the founding
@@ -49,21 +49,21 @@ title — implemented, diverged, partial, superseded, or open, with a pointer
 to what actually shipped. `tests/test_design_record_headers.py` guards that
 every record has one, that every As-built path exists, and that the
 generated index hasn't drifted. That index is
-[`docs/superpowers/README.md`](superpowers/README.md), built by
+[`docs/superpowers/README.md`](../superpowers/README.md), built by
 `scripts/gen_records_index.py` from those headers — regenerate it after
 changing one.
 
 The living picture, the vision and the decisions are routed in the header above.
 
 The experiment scripts behind the routing evidence are
-[`docs/experiments/`](experiments/) — kept so a claim in those specs can be
+[`docs/experiments/`](../experiments/) — kept so a claim in those specs can be
 re-run rather than taken on trust.
 
 ---
 
 ## 0. The vision & the build/adopt decision
 
-**Vision:** lives in [`PRD.md`](PRD.md) §1 (why, for whom) and §4 (what it must do),
+**Vision:** lives in [`PRD.md`](../PRD.md) §1 (why, for whom) and §4 (what it must do),
 and nowhere else. The founding statement is not repeated here.
 
 > **Superseded 2026-10-21.** The founding vision promised "full control over a

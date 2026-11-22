@@ -151,7 +151,7 @@ does not say:
 **Answers in ONE `.env`, then one command.** `setup.sh` is the whole install;
 the agent's job is to elicit the answers, read the result, and diagnose a
 failure — never to compose the commands (design record
-`docs/superpowers/specs/2026-08-25-deterministic-setup.md`).
+`docs/archive/superpowers/specs/2026-08-25-deterministic-setup.md`).
 
 The answer file is the **repo-root `.env`** — the app's configuration and this
 profile's, in one file, since v2.42.0 (`docs/superpowers/specs/2026-09-23-airgap-check-configure-setup-design.md`,

@@ -3,7 +3,7 @@
 design record now carries in its own file.
 
 Before 2026-09-20 the index of design records lived as one hand-maintained
-table in `docs/DESIGN.md`. That table drifted from the code (two wrong
+table in `docs/DESIGN.md` (now `docs/archive/DESIGN.md`). That table drifted from the code (two wrong
 cells, one missing row, found in the 2026-09-20 consistency audit) because
 nothing forced it to stay in sync with the 53 records it summarized. The fix
 moves the status onto each record itself (a `> **Status:** ...` / `> **As-built:**
@@ -185,7 +185,9 @@ def render(by_dir: dict[str, list[Record]]) -> str:
     lines.append(
         "This indexes the design records under `docs/superpowers/`: specs, "
         "plans, and research notes written as the system grew past the "
-        "founding compendium in `docs/DESIGN.md`."
+        "founding compendium in `docs/archive/DESIGN.md`. Records whose "
+        "status became `superseded` move to `docs/archive/superpowers/` and "
+        "leave this index."
     )
     lines.append("")
     for directory in DIRS:
