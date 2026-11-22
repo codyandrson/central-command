@@ -30,12 +30,8 @@ import agentLogRoutes from './routes/agent-log.js';
 import tokensRoutes from './routes/cc-tokens.js';
 // Central Command: the workspace Memory tab's note store and learned aggregate.
 import learnedRoutes from './routes/cc-learned.js';
-import eventsRoutes from './routes/events.js';
 import serverInfoRoutes from './routes/server-info.js';
-import codexLimitsRoutes from './routes/codex-limits.js';
-import claudeCodeLimitsRoutes from './routes/claude-code-limits.js';
 import versionRoutes from './routes/version.js';
-import channelsRoutes from './routes/channels.js';
 import versionCheckRoutes from './routes/version-check.js';
 import updateProxyRoutes from './routes/cc-update-proxy.js';
 import gatewayRoutes from './routes/gateway.js';
@@ -50,8 +46,6 @@ import mcpRoutes from './routes/cc-mcp.js';
 // D27: /api/crons served by the Central Command heartbeat adapter (cc-crons), not
 // the OpenClaw gateway cron tool — same replacement pattern as cc-kanban.
 import cronsRoutes from './routes/cc-crons.js';
-import sessionsRoutes from './routes/sessions.js';
-import apiKeysRoutes from './routes/api-keys.js';
 import filesRoutes from './routes/files.js';
 import voicePhrasesRoutes from './routes/voice-phrases.js';
 import fileBrowserRoutes from './routes/file-browser.js';
@@ -59,7 +53,6 @@ import uploadConfigRoutes from './routes/upload-config.js';
 import uploadReferenceRoutes from './routes/upload-reference.js';
 // Central Command: the board is backed by first-class Tasks, not the file store.
 import kanbanRoutes from './routes/cc-kanban.js';
-import beadsRoutes from './routes/beads.js';
 // D2026-08-09: the Graph panel's read-only proxy to the API tier's bolt reader.
 import graphRoutes from './routes/cc-graph.js';
 import contextRoutes from './routes/cc-context.js';
@@ -106,9 +99,9 @@ app.use(
 );
 // Authentication — after bodyLimit (reject oversized before auth), before compress/routes
 app.use('*', authMiddleware);
-// Apply compression to all routes except SSE (compression buffers chunks and breaks streaming)
+// Apply compression to all routes except raw file streaming
 app.use('*', async (c, next) => {
-  if (c.req.path === '/api/events' || c.req.path === '/api/files/raw') return next();
+  if (c.req.path === '/api/files/raw') return next();
   return compress()(c, next);
 });
 app.use('*', cacheHeaders);
@@ -117,11 +110,11 @@ app.use('*', cacheHeaders);
 
 const routes = [
   healthRoutes, authRoutes, ttsRoutes, transcribeRoutes, agentLogRoutes,
-  tokensRoutes, learnedRoutes, eventsRoutes, serverInfoRoutes,
-  codexLimitsRoutes, claudeCodeLimitsRoutes, versionRoutes, versionCheckRoutes,
+  tokensRoutes, learnedRoutes, serverInfoRoutes,
+  versionRoutes, versionCheckRoutes,
   gatewayRoutes, connectDefaultsRoutes,
-  workspaceRoutes, charterRoutes, mailRulesRoutes, mcpRoutes, cronsRoutes, sessionsRoutes, filesRoutes, apiKeysRoutes,
-  voicePhrasesRoutes, fileBrowserRoutes, uploadConfigRoutes, uploadReferenceRoutes, channelsRoutes, kanbanRoutes, beadsRoutes,
+  workspaceRoutes, charterRoutes, mailRulesRoutes, mcpRoutes, cronsRoutes, filesRoutes,
+  voicePhrasesRoutes, fileBrowserRoutes, uploadConfigRoutes, uploadReferenceRoutes, kanbanRoutes,
   graphRoutes, activityRoutes, loeRoutes, skillsRoutes, decisionsRoutes, sourcesRoutes,
   updateRoutes, systemsRoutes, contextRoutes,
 ];

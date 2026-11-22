@@ -1,27 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 export interface TTSVoiceConfig {
-  qwen: {
-    mode: string;
-    language: string;
-    speaker: string;
-    voiceDescription: string;
-    styleInstruction: string;
-  };
   openai: {
     model: string;
     voice: string;
     instructions: string;
     /** Voice saved for the deployment's speech service (deployment speech mode). */
     deploymentVoice?: string;
-  };
-  edge: {
-    voice: string;
-  };
-  xiaomi: {
-    model: string;
-    voice: string;
-    style: string;
   };
   /**
    * Set by the server when OPENAI_TTS_MODEL is configured: the deployment owns
@@ -50,7 +35,7 @@ interface UseTTSConfigReturn {
 /**
  * Hook that loads and auto-saves TTS voice configuration from `/api/tts/config`.
  *
- * Text fields (instructions, voice descriptions) are debounced before saving;
+ * The text field (voice instructions) is debounced before saving;
  * all other fields save immediately on change.
  */
 export function useTTSConfig(): UseTTSConfigReturn {
@@ -100,7 +85,7 @@ export function useTTSConfig(): UseTTSConfigReturn {
 
       const patch = { [provider]: { [field]: value } };
       const key = `${provider}.${field}`;
-      const isTextField = field === 'instructions' || field === 'voiceDescription' || field === 'styleInstruction' || field === 'style';
+      const isTextField = field === 'instructions';
 
       if (isTextField) {
         clearTimeout(debounceTimers.current[key]);

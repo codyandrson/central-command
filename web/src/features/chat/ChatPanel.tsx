@@ -11,7 +11,6 @@ import { ActivityLog, ChatHeader, ProcessingIndicator, ReadOnlySessionNotice, Sc
 import { isMessageCollapsible } from './types';
 import type { ChatMsg, ImageAttachment, OutgoingUploadPayload } from './types';
 import type { ChatComposerState, SourceEmail } from '@/types';
-import type { BeadLinkTarget } from '@/features/beads';
 import { ENDING_LABEL, sessionEnding } from './sessionEnd';
 
 interface ChatPanelProps {
@@ -52,8 +51,6 @@ interface ChatPanelProps {
   pathLinkPrefixes?: string[];
   /** Configured shorthand aliases that should normalize to canonical workspace paths. */
   pathLinkAliases?: Record<string, string>;
-  /** Open a dedicated bead viewer tab. */
-  onOpenBeadId?: (target: BeadLinkTarget) => void | Promise<void>;
   /** Whether to show the compact Commands launcher inside the composer. */
   showCommandPaletteButton?: boolean;
   /** Open the command palette from the compact composer launcher. */
@@ -96,7 +93,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
   onOpenWorkspacePath,
   pathLinkPrefixes,
   pathLinkAliases,
-  onOpenBeadId,
   showCommandPaletteButton = false,
   onOpenCommandPalette,
   composer,
@@ -399,7 +395,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
                 onOpenWorkspacePath={onOpenWorkspacePath}
                 pathLinkPrefixes={pathLinkPrefixes}
                 pathLinkAliases={pathLinkAliases}
-                onOpenBeadId={onOpenBeadId}
               />
             </div>
           );

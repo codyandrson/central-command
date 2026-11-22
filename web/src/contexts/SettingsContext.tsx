@@ -1,11 +1,11 @@
 /* eslint-disable react-refresh/only-export-components -- hook intentionally co-located with provider */
 import { createContext, useContext, useCallback, useRef, useState, useEffect, useMemo, type ReactNode } from 'react';
-import { useTTS, coerceTTSProvider, coerceSTTProvider, OFFERED_PROVIDERS, type TTSProvider, type SpeakingPhase } from '@/features/tts/useTTS';
+import { useTTS, OFFERED_PROVIDERS, type TTSProvider, type SpeakingPhase } from '@/features/tts/useTTS';
 import { type ThemeName, applyTheme, themeNames } from '@/lib/themes';
 import { type FontName, applyFont, fontNames } from '@/lib/fonts';
 import { TOAST_MODE_KEY } from '@/features/notifications/seen';
 
-export type STTProvider = 'local' | 'openai';
+/** How useVoiceInput finalizes a dictation; the app always uses 'local' (the server's /api/transcribe). */
 export type STTInputMode = 'browser' | 'local' | 'hybrid';
 
 /** Which toasts the operator wants. `errors` keeps the failure toasts — those
@@ -21,12 +21,6 @@ interface SettingsContextValue {
   setTtsProvider: (provider: TTSProvider) => void;
   setTtsModel: (model: string) => void;
   toggleTtsProvider: () => void;
-  sttProvider: STTProvider;
-  setSttProvider: (provider: STTProvider) => void;
-  sttInputMode: STTInputMode;
-  setSttInputMode: (mode: STTInputMode) => void;
-  sttModel: string;
-  setSttModel: (model: string) => void;
   wakeWordEnabled: boolean;
   setWakeWordEnabled: (enabled: boolean) => void;
   handleToggleWakeWord: () => void;
@@ -126,19 +120,12 @@ function resolveInitialFont(): FontName {
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [soundEnabled, setSoundEnabled] = useState(localStorage.getItem('oc-sound') === 'true');
-  const [ttsProvider, setTtsProvider] = useState<TTSProvider>(() => coerceTTSProvider(localStorage.getItem('oc-tts-provider') || 'openai'));
+  // One provider; a provider an earlier release saved in `oc-tts-provider` is not read.
+  const [ttsProvider, setTtsProvider] = useState<TTSProvider>('openai');
   const [ttsModel, setTtsModelState] = useState(() => localStorage.getItem('oc-tts-model') || '');
   // True when the server reports deployment speech mode (OPENAI_TTS_MODEL set):
   // the deployment owns the TTS model, so a saved `oc-tts-model` is never sent.
   const [deploymentSpeech, setDeploymentSpeech] = useState(false);
-  const [sttProvider, setSttProviderState] = useState<STTProvider>(() => {
-    return coerceSTTProvider(localStorage.getItem('oc-stt-provider'));
-  });
-  const [sttInputMode, setSttInputModeState] = useState<STTInputMode>(() => {
-    const saved = localStorage.getItem('nerve:sttInputMode') as STTInputMode | null;
-    return saved === 'browser' || saved === 'local' || saved === 'hybrid' ? saved : 'hybrid';
-  });
-  const [sttModel, setSttModelState] = useState(() => localStorage.getItem('oc-stt-model') || 'base');
   const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
   const [liveTranscriptionPreview, setLiveTranscriptionPreview] = useState(() => {
     const saved = localStorage.getItem('nerve:liveTranscriptionPreview');
@@ -233,89 +220,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('oc-tts-model', model);
   }, []);
 
-  // Sync STT settings to server on mount (in case server restarted).
-  // GET first to avoid overwriting server state with stale local values.
+  // Whether the deployment owns the TTS model (deployment speech mode).
   useEffect(() => {
-    if (!sttProvider) return;
-    fetch('/api/transcribe/config')
-      .then(resp => resp.ok ? resp.json() : null)
-      .then(data => {
-        const serverProvider = data?.provider as STTProvider | undefined;
-        const serverModel = typeof data?.model === 'string' ? data.model : '';
-
-        // Model: trust server on startup to avoid stale localStorage mismatches
-        // (e.g. UI says tiny.en while server is actually tiny).
-        if (serverModel && serverModel !== sttModel) {
-          setSttModelState(serverModel);
-          localStorage.setItem('oc-stt-model', serverModel);
-        }
-
-        // Provider: a browser with NO saved preference adopts the server's
-        // (STT_PROVIDER env — a deployment's choice); a saved one is pushed.
-        // A provider this deployment does not offer resolves to 'openai'.
-        if (serverProvider && localStorage.getItem('oc-stt-provider') === null) {
-          const adopted = coerceSTTProvider(serverProvider);
-          setSttProviderState(adopted);
-          if (adopted === serverProvider) return;
-          return fetch('/api/transcribe/config', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider: adopted }),
-          });
-        }
-        if (serverProvider !== sttProvider) {
-          return fetch('/api/transcribe/config', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider: sttProvider }),
-          });
-        }
-      })
-      .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Same for TTS: no saved preference → the server's defaultProvider, which
-  // is 'openai' whenever a key is configured (a proxy/self-hosted endpoint in
-  // a Central Command deployment) and only falls back to Edge without one.
-  // The same read also tells us whether the deployment owns the TTS model.
-  useEffect(() => {
-    const hasSavedProvider = localStorage.getItem('oc-tts-provider') !== null;
     fetch('/api/tts/config')
       .then(resp => resp.ok ? resp.json() : null)
       .then(data => {
         setDeploymentSpeech(!!data?.deploymentSpeech);
-        if (!hasSavedProvider && typeof data?.defaultProvider === 'string') {
-          setTtsProvider(coerceTTSProvider(data.defaultProvider));
-        }
       })
       .catch(() => {});
-  }, []);
-
-  const changeSttProvider = useCallback((provider: STTProvider) => {
-    setSttProviderState(provider);
-    localStorage.setItem('oc-stt-provider', provider);
-    // Notify server to switch provider
-    fetch('/api/transcribe/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider }),
-    }).catch(() => {});
-  }, []);
-
-  const changeSttInputMode = useCallback((mode: STTInputMode) => {
-    setSttInputModeState(mode);
-    localStorage.setItem('nerve:sttInputMode', mode);
-  }, []);
-
-  const changeSttModel = useCallback((model: string) => {
-    setSttModelState(model);
-    localStorage.setItem('oc-stt-model', model);
-    // Notify server to switch model
-    fetch('/api/transcribe/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model }),
-    }).catch(() => {}); // Best-effort — server will use new model on next request
   }, []);
 
   const toggleTtsProvider = useCallback(() => {
@@ -419,12 +331,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setTtsProvider: changeTtsProvider,
     setTtsModel: changeTtsModel,
     toggleTtsProvider,
-    sttProvider,
-    setSttProvider: changeSttProvider,
-    sttInputMode,
-    setSttInputMode: changeSttInputMode,
-    sttModel,
-    setSttModel: changeSttModel,
     wakeWordEnabled,
     setWakeWordEnabled,
     handleToggleWakeWord,
@@ -460,7 +366,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setToastMode,
   }), [
     soundEnabled, toggleSound, ttsProvider, ttsModel, changeTtsProvider, changeTtsModel, toggleTtsProvider,
-    sttProvider, changeSttProvider, sttInputMode, changeSttInputMode, sttModel, changeSttModel,
     wakeWordEnabled, handleToggleWakeWord, handleWakeWordState,
     liveTranscriptionPreview, toggleLiveTranscriptionPreview,
     speak, speakNow, stopSpeaking, speaking, speakingPhase, telemetryVisible, toggleTelemetry,

@@ -44,8 +44,8 @@ interface SelfCheckDoc {
 const POLL_INTERVAL_MS = 30_000;
 const SELFCHECK_POLL_MS = 2_000;
 
-/** Poll GET /api/systems every 30s. Same shape as useLimits: keep the last
- *  good payload on a transient fetch failure rather than blanking the grid. */
+/** Poll GET /api/systems every 30s. Keep the last good payload on a
+ *  transient fetch failure rather than blanking the grid. */
 function useSystems() {
   const [systems, setSystems] = useState<SystemRow[] | null>(null);
   const [error, setError] = useState('');

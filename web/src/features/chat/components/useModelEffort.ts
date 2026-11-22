@@ -135,11 +135,10 @@ export function useModelEffort(): UseModelEffortReturn {
   const [selectedModel, setSelectedModel] = useState<string>(model || '--');
   const [prevModelSource, setPrevModelSource] = useState<string | null>(null);
 
-  // Cache of actual models per session (fetched from transcript/cron payload).
+  // Cache of actual models per session (fetched from the cron payload).
   // Keyed by session key → resolved model ID. Survives session switches so
   // we don't re-fetch when switching back to a previously visited session.
   const [resolvedSessionModels, setResolvedSessionModels] = useState<Record<string, string>>({});
-  const [resolvedSessionThinking, setResolvedSessionThinking] = useState<Record<string, EffortLevel>>({});
 
   const rawCurrentSessionModel = useMemo(() => {
     const cached = resolvedSessionModels[currentSession];
@@ -219,11 +218,10 @@ export function useModelEffort(): UseModelEffortReturn {
 
   const inheritedEffortLabel = useMemo<EffortSelection>(() => {
     const s = sessions.find(sess => getSessionKey(sess) === currentSession);
-    return resolvedSessionThinking[currentSession]
-      || normalizeEffortLevel(s?.thinking)
+    return normalizeEffortLevel(s?.thinking)
       || normalizeEffortLevel(thinking)
       || INHERITED_EFFORT_VALUE;
-  }, [sessions, currentSession, thinking, resolvedSessionThinking]);
+  }, [sessions, currentSession, thinking]);
 
   const selectedEffortLabel = selectedEffort === INHERITED_EFFORT_VALUE
     ? inheritedEffortLabel
@@ -301,25 +299,8 @@ export function useModelEffort(): UseModelEffortReturn {
       if (signal.cancelled || !currentSession) return;
 
       let resolvedModel: string | null = null;
-      let resolvedThinking: EffortLevel | null = null;
 
-      try {
-        const res = await fetch(`/api/sessions/runtime?sessionKey=${encodeURIComponent(currentSession)}`);
-        if (signal.cancelled) return;
-        const data = await res.json() as { ok: boolean; model?: string | null; thinking?: string | null; missing?: boolean };
-        if (data.ok) {
-          if (data.model != null) resolvedModel = data.model;
-          if (!resolvedThinking) resolvedThinking = normalizeEffortLevel(data.thinking);
-        }
-      } catch { /* ignore */ }
-
-      if (resolvedThinking && !signal.cancelled) {
-        setResolvedSessionThinking(prev => prev[currentSession] === resolvedThinking
-          ? prev
-          : { ...prev, [currentSession]: resolvedThinking });
-      }
-
-      // For child sessions, resolve the actual model from cron payload or transcript
+      // For cron sessions, resolve the actual model from the cron payload
       const sessionType = getSessionType(currentSession);
       if (sessionType === 'cron') {
         // Cron parent: look up the job's payload.model

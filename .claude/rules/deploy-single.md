@@ -143,9 +143,10 @@ when a matching file is read.
   is guarded (epic small-fixes story 11.12):
   `tests/test_single_questions_schema.py::test_every_airgap_seam_is_a_row_or_a_named_exception`
   walks the Seam column of `deploy/AIRGAP.md` and fails on a documented seam
-  with neither a row nor one of its six named exceptions — it found
+  with neither a row nor one of its five named exceptions — it found
   `CC_NETRC`, `CC_CLIENT_CERT`, `CC_CLIENT_KEY` and `WHISPER_MODELS_BASE_URL`
-  askable by nobody, and they now have rows. A test that a consumer never
+  askable by nobody, and they got rows (the last left again with the
+  cockpit's local speech engine). A test that a consumer never
   reads a key without a row is owed. The validators live in
   `deploy/single/questions-lib.sh`, print ONE line of reason, and may never
   write — `check` reaches them. `when` is `KEY=value` / `KEY!=value`,

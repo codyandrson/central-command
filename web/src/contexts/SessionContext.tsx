@@ -131,21 +131,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     markSessionRead(key);
   }, [markSessionRead]);
 
-  const fetchHiddenCronSessions = useCallback(async (activeMinutes: number, limit: number): Promise<Session[]> => {
-    try {
-      const params = new URLSearchParams({
-        activeMinutes: String(activeMinutes),
-        limit: String(limit),
-      });
-      const res = await fetch(`/api/sessions/hidden?${params.toString()}`);
-      if (!res.ok) return [];
-      const data = await res.json() as { ok?: boolean; sessions?: Session[] };
-      return Array.isArray(data.sessions) ? data.sessions : [];
-    } catch {
-      return [];
-    }
-  }, []);
-
   const mergeSessionLists = useCallback((primary: Session[], supplemental: Session[]): Session[] => {
     if (supplemental.length === 0) return primary;
     const merged = [...primary];
@@ -295,12 +280,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const listAuthoritativeSessions = useCallback(async () => {
     if (connectionState !== 'connected') return sessionsRef.current;
     try {
-      const [res, hiddenCronSessions] = await Promise.all([
-        rpc('sessions.list', { limit: FULL_SESSIONS_LIMIT }) as Promise<SessionsListResponse>,
-        fetchHiddenCronSessions(24 * 60, FULL_SESSIONS_LIMIT),
-      ]);
+      const res = await rpc('sessions.list', { limit: FULL_SESSIONS_LIMIT }) as SessionsListResponse;
 
-      const baseSessions = mergeSessionLists(res?.sessions ?? [], hiddenCronSessions);
+      const baseSessions = res?.sessions ?? [];
       const spawnedByRoots = new Set<string>([MAIN_SESSION_KEY]);
       for (const rootSession of getTopLevelAgentSessions(baseSessions)) {
         spawnedByRoots.add(getSessionKey(rootSession));
@@ -328,7 +310,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       console.debug('[SessionContext] Failed to fetch authoritative session list:', err);
       return sessionsRef.current;
     }
-  }, [connectionState, fetchHiddenCronSessions, mergeSessionLists, rpc]);
+  }, [connectionState, mergeSessionLists, rpc]);
 
   const setGranularStatus = useCallback((sessionKey: string, state: GranularAgentState) => {
     if (!sessionKey) return;

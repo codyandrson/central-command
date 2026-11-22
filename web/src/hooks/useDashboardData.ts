@@ -1,13 +1,11 @@
 /**
- * useDashboardData - Handles dashboard data fetching (tokens) and routes
- * file.changed events to the app.
- * 
+ * useDashboardData - Handles dashboard data fetching (tokens).
+ *
  * Extracted from App.tsx to separate data fetching concerns from layout.
  * Includes AbortController support for proper cleanup on unmount.
- * 
- * Real-time updates via:
- * 1. SSE (Server-Sent Events) - for local file/API changes
- * 2. WebSocket (Gateway) - for gateway token events
+ *
+ * Real-time updates ride the gateway WebSocket (the /ws relay): a chat
+ * `final` frame triggers a token refresh.
  *
  * What an agent has learned (the workspace Memory tab) is not fetched here:
  * that tab owns its reads (`workspace/hooks/useAgentLearned`).
@@ -16,40 +14,23 @@
  */
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useGateway } from '@/contexts/GatewayContext';
-import { useServerEvents, type ServerEvent } from '@/hooks/useServerEvents';
 import type { TokenData, GatewayEvent } from '@/types';
 
-// Polling intervals - much longer now since SSE/WS provide real-time updates
-// These are just safety nets for edge cases
+// Polling interval - long, since the WS frames provide real-time updates;
+// a safety net for edge cases
 const TOKEN_POLL_INTERVAL = 60000;  // 60s fallback (was 30s)
-
-export type FileChangedHandler = (path: string, agentId: string) => void;
-
-export interface DashboardDataOptions {
-  agentId?: string;
-  /** Called when a file.changed SSE event arrives */
-  onFileChanged?: FileChangedHandler;
-}
 
 export interface DashboardDataState {
   tokenData: TokenData | null;
   refreshTokens: (signal?: AbortSignal) => Promise<void>;
 }
 
-interface FileChangedEventData {
-  path?: string;
-  agentId?: string;
-}
-
-export function useDashboardData(options: DashboardDataOptions = {}): DashboardDataState {
+export function useDashboardData(): DashboardDataState {
   const { subscribe, connectionState } = useGateway();
-  const activeAgentId = options.agentId ?? 'main';
   const [tokenData, setTokenData] = useState<TokenData | null>(null);
 
   // Refs for callbacks (to avoid stale closures in subscriptions)
   const refreshTokensRef = useRef<((signal?: AbortSignal) => Promise<void>) | undefined>(undefined);
-  const onFileChangedRef = useRef(options.onFileChanged);
-  const agentIdRef = useRef(activeAgentId);
 
   const refreshTokens = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -64,28 +45,8 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
     }
   }, []);
 
-  // These refs back long-lived SSE/WS handlers and must update during render.
-  // Waiting for a passive effect leaves a switch-gap where an old agent event can
-  // be accepted under stale refs after the UI already rerendered.
+  // This ref backs the long-lived WS handler and must update during render.
   refreshTokensRef.current = refreshTokens;
-  onFileChangedRef.current = options.onFileChanged;
-  agentIdRef.current = activeAgentId;
-
-  // SSE event handler for real-time updates from backend
-  const handleSSEEvent = useCallback((event: ServerEvent) => {
-    if (event.event === 'file.changed') {
-      const data = event.data as FileChangedEventData | undefined;
-      const eventAgentId = typeof data?.agentId === 'string' ? data.agentId : undefined;
-
-      if (data?.path && eventAgentId === agentIdRef.current) {
-        onFileChangedRef.current?.(data.path, eventAgentId);
-      }
-    }
-  }, []);
-
-  // Subscribe to SSE events from the backend
-  // This catches local file changes and API-triggered updates
-  useServerEvents(handleSSEEvent);
 
   // Subscribe to WebSocket events for real-time token updates
   useEffect(() => {
@@ -111,7 +72,7 @@ export function useDashboardData(options: DashboardDataOptions = {}): DashboardD
     // Initial fetch
     refreshTokens(controller.signal);
 
-    // Polling as safety net — SSE/WS provide real-time updates
+    // Polling as safety net — WS frames provide real-time updates
     const tokIv = setInterval(() => refreshTokens(controller.signal), TOKEN_POLL_INTERVAL);
 
     return () => {

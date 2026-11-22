@@ -58,13 +58,13 @@ names. Self-clean to exact baseline counts even on failure paths.
 
 ## Phase 1/2 — cockpit direct routes (sonnet, needs auth per SKILL.md)
 
-Login with a password the operator gave you, then: workspace/kanban/transcribe/tts/language config GET→PUT→verify→
-RESTORE roundtrips (restore mandatory even on failure); files API in a
+Login with a password the operator gave you, then: workspace/kanban/tts/language config GET→PUT→verify→
+RESTORE roundtrips (restore mandatory even on failure; transcribe config is
+GET only); files API in a
 `testrun-<date>/` subdir only, full write/rename/move/trash/restore cycle;
 path-traversal probes on files/read + resolve (`../../etc/hostname`,
 url-encoded, absolute — MUST be refused, report exactly what happens);
-memories gating; sessions/:id/model with real + fake ids. No /api/keys PUT,
-no gateway restart. Clean your subdir.
+memories gating. No gateway restart. Clean your subdir.
 
 ## Phase 2 — Playwright UI walk (sonnet, SOLE browser owner)
 

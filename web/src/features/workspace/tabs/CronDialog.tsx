@@ -21,7 +21,6 @@ interface CronDialogProps {
 }
 
 type ScheduleKind = 'cron' | 'every' | 'at';
-type DeliveryMode = 'none' | 'announce';
 
 const INTERVAL_PRESETS = [
   { value: '300000', label: '5 minutes' },
@@ -34,41 +33,7 @@ const INTERVAL_PRESETS = [
   { value: '86400000', label: '24 hours' },
 ];
 
-const CHANNEL_LABELS: Record<string, string> = {
-  whatsapp: 'WhatsApp',
-  telegram: 'Telegram',
-  discord: 'Discord',
-  signal: 'Signal',
-  slack: 'Slack',
-  irc: 'IRC',
-  googlechat: 'Google Chat',
-  imessage: 'iMessage',
-};
-
-const CHANNEL_PLACEHOLDERS: Record<string, string> = {
-  whatsapp: '+905551234567',
-  telegram: '-100123456789 or @username',
-  discord: 'channel-id',
-  signal: '+905551234567',
-  slack: '#channel or @user',
-  irc: '#channel',
-  googlechat: 'space-id',
-  imessage: '+905551234567',
-};
-
-/**
- * Delivery to an external channel is under construction: this deployment has
- * no messaging channel and no agent holds a message tool. The code below is
- * kept so a future messaging integration only has to turn this on.
- */
-const DELIVERY_ENABLED = false;
-
 const MAIN_ROOT_SESSION_KEY = 'agent:main:main';
-
-/** Strip the auto-appended delivery instruction from a prompt for clean editing */
-function stripDeliveryInstruction(msg: string): string {
-  return msg.replace(/\n\n(?:After completing the task, s|S)end the result using the message tool.*$/s, '');
-}
 
 function isoToLocal(iso: string): string {
   try {
@@ -129,7 +94,7 @@ function CronSelect(props: SelectHTMLAttributes<HTMLSelectElement>) {
   );
 }
 
-/** Modal dialog for creating or editing a cron job (schedule, prompt, model, channel). */
+/** Modal dialog for creating or editing a cron job (schedule, prompt, model). */
 export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions = {} }: CronDialogProps) {
   const prefill = mode === 'edit' && initialData ? initialData : null;
   const { agentName } = useSessionContext();
@@ -152,12 +117,9 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
     }
     return out;
   });
-  const [message, setMessage] = useState(() => prefill ? stripDeliveryInstruction(prefill.message || '') : '');
+  const [message, setMessage] = useState(() => prefill?.message || '');
   const [model, setModel] = useState(() => prefill?.model || '');
   const [thinking, setThinking] = useState(() => prefill?.thinking || '');
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>(() => DELIVERY_ENABLED && prefill?.delivery?.mode === 'announce' ? 'announce' : 'none');
-  const [deliveryChannel, setDeliveryChannel] = useState(() => prefill?.delivery?.channel || '');
-  const [deliveryTo, setDeliveryTo] = useState(() => prefill?.delivery?.to || '');
   const { models: catalogModels } = useGatewayModelCatalog();
   const primaryModel = useMemo(
     () => catalogModels?.find((m) => m.role === 'primary'),
@@ -192,7 +154,6 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
   // assignee comes from the roster's taskable ACTIVE agents.
   const [agentId, setAgentId] = useState(() => prefill?.agentId || '');
   const [taskableAgents, setTaskableAgents] = useState<{ id: string; name: string }[]>([]);
-  const [availableChannels, setAvailableChannels] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -210,20 +171,11 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
   // built-ins is fine — the registry validates the result).
   const editingBuiltin = Boolean(prefill && prefill.payloadKind !== 'agentTurn');
 
-  // Fetch configured channels and taskable agents when dialog opens. The
+  // Fetch taskable agents when the dialog opens. The
   // model catalog comes from useGatewayModelCatalog above (fetched once on
   // this component's own mount — the parent remounts it per open via `key`).
   useEffect(() => {
     if (!open) return;
-    if (DELIVERY_ENABLED) {
-      fetch('/api/channels')
-        .then(r => r.json())
-        .then((data: { channels?: string[] }) => {
-          const ch = data.channels || [];
-          setAvailableChannels(ch);
-        })
-        .catch(() => setAvailableChannels([]));
-    }
     fetch('/api/crons/agents')
       .then(r => r.json())
       .then((data: { ok?: boolean; result?: { agents?: { id: string; name: string }[] } }) => {
@@ -261,11 +213,6 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
       return;
     }
 
-    if (DELIVERY_ENABLED && isAgentTurn && deliveryMode === 'announce' && availableChannels.length > 0 && !deliveryChannel) {
-      setError('Select a delivery channel or switch to "Run silently"');
-      return;
-    }
-
     if (isAgentTurn && !agentId) {
       setError('Pick an agent to assign the scheduled task to');
       return;
@@ -297,15 +244,7 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
     const sessionTarget = isAgentTurn ? 'isolated' : 'main';
     let payload: Record<string, unknown>;
     if (isAgentTurn) {
-      let finalMessage = message.trim();
-
-      // Workaround: announce delivery doesn't reliably send to channels like WhatsApp.
-      // Instead, append a send instruction to the agent prompt so it uses the message tool directly.
-      if (DELIVERY_ENABLED && deliveryMode === 'announce' && deliveryChannel && deliveryTo.trim()) {
-        finalMessage += `\n\nSend the result using the message tool (channel=${deliveryChannel}, target=${deliveryTo.trim()}). Keep the message concise. After sending, respond with only: NO_REPLY`;
-      }
-
-      payload = { kind: 'agentTurn', message: finalMessage };
+      payload = { kind: 'agentTurn', message: message.trim() };
       // Always present (even blank) so an edit that clears an override — back
       // to "Default" — round-trips as a clear, not a no-op.
       payload.model = model;
@@ -314,21 +253,11 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
       payload = { kind: 'heartbeatAction', actionKind: executionKind, params: actionParams };
     }
 
-    // Build delivery — use "none" when we've baked send instructions into the prompt
-    const hasInlineDelivery = DELIVERY_ENABLED && isAgentTurn && deliveryMode === 'announce' && deliveryChannel && deliveryTo.trim();
-    const effectiveDeliveryMode: DeliveryMode = DELIVERY_ENABLED ? deliveryMode : 'none';
-    const delivery: Record<string, unknown> = { mode: hasInlineDelivery ? 'none' : effectiveDeliveryMode };
-    if (effectiveDeliveryMode === 'announce' && !hasInlineDelivery) {
-      if (deliveryChannel) delivery.channel = deliveryChannel;
-      if (deliveryTo.trim()) delivery.to = deliveryTo.trim();
-    }
-
     const job: Record<string, unknown> = {
       schedule,
       payload,
       sessionTarget,
       sessionKey: effectiveTargetRootSessionKey,
-      delivery,
       enabled: true,
     };
     if (name.trim()) job.name = name.trim();
@@ -343,7 +272,7 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
     } else {
       setError(`Failed to ${mode === 'edit' ? 'update' : 'create'} cron job`);
     }
-  }, [name, scheduleKind, cronExpr, cronTz, everyMs, atTime, isAgentTurn, executionKind, actionSpec, actionParams, effectiveTargetRootSessionKey, message, model, thinking, agentId, deliveryMode, deliveryChannel, deliveryTo, onSubmit, handleClose, mode, availableChannels.length]);
+  }, [name, scheduleKind, cronExpr, cronTz, everyMs, atTime, isAgentTurn, executionKind, actionSpec, actionParams, effectiveTargetRootSessionKey, message, model, thinking, agentId, onSubmit, handleClose, mode]);
 
   if (!open) return null;
 
@@ -672,74 +601,6 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
               )}
             </SectionShell>
 
-            {isAgentTurn && (
-              <SectionShell
-                eyebrow="Delivery 🚧"
-                title="What happens after it finishes"
-                description="Under construction — no external messaging channel is wired to this deployment yet."
-              >
-                <div className="flex flex-col gap-1">
-                  <span className="cockpit-field-label">Result handling</span>
-                  <CronSelect
-                    value={deliveryMode}
-                    onChange={e => setDeliveryMode(e.target.value as DeliveryMode)}
-                    disabled={!DELIVERY_ENABLED}
-                    title={DELIVERY_ENABLED ? undefined : 'Delivery 🚧 under construction — results stay in the session'}
-                    aria-label={DELIVERY_ENABLED ? 'Delivery mode' : 'Delivery mode (under construction)'}
-                  >
-                    <option value="announce">Send result to a channel</option>
-                    <option value="none">Keep it in the session</option>
-                  </CronSelect>
-                </div>
-
-                {(!DELIVERY_ENABLED || deliveryMode === 'none') && (
-                  <div className="cockpit-note">
-                    The result stays in the session transcript for later review.
-                  </div>
-                )}
-
-                {DELIVERY_ENABLED && deliveryMode === 'announce' && (
-                  <div className="space-y-2.5">
-                    {availableChannels.length === 0 ? (
-                      <div className="rounded-[18px] border border-orange/30 bg-orange/6 px-3 py-3 text-[0.733rem] text-orange/85">
-                        No messaging channels are configured yet. Set one up first, or keep the job in the session.
-                      </div>
-                    ) : (
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="flex flex-col gap-1">
-                          <span className="cockpit-field-label">Channel</span>
-                          <CronSelect
-                            value={deliveryChannel}
-                            onChange={e => setDeliveryChannel(e.target.value)}
-                            aria-label="Delivery channel"
-                          >
-                            <option value="">Select channel…</option>
-                            {availableChannels.map((channel) => (
-                              <option key={channel} value={channel}>{CHANNEL_LABELS[channel] || channel}</option>
-                            ))}
-                          </CronSelect>
-                        </div>
-                        <div className="flex flex-col gap-1">
-                          <label htmlFor="cron-deliver-to" className="cockpit-field-label">Recipient / destination</label>
-                          <input
-                            id="cron-deliver-to"
-                            type="text"
-                            value={deliveryTo}
-                            onChange={e => setDeliveryTo(e.target.value)}
-                            placeholder={CHANNEL_PLACEHOLDERS[deliveryChannel] || 'recipient ID'}
-                            className="cockpit-input cockpit-input-mono"
-                          />
-                        </div>
-                      </div>
-                    )}
-                    <div className="cockpit-note" data-tone="primary">
-                      The delivery instruction is appended so the agent can send the result directly when it finishes.
-                    </div>
-                  </div>
-                )}
-              </SectionShell>
-            )}
-
             {error && (
               <div className="cockpit-note" data-tone="danger">{error}</div>
             )}
@@ -747,8 +608,8 @@ export function CronDialog({ open, onClose, onSubmit, mode, initialData, actions
             <div className="flex flex-col items-stretch gap-3 rounded-[24px] border border-border/70 bg-secondary/28 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <p className="text-sm leading-5 text-muted-foreground">
                 {isEdit
-                  ? 'Save when the timing and delivery look right.'
-                  : 'Create the job when the timing and delivery look right.'}
+                  ? 'Save when the timing looks right.'
+                  : 'Create the job when the timing looks right.'}
               </p>
               <button
                 type="submit"

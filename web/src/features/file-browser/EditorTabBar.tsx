@@ -1,11 +1,9 @@
 import { EditorTab } from './EditorTab';
 import type { OpenFile } from './types';
-import type { OpenBeadTab } from '@/features/beads';
 
 interface EditorTabBarProps {
   activeTab: string;
   openFiles: OpenFile[];
-  openBeads?: OpenBeadTab[];
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
 }
@@ -13,12 +11,11 @@ interface EditorTabBarProps {
 export function EditorTabBar({
   activeTab,
   openFiles,
-  openBeads = [],
   onSelectTab,
   onCloseTab,
 }: EditorTabBarProps) {
-  // Don't render tab bar if no file/bead tabs are open (chat-only mode)
-  if (openFiles.length === 0 && openBeads.length === 0) return null;
+  // Don't render tab bar if no file tabs are open (chat-only mode)
+  if (openFiles.length === 0) return null;
 
   return (
     <div
@@ -51,19 +48,6 @@ export function EditorTabBar({
         />
       ))}
 
-      {/* Bead viewer tabs */}
-      {openBeads.map((bead) => (
-        <EditorTab
-          key={bead.id}
-          id={bead.id}
-          label={bead.name}
-          active={activeTab === bead.id}
-          tooltip={bead.beadId}
-          onSelect={() => onSelectTab(bead.id)}
-          onClose={() => onCloseTab(bead.id)}
-          onMiddleClick={() => onCloseTab(bead.id)}
-        />
-      ))}
     </div>
   );
 }

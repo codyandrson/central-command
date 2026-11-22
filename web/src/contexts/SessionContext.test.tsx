@@ -151,7 +151,6 @@ describe('SessionContext', () => {
 
       if (url.includes('/api/server-info')) return Promise.resolve(jsonResponse({ agentName: 'Jen' }));
       if (url.includes('/api/agentlog')) return Promise.resolve(jsonResponse([]));
-      if (url.includes('/api/sessions/hidden')) return Promise.resolve(jsonResponse({ ok: true, sessions: [] }));
       return Promise.resolve(jsonResponse({}));
     }) as typeof fetch;
   });
@@ -196,7 +195,6 @@ describe('SessionContext', () => {
         return Promise.resolve(jsonResponse({ ok: true, content: '# IDENTITY.md\n- Name: Reviewer Prime\n- Role: Review agent\n' }));
       }
       if (url.includes('/api/agentlog')) return Promise.resolve(jsonResponse([]));
-      if (url.includes('/api/sessions/hidden')) return Promise.resolve(jsonResponse({ ok: true, sessions: [] }));
       return Promise.resolve(jsonResponse({}));
     }) as typeof fetch;
 
@@ -238,7 +236,6 @@ describe('SessionContext', () => {
         return Promise.resolve(jsonResponse({ ok: true, content: '# IDENTITY.md\n- Role: Review agent\n' }));
       }
       if (url.includes('/api/agentlog')) return Promise.resolve(jsonResponse([]));
-      if (url.includes('/api/sessions/hidden')) return Promise.resolve(jsonResponse({ ok: true, sessions: [] }));
       return Promise.resolve(jsonResponse({}));
     }) as typeof fetch;
 
@@ -281,7 +278,6 @@ describe('SessionContext', () => {
         return Promise.resolve(jsonResponse({ ok: true, content: '# IDENTITY.md\n- Role: Review agent\n' }));
       }
       if (url.includes('/api/agentlog')) return Promise.resolve(jsonResponse([]));
-      if (url.includes('/api/sessions/hidden')) return Promise.resolve(jsonResponse({ ok: true, sessions: [] }));
       return Promise.resolve(jsonResponse({}));
     }) as typeof fetch;
     globalThis.fetch = fetchSpy;

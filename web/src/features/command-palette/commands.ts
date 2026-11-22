@@ -28,9 +28,6 @@ export interface CommandActions {
 /** Every TTS provider command; only providers in OFFERED_PROVIDERS reach the palette. */
 const TTS_PROVIDER_COMMANDS: { id: string; label: string; provider: TTSProvider; keywords: string[] }[] = [
   { id: 'tts-openai', label: `TTS: Use ${OFFERED_PROVIDER_LABEL}`, provider: 'openai', keywords: ['tts', 'voice', 'speech', 'openai', 'cc-tts'] },
-  { id: 'tts-replicate', label: 'TTS: Switch to Replicate', provider: 'replicate', keywords: ['tts', 'voice', 'speech', 'replicate', 'qwen'] },
-  { id: 'tts-edge', label: 'TTS: Switch to Edge (Free)', provider: 'edge', keywords: ['tts', 'voice', 'speech', 'edge', 'free'] },
-  { id: 'tts-xiaomi', label: 'TTS: Switch to Xiaomi Mimo', provider: 'xiaomi', keywords: ['tts', 'voice', 'speech', 'xiaomi', 'mimo'] },
 ];
 
 const THEME_LABELS: Record<ThemeName, string> = {

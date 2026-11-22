@@ -1969,7 +1969,7 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
   authority on which routes are live; the inherited routes it also mounts
   (auth, files, workspace, TTS and transcription, and others) came from upstream.
 - **Feature directories** under `web/src/features/`: `activity`, `agents`,
-  `attention`, `auth`, `beads`, `charts`, `chat`, `command-palette`, `connect`,
+  `attention`, `auth`, `charts`, `chat`, `command-palette`, `connect`,
   `dashboard`, `decisions`, `file-browser`, `gates` (the gate-override hooks and
   the capabilities view), `graph`, `graph-verifications`,
   `kanban`, `loe`, `markdown`, `notifications`, `outages` (the
@@ -2002,11 +2002,18 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
   push ride a WebSocket: the browser connects to the cockpit server's `/ws`
   (`web/server/lib/ws-proxy.ts`), which relays to the `/ws` that **FastAPI
   serves** (`api/nerve_gateway.py`) by answering the wire protocol the upstream
-  client already speaks. The Hono server's own SSE endpoint
-  (`web/server/routes/events.ts`) carries the cockpit server's local events
-  (`memory.changed` from its file watcher, `tokens.updated`, `status.changed`
-  and keep-alives), not the API's event log; `web/server/lib/gateway-rpc.ts` is
-  upstream's workspace-file fallback client, not part of this seam.
+  client already speaks. The cockpit server has no event stream of its own
+  (its SSE endpoint and file watcher were removed, DL-224): the file tree
+  loads when opened and has a Refresh button. `web/server/lib/gateway-rpc.ts`
+  is upstream's workspace-file fallback client, not part of this seam.
+- **Speech.** Read-aloud and voice input have one engine: the deployment's
+  speech service behind the LiteLLM aliases `cc-tts` and `cc-stt`. On k3s the
+  cockpit server's `POST /api/tts` and `POST /api/transcribe` call it as an
+  OpenAI-shaped endpoint (`OPENAI_BASE_URL`, `OPENAI_TTS_MODEL`,
+  `OPENAI_STT_MODEL` and the scoped `OPENAI_API_KEY` in the cockpit server's env
+  file, written by setup); on the single-node profile the API's own `api/speech.py` answers the
+  same routes. The language setting (`PUT /api/language`) writes
+  `NERVE_LANGUAGE` to that env file.
 - **Defaults.** Cockpit server on 3080 (`web/server/lib/constants.ts`); API on
   8080. The vendored default gateway URL does **not** point at the API —
   `GATEWAY_URL` in the cockpit server's env file must, or every `cc-*` route

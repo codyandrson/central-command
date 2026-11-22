@@ -10,18 +10,14 @@ vi.mock('@/features/markdown/MarkdownRenderer', () => ({
     content,
     className,
     currentDocumentPath,
-    onOpenBeadId,
     onOpenWorkspacePath,
-    workspaceAgentId,
   }: {
     content: string;
     className?: string;
     currentDocumentPath?: string;
-    onOpenBeadId?: (target: { beadId: string }) => void;
     onOpenWorkspacePath?: (path: string, basePath?: string) => void;
-    workspaceAgentId?: string;
   }) => {
-    markdownRendererSpy({ content, className, currentDocumentPath, onOpenBeadId, onOpenWorkspacePath, workspaceAgentId });
+    markdownRendererSpy({ content, className, currentDocumentPath, onOpenWorkspacePath });
     return <div data-testid="markdown-renderer" className={className}>{content}</div>;
   },
 }));
@@ -88,8 +84,7 @@ describe('MarkdownDocumentView', () => {
     expect(screen.getByTestId('file-editor')).toBeInTheDocument();
   });
 
-  it('passes bead and workspace handlers through to the markdown renderer while preserving document path fallback', () => {
-    const onOpenBeadId = vi.fn();
+  it('passes the workspace handler through to the markdown renderer while preserving document path fallback', () => {
     const onOpenWorkspacePath = vi.fn();
 
     render(
@@ -98,17 +93,13 @@ describe('MarkdownDocumentView', () => {
         onContentChange={vi.fn()}
         onSave={vi.fn()}
         onRetry={vi.fn()}
-        onOpenBeadId={onOpenBeadId}
         onOpenWorkspacePath={onOpenWorkspacePath}
-        workspaceAgentId="research"
       />,
     );
 
     expect(markdownRendererSpy).toHaveBeenCalled();
     const props = markdownRendererSpy.mock.calls.at(-1)?.[0];
     expect(props.currentDocumentPath).toBe('docs/guide.md');
-    expect(props.onOpenBeadId).toBe(onOpenBeadId);
-    expect(props.workspaceAgentId).toBe('research');
 
     props.onOpenWorkspacePath?.('docs/todo.md');
     expect(onOpenWorkspacePath).toHaveBeenCalledWith('docs/todo.md', 'docs/guide.md');

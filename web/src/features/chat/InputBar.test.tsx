@@ -65,8 +65,6 @@ vi.mock('@/contexts/SessionContext', () => ({
 vi.mock('@/contexts/SettingsContext', () => ({
   useSettings: () => ({
     liveTranscriptionPreview: false,
-    sttInputMode: 'browser',
-    sttProvider: 'browser',
   }),
 }));
 

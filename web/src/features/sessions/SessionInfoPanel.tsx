@@ -81,7 +81,7 @@ export const SessionInfoPanel = memo(function SessionInfoPanel({
     closeTimer.current = setTimeout(() => setOpen(false), 150);
   }, []);
 
-  /* For cron/subagent sessions, resolve the actual model used */
+  /* For a cron session, resolve the actual model from its job's payload */
   const [actualModel, setActualModel] = useState<string | null>(null);
   const sessionKey = getSessionKey(session);
   const sessionType = getSessionType(sessionKey);
@@ -103,19 +103,6 @@ export const SessionInfoPanel = memo(function SessionInfoPanel({
             const jobs = data.result?.jobs || data.result?.details?.jobs || [];
             const job = jobs.find(j => j.id === jobIdMatch[1]);
             if (job?.payload?.model) setActualModel(job.payload.model);
-          })
-          .catch(() => { /* ignore */ });
-      }
-    } else {
-      // Cron-run or subagent: read model from transcript
-      const parts = sessionKey.split(':');
-      const sessionId = parts[parts.length - 1];
-      if (sessionId && /^[0-9a-f-]{36}$/.test(sessionId)) {
-        fetch(`/api/sessions/${sessionId}/model`)
-          .then(r => r.json())
-          .then((data: { ok: boolean; model?: string | null; missing?: boolean }) => {
-            if (cancelled || !data.ok) return;
-            if (data.model != null) setActualModel(data.model);
           })
           .catch(() => { /* ignore */ });
       }

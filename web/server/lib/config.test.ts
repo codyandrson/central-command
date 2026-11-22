@@ -63,32 +63,6 @@ describe('config module', () => {
     });
   });
 
-  describe('workspaceWatchRecursive', () => {
-    it('defaults to true when env var is unset', async () => {
-      vi.resetModules();
-      delete process.env.NERVE_WATCH_WORKSPACE_RECURSIVE;
-
-      const { config } = await import('./config.js');
-      expect(config.workspaceWatchRecursive).toBe(true);
-    });
-
-    it('can be disabled explicitly with false', async () => {
-      vi.resetModules();
-      process.env.NERVE_WATCH_WORKSPACE_RECURSIVE = 'false';
-
-      const { config } = await import('./config.js');
-      expect(config.workspaceWatchRecursive).toBe(false);
-    });
-
-    it('stays enabled when set to true', async () => {
-      vi.resetModules();
-      process.env.NERVE_WATCH_WORKSPACE_RECURSIVE = 'true';
-
-      const { config } = await import('./config.js');
-      expect(config.workspaceWatchRecursive).toBe(true);
-    });
-  });
-
   describe('SESSION_COOKIE_NAME', () => {
     it('includes the port number', async () => {
       const { SESSION_COOKIE_NAME, config } = await import('./config.js');
@@ -218,17 +192,6 @@ describe('config module', () => {
       expect(config.language).toMatch(/^[a-z]{2}$/);
     });
 
-    it('edgeVoiceGender is either male or female', async () => {
-      const { config } = await import('./config.js');
-      expect(['male', 'female']).toContain(config.edgeVoiceGender);
-    });
-  });
-
-  describe('sttProvider', () => {
-    it('is either local or openai', async () => {
-      const { config } = await import('./config.js');
-      expect(['local', 'openai']).toContain(config.sttProvider);
-    });
   });
 
   describe('paths are absolute', () => {
@@ -242,10 +205,6 @@ describe('config module', () => {
       expect(path.isAbsolute(config.memoryPath)).toBe(true);
     });
 
-    it('sessionsDir is absolute', async () => {
-      const { config } = await import('./config.js');
-      expect(path.isAbsolute(config.sessionsDir)).toBe(true);
-    });
   });
 
   describe('network-exposed auth guard', () => {
@@ -291,27 +250,6 @@ describe('config module', () => {
   });
 
   describe('updateConfig', () => {
-    it('updates sttProvider to openai', async () => {
-      const { config, updateConfig } = await import('./config.js');
-      const original = config.sttProvider;
-      updateConfig('sttProvider', 'openai');
-      expect(config.sttProvider).toBe('openai');
-      // Restore
-      updateConfig('sttProvider', original);
-    });
-
-    it('updates sttProvider to local', async () => {
-      const { config, updateConfig } = await import('./config.js');
-      updateConfig('sttProvider', 'local');
-      expect(config.sttProvider).toBe('local');
-    });
-
-    it('rejects invalid sttProvider', async () => {
-      const { updateConfig } = await import('./config.js');
-      // @ts-expect-error testing invalid input
-      expect(() => updateConfig('sttProvider', 'whisper')).toThrow(/Invalid sttProvider/);
-    });
-
     it('updates language to a supported code', async () => {
       const { config, updateConfig } = await import('./config.js');
       const original = config.language;
@@ -328,26 +266,6 @@ describe('config module', () => {
     it('rejects empty language', async () => {
       const { updateConfig } = await import('./config.js');
       expect(() => updateConfig('language', '')).toThrow(/Invalid language/);
-    });
-
-    it('updates edgeVoiceGender to male', async () => {
-      const { config, updateConfig } = await import('./config.js');
-      const original = config.edgeVoiceGender;
-      updateConfig('edgeVoiceGender', 'male');
-      expect(config.edgeVoiceGender).toBe('male');
-      updateConfig('edgeVoiceGender', original);
-    });
-
-    it('updates edgeVoiceGender to female', async () => {
-      const { config, updateConfig } = await import('./config.js');
-      updateConfig('edgeVoiceGender', 'female');
-      expect(config.edgeVoiceGender).toBe('female');
-    });
-
-    it('rejects invalid edgeVoiceGender', async () => {
-      const { updateConfig } = await import('./config.js');
-      // @ts-expect-error testing invalid input
-      expect(() => updateConfig('edgeVoiceGender', 'nonbinary')).toThrow(/Invalid edgeVoiceGender/);
     });
 
     it('updates sessionSecret', async () => {
@@ -369,12 +287,18 @@ describe('config module', () => {
 
     it('config object retains as-const read types after mutation', async () => {
       const { config, updateConfig } = await import('./config.js');
-      updateConfig('sttProvider', 'openai');
-      // TypeScript still sees config.sttProvider as 'local' | 'openai' (readonly),
-      // but the runtime value should be updated.
-      const provider: string = config.sttProvider;
-      expect(provider).toBe('openai');
-      updateConfig('sttProvider', 'local');
+      const original = config.language;
+      updateConfig('language', 'de');
+      // TypeScript still sees config.language as readonly, but the runtime value is updated.
+      const language: string = config.language;
+      expect(language).toBe('de');
+      updateConfig('language', original);
+    });
+
+    it.each(['sttProvider', 'edgeVoiceGender'])('no longer accepts %s, a setting of a removed speech engine', async (key) => {
+      const { updateConfig } = await import('./config.js');
+      // @ts-expect-error — not a mutable key any more
+      expect(() => updateConfig(key, 'openai')).toThrow(/Cannot mutate config key/);
     });
   });
 });

@@ -25,13 +25,6 @@ describe('getDeploymentSpeech (deployment speech mode)', () => {
     for (const [k, v] of Object.entries(opts.env)) vi.stubEnv(k, v);
     disk.stored = opts.stored;
 
-    vi.doMock('./config.js', () => ({ config: { language: 'en', edgeVoiceGender: 'female' } }));
-    vi.doMock('./language.js', () => ({
-      getEdgeTtsVoice: () => 'en-US-AriaNeural',
-      getQwen3Language: () => null,
-      getFallbackInfo: () => ({ supported: true }),
-      resolveLanguage: () => undefined,
-    }));
     vi.doMock('node:fs', () => ({
       default: {
         existsSync: () => disk.stored !== undefined,

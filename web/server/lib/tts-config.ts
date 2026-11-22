@@ -1,37 +1,24 @@
 /**
  * TTS voice configuration — reads/writes a JSON config file.
  *
- * All voice-related settings (OpenAI, Qwen/Replicate, Edge) live here
+ * The voice settings of the one speech provider (the OpenAI-shaped endpoint,
+ * which deploy setup points at the deployment's own speech service) live here
  * instead of env vars or hardcoded values. On first run, default settings
  * are written to `<PROJECT_ROOT>/tts-config.json`. Subsequent reads merge
- * the on-disk config with defaults so new fields are always present.
+ * the on-disk config with defaults so new fields are always present; sections
+ * of providers that no longer exist (qwen, edge, xiaomi) are dropped on read.
  * @module
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config } from './config.js';
-import { getEdgeTtsVoice, getQwen3Language, getFallbackInfo, resolveLanguage } from './language.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const CONFIG_PATH = path.join(PROJECT_ROOT, 'tts-config.json');
 
 export interface TTSVoiceConfig {
-  /** Qwen / Replicate TTS settings */
-  qwen: {
-    /** TTS mode: 'voice_design' or 'custom_voice' */
-    mode: string;
-    /** Language for synthesis */
-    language: string;
-    /** Preset speaker name (for custom_voice mode) */
-    speaker: string;
-    /** Voice description (for voice_design mode) */
-    voiceDescription: string;
-    /** Style/emotion instruction */
-    styleInstruction: string;
-  };
   /** OpenAI TTS settings */
   openai: {
     /** OpenAI TTS model (gpt-4o-mini-tts, tts-1, tts-1-hd) */
@@ -47,30 +34,9 @@ export interface TTSVoiceConfig {
      */
     deploymentVoice: string;
   };
-  /** Edge TTS settings */
-  edge: {
-    /** Voice name (e.g. en-US-AriaNeural, en-GB-SoniaNeural) */
-    voice: string;
-  };
-  /** Xiaomi MiMo TTS settings */
-  xiaomi: {
-    /** Xiaomi model name */
-    model: string;
-    /** Built-in Xiaomi voice name */
-    voice: string;
-    /** Optional default Xiaomi style prompt */
-    style: string;
-  };
 }
 
 const DEFAULTS: TTSVoiceConfig = {
-  qwen: {
-    mode: 'voice_design',
-    language: 'English',
-    speaker: 'Serena',
-    voiceDescription: '',
-    styleInstruction: '',
-  },
   openai: {
     // Env seeds the FIRST-RUN defaults only; tts-config.json wins once written.
     model: process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts',
@@ -78,14 +44,6 @@ const DEFAULTS: TTSVoiceConfig = {
     instructions:
       'Speak naturally and conversationally, like a real person. Warm, friendly tone with a slight British accent. Keep it casual and relaxed, not robotic or overly formal.',
     deploymentVoice: '',
-  },
-  edge: {
-    voice: 'en-US-AriaNeural',
-  },
-  xiaomi: {
-    model: 'mimo-v2-tts',
-    voice: 'mimo_default',
-    style: '',
   },
 };
 
@@ -98,7 +56,7 @@ export function getTTSConfig(): TTSVoiceConfig {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-      cached = deepMerge(DEFAULTS, raw) as TTSVoiceConfig;
+      cached = { openai: deepMerge(DEFAULTS.openai, raw?.openai ?? {}) };
       return cached;
     }
   } catch (err) {
@@ -106,7 +64,7 @@ export function getTTSConfig(): TTSVoiceConfig {
   }
 
   // First run — write defaults to disk
-  cached = { ...DEFAULTS };
+  cached = { openai: { ...DEFAULTS.openai } };
   saveTTSConfig(cached);
   return cached;
 }
@@ -203,93 +161,4 @@ function deepMerge(target: any, source: any): any {
     }
   }
   return result;
-}
-
-// ─── Language-aware TTS voice resolution ─────────────────────────────────────
-
-export interface ResolvedTTSVoice {
-  voice: string;
-  language: string;
-  fallback: boolean;
-  warning?: string;
-}
-
-/** Extract BCP-47 locale prefix from an Edge voice id (e.g. tr-TR from tr-TR-EmelNeural). */
-function voiceLocalePrefix(voiceName: string): string {
-  const match = voiceName.match(/^([a-z]{2,3}-[A-Z]{2})-/);
-  return match?.[1] || '';
-}
-
-/**
- * Resolve the effective Edge TTS voice considering language preference.
- *
- * Rules:
- *   1) For English, keep explicit non-default user override.
- *   2) For non-English, keep user override only if its locale matches
- *      one of the selected language's registered Edge locales.
- *      Otherwise auto-fallback to the language-derived voice.
- */
-export function resolveEdgeTTSVoice(): ResolvedTTSVoice {
-  const cfg = getTTSConfig();
-  const lang = config.language;
-  const gender = config.edgeVoiceGender;
-
-  const languageVoice = getEdgeTtsVoice(lang, gender);
-  const userVoice = cfg.edge.voice;
-
-  if (userVoice) {
-    if (lang === 'en') {
-      const defaultEnVoice = getEdgeTtsVoice('en', gender);
-      if (userVoice !== defaultEnVoice) {
-        return { voice: userVoice, language: lang, fallback: false };
-      }
-    } else {
-      const languageConfig = resolveLanguage(lang);
-      const userLocale = voiceLocalePrefix(userVoice);
-      if (languageConfig && userLocale) {
-        const allowedLocales = new Set(
-          Object.values(languageConfig.edgeTtsVoices)
-            .map((voice) => voiceLocalePrefix(voice))
-            .filter(Boolean),
-        );
-        if (allowedLocales.has(userLocale)) {
-          return { voice: userVoice, language: lang, fallback: false };
-        }
-      }
-    }
-  }
-
-  return { voice: languageVoice, language: lang, fallback: false };
-}
-
-/**
- * Resolve the effective Qwen3 TTS language, falling back to English if unsupported.
- */
-export function resolveQwen3Language(): ResolvedTTSVoice {
-  const lang = config.language;
-  const qwen3Lang = getQwen3Language(lang);
-
-  if (qwen3Lang) {
-    return { voice: qwen3Lang, language: lang, fallback: false };
-  }
-
-  const info = getFallbackInfo('replicate', lang);
-  return {
-    voice: 'English',
-    language: 'en',
-    fallback: true,
-    warning: info.warning,
-  };
-}
-
-/**
- * Get provider-specific language support info for the current language setting.
- */
-export function getProviderLanguageSupport(): Record<string, { supported: boolean; warning?: string }> {
-  const lang = config.language;
-  return {
-    edge: getFallbackInfo('edge', lang),
-    replicate: getFallbackInfo('replicate', lang),
-    openai: getFallbackInfo('openai', lang),
-  };
 }

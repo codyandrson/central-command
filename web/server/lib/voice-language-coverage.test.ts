@@ -1,14 +1,10 @@
 /** Coverage checks for multilingual server-side voice phrase defaults. */
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_LANGUAGE, DEFAULT_VOICE_PHRASES, SUPPORTED_LANGUAGES, WHISPER_DEFAULT_MODEL } from './constants.js';
+import { DEFAULT_LANGUAGE, DEFAULT_VOICE_PHRASES, SUPPORTED_LANGUAGES } from './constants.js';
 
 describe('server multilingual voice phrase coverage', () => {
   it('should default to English language preference', () => {
     expect(DEFAULT_LANGUAGE).toBe('en');
-  });
-
-  it('should default local whisper model to base', () => {
-    expect(WHISPER_DEFAULT_MODEL).toBe('base');
   });
 
   it('should provide stop and cancel defaults for every supported language', () => {

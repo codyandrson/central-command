@@ -32,7 +32,7 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 
 /** Literal fetch targets: fetch('/api/x'), fetch(`/api/x?${q}`), … — path
  *  cut at the first `?` or `${`. Group 2 marks a `${`-truncated path, which
- *  is a PREFIX of the real one (`/api/beads/${id}` fetches `/api/beads/:id`)
+ *  is a PREFIX of the real one (`/api/crons/${id}` fetches `/api/crons/:id`)
  *  and must be matched as such, not as an exact path. */
 const FETCH_RE = /(?:\bfetch|\bapiFetch|\bpostJSON|\bfetchResult)\(\s*[`'"](\/api\/[^`'"?$]+)(\$)?/g;
 

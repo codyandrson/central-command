@@ -28,13 +28,6 @@ function getFilenameFromPathish(value: string, fallback: string): string {
   return segments[segments.length - 1] || fallback;
 }
 
-function imageExtensionFromMimeType(mimeType?: string): string {
-  if (!mimeType?.startsWith('image/')) return 'png';
-  const subtype = mimeType.slice('image/'.length).toLowerCase();
-  if (subtype === 'jpeg') return 'jpg';
-  return subtype || 'png';
-}
-
 function dedupeExtractedImages(images: Array<{ url: string; alt?: string }>): Array<{ url: string; alt?: string }> {
   const seen = new Set<string>();
   return images.filter((image) => {
@@ -44,10 +37,7 @@ function dedupeExtractedImages(images: Array<{ url: string; alt?: string }>): Ar
   });
 }
 
-function extractLegacyMessageImages(
-  message: ChatMessage,
-  options: { sessionKey?: string; messageTimestampMs?: number },
-): Array<{ url: string; alt?: string }> {
+function extractLegacyMessageImages(message: ChatMessage): Array<{ url: string; alt?: string }> {
   const extracted: Array<{ url: string; alt?: string }> = [];
 
   for (const mediaPath of [...toArray(message.MediaPath), ...toArray(message.MediaPaths)]) {
@@ -66,22 +56,6 @@ function extractLegacyMessageImages(
       url: trimmedUrl,
       alt: getFilenameFromPathish(trimmedUrl.split('?')[0] || trimmedUrl, 'image'),
     });
-  }
-
-  if (options.sessionKey && Number.isFinite(options.messageTimestampMs) && Array.isArray(message.content)) {
-    const timestampMs = options.messageTimestampMs as number;
-    let imageIndex = 0;
-    for (const block of message.content) {
-      if (block.type !== 'image') continue;
-      if (block.omitted) {
-        const extension = imageExtensionFromMimeType(block.mimeType || block.source?.media_type);
-        extracted.push({
-          url: `/api/sessions/media?sessionKey=${encodeURIComponent(options.sessionKey)}&timestamp=${timestampMs}&imageIndex=${imageIndex}`,
-          alt: `message-${timestampMs}-image-${imageIndex}.${extension}`,
-        });
-      }
-      imageIndex += 1;
-    }
   }
 
   return extracted;
@@ -293,7 +267,7 @@ function splitSystemEvents(text: string): Array<{ role: 'event' | 'user'; text: 
   return segments;
 }
 
-export function splitToolCallMessage(m: ChatMessage, options: { sessionKey?: string } = {}): ChatMsg[] {
+export function splitToolCallMessage(m: ChatMessage): ChatMsg[] {
   const ts = m.timestamp || m.createdAt || m.ts || null;
   const parsedTimestamp = ts ? new Date(ts as string | number) : null;
   const hasPersistedTimestamp = Boolean(parsedTimestamp && Number.isFinite(parsedTimestamp.getTime()));
@@ -444,10 +418,7 @@ export function splitToolCallMessage(m: ChatMessage, options: { sessionKey?: str
   const { cleaned: text, images: extractedImages } = isAssistant
     ? extractImages(goalPreviewCleaned)
     : { cleaned: goalPreviewCleaned, images: [] };
-  const legacyExtractedImages = extractLegacyMessageImages(m, {
-    sessionKey: options.sessionKey,
-    messageTimestampMs: hasPersistedTimestamp ? timestamp.getTime() : undefined,
-  });
+  const legacyExtractedImages = extractLegacyMessageImages(m);
   const combinedExtractedImages = dedupeExtractedImages([...extractedImages, ...legacyExtractedImages]);
 
   // Extract image content blocks (base64 images from gateway)
@@ -621,10 +592,10 @@ export function tagIntermediateMessages(msgs: ChatMsg[]): ChatMsg[] {
  *
  * filter → split → group → tag
  */
-export function processChatMessages(messages: ChatMessage[], options: { sessionKey?: string } = {}): ChatMsg[] {
+export function processChatMessages(messages: ChatMessage[]): ChatMsg[] {
   const chatMsgs: ChatMsg[] = messages
     .filter(filterMessage)
-    .flatMap((message) => splitToolCallMessage(message, options));
+    .flatMap((message) => splitToolCallMessage(message));
 
   const grouped = groupToolMessages(chatMsgs);
   const tagged = tagIntermediateMessages(grouped);
@@ -665,5 +636,5 @@ export async function loadChatHistory(params: {
   onComposer?.(res?.composer, sessionKey);
   onSourceEmail?.(res?.sourceEmail, sessionKey);
 
-  return processChatMessages(msgs, { sessionKey });
+  return processChatMessages(msgs);
 }

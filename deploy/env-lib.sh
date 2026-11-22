@@ -785,9 +785,9 @@ cc_resolve_py() {
 #   npm   web/package.json (CR-stripped), node's MAJOR and npm's MAJOR: the
 #         install is `npm install --no-package-lock`, which resolves the
 #         package.json ranges and reads no lockfile, so those are what decide
-#         it. A new node major is a new native-module ABI (the cockpit carries
-#         a native whisper addon), which only a reinstall rebuilds; npm's major
-#         decides how the ranges resolve (npm >= 11 is required).
+#         it. A new node major is a new native-module ABI, which only a
+#         reinstall rebuilds; npm's major decides how the ranges resolve
+#         (npm >= 11 is required).
 #   build what `npm run build` reads — `tsc -b` (tsconfig.json and its three
 #         referenced projects: config/tsconfig.{app,node,server}.json
 #         over src/, vite.config.ts and server/), `vite build`

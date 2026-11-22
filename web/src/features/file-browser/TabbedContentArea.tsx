@@ -14,7 +14,6 @@ import { MarkdownDocumentView } from './MarkdownDocumentView';
 import { PdfViewer } from './PdfViewer';
 import { isImageFile, isMarkdownFile, isPdfFile } from './utils/fileTypes';
 import type { OpenFile } from './types';
-import { BeadViewerTab, type BeadLinkTarget, type OpenBeadTab } from '@/features/beads';
 
 // Lazy-load CodeMirror editor — keeps it out of the initial bundle
 const FileEditor = lazy(() => import('./FileEditor'));
@@ -37,7 +36,6 @@ interface SaveToast {
 interface TabbedContentAreaProps {
   activeTab: string;
   openFiles: OpenFile[];
-  openBeads?: OpenBeadTab[];
   workspaceAgentId: string;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
@@ -46,8 +44,6 @@ interface TabbedContentAreaProps {
   onRetryFile: (path: string) => void;
   onReloadFile?: (path: string) => void;
   onOpenWorkspacePath?: (path: string, basePath?: string) => void | Promise<void>;
-  onOpenBeadId?: (target: BeadLinkTarget) => void;
-  pathLinkPrefixes?: string[];
   pathLinkAliases?: Record<string, string>;
   saveToast?: SaveToast | null;
   onDismissToast?: () => void;
@@ -58,7 +54,6 @@ interface TabbedContentAreaProps {
 export function TabbedContentArea({
   activeTab,
   openFiles,
-  openBeads = [],
   workspaceAgentId,
   onSelectTab,
   onCloseTab,
@@ -67,14 +62,12 @@ export function TabbedContentArea({
   onRetryFile,
   onReloadFile,
   onOpenWorkspacePath,
-  onOpenBeadId,
-  pathLinkPrefixes,
   pathLinkAliases,
   saveToast,
   onDismissToast,
   chatPanel,
 }: TabbedContentAreaProps) {
-  const hasOpenTabs = openFiles.length > 0 || openBeads.length > 0;
+  const hasOpenTabs = openFiles.length > 0;
   const visibleSaveToast = saveToast && (!saveToast.agentId || saveToast.agentId === workspaceAgentId)
     ? saveToast
     : null;
@@ -86,7 +79,6 @@ export function TabbedContentArea({
         <EditorTabBar
           activeTab={activeTab}
           openFiles={openFiles}
-          openBeads={openBeads}
           onSelectTab={onSelectTab}
           onCloseTab={onCloseTab}
         />
@@ -124,9 +116,7 @@ export function TabbedContentArea({
                 onSave={onSaveFile}
                 onRetry={onRetryFile}
                 onOpenWorkspacePath={onOpenWorkspacePath}
-                onOpenBeadId={onOpenBeadId}
                 pathLinkAliases={pathLinkAliases}
-                workspaceAgentId={workspaceAgentId}
               />
             ) : (
               <Suspense fallback={<EditorFallback />}>
@@ -138,30 +128,6 @@ export function TabbedContentArea({
                 />
               </Suspense>
             )}
-          </div>
-        ))}
-
-        {/* Bead viewer tabs */}
-        {openBeads.map((bead) => (
-          <div
-            key={bead.id}
-            className={activeTab === bead.id ? 'h-full' : 'hidden'}
-            role="tabpanel"
-            id={`tabpanel-${bead.id}`}
-            aria-labelledby={`tab-${bead.id}`}
-          >
-            <BeadViewerTab
-              beadTarget={{
-                beadId: bead.beadId,
-                explicitTargetPath: bead.explicitTargetPath,
-                currentDocumentPath: bead.currentDocumentPath,
-                workspaceAgentId: bead.workspaceAgentId,
-              }}
-              onOpenBeadId={onOpenBeadId}
-              onOpenWorkspacePath={onOpenWorkspacePath}
-              pathLinkPrefixes={pathLinkPrefixes}
-              pathLinkAliases={pathLinkAliases}
-            />
           </div>
         ))}
 

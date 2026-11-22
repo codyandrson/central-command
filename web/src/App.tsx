@@ -19,7 +19,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useGateway } from '@/contexts/GatewayContext';
 import { useSessionContext } from '@/contexts/SessionContext';
 import { useChat } from '@/contexts/ChatContext';
-import { useSettings, type STTInputMode } from '@/contexts/SettingsContext';
+import { useSettings } from '@/contexts/SettingsContext';
 import { getSessionKey } from '@/types';
 import { useConnectionManager } from '@/hooks/useConnectionManager';
 import { useDashboardData } from '@/hooks/useDashboardData';
@@ -30,7 +30,6 @@ import { StatusBar } from '@/components/StatusBar';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { WorkspaceSwitchDialog } from '@/components/WorkspaceSwitchDialog';
 import { ChatPanel, type ChatPanelHandle } from '@/features/chat/ChatPanel';
-import type { TTSProvider } from '@/features/tts/useTTS';
 import type { ViewMode } from '@/features/command-palette/commands';
 import { CcLiveBridge } from '@/components/CcLiveBridge';
 import { ToastHost } from '@/features/notifications';
@@ -41,8 +40,7 @@ import { PanelErrorBoundary } from '@/components/PanelErrorBoundary';
 import { SpawnAgentDialog } from '@/features/sessions/SpawnAgentDialog';
 import { useAttention } from '@/features/attention/useAttention';
 import { DEFAULT_CHAT_PATH_LINKS_CONFIG, parseChatPathLinksConfig } from '@/features/chat/chatPathLinks';
-import { FileTreePanel, TabbedContentArea, useOpenFiles, type FileTreeChangeEvent } from '@/features/file-browser';
-import { type BeadLinkTarget, type OpenBeadTab, buildBeadTabId } from '@/features/beads';
+import { FileTreePanel, TabbedContentArea, useOpenFiles } from '@/features/file-browser';
 import { isImageFile } from '@/features/file-browser/utils/fileTypes';
 import { getSessionDisplayLabel, isTopLevelAgentSessionKey, TERMINAL_SESSION_STATUSES } from '@/features/sessions/sessionKeys';
 import { useStalledDiscussions } from '@/features/sessions/useStalledDiscussions';
@@ -146,7 +144,6 @@ export default function App({ onLogout }: AppProps) {
   const {
     soundEnabled, toggleSound,
     ttsProvider, ttsModel, setTtsProvider, setTtsModel,
-    sttProvider, setSttProvider, sttInputMode, setSttInputMode, sttModel, setSttModel,
     wakeWordEnabled, handleToggleWakeWord, handleWakeWordState,
     liveTranscriptionPreview, toggleLiveTranscriptionPreview,
     eventsVisible, logVisible,
@@ -166,15 +163,12 @@ export default function App({ onLogout }: AppProps) {
     serverSideAuth, authEnabled,
   } = useConnectionManager();
 
-  // Track file change events for tree refresh. Sequence keeps repeated same-path updates visible.
-  const [lastChangedEvent, setLastChangedEvent] = useState<FileTreeChangeEvent | null>(null);
   const [revealRequest, setRevealRequest] = useState<{
     id: number;
     path: string;
     kind: 'file' | 'directory';
     agentId: string;
   } | null>(null);
-  const fileTreeChangeSequenceRef = useRef(0);
 
   const initialCompactLayout = typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches;
   const initialDesktopFileBrowserCollapsed = (() => {
@@ -239,7 +233,7 @@ export default function App({ onLogout }: AppProps) {
   const {
     openFiles, activeTab, setActiveTab,
     openFile, closeFile, updateContent, saveFile, reloadFile,
-    handleFileChanged, remapOpenPaths, closeOpenPathsByPrefix,
+    remapOpenPaths, closeOpenPathsByPrefix,
     hasDirtyFiles, saveAllDirtyFiles, discardAllDirtyFiles,
   } = useOpenFiles(workspaceAgentId);
 
@@ -314,21 +308,9 @@ export default function App({ onLogout }: AppProps) {
     dismissSaveToast();
   }, [dismissSaveToast, saveFile, showSaveToastForAgent, workspaceAgentId]);
 
-  // Single file.changed handler, feeds both open files and tree refresh.
-  const onFileChanged = useCallback((path: string, targetAgentId: string) => {
-    handleFileChanged(path, targetAgentId);
-    setLastChangedEvent({
-      path,
-      agentId: targetAgentId,
-      sequence: ++fileTreeChangeSequenceRef.current,
-    });
-  }, [handleFileChanged]);
-
-  // Dashboard data (extracted hook) — single SSE connection handles all events
-  const { tokenData } = useDashboardData({
-    agentId: workspaceAgentId,
-    onFileChanged,
-  });
+  // Dashboard data (extracted hook): the Usage panel's token numbers. The file
+  // tree has no live refresh; it loads when opened and has a Refresh button.
+  const { tokenData } = useDashboardData();
 
   // UI state
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -357,7 +339,6 @@ export default function App({ onLogout }: AppProps) {
   // screens; these carry the operator between them with the item already
   // selected, instead of making them hunt for what they were just shown.
   const [pendingDecisionItemId, setPendingDecisionItemId] = useState<string | null>(null);
-  const [openBeads, setOpenBeads] = useState<OpenBeadTab[]>([]);
   const setViewMode = useCallback((mode: ViewMode) => {
     const nextMode = mode === 'kanban' && !kanbanVisible ? 'chat' : mode;
     setViewModeRaw(nextMode);
@@ -475,54 +456,9 @@ export default function App({ onLogout }: AppProps) {
     setViewMode('chat');
   }, [kanbanVisible, setViewMode, viewMode]);
 
-  const openBeadId = useCallback((target: BeadLinkTarget) => {
-    const normalizedBeadId = target.beadId.trim();
-    if (!normalizedBeadId) return;
-
-    const normalizedTarget: BeadLinkTarget = {
-      beadId: normalizedBeadId,
-      explicitTargetPath: target.explicitTargetPath?.trim() || undefined,
-      currentDocumentPath: target.currentDocumentPath?.trim() || undefined,
-      workspaceAgentId: target.workspaceAgentId?.trim() || workspaceAgentId,
-    };
-
-    const tabId = buildBeadTabId(normalizedTarget);
-    setOpenBeads((prev) => {
-      if (prev.some((bead) => bead.id === tabId)) return prev;
-      return [...prev, {
-        id: tabId,
-        beadId: normalizedBeadId,
-        name: normalizedBeadId,
-        explicitTargetPath: normalizedTarget.explicitTargetPath,
-        currentDocumentPath: normalizedTarget.currentDocumentPath,
-        workspaceAgentId: normalizedTarget.workspaceAgentId,
-      }];
-    });
-    setActiveTab(tabId);
-  }, [setActiveTab, workspaceAgentId]);
-
-  const visibleOpenBeads = useMemo(() => openBeads.filter((bead) => {
-    const beadWorkspaceAgentId = bead.workspaceAgentId?.trim() || workspaceAgentId;
-    return beadWorkspaceAgentId === workspaceAgentId;
-  }), [openBeads, workspaceAgentId]);
-
-  useEffect(() => {
-    if (!activeTab.startsWith('bead:')) return;
-    if (visibleOpenBeads.some((bead) => bead.id === activeTab)) return;
-    setActiveTab('chat');
-  }, [activeTab, setActiveTab, visibleOpenBeads]);
-
   const closeWorkspaceTab = useCallback((tabId: string) => {
-    if (tabId.startsWith('bead:')) {
-      setOpenBeads((prev) => prev.filter((bead) => bead.id !== tabId));
-      if (activeTab === tabId) {
-        setActiveTab('chat');
-      }
-      return;
-    }
-
     closeFile(tabId);
-  }, [activeTab, closeFile, setActiveTab]);
+  }, [closeFile]);
 
   const openWorkspacePath = useCallback(async (targetPath: string, basePath?: string) => {
     const params = new URLSearchParams({ path: targetPath, agentId: workspaceAgentId });
@@ -782,26 +718,10 @@ export default function App({ onLogout }: AppProps) {
     return () => mq.removeListener(onChange);
   }, [handleCompactLayoutChange]);
 
-  // Handlers for TTS provider/model changes
-  const handleTtsProviderChange = useCallback((provider: TTSProvider) => {
-    setTtsProvider(provider);
-  }, [setTtsProvider]);
-
+  // Handler for TTS model changes
   const handleTtsModelChange = useCallback((model: string) => {
     setTtsModel(model);
   }, [setTtsModel]);
-
-  const handleSttProviderChange = useCallback((provider: 'local' | 'openai') => {
-    setSttProvider(provider);
-  }, [setSttProvider]);
-
-  const handleSttInputModeChange = useCallback((mode: STTInputMode) => {
-    setSttInputMode(mode);
-  }, [setSttInputMode]);
-
-  const handleSttModelChange = useCallback((model: string) => {
-    setSttModel(model);
-  }, [setSttModel]);
 
   const visibleSaveToast = saveToast?.agentId === workspaceAgentId
     && saveToast.workspaceVersion === workspaceVersion
@@ -812,7 +732,6 @@ export default function App({ onLogout }: AppProps) {
     <TabbedContentArea
       activeTab={activeTab}
       openFiles={openFiles}
-      openBeads={visibleOpenBeads}
       workspaceAgentId={workspaceAgentId}
       onSelectTab={setActiveTab}
       onCloseTab={closeWorkspaceTab}
@@ -823,8 +742,6 @@ export default function App({ onLogout }: AppProps) {
       onReloadFile={reloadFile}
       onRetryFile={reloadFile}
       onOpenWorkspacePath={openWorkspacePath}
-      onOpenBeadId={openBeadId}
-      pathLinkPrefixes={chatPathLinkPrefixes}
       pathLinkAliases={chatPathLinkAliases}
       chatPanel={
         <PanelErrorBoundary name="Chat">
@@ -854,7 +771,6 @@ export default function App({ onLogout }: AppProps) {
             onOpenWorkspacePath={openWorkspacePath}
             pathLinkPrefixes={chatPathLinkPrefixes}
             pathLinkAliases={chatPathLinkAliases}
-            onOpenBeadId={openBeadId}
             showCommandPaletteButton={commandPaletteButtonVisible && !paletteOpen && !settingsOpen && viewMode === 'chat'}
             onOpenCommandPalette={handleOpenPalette}
             composer={composer}
@@ -1063,14 +979,7 @@ export default function App({ onLogout }: AppProps) {
             onToggleSound={toggleSound}
             ttsProvider={ttsProvider}
             ttsModel={ttsModel}
-            onTtsProviderChange={handleTtsProviderChange}
             onTtsModelChange={handleTtsModelChange}
-            sttProvider={sttProvider}
-            sttInputMode={sttInputMode}
-            sttModel={sttModel}
-            onSttProviderChange={handleSttProviderChange}
-            onSttInputModeChange={handleSttInputModeChange}
-            onSttModelChange={handleSttModelChange}
             wakeWordEnabled={wakeWordEnabled}
             onToggleWakeWord={handleToggleWakeWord}
             liveTranscriptionPreview={liveTranscriptionPreview}
@@ -1091,7 +1000,6 @@ export default function App({ onLogout }: AppProps) {
                 onOpenFile={openFile}
                 onAddToChat={(path, kind, agentId) => chatPanelRef.current?.addWorkspacePath(path, kind, agentId ?? workspaceAgentId)}
                 addToChatEnabled={addToChatEnabled}
-                lastChangedEvent={lastChangedEvent}
                 revealRequest={revealRequest}
                 onRemapOpenPaths={remapOpenPaths}
                 onCloseOpenPaths={closeOpenPathsByPrefix}
@@ -1119,7 +1027,6 @@ export default function App({ onLogout }: AppProps) {
                     onOpenFile={openFile}
                     onAddToChat={(path, kind, agentId) => chatPanelRef.current?.addWorkspacePath(path, kind, agentId ?? workspaceAgentId)}
                     addToChatEnabled={addToChatEnabled}
-                    lastChangedEvent={lastChangedEvent}
                     revealRequest={revealRequest}
                     onRemapOpenPaths={remapOpenPaths}
                     onCloseOpenPaths={closeOpenPathsByPrefix}

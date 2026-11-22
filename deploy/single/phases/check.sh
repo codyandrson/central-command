@@ -596,7 +596,7 @@ CHECK_SECTIONS=(
   "llm|the upstream endpoint FROM THIS HOST — the model list, one chat, one structured, one embedding — ONLY when .env declares it; with the catalog left to the LiteLLM UI this section says so and probes nothing"
   "integrations|Jira and Confluence FROM THIS HOST — scripts/atlassian_probe.py against the configured credentials, ONLY when .env sets CC_JIRA_BASE_URL; blank says so and probes nothing"
   "compose|compose.yaml renders with this .env, with no variable it requires left unset"
-  "models|the speech models' source (Hugging Face or a pre-placed volume) and the cockpit's whisper model"
+  "models|the speech models' source (Hugging Face or a pre-placed volume)"
 )
 
 check_list() {
@@ -1096,17 +1096,6 @@ check_models() {
         fail "speech-model-${n}" "${m} is not reachable at ${hf} (${out#* }) and there is no ${vol} volume holding a pre-placed snapshot — seams: CC_HF_ENDPOINT, pre-place the snapshot, or CC_ENABLE_SPEECH=0. huggingface_hub has NO insecure switch: an intercepted TLS path needs CC_CA_BUNDLE"
       fi
     done
-  fi
-
-  # The cockpit's LOCAL whisper engine: unused once cc-stt is registered, so
-  # nothing here is a FAIL — it is a source the operator may or may not need.
-  local wdir="${WHISPER_MODEL_DIR:-$HOME/.nerve/models}"
-  if compgen -G "$wdir/*.bin" >/dev/null 2>&1; then
-    pass "whisper-local" "$wdir holds a ggml .bin — the cockpit's local whisper engine needs no download"
-  elif [[ -n "${WHISPER_MODELS_BASE_URL:-}" ]]; then
-    probe_http "whisper-local" "$WHISPER_MODELS_BASE_URL" "the whisper model source for the cockpit's local engine" "WHISPER_MODELS_BASE_URL" HEAD
-  else
-    pass "whisper-local" "no ggml .bin in $wdir and no WHISPER_MODELS_BASE_URL — not needed while cc-stt serves the cockpit's voice input (it is the fallback engine)"
   fi
 }
 

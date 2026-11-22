@@ -97,9 +97,6 @@ async def tts_config() -> dict:
     return {
         "defaultProvider": "openai",
         "openai": {"model": TTS_ALIAS, "voice": settings.tts_voice, "instructions": ""},
-        "qwen": {"mode": "", "language": "", "speaker": "", "voiceDescription": "", "styleInstruction": ""},
-        "edge": {"voice": ""},
-        "xiaomi": {"model": "", "voice": "", "style": ""},
     }
 
 
@@ -140,10 +137,3 @@ async def transcribe(request: Request) -> Response:
 async def transcribe_config() -> dict:
     # Same shape as the Node route (transcribe.ts GET): provider + model + readiness.
     return {"provider": "openai", "model": STT_ALIAS, "modelReady": True}
-
-
-@router.put("/transcribe/config")
-async def transcribe_config_put() -> dict:
-    # A browser with a saved 'local' preference pushes it here on mount; there
-    # is no local engine in this profile, so the answer is always the alias.
-    return await transcribe_config()

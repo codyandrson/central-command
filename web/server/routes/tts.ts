@@ -1,25 +1,20 @@
 /**
  * POST /api/tts — Text-to-speech synthesis.
  *
- * Supports OpenAI TTS, Replicate (Qwen, etc.), and Edge TTS (free, zero-config).
- * Body: { text: string, provider?: string, model?: string, voice?: string }
+ * One provider: the OpenAI-shaped speech endpoint (`OPENAI_BASE_URL`), which
+ * deploy setup points at the deployment's own speech service through the
+ * LiteLLM proxy (`OPENAI_TTS_MODEL=cc-tts`, deployment speech mode — see
+ * lib/tts-config.ts getDeploymentSpeech). Needs OPENAI_API_KEY.
+ * Body: { text: string, voice?: string, model?: string, provider?: string }
+ * (`provider` is accepted for wire compatibility and ignored, as in the API's
+ * own speech route, central_command/api/speech.py).
  * Response: audio/mpeg binary
- *
- * Provider selection priority:
- *  - Explicit provider choice is always honoured
- *  - "openai" → OpenAI TTS (requires OPENAI_API_KEY)
- *  - "replicate" → Replicate-hosted models (requires REPLICATE_API_TOKEN)
- *  - "edge" → Microsoft Edge Read-Aloud TTS (free, no key needed)
- *  - Auto fallback: openai (if key) → replicate (if key) → edge (always available)
- *
- * Backward compat: provider "qwen" is treated as replicate + model "qwen-tts".
  */
 
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import crypto from 'node:crypto';
-import { config } from '../lib/config.js';
 import {
   getTTSConfig,
   updateTTSConfig,
@@ -29,9 +24,6 @@ import {
 } from '../lib/tts-config.js';
 import { getTtsCache, setTtsCache } from '../services/tts-cache.js';
 import { synthesizeOpenAI } from '../services/openai-tts.js';
-import { synthesizeReplicate } from '../services/replicate-tts.js';
-import { synthesizeEdge } from '../services/edge-tts.js';
-import { synthesizeXiaomi } from '../services/xiaomi-tts.js';
 import { rateLimitTTS, rateLimitGeneral } from '../middleware/rate-limit.js';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
@@ -46,8 +38,9 @@ const ttsSchema = z.object({
     .max(MAX_TEXT_LENGTH, `Text too long (max ${MAX_TEXT_LENGTH} chars)`)
     .refine((s) => s.trim().length > 0, 'Text cannot be empty or whitespace'),
   voice: z.string().optional(),
-  // Accept both old ("qwen") and new ("replicate") values
-  provider: z.enum(['openai', 'replicate', 'qwen', 'edge', 'xiaomi']).optional(),
+  // Accepted for wire compatibility (a browser may still hold an old saved
+  // provider); there is one provider and the value is not read.
+  provider: z.string().optional(),
   model: z.string().optional(),
 });
 
@@ -85,45 +78,20 @@ app.post(
   }),
   async (c) => {
     try {
-      const { text, voice: rawVoice, provider: rawProvider, model: rawModel } = c.req.valid('json');
-
-      // Normalize "qwen" → "replicate" + model "qwen-tts" for backward compat
-      const isLegacyQwen = rawProvider === 'qwen';
-      const provider = isLegacyQwen ? 'replicate' : rawProvider;
-      const model = rawModel || (isLegacyQwen ? 'qwen-tts' : undefined);
-
-      // Voice is passed through — each provider resolves its own default from config
-      const voice = rawVoice;
-
-      // Resolve effective provider: explicit > openai (if key) > replicate (if key) > edge
-      const useXiaomi = provider === 'xiaomi';
-      const useReplicate =
-        provider === 'replicate' ||
-        (!provider && !config.openaiApiKey && !!config.replicateApiToken);
-      const useEdge =
-        provider === 'edge' ||
-        (!provider && !config.openaiApiKey && !config.replicateApiToken);
-      const effectiveProvider = useXiaomi
-        ? 'xiaomi'
-        : useEdge
-          ? 'edge'
-          : useReplicate
-            ? 'replicate'
-            : 'openai';
-      console.log(`[tts] provider=${effectiveProvider} voice=${voice} text="${text.slice(0, 50)}..."`);
-
-      const xiaomiStyle = effectiveProvider === 'xiaomi' ? getTTSConfig().xiaomi.style : '';
+      const { text, voice, model } = c.req.valid('json');
+      console.log(`[tts] voice=${voice} text="${text.slice(0, 50)}..."`);
 
       // In deployment speech mode the server decides the model (and the default
       // voice), so the cache key carries those, not a stale browser `model`.
-      const deployment = effectiveProvider === 'openai' ? getDeploymentSpeech() : null;
+      const deployment = getDeploymentSpeech();
       const keyModel = deployment ? deployment.model : model || '';
       const keyVoice = deployment ? voice || deployment.voice : voice || '';
 
-      // Cache key includes provider + model + voice and Xiaomi style for proper isolation
+      // Cache key: model + voice + text. The leading 'openai' and the empty
+      // field keep the key shape of the multi-provider route it replaced.
       const hash = crypto
         .createHash('md5')
-        .update(`${effectiveProvider}:${keyModel}:${keyVoice}:${xiaomiStyle}:${text}`)
+        .update(`openai:${keyModel}:${keyVoice}::${text}`)
         .digest('hex');
 
       const cached = getTtsCache(hash);
@@ -148,20 +116,10 @@ app.post(
       } else {
         const controller = new AbortController();
         const promise = (async (): Promise<SynthesisOutcome> => {
-          let result;
-          if (effectiveProvider === 'xiaomi') {
-            result = await synthesizeXiaomi(text, { model, voice });
-          } else if (effectiveProvider === 'edge') {
-            result = await synthesizeEdge(text, voice);
-          } else if (effectiveProvider === 'replicate') {
-            result = await synthesizeReplicate(text, { model, voice });
-          } else {
-            result = await synthesizeOpenAI(text, voice, model, controller.signal);
-          }
+          const result = await synthesizeOpenAI(text, voice, model, controller.signal);
           if (!result.ok) return { ok: false, status: result.status, message: result.message };
-          const contentType = 'contentType' in result ? (result as { contentType: string }).contentType : 'audio/mpeg';
           setTtsCache(hash, result.buf);
-          return { ok: true, buf: result.buf, contentType };
+          return { ok: true, buf: result.buf, contentType: 'audio/mpeg' };
         })().finally(() => inflightSyntheses.delete(hash));
         job = { promise, subscribers: 0, controller };
         inflightSyntheses.set(hash, job);
@@ -205,22 +163,17 @@ app.get('/api/tts/config', rateLimitGeneral, (c) => {
   // deploymentSpeech: non-null when OPENAI_TTS_MODEL is set — the deployment owns
   // the model and the voice (see getDeploymentSpeech); the UI shows these, not
   // the stored OpenAI model/voice, which are not sent in that mode.
-  // defaultProvider: what a browser with no saved preference should use. With a
-  // key configured, prefer the OpenAI-shaped endpoint (a proxy or self-hosted
-  // TTS in a Central Command deployment) over Edge, which phones Microsoft.
+  // defaultProvider: the one provider, the same value the API's own route sends.
   return c.json({
     ...getTTSConfig(),
-    defaultProvider: config.openaiApiKey ? 'openai' : 'edge',
+    defaultProvider: 'openai',
     deploymentSpeech: getDeploymentSpeech(),
   });
 });
 
 /** Allowed top-level keys and their allowed child keys (all must be strings) */
 const TTS_CONFIG_SCHEMA: Record<string, string[]> = {
-  qwen: ['mode', 'language', 'speaker', 'voiceDescription', 'styleInstruction'],
   openai: ['model', 'voice', 'instructions', 'deploymentVoice'],
-  edge: ['voice'],
-  xiaomi: ['model', 'voice', 'style'],
 };
 
 /** Validate TTS config patch — only allow known keys with string values */

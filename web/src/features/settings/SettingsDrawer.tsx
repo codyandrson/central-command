@@ -9,7 +9,6 @@ import { GraphSettings } from './GraphSettings';
 import { ContextSettings } from './ContextSettings';
 import { MailRulesSettings } from './MailRulesSettings';
 import type { TTSProvider } from '@/features/tts/useTTS';
-import type { STTInputMode, STTProvider } from '@/contexts/SettingsContext';
 
 interface SettingsDrawerProps {
   open: boolean;
@@ -26,14 +25,7 @@ interface SettingsDrawerProps {
   onToggleSound: () => void;
   ttsProvider: TTSProvider;
   ttsModel: string;
-  onTtsProviderChange: (provider: TTSProvider) => void;
   onTtsModelChange: (model: string) => void;
-  sttProvider: STTProvider;
-  sttInputMode: STTInputMode;
-  sttModel: string;
-  onSttProviderChange: (provider: STTProvider) => void;
-  onSttInputModeChange: (mode: STTInputMode) => void;
-  onSttModelChange: (model: string) => void;
   wakeWordEnabled: boolean;
   onToggleWakeWord: () => void;
   liveTranscriptionPreview: boolean;
@@ -80,14 +72,7 @@ export function SettingsDrawer({
   onToggleSound,
   ttsProvider,
   ttsModel,
-  onTtsProviderChange,
   onTtsModelChange,
-  sttProvider,
-  sttInputMode,
-  sttModel,
-  onSttProviderChange,
-  onSttInputModeChange,
-  onSttModelChange,
   wakeWordEnabled,
   onToggleWakeWord,
   liveTranscriptionPreview,
@@ -231,14 +216,7 @@ export function SettingsDrawer({
                 onToggleSound={onToggleSound}
                 ttsProvider={ttsProvider}
                 ttsModel={ttsModel}
-                onTtsProviderChange={onTtsProviderChange}
                 onTtsModelChange={onTtsModelChange}
-                sttProvider={sttProvider}
-                sttInputMode={sttInputMode}
-                sttModel={sttModel}
-                onSttProviderChange={onSttProviderChange}
-                onSttInputModeChange={onSttInputModeChange}
-                onSttModelChange={onSttModelChange}
                 wakeWordEnabled={wakeWordEnabled}
                 onToggleWakeWord={onToggleWakeWord}
                 liveTranscriptionPreview={liveTranscriptionPreview}

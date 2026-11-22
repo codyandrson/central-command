@@ -18,8 +18,6 @@ import {
   DEFAULT_PORT,
   DEFAULT_SSL_PORT,
   DEFAULT_HOST,
-  WHISPER_MODEL_FILES,
-  WHISPER_DEFAULT_MODEL,
   DEFAULT_LANGUAGE,
   SUPPORTED_LANGUAGES,
 } from './constants.js';
@@ -49,22 +47,13 @@ export const config = {
   // Bind address — defaults to localhost for safety; set HOST=0.0.0.0 for remote access
   host: process.env.HOST || DEFAULT_HOST,
 
+  // Key for the OpenAI-shaped speech endpoint (OPENAI_BASE_URL) — read-aloud
+  // and voice input; deploy setup mints a proxy key scoped to cc-tts + cc-stt.
   openaiApiKey: process.env.OPENAI_API_KEY || '',
-  replicateApiToken: process.env.REPLICATE_API_TOKEN || '',
-  mimoApiKey: process.env.MIMO_API_KEY || '',
-
-  // Speech-to-text
-  sttProvider: (process.env.STT_PROVIDER || 'local') as 'local' | 'openai',
-  whisperModel: process.env.WHISPER_MODEL || WHISPER_DEFAULT_MODEL,
-  whisperModelDir: process.env.WHISPER_MODEL_DIR || path.join(HOME, '.nerve', 'models'),
 
   // Language preference (ISO 639-1). Invalid/auto values are normalized to English.
   // Primary env key: NERVE_LANGUAGE. Legacy LANGUAGE is still accepted as fallback.
   language: normalizeLanguagePreference(LANGUAGE_ENV_VALUE),
-  edgeVoiceGender:
-    process.env.EDGE_VOICE_GENDER === 'male' || process.env.EDGE_VOICE_GENDER === 'female'
-      ? process.env.EDGE_VOICE_GENDER
-      : 'female',
 
   // Gateway connection
   gatewayUrl: process.env.GATEWAY_URL || DEFAULT_GATEWAY_URL,
@@ -88,8 +77,6 @@ export const config = {
   fileBrowserWritable: process.env.FILE_BROWSER_WRITABLE === '1',
   memoryPath: process.env.MEMORY_PATH || path.join(HOME, '.openclaw', 'workspace', 'MEMORY.md'),
   memoryDir: process.env.MEMORY_DIR || path.join(HOME, '.openclaw', 'workspace', 'memory'),
-  sessionsDir: process.env.SESSIONS_DIR || path.join(HOME, '.openclaw', 'agents', 'main', 'sessions'),
-  workspaceWatchRecursive: process.env.NERVE_WATCH_WORKSPACE_RECURSIVE !== 'false',
   workspaceRemote: process.env.NERVE_WORKSPACE_REMOTE === 'true',
   certPath: path.join(PROJECT_ROOT, 'certs', 'cert.pem'),
   keyPath: path.join(PROJECT_ROOT, 'certs', 'key.pem'),
@@ -121,16 +108,14 @@ export const config = {
 
 /** Keys that may be mutated at runtime and their accepted types. */
 type MutableConfigMap = {
-  sttProvider: 'local' | 'openai';
   language: string;
-  edgeVoiceGender: 'female' | 'male';
   sessionSecret: string;
 };
 
 /**
  * Centralized, type-safe config mutation.
  *
- * Only the four known mutable keys are accepted; values are validated at
+ * Only the two known mutable keys are accepted; values are validated at
  * runtime before the write so callers can never silently corrupt config.
  * The single `Record<string, unknown>` cast is confined to this function.
  */
@@ -139,19 +124,9 @@ export function updateConfig<K extends keyof MutableConfigMap>(
   value: MutableConfigMap[K],
 ): void {
   switch (key) {
-    case 'sttProvider':
-      if (value !== 'local' && value !== 'openai') {
-        throw new Error(`Invalid sttProvider: ${value}. Must be 'local' or 'openai'`);
-      }
-      break;
     case 'language':
       if (typeof value !== 'string' || !SUPPORTED_LANGUAGE_CODES.has(value)) {
         throw new Error(`Invalid language: ${value}. Must be a supported ISO 639-1 code`);
-      }
-      break;
-    case 'edgeVoiceGender':
-      if (value !== 'female' && value !== 'male') {
-        throw new Error(`Invalid edgeVoiceGender: ${value}. Must be 'female' or 'male'`);
       }
       break;
     case 'sessionSecret':
@@ -178,24 +153,17 @@ export const WS_ALLOWED_HOSTS = new Set([
   ...(process.env.WS_ALLOWED_HOSTS?.split(',').map(h => h.trim()).filter(Boolean) ?? []),
 ]);
 
-/** Resolve the TTS provider label for the startup banner. */
-function ttsProviderLabel(): string {
-  if (config.openaiApiKey && config.replicateApiToken) return 'OpenAI + Replicate + Edge';
-  if (config.openaiApiKey) return 'OpenAI + Edge';
-  if (config.replicateApiToken) return 'Replicate + Edge';
-  return 'Edge (free)';
-}
-
-/** Resolve the STT provider label for the startup banner. */
-function sttProviderLabel(): string {
-  if (config.sttProvider === 'openai') return config.openaiApiKey ? 'OpenAI Whisper' : 'OpenAI (no key!)';
-  return `Local (${config.whisperModel})`;
+/** Resolve the speech label for the startup banner (TTS and STT share the one endpoint). */
+function speechLabel(): string {
+  if (!config.openaiApiKey) return 'off (no OPENAI_API_KEY)';
+  const tts = (process.env.OPENAI_TTS_MODEL || '').trim();
+  return tts ? `deployment speech service (${tts})` : 'OpenAI-shaped endpoint';
 }
 
 /** Print startup banner with version and config summary. */
 export function printStartupBanner(version: string): void {
   console.log(`\n  \x1b[33m⚡ Nerve v${version}\x1b[0m`);
-  console.log(`  Agent: ${config.agentName} | TTS: ${ttsProviderLabel()} | STT: ${sttProviderLabel()}`);
+  console.log(`  Agent: ${config.agentName} | Speech: ${speechLabel()}`);
   console.log(`  Gateway: ${config.gatewayUrl}`);
   if (config.auth) {
     console.log('  \x1b[32m🔒 Authentication enabled\x1b[0m');
@@ -275,10 +243,7 @@ export function validateConfig(): void {
 
   // Informational warnings
   if (!config.openaiApiKey) {
-    console.warn('[config] ⚠ OPENAI_API_KEY not set — OpenAI TTS/Whisper unavailable (Edge TTS still works)');
-  }
-  if (!config.replicateApiToken) {
-    console.warn('[config] ⚠ REPLICATE_API_TOKEN not set — Qwen TTS unavailable');
+    console.warn('[config] ⚠ OPENAI_API_KEY not set — read-aloud and voice input unavailable');
   }
   if (!process.env.NERVE_LANGUAGE && process.env.LANGUAGE) {
     console.warn('[config] ⚠ LANGUAGE is deprecated — use NERVE_LANGUAGE instead');
@@ -290,24 +255,6 @@ export function validateConfig(): void {
       '[config] ⚠ Server binds to ' + config.host + ' — API may be accessible from the network.\n' +
       '         Set HOST=127.0.0.1 for local-only access.',
     );
-  }
-
-  // STT validation
-  if (config.sttProvider === 'local') {
-    const modelFile = WHISPER_MODEL_FILES[config.whisperModel];
-    if (modelFile) {
-      const modelPath = path.join(config.whisperModelDir, modelFile);
-      try {
-        fs.accessSync(modelPath);
-      } catch {
-        console.warn(
-          `[config] ⚠ Whisper model not found at ${modelPath}\n` +
-          `         Local STT unavailable. Re-run installer or set STT_PROVIDER=openai`,
-        );
-      }
-    } else {
-      console.warn(`[config] ⚠ Unknown Whisper model: ${config.whisperModel}`);
-    }
   }
 
   // ── FILE_BROWSER_ROOT validation ───────────────────────────────────────

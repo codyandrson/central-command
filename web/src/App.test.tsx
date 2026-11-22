@@ -167,12 +167,6 @@ vi.mock('@/contexts/SettingsContext', () => ({
     ttsModel: 'none',
     setTtsProvider: vi.fn(),
     setTtsModel: vi.fn(),
-    sttProvider: 'local',
-    setSttProvider: vi.fn(),
-    sttInputMode: 'push-to-talk',
-    setSttInputMode: vi.fn(),
-    sttModel: 'whisper',
-    setSttModel: vi.fn(),
     wakeWordEnabled: false,
     handleToggleWakeWord: vi.fn(),
     handleWakeWordState: vi.fn(),
@@ -228,14 +222,12 @@ vi.mock('@/features/file-browser', () => ({
       Trigger add to chat
     </button>
   ) : <div data-testid="file-tree-panel-disabled">Add to chat disabled</div>),
-  TabbedContentArea: ({ workspaceAgentId, onSaveFile, onReloadFile, saveToast, chatPanel, openBeads, onOpenBeadId }: {
+  TabbedContentArea: ({ workspaceAgentId, onSaveFile, onReloadFile, saveToast, chatPanel }: {
     workspaceAgentId: string;
     onSaveFile: (path: string) => void;
     onReloadFile?: (path: string) => void;
     saveToast?: { path: string; type: 'conflict' } | null;
     chatPanel?: ReactNode;
-    openBeads?: Array<{ id: string; beadId: string }>;
-    onOpenBeadId?: (target: { beadId: string }) => void;
   }) => {
     tabRenderSnapshots.push({
       workspaceAgentId,
@@ -248,8 +240,6 @@ vi.mock('@/features/file-browser', () => ({
         {chatPanel}
         <div data-testid="workspace-agent">{workspaceAgentId}</div>
         <button type="button" onClick={() => onSaveFile('shared.md')}>Save shared.md</button>
-        <button type="button" onClick={() => onOpenBeadId?.({ beadId: 'nerve-fms2' })}>Open bead viewer</button>
-        <div data-testid="open-beads">{(openBeads ?? []).map((bead) => bead.beadId).join(',')}</div>
         {saveToast && (
           <div>
             <span>File changed externally.</span>
@@ -295,7 +285,6 @@ vi.mock('@/components/ConfirmDialog', () => ({
 
 vi.mock('@/features/chat/ChatPanel', () => ({
   ChatPanel: forwardRef((props: {
-    onOpenBeadId?: (target: { beadId: string; workspaceAgentId?: string }) => void;
     showCommandPaletteButton?: boolean;
     onOpenCommandPalette?: () => void;
   }, ref) => {
@@ -599,72 +588,6 @@ describe('App save toast workspace scoping', () => {
     expect(screen.getByTestId('workspace-agent')).toHaveTextContent('alpha');
     expect(screen.queryByText('File changed externally.')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
-  });
-});
-
-describe('App bead tab workspace scoping', () => {
-  beforeEach(() => {
-    localStorage.clear();
-    sessionContext.currentSession = 'agent:alpha:main';
-    sessionContext.setCurrentSession.mockReset();
-    dirtyStateByAgent.alpha = false;
-    dirtyStateByAgent.bravo = false;
-    tabRenderSnapshots.length = 0;
-
-    Object.defineProperty(window, 'matchMedia', {
-      writable: true,
-      value: vi.fn().mockImplementation((query: string) => ({
-        matches: false,
-        media: query,
-        onchange: null,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      })),
-    });
-  });
-
-  it('shows bead tabs only for the active workspace and drops them immediately on workspace switch', () => {
-    const { rerender } = render(<App />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open bead viewer' }));
-    expect(screen.getByTestId('open-beads')).toHaveTextContent('nerve-fms2');
-
-    sessionContext.currentSession = 'agent:bravo:main';
-    rerender(<App />);
-
-    expect(screen.getByTestId('workspace-agent')).toHaveTextContent('bravo');
-    expect(screen.getByTestId('open-beads')).toHaveTextContent('');
-
-    sessionContext.currentSession = 'agent:alpha:main';
-    rerender(<App />);
-
-    expect(screen.getByTestId('workspace-agent')).toHaveTextContent('alpha');
-    expect(screen.getByTestId('open-beads')).toHaveTextContent('nerve-fms2');
-  });
-
-  it('creates distinct shorthand bead tabs per workspace instead of deduping across hidden tabs', () => {
-    const { rerender } = render(<App />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open bead viewer' }));
-    expect(screen.getByTestId('open-beads')).toHaveTextContent('nerve-fms2');
-
-    sessionContext.currentSession = 'agent:bravo:main';
-    rerender(<App />);
-    expect(screen.getByTestId('open-beads')).toHaveTextContent('');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open bead viewer' }));
-    expect(screen.getByTestId('open-beads')).toHaveTextContent('nerve-fms2');
-
-    sessionContext.currentSession = 'agent:alpha:main';
-    rerender(<App />);
-    expect(screen.getByTestId('open-beads')).toHaveTextContent('nerve-fms2');
-
-    sessionContext.currentSession = 'agent:bravo:main';
-    rerender(<App />);
-    expect(screen.getByTestId('open-beads')).toHaveTextContent('nerve-fms2');
   });
 });
 

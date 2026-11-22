@@ -1190,7 +1190,6 @@ phase_app() {
   set_kv_if_unset "$wenv" OPENAI_BASE_URL  "http://127.0.0.1:4000/v1" "web-speech-url"
   set_kv_if_unset "$wenv" OPENAI_TTS_MODEL "cc-tts"                   "web-speech-tts"
   set_kv_if_unset "$wenv" OPENAI_STT_MODEL "cc-stt"                   "web-speech-stt"
-  set_kv_if_unset "$wenv" STT_PROVIDER     "openai"                   "web-speech-provider"
   # Optional: the voice the speech engine is asked for, the same CC_TTS_VOICE the
   # API's own speech route reads. Left unset when the app env has none — the
   # cockpit then uses the engine's first voice (af_heart), as the API does.

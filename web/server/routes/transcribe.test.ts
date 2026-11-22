@@ -1,4 +1,5 @@
-/** Tests for the transcribe config and language routes. */
+// @vitest-environment node
+/** Tests for the transcribe and language routes. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Hono } from 'hono';
 
@@ -12,17 +13,13 @@ describe('transcribe routes', () => {
   });
 
   function mockDeps(overrides: {
-    sttProvider?: string;
     openaiKey?: string;
     language?: string;
   } = {}) {
     const mockConfig: Record<string, unknown> = {
       auth: false, port: 3000, host: '127.0.0.1', sslPort: 3443,
-      sttProvider: overrides.sttProvider || 'local',
-      openaiApiKey: overrides.openaiKey || '',
-      replicateApiToken: '',
+      openaiApiKey: overrides.openaiKey ?? 'sk-test',
       language: overrides.language || 'en',
-      edgeVoiceGender: 'female',
       limits: { transcribe: 12 * 1024 * 1024 },
     };
     vi.doMock('../lib/config.js', () => ({
@@ -35,30 +32,17 @@ describe('transcribe routes', () => {
       rateLimitGeneral: vi.fn((_c: unknown, next: () => Promise<void>) => next()),
     }));
     vi.doMock('../lib/constants.js', () => ({
+      OPENAI_STT_MODEL: 'cc-stt',
       SUPPORTED_LANGUAGES: [
-        { code: 'en', name: 'English', nativeName: 'English', edgeTtsVoices: { female: 'v1', male: 'v2' }, qwen3Language: null },
-        { code: 'de', name: 'German', nativeName: 'Deutsch', edgeTtsVoices: { female: 'v3', male: 'v4' }, qwen3Language: 'de' },
+        { code: 'en', name: 'English', nativeName: 'English' },
+        { code: 'de', name: 'German', nativeName: 'Deutsch' },
       ],
     }));
     vi.doMock('../lib/env-file.js', () => ({
       writeEnvKey: vi.fn(async () => {}),
     }));
-    vi.doMock('../lib/language.js', () => ({
-      isLanguageSupported: vi.fn(() => true),
-    }));
     vi.doMock('../services/openai-whisper.js', () => ({
       transcribe: vi.fn(async () => ({ ok: true, text: 'openai transcription' })),
-    }));
-    vi.doMock('../services/whisper-local.js', () => ({
-      transcribeLocal: vi.fn(async () => ({ ok: true, text: 'local transcription' })),
-      isModelAvailable: vi.fn((model?: string) => !model || model === 'base.en'),
-      getActiveModel: vi.fn(() => 'base.en'),
-      setWhisperModel: vi.fn(async (model: string) => {
-        if (model === 'bad-model') return { ok: false, message: 'Unknown model' };
-        return { ok: true, message: `Model set to ${model}` };
-      }),
-      getDownloadProgress: vi.fn(() => null),
-      getSystemInfo: vi.fn(() => ({ hasGpu: false })),
     }));
   }
 
@@ -69,101 +53,87 @@ describe('transcribe routes', () => {
     return app;
   }
 
-  describe('GET /api/transcribe/config', () => {
-    it('returns current STT config', async () => {
-      mockDeps();
+  /** A multipart audio upload, as the browser sends it (the node environment above: jsdom cannot parse one). */
+  function audioUpload(): RequestInit {
+    const boundary = '----testboundary';
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="clip.webm"',
+      'Content-Type: audio/webm',
+      '',
+      'abc',
+      `--${boundary}--`,
+      '',
+    ].join('\r\n');
+    return { method: 'POST', headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` }, body };
+  }
+
+  describe('POST /api/transcribe', () => {
+    it('transcribes through the OpenAI-shaped endpoint with the language hint', async () => {
+      mockDeps({ language: 'de' });
       const app = await buildApp();
-      const res = await app.request('/api/transcribe/config');
+      const res = await app.request('/api/transcribe', audioUpload());
       expect(res.status).toBe(200);
-      const json = (await res.json()) as Record<string, unknown>;
-      expect(json.provider).toBe('local');
-      expect(json.model).toBe('base.en');
-      expect(json.language).toBe('en');
-      expect(json).toHaveProperty('availableModels');
-      expect(json).toHaveProperty('hasGpu');
+      expect(await res.json()).toEqual({ text: 'openai transcription' });
+      const whisper = await import('../services/openai-whisper.js');
+      const call = vi.mocked(whisper.transcribe).mock.calls[0];
+      expect(call[1]).toBe('clip.webm');
+      expect(call[3]).toBe('de');
     });
 
-    it('includes model ready status', async () => {
+    it('says the key is missing rather than trying a local engine', async () => {
+      mockDeps({ openaiKey: '' });
+      const app = await buildApp();
+      const res = await app.request('/api/transcribe', audioUpload());
+      expect(res.status).toBe(500);
+      expect(await res.text()).toContain('OPENAI_API_KEY');
+      const whisper = await import('../services/openai-whisper.js');
+      expect(vi.mocked(whisper.transcribe)).not.toHaveBeenCalled();
+    });
+
+    it('rejects a request with no file', async () => {
       mockDeps();
       const app = await buildApp();
-      const res = await app.request('/api/transcribe/config');
-      const json = (await res.json()) as Record<string, unknown>;
-      expect(json.modelReady).toBe(true);
+      const res = await app.request('/api/transcribe', { method: 'POST', body: new FormData() });
+      expect(res.status).toBe(400);
     });
   });
 
-  describe('PUT /api/transcribe/config', () => {
-    it('switches provider', async () => {
+  describe('GET /api/transcribe/config', () => {
+    it('reports the one provider and its model, the same shape as the API route', async () => {
       mockDeps();
       const app = await buildApp();
-      const res = await app.request('/api/transcribe/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'openai' }),
-      });
+      const res = await app.request('/api/transcribe/config');
       expect(res.status).toBe(200);
-      const json = (await res.json()) as Record<string, unknown>;
-      expect(json.provider).toBe('openai');
+      expect(await res.json()).toEqual({ provider: 'openai', model: 'cc-stt', language: 'en', modelReady: true });
     });
 
-    it('rejects unsupported language', async () => {
+    it('has no PUT: there is no provider or model to switch', async () => {
       mockDeps();
       const app = await buildApp();
       const res = await app.request('/api/transcribe/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: 'xx' }),
+        body: JSON.stringify({ provider: 'local' }),
       });
-      expect(res.status).toBe(400);
-    });
-
-    it('accepts valid language', async () => {
-      mockDeps();
-      const app = await buildApp();
-      const res = await app.request('/api/transcribe/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: 'de' }),
-      });
-      expect(res.status).toBe(200);
-      const json = (await res.json()) as Record<string, unknown>;
-      expect(json.language).toBe('de');
-    });
-
-    it('rejects bad model', async () => {
-      mockDeps();
-      const app = await buildApp();
-      const res = await app.request('/api/transcribe/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'bad-model' }),
-      });
-      expect(res.status).toBe(400);
-    });
-
-    it('returns 400 for invalid JSON', async () => {
-      mockDeps();
-      const app = await buildApp();
-      const res = await app.request('/api/transcribe/config', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: 'not json',
-      });
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(404);
     });
   });
 
   describe('GET /api/language', () => {
-    it('returns language info with supported list', async () => {
+    it('returns the language and the supported list', async () => {
       mockDeps();
       const app = await buildApp();
       const res = await app.request('/api/language');
       expect(res.status).toBe(200);
       const json = (await res.json()) as Record<string, unknown>;
       expect(json.language).toBe('en');
-      expect(json.edgeVoiceGender).toBe('female');
-      expect(Array.isArray(json.supported)).toBe(true);
-      expect(json).toHaveProperty('providers');
+      expect(json.supported).toEqual([
+        { code: 'en', name: 'English', nativeName: 'English' },
+        { code: 'de', name: 'German', nativeName: 'Deutsch' },
+      ]);
+      expect(json).not.toHaveProperty('edgeVoiceGender');
+      expect(json).not.toHaveProperty('providers');
     });
   });
 
@@ -179,7 +149,7 @@ describe('transcribe routes', () => {
       expect(res.status).toBe(400);
     });
 
-    it('accepts valid language code', async () => {
+    it('accepts a valid language code and writes NERVE_LANGUAGE', async () => {
       mockDeps();
       const app = await buildApp();
       const res = await app.request('/api/language', {
@@ -188,30 +158,9 @@ describe('transcribe routes', () => {
         body: JSON.stringify({ language: 'de' }),
       });
       expect(res.status).toBe(200);
-      const json = (await res.json()) as Record<string, unknown>;
-      expect(json.language).toBe('de');
-    });
-
-    it('rejects invalid edgeVoiceGender', async () => {
-      mockDeps();
-      const app = await buildApp();
-      const res = await app.request('/api/language', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ edgeVoiceGender: 'other' }),
-      });
-      expect(res.status).toBe(400);
-    });
-
-    it('accepts valid edgeVoiceGender', async () => {
-      mockDeps();
-      const app = await buildApp();
-      const res = await app.request('/api/language', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ edgeVoiceGender: 'male' }),
-      });
-      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ language: 'de' });
+      const envFile = await import('../lib/env-file.js');
+      expect(vi.mocked(envFile.writeEnvKey)).toHaveBeenCalledWith('NERVE_LANGUAGE', 'de');
     });
 
     it('returns 400 for invalid JSON', async () => {
@@ -223,19 +172,6 @@ describe('transcribe routes', () => {
         body: 'not json',
       });
       expect(res.status).toBe(400);
-    });
-  });
-
-  describe('GET /api/language/support', () => {
-    it('returns full compatibility matrix', async () => {
-      mockDeps();
-      const app = await buildApp();
-      const res = await app.request('/api/language/support');
-      expect(res.status).toBe(200);
-      const json = (await res.json()) as { languages: Array<Record<string, unknown>>; currentModel: string; isMultilingual: boolean };
-      expect(Array.isArray(json.languages)).toBe(true);
-      expect(json.currentModel).toBe('base.en');
-      expect(json.isMultilingual).toBe(false);  // base.en ends with .en
     });
   });
 });

@@ -384,7 +384,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   // Tab completion for session names
   const { sessions, agentName: ctxAgentName } = useSessionContext();
-  const { liveTranscriptionPreview, sttInputMode, sttProvider } = useSettings();
+  const { liveTranscriptionPreview } = useSettings();
   const getSessionLabels = useMemo(() => {
     // Build a closure that returns current session labels
     const labels = sessions.map((s) => {
@@ -644,8 +644,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     };
   }, []);
 
-  const effectiveSttInputMode = sttProvider === 'openai' ? 'local' : sttInputMode;
-
   const { voiceState, interimTranscript, startRecording, stopAndTranscribe, wakeWordEnabled, toggleWakeWord, error: voiceError, clearError: clearVoiceError } = useVoiceInput((text) => {
     const input = inputRef.current;
     if (input) {
@@ -657,7 +655,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     }
     setDraftText('');
     onSend('[voice] ' + text);
-  }, agentName, voiceLang, voicePhrasesVersion, effectiveSttInputMode);
+  }, agentName, voiceLang, voicePhrasesVersion, 'local'); // dictation is always finalized by the server's /api/transcribe
 
   // Live transcription preview: write interim transcript to textarea during recording
   useEffect(() => {

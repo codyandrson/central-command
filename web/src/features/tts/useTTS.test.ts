@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractTTSMarkers, migrateTTSProvider, coerceTTSProvider, coerceSTTProvider } from './useTTS';
+import { extractTTSMarkers, OFFERED_PROVIDERS } from './useTTS';
 
 describe('extractTTSMarkers', () => {
   it('should extract a single TTS marker', () => {
@@ -65,42 +65,8 @@ describe('extractTTSMarkers', () => {
   });
 });
 
-describe('migrateTTSProvider', () => {
-  it('should migrate "qwen" to "replicate"', () => {
-    expect(migrateTTSProvider('qwen')).toBe('replicate');
-  });
-
-  it('should keep "openai" as-is', () => {
-    expect(migrateTTSProvider('openai')).toBe('openai');
-  });
-
-  it('should keep "replicate" as-is', () => {
-    expect(migrateTTSProvider('replicate')).toBe('replicate');
-  });
-
-  it('should keep "edge" as-is', () => {
-    expect(migrateTTSProvider('edge')).toBe('edge');
-  });
-
-  it('should keep "xiaomi" as-is', () => {
-    expect(migrateTTSProvider('xiaomi')).toBe('xiaomi');
-  });
-
-  it('should default unknown values to "openai"', () => {
-    expect(migrateTTSProvider('unknown')).toBe('openai');
-    expect(migrateTTSProvider('')).toBe('openai');
-  });
-});
-
-describe('provider coercion (only openai is offered in this deployment)', () => {
-  it('resolves a stored or default hidden TTS provider to openai', () => {
-    expect(coerceTTSProvider('edge')).toBe('openai');
-    expect(coerceTTSProvider('qwen')).toBe('openai');
-    expect(coerceTTSProvider('openai')).toBe('openai');
-  });
-
-  it('resolves a stored or default local STT provider to openai', () => {
-    expect(coerceSTTProvider('local')).toBe('openai');
-    expect(coerceSTTProvider(null)).toBe('openai');
+describe('offered providers', () => {
+  it('offers the one deployment speech provider for read-aloud and dictation', () => {
+    expect(OFFERED_PROVIDERS).toEqual({ tts: ['openai'], stt: ['openai'] });
   });
 });

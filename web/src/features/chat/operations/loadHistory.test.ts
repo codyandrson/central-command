@@ -376,21 +376,6 @@ describe('processChatMessages', () => {
     ]);
   });
 
-  it('does not synthesize omitted transcript image URLs without a persisted timestamp', () => {
-    const result = processChatMessages([
-      {
-        role: 'assistant',
-        content: [
-          { type: 'text', text: 'generated image' },
-          { type: 'image', omitted: true, mimeType: 'image/png' },
-        ],
-      },
-    ], { sessionKey: 'agent:main:main' });
-
-    expect(result).toHaveLength(1);
-    expect(result[0].extractedImages).toBeUndefined();
-  });
-
   it('deduplicates merged image references while preserving order', () => {
     const result = processChatMessages([
       {
@@ -445,7 +430,7 @@ describe('loadChatHistory', () => {
     await expect(loadChatHistory({ rpc, sessionKey: 'sk' })).rejects.toThrow('network error');
   });
 
-  it('hydrates omitted transcript images through the session media route', async () => {
+  it('synthesizes no image URL for an omitted transcript image block', async () => {
     const rpc = vi.fn().mockResolvedValue({
       messages: [
         {
@@ -462,11 +447,6 @@ describe('loadChatHistory', () => {
     const result = await loadChatHistory({ rpc, sessionKey: 'agent:main:main' });
 
     expect(result).toHaveLength(1);
-    expect(result[0].extractedImages).toEqual([
-      {
-        url: '/api/sessions/media?sessionKey=agent%3Amain%3Amain&timestamp=1775131617235&imageIndex=0',
-        alt: 'message-1775131617235-image-0.png',
-      },
-    ]);
+    expect(result[0].extractedImages).toBeUndefined();
   });
 });

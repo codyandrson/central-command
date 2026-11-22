@@ -23,8 +23,9 @@ out of step are exactly what this walk checks:
 To see it fail: add a row for `CC_NOPE` and re-run.
 
 Story 11.12 (epic small-fixes, R7, DEPLOY-SINGLE-001) extends it two ways: the
-four typed keys that were answered by hand (CC_NETRC, CC_CLIENT_CERT,
-CC_CLIENT_KEY, WHISPER_MODELS_BASE_URL) are rows now, and the FORWARD walk
+typed keys that were answered by hand (CC_NETRC, CC_CLIENT_CERT,
+CC_CLIENT_KEY; WHISPER_MODELS_BASE_URL too, until it left with the cockpit's
+local speech engine) are rows now, and the FORWARD walk
 below reads deploy/AIRGAP.md's seam table, so a seam documented there with no
 row fails the suite instead of waiting for review.
 """
@@ -274,12 +275,11 @@ def test_the_four_typed_keys_are_rows_with_the_right_shape():
         r = rows[key]
         assert (r["group"], r["default"], r["validator"], r["secret"]) == (
             "network", "-", "v_path", "n"), r
-    w = rows["WHISPER_MODELS_BASE_URL"]
-    assert (w["group"], w["validator"], w["when"]) == ("mirrors", "v_url", "-")
-    assert "local speech engine" in w["prompt"].lower()
     keys = [r["key"] for r in ROWS]
     assert keys.index("CC_NETRC") > keys.index("CC_TLS_INSECURE")
-    assert keys.index("WHISPER_MODELS_BASE_URL") > keys.index("CC_HF_ENDPOINT")
+    # The fourth, the mirror for the cockpit's local Whisper engine, left with
+    # that engine: nothing reads it, so configure must not ask for it.
+    assert "WHISPER_MODELS_BASE_URL" not in keys
 
 
 # ── the FORWARD walk: AIRGAP.md's seam table -> a row, or a named exception ──
@@ -291,7 +291,6 @@ _SEAM_EXCEPTIONS = {
     "CC_CONFLUENCE_AUTH_MODE": ("derives from its flavor; an .env.example line", ENV_EXAMPLE),
     "CC_CONFLUENCE_PROFILE": ("informational; an .env.example line", ENV_EXAMPLE),
     "CC_IMG_<NAME>": ("written by the image resolver", SINGLE / "resolve-images.sh"),
-    "WHISPER_MODEL_DIR": ("a local directory, not an answer", ROOT / "web" / "server" / "lib" / "config.ts"),
     "CC_LLM_UPSTREAM_MODEL_<ALIAS>": ("a prefix the per-alias rows expand", None),
 }
 

@@ -201,7 +201,7 @@ Nine sections, in order — `./setup.sh check --list` prints this table:
 | `llm` | the upstream endpoint FROM THIS HOST — the model list, one chat, one structured, one embedding — ONLY when .env declares it; with the catalog left to the LiteLLM UI this section says so and probes nothing |
 | `integrations` | Jira and Confluence FROM THIS HOST — scripts/atlassian_probe.py against the configured credentials, ONLY when .env sets CC_JIRA_BASE_URL; blank says so and probes nothing |
 | `compose` | compose.yaml renders with this .env, with no variable it requires left unset |
-| `models` | the speech models' source (Hugging Face or a pre-placed volume) and the cockpit's whisper model |
+| `models` | the speech models' source (Hugging Face or a pre-placed volume) |
 
 It ends with `CHECK: <n> pass, <n> warn, <n> fail, <n> action`, the state-dir
 path, and one honest ceiling: **check proves inputs, not builds.** A local image

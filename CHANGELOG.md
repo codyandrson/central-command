@@ -4,6 +4,35 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.116.0: Inert inherited cockpit features with server code behind them are removed
+
+- **Why.** The second removal release under DL-224. Each feature below came with the cockpit's origin
+  and did nothing in Central Command; the operator ruled on each in the system review of 2026-11-21.
+  About 8,800 lines go.
+- **Beads.** The `bead:ID` links, the viewer tab and `/api/beads` shelled out to a `bd` command no
+  deployment has. Work is tracked in Jira and on the Task Board.
+- **Codex and Claude Code usage limits.** The two blocks in the Usage panel never rendered (their rows
+  never matched a LiteLLM model), and one route spawned a local CLI to ask it. Gone with their routes
+  and `node-pty`. Per-model spend in the Usage panel is unchanged.
+- **Schedule delivery to a channel.** The control was greyed out and its route read another product's
+  configuration. A schedule's result lands where it always has: its run history, the Activity screen,
+  and whatever its action creates.
+- **Other speech engines.** The Replicate, Microsoft Edge and Xiaomi text-to-speech providers, the
+  local Whisper engine with its model download and `@fugood/whisper.node`, and the browser form that
+  wrote API keys into the cockpit's settings file. Read-aloud and voice input go through the
+  deployment's speech service, as the UI already offered; the wake word, voice phrases, live preview
+  and language setting are unchanged. The single-node installer no longer asks for
+  `WHISPER_MODELS_BASE_URL`.
+- **Session-file routes.** `GET /api/sessions/hidden`, `/media`, `/runtime` and `/:id/model` read
+  another product's files and always answered empty. The model and thinking pickers use the gateway
+  relay, as before.
+- **The file watcher and `/api/events`.** It watched leftover folders. The file browser and editor
+  stay (off by default, as before) and refresh on open or with their refresh button. Chat, sessions,
+  the attention pill and the update badge never used it.
+- **Checked before release.** The built cockpit was loaded in a headless browser against a running
+  API: the shell, the Usage panel, the audio settings and the schedule dialog opened with no console
+  error and no failed request.
+
 ## 2026-11-21 — v2.115.0: The cockpit is owned code; dead inherited code is removed
 
 - **Why.** `web/` began as a wholesale fork of openclaw-nerve v1.5.3. About 170 of its files have been

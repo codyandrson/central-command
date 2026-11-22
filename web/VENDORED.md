@@ -30,22 +30,26 @@ upstream's WebSocket client for remote workspace-file access.
 | `POST /api/gateway/restart` and `server/lib/openclaw-bin.ts` | it shelled out to an `openclaw` CLI no deployment has; the restart card in Settings > Connection uses `routes/cc-update.ts` |
 | `POST /api/sessions/spawn-subagent` and `server/lib/subagent-spawn.ts` | nothing in the cockpit called it |
 
+## Removed in the release after v2.115.0 (the operator's rulings of 2026-11-21)
+
+The server-backed inert features, each with its route, its libraries, the
+client code that called or rendered it, its settings and its tests:
+
+| removed | why |
+|---|---|
+| beads: `routes/beads.ts`, `server/lib/beads.ts` and `server/lib/plans.ts` (its only importer), `src/features/beads/`, the `bead:` link handling in the markdown renderer and chat, and the bead viewer tab | it shelled out to a `bd` command no deployment has |
+| the Codex and Claude Code usage-limit blocks in the Usage panel: `routes/codex-limits.ts`, `routes/claude-code-limits.ts`, `server/services/claude-usage.ts`, `server/lib/cached-fetch.ts`, `src/features/dashboard/useLimits.ts`, and the `node-pty` dependency | neither CLI runs here, so both always reported "unavailable". The rest of the Usage panel (spend from LiteLLM through `cc-tokens`) stays |
+| `routes/channels.ts` and the schedule dialog's "deliver to a channel" section (`DELIVERY_ENABLED`, the channel and recipient fields, the appended send instruction) | it read channel names from `~/.openclaw/openclaw.json`; no deployment has a messaging channel. A schedule no longer sends a `delivery` field, which the API never read |
+| the Replicate, Microsoft Edge and Xiaomi text-to-speech providers (`server/services/{replicate,edge,xiaomi}-tts.ts`, `server/lib/language.ts`), the local Whisper engine (`server/services/whisper-local.ts`, its model download and picker, `PUT /api/transcribe/config`, `GET /api/language/support`, the `@fugood/whisper.node` dependency, `STT_PROVIDER`, `WHISPER_MODEL`, `WHISPER_MODEL_DIR` with its `~/.nerve/models` default, and the installer's `WHISPER_MODELS_BASE_URL` question), and the API-key form with `routes/api-keys.ts` (`REPLICATE_API_TOKEN`, `MIMO_API_KEY`, `EDGE_VOICE_GENDER`) | read-aloud and voice input have one engine: the deployment's speech service behind `cc-tts` / `cc-stt`, reached through `OPENAI_BASE_URL` with the key setup mints. `OPENAI_API_KEY` stays (that key); the form that could overwrite it from the browser is gone |
+| the OpenClaw session-file routes `GET /api/sessions/hidden`, `/api/sessions/media`, `/api/sessions/runtime` and `/api/sessions/:id/model` (all of `routes/sessions.ts`, and `SESSIONS_DIR`), with their callers in `SessionContext.tsx`, `loadHistory.ts`, `useModelEffort.ts` and `SessionInfoPanel.tsx` | they read `~/.openclaw/agents/*/sessions`, which no deployment has, so each answered empty or "missing". Sessions, models and thinking levels come over the `/ws` relay and `GET /api/gateway/models` |
+| the file watcher (`server/lib/file-watcher.ts`, `NERVE_WATCH_WORKSPACE_RECURSIVE`), `routes/events.ts` (`GET /api/events` SSE, `POST /api/events/test`, `broadcast()`) and the client's `src/hooks/useServerEvents.ts` | they pushed `file.changed` / `memory.changed` for upstream's workspace files. The file tree (kept, UI off) has no live refresh: it loads when opened and has a Refresh button. Everything live in Central Command rides `/ws` or its own polling |
+
 ## Still present from upstream, to be removed or adapted in a later release
 
 Inert here, or only partly used, and kept for now by decision:
 
-- beads (`routes/beads.ts`, `src/features/beads/`);
 - the connect dialog (`src/features/connect/`, `routes/connect-defaults.ts`);
-- the OpenClaw session-file routes in `routes/sessions.ts` (media, hidden,
-  runtime, model);
-- the file watcher (`server/lib/file-watcher.ts`) and `/api/events`;
 - the Log and Events dropdowns;
-- the usage-limit blocks and their routes (`routes/codex-limits.ts`,
-  `routes/claude-code-limits.ts`), which report "unavailable" because neither
-  CLI runs here;
-- the channels route (`routes/channels.ts`, an empty list) and the schedule
-  dialog's delivery control;
-- the other speech engines and the API-key form (`routes/api-keys.ts`);
 - the slash-command code (`src/features/chat/InputBar.tsx`; none is wired
   server-side);
 - the relevant-memories block;

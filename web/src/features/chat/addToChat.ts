@@ -7,11 +7,6 @@ export interface PlanChatArtifact extends BaseChatArtifact {
   path: string;
 }
 
-export interface BeadChatArtifact extends BaseChatArtifact {
-  title: string;
-  id: string;
-}
-
 export interface WorkspacePathChatArtifact extends BaseChatArtifact {
   path: string;
   kind: 'file' | 'directory';
@@ -31,14 +26,6 @@ export function formatPlanAddToChat(plan: PlanChatArtifact): string {
     ['Source', plan.source],
     ['Title', plan.title],
     ['Path', plan.path],
-  ]);
-}
-
-export function formatBeadAddToChat(bead: BeadChatArtifact): string {
-  return formatArtifactBlock('Bead', [
-    ['Source', bead.source],
-    ['Title', bead.title],
-    ['ID', bead.id],
   ]);
 }
 

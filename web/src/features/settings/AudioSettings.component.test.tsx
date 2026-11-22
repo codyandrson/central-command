@@ -20,10 +20,7 @@ vi.mock('@/features/tts/useTTSConfig', () => ({
   useTTSConfig: () => ({
     config: {
       deploymentSpeech: ttsState.deploymentSpeech,
-      edge: { voice: 'en-US-AriaNeural' },
       openai: { model: 'tts-1', voice: 'alloy', instructions: '' },
-      qwen: { mode: 'voice_design', language: 'English', speaker: 'Serena', voiceDescription: '', styleInstruction: '' },
-      xiaomi: { model: 'mimo-v2-tts', voice: 'mimo_default', style: '' },
     },
     saved: true,
     updateField,
@@ -55,16 +52,9 @@ vi.mock('@/components/ui/InlineSelect', () => ({
 const baseProps = {
   soundEnabled: true,
   onToggleSound: vi.fn(),
-  ttsProvider: 'edge' as const,
+  ttsProvider: 'openai' as const,
   ttsModel: 'tts-1',
-  onTtsProviderChange: vi.fn(),
   onTtsModelChange: vi.fn(),
-  sttProvider: 'local' as const,
-  sttInputMode: 'hybrid' as const,
-  sttModel: 'base',
-  onSttProviderChange: vi.fn(),
-  onSttInputModeChange: vi.fn(),
-  onSttModelChange: vi.fn(),
   wakeWordEnabled: true,
   onToggleWakeWord: vi.fn(),
   liveTranscriptionPreview: true,
@@ -78,42 +68,14 @@ function mockWakeWordSupport(result: { supported: boolean; reason: 'mobile-web' 
   (wakeWordSupport.isWakeWordSupportedEnvironment as Mock).mockReturnValue(result.supported);
 }
 
-type ApiKeyState = { openaiKeySet: boolean; replicateKeySet: boolean; xiaomiKeySet: boolean; hasGpu: boolean };
-let apiKeyState: ApiKeyState = {
-  openaiKeySet: true,
-  replicateKeySet: true,
-  xiaomiKeySet: false,
-  hasGpu: false,
-};
-
 describe('AudioSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ttsState.deploymentSpeech = null;
     mockWakeWordSupport({ supported: true, reason: null });
-    apiKeyState = {
-      openaiKeySet: true,
-      replicateKeySet: true,
-      xiaomiKeySet: false,
-      hasGpu: false,
-    };
 
     globalThis.fetch = vi.fn((input: string | URL) => {
       const url = String(input);
-
-      if (url === '/api/keys') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve(apiKeyState),
-        } as Response);
-      }
-
-      if (url === '/api/transcribe/config') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ hasGpu: apiKeyState.hasGpu }),
-        } as Response);
-      }
 
       if (url === '/api/language') {
         return Promise.resolve({
@@ -121,15 +83,7 @@ describe('AudioSettings', () => {
           json: () => Promise.resolve({
             language: 'en',
             supported: [{ code: 'en', name: 'English', nativeName: 'English' }],
-            providers: { edge: true, qwen3: true, openai: true },
           }),
-        } as Response);
-      }
-
-      if (url === '/api/language/support') {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ languages: [], isMultilingual: false }),
         } as Response);
       }
 
@@ -250,32 +204,27 @@ describe('AudioSettings', () => {
         expect(updateField).not.toHaveBeenCalled();
       });
     });
+  });
 
-    it('renders Xiaomi model and voice selectors', async () => {
-      render(<AudioSettings {...baseProps} section="output" ttsProvider="xiaomi" ttsModel="mimo-v2-tts" />);
+  describe('removed speech engines and the key form', () => {
+    it('offers no local STT engine, model picker, input-mode choice or key form, and calls none of their routes', async () => {
+      render(<AudioSettings {...baseProps} section="all" />);
 
-      expect(await screen.findByLabelText('TTS Model')).toHaveValue('mimo-v2-tts');
-      expect(screen.getByLabelText('Xiaomi Voice')).toHaveValue('mimo_default');
-      expect(screen.getByRole('option', { name: 'mimo-v2-tts' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'mimo_default' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'default_zh' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'default_en' })).toBeInTheDocument();
-    });
+      expect(await screen.findByText('Using the deployment speech service (cc-stt)')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Local (Free)' })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('STT Model')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('STT Input Mode')).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText(/Paste your/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Edge Voice')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Xiaomi Voice')).not.toBeInTheDocument();
+      // The live preview and the language picker stay.
+      expect(screen.getByRole('switch', { name: /toggle live transcription preview/i })).toBeInTheDocument();
+      expect(await screen.findByLabelText('Voice Language')).toBeInTheDocument();
 
-    it('updates Xiaomi voice when the voice selector changes', async () => {
-      render(<AudioSettings {...baseProps} section="output" ttsProvider="xiaomi" ttsModel="mimo-v2-tts" />);
-
-      fireEvent.change(await screen.findByLabelText('Xiaomi Voice'), { target: { value: 'default_en' } });
-      expect(updateField).toHaveBeenCalledWith('xiaomi', 'voice', 'default_en');
-    });
-
-    it('updates Xiaomi style when the Style field changes', async () => {
-      render(<AudioSettings {...baseProps} section="output" ttsProvider="xiaomi" ttsModel="mimo-v2-tts" />);
-
-      fireEvent.click(await screen.findByText('Happy, whisper, calm, dramatic...'));
-      fireEvent.change(screen.getByPlaceholderText('Happy, whisper, calm, dramatic...'), { target: { value: 'Happy' } });
-
-      expect(updateField).toHaveBeenCalledWith('xiaomi', 'style', 'Happy');
+      const urls = (globalThis.fetch as Mock).mock.calls.map((c) => String(c[0]));
+      for (const gone of ['/api/keys', '/api/transcribe/config', '/api/language/support']) {
+        expect(urls).not.toContain(gone);
+      }
     });
   });
 });

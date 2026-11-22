@@ -20,13 +20,7 @@ async function load(env: Record<string, string>, stored: Record<string, unknown>
   disk.stored = stored;
 
   vi.doMock('../lib/config.js', () => ({
-    config: { openaiApiKey: 'sk-test', language: 'en', edgeVoiceGender: 'female' },
-  }));
-  vi.doMock('../lib/language.js', () => ({
-    getEdgeTtsVoice: () => 'en-US-AriaNeural',
-    getQwen3Language: () => null,
-    getFallbackInfo: () => ({ supported: true }),
-    resolveLanguage: () => undefined,
+    config: { openaiApiKey: 'sk-test', language: 'en' },
   }));
   vi.doMock('node:fs', () => ({
     default: {

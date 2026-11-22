@@ -3,7 +3,7 @@
  *
  * Starts HTTP and optional HTTPS servers (for secure-context features like
  * microphone access), sets up WebSocket proxying to the OpenClaw gateway,
- * starts file watchers, and registers graceful shutdown handlers.
+ * and registers graceful shutdown handlers.
  * @module
  */
 
@@ -13,10 +13,8 @@ import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import app from './app.js';
-import { releaseWhisperContext } from './services/whisper-local.js';
 import { config, validateConfig, printStartupBanner, probeGateway } from './lib/config.js';
 import { setupWebSocketProxy, closeAllWebSockets } from './lib/ws-proxy.js';
-import { startFileWatcher, stopFileWatcher } from './lib/file-watcher.js';
 
 // ── Startup banner + validation ──────────────────────────────────────
 
@@ -39,10 +37,6 @@ function readProductVersion(): string {
 
 printStartupBanner(readProductVersion());
 validateConfig();
-
-// ── Start file watchers ──────────────────────────────────────────────
-
-startFileWatcher();
 
 // ── HTTP server ──────────────────────────────────────────────────────
 
@@ -172,9 +166,7 @@ if (fs.existsSync(config.certPath) && fs.existsSync(config.keyPath)) {
 function shutdown(signal: string) {
   console.log(`\n[openclaw-ui] ${signal} received, shutting down...`);
 
-  stopFileWatcher();
   closeAllWebSockets();
-  releaseWhisperContext().catch(() => {});
 
   httpServer.close(() => {
     console.log('[openclaw-ui] HTTP server closed');
