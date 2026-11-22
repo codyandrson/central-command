@@ -502,21 +502,36 @@ def test_row_state(rm, monkeypatch, capsys):
 
 
 def test_an_optional_alias_never_pauses_even_without_require(rm, monkeypatch, capsys):
-    """k3s passes no --require: before v2.62.1 an unfilled cc-rerank (and its
-    real-model row) paused every install, so a site with no reranker could
-    not finish. Both are `optional: true` now; a filled row is unchanged."""
+    """k3s passes no --require: before v2.62.1 an unfilled cc-rerank paused
+    every install, so a site with no reranker could not finish. It is
+    `optional: true` now; a filled row is unchanged."""
     k3s = ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml"
     policy = rm.load_declaration(k3s)
-    assert rm.optional_aliases(policy) == {"cc-rerank", "qwen3-rerank-local"}
+    assert rm.optional_aliases(policy) == {"cc-rerank"}
     assert rm.optional_aliases(rm.load_declaration(_single())) == {"cc-rerank"}
     want = rm.declared(policy)
     live = [_live(a, **{k: (v.replace("PLACEHOLDER", "x") if isinstance(v, str) else v)
                         for k, v in p.items()})
-            for a, p in want.items() if a not in ("cc-rerank", "qwen3-rerank-local")]
-    live += [_live(a, **want[a]) for a in ("cc-rerank", "qwen3-rerank-local")]
+            for a, p in want.items() if a != "cc-rerank"]
+    live += [_live("cc-rerank", **want["cc-rerank"])]
     rc, out, _ = _run(rm, monkeypatch, capsys, live=live, env={}, argv=("--policy", str(k3s)))
     assert rc == 0, out
-    assert "optional cc-rerank" in out and "optional qwen3-rerank-local" in out
+    assert "optional cc-rerank" in out
+
+
+def test_a_fresh_k3s_catalog_requires_exactly_the_role_aliases(rm, monkeypatch, capsys):
+    """With no --require (how k3s setup.sh calls it), a fresh catalog creates
+    the six role-alias skeletons and pauses for the five required ones — no
+    specific model is created or required (DL-226)."""
+    k3s = ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml"
+    rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={}, argv=("--policy", str(k3s)))
+    created = sorted(b["model_name"] for p, b in proxy.calls if p.endswith("/model/new"))
+    assert created == sorted(["cc-default", "graphiti-llm", "cc-embedding", "cc-rerank", "cc-tts", "cc-stt"])
+    assert rc == rm.EXIT_ACTION, out
+    paused = out[out.index("OPERATOR ACTION"):]
+    assert sorted(line.split(":")[0].strip() for line in paused.splitlines()[1:] if line.strip()) == \
+        sorted(["cc-default", "graphiti-llm", "cc-embedding", "cc-tts", "cc-stt"])
+    assert "optional cc-rerank" in out
 
 
 def test_mode_is_written_to_model_info_on_create(rm, monkeypatch, capsys):
@@ -555,8 +570,9 @@ def test_shape_update_patches_mode_and_same_needs_model_info_mode(rm):
 
 # ── policy_params (DL-220) ────────────────────────────────────────────────────
 # cc-tts / cc-stt carry one-job-at-a-time and no-retries. register-models.py
-# writes them into a row it CREATES and never reads them back: policy.py owns
-# them on an existing row, so a row without them is not drift here.
+# writes them into a row it CREATES and never reads them back: after creation
+# they are the row's, in the proxy's database (DL-226), so a row without them
+# is not drift here.
 
 K3S_DECLARATION = ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml"
 SPEECH_PARAMS = {"max_parallel_requests": 1, "num_retries": 0}

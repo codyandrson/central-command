@@ -70,8 +70,11 @@ to add one.
 
 - **Status:** active
 - **Date:** 2026-07-31
-- **Rule:** (recorded here) `deploy/shared/litellm/model-preferences.yaml`
-  declares `fallbacks: {}` — no local model falls back to a cloud model.
+- **Rule:** (recorded here) No local model falls back to a cloud model: no
+  fallback chain is set on the proxy. Until DL-226 the k3s declaration
+  `deploy/shared/litellm/model-preferences.yaml` carried it as `fallbacks: {}`;
+  since then the chains live only in the proxy's database, set by a gated
+  `litellm.set_fallbacks` or the LiteLLM UI.
 - **Why:** The YAML's own comment: fallback keys to `claude-haiku-4-5` were
   removed after a workstation outage silently reached Anthropic and then
   died anyway on a `max_tokens` mismatch (366 such errors in four days).
@@ -81,8 +84,8 @@ to add one.
   (2026-10-21): routing and retries are LiteLLM's, a failure lands retryable
   at full quality rather than degraded, fallbacks stay off by operator
   decision, and only the operator reverses that.
-- **Enforced:** code structure only — an empty YAML block (`fallbacks: {}`); no test asserts fallbacks stay empty
-- **Source:** code comment `deploy/shared/litellm/model-preferences.yaml:414-432`
+- **Enforced:** discipline only — no fallback chain is set on the proxy; no test asserts that, and since DL-226 no tracked file declares one
+- **Source:** the `fallbacks:` comment in `deploy/shared/litellm/model-preferences.yaml` as it stood at v2.118.0 (`git show v2.118.0:deploy/shared/litellm/model-preferences.yaml`); DL-226
 
 ### DL-068 — The router-mode serving unit was never built; model swapping lives outside this repo
 

@@ -113,7 +113,8 @@ def test_the_updater_names_the_new_paths_and_carries_the_move():
     units = upd[upd.index("changed_units=\"$(changed_between"):]
     units = units[:units.index(')"')]
     assert "deploy/pi" not in units            # cc-nerve.service is matched by deploy/k3s/*.service now
-    assert 'python3 "$REPO/deploy/shared/litellm/policy.py" --apply' in upd
+    # The policy layer is cut (DL-226): no update step pushes per-model values.
+    assert "policy.py" not in _code(K3S / "cc-update.sh")
     assert "\nmigrate_k3s_env() {" in upd
     main = upd[upd.index("\nmain() {"):]
     assert main.index('phase "merging') < main.index("migrate_k3s_env") < main.index('phase "applying schema')
@@ -121,10 +122,10 @@ def test_the_updater_names_the_new_paths_and_carries_the_move():
 
 def test_the_other_k3s_scripts_name_the_shared_litellm_files_and_the_moved_unit():
     setup = _code(K3S / "setup.sh")
-    assert "deploy/shared/litellm/register-models.py" in setup and "deploy/shared/litellm/policy.py" in setup
+    assert "deploy/shared/litellm/register-models.py" in setup and "policy.py" not in setup
     assert '"$HERE/cc-nerve.service.in"' in setup and "deploy/pi/cc-nerve.service" not in setup
     assert "deploy/shared/litellm/config.yaml" in _code(K3S / "make-secrets.sh")
-    assert "deploy/shared/litellm/policy.py --check" in _code(K3S / "verify.sh")
+    assert "policy.py" not in _code(K3S / "verify.sh")  # the policy layer is cut (DL-226)
 
 
 def test_the_app_and_the_single_profile_name_the_shared_files():
@@ -137,20 +138,21 @@ def test_the_app_and_the_single_profile_name_the_shared_files():
         assert "deploy/pi/" not in (ROOT / rel).read_text(encoding="utf-8"), rel
 
 
-PYTHON_RESOLVER_MIRRORS = (SHARED / "policy.py", SHARED / "register-models.py")
+PYTHON_RESOLVER_MIRRORS = (SHARED / "register-models.py",)
 
 
 def test_operator_tooling_resolves_the_env_like_the_resolver():
-    """The two Python mirrors of cc_k3s_env_file build the path from
-    segments, which no literal-string guard sees; each must prefer
+    """The Python mirror of cc_k3s_env_file (register-models.py; policy.py was
+    the second until DL-226 removed it) builds the path from
+    segments, which no literal-string guard sees; it must prefer
     deploy/k3s/.env — taken when it exists OR is a symlink, like the shell
     resolver — and fall back to the old path only after. A caller may run
-    policy.py and register-models.py without LITELLM_MASTER_KEY in the
+    register-models.py without LITELLM_MASTER_KEY in the
     environment, so the file fallback is load-bearing: release B's first
     story deleted the test that pinned the two shared files, and flipping
     their order or dropping is_symlink() passed the suite until this."""
     fallback_kept = ("the resolver's deploy/pi fallback is kept by decision until a release drops it "
-                     "from both mirrors and this test together")
+                     "from the mirror and this test together")
     for path in PYTHON_RESOLVER_MIRRORS:
         src = path.read_text(encoding="utf-8")
         name = str(path.relative_to(ROOT))
@@ -162,10 +164,10 @@ def test_operator_tooling_resolves_the_env_like_the_resolver():
 
 
 def test_the_moved_litellm_directory_still_finds_its_own_siblings():
-    for name in ("policy.py", "register-models.py"):
-        src = (SHARED / name).read_text(encoding="utf-8")
-        assert 'HERE / "model-preferences.yaml"' in src, name
-    assert '"$HERE/policy.py"' in (SHARED / "checks.sh").read_text(encoding="utf-8")
+    src = (SHARED / "register-models.py").read_text(encoding="utf-8")
+    assert 'HERE / "model-preferences.yaml"' in src
+    assert not (SHARED / "policy.py").exists()  # cut by DL-226
+    assert "policy.py" not in _code(SHARED / "checks.sh")
 
 
 def test_the_rules_glob_follows_the_files():
@@ -243,7 +245,6 @@ ALLOWED = {
     "docs/superpowers/": ("design records are dated history; their As-built headers point at live files", None),
     "docs/decisions/process.md": ("the decision log recounts the v2.61.0 Graphiti deletion", None),
     "deploy/k3s/env-path.sh": ("the resolver's fallback and the one-time move (kept through B by decision)", None),
-    "deploy/shared/litellm/policy.py": ("the resolver's Python mirror", _block("def _env_path(")),
     "deploy/shared/litellm/register-models.py": ("the resolver's Python mirror", _block("def _env_path(")),
     "tests/test_k3s_env_path.py": ("exercises the resolver and the move in every layout", None),
     "deploy/k3s/cc-update.sh": ("operator-facing fallback message", _message),
@@ -305,7 +306,6 @@ def test_no_tracked_file_names_deploy_pi_outside_history_and_the_kept_seam():
 
 # path → (reason, line predicate or None for the whole file)
 SEGMENT_ALLOWED = {
-    "deploy/shared/litellm/policy.py": ("the resolver's Python mirror", _block("def _env_path(")),
     "deploy/shared/litellm/register-models.py": ("the resolver's Python mirror", _block("def _env_path(")),
     "tests/test_k3s_env_path.py": ("builds every env layout under tmp_path", None),
     "tests/test_k3s_mint_key_scope.py": ("builds the pre-move layout under tmp_path", None),
@@ -322,7 +322,7 @@ def test_no_tracked_code_builds_deploy_pi_from_segments_outside_the_allowlist():
     it for the same reason. This greps every tracked .py and .sh for the forms
     the languages build the path from (`"deploy" / "pi"`, `"deploy", "pi"`,
     either quote style); what may carry them is enumerated in SEGMENT_ALLOWED
-    with its reason — the two resolver mirrors' _env_path blocks and the
+    with its reason — the resolver mirror's _env_path block and the
     tests that lay the old tree out under tmp_path or assert it is gone — so
     the shape planted anywhere else fails here naming its file and line."""
     r = subprocess.run(["git", "grep", "-n", "-I", "-E", "-e",
@@ -337,8 +337,9 @@ def test_no_tracked_code_builds_deploy_pi_from_segments_outside_the_allowlist():
         hits.setdefault(path, []).append(int(line))
     # the canary: the grep sees what the literal guard could not. It holds as
     # long as the resolver's fallback is kept (by decision); the release that
-    # drops it from the two mirrors retires this line with them.
-    assert "deploy/shared/litellm/policy.py" in hits, "canary gone: the segment grep no longer matches policy.py"
+    # drops it from the mirror retires this line with it.
+    assert "deploy/shared/litellm/register-models.py" in hits, \
+        "canary gone: the segment grep no longer matches register-models.py"
     offenders = []
     for path, numbers in sorted(hits.items()):
         lines = (ROOT / path).read_text(encoding="utf-8", errors="replace").split("\n")

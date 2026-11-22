@@ -65,13 +65,14 @@ OpenAIGenericClient) and which 404s against llama-swap.
 A `policy_params:` block on an entry (cc-tts / cc-stt: one job at a time, no
 retries — DL-220) is written into the row this script CREATES (or overwrites
 as a skeleton) and nowhere else: it is not an invariant, an existing row is
-never written for it, and a row without it is not drift here. On the k3s
-profile policy.py owns those keys afterwards (`--apply` / `--check`).
+never written for it, and a row without it is not drift here. After creation
+the value is the row's, in the proxy's database, like every other per-model
+setting (DL-226).
 
-The declaration is `.yaml` (PyYAML) or `.json` (stdlib — the single-node
-profile's, so the pre-venv python needs nothing). `models:` entries take
-their timeout from the top-level `timeout:` (policy.py --apply writes it and
---check gates it); `registration_only:` entries carry theirs in the block.
+The declaration is `.yaml` (PyYAML — the k3s profile's model-preferences.yaml)
+or `.json` (stdlib — the single-node profile's models.json, so the pre-venv
+python needs nothing). Both hold one block, `registration_only:`, of ROLE
+aliases; each entry carries its timeout inside its `registration:` block.
 
 Reads the master key from LITELLM_MASTER_KEY, falling back to deploy/k3s/.env;
 the proxy URL from CC_LITELLM_URL (default http://127.0.0.1:4000). The key is
@@ -294,12 +295,8 @@ def optional_aliases(policy: dict) -> set[str]:
     """Aliases declared `optional: true` — never a reason to pause (exit 3),
     whatever --require says. `cc-rerank` on both profiles: graph search runs
     without a reranker (rank fusion), so a skeleton nobody filled is a choice."""
-    out: set[str] = set()
-    for block in ("models", "registration_only"):
-        for alias, spec in (policy.get(block) or {}).items():
-            if isinstance(spec, dict) and spec.get("optional"):
-                out.add(alias)
-    return out
+    return {alias for alias, spec in (policy.get("registration_only") or {}).items()
+            if isinstance(spec, dict) and spec.get("optional")}
 
 
 def row_state(alias: str, live_models: list[dict]) -> str:
@@ -415,25 +412,24 @@ def extra_params(spec: dict) -> dict:
 def policy_params(policy: dict) -> dict[str, dict]:
     """alias -> the `policy_params:` litellm_params an entry declares (see the
     module doc). Written at CREATE (and when a skeleton is overwritten), never
-    compared: policy.py is the one that checks and applies them. A key this
+    compared: after creation the value is the row's (DL-226). A key this
     script owns (or the credential) may not be declared there."""
     out: dict[str, dict] = {}
-    for block in ("models", "registration_only"):
-        for alias, spec in (policy.get(block) or {}).items():
-            pp = (spec or {}).get("policy_params")
-            if not pp:
-                continue
-            if not isinstance(pp, dict):
-                raise SystemExit(f"{alias}: policy_params must be a mapping, got {type(pp).__name__}")
-            clash = sorted(set(pp) & (set(OWNED) | {"api_key"}))
-            if clash:
-                raise SystemExit(f"{alias}: policy_params may not redeclare {clash}")
-            out[alias] = dict(pp)
+    for alias, spec in (policy.get("registration_only") or {}).items():
+        pp = (spec or {}).get("policy_params")
+        if not pp:
+            continue
+        if not isinstance(pp, dict):
+            raise SystemExit(f"{alias}: policy_params must be a mapping, got {type(pp).__name__}")
+        clash = sorted(set(pp) & (set(OWNED) | {"api_key"}))
+        if clash:
+            raise SystemExit(f"{alias}: policy_params may not redeclare {clash}")
+        out[alias] = dict(pp)
     return out
 
 
 def declared(policy: dict, upstream: dict[str, dict] | None = None) -> dict[str, dict]:
-    """alias -> the litellm_params to register, from BOTH declaration blocks.
+    """alias -> the litellm_params to register, from `registration_only:`.
 
     `upstream` (from `upstream_rows`) REPLACES the PLACEHOLDER provider fields
     for the aliases it covers, so a declared alias is created as a real row.
@@ -441,15 +437,6 @@ def declared(policy: dict, upstream: dict[str, dict] | None = None) -> dict[str,
     and every UI-driven install get.
     """
     out: dict[str, dict] = {}
-    for alias, spec in (policy.get("models") or {}).items():
-        reg = spec.get("registration")
-        if not reg:
-            continue
-        params = {k: v for k, v in reg.items() if k in OWNED and k != "timeout"}
-        if spec.get("timeout") is not None:
-            params["timeout"] = spec["timeout"]
-        params.update(extra_params(spec))
-        out[alias] = params
     for alias, spec in (policy.get("registration_only") or {}).items():
         reg = spec.get("registration") or {}
         out[alias] = {**{k: v for k, v in reg.items() if k in OWNED}, **extra_params(spec)}
@@ -468,12 +455,8 @@ def probe_judged(policy: dict) -> set[str]:
     `mode: rerank`) or an ordinary chat model used as one (`openai/…`), and
     setup's probe — not a pattern — decides which (design record 2026-10-04,
     D3 as rebuilt in v2.62.0). A PLACEHOLDER left in one is still `pending`."""
-    out: set[str] = set()
-    for block in ("models", "registration_only"):
-        for alias, spec in (policy.get(block) or {}).items():
-            if isinstance(spec, dict) and spec.get("judged_by_probe"):
-                out.add(alias)
-    return out
+    return {alias for alias, spec in (policy.get("registration_only") or {}).items()
+            if isinstance(spec, dict) and spec.get("judged_by_probe")}
 
 
 def _norm(v):

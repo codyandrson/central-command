@@ -476,9 +476,8 @@ declares as a SKELETON (`register-models.py`, create-only) and **pauses
 (exit 3) on a fresh catalog** for the operator to enter providers, model
 ids and keys/credentials in the LiteLLM UI; the re-run checks the
 invariants (`graphiti-llm` must be a PLAIN `openai/<model>`, same prefix as
-`cc-default` — the old `chat_completions/` bridge prefix 404s;
-`qwen3-rerank-local`'s `/v1/rerank` api_base), applies the routing policy
-(`policy.py --apply` → restart → `--check`), mints the virtual keys, then
+`cc-default` — the old `chat_completions/` bridge prefix 404s; a dedicated
+`cc-rerank`'s `/v1/rerank` api_base), mints the virtual keys, then
 probes `cc-default`, `graphiti-llm` (a structured chat/completions round
 trip), `cc-rerank` (its kind: `/rerank`, else a True/False chat answer with
 logprobs — written to `CC_GRAPH_RERANK_KIND`) and `cc-embedding` through the

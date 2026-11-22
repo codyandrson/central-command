@@ -175,53 +175,43 @@ Assumed already true before phase 2:
     `model-preferences.yaml` declares as a SKELETON (name, invariants, and
     `PLACEHOLDER` where the model id and `api_base` go; no key) and exits 3
     for you to fill them in at `http://127.0.0.1:4000/ui` — model ids,
-    endpoints, and the Anthropic credential under Endpoints (the pod carries
-    no `ANTHROPIC_API_KEY` on purpose). Re-run and it checks the rows, then
-    the policy goes on:
+    endpoints, and any provider credential under Endpoints (the pod carries
+    no provider key on purpose). Re-run and it checks the rows:
 
     ```bash
     python3 deploy/shared/litellm/register-models.py             # exit 3 = go fill in the UI
     python3 deploy/shared/litellm/register-models.py             # exit 0 = every row filled and consistent
-    python3 deploy/shared/litellm/policy.py --apply              # routing policy
-    sudo k3s kubectl -n central-command rollout restart deploy/cc-litellm
-    sudo k3s kubectl -n central-command rollout status deploy/cc-litellm --timeout=120s
-    python3 deploy/shared/litellm/policy.py --check              # proves parity
     ```
 
-    The restart is required, not optional: the adaptive router reads member
-    preferences only when constructed (`policy.py --apply` prints this same
-    warning), so skipping it leaves `/adaptive_router/state` stale even though
-    `--check` may still pass.
-
-    `model-preferences.yaml` declares every alias — the `cc-*` ROLE aliases
-    the app addresses (cc-default, cc-embedding, cc-rerank) AND the
-    real-model rows they point at — plus the two invariants most easily got
+    `model-preferences.yaml` declares only the `cc-*` ROLE aliases the app
+    addresses (cc-default, graphiti-llm, cc-embedding, cc-rerank, cc-tts,
+    cc-stt) — no specific model — plus the two invariants most easily got
     wrong: `graphiti-llm` must be a PLAIN `openai/<model>`, same prefix as
     `cc-default` (the app's in-process graphiti-core client,
     `OpenAIGenericClient`, speaks chat-completions, and the old
     `openai/chat_completions/` Responses→chat bridge prefix 404s), and a
-    dedicated rerank row's (`qwen3-rerank-local`, and `cc-rerank` when it is
-    one) **`api_base` must end in `/v1/rerank`** (the `cohere/` client POSTs
+    dedicated rerank row's (`cc-rerank` when it is one) **`api_base` must
+    end in `/v1/rerank`** (the `cohere/` client POSTs
     the base verbatim and appends nothing). `cc-rerank` is graph search's
     reranker ROLE and may instead be a chat model with logprobs and thinking
     OFF; it is `judged_by_probe`, so its row is not held to the skeleton's
     patterns — the llm phase probes `/rerank`, then the chat shape, and writes
     the result to `CC_GRAPH_RERANK_KIND` (only when that key is empty; a set
-    kind is proven, never re-detected). `cc-rerank` and `qwen3-rerank-local`
-    are `optional: true` (v2.62.1): with **no reranker**, leave both skeletons
-    unfilled — the catalog step does not pause for them, and the probe
+    kind is proven, never re-detected). `cc-rerank` is `optional: true`
+    (v2.62.1): with **no reranker**, leave its skeleton unfilled — the
+    catalog step does not pause for them, and the probe
     PASSes "no reranker" and writes `CC_GRAPH_RERANK_ALIAS=` (empty, an
     explicit off) to the app's `.env`. To turn it on later, fill `cc-rerank`,
     set `CC_GRAPH_RERANK_ALIAS=cc-rerank` there and re-run the llm phase. An
     unfilled row the app's `.env` names is a gate whose message gives that
     exact line. Tiers, the measured numbers and the benchmark:
     `deploy/single/README.md`, Reranking. Nothing
-    you enter in the UI is ever overwritten by the script. Timeouts have
-    exactly one home per model, which is what makes `policy.py --check` a
-    real gate rather than a coin flip. `policy.py --apply` still only
-    *annotates* models that already exist — register first, always. The
-    setup driver (`./deploy/k3s/setup.sh llm`) runs all of this, gate
-    included, and then probes `cc-default`, `graphiti-llm` (structured),
+    you enter in the UI is ever overwritten by the script. Per-model
+    timeouts, costs and capability flags are the rows' own, in the proxy's
+    database (DL-226): set them in the UI or through the litellm-manager's
+    gated proposals. A from-scratch rebuild does not re-create them — restore
+    the proxy database from backup, or enter them again. The setup driver (`./deploy/k3s/setup.sh llm`) runs all of this, gate
+    included, mints the keys, and then probes `cc-default`, `graphiti-llm` (structured),
     `cc-rerank` (its kind) and the embedder through the proxy.
 
     **2. A fresh master key**, so every downstream virtual key must be re-minted
@@ -339,7 +329,7 @@ Expected placement once settled:
 | `cc-vlogs` | compute (pinned) | stateful (`cc-vlogs-data`) | ServiceLB :9428 |
 | `cc-pgweb` | anchor (pinned) | stateless zero-login DB UI for the spine | `hostPort` 127.0.0.1:8092 |
 | `cc-crawler` | compute (**required**) | Chromium stays off the anchor | ServiceLB :8091 |
-| `cc-speech` | compute (**required**) | Speaches (Kokoro TTS + faster-whisper STT) behind the `cc-tts`/`cc-stt` aliases; model cache in `cc-speech-models`. A memory limit and **no CPU limit** (the engine spins one thread per physical core whatever the quota, so a quota only throttles it; contended CPU is shared by request, and `cc-neo4j` requests twice as much — DL-220); the two aliases take one job at a time and are not retried (`policy_params`, applied by `policy.py`) | ServiceLB :8093 |
+| `cc-speech` | compute (**required**) | Speaches (Kokoro TTS + faster-whisper STT) behind the `cc-tts`/`cc-stt` aliases; model cache in `cc-speech-models`. A memory limit and **no CPU limit** (the engine spins one thread per physical core whatever the quota, so a quota only throttles it; contended CPU is shared by request, and `cc-neo4j` requests twice as much — DL-220); the two aliases take one job at a time and are not retried (`policy_params`, written into the rows `register-models.py` creates; an existing row keeps what it has) | ServiceLB :8093 |
 | `cc-litellm` | **floats** (prefers compute) | stateless, the arm64 memory hog | ServiceLB :4000 |
 | `cc-fluentbit` | DaemonSet, both nodes | log collection | none |
 

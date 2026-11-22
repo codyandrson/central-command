@@ -67,11 +67,11 @@ sets `created_by`/`updated_by` to the proposer (the approver when there is no
 proposer) on a gated add and `updated_by` likewise on a gated update; `register-models.py` stamps itself
 (`created_by`/`created_at`/`updated_by`/`updated_at` = `"register-models.py"` and
 the time) when it creates a skeleton, and stamps `updated_by`/`updated_at` when
-it completes a still-`PLACEHOLDER` one; it never overwrites a filled-in row; `policy.py --apply` stamps `updated_by`/`updated_at` = `"policy.py"` on
-every model it patches. A model with **all four fields `None`** predates
-2026-08-30's v2.5.0, when neither script set them — it is not evidence of a
-manual edit. Fix it with any later gated update, or a re-run of `policy.py
---apply`.
+it completes a still-`PLACEHOLDER` one; it never overwrites a filled-in row.
+A row stamped `"policy.py"` was last patched by the retired policy script
+(removed by DL-226). A model with **all four fields `None`** predates
+2026-08-30's v2.5.0, when no script set them — it is not evidence of a
+manual edit. Fix it with any later gated update.
 
 `model_info` also accepts **arbitrary custom keys**, and is where custom
 per-deployment **pricing** lives: `input_cost_per_token`,
@@ -138,36 +138,31 @@ field rather than asserting a false capability that happens to read the same
 either way.
 <!-- overlay: model_server_layout -->
 
-## The declared policy file and `policy.py`
+## Where per-model values live — the row, at every site
 
-`deploy/shared/litellm/model-preferences.yaml` declares, per model:
-`quality_tier` (1=budget 2=mid 3=frontier), `strengths` (from LiteLLM's fixed
-`RequestType` taxonomy — seven values, no more), `input_cost_per_token`,
-`timeout`, and — since 2026-08-19 — `supports_vision`, `max_input_tokens`,
-`thinking_mechanism`, `thinking_levels`. Plus `aliases` and `fallbacks`.
+A model's `timeout` (`litellm_params`), its prices, and its capability flags
+(`supports_vision`, `supports_function_calling`, `supports_response_schema`,
+`max_input_tokens`, `max_output_tokens`, `mode`, `thinking_mechanism`,
+`thinking_levels` in `model_info`) live **on its row in the proxy's
+database**, the same on every deployment (DL-226). Measure with
+`litellm_probe_model`, then propose `litellm.update_model` with the values;
+prices are copied by the Executor from the credential's catalog. No file
+declares them and nothing re-applies them, so a re-created row needs them
+entered again.
 
-**Read the file header before editing it.** It states the two-halves trap in
-one place: `adaptive_router_preferences` lives in `model_info`,
-`input_cost_per_token` lives in `litellm_params` — put either in the wrong
-LiteLLM object and nothing errors, the router just silently scores every model
-identically (the state found 2026-07-26: `model_costs {}`, every cell at the
-uninformed α=5/β=5 prior). The adaptive router that read them is deleted
-(`routing-doctrine`); the declarations remain as checked model metadata.
+`deploy/shared/litellm/model-preferences.yaml` is only the k3s installer's
+list of the role aliases (`cc-default`, `graphiti-llm`, `cc-embedding`,
+`cc-rerank`, `cc-tts`, `cc-stt`) that `register-models.py` creates as
+skeletons on a fresh catalog (the single-node twin is
+`deploy/single/models.json`). Editing it changes no running row.
 
-`policy.py --check` prints drift lines; note two of them are about *absence*:
-an absent `adaptive_router_preferences` and an absent `input_cost_per_token`
-are both reported as drift — absent is **not zero**, it is undeclared.
+**Declare capabilities on the alias an agent resolves to.** `cc-default` is a
+real row, not a pointer: the attachment gate and the context-window discovery
+read `supports_vision` / `max_input_tokens` from the row named `cc-default`, so
+a flag declared only on the underlying model's own row is read from the wrong
+(undeclared) place and fails closed.
 
-**`cc-default` is a full declared entry, not just an alias pointer, since
-2026-08-19.** It used to live only under `aliases:` (a bare DB pointer with no
-preferences); it was promoted into `models:` because capability declarations
-(`supports_vision`, `max_input_tokens`) have to live on the entry an agent
-actually resolves to, or the attachment gate and the context-window discovery
-both read from the wrong (undeclared) place and silently fail closed. If you
-add a new capability-bearing field to the schema, check whether `cc-default`
-needs its own copy in addition to the underlying model's.
-
-Timeouts on the local-model-server entries are large **on purpose** — see
+Timeouts on the local-model-server rows are large **on purpose** — see
 `routing-doctrine`'s local-model-server section for why (FIFO queueing, not
 slow compute).
 <!-- overlay: model_server_timeouts -->

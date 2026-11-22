@@ -76,7 +76,6 @@ echo "== A. services are up and answering =="
 # exactly the property worth asserting.
 check "postgres (spine)  127.0.0.1:5442" "${K[*]} exec deploy/cc-postgres -- pg_isready -U central_command"
 check "litellm            127.0.0.1:4000" "curl -fsS http://127.0.0.1:4000/health/liveliness"
-check "litellm: live routing policy == model-preferences.yaml" "python3 deploy/shared/litellm/policy.py --check"
 check "n8n                127.0.0.1:5678" "curl -fsS http://127.0.0.1:5678/healthz"
 check "crawler            127.0.0.1:8091" "curl -fsS http://127.0.0.1:8091/healthz"
 check "speech             127.0.0.1:8093" "curl -fsS http://127.0.0.1:8093/health"

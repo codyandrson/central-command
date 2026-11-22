@@ -62,10 +62,10 @@ outage now fails fast instead of silently reaching for a Claude model.
 This is **configuration, not a rule.** Provider models are expected back later
 to make the system more robust; any `claude-*` entries the operator keeps
 registered stay **dormant** for exactly that — do not read them as
-unused/deletable (the declared policy file carries the retired ones as comments
-so re-adding is a paste). State it that way if asked. **A reappearing `fallbacks:` block in `config.yaml` fails
-`tests/test_litellm_policy.py`** — with `store_model_in_db: true` the DB wins
-that key regardless of what the file says.
+unused/deletable. State it that way if asked. **A reappearing `fallbacks:`
+block in `config.yaml` fails `tests/test_single_models_declaration.py`** — with
+`store_model_in_db: true` the DB wins that key regardless of what the file
+says.
 
 Side effect worth knowing: **this deleted the `max_tokens` failure class.**
 Every one of those errors (a count the instance overlay holds) was the second
@@ -77,9 +77,8 @@ haiku rejects a `max_tokens` above its cap. No separate fix was needed.
 model's sake — declare that model's cap on its entry.
 <!-- overlay: model_server_max_output_tokens -->
 
-**To reverse it:** add the keys back to
-`deploy/shared/litellm/model-preferences.yaml` and run `policy.py --apply`, or
-propose `litellm.set_fallbacks` per alias. **The bite mark: the ALIAS needs its
+**To reverse it:** propose `litellm.set_fallbacks` per alias (the chain lives
+in the proxy's database; no file declares it). **The bite mark: the ALIAS needs its
 own fallback key**, not just the member deployment. When the alias's single
 deployment is in cooldown the router 429s on `cc-default` before any call
 happens, and the lookup finds nothing declared there (found 2026-07-29, the
@@ -97,25 +96,21 @@ which is what makes a local-server outage diagnosable.
 
 Do not propose re-enabling cooldown while aliases have one deployment each.
 
-## Where the routing policy lives
+## Where routing settings live
 
 - `deploy/shared/litellm/config.yaml` — proxy settings only. **No models.** A
   `fallbacks` block here reads back as `[]` because with
   `store_model_in_db: true` the DB wins that key (verified 2026-07-26); a test
   fails if one reappears.
-- `deploy/shared/litellm/model-preferences.yaml` — the **declared** policy:
-  per-model `quality_tier`, `strengths`, `input_cost_per_token`, `timeout`,
-  `supports_vision`, `max_input_tokens`, `thinking_mechanism`/`thinking_levels`,
-  and `fallbacks`. It is the truth the repo commits to.
-- `deploy/shared/litellm/policy.py --check` reports drift (exit 1); `--apply` makes
-  the live proxy match. `verify.sh` runs the check.
+- **The proxy's database** — every model row, with its `timeout`, prices and
+  capability flags, and the fallback chains. The same at every site (DL-226):
+  measured with `litellm_probe_model`, changed through gated
+  `litellm.update_model` / `litellm.set_fallbacks` proposals or the LiteLLM UI.
+  No file declares these values and nothing re-applies them.
+- `deploy/shared/litellm/model-preferences.yaml` — only the k3s installer's list
+  of the role aliases it creates as skeletons on a fresh catalog.
 
-**The two halves live in different homes inside LiteLLM:**
-`adaptive_router_preferences` → `model_info`; `input_cost_per_token` →
-`litellm_params`. Put either in the wrong home and nothing errors — the router
-silently scores every model identically. That was exactly the state found on
-2026-07-26. (The adaptive router itself is deleted, see above; `policy.py` still
-declares and checks both halves as model metadata.) `supports_vision` and `max_input_tokens` are also `model_info`
+`supports_vision` and `max_input_tokens` are `model_info`
 keys — see `models-and-model-info` for why they must live on `cc-default`
 itself, not only on the underlying deployment alias.
 

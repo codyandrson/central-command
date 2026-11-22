@@ -195,7 +195,7 @@ hygiene, and how the test suite itself must be written. See
   docstrings — is unchanged. The image patches and their pinning tests left
   with `deploy/pi/graphiti/` in v2.61.0, one release after the server did;
   the tests below carry the rule forward.
-- **Enforced:** test: `tests/test_graph_ontology.py::test_each_docstring_is_byte_identical_to_the_upstream_builtin`, test: `tests/test_litellm_policy.py::test_graphiti_llm_is_a_plain_openai_alias`, test: `tests/test_graphiti_client.py::test_the_client_is_built_explicitly_and_issues_no_ddl` (the stock OpenAIGenericClient), test: `tests/test_single_models_declaration.py` (plain prefix), script: `deploy/single/discover-llm.sh` (structured probe)
+- **Enforced:** test: `tests/test_graph_ontology.py::test_each_docstring_is_byte_identical_to_the_upstream_builtin`, test: `tests/test_single_models_declaration.py::test_k3s_declaration_is_the_role_aliases_only`, test: `tests/test_graphiti_client.py::test_the_client_is_built_explicitly_and_issues_no_ddl` (the stock OpenAIGenericClient), test: `tests/test_single_models_declaration.py` (plain prefix), script: `deploy/single/discover-llm.sh` (structured probe)
 - **Source:** CHANGELOG v2.39.0
 - **Supersedes:** DL-055
 
@@ -1270,7 +1270,7 @@ hygiene, and how the test suite itself must be written. See
 
 ### DL-164 — Model facts live in one tracked file, applied by script; an absent cost is not zero; routing preferences and cost have fixed homes
 
-- **Status:** active
+- **Status:** superseded
 - **Date:** 2026-07-26
 - **Rule:** (recorded here) Declared model facts (tiers, costs; `fallbacks: {}` while DL-067 holds) live in one tracked file
   applied idempotently by a script, with `verify.sh` failing if the live
@@ -1287,6 +1287,7 @@ hygiene, and how the test suite itself must be written. See
   to redesign anything at all".
 - **Enforced:** discipline only — a rejection or a design position; there is nothing to enforce
 - **Source:** docs/superpowers/specs/2026-07-26-adaptive-routing-that-learns-design.md; docs/superpowers/specs/2026-07-27-default-alias-seam-design.md
+- **Superseded-by:** DL-226
 
 ### DL-165 — The default alias is a deployment row; a verified fallback is not exercised; self-hosted-as-policy is retired
 
@@ -2641,7 +2642,7 @@ hygiene, and how the test suite itself must be written. See
   node sizing). Changing Neo4j's request restarts the graph database once, at
   the update that carries it. On the proxy, `cc-tts` and `cc-stt` (and only
   those) declare `policy_params: {max_parallel_requests: 1, num_retries: 0}`:
-  one job at a time, no retry at the proxy. `policy.py --apply` PATCHes
+  one job at a time, no retry at the proxy. (Until DL-226:) `policy.py --apply` PATCHes
   exactly those two litellm_params onto an existing row (never its model or
   api_base, which are the operator's) and proves afterwards that the row's
   identity did not move; `--check` reports a missing or different value as
@@ -2663,8 +2664,13 @@ hygiene, and how the test suite itself must be written. See
   `web/src/features/tts/speechChunks.ts`. If read-aloud is still too slow on
   some hardware after that, the options researched on 2026-11-18 were a faster
   engine behind the same endpoint (Piper) or the same engine on a GPU.
-- **Enforced:** test: `tests/test_k3s_compute_cpu.py::test_the_speech_container_has_a_memory_limit_and_no_cpu_limit`, `tests/test_k3s_compute_cpu.py::test_neo4j_requests_at_least_twice_the_speech_pods_cpu`, `tests/test_k3s_compute_cpu.py::test_what_the_manifests_place_on_the_compute_node_still_fits_a_two_cpu_node`, `tests/test_litellm_policy.py::test_the_two_speech_aliases_declare_one_job_at_a_time_and_no_retries`, `tests/test_litellm_policy.py::test_no_other_alias_gained_the_concurrency_or_retry_parameters`, `tests/test_litellm_policy.py::test_apply_adds_the_params_to_an_existing_row_and_leaves_model_and_api_base_alone`
-- **Source:** `deploy/k3s/90-speech.yaml` (resources block); `deploy/k3s/40-graph.yaml` (resources block); `deploy/shared/litellm/model-preferences.yaml` (`policy_params:`); `deploy/shared/litellm/policy.py` (`apply_policy_params`, `policy_params_drift`); `deploy/shared/litellm/register-models.py` (`policy_params`); `deploy/single/models.json`
+- **Note (2026-11-21):** DL-226 cut the policy layer: `policy.py` is gone, so
+  nothing PATCHes or checks these two values on an existing row any more.
+  `register-models.py` still writes them into a row it creates on either
+  profile; a row that exists keeps what it has, and a change is made on the
+  row (the LiteLLM UI or a gated `litellm.update_model`).
+- **Enforced:** test: `tests/test_k3s_compute_cpu.py::test_the_speech_container_has_a_memory_limit_and_no_cpu_limit`, `tests/test_k3s_compute_cpu.py::test_neo4j_requests_at_least_twice_the_speech_pods_cpu`, `tests/test_k3s_compute_cpu.py::test_what_the_manifests_place_on_the_compute_node_still_fits_a_two_cpu_node`, `tests/test_single_models_declaration.py::test_only_the_speech_aliases_declare_one_job_at_a_time_and_no_retries`, `tests/test_register_models_upstream.py::test_a_created_speech_skeleton_carries_the_policy_params_and_no_other_alias_does`
+- **Source:** `deploy/k3s/90-speech.yaml` (resources block); `deploy/k3s/40-graph.yaml` (resources block); `deploy/shared/litellm/model-preferences.yaml` (`policy_params:`); `deploy/shared/litellm/register-models.py` (`policy_params`); `deploy/single/models.json`
 
 ### DL-221 — The executive assistant plans the operator's work, not only their attention; step 1 fixes the answered-question defect and takes the rationing out
 
@@ -3242,3 +3248,32 @@ hygiene, and how the test suite itself must be written. See
   2026-11-21.
 - **Enforced:** test: `tests/test_litellm_cache_call_types.py::test_the_response_cache_is_in_the_proxys_memory`
 - **Source:** the operator's ruling in the system review, 2026-11-21; `deploy/shared/litellm/config.yaml` and `deploy/single/litellm-config.yaml` (the cache comment); `deploy/k3s/removed.txt`; `deploy/single/phases/llm.sh` (`retire_litellm_redis`); DL-062
+
+### DL-226 — Per-model LiteLLM values live on the proxy's rows; the k3s policy layer is cut
+
+- **Status:** active
+- **Date:** 2026-11-21
+- **Rule:** (recorded here) A model's timeout, cost and capability flags are set
+  once, on its row in the proxy's database, the same way at every site: through
+  the litellm-manager's gated proposals (`litellm_probe_model` measures,
+  `litellm.update_model` declares) or the LiteLLM UI. No tracked file declares
+  a specific model and no installer or updater writes one.
+  `deploy/shared/litellm/policy.py` is removed with every call to it (k3s
+  `setup.sh`'s apply, restart and check; `cc-update.sh`'s post-health apply;
+  `verify.sh`'s parity check; `checks.sh`'s fourth check).
+  `deploy/shared/litellm/model-preferences.yaml` keeps its name and holds only
+  the k3s profile's role aliases for `register-models.py`, the twin of
+  `deploy/single/models.json`.
+- **Why:** The layer was a second, k3s-only way to do what the manager's
+  register, probe and declare flow does at both sites; the single-node profile
+  never had it. Its `--check` still demanded `quality_tier` and `strengths` for
+  an adaptive router deleted on 2026-07-27 (DL-147), and a check against a live
+  proxy during the system review reported no drift, so the proxy's database already held
+  every value the file declared. What is given up: the fleet as a reviewable
+  diff in the repository; self-repair of declared values at each k3s update;
+  and a from-scratch k3s rebuild no longer re-creates per-model values — the
+  proxy database is restored from backup or the values are entered again. The
+  operator ruled the cut in the system review on 2026-11-21.
+- **Enforced:** test: `tests/test_single_models_declaration.py::test_k3s_declaration_is_the_role_aliases_only`, `tests/test_register_models_upstream.py::test_a_fresh_k3s_catalog_requires_exactly_the_role_aliases`, `tests/test_deploy_pi_boundary.py::test_the_other_k3s_scripts_name_the_shared_litellm_files_and_the_moved_unit`
+- **Source:** the operator's ruling in the system review, 2026-11-21; `deploy/shared/litellm/model-preferences.yaml`; `deploy/shared/litellm/register-models.py`; `central_command/runtime/litellm_manager_profile.py`
+- **Supersedes:** DL-164

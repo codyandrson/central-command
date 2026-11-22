@@ -1927,8 +1927,10 @@ REGISTRY: list[Capability] = [
         arguments=["path"],
         description=(
             "Current content of a LiteLLM config or deployment file. "
-            "config.yaml and model-preferences.yaml are the proxy's config "
-            "and the declared routing policy; 30-litellm.yaml (the k8s "
+            "config.yaml is the proxy's config; model-preferences.yaml is "
+            "only the k3s installer's list of the role aliases it creates as "
+            "skeletons (a model's timeout, cost and capabilities are on its "
+            "row in the proxy, DL-226); 30-litellm.yaml (the k8s "
             "Deployment manifest) is readable for TROUBLESHOOTING. None of "
             "the three is written by any capability. Any other path is "
             "refused."

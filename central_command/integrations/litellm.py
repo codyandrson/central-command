@@ -165,10 +165,10 @@ async def model_accepts_images(model_id: str) -> bool:
     FAILS CLOSED, and the distinction matters: LiteLLM reports
     `model_info.supports_vision` as `None` for our self-hosted entries, which
     means "nobody declared it", NOT "yes". Only an explicit `True` is a yes, so
-    an undeclared model is treated as text-only. Declare the truth in
-    `deploy/shared/litellm/model-preferences.yaml` (the same `model_info` home the
-    routing preferences already use) rather than teaching this function to
-    guess from the model's name.
+    an undeclared model is treated as text-only. Declare the truth on the
+    model's row in the proxy (`model_info.supports_vision`, measured by
+    `litellm_probe_model` and set with `litellm.update_model`, DL-226) rather
+    than teaching this function to guess from the model's name.
 
     An unreachable proxy raises LiteLLMError — the caller decides whether "we
     cannot tell" refuses the send or falls through, and neither is silently

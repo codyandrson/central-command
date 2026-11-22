@@ -3,7 +3,6 @@ paths:
   - "deploy/shared/litellm/**"
   - "**/register-models.py"
   - "**/model-preferences.yaml"
-  - "**/policy.py"
   - "central_command/gateway/executor.py"
   - "central_command/runtime/packs.py"
   - "central_command/runtime/litellm_manager.py"
@@ -35,10 +34,13 @@ when a matching file is read.
   coerces the same absence to **false**. `litellm_probe_model` sends one real
   request per capability and returns the declared→observed diff. Probe trap:
   a thinking model can spend a small `max_tokens` on reasoning and answer
-  HTTP 200 with EMPTY content — that is "inconclusive", never "no". Declared
-  fleet facts live in `model-preferences.yaml`; the updater applies them on
-  release (`cc-update.sh`'s `litellm policy apply` phase runs `policy.py
-  --apply`), so run it by hand only for a change made outside a release.
+  HTTP 200 with EMPTY content — that is "inconclusive", never "no". Measured
+  facts are declared ON THE ROW (`litellm.update_model`), and so are a
+  model's timeout and cost: no tracked file declares a specific model and no
+  installer or updater writes one (DL-226). `model-preferences.yaml` (k3s)
+  and `deploy/single/models.json` list only the role aliases
+  `register-models.py` creates as skeletons; don't re-grow a per-model
+  section or a script that pushes it.
 - **LiteLLM forbids `-` in MCP server names; Kubernetes requires it.**
   `mcp_server.id` stays the k8s-valid canonical id and the proxy sees
   `_litellm_server_name()`'s underscored form — translated in exactly two
@@ -93,4 +95,4 @@ when a matching file is read.
   filled by hand (or made from an earlier answer) is never rewritten — and
   writes nothing when the row already is that shape, so a re-run never
   flaps. `optional: true` in a declaration means the alias never pauses
-  setup; `cc-rerank` (both profiles) and `qwen3-rerank-local` (k3s) carry it.
+  setup; `cc-rerank` carries it in both profiles' declarations.

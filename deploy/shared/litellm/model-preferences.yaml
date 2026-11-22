@@ -1,368 +1,68 @@
 # ============================================================================
-# DECLARED LiteLLM routing policy — the truth this repo commits to.
+# The k3s profile's ROLE-ALIAS declaration for register-models.py.
 #
-#   Applied by:   python3 deploy/shared/litellm/policy.py --apply
-#   Checked by:   python3 deploy/shared/litellm/policy.py --check  (and verify.sh)
-#   Guarded by:   tests/test_litellm_policy.py
+#   Read by:   python3 deploy/shared/litellm/register-models.py  (setup.sh llm)
+#   Guarded by: tests/test_single_models_declaration.py,
+#               tests/test_register_models_upstream.py
 #
-#   The models themselves live in the LiteLLM Postgres (store_model_in_db:
-#   true), so they cannot be declared in config.yaml without creating duplicate
-#   deployments. But "model X is tier 2 and good at code" is a decision worth
-#   reviewing in a diff, so it is declared HERE and pushed into the DB.
+# The single-node profile's twin is deploy/single/models.json. Both list only
+# the cc-* ROLE aliases Central Command addresses. register-models.py is
+# CREATE-ONLY: an absent alias is created as a skeleton (PLACEHOLDER where the
+# provider goes, never a key), an existing row is never written to, and the
+# re-run checks a filled row against the patterns below. Every alias here is
+# required except those marked `optional: true`.
 #
-#   !! THE TWO HALVES LIVE IN DIFFERENT PLACES INSIDE LITELLM !!
-#     adaptive_router_preferences  ->  model_info       (router.py:7659)
-#     input_cost_per_token         ->  litellm_params   (router.py:7666)
-#   Put either in the wrong home and the router does not error — it silently
-#   scores every model identically. That is exactly the state found on
-#   2026-07-26: model_costs {} and every cell at alpha=5/beta=5, so `cc-smart`
-#   was a coin flip that happened to pick Sonnet for the prompt "say ok".
+# Per-model timeouts, costs and capability flags live on the model's row in
+# the proxy's database (DL-226), set through the litellm-manager agent's gated
+# proposals or the LiteLLM UI — the same at every site. This file declares
+# nothing about a specific model.
 #
-#   quality_tier: 1=budget 2=mid 3=frontier. BASE_TIER_WEIGHT = {1:0.3, 2:0.5,
-#   3:0.7}; a request type listed in `strengths` adds +0.3, capped at 0.95.
-#   These are the COLD-START PRIOR only — with COLD_START_MASS=10, roughly ten
-#   real observations start to move them.
+# Field meanings: `registration:` is what an absent alias is created with
+# (model / api_base patterns, mode, timeout — a value without PLACEHOLDER is
+# an exact invariant); `extra_params:` are litellm_params the alias does not
+# work without, written at create and checked afterwards; `policy_params:` are
+# written into a created skeleton only and never checked; `judged_by_probe`
+# means a filled row is judged by setup's probe, not by the patterns.
 #
-#   strengths values come from the fixed v0 taxonomy in
-#   litellm/types/router.py::RequestType. Seven, no more.
-#
-#   ── `registration:` (added 2026-08-23; SKELETONS since 2026-08-30) ───────
-#   Each entry carries the litellm_params register-models.py CREATES it with
-#   when it is ABSENT from the proxy — and nothing else, ever: the catalog is
-#   managed through LiteLLM's UI/API (operator decision, 2026-08-30), so an
-#   alias that exists is never written to by this file. `PLACEHOLDER` marks
-#   what the operator fills in during setup's pause on a fresh catalog (model
-#   id, api_base host; the key/credential is never declared here at all).
-#   Everything else in the block is an INVARIANT the re-run checks: the
-#   bridge prefix on graphiti-llm, the reranker's mode and /v1/rerank path,
-#   the per-alias timeouts. A fully-clean deployment used to have nothing to
-#   register FROM (2026-08-23: eleven hand-composed registrations); now it
-#   has the names and the rules, and the operator supplies the providers.
-#
-#   TIMEOUT HAS EXACTLY ONE HOME. For a model in `models:` it is the top-level
-#   `timeout:` (which `policy.py --check` gates), and `registration:` must NOT
-#   repeat it — two homes is how a DRIFT failure gets shipped. Only the
-#   `registration_only:` entries below carry a timeout inside their block,
-#   because policy.py does not declare them at all.
-#
-#   ── `policy_params:` (added 2026-11-18, DL-220) ──────────────────────────
-#   litellm_params that are POLICY, not provider identity, on an alias the
-#   `registration_only:` block holds — so policy.py, which declares nothing
-#   else for those entries, owns exactly these keys: `--apply` PATCHes them
-#   onto an EXISTING row (and only them: the row's model, api_base and key are
-#   the operator's and are never re-sent), `--check` reports a missing or
-#   different value as DRIFT, and register-models.py writes them into a
-#   skeleton it CREATES (a row it finds is never written by it, and a missing
-#   key is never its drift: policy.py is the one that reads it). Today only
-#   cc-tts and cc-stt carry any: one job at a time and no retries, per alias —
-#   never a global LiteLLM setting. A key here may not be one register-models
-#   owns (model, api_base, api_key, timeout, mode).
-#
-#   No entry carries `chat_template_kwargs`: reasoning control is injected
-#   PER REQUEST from the `thinking_mechanism` / `thinking_levels` declarations
-#   above (runtime/models._thinking_body), never baked into a deployment.
-#   ONE EXCEPTION, and it is the operator's to set, not this file's:
-#   `graphiti-llm`. Its only caller is graphiti-core (in the app process since
-#   2026-10-04, but not through runtime/models), which cannot inject anything
-#   per request (it sends reasoning controls only for gpt-5/o1/o3 model
-#   names). Behind a hybrid-thinking local model the alias itself must carry
-#   `chat_template_kwargs: {"enable_thinking": false}` — the `extra_params`
-#   block on graphiti-llm below. It was set by hand on 2026-08-18,
-#   silently lost when the alias was re-created, and found again on 2026-09-20
-#   as unbounded extraction turns. A re-created alias needs it re-entered.
-# ============================================================================
-
-models:
-  # ── Anthropic (billed; costs are $/token and must be non-zero) ────────────
-  # thinking_mechanism `anthropic`: LiteLLM translates a top-level
-  # `reasoning_effort` into Anthropic's native control (output_config.effort /
-  # thinking), and accepts "xhigh" verbatim; "none" disables it. Undeclared
-  # would mean Central Command sends NO thinking control at all.
-  # ── Anthropic — RETIRED FROM THE PROXY 2026-08-30 (operator action) ──────
-  # The operator deleted claude-opus-4-8 / claude-sonnet-5 / claude-haiku-4-5
-  # in the LiteLLM UI: the clean-installed proxy database has no Anthropic
-  # credential (the old `anthropic-main` died with the pre-install DB), so
-  # the entries were registered-but-401 and probed exactly that way. They
-  # are commented rather than deleted so re-adding is a paste: store an
-  # Anthropic credential in the UI first, uncomment, then run
-  # `policy.py --apply` (registration blocks mean register-models.py would
-  # otherwise recreate credential-less skeletons on a fresh install).
-  # claude-opus-4-8:
-  #   registration:
-  #     model: anthropic/PLACEHOLDER   # no api_base: the provider's own
-  #   quality_tier: 3
-  #   strengths: [analytical_reasoning, technical_design]
-  #   input_cost_per_token: 0.000005
-  #   timeout: null
-  #   thinking_mechanism: anthropic
-  #   thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
-  #
-  # claude-sonnet-5:
-  #   registration:
-  #     model: anthropic/PLACEHOLDER
-  #   quality_tier: 3
-  #   strengths: [code_generation, writing]
-  #   input_cost_per_token: 0.000002
-  #   timeout: null
-  #   thinking_mechanism: anthropic
-  #   thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
-  #
-  # claude-haiku-4-5:
-  #   registration:
-  #     model: anthropic/PLACEHOLDER
-  #   quality_tier: 2
-  #   strengths: [factual_lookup, general]
-  #   input_cost_per_token: 0.000001
-  #   timeout: null
-  #   thinking_mechanism: anthropic
-  #   thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
-
-  # ── Model host, <model-host-address> over Tailscale (free; often off) ─────
-  # timeout is generous ON PURPOSE: liveness is now detected by background
-  # health checks (config.yaml general_settings), which frees the request
-  # timeout to cover a COLD MODEL LOAD. A short timeout here would misread a
-  # legitimate model swap as an outage. The 900s previously set on
-  # qwen3-coder-next was the opposite mistake — long enough to hang a caller
-  # for a quarter of an hour with no fallback configured.
-  #
-  # REPLACED 2026-08-15: qwen3-coder-next (Qwen3-Coder-Next 80B-A3B) -> Qwen3.6-27B
-  # dense. The 80B was chosen on CODING benchmarks in July and Graphiti's entity
-  # extraction inherited it as a side effect, which is not what this endpoint is
-  # mostly for: one server answers BOTH `cc-default` (every agent) and
-  # `graphiti-llm` (knowledge-graph extraction, dedup and contradiction
-  # detection). `strengths` says so now — the old value advertised a code model
-  # to a router making judgment calls about people and relationships.
-  #
-  # UPGRADED 2026-08-18: Qwen3.6-27B -> Qwen3.8-27B. Same architecture exactly
-  # (64 layers, 5120 hidden, Gated DeltaNet hybrid, 262K native, Apache 2.0,
-  # same vision encoder) — the gain is post-training, so the KV-cache maths,
-  # the 49152 context and the VRAM budget all carry over unchanged (21,259 MiB
-  # loaded vs 21,263 before). What is genuinely new is the MTP head: Qwen
-  # trained nextn layers into 3.8 and unsloth's GGUF keeps them, so
-  # `--spec-type draft-mtp` is speculative decoding with no draft model.
-  # 3.6 has no such tensors — that flag is 3.8-only.
-  # VISION since 2026-08-19: the server loads unsloth's mmproj for 3.8
-  # (`--no-mmproj-offload` — projector in system RAM). `supports_vision` is
-  # what the attachment gate reads (`litellm.model_accepts_images`):
-  # capability is DECLARED, not guessed, and None means "nobody said", never
-  # "yes". `max_input_tokens` is the SERVING context, not the 262K native
-  # window — the app's context-pressure check prefers this over its 200K
-  # fallback (config.py). 81920 since later on 2026-08-19: the embedder moved
-  # to CPU (100ms/query measured — trivial at ~165 calls/day), freeing the
-  # VRAM that had capped context at 49152, and the :8081 slot is now
-  # llama-swap (the model swapper, configured by the model host's
-  # own notes): one big model at a time, requests QUEUE through a swap.
-  qwen3.8-27b:
-    registration:
-      model: openai/PLACEHOLDER
-      api_base: PLACEHOLDER   # the llama-swap slot (the model swapper)
-    quality_tier: 2
-    strengths: [factual_lookup, general, code_understanding]
-    input_cost_per_token: 0
-    # 6000, was 600, was 300 (2026-08-20, operator decision): under llama-swap
-    # FIFO a request waits behind the whole queue, and the operator would "much rather
-    # long running processes than crashing processes just because they were
-    # waiting". Outage detection is unharmed: a dead model host refuses the
-    # TCP connection instantly — the timeout only governs connected-but-queued.
-    timeout: 6000
-    supports_vision: true
-    max_input_tokens: 81920
-    # MEASURED 2026-08-30 by litellm_probe_model (deploy: forced tool_choice
-    # 1 call, auto 2 parallel calls, json_schema and json_object both
-    # parsed, reasoning_content present). Declared because LiteLLM's own
-    # aggregate view (/model_group/info) reads an UNDECLARED flag as false —
-    # cc-default advertised `supports_function_calling: false` while every
-    # agent called tools through it. Re-probe before changing.
-    mode: chat
-    supports_function_calling: true
-    supports_response_schema: true
-    # Qwen3.8's chat template takes enable_thinking / reasoning_effort through
-    # chat_template_kwargs. There is NO reasoning_effort "none" — the template
-    # raises and every request 500s — so `off` is enable_thinking: false.
-    thinking_mechanism: qwen_template
-    thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
-
-  # PROMOTED from `aliases` 2026-08-19: cc-default is not just a fallback key —
-  # it is a real DB deployment (openai/qwen3.8-27b) with its own litellm_params
-  # and model_info, and it is the model id agents actually resolve, so the
-  # capability declarations above must live on THIS entry too or the attachment
-  # gate answers from the undeclared alias and refuses every image.
-  cc-default:
-    # A real DB deployment onto the SAME upstream model as qwen3.8-27b, not an
-    # alias — that is why both entries exist and both must be registered.
-    registration:
-      model: openai/PLACEHOLDER
-      api_base: PLACEHOLDER
-    quality_tier: 2
-    strengths: [factual_lookup, general, code_understanding]
-    input_cost_per_token: 0
-    timeout: 6000  # same reasoning as qwen3.8-27b above
-    supports_vision: true
-    max_input_tokens: 81920
-    mode: chat                        # measured 2026-08-30, see qwen3.8-27b
-    supports_function_calling: true
-    supports_response_schema: true
-    thinking_mechanism: qwen_template
-    thinking_levels: ["off", "low", "medium", "xhigh"]   # "off" QUOTED: bare off is YAML false
-
-  # THE JUDGE (2026-08-19): GPT-OSS-20B MXFP4 at 131072 ctx on the SAME
-  # llama-swap slot — requesting it swaps the 27B out (~10s, queued) and ttl
-  # 600 idles it back out. Role, decided before registering (per the STATUS
-  # rule): a second opinion for graph-judgment work (extraction/contradiction
-  # A/B). It is NOT in any routing pool and nothing falls back to it. No
-  # supports_vision: it has no vision encoder.
-  gpt-oss-20b:
-    registration:
-      model: openai/PLACEHOLDER
-      api_base: PLACEHOLDER
-    quality_tier: 2
-    strengths: [analytical_reasoning, factual_lookup]
-    input_cost_per_token: 0
-    # 18000 (was 1800; ×10 by operator decision 2026-08-20): a judge request
-    # FIFO-queues behind the entire current drain (8m20s observed) before its
-    # swap even starts. Judge calls are deliberate and low-volume; waiting is
-    # correct, timing out is not.
-    timeout: 18000
-    max_input_tokens: 131072
-    # MEASURED 2026-08-30 (litellm_probe_model): tools yes (one call per
-    # turn observed — parallel inconclusive, so not declared), json_schema
-    # and json_object yes, reasoning_content yes, vision NO (no mmproj: the
-    # 500 the attachment gate was built around) — left undeclared on purpose,
-    # the gate treats absent as text-only.
-    mode: chat
-    supports_function_calling: true
-    supports_response_schema: true
-
-  # JUDGE CANDIDATE #2 (2026-08-19): Gemma 4 31B dense on the same llama-swap
-  # slot. Chosen from dated primary sources (Google model card / arXiv
-  # 2607.02770, Jul 2026): GPQA Diamond 84.3 vs GPT-OSS-20B-high's 71.5, HLE
-  # 19.5 vs 10.9 — and a THIRD lineage (Google), so both judge candidates are
-  # decorrelated from the Qwen generalist they second-guess. Dense 31B ≈
-  # ~30 t/s on the 3090 — fine for deliberate judge calls, wrong for
-  # cc-default. Tier 3 on those scores. The judge A/B (27B vs 20B vs this)
-  # decides which model KEEPS the role; the loser(s) may be retired per the
-  # decide-the-role-first rule.
-  gemma-4-31b:
-    registration:
-      model: openai/PLACEHOLDER
-      api_base: PLACEHOLDER
-    quality_tier: 3
-    strengths: [analytical_reasoning]
-    input_cost_per_token: 0
-    timeout: 18000  # same reasoning as gpt-oss-20b above
-    # 65536 measured 2026-08-20: gemma KV ≈ 50 KB/token (pricier than the Qwen
-    # hybrid), 654 MiB free at 64K beside the reranker — its practical ceiling.
-    max_input_tokens: 65536
-    # MEASURED 2026-08-30 (litellm_probe_model): forced tool_choice 1 call,
-    # auto 2 parallel calls, json_schema + json_object parsed,
-    # reasoning_content present, vision NO (no mmproj) — undeclared on purpose.
-    mode: chat
-    supports_function_calling: true
-    supports_response_schema: true
-
-# ============================================================================
-# REGISTRATION-ONLY models — they must EXIST on the proxy, but the adaptive
-# router never scores them, so they carry no quality_tier / strengths / cost.
-#
-# They are deliberately NOT in `models:` above: policy.py --check would then
-# demand `model_info.adaptive_router_preferences` on an embedder and a rerank
-# endpoint, and report permanent DRIFT against a perfectly healthy proxy.
-# `models:` is "what the router chooses between"; this block is "what else has
-# to be registered". Together they are the authoritative list of eleven (the
-# three Anthropic entries above are commented out — retired 2026-08-30).
-#
-# ROLE vs REAL MODEL (2026-08-30, operator decision): every Central Command
-# consumer addresses a `cc-*` ROLE alias (cc-default, cc-embedding, cc-rerank)
-# so the operator can re-point a role in the LiteLLM UI without touching the
-# app; every real local model ALSO keeps its own row (qwen3-embedding-local,
-# qwen3-rerank-local, …). Two rows onto one upstream is the pattern, not
-# duplication — same as cc-default / qwen3.8-27b in `models:` above.
-#
-# Timeouts live HERE for these entries (policy.py declares none of them), unlike
-# the `models:` entries where the top-level `timeout:` is the single home.
+# Why the chat aliases carry a long timeout: on a site where one local model
+# server queues every request, a slow run should wait its turn, not fail. A
+# dead server still refuses the connection at once; the timeout only governs
+# a request that is connected and queued.
 # ============================================================================
 registration_only:
-  # THE BRIDGE IS GONE (2026-09-21). The graph client — graphiti-core, in the
-  # app process since 2026-10-04 — uses upstream's chat-completions client
-  # (`OpenAIGenericClient`) instead of the Responses-API client the retired
-  # server was once patched to use — it POSTs to `/v1/chat/completions` with a `response_format`
-  # json_schema, and LiteLLM forwards that to llama.cpp unchanged. So the
-  # alias must be a PLAIN `openai/<model>`, exactly like cc-default. The old
-  # `openai/chat_completions/` prefix is now WRONG: it forces LiteLLM's
-  # Responses->chat bridge, which sends "chat_completions/<model>" upstream
-  # and llama-swap 404s. Do not re-add the prefix.
+  # What every agent addresses.
+  cc-default:
+    registration:
+      model: openai/PLACEHOLDER
+      api_base: PLACEHOLDER
+      timeout: 6000
+
+  # Graph extraction (graphiti-core in the app process). A PLAIN openai/ alias:
+  # the old openai/chat_completions/ bridge prefix 404s and the re-run refuses
+  # it. graphiti-core sends no reasoning control of its own, so thinking is
+  # switched off ON THE ROW; a cloud model that rejects chat_template_kwargs
+  # needs this block deleted and thinking turned off its provider's way.
   graphiti-llm:
     registration:
       model: openai/PLACEHOLDER
       api_base: PLACEHOLDER
-      # 6000, the same as cc-default (the operator's 2026-11-02 decision,
-      # DL-204): one FIFO slot answers both aliases, so a graph write waits
-      # behind agent turns exactly as a turn does, and the 300 s it had never
-      # failed outside a queue (3052 calls, p95 46 s) but failed four times in
-      # one. register-models.py is create-only: an EXISTING row keeps its
-      # value and reads as drift until the operator sets it in the LiteLLM UI.
-      timeout: 6000
-    # THINKING OFF, ON THE ROW (declared 2026-09-26; hand-set since 2026-09-20).
-    # A hybrid-thinking local model reasons before every structured extraction
-    # call unless told not to, and graphiti-core only sends reasoning controls
-    # for gpt-5/o-series names — so the switch has to be a litellm_param on
-    # THIS alias, forwarded by LiteLLM as extra body to llama.cpp (measured
-    # 2026-09-20: 60 output tokens with a reasoning item -> 7 without; llama.cpp
-    # does not enforce the json_schema grammar while the model thinks). It was
-    # lost every time the alias was re-created, and a partial /model/update
-    # drops it too. register-models.py writes it into the skeleton and reports
-    # DRIFT when a row lacks it. A CLOUD model behind this alias rejects the
-    # parameter (it is not an OpenAI API field): delete this block in that
-    # deployment's copy, and set thinking off however that provider does it.
+      timeout: 6000   # one queue may answer both chat aliases (DL-204)
     extra_params:
       chat_template_kwargs:
         enable_thinking: false
 
-  # (`gpt-4.1-nano` — graphiti-core's default cross-encoder, which the app
-  # built on that alias name and never called — left this declaration in
-  # v2.62.0. register-models.py lists an existing row as `extra` and leaves
-  # it alone; delete it in the UI whenever convenient.)
-
-  # Its own llama.cpp server (:8083), CPU-resident since 2026-08-19. Exactly
-  # 1024 dimensions — nothing schema-side enforces the width, so a mis-sized
-  # vector silently breaks similarity search instead of erroring; never
-  # repoint this without re-embedding the graph.
-  qwen3-embedding-local:
-    registration:
-      model: openai/PLACEHOLDER
-      api_base: PLACEHOLDER
-      timeout: 60
-
-  # THE EMBEDDING ROLE — what Central Command actually addresses (config.py
-  # `embed_alias` — graphiti-core's embedder and neo4j_writer alike).
-  # Points at the same upstream as qwen3-embedding-local; both rows exist on
-  # purpose (see the role-vs-real note above). RE-POINTING THIS ROLE IS A
-  # MIGRATION, NEVER A SWAP: vectors from a different model live in a
-  # different semantic space even at the SAME 1024 dimensions. The graph
-  # records its embedder and CLOSES (reads and writes park, the banner names
-  # the remedy) as soon as the model behind this alias no longer matches, until
-  # the operator re-embeds it offline: python -m central_command.graph_reembed
-  # check, then run. A different dimension is the same path plus CC_EMBED_DIM
-  # (setup.sh's CC_EMBED_DIM check refuses the change). Runbook:
-  # skills/graphiti/references/operations.md, "Changing the embedding model".
+  # The embedder. Re-pointing it is a MIGRATION (re-embed the graph:
+  # skills/graphiti/references/operations.md), never a swap.
   cc-embedding:
     registration:
       model: openai/PLACEHOLDER
       api_base: PLACEHOLDER
       timeout: 60
 
-  # THE RERANK ROLE — CC_GRAPH_RERANK_ALIAS (the app's .env; the k3s
-  # installer and updater set it) addresses this name. Its KIND
-  # (CC_GRAPH_RERANK_KIND) is PROBED by setup.sh's llm phase (design record
-  # 2026-10-04, D3 as rebuilt in v2.62.0): a dedicated reranker answers
-  # LiteLLM's /rerank (the app's RerankClient) — the skeleton below is that
-  # shape, with the same cohere-client constraint as qwen3-rerank-local
-  # (api_base POSTed verbatim, so it MUST end in /v1/rerank); or an ordinary
-  # chat model used as a reranker (openai/<id>, one True/False question per
-  # candidate scored from logprobs — the row MUST return logprobs and carry
-  # thinking OFF, e.g. the chat_template_kwargs block graphiti-llm carries).
-  # `judged_by_probe`: the skeleton is created as written, but a filled-in
-  # row is not held to these patterns — the probe is the judge of both shapes.
+  # Graph search's reranker, OPTIONAL. The skeleton is the dedicated shape
+  # (LiteLLM's cohere client POSTs api_base verbatim, so it MUST end in
+  # /v1/rerank); a chat model used as a reranker is right too, and setup's
+  # probe decides.
   cc-rerank:
     registration:
       model: cohere/PLACEHOLDER
@@ -370,48 +70,12 @@ registration_only:
       mode: rerank
       timeout: 60
     judged_by_probe: true
-    # OPTIONAL (v2.62.1): an unfilled skeleton never pauses setup — graph
-    # search then runs without a reranker, and setup's probe says so and
-    # writes CC_GRAPH_RERANK_ALIAS= (empty, an explicit "off") to the app's
-    # .env. A filled row is probed exactly as before.
     optional: true
 
-  # THE SPEECH ROLES — what the cockpit's read-aloud and voice input address
-  # (web/.env OPENAI_TTS_MODEL / OPENAI_STT_MODEL, api/speech.py). cc-speech
-  # (deploy/k3s/90-speech.yaml) answers both: model openai/<the id setup
-  # installs into it>, api_base http://cc-speech:8093/v1 — the SERVICE port
-  # (90-speech.yaml maps 8093 -> the container's 8000; `:8000` by that name is
-  # unreachable and the TTS probe times out), key `none`. Either
-  # may point elsewhere — hosted Whisper-convention models for cc-stt is the
-  # expected case. The mode is LiteLLM's audio mode, an invariant.
-  #
-  # ONE JOB AT A TIME, NO RETRIES (policy_params, DL-220, 2026-11-18). The CPU
-  # engine behind these aliases synthesises slowly under load, and on
-  # 2026-11-17 the cockpit sent one long text three times, the proxy retried
-  # each (the router's default is num_retries 2, i.e. three attempts), and 15
-  # synthesis jobs landed on the pod at once; it pinned its limits, failed its
-  # probes and was restarted. `max_parallel_requests: 1` is LiteLLM's
-  # per-deployment concurrency limit and `num_retries: 0` is the per-deployment
-  # retry count (it outranks the router-wide default; only a request header or
-  # body can override it). Per alias on purpose: the same values on the chat
-  # aliases would be a fleet-wide change. The timeouts below are unchanged.
-  #
-  # MEASURED ON THE PINNED PROXY, v1.110.2 (2026-11-21, a copy of this
-  # deployment's database): a request that arrives while the alias's one slot
-  # is taken is REJECTED, HTTP 429 `Deployment has all max_parallel_requests
-  # slots in use`, no Retry-After header. (1.98.0 made it WAIT: three concurrent
-  # 5 s requests finished at 5/10/15 s, all 200.) And on the audio routes the
-  # deployment's `num_retries: 0` is not honoured for that 429: the proxy
-  # retries it with backoff for 4.6-8 s before it returns it. So the queue is
-  # not LiteLLM's any more: the application serialises each route in FIFO order
-  # before it calls the proxy (central_command/integrations/speech_gate.py in
-  # the API process, web/server/lib/fifo-gate.ts in the cockpit server), and a
-  # 429 that still arrives is surfaced as the error it is, never retried. The
-  # limit STAYS on the rows, because it is the pod's own protection against
-  # any caller that is not that application (a script, the setup probes, a
-  # second process), and the no-retry count stays because a retried synthesis
-  # is the pile-up this was written for. Never a router-wide `retry_policy`
-  # for this: that would change every alias.
+  # The cockpit's read-aloud and voice input. The bundled engine is
+  # api_base http://cc-speech:8093/v1 (the SERVICE port, 90-speech.yaml), key
+  # `none`. One job at a time and no proxy retries, per alias (DL-220) — never
+  # a global LiteLLM setting.
   cc-tts:
     registration:
       model: openai/PLACEHOLDER
@@ -430,56 +94,3 @@ registration_only:
     policy_params:
       max_parallel_requests: 1
       num_retries: 0
-
-  # !! THE api_base MUST END IN /v1/rerank !!  Discovered in-pod during the
-  # 2026-08-23 clean install and recorded nowhere until now. The `cohere/`
-  # prefix selects LiteLLM's cohere client, and that client appends nothing —
-  # it POSTs the api_base verbatim. Give it `.../v1` and the request lands on
-  # the chat route, which is not a rerank endpoint. Resident on the GPU (:8082)
-  # beside whatever llama-swap currently holds.
-  qwen3-rerank-local:
-    registration:
-      model: cohere/PLACEHOLDER
-      api_base: PLACEHOLDER/v1/rerank
-      # The cohere client refuses to send without SOME key ("Cohere API key is
-      # required" -> /rerank 500). The local server ignores it; the previous
-      # instance carried a hand-set placeholder that was never declared here
-      # (found 2026-08-29, first clean install driven from this file).
-      mode: rerank
-      timeout: 60
-    # Optional with the role it serves (cc-rerank, above): a site with no
-    # dedicated reranker has nothing to put here, and nothing in the app
-    # addresses this row by name.
-    optional: true
-
-# Written to the DB via POST /fallback, NOT via router_settings.fallbacks —
-# with store_model_in_db: true the DB wins for that key and a config.yaml
-# block reads back as []. Verified 2026-07-26.
-#
-# Aliases are model GROUPS that exist only in LiteLLM's DB (config.yaml: the
-# alias lives in Postgres so it can be re-pointed with no restart). They carry
-# no preferences here, but they MAY carry fallbacks. Declared so the policy
-# tests can tell "fallback for an alias" from "fallback for a typo".
-# (`cc-default` moved UP into `models` 2026-08-19 — it needs capability
-# declarations, which aliases cannot carry. Its pointer still lives in the DB.)
-aliases: []
-
-# EMPTY BY OPERATOR DECISION, 2026-07-31 — local models only for now.
-#
-# This block previously declared `[claude-haiku-4-5]` for qwen3-coder-next,
-# qwen3.6-35b and cc-default. Those fallbacks were removed from the proxy
-# because a model-host outage was silently reaching for Anthropic, and the
-# attempt died anyway on `max_tokens: 262144 > 64000` — 366 such errors in four
-# days. Failing fast with the real `Connection error` is what makes an outage
-# diagnosable, and the operator is at the machine when it happens.
-#
-# This is CURRENT CONFIGURATION, not a rule. Provider models are expected back
-# later to make the system more robust. The `claude-*` entries were retired
-# from the proxy 2026-08-30 (operator action, credential-less after the clean
-# install — see the commented block in `models:`). To restore, re-add the
-# models AND the fallback keys here and run
-# `policy.py --apply`. If you do, note the historical bite mark: the ALIAS needs
-# its own key, because when the alias's one deployment is in COOLDOWN the router
-# 429s on `cc-default` before any call happens and the lookup finds nothing
-# declared there (found 2026-07-29, the first real model-host outage).
-fallbacks: {}

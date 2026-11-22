@@ -13,7 +13,7 @@
 #   This file ORCHESTRATES; it does not reimplement. Every real operation
 #   already lives next to it (init-env.sh, make-secrets.sh, mint-keys.sh,
 #   build-*-image.sh, make-*-kubeconfig.sh, install-gvisor.sh, verify.sh, and
-#   deploy/shared/litellm/{register-models,policy}.py) and is CALLED, not copied.
+#   deploy/shared/litellm/register-models.py) and is CALLED, not copied.
 #   README.md stays the prose runbook; this mechanizes its §1–§6 and §9.
 #
 #   PHASES — each a subcommand, each individually re-runnable via the SAME
@@ -21,7 +21,7 @@
 #
 #     validate    offline check of both .env files. No side effects.
 #     preflight   named checks of the CLUSTER and both hosts. Read-only.
-#     llm         secrets + the LiteLLM pair + register/policy/mint + probes
+#     llm         secrets + the LiteLLM pair + register/mint + probes
 #                 THROUGH the proxy (README §1's "absent" fork, made code)
 #     stack       build the two local images if missing, apply every
 #                 manifest, mint the kubeconfigs, gVisor
@@ -581,10 +581,10 @@ phase_preflight() {
   else
     fail "python-3.12" "no CPython 3.12 available to uv — run: uv python install 3.12"
   fi
-  # register-models.py / policy.py run under the SYSTEM python3 (they are called
-  # before the venv exists) and both import yaml.
+  # register-models.py runs under the SYSTEM python3 (it is called before the
+  # venv exists) and reads this profile's YAML declaration.
   if $PY -c 'import yaml' 2>/dev/null; then
-    pass "python-yaml" "system python3 has PyYAML (register-models.py / policy.py need it)"
+    pass "python-yaml" "system python3 has PyYAML (register-models.py needs it)"
   else
     fail "python-yaml" "system python3 cannot import yaml — apt install python3-yaml"
   fi
@@ -666,23 +666,20 @@ llm_gate() { # llm_gate <what-failed>
   note "                (the value is in deploy/k3s/.env — not printed here)"
   note ""
   note "  For each alias listed above, edit the row: replace every PLACEHOLDER"
-  note "  (model id after the prefix, api_base host) and enter the key — for"
-  note "  the Anthropic rows create the credential under Endpoints and attach"
-  note "  it (ANTHROPIC_API_KEY is deliberately NOT in the pod). The invariants"
-  note "  the re-run checks are in deploy/shared/litellm/model-preferences.yaml:"
+  note "  (model id after the prefix, api_base host) and enter the key — for a"
+  note "  provider credential, create it under Endpoints and attach it. The"
+  note "  invariants the re-run checks are in deploy/shared/litellm/model-preferences.yaml:"
   note "    graphiti-llm           MUST be a PLAIN openai/<model> — same as"
   note "                           cc-default. The old chat_completions/"
   note "                           bridge prefix is now WRONG: the app's"
   note "                           in-process graphiti-core client speaks"
   note "                           chat-completions, and a bridged alias 404s."
-  note "    qwen3-rerank-local     api_base MUST end in /v1/rerank, mode rerank"
-  note "    cc-rerank              graph search's reranker ROLE: a dedicated reranker"
-  note "                           (cohere/<id>, api_base ending /v1/rerank, mode"
-  note "                           rerank — like qwen3-rerank-local) or a chat model"
-  note "                           with logprobs and thinking OFF (openai/<id>). The"
-  note "                           probe decides which (CC_GRAPH_RERANK_KIND)."
-  note "    cc-embedding           the embedding ROLE — same upstream as"
-  note "                           qwen3-embedding-local; both rows must exist"
+  note "    cc-rerank              OPTIONAL — graph search's reranker ROLE: a dedicated"
+  note "                           reranker (cohere/<id>, api_base ending /v1/rerank,"
+  note "                           mode rerank) or a chat model with logprobs and"
+  note "                           thinking OFF (openai/<id>). The probe decides"
+  note "                           which (CC_GRAPH_RERANK_KIND)."
+  note "    cc-embedding           the embedding ROLE — what the graph embeds through"
   note "    cc-tts / cc-stt        the speech ROLES; the bundled cc-speech pod"
   note "                           answers both — enter, verbatim:"
   note "      cc-tts  model openai/speaches-ai/Kokoro-82M-v1.0-ONNX  api_base http://cc-speech:8093/v1  key none"
@@ -814,7 +811,9 @@ phase_llm() {
   # becomes a skeleton (name + invariants + PLACEHOLDER where the provider
   # goes); an existing one is never touched. Exit 3 — a fresh catalog, a
   # placeholder left in, a broken invariant — is the USER-ACTION gate, and it
-  # fires BEFORE the policy, the keys and every later phase.
+  # fires BEFORE the keys and every later phase. Per-model timeouts, costs and
+  # capabilities are the rows' own, in the proxy's database (DL-226): nothing
+  # here writes them.
   local rrc=0
   $PY "$REPO_ROOT/deploy/shared/litellm/register-models.py" >&2 || rrc=$?
   case "$rrc" in
@@ -822,23 +821,6 @@ phase_llm() {
     3) llm_gate "the model catalog needs your provider details (see the alias list above)"; return 3 ;;
     *) fail "catalog" "register-models.py failed (exit $rrc) — run: ./deploy/k3s/setup.sh diagnose"; return 1 ;;
   esac
-  step "policy-apply" "routing policy + costs applied onto the registered models" \
-    $PY "$REPO_ROOT/deploy/shared/litellm/policy.py" --apply || return 1
-
-  # REQUIRED, not hygiene: the adaptive router reads member preferences only
-  # when it is CONSTRUCTED, so without this restart /adaptive_router/state
-  # stays stale even though --check may still pass (policy.py --apply prints
-  # the same warning).
-  step "litellm-restart" "cc-litellm restarted so the adaptive router re-reads the preferences" \
-    "${K[@]}" rollout restart deploy/cc-litellm || return 1
-  step "litellm-restarted" "cc-litellm back up" \
-    "${K[@]}" rollout status deploy/cc-litellm --timeout=300s || return 1
-  if ! wait_http "http://127.0.0.1:4000/health/liveliness" 300; then
-    fail "litellm-relive" "proxy never came back after the restart — run: ./deploy/k3s/setup.sh diagnose"
-    return 1
-  fi
-  step "policy-check" "the live routing policy matches model-preferences.yaml" \
-    $PY "$REPO_ROOT/deploy/shared/litellm/policy.py" --check || return 1
 
   # mint-keys.sh writes CC_LLM_API_KEY into the REPO-ROOT .env and FATALs if
   # that file does not exist — so it has to exist by now, not by the app phase.
@@ -877,7 +859,7 @@ phase_llm() {
   rerank_decide_k3s || return $?
   # cc-embedding is the embedding ROLE alias (2026-08-30, parity with the
   # single-node profile) — the app's graph client embeds through exactly that
-  # name; qwen3-rerank-local/qwen3-embedding-local stay as real-model rows.
+  # name.
   local dim
   dim="$(probe_alias embed cc-embedding 2>/dev/null | tail -1)"
   if [[ ! "$dim" =~ ^[0-9]+$ ]]; then

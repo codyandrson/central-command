@@ -38,7 +38,9 @@ dependencies = [
     # act: bump here AND `graphiti_patches.PINNED_VERSION` (a test pins them
     # equal), re-cut both patches, run the full suite.
     "graphiti-core==0.30.2",
-    # deploy/shared/litellm/policy.py reads the routing declaration with it.
+    # deploy/shared/litellm/register-models.py reads the k3s role-alias
+    # declaration with it (setup.sh runs it under the system python3; this copy
+    # serves the tests that load it and the YAML the suite parses).
     # >=6.0.4: exponential merge-key expansion on crafted YAML.
     "pyyaml>=6.0.4,<7",
     # HTML mail -> the text an agent reads (ingest/mailtext.py). Layout-table

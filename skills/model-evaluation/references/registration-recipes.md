@@ -110,7 +110,7 @@ Distinct from `litellm_probe_model` — these govern LiteLLM's own periodic
 cheap-vs-expensive health reads):
 
 - **`mode`** — what kind of health check applies (`chat`, `embedding`,
-  `rerank`, …); the declared policy file's `cc-rerank` registration sets
+  `rerank`, …); the installers' `cc-rerank` skeleton is created with
   `mode: rerank` for exactly this reason.
 - **`health_check_max_tokens`**, **`health_check_reasoning_effort`**,
   **`health_check_timeout`** — override the health check's own request

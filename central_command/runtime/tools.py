@@ -2190,11 +2190,15 @@ _LITELLM_CONFIG_FILES = (
 
 async def litellm_read_config(ctx: RunContext, path: str) -> str:
     """Read a LiteLLM config or deployment file. `deploy/shared/litellm/config.yaml`
-    is the proxy's config file and `deploy/shared/litellm/model-preferences.yaml`
-    the declared routing policy; `deploy/k3s/30-litellm.yaml` (the k8s
+    is the proxy's config file; `deploy/k3s/30-litellm.yaml` (the k8s
     Deployment manifest) is readable for TROUBLESHOOTING — it references
-    secret NAMES via secretKeyRef, never values. No capability writes any of
-    the three. Any other path is refused. Read-only.
+    secret NAMES via secretKeyRef, never values.
+    `deploy/shared/litellm/model-preferences.yaml` is only the k3s installer's
+    list of the ROLE aliases it creates as skeletons on a fresh catalog; it
+    declares nothing about a specific model and nothing re-applies it — a
+    model's timeout, cost and capabilities are on its row in the proxy
+    (`litellm_list_models`). No capability writes any of the three. Any other
+    path is refused. Read-only.
     """
     if path not in _LITELLM_CONFIG_FILES:
         return (

@@ -4,6 +4,34 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.119.0: The k3s model policy layer is cut; a model's values live on its row in the proxy
+
+- **Why.** The k3s profile declared specific models, with their timeouts, costs and capability flags,
+  in `deploy/shared/litellm/model-preferences.yaml`, and `policy.py` pushed those values to the proxy
+  at every update and failed verification on drift. The single-node profile never had it, so it was a
+  second, k3s-only way to do what the LiteLLM manager's register, probe, declare flow does at every
+  site; its check still demanded fields for an adaptive router deleted on 2026-07-27. The operator
+  ruled the cut in the system review of 2026-11-21 (DL-226, superseding DL-164). A drift check run
+  against a live proxy during the review reported none, so the database already held every declared
+  value.
+- **Removed.** `policy.py` and its calls in k3s `setup.sh` (with the proxy restart that existed only
+  for it), `cc-update.sh` and `verify.sh`; the fourth step of `checks.sh`; the `models:`, `aliases:`
+  and `fallbacks:` sections of `model-preferences.yaml`.
+- **What `model-preferences.yaml` is now.** The k3s profile's role-alias declaration for
+  `register-models.py`, the twin of `deploy/single/models.json`: `cc-default`, `graphiti-llm`,
+  `cc-embedding`, `cc-tts`, `cc-stt` and the optional `cc-rerank`, each with the registration fields
+  and timeout it had. A k3s install no longer requires any specific model's row.
+- **Where a model's timeout, cost and capabilities are set.** On the model's row in the proxy:
+  measured with `litellm_probe_model` and proposed with `litellm.update_model`, or entered in the
+  LiteLLM UI. The manager's charter and the bundled skill docs say so; the charter's stale proxy
+  version line now points at the recorded pin, and its sentence on router settings matches DL-223.
+- **What this gives up.** The fleet as a reviewable diff; self-repair of declared values at each k3s
+  update; and a from-scratch k3s rebuild no longer re-creating per-model values (restore the proxy
+  database from backup, or enter them again).
+- **At the update.** The installed updater still tries to run `policy.py --apply` after the health
+  check; the file is gone, so it prints a warning and the update succeeds. Existing rows are not
+  touched.
+
 ## 2026-11-21 — v2.118.0: Redis is removed; the proxy caches in its own memory
 
 - **Why.** Redis existed for one job, the LiteLLM proxy's response cache. Measured over 30 days, 1,302

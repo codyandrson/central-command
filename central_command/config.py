@@ -1040,8 +1040,8 @@ class Settings(BaseSettings):
     def agent_model(self, agent_id: str | None) -> str:
         """Per-agent MODEL override for `agent_id`, from CC_MODEL_<AGENT_ID>
         (same provider:model shape as CC_DEFAULT_MODEL), or "" if unset. Lets
-        one agent canary a different LiteLLM alias (e.g. the cc-smart adaptive
-        router) while everyone else stays on default_model. Read dynamically
+        one agent canary a different LiteLLM alias while everyone else stays
+        on default_model. Read dynamically
         for the same reason as agent_proxy_key."""
         if not agent_id:
             return ""

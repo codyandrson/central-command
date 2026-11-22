@@ -105,8 +105,7 @@ thinking_levels: ["off", "low", "medium", "xhigh"]
 template takes `enable_thinking`/`reasoning_effort` through
 `chat_template_kwargs`, and there is **no** `reasoning_effort: "none"` for it —
 the template raises and every request 500s, so `"off"` must mean
-`enable_thinking: false`, not an omitted field; the declared policy file's
-comments on the `cc-default` entry carry the worked case). If instead the
+`enable_thinking: false`, not an omitted field). If instead the
 gateway is genuinely OpenAI-`reasoning_effort`-native (Anthropic-style), the
 matching declaration is `thinking_mechanism: anthropic` with
 `thinking_levels: ["off", "low", "medium", "xhigh"]` (`"off"` **quoted** —

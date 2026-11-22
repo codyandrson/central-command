@@ -2,12 +2,12 @@
 # ============================================================================
 # Is the LiteLLM proxy healthy AND still serving what the deployment needs?
 #
-#   The SAME script runs as the pre-check, the post-check and the rollback
-#   re-check of gateway/executor.py's litellm.apply_config_change arc — and it
-#   is a fine thing to run by hand:  ./deploy/shared/litellm/checks.sh
+#   Run by hand:  ./deploy/shared/litellm/checks.sh
+#   (Its old caller, the Executor's config-change capability, was removed by
+#   DL-223; nothing runs it automatically.)
 #
 #   Exit 0 = green. Any failure exits nonzero at the FIRST failed check with a
-#   line naming it, because the Executor puts this output on the proposal.
+#   line naming it.
 #
 #   The master key comes from LITELLM_MASTER_KEY, falling back to the k3s
 #   profile's containers' env (deploy/k3s/.env, gitignored — resolved by
@@ -63,9 +63,5 @@ code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 \
   || fail "completion: could not reach $BASE"
 [[ "$code" == "200" ]] || fail "completion: 1-token cc-default completion returned HTTP $code"
 echo "ok  cc-default answers a 1-token completion"
-
-# 4. live routing still matches the declared policy (model-preferences.yaml).
-out="$(python3 "$HERE/policy.py" --check 2>&1)" || fail "policy.py --check: $out"
-echo "ok  routing policy matches model-preferences.yaml"
 
 echo "all checks green"

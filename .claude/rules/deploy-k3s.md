@@ -181,9 +181,9 @@ when a matching file is read.
   script, `deploy/shared/litellm/checks.sh` and the `--k3s` arm of
   `deploy/n8n/apply-workflows.sh` (the reader release A missed) source
   `deploy/k3s/env-path.sh` and call `cc_k3s_env_file` — never a literal path;
-  `policy.py` and `register-models.py` mirror the same two-step lookup in
-  Python because a caller may run them with no `LITELLM_MASTER_KEY` in the
-  environment. The
+  `register-models.py` mirrors the same two-step lookup in Python because a
+  caller may run it with no `LITELLM_MASTER_KEY` in the environment (it was
+  one of two mirrors until DL-226 removed `policy.py`). The
   file is UNTRACKED (no merge moves it, no `reset --hard` restores it), so
   `cc_k3s_env_migrate` does the move once — `mv`, mode kept, a relative
   symlink left at `deploy/pi/.env` for any release that still reads it —

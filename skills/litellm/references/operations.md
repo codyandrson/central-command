@@ -46,10 +46,11 @@ none is deployed.
 
 ## Timeouts
 
-Per-model `timeout` is part of the declared policy
-(`model-preferences.yaml`), not something to invent per call. If a model is
-timing out, check its declared timeout and the actual upstream latency before
-proposing a change. On the local-model-server models, a long declared timeout
+Per-model `timeout` is `litellm_params.timeout` on the model's row in the
+proxy (read it with `litellm_list_models`; change it with a gated
+`litellm.update_model`), not something to invent per call. No file declares it
+and nothing re-applies one (DL-226). If a model is timing out, check its
+timeout on the row and the actual upstream latency before proposing a change. On the local-model-server models, a long declared timeout
 is deliberate FIFO-queue policy, not slack to trim — see
 `routing-doctrine`'s local-model-server section.
 <!-- overlay: model_server_timeouts -->

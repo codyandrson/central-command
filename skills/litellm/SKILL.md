@@ -55,8 +55,8 @@ approves, the Executor applies.
   fallbacks, cooldown 0, the llama-swap slot, and the experiments that were
   deleted. The *why*, so you don't re-propose them.
 - `models-and-model-info` — model rows, aliases, `model_info` native fields vs
-  invented ones, `max_input_tokens`/`supports_vision`, the declared-policy file,
-  `policy.py`, and model autodiscovery.
+  invented ones, `max_input_tokens`/`supports_vision`, where per-model values
+  live (the row, not a file), and model autodiscovery.
 - `keys-and-teams` — virtual keys, the Enterprise-tags 403, credentials-by-name,
   teams, and how spend attribution actually works here.
 - `operations` — health endpoints, caching, timeouts, and the failure modes
