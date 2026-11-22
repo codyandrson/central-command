@@ -72,7 +72,7 @@ MASTER="$(sed -n 's/^LITELLM_MASTER_KEY=//p' "$PI_ENV" | head -1)"
 [[ -n "$MASTER" ]] || { echo "FATAL: LITELLM_MASTER_KEY empty in $PI_ENV" >&2; exit 1; }
 
 curl -fsS -m 10 "$BASE_URL/health/liveliness" >/dev/null \
-  || { echo "FATAL: no LiteLLM proxy at $BASE_URL — bring the trio up first." >&2; exit 1; }
+  || { echo "FATAL: no LiteLLM proxy at $BASE_URL — bring the LiteLLM pair up first." >&2; exit 1; }
 
 current() {  # current <file> <name>
   sed -n "s/^$2=//p" "$1" | head -1

@@ -305,7 +305,7 @@ def test_the_tree_edit_guard_catches_a_planted_violation():
 def test_the_tree_edit_guard_leaves_env_keys_commands_and_findings_alone():
     clean = "\n".join([
         'f() {',
-        '  fail "x" "fix or unset CC_IMG_REDIS in .env, then re-run: ./setup.sh"',
+        '  fail "x" "fix or unset CC_IMG_NEO4J in .env, then re-run: ./setup.sh"',
         '  note "  Do not add one to a tracked file: the install refuses a tree that differs"',
         '  useraction "y" "set it in .env or run ./setup.sh configure in a terminal"',
         '  warn "z" "podman-compose must be 1.6.0 or newer; check it by hand"',

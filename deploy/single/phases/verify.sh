@@ -40,7 +40,7 @@ capability_manifest() {
   echo
   echo "   installed:"
   echo "     postgres    the spine (schema auto-loaded)"
-  echo "     litellm     the proxy + its own postgres and redis"
+  echo "     litellm     the proxy + its own postgres (response cache in its memory)"
   echo "     neo4j       the knowledge graph store"
   echo "     graph       graphiti-core, IN the API process (no separate service)"
   if [[ "$CC_ENABLE_SANDBOX" == "1" ]]; then

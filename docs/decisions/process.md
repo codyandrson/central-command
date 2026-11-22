@@ -3212,3 +3212,33 @@ hygiene, and how the test suite itself must be written. See
   listed in `web/VENDORED.md` for a later release.
 - **Enforced:** code structure only (`web/server/app.ts`; what it does not import does not run, and `npm run build` typechecks what remains)
 - **Source:** the operator's ruling in the system review, 2026-11-21; `web/VENDORED.md`; PRD FR-44 (amended 2026-11-21); `docs/CHAT_MARKERS.md`
+
+### DL-225 — LiteLLM caches in its own memory; the Redis that held the cache is removed
+
+- **Status:** active
+- **Date:** 2026-11-21
+- **Rule:** (recorded here) Both profiles' proxy configs set
+  `cache_params.type: local` (the proxy's built-in in-memory cache) and keep
+  `supported_call_types: ["completion", "acompletion"]` (DL-062: embeddings are
+  never cached). The Redis Deployment, Service and volume claim leave the k3s
+  profile (tombstoned in `deploy/k3s/removed.txt`), and the `litellm-redis`
+  service, its volume and its image row leave the single-node profile, whose
+  `llm` phase removes an older install's container and volume by name. The
+  application's `no-cache` rider and the re-embed tool's `/cache/ping` check are
+  unchanged: the in-memory cache keys requests the same way.
+- **Why:** The Redis existed for nothing but the response cache, and over 30
+  days 1,302 of 187,692 requests were cache hits, nearly all on `cc-default` and
+  very probably the health probe's identical one-token request, which the
+  operator had chosen to let answer from the cache. The proxy runs one replica
+  with one worker in both profiles, so an in-memory cache serves that probe as
+  well; removing Redis is one fewer service, image and volume to install,
+  mirror, back up and upgrade at every site. What is given up: cached answers
+  do not survive a proxy restart, and they are not shared if the proxy ever
+  runs more than one worker or replica; at that point Redis is the documented
+  choice again. A rehearsal at the pinned proxy version confirmed the local
+  cache starts without Redis, serves and logs a repeated request as a hit,
+  honours `no-cache`, answers `/cache/ping` with `cache_type: local`, and keys
+  requests as before. The operator ruled the removal in the system review on
+  2026-11-21.
+- **Enforced:** test: `tests/test_litellm_cache_call_types.py::test_the_response_cache_is_in_the_proxys_memory`
+- **Source:** the operator's ruling in the system review, 2026-11-21; `deploy/shared/litellm/config.yaml` and `deploy/single/litellm-config.yaml` (the cache comment); `deploy/k3s/removed.txt`; `deploy/single/phases/llm.sh` (`retire_litellm_redis`); DL-062

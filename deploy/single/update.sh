@@ -879,7 +879,7 @@ deploy_current_tree() {
   deploy_phase fetch "dependencies could not all be acquired — fix the seam(s) named above (the repo-root .env), then re-run ${RERUN}" || return 1
   # The LLM half is part of the release surface too (a new alias, a new pod
   # played in that phase — v2.21.0's speech engine). Idempotent: compose
-  # converges the containers (and the phase recreates any of the LiteLLM trio
+  # converges the containers (and the phase recreates any of the LiteLLM pair
   # whose image changed behind its ref) and the catalog step is create-only.
   # Exit 3 is the catalog pause — the operator's move.
   deploy_phase llm "the model catalog needs your attention (see above) — fill it in the LiteLLM UI, then re-run ${RERUN}" || return 1

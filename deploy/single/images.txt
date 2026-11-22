@@ -34,9 +34,9 @@
 #                   and a digest there would fail weekly on a healthy registry.
 #                   An exact-version tag gets a real digest, and a mismatch on
 #                   one is a hard FAIL. The exception is docker-library's
-#                   postgres and redis: an exact tag there (16.16-trixie,
-#                   7.4.12-alpine) is re-pushed whenever its Debian or Alpine
-#                   base is rebuilt, so those rows pin the tag and carry `-`.
+#                   postgres: an exact tag there (16.16-trixie) is re-pushed
+#                   whenever its Debian base is rebuilt, so that row pins the
+#                   tag and carries `-`.
 #     component     core | n8n | sandbox-base | crawler-base | speech
 #                   (resolution skips components whose CC_ENABLE_* flag is 0)
 #
@@ -77,7 +77,6 @@
 
 dockerio  library/postgres            16                    16.16-trixie       -                                                                        core
 dockerio  library/neo4j               5.26                  5.26.33            sha256:51d0314ef86074f519003da8dd4daaa9fff72b8479672b742d7cab7f3064e3ed  core
-dockerio  library/redis               7                     7.4.12-alpine      -                                                                        core
 # LiteLLM is locked to an exact version + digest (was the rolling main-stable
 # channel until 2026-11-21): v1.110.2, the multi-arch index digest. The
 # constraint v1.110 lets a mirror substitute a newer v1.110.x only; v1.111 and

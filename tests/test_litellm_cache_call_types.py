@@ -52,3 +52,20 @@ def test_no_config_source_caches_embeddings():
             "embeddings misalign mixed hit/miss batches and corrupt graph "
             "name_embeddings. Remove them."
         )
+
+
+def test_the_response_cache_is_in_the_proxys_memory():
+    """DL-225: both profiles cache in the proxy's own memory (`type: local`),
+    and no Redis is wired in — no host or port parameter in the cache block,
+    no Redis service in either deployment. Moving back to a shared cache (more
+    than one proxy worker or replica) is a decision, made by changing this."""
+    for path in CONFIG_SOURCES:
+        params = _litellm_settings(path).get("cache_params") or {}
+        assert params.get("type") == "local", f"{path}: cache_params.type is {params.get('type')!r}"
+        assert not {"host", "port", "password"} & set(params), f"{path}: {sorted(params)}"
+    compose = yaml.safe_load((REPO / "deploy" / "single" / "compose.yaml").read_text(encoding="utf-8"))
+    assert not [s for s in compose["services"] if "redis" in s], compose["services"].keys()
+    assert not [v for v in (compose.get("volumes") or {}) if "redis" in v]
+    docs = list(yaml.safe_load_all((REPO / "deploy" / "k3s" / "30-litellm.yaml").read_text(encoding="utf-8")))
+    names = [d["metadata"]["name"] for d in docs if d]
+    assert not [n for n in names if "redis" in n], names

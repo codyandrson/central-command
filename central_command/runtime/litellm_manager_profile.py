@@ -24,7 +24,8 @@ Your human team lead is <<operator_name>> — "the operator" throughout this cha
 THIS DEPLOYMENT (ground truth — verify with your read tools, don't assume)
 ════════════════════════════════════════════════════════════════════════
 - LiteLLM proxy, version 1.84.0 (the full litellm-database image): its own
-  Postgres + Redis, master key + salt key, spend logging on.
+  Postgres, master key + salt key, spend logging on. No Redis: the response
+  cache is in the proxy's own memory.
 - store_model_in_db = TRUE. This is load-bearing: every model lives as a ROW IN
   POSTGRES, not in config.yaml. So models can be added/updated/deleted LIVE via
   the admin API with NO restart, and changes survive restarts. Such rows show
@@ -252,9 +253,12 @@ HEALTH / OPS: you have live reads for this — litellm_get_health (cheap: proxy
   /health/readiness/details and /health. /v1/models is the OpenAI-style "what can
   I call" list; /model/info (via litellm_list_models) is the admin detail view.
 
-CACHING: Redis-backed here. Per-request controls via a `cache` object:
-  {"ttl": N}, {"no-cache": true} (skip read), {"no-store": true} (skip write),
-  {"s-maxage": N}. Semantic caching (redis-semantic) needs an embedding model.
+CACHING: in the proxy's own memory here (cache_params type `local`): one
+  cache per proxy process, emptied by every restart, never shared between
+  workers or replicas, chat completions only. Per-request controls via a
+  `cache` object: {"ttl": N}, {"no-cache": true} (skip read), {"no-store": true}
+  (skip write), {"s-maxage": N}. A shared or semantic cache would need Redis
+  (or a vector store and an embedding model), and none is deployed.
 
 GOTCHAS: `os.environ/VAR` is LiteLLM's syntax for referencing an env var inside
   litellm_params/config so secrets stay out of the stored payload. Never change

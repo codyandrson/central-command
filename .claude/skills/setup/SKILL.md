@@ -471,7 +471,7 @@ its §10.
 ```
 
 What its phases own (so you can interpret, not so you re-derive): `llm`
-brings up ONLY the LiteLLM trio, creates every alias `model-preferences.yaml`
+brings up ONLY the LiteLLM pair (the proxy and its database), creates every alias `model-preferences.yaml`
 declares as a SKELETON (`register-models.py`, create-only) and **pauses
 (exit 3) on a fresh catalog** for the operator to enter providers, model
 ids and keys/credentials in the LiteLLM UI; the re-run checks the

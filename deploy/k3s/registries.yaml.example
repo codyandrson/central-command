@@ -7,7 +7,7 @@
 #           sudo systemctl restart k3s-agent  (agent node)
 #
 # Registries covered = every registry an image in deploy/k3s/*.yaml pulls
-# from today (docker.io: postgres, redis, neo4j, n8n; ghcr.io: litellm).
+# from today (docker.io: postgres, neo4j, n8n; ghcr.io: litellm).
 # The locally built images (cc-sandbox, cc-crawler) are never pulled, so
 # they need no mirror entry — only their base images do, at build time.
 #

@@ -2,8 +2,9 @@
 # LiteLLM — the proxy FLOATS (prefers the compute node), its stores stay on the anchor node.
 #
 #   This split is the whole point of the migration. cc-litellm is the memory hog
-#   AND it is stateless: everything it remembers lives in cc-litellm-db and
-#   redis. So the hog floats to the x86_64 compute node (off the architecture where
+#   AND it is stateless: everything it must remember lives in cc-litellm-db
+#   (its response cache is in its own memory and is lost on restart by
+#   design, DL-225). So the hog floats to the x86_64 compute node (off the architecture where
 #   the Prisma leak was measured) while its 182 MB database stays pinned to the
 #   anchor node. If the compute node goes away, LiteLLM reschedules onto the anchor node and its
 #   database is already there. That is real failover, and it only works because
@@ -27,18 +28,6 @@ spec:
       storage: 5Gi
 ---
 apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: cc-litellm-redisdata
-  namespace: central-command
-spec:
-  accessModes: [ReadWriteOnce]
-  storageClassName: local-path
-  resources:
-    requests:
-      storage: 1Gi
----
-apiVersion: v1
 kind: Service
 metadata:
   name: litellm-db
@@ -49,18 +38,6 @@ spec:
   ports:
     - port: 5432
       targetPort: 5432
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: litellm-redis
-  namespace: central-command
-spec:
-  selector:
-    app: cc-litellm-redis
-  ports:
-    - port: 6379
-      targetPort: 6379
 ---
 # The one service the anchor host must reach at a fixed port while the pod roams.
 apiVersion: v1
@@ -139,45 +116,6 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: cc-litellm-redis
-  namespace: central-command
-spec:
-  replicas: 1
-  strategy:
-    type: Recreate
-  selector:
-    matchLabels:
-      app: cc-litellm-redis
-  template:
-    metadata:
-      labels:
-        app: cc-litellm-redis
-    spec:
-      nodeSelector:
-        cc-role/anchor: "true"
-      containers:
-        - name: redis
-          image: docker.io/library/redis:7.4.12-alpine
-          args: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
-          volumeMounts:
-            - name: data
-              mountPath: /data
-          readinessProbe:
-            exec: {command: ["redis-cli", "ping"]}
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 10
-          resources:
-            requests: {memory: 32Mi, cpu: 25m}
-            limits: {memory: 512Mi}
-      volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: cc-litellm-redisdata
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
   name: cc-litellm
   namespace: central-command
 spec:
@@ -249,10 +187,6 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef: {name: cc-litellm, key: DATABASE_URL}
-            - name: REDIS_HOST
-              value: litellm-redis
-            - name: REDIS_PORT
-              value: "6379"
             - name: STORE_MODEL_IN_DB
               value: "True"
             - name: OPENAI_API_KEY

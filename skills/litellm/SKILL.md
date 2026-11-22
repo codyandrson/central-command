@@ -7,7 +7,7 @@ default_agents: litellm-manager
 # LiteLLM
 
 This deployment is a **self-hosted LiteLLM proxy** (`litellm-database` image)
-with its own Postgres and Redis, reached at `127.0.0.1:4000`. Central Command routes
+with its own Postgres, reached at `127.0.0.1:4000`. Central Command routes
 **all** of its agent traffic through it, so a change here can affect how every
 agent runs. Agent traffic itself speaks **OpenAI chat-completions format**
 (`/v1/chat/completions`), not the Anthropic passthrough — see `routing-doctrine`.

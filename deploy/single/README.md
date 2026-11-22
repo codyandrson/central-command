@@ -26,13 +26,18 @@ templates + `podman kube play` on 2026-09-03 (design record
 `docs/superpowers/specs/2026-09-03-deploy-refactor-design.md`).
 
 **Always up:** `postgres` (the spine, schema auto-loaded from the repo's
-`schema.sql` on a FRESH database) · `litellm` + its own `litellm-db` and
-`litellm-redis` · `neo4j`. There is no graph SERVICE: the knowledge graph's
+`schema.sql` on a FRESH database) · `litellm` + its own `litellm-db` ·
+`neo4j`. There is no graph SERVICE: the knowledge graph's
 extraction and search run inside the API through graphiti-core, talking bolt
 to `neo4j` (design record
 `docs/superpowers/specs/2026-10-04-graphiti-library-migration-design.md`; the
 Graphiti MCP container left in that release, and the `stack` phase removes an
-existing install's leftover `<prefix>graphiti` container by name).
+existing install's leftover `<prefix>graphiti` container by name). LiteLLM
+keeps its response cache in its own memory, per process and emptied by a
+restart (DL-225); the Redis that held it is gone, and the `llm` phase removes
+an existing install's leftover `<prefix>litellm-redis` container and its
+`central-command_litellm-redisdata` volume by name. Its image stays in local
+storage for a rollback; remove it by hand once you no longer need one.
 
 **Profiles**, selected from the `CC_ENABLE_*` flags by `setup.sh`:
 
@@ -67,7 +72,7 @@ the k3s profile's gVisor.
 
 **Order lives in the file, not in the driver.** `healthcheck` +
 `depends_on: condition: service_healthy` express what used to be a sequence of
-plays and polls: litellm waits for its database and redis, n8n for its own.
+plays and polls: litellm waits for its database, n8n for its own.
 `setup.sh` brings services up with `--wait`. Two host-side
 polls survive on purpose — LiteLLM's first-boot Prisma migration (5 minutes),
 and the speech engine, which carries **no** healthcheck because its first boot
@@ -396,7 +401,7 @@ the steps whose `.env` inputs changed. What `up` does NOT notice is a NEW
 image behind an UNCHANGED ref — a local image a release rebuilt under its
 fixed tag, a re-pulled `main-stable` — because podman-compose 1.6.0 compares
 the service definition, not the image ID (docker compose does compare it). So
-`stack` (and `llm`, for LiteLLM and its database and redis) then compares each
+`stack` (and `llm`, for LiteLLM and its database) then compares each
 container's image ID with the ID its ref resolves to now and recreates exactly
 the ones that differ, one `PASS up-stack: <service> recreated …` line each. The
 stateful services keep their data in named volumes, which a recreate never

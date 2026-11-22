@@ -29,15 +29,20 @@ Two different reads, do not conflate them:
 
 ## Caching
 
-Redis-backed here. Per-request controls via a `cache` object on the call:
+In the proxy's own memory here (`cache_params` type `local`, DL-225): one cache
+per proxy process, emptied by every restart and never shared between workers
+or replicas, covering chat completions only (`supported_call_types` — never
+embeddings). There is no Redis. Per-request controls via a `cache` object on
+the call:
 
 - `{"ttl": N}` — cache the response for N seconds.
 - `{"no-cache": true}` — skip the cache read (still writes).
 - `{"no-store": true}` — skip the cache write (still reads).
 - `{"s-maxage": N}` — only accept a cached response younger than N seconds.
 
-Semantic caching (`redis-semantic`) needs an embedding model configured — not
-assumed to be on by default.
+A cache shared across processes would need Redis again, and semantic caching
+(`redis-semantic`, `qdrant-semantic`) a vector store and an embedding model;
+none is deployed.
 
 ## Timeouts
 

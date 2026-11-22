@@ -117,19 +117,6 @@ services:
       retries: 12
       start_period: 30s
 
-  litellm-redis:
-    container_name: ${CC_POD_PREFIX:-cc-}litellm-redis
-    image: ${CC_IMG_REDIS:-docker.io/library/redis:7.4.12-alpine}
-    restart: always
-    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
-    volumes:
-      - litellm-redisdata:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
   litellm:
     container_name: ${CC_POD_PREFIX:-cc-}litellm
     image: ${CC_IMG_BERRIAI_LITELLM_DATABASE:-ghcr.io/berriai/litellm-database:v1.110.2}
@@ -137,8 +124,6 @@ services:
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     depends_on:
       litellm-db:
-        condition: service_healthy
-      litellm-redis:
         condition: service_healthy
     environment:
       LITELLM_MASTER_KEY: ${CC_LLM_PROXY_ADMIN_KEY}
@@ -152,8 +137,6 @@ services:
       # this adds no exposure.
       UI_USERNAME: ${UI_USERNAME:-admin}
       UI_PASSWORD: ${UI_PASSWORD:-${CC_LLM_PROXY_ADMIN_KEY}}
-      REDIS_HOST: litellm-redis
-      REDIS_PORT: "6379"
       STORE_MODEL_IN_DB: "True"
       # ── outbound TLS (2026-09-23 design record, D4) ──────────────────────
       # LiteLLM is one of only two services here that dials an EXTERNAL
@@ -382,7 +365,6 @@ services:
 volumes:
   pgdata:
   litellm-pgdata:
-  litellm-redisdata:
   neo4j-data:
   n8n-pgdata:
   n8n-data:

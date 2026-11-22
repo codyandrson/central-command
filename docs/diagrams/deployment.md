@@ -35,7 +35,6 @@ flowchart LR
         PG["Postgres: the spine"]
         LLM["LiteLLM proxy"]
         LLMDB["LiteLLM database"]
-        Redis["LiteLLM Redis"]
         Neo["Neo4j graph store"]
     end
 
@@ -70,7 +69,6 @@ flowchart LR
     Runner --> Sandbox
 
     LLM --> LLMDB
-    LLM --> Redis
     LLM --> Upstream
     LLM -->|"voice aliases"| Speech
     Crawler -->|"optional model-assisted filter"| LLM
@@ -82,7 +80,7 @@ flowchart LR
 
 | Part | What it is | Where in the repo |
 |---|---|---|
-| Always-up services | Postgres, LiteLLM with its own database and Redis, and Neo4j. Start order is healthchecks plus `depends_on`, not a script sequence. Postgres loads `schema.sql` only on a fresh database. | `deploy/single/compose.yaml` |
+| Always-up services | Postgres, LiteLLM with its own database (its response cache is in its own memory), and Neo4j. Start order is healthchecks plus `depends_on`, not a script sequence. Postgres loads `schema.sql` only on a fresh database. | `deploy/single/compose.yaml` |
 | Profiles | `n8n` (with its database), `crawler` and `speech` are Compose profiles. The installer turns them on from the `CC_ENABLE_*` flags; crawler and speech are on by default, n8n is off. | `compose.yaml` (`profiles:`), `deploy/single/README.md` ("Profiles") |
 | Host processes | The API, the cockpit server and the sandbox runner are not containers. `./setup.sh` starts them, through user-level systemd units where the machine has a user manager. | `deploy/single/README.md` ("Starting the sandbox runner"), `deploy/single/supervise-lib.sh` |
 | Sandbox | No Compose service. The runner creates a container per run with rootless podman, which the README says is weaker containment than the k3s profile's gVisor. | `deploy/single/README.md` (Containment trade) |
@@ -102,7 +100,7 @@ units on the anchor node, outside the cluster.
 | Where | What runs there |
 |---|---|
 | **Anchor node** (control plane, arm64), as host services outside the cluster | Cockpit server (port 3080), API and Executor (port 8080), sandbox runner (port 8090), the loopback relay to the graph store, the updater (a root one-shot started by a trigger file) |
-| **Anchor node**, cluster pods pinned here | Postgres (the spine), the LiteLLM database and Redis, n8n and its database |
+| **Anchor node**, cluster pods pinned here | Postgres (the spine), the LiteLLM database, n8n and its database |
 | **Compute node** (amd64), cluster pods | The LiteLLM proxy (floats, prefers this node), Neo4j (pinned), the crawler and the speech engine (both required here) |
 | **Compute node**, separate namespaces | Sandbox jobs under gVisor, one per run; agent-built MCP servers |
 
@@ -123,7 +121,7 @@ flowchart LR
     API -.->|"deploys approved servers"| MCP["Agent-built MCP servers"]
     API --> LLM["LiteLLM proxy"]
 
-    LLM --> LLMDB["LiteLLM database and Redis"]
+    LLM --> LLMDB["LiteLLM database"]
     LLM --> Speech["Speech engine"]
     LLM --> MCP
     LLM --> Upstream["Model endpoint, outside the cluster"]
@@ -134,7 +132,7 @@ flowchart LR
 | Part | What it is | Where in the repo |
 |---|---|---|
 | Node roles | The runbook calls them the anchor node (control plane, arm64) and the compute node (agent, amd64). Both are node labels; the manifests never name a machine. | `deploy/k3s/README.md` (sections 1 and 3a), `deploy/k3s/00-namespace.yaml` |
-| Pinned versus floating | Postgres, the LiteLLM database and Redis, and n8n are pinned to the anchor node. Neo4j is pinned to the compute node. LiteLLM prefers the compute node and falls back to the anchor node, with 30-second eviction tolerations. | `deploy/k3s/README.md` (placement table), `20-postgres.yaml`, `30-litellm.yaml`, `40-graph.yaml`, `50-n8n.yaml` |
+| Pinned versus floating | Postgres, the LiteLLM database and n8n are pinned to the anchor node. Neo4j is pinned to the compute node. LiteLLM prefers the compute node and falls back to the anchor node, with 30-second eviction tolerations. | `deploy/k3s/README.md` (placement table), `20-postgres.yaml`, `30-litellm.yaml`, `40-graph.yaml`, `50-n8n.yaml` |
 | Required on compute | The crawler and speech engine have a hard node requirement. Sandbox jobs do too, because gVisor is installed only there. | `70-crawler.yaml`, `90-speech.yaml`, `60-sandbox.yaml` |
 | Host services | `cc-uvicorn` (API), `cc-nerve` (cockpit server), `cc-sandbox-runner`, `cc-graph-bolt` (relay) and the `cc-update` path and service units. The API, runner and cockpit units are rendered from `.in` templates. | `deploy/k3s/*.service.in`, `cc-graph-bolt.service`, `cc-update.path`, README section 6 |
 | Graph exposure | Neo4j is reachable inside the cluster only. A `socat` relay unit exposes it on loopback for the API. | `cc-graph-bolt.service`, `40-graph.yaml` |

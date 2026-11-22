@@ -1162,8 +1162,12 @@ def test_the_cache_ping_response_shape_is_the_vendored_documents():
 
 
 def test_the_cache_params_the_proxy_double_encodes_are_read(world, capsys):
-    world.cache = _Response(200, {"litellm_cache_params": json.dumps({
-        "supported_call_types": ["completion", "acompletion"], "type": "redis",
+    # The in-memory cache's answer (DL-225): LiteLLM's `/cache/ping` for a
+    # non-redis cache is 200 with `cache_type` and the double-encoded params,
+    # and no ping fields — it still counts as "cache on".
+    world.cache = _Response(200, {"status": "healthy", "cache_type": "local",
+                                  "litellm_cache_params": json.dumps({
+        "supported_call_types": ["completion", "acompletion"], "type": "local",
     })})
     assert _main(world, "check") == 0
     assert (
@@ -1173,8 +1177,9 @@ def test_the_cache_params_the_proxy_double_encodes_are_read(world, capsys):
 
 
 def test_double_encoded_cache_params_that_cover_embeddings_exit_one(world, capsys):
-    world.cache = _Response(200, {"litellm_cache_params": json.dumps({
-        "supported_call_types": ["completion", "embedding", "aembedding"],
+    world.cache = _Response(200, {"status": "healthy", "cache_type": "local",
+                                  "litellm_cache_params": json.dumps({
+        "supported_call_types": ["completion", "embedding", "aembedding"], "type": "local",
     })})
     assert _main(world, "check") == 1
     assert "the LiteLLM cache covers embeddings" in capsys.readouterr().out

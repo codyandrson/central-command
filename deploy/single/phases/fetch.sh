@@ -24,7 +24,6 @@
 #     resolve-images                     run    p_resolve_images
 #     image-postgres                     run    p_image_postgres
 #     image-neo4j                        run    p_image_neo4j
-#     image-redis                        run    p_image_redis
 #     image-berriai_litellm_database     run    p_image_berriai_litellm_database
 #     image-n8nio_n8n                    run    p_image_n8nio_n8n
 #     image-python                       run    p_image_python
@@ -378,10 +377,6 @@ p_image_postgres() {
 
 p_image_neo4j() {
   p_img CC_IMG_NEO4J
-}
-
-p_image_redis() {
-  p_img CC_IMG_REDIS
 }
 
 p_image_berriai_litellm_database() {

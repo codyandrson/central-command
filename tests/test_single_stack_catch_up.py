@@ -75,9 +75,19 @@ case "$1" in
   ps)     [[ -f "$STUB/fail-ps" ]] && exit 125
           cat "$STUB/containers" 2>/dev/null; exit 0 ;;
   images) cat "$STUB/images" 2>/dev/null; exit 0 ;;
-  # `container exists`: only the retired Graphiti container is ever asked
-  # about here, and it is absent unless <state>/graphiti-exists says so.
-  container) [[ -f "$STUB/graphiti-exists" ]] && exit 0; exit 1 ;;
+  # `container exists`: only the retired containers are ever asked about
+  # here — Graphiti's and LiteLLM's Redis — and each is absent unless
+  # <state>/graphiti-exists or <state>/redis-exists says so; the Redis volume
+  # likewise with <state>/redis-volume. `rm` and `volume rm` succeed, logged.
+  container)
+    [[ "${2:-}" == exists ]] || exit 0
+    [[ "${3:-}" == *graphiti && -f "$STUB/graphiti-exists" ]] && exit 0
+    [[ "${3:-}" == *litellm-redis && -f "$STUB/redis-exists" ]] && exit 0
+    exit 1 ;;
+  volume)
+    [[ "${2:-}" == exists ]] || exit 0
+    [[ -f "$STUB/redis-volume" ]] && exit 0
+    exit 1 ;;
   compose)
     [[ "${2:-}" == version ]] && { echo "podman-compose version 1.6.0"; exit 0; }
     [[ " $* " == *" up "* ]] || exit 0
@@ -120,7 +130,6 @@ class Stack:
             "CC_ENABLE_N8N": "0", "CC_ENABLE_CRAWLER": "1", "CC_ENABLE_SPEECH": "0",
             "CC_ENABLE_SANDBOX": "0",
             "CC_IMG_POSTGRES": "docker.io/library/postgres:16.16-trixie",
-            "CC_IMG_REDIS": "docker.io/library/redis:7.4.12-alpine",
             "CC_IMG_NEO4J": "docker.io/library/neo4j:5.26.33",
             "CC_IMG_BERRIAI_LITELLM_DATABASE": "ghcr.io/berriai/litellm-database:main-stable",
         }
@@ -146,7 +155,6 @@ class Stack:
         self.refs = {
             "postgres": "docker.io/library/postgres:16.16-trixie",
             "litellm-db": "docker.io/library/postgres:16.16-trixie",
-            "litellm-redis": "docker.io/library/redis:7.4.12-alpine",
             "litellm": "ghcr.io/berriai/litellm-database:main-stable",
             "neo4j": "docker.io/library/neo4j:5.26.33",
             "crawler": "localhost/cc-crawler:1",
@@ -385,10 +393,10 @@ def test_id_spellings_and_a_digest_pinned_ref_agree(stack: Stack):
     an operator pin by digest all resolve to the same answer."""
     stack.containers["postgres"] = "sha256:" + OLD
     stack.containers["neo4j"] = OLD[:12]
-    pin = "docker.io/library/redis@sha256:" + "e" * 64
-    stack.env_lines["CC_IMG_REDIS"] = pin
+    pin = "ghcr.io/berriai/litellm-database@sha256:" + "e" * 64
+    stack.env_lines["CC_IMG_BERRIAI_LITELLM_DATABASE"] = pin
     stack.write_env()
-    stack.images["docker.io/library/redis:<none>"] = ("sha256:" + "e" * 64, "sha256:" + OLD)
+    stack.images["ghcr.io/berriai/litellm-database:<none>"] = ("sha256:" + "e" * 64, "sha256:" + OLD)
     stack.sync()
     assert stack.drift() == (0, {})
 
@@ -405,12 +413,43 @@ def test_podman_that_cannot_be_asked_is_never_current(stack: Stack):
 
 
 @drives_installer
-def test_the_up_litellm_probe_reads_false_on_a_stale_trio_member(stack: Stack):
+def test_the_up_litellm_probe_reads_false_on_a_stale_pair_member(stack: Stack):
     assert stack.call("p_up_litellm").returncode == 0
-    stack.rebuild("docker.io/library/redis:7.4.12-alpine")
+    stack.rebuild("ghcr.io/berriai/litellm-database:main-stable")
     assert stack.call("p_up_litellm").returncode != 0, (
         "a done llm/up-litellm row hid a container on an image its ref no longer names"
     )
+
+
+@drives_installer
+def test_the_up_litellm_probe_reads_false_while_the_retired_redis_runs(stack: Stack):
+    """DL-225: an older install's `litellm-redis` container outliving its
+    service is not done (phases/llm.sh removes it by name)."""
+    assert stack.call("p_up_litellm").returncode == 0
+    write_lf(stack.stub / "redis-exists", "")
+    assert stack.call("p_up_litellm").returncode != 0
+
+
+@drives_installer
+def test_the_retired_redis_container_and_volume_are_removed_by_name(stack: Stack):
+    write_lf(stack.stub / "redis-exists", "")
+    write_lf(stack.stub / "redis-volume", "")
+    r = stack.call("retire_litellm_redis")
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = stack.log()
+    assert "podman rm -f cc-litellm-redis" in log, log
+    assert "podman volume rm central-command_litellm-redisdata" in log, log
+    assert _lines(r.stdout, "PASS up-litellm: removed the retired LiteLLM Redis container")
+    assert _lines(r.stdout, "PASS up-litellm: removed the retired LiteLLM Redis volume")
+
+
+@drives_installer
+def test_a_fresh_install_has_no_redis_to_retire(stack: Stack):
+    r = stack.call("retire_litellm_redis")
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = stack.log()
+    assert " rm " not in log and "volume rm" not in log, log
+    assert not _lines(r.stdout, "PASS up-litellm: removed")
 
 
 @drives_installer
@@ -496,9 +535,9 @@ def test_stateful_services_on_named_volumes_are_recreated_in_one_call(stack: Sta
 
 
 @drives_installer
-def test_the_llm_phase_catches_up_only_its_trio(stack: Stack):
+def test_the_llm_phase_catches_up_only_its_pair(stack: Stack):
     stack.rebuild("docker.io/library/postgres:16.16-trixie")
-    r = stack.call("catch_up_images", "up-litellm", "litellm-db", "litellm-redis", "litellm")
+    r = stack.call("catch_up_images", "up-litellm", "litellm-db", "litellm")
     assert r.returncode == 0, r.stdout + r.stderr
     assert stack.recreates() == [["litellm-db"]], "the llm phase touched a service it does not own"
     assert _lines(r.stdout, "PASS up-litellm: litellm-db recreated")
@@ -576,8 +615,9 @@ def test_both_phases_catch_up_right_after_their_compose_up():
     assert stack_body.index('catch_up_images "up-stack" || return 1') > up
     llm_body = _body("phase_llm")
     up = llm_body.index("compose up -d --wait litellm || return 1")
-    catch = llm_body.index('catch_up_images "up-litellm" litellm-db litellm-redis litellm || return 1')
-    assert up < catch < llm_body.index('"litellm-live"')
+    catch = llm_body.index('catch_up_images "up-litellm" litellm-db litellm || return 1')
+    retire = llm_body.index("retire_litellm_redis || return 1")
+    assert up < catch < retire < llm_body.index('"litellm-live"')
 
 
 def test_update_deploys_the_stack_between_llm_and_app():

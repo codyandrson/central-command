@@ -166,12 +166,13 @@ phase_llm() {
   # definition is unchanged is left alone. Named services only: the graph must
   # not be created before the embedding dimension has been MEASURED, and
   # compose brings each service's healthy dependencies up with it.
-  step "up-litellm" "litellm + its database and redis are up and healthy" \
+  step "up-litellm" "litellm + its database are up and healthy" \
     compose up -d --wait litellm || return 1
   # ...and on the image their refs resolve to NOW: `up` leaves a running
   # container alone when only the image behind its ref changed (a re-pushed
   # tag, a new postgres:16.16-trixie build). See image_drift.
-  catch_up_images "up-litellm" litellm-db litellm-redis litellm || return 1
+  catch_up_images "up-litellm" litellm-db litellm || return 1
+  retire_litellm_redis || return 1
 
   # LiteLLM runs its Prisma migrations at boot; 5 minutes is the honest budget.
   if wait_http "http://127.0.0.1:${CC_LITELLM_PORT}/health/liveliness" 300; then
@@ -467,12 +468,52 @@ p_secrets() {
   return 0
 }
 
-# llm/up-litellm: the proxy answers AND the trio runs the images their refs
-# resolve to now — the same question the stack row asks, for the three services
-# this phase brings up (catch_up_images there).
+# llm/up-litellm: the proxy answers AND the pair runs the images their refs
+# resolve to now — the same question the stack row asks, for the two services
+# this phase brings up (catch_up_images there) — and the retired Redis
+# container is gone (retire_litellm_redis; read-only: `container exists`
+# changes nothing).
 p_up_litellm() {
   p_litellm_live || return 1
-  image_drift litellm-db litellm-redis litellm
+  ! podman container exists "$(p_flag CC_POD_PREFIX cc-)litellm-redis" 2>/dev/null || return 1
+  image_drift litellm-db litellm
+}
+
+# ── the retired LiteLLM Redis (DL-225) ──────────────────────────────────────
+# The proxy's response cache is in its own memory now, so compose.yaml no
+# longer declares `litellm-redis` or its `litellm-redisdata` volume. `compose
+# up` never removes a container whose service left the file, and the old one is
+# `restart: always`: it would run on, idle, and come back after every reboot.
+# So an install that predates the removal has the container removed here, by
+# name, AFTER `up` has recreated the proxy without the dependency, and then the
+# volume (it held only cached answers, worth nothing once the cache moved; a
+# rollback's compose recreates it empty). A fresh install finds neither. Not
+# --remove-orphans, for the reason retire_graphiti_container gives (a disabled
+# PROFILE's containers). The image is left in local storage, like the Graphiti
+# server's: `./update.sh rollback` to the previous release needs it, and an
+# air-gapped site could not pull it again.
+retired_litellm_redis_name() { printf '%slitellm-redis' "${CC_POD_PREFIX:-cc-}"; }
+# compose names a project volume <project>_<volume>; the project is
+# compose.yaml's top-level `name:`.
+RETIRED_LITELLM_REDIS_VOLUME="central-command_litellm-redisdata"
+retire_litellm_redis() {
+  local name; name="$(retired_litellm_redis_name)"
+  if podman container exists "$name" 2>/dev/null; then
+    if podman rm -f "$name" >/dev/null 2>&1; then
+      pass "up-litellm" "removed the retired LiteLLM Redis container $name — the proxy caches in its own memory now (DL-225)"
+    else
+      fail "up-litellm" "could not remove the retired LiteLLM Redis container $name (podman rm -f $name) — it restarts at boot"
+      return 1
+    fi
+  fi
+  if podman volume exists "$RETIRED_LITELLM_REDIS_VOLUME" 2>/dev/null; then
+    if podman volume rm "$RETIRED_LITELLM_REDIS_VOLUME" >/dev/null 2>&1; then
+      pass "up-litellm" "removed the retired LiteLLM Redis volume $RETIRED_LITELLM_REDIS_VOLUME (it held only cached answers)"
+    else
+      warn "up-litellm" "could not remove the retired LiteLLM Redis volume $RETIRED_LITELLM_REDIS_VOLUME — nothing uses it; remove it by hand: podman volume rm $RETIRED_LITELLM_REDIS_VOLUME"
+    fi
+  fi
+  return 0
 }
 
 p_speech_up() {

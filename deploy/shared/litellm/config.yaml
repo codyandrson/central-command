@@ -83,10 +83,18 @@ litellm_settings:
   request_timeout: 300
   drop_params: true
   cache: true
+  # The response cache lives in the proxy's OWN MEMORY (DL-225, 2026-11-21): one
+  # cache per proxy process, emptied by every restart, 200 entries for 600 s
+  # (LiteLLM's in-memory defaults). It used to be a Redis kept for nothing else;
+  # over 30 days 1,302 of 187,692 requests were cache hits, nearly all on
+  # cc-default and very probably the health probe's identical one-token request,
+  # so the service, its image and its volume were removed. One proxy process
+  # runs (replicas: 1 below in 30-litellm.yaml, and no --num_workers, whose
+  # default is 1), so the probe still meets its cached answer. Run more workers
+  # or replicas and each holds its own cache: the probe would hit only the one
+  # that answered it last, and Redis becomes the documented choice again.
   cache_params:
-    type: redis
-    host: os.environ/REDIS_HOST
-    port: os.environ/REDIS_PORT
+    type: local
     # NEVER add embedding/aembedding back to this list. With them cached, a
     # /v1/embeddings batch that mixes cache hits and misses comes back
     # MISALIGNED — miss rows receive a neighboring cached input's vector

@@ -739,7 +739,7 @@ async def test_get_health_read(monkeypatch):
         status_code = 200
 
         def json(self):
-            return {"status": "healthy", "db": "connected", "cache": "redis",
+            return {"status": "healthy", "db": "connected", "cache": "local",
                     "litellm_version": "1.84.0", "log_level": "WARNING",
                     "success_callbacks": ["a", "b", "c"]}
 

@@ -184,7 +184,7 @@ def test_a_localhost_or_hostless_pin_is_not_a_registry():
         "CC_TLS_INSECURE": "1",
         "CC_IMG_A": "localhost/cc-crawler:1",
         "CC_IMG_B": "postgres:16.16-trixie",
-        "CC_IMG_C": "mirror.corp.example:5000/library/redis:7.4.12-alpine",
+        "CC_IMG_C": "mirror.corp.example:5000/library/neo4j:5.26.33",
     })
     assert out.strip() == "mirror.corp.example:5000"
 

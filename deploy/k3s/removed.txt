@@ -25,3 +25,14 @@ central-command rolebinding cc-litellm-operator
 central-command role cc-litellm-operator
 central-command secret cc-litellm-operator-token
 central-command serviceaccount cc-litellm-operator
+# DL-225: LiteLLM's response cache moved into the proxy's own memory, so its
+# Redis leaves the deployment. All three resources were declared in
+# 30-litellm.yaml (make-secrets.sh never made any of them), so a rollback's
+# re-apply of the previous manifests recreates them all together — the
+# Graphiti one-release-later precedent does not apply and they go in the same
+# release. The order is load-bearing: the Deployment first, so that the
+# claim's pvc-protection finalizer releases once its pod has gone, instead of
+# `kubectl delete pvc` waiting on a pod that still mounts it.
+central-command deployment cc-litellm-redis
+central-command service litellm-redis
+central-command persistentvolumeclaim cc-litellm-redisdata

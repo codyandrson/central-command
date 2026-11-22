@@ -104,7 +104,7 @@ and `deploy/discovery.conf` are retired; an existing install's are merged into
 
 | Source | Used by | Seam | Notes |
 |---|---|---|---|
-| docker.io | postgres, neo4j, redis, n8n, the sandbox base image | `CC_REGISTRY_DOCKERIO` | a HOST prefix (`registry.corp.example`), never a URL |
+| docker.io | postgres, neo4j, n8n, the sandbox base image | `CC_REGISTRY_DOCKERIO` | a HOST prefix (`registry.corp.example`), never a URL |
 | ghcr.io | LiteLLM, the speech engine (`speaches`) | `CC_REGISTRY_GHCR` | same shape |
 | mcr.microsoft.com | the crawler base (Microsoft's Playwright image: browsers + OS libs baked in) | `CC_REGISTRY_MCR` | replaces Debian + Microsoft's browser CDN for that build |
 | one image at a path this mirror renames, or a tag you verified yourself | any image, including the build bases | `CC_IMG_<NAME>` | THE seam a host variable cannot express. An operator pin WINS: the resolver verifies that exact ref exists (manifest HEAD by tag, or by digest for a `…@sha256:…` ref, parsed from YOUR ref), `WARN`s that it honoured a pin, records it as `pinned`, and never rewrites it. A pin the registry does not have is a `FAIL` naming the key — a pin is checked, not trusted. Unset it to resolve against `images.txt` again |

@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.118.0: Redis is removed; the proxy caches in its own memory
+
+- **Why.** Redis existed for one job, the LiteLLM proxy's response cache. Measured over 30 days, 1,302
+  of 187,692 requests were cache hits, and 1,298 of those were one alias answering what is very
+  probably the health probe's identical one-token request. The proxy runs as one process in both
+  profiles, and LiteLLM has a built-in in-memory cache that needs no service. The operator ruled the
+  cut in the system review of 2026-11-21 (DL-225).
+- **What changes.** Both profiles' proxy config sets `cache_params: {type: local}`; the call-type list
+  and its warning about never caching embeddings are unchanged, and so is the `no-cache` rider the
+  application sends. The cache holds 200 entries for 600 seconds, per process, and is empty after a
+  proxy restart. Rehearsed on a scratch proxy at the pinned version before the change: a repeated
+  request is served from the cache and logged as a hit, `no-cache` bypasses it, and `/cache/ping`
+  answers 200.
+- **Removed.** k3s: the `cc-litellm-redis` Deployment, its Service and its volume claim (tombstoned, so
+  the updater deletes them) and the proxy's `REDIS_HOST`/`REDIS_PORT`. Single-node: the Compose
+  service, its volume and image row, and its fetch step; the `llm` phase removes the container and
+  volume an older install left behind, by name. A mirror no longer has to carry the Redis image.
+- **What this gives up.** Cached answers do not survive a proxy restart, and would not be shared
+  between workers or replicas. If the proxy ever runs more than one, Redis is the documented choice
+  again.
+- **Left behind on an existing install, harmless.** The Redis image in local storage (kept for a
+  rollback) and, on single-node, the `CC_IMG_REDIS` line in `.env`. Remove them by hand when a
+  rollback no longer matters.
+
 ## 2026-11-21 — v2.117.0: The last inert inherited cockpit features are removed; agent names come from the roster
 
 - **Why.** The third removal release under DL-224, covering inherited features with no server-side

@@ -1149,7 +1149,6 @@ image_drift() { # image_drift [service...]
 # tests/test_single_stack_catch_up.py pins both directions: every service with a
 # named volume is listed here, and every one listed has its path on one.
 #   postgres, litellm-db, n8n-db  PGDATA is a subdirectory of this mount
-#   litellm-redis                 `--appendonly yes` writes here
 #   neo4j                         the graph (the image's /logs is NOT data, and
 #                                 an anonymous volume: a recreate starts it empty)
 #   n8n                           its own state (the Gmail credential is in n8n-db)
@@ -1159,7 +1158,6 @@ STACK_STATEFUL=(
   "postgres /var/lib/postgresql/data"
   "litellm-db /var/lib/postgresql/data"
   "n8n-db /var/lib/postgresql/data"
-  "litellm-redis /data"
   "neo4j /data"
   "n8n /home/node/.n8n"
   "speech /home/ubuntu/.cache/huggingface/hub"

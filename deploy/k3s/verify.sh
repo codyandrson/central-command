@@ -183,7 +183,7 @@ skill_review_store() {
         -c "select (select count(*) from information_schema.columns where table_name = 'skill_doc' and column_name in ('bundled_release', 'bundled_path', 'bundled_hash')) + (select count(*) from information_schema.tables where table_name in ('skill_bundled_text', 'skill_doc_review'))" 2>/dev/null) || return 1
   [[ "$n" == 5 ]]
 }
-# The LiteLLM trio survives a clean install untouched (README.md), so its keys
+# The LiteLLM pair survives a clean install untouched (README.md), so its keys
 # must be present and decryptable in BOTH modes.
 if litellm_keys; then ok "litellm: virtual keys survived the salt"; else bad "litellm: virtual keys survived the salt"; fi
 if skill_review_store; then ok "spine: the bundled-skill review's columns and tables exist"; else bad "spine: the bundled-skill review's columns and tables are missing (schema.sql has not landed)"; fi
@@ -208,7 +208,7 @@ pinned() {  # pinned <app> <expected-node>
   local got; got="$(node_of "$1")"
   if [[ "$got" == "$2" ]]; then ok "$1 pinned to $2"; else bad "$1 should be on $2 but is on '${got:-<none>}'"; fi
 }
-for a in cc-postgres cc-litellm-db cc-litellm-redis cc-n8n cc-n8n-db; do pinned "$a" "$ANCHOR_NODE"; done
+for a in cc-postgres cc-litellm-db cc-n8n cc-n8n-db; do pinned "$a" "$ANCHOR_NODE"; done
 pinned cc-neo4j "$COMPUTE_NODE"
 # Same call as neo4j: stateful, so pinned, and off the anchor. Accepted
 # consequence: compute node down = log console down (the logs themselves

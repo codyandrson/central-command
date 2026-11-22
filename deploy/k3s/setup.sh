@@ -21,7 +21,7 @@
 #
 #     validate    offline check of both .env files. No side effects.
 #     preflight   named checks of the CLUSTER and both hosts. Read-only.
-#     llm         secrets + the LiteLLM trio + register/policy/mint + probes
+#     llm         secrets + the LiteLLM pair + register/policy/mint + probes
 #                 THROUGH the proxy (README §1's "absent" fork, made code)
 #     stack       build the two local images if missing, apply every
 #                 manifest, mint the kubeconfigs, gVisor
@@ -78,7 +78,7 @@ SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes)
 # Every deployment the manifests declare. rollout status on each is the honest
 # "the stack is up" assertion — `get pods` reports a CrashLooping pod as
 # Running until the probe flips it.
-DEPLOYMENTS=(cc-postgres cc-litellm-db cc-litellm-redis cc-litellm
+DEPLOYMENTS=(cc-postgres cc-litellm-db cc-litellm
              cc-neo4j cc-n8n-db cc-n8n cc-crawler cc-vlogs cc-speech)
 
 PY=python3
@@ -782,7 +782,7 @@ phase_llm() {
   step "secrets" "namespace, the Secrets and the two file-built ConfigMaps applied from deploy/k3s/.env" \
     "$HERE/make-secrets.sh" || return 1
 
-  # Only the LiteLLM trio here. README §1's fork ("already running" vs
+  # Only the LiteLLM pair here. README §1's fork ("already running" vs
   # "absent") is resolved by apply itself: applying an unchanged manifest is a
   # no-op, so both arms are the same command.
   step "apply-litellm" "namespace + LiteLLM manifests applied" \
@@ -796,7 +796,7 @@ phase_llm() {
     "${KROOT[@]}" apply -f "$HERE/90-speech.yaml" || return 1
 
   local d
-  for d in cc-litellm-db cc-litellm-redis cc-litellm; do
+  for d in cc-litellm-db cc-litellm; do
     step "rollout-${d}" "$d rolled out" \
       "${K[@]}" rollout status "deploy/$d" --timeout=300s || return 1
   done
@@ -938,7 +938,7 @@ phase_stack() {
 
   # `apply -f <dir>` reads the *.yaml files only; the scripts, units,
   # sandbox.Dockerfile and registries.yaml.example are ignored. Re-applying the
-  # LiteLLM trio from the llm phase is a no-op.
+  # LiteLLM pair from the llm phase is a no-op.
   step "apply-manifests" "every manifest in deploy/k3s/ applied" \
     "${KROOT[@]}" apply -f "$HERE/" || return 1
 

@@ -25,10 +25,16 @@ litellm_settings:
   # The user's endpoint may not accept every param LiteLLM would send.
   drop_params: true
   cache: true
+  # The response cache lives in the proxy's OWN MEMORY (DL-225, 2026-11-21): one
+  # cache per proxy process, emptied by every restart, 200 entries for 600 s
+  # (LiteLLM's in-memory defaults). The Redis it replaced existed for nothing
+  # else, and a 30-day measurement found 1,302 hits in 187,692 requests, nearly
+  # all the health probe's identical one-token request. compose.yaml runs one
+  # proxy process (no --num_workers, whose default is 1), so the probe still
+  # meets its cached answer; with more workers each would hold its own cache,
+  # and Redis becomes the documented choice again.
   cache_params:
-    type: redis
-    host: os.environ/REDIS_HOST
-    port: os.environ/REDIS_PORT
+    type: local
     # NEVER add embedding/aembedding here (mirrors deploy/shared/litellm/
     # config.yaml, pinned by tests/test_litellm_cache_call_types.py):
     # a /v1/embeddings batch mixing cache hits and misses comes back

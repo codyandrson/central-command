@@ -27,12 +27,12 @@
 #       corruption) and Postgres on NFS is a bad trade. (This is also why a
 #       node swap always means restoring that node's stateful data from
 #       backup — the PV's hostname pin is the storage class's, not ours.)
-#       -> cc-postgres, cc-litellm-db, cc-litellm-redis, cc-n8n, cc-n8n-db (anchor)
+#       -> cc-postgres, cc-litellm-db, cc-n8n, cc-n8n-db (anchor)
 #       -> cc-neo4j (compute, for the JVM headroom)
 #
 #   Why the databases stay on the anchor node is the part that makes failover WORK:
 #   LiteLLM the proxy is the memory hog AND it is stateless — its state lives
-#   in cc-litellm-db (182 MB) and redis. Float the hog, keep the small database
+#   in cc-litellm-db (182 MB). Float the hog, keep the small database
 #   on the anchor node, and a compute-node outage reschedules LiteLLM onto the anchor node where its
 #   database already is.
 #

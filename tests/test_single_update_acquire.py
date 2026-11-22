@@ -416,13 +416,13 @@ def test_a_mirror_missing_one_tag_stops_before_the_merge_with_nothing_changed(de
 @drives_installer
 def test_a_failed_staged_artifact_is_a_fail_and_still_changes_nothing(dep: Dep):
     dep.fill_ledger()
-    write_lf(dep.flags / "pull-fails", "docker.io/library/redis:7.4.12-alpine\n")
+    write_lf(dep.flags / "pull-fails", "docker.io/library/postgres:16.16-trixie\n")
     head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
 
     r = dep.update("apply")
 
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "FAIL image-redis:" in r.stdout, r.stdout
+    assert "FAIL image-postgres:" in r.stdout, r.stdout
     assert any(l.startswith("FAIL acquire:") and "NOTHING was changed" in l
                for l in r.stdout.splitlines()), r.stdout
     _untouched(dep, head, env, led)
@@ -878,7 +878,7 @@ def test_update_run_does_not_roll_back_a_stop_before_the_merge(dep: Dep):
     subprocess.run(["git", "-C", str(dep.repo), "tag", "pre-update-20200101T000000Z",
                     "local"], check=True)
     old_tags = dep.git("tag", "-l")
-    write_lf(dep.flags / "pull-fails", "docker.io/library/redis:7.4.12-alpine\n")
+    write_lf(dep.flags / "pull-fails", "docker.io/library/postgres:16.16-trixie\n")
     head = dep.head()
 
     r, status = _run_runner(dep)
@@ -887,7 +887,7 @@ def test_update_run_does_not_roll_back_a_stop_before_the_merge(dep: Dep):
     assert dep.head() == head
     assert dep.git("tag", "-l") == old_tags
     assert status["state"] == "failed" and status["phase"] == "apply", status
-    assert "NOTHING was changed" in status["error"] and "image-redis" in status["error"], status
+    assert "NOTHING was changed" in status["error"] and "image-postgres" in status["error"], status
 
 
 @drives_installer

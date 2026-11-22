@@ -106,7 +106,7 @@ echo "== containers (prefix=${CC_POD_PREFIX})"
 # Containers, not pods: compose has no pods. The names are compose.yaml's
 # container_name values, which keep the cc- prefix for exactly this reason.
 ctrs="$(podman ps -a --format '{{.Names}} {{.Status}}' 2>/dev/null)"
-for p in postgres-postgres litellm-db litellm-redis litellm neo4j; do
+for p in postgres-postgres litellm-db litellm neo4j; do
   name="${CC_POD_PREFIX}${p}"
   line="$(grep -E "^${name} " <<<"$ctrs")"
   if [[ -z "$line" ]]; then

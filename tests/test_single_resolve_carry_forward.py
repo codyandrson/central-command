@@ -203,28 +203,28 @@ def test_a_real_pin_survives_all_three_runs(tree: Tree):
     fails."""
     first = tree.resolve()
     assert first.returncode == 0, first.stdout + first.stderr
-    pin = "docker.io/library/redis:7.4-alpine"
-    tree.set_env("CC_IMG_REDIS", pin)
+    pin = "docker.io/library/neo4j:5.26.32"
+    tree.set_env("CC_IMG_NEO4J", pin)
 
     second = tree.resolve()
-    assert _line(second.stdout, "image-redis").startswith("WARN "), second.stdout
-    assert "operator pin honoured" in _line(second.stdout, "image-redis")
-    assert tree.manifest_rows()["CC_IMG_REDIS"].split()[4] == "pinned"
+    assert _line(second.stdout, "image-neo4j").startswith("WARN "), second.stdout
+    assert "operator pin honoured" in _line(second.stdout, "image-neo4j")
+    assert tree.manifest_rows()["CC_IMG_NEO4J"].split()[4] == "pinned"
 
     # The pin's registry and another image's are both down: the pin that no
     # longer exists is a FAIL (it names the key), the mirror lacking postgres a
     # USERACTION, so the run is exit 1 — and BOTH carried rows keep their
-    # meaning — postgres's self-write and redis's `pinned`.
-    third = tree.resolve(missing=("library/postgres", "library/redis"))
+    # meaning — postgres's self-write and neo4j's `pinned`.
+    third = tree.resolve(missing=("library/postgres", "library/neo4j"))
     assert third.returncode == 1, third.stdout + third.stderr
-    assert _line(third.stdout, "image-redis").startswith("FAIL ")
+    assert _line(third.stdout, "image-neo4j").startswith("FAIL ")
     assert _line(third.stdout, "image-postgres").startswith("USERACTION ")
-    assert tree.manifest_rows()["CC_IMG_REDIS"].split()[4] == "pinned"
+    assert tree.manifest_rows()["CC_IMG_NEO4J"].split()[4] == "pinned"
 
     fourth = tree.resolve()
-    redis = _line(fourth.stdout, "image-redis")
-    assert redis.startswith("WARN ") and "operator pin honoured" in redis, fourth.stdout
-    assert tree.env_value("CC_IMG_REDIS") == pin
+    neo4j = _line(fourth.stdout, "image-neo4j")
+    assert neo4j.startswith("WARN ") and "operator pin honoured" in neo4j, fourth.stdout
+    assert tree.env_value("CC_IMG_NEO4J") == pin
     postgres = _line(fourth.stdout, "image-postgres")
     assert postgres.startswith("PASS ") and "operator pin" not in postgres, fourth.stdout
     assert fourth.returncode == 2, fourth.stdout + fourth.stderr   # the pin's WARN
@@ -247,15 +247,15 @@ def test_an_operator_pin_that_does_not_exist_is_still_a_fail(tree: Tree):
     naming the key, exit 1, even with every other image healthy."""
     first = tree.resolve()
     assert first.returncode == 0, first.stdout + first.stderr
-    tree.set_env("CC_IMG_REDIS", "docker.io/library/redis:7.4-alpine")
+    tree.set_env("CC_IMG_NEO4J", "docker.io/library/neo4j:5.26.32")
 
-    r = tree.resolve(missing=("library/redis",))
+    r = tree.resolve(missing=("library/neo4j",))
 
     assert r.returncode == 1, r.stdout + r.stderr
-    line = _line(r.stdout, "image-redis")
-    assert line.startswith("FAIL ") and "CC_IMG_REDIS" in line and "no such manifest" in line, line
+    line = _line(r.stdout, "image-neo4j")
+    assert line.startswith("FAIL ") and "CC_IMG_NEO4J" in line and "no such manifest" in line, line
     assert not any(l.startswith("USERACTION image-") for l in r.stdout.splitlines()), r.stdout
-    assert tree.env_value("CC_IMG_REDIS") == "docker.io/library/redis:7.4-alpine", "the pin was rewritten"
+    assert tree.env_value("CC_IMG_NEO4J") == "docker.io/library/neo4j:5.26.32", "the pin was rewritten"
 
 
 # ── a component switched OFF and back ON is not a pin either ────────────────

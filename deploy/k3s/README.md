@@ -159,8 +159,9 @@ Assumed already true before phase 2:
   killed by a reboot reads "Error" in every pod listing). Hand-installed
   because a k3s restart is not the updater's to perform; `setup.sh preflight`
   warns and `verify.sh` fails while it is missing.
-- **The LiteLLM trio** (`cc-litellm`, `cc-litellm-db`, `cc-litellm-redis`) is
-  either already running or absent, and both are fine.
+- **The LiteLLM pair** (`cc-litellm`, `cc-litellm-db`) is
+  either already running or absent, and both are fine. (There is no LiteLLM
+  Redis: the response cache is in the proxy's own memory, DL-225.)
   - **Already running:** leave it. Every step below is safe against it —
     `make-secrets.sh` rewrites their Secret with the same values, and
     re-applying `30-litellm.yaml` is a no-op when nothing changed.
@@ -333,7 +334,6 @@ Expected placement once settled:
 |---|---|---|---|
 | `cc-postgres` | anchor (pinned) | stateful (`cc-pgdata`) | `hostPort` 127.0.0.1:**5442** |
 | `cc-litellm-db` | anchor (pinned) | stateful (`cc-litellm-pgdata`) | `hostPort` 127.0.0.1:5443 |
-| `cc-litellm-redis` | anchor (pinned) | stateful | none |
 | `cc-n8n`, `cc-n8n-db` | anchor (pinned) | stateful | `hostPort` 127.0.0.1:5678 (n8n) |
 | `cc-neo4j` | compute (pinned) | stateful (`cc-neo4j-data`) | **ClusterIP only** |
 | `cc-vlogs` | compute (pinned) | stateful (`cc-vlogs-data`) | ServiceLB :9428 |
