@@ -417,6 +417,11 @@ NO_LIVE_WORLD = {
     "calendar_facade_token": "",
     "exchange_url": "",
     "exchange_password": "",
+    # The native Google client (DL-234): held at the n8n default with no
+    # secret, so nothing the suite approves can reach a real Google account.
+    "google_provider": "n8n",
+    "google_client_secret": "",
+    "google_refresh_token": "",
     "llm_proxy_admin_key": "",
     "sandbox_runner_url": "",
     "sandbox_runner_token": "",

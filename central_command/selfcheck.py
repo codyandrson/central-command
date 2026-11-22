@@ -816,6 +816,8 @@ async def check_mail(ctx: Context) -> Outcome:
             "the mail feed is off (CC_FEED_ENABLED=0, and no enabled heartbeat mail-poll "
             "schedule) and Exchange is not configured, so nothing in the app reads mail; "
             "turn the feed on and the self-check will prove the provider"), None)
+    if settings.google_provider == "native":
+        return await _check_google_mail(reader)
     if not email_facade.configured():
         # The façade's own switch (url AND token); the two messages only say
         # WHICH key is the empty one.
@@ -843,6 +845,28 @@ async def check_mail(ctx: Context) -> Outcome:
     # A count, never content: refs are ids only, and none is printed.
     return ok(f"the n8n mail façade answers a references-only list "
               f"({len(refs) if isinstance(refs, list) else 0} ref(s) in the last day)")
+
+
+async def _check_google_mail(reader: str) -> Outcome:
+    """The native Google client (DL-234): the same references-only list the n8n
+    branch makes, through the same façade function."""
+    from central_command.integrations import email_facade, google
+
+    missing = google.missing_settings()
+    if missing:
+        return at(fail(f"{reader} reads mail through the native Google client "
+                       f"(CC_GOOGLE_PROVIDER=native), but {', '.join(missing)} is empty — "
+                       "python -m central_command.google_consent writes the refresh token",
+                       missing[0]), None)
+    try:
+        refs = await email_facade.list_refs(MAIL_PROBE_QUERY)
+    except Exception as exc:  # noqa: BLE001
+        return at(fail(f"the native Google client failed a references-only list "
+                       f"({_describe(exc)}) — check CC_GOOGLE_CLIENT_ID/_SECRET and re-run "
+                       "python -m central_command.google_consent", "CC_GOOGLE_REFRESH_TOKEN"), None)
+    return Outcome(PASS, f"the native Google client answers a references-only list "
+                         f"({len(refs) if isinstance(refs, list) else 0} ref(s) in the last day)",
+                   system=None)
 
 
 def _load_atlassian_probe():
@@ -989,7 +1013,9 @@ def _fixed(seconds: float) -> Callable[[Context], float]:
 def _mail_remedy() -> str:
     from central_command.integrations import exchange
 
-    return "CC_EXCHANGE_URL" if exchange.configured() else "CC_EMAIL_FACADE_URL"
+    if exchange.configured():
+        return "CC_EXCHANGE_URL"
+    return "CC_GOOGLE_REFRESH_TOKEN" if settings.google_provider == "native" else "CC_EMAIL_FACADE_URL"
 
 
 CHECKS: tuple[Check, ...] = (

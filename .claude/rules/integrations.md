@@ -4,6 +4,9 @@ paths:
   - "central_command/integrations/jira.py"
   - "central_command/integrations/exchange.py"
   - "central_command/integrations/calendar_facade.py"
+  - "central_command/integrations/email_facade.py"
+  - "central_command/integrations/google.py"
+  - "central_command/google_consent.py"
   - "central_command/reports/ea_calendar.py"
   - "central_command/contract/mail.py"
   - "central_command/ingest/**"
@@ -22,6 +25,22 @@ Moved from the root instructions; loads when a matching file is read. How a rule
   provider's sentence, 503 for everything it does not recognise (fail-safe
   is "outage"). A new refusal the provider learns to state needs a line in
   that classifier, or it is an outage again (DL-205, 2026-11-04).
+- **The native Google client answers exactly what the n8n façade answered**
+  (DL-234). `CC_GOOGLE_PROVIDER=native` routes `email_facade._call` and
+  `calendar_facade._call` to `integrations/google.py`, which takes the same
+  payload and returns the envelope the shipped workflow's last node returns, or
+  the status the n8n path's caller saw: mail 422 only for a sentence on the
+  classifier's list, 503 otherwise; calendar 500 for every failure, `{ok:false}`
+  for a NO. So a change to one path's behaviour is a change to both or a parity
+  break: `tests/test_google_parity.py` runs the SHIPPED workflow JavaScript
+  against the same Google stub as the native path, and a workflow edit that is
+  not mirrored in `google.py` (or the reverse) fails it. The façade stamps
+  `google` on the error so an outage parks on the Google probe, never on the n8n
+  host. Why: the callers (ledger, attachments, rules, the mail tools, the
+  Executor, the EA's calendar reads, the heartbeat) and the outage machinery
+  were built against the n8n answers, and the cutover must change nothing they
+  can see. `runtime/` never imports the module or the consent command
+  (`tests/test_governance.py`).
 - **Jira Cloud and Jira Data Center are two products, not two logins.** DC
   (and the retired Server line) never exposed REST v3 — it answers 404 to
   every `/rest/api/3/...` path — and beyond the version segment rich text is

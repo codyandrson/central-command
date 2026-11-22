@@ -4,6 +4,44 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-22 — v2.129.0: A native Google mail and calendar client on Google's own libraries, selectable in place of n8n; the default is unchanged
+
+- **Why.** n8n, its database and four workflows serve one path: Gmail and Calendar for a Google
+  account. The operator ruled in the 2026-11-21 system review to replace it with a direct client
+  behind the same façade functions, and on 2026-11-22 that the client use Google's own libraries
+  rather than a hand-written request layer (DL-234 amends DL-158). This release adds the client as an
+  option. The cutover and the removal of n8n are later steps.
+- **Nothing changes until it is selected.** `CC_GOOGLE_PROVIDER` is `n8n` by default; with the
+  default, the new module is never imported. `native` selects the new client; any other value refuses
+  to start. Exchange, where configured, still wins.
+- **The client.** `integrations/google.py` on `google-api-python-client` (Gmail and Calendar calls
+  built from the library's bundled discovery documents, so nothing is fetched at run time; one HTTP
+  object per call, run in a worker thread like the Exchange client) and `google-auth` (token refresh).
+  It serves the nine operations the n8n workflows serve: mail list, message, attachment and
+  report-spam; calendar list, get, create, update and delete. A parity test drives every façade
+  operation through both paths and asserts the caller sees the same result and Google receives the
+  same request.
+- **Quirks of the n8n path are kept on purpose**, so the cutover changes one thing at a time: an
+  unknown Gmail message is a 503, every calendar failure is a 500, the mail list stops at five pages
+  of 500, the calendar list at 250 events. Fixing them is a separate decision.
+- **Outage and retry.** Errors from the native path carry a new dependency name, `google`, with its
+  own probe; work parks and retries on it as it does on n8n today.
+- **The consent command.** `python -m central_command.google_consent --port <port>` runs Google's
+  installed-application flow (`google-auth-oauthlib`, loopback redirect, PKCE) and writes
+  `CC_GOOGLE_REFRESH_TOKEN` into the env file. It prints no token, secret or code. `--help` has the
+  steps for a server reached over ssh. Scopes: `gmail.modify` and `calendar.events`.
+- **Read before the cutover.** An OAuth client left in Google's "Testing" status issues refresh
+  tokens that expire after seven days, which would stop mail and calendar; the client must be
+  published or of a kind Google exempts. A password change or revocation also ends the token.
+- **Dependencies.** `google-api-python-client`, `google-auth-oauthlib` and `google-auth` (already
+  installed, now declared) are core dependencies; `requirements.lock` is regenerated and gains eight
+  pure-Python pins. They add about 115 MB, almost all of it the client's bundled discovery
+  documents. A site that installs from a package mirror needs them there, whether or not it uses
+  Google.
+- **Not exercised.** No real Google account was contacted: the Google side is stubbed at the
+  library's HTTP layer and the consent flow ran against a local stub. The self-check's Google branch
+  has no test. The first real run is the cutover.
+
 ## 2026-11-22 — v2.128.0: An MCP server that already runs can be registered by its URL, through the gate, on both install profiles
 
 - **Why.** Only a server built and deployed by the pipeline could be registered and used, and that

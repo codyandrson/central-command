@@ -26,6 +26,14 @@ patches `calendar_facade.list_events` still patches the whole thing. The
 normalised event shape is identical on both providers — a caller must not be
 able to tell which one answered — and `ExchangeError` is mapped to
 `CalendarFacadeError` at the seam.
+
+**The native Google client (DL-234).** With `CC_GOOGLE_PROVIDER=native` (and no
+Exchange) `_call` hands the SAME payload to
+`integrations/google.py:calendar_request` instead of the webhook: the envelope
+comes back as the workflow answered it (so the `ok` check and everything after
+it are shared), and a failure is the status n8n answered for every `fail()`,
+HTTP 500, stamped with the `google` dependency so an outage parks on Google.
+The default (`n8n`) never imports the module.
 """
 
 from __future__ import annotations
@@ -55,6 +63,17 @@ def _exchange():
     return exchange if exchange.configured() else None
 
 
+def _google():
+    """The native Google client when this deployment selected it
+    (`CC_GOOGLE_PROVIDER=native`), else None. Deferred like `_exchange`;
+    Exchange, when configured, is asked first and still wins."""
+    if settings.google_provider != "native":
+        return None
+    from central_command.integrations import google
+
+    return google
+
+
 def configured() -> bool:
     """True when the n8n calendar façade has an address AND a token. The
     default URL is never empty, so the token is the signal (as selfcheck
@@ -66,11 +85,47 @@ def provider_configured() -> bool:
     """True when ANY calendar provider can answer: the n8n façade, or the native
     Exchange client. An Exchange site leaves the façade token empty
     (`deploy/n8n/apply-workflows.sh`), so the façade's own check would call it
-    unconfigured. `configured()` stays the n8n path's gate."""
-    return configured() or _exchange() is not None
+    unconfigured. `configured()` stays the n8n path's gate. A selected native
+    Google client counts once its three settings are present (DL-234)."""
+    if _exchange() is not None:
+        return True
+    google = _google()
+    if google is not None:
+        return not google.missing_settings()
+    return configured()
 
 
 async def _call(payload: dict, timeout: float = 60.0) -> dict:
+    google = _google()
+    if google is not None:
+        out = await _call_google(google, payload)
+    else:
+        out = await _call_n8n(payload, timeout)
+    if not out.get("ok"):
+        raise CalendarFacadeError(
+            f"calendar façade {payload.get('mode')} refused: {str(out)[:200]}"
+        )
+    return out
+
+
+async def _call_google(google, payload: dict) -> dict:
+    """The native path of `_call`: the workflow's envelope, or the error the
+    n8n path raises for its HTTP 500 (status typed), stamped `google`."""
+    mode = payload.get("mode")
+    missing = google.missing_settings()
+    if missing:
+        # Semantic, like the n8n path's "not configured": FAILED, never parked.
+        raise CalendarFacadeError(f"calendar façade {mode} not configured — set {', '.join(missing)}")
+    try:
+        return await google.calendar_request(payload)
+    except google.GoogleError as e:
+        raise google.stamp(CalendarFacadeError(
+            f"calendar façade {mode} failed: HTTP {e.status_code} {google.answer_text(e)[:200]}",
+            status_code=e.status_code,
+        )) from e
+
+
+async def _call_n8n(payload: dict, timeout: float) -> dict:
     if not configured():
         # No transient marker word ('connection', 'timeout' — see
         # contract/failures.py): this must classify SEMANTIC and land FAILED,
@@ -100,12 +155,7 @@ async def _call(payload: dict, timeout: float = 60.0) -> dict:
             f"{resp.status_code} {resp.text[:200]}",
             status_code=resp.status_code,
         )
-    out = resp.json()
-    if not out.get("ok"):
-        raise CalendarFacadeError(
-            f"calendar façade {payload.get('mode')} refused: {str(out)[:200]}"
-        )
-    return out
+    return resp.json()
 
 
 async def list_events(

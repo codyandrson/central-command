@@ -32,6 +32,8 @@ health check that costs more than the work it guards.
 Endpoints (the first three verified against the live Pi stack on 2026-07-31):
   n8n        GET  http://127.0.0.1:5678/healthz          -> 200 {"status":"ok"}
   calendar   the same n8n health (the façade host)
+  google     GET  the root of oauth2/gmail/www.googleapis.com (unauthenticated;
+             UP without a socket unless CC_GOOGLE_PROVIDER=native)
   graph      TCP  the bolt port of CC_NEO4J_URL          (since 2026-10-04: graphiti-core
              runs in-process, so the graph's dependency is Neo4j itself)
   litellm    GET  http://127.0.0.1:4000/health/liveliness -> 200 "I'm alive!"
@@ -84,6 +86,7 @@ GRAPH = "graph"
 LITELLM = "litellm"
 N8N = "n8n"
 CALENDAR = "calendar"
+GOOGLE = "google"
 JIRA = "jira"
 CONFLUENCE = "confluence"
 FORGE = "forge"
@@ -128,6 +131,28 @@ async def probe_calendar() -> bool:
     host's. (When the native Exchange client is configured the façade routes
     there instead, and this still asks n8n — a stated limit, see the epic.)"""
     return await _get_ok(_root(settings.calendar_facade_url) + "/healthz")
+
+
+# The hosts the native Google client (`integrations/google.py`, DL-234) talks
+# to: the token endpoint and the two API hosts. Copied because this module may
+# import config, httpx and the standard library only; a test pins them equal to
+# the client's own constants.
+GOOGLE_HOSTS = (
+    "https://oauth2.googleapis.com",
+    "https://gmail.googleapis.com",
+    "https://www.googleapis.com",
+)
+
+
+async def probe_google() -> bool:
+    """The native Google client's hosts, each an UNAUTHENTICATED GET of its root:
+    any answer short of the transient statuses means Google is there (a 404 is an
+    answer). Not selected (`CC_GOOGLE_PROVIDER` is not `native`) means nothing to
+    wait for, and probes UP without a socket."""
+    if settings.google_provider != "native":
+        return True
+    answers = await asyncio.gather(*(_answers(h + "/") for h in GOOGLE_HOSTS))
+    return all(answers)
 
 
 async def probe_jira() -> bool:
@@ -274,6 +299,7 @@ PROBES = {
     LITELLM: probe_litellm,
     N8N: probe_n8n,
     CALENDAR: probe_calendar,
+    GOOGLE: probe_google,
     JIRA: probe_jira,
     CONFLUENCE: probe_confluence,
     FORGE: probe_forge,

@@ -939,13 +939,21 @@ def _attributed(dependencies: tuple[str, ...], e: BaseException) -> tuple[str, .
     `/rerank` answered 5xx) was not stopped by Neo4j or the embedder, it was
     stopped by the proxy, and the sweep should wait on the proxy. Matched by
     class name because `runtime/` may not import the graph client (it holds the
-    write path); the error type is the evidence, as everywhere else here."""
+    write path); the error type is the evidence, as everywhere else here.
+
+    Likewise an error that names its own dependency (`DEPENDENCIES_ATTR`):
+    the mail and calendar tools map to `n8n` and `calendar`, but a façade
+    answering through the native Google client (DL-234) stamps `google` on
+    its error, and the sweep must wait on Google, not on the n8n host."""
     cur: BaseException | None = e
     seen: set[int] = set()
     while cur is not None and id(cur) not in seen:
         seen.add(id(cur))
         if type(cur).__name__ == "RerankHTTPError":
             return ("litellm",)
+        stamp = getattr(cur, _DEPENDENCIES_ATTR, None)
+        if stamp:
+            return tuple(stamp)
         cur = cur.__cause__
     return dependencies
 

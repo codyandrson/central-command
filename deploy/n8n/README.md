@@ -7,6 +7,13 @@ email and calendar façades, and this directory is their **source of truth** —
 canvas in n8n is a rendering of these files, re-applied on every release that
 touches them. Edit the JSON, not the canvas.
 
+They are also the SPECIFICATION of the native Google client
+(`central_command/integrations/google.py`, DL-234), an option that is off by
+default (`CC_GOOGLE_PROVIDER=n8n`): with `native` the same façade functions call
+Google directly and n8n is not on the path. `tests/test_google_parity.py` runs
+these files' JavaScript against the same Google stub as the native client, so
+an edit here that is not mirrored there fails the suite.
+
 | file | id | role |
 |---|---|---|
 | `workflows/cc-email-facade.json` | `kC81tDmXwPb25Nsj` | the webhook (`POST /webhook/cc-email-facade`): checks `x-cc-token`, refuses attachments, calls the provider. Holds no credential. |

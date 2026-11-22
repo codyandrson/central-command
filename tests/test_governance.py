@@ -65,6 +65,12 @@ _BANNED_RUNTIME_MODULES = frozenset({
     "central_command.integrations.graphiti_ingest",
     "central_command.integrations.graphiti_client",
     "central_command.integrations.neo4j_writer",
+    # The native Google client (DL-234) holds the OAuth credential and the
+    # writes (report_spam, the calendar writes). runtime/ reaches mail and
+    # calendar reads through the façades, as it reaches Exchange; it never
+    # imports the provider, nor the consent command that writes the token.
+    "central_command.integrations.google",
+    "central_command.google_consent",
 })
 
 
@@ -133,6 +139,10 @@ def test_the_graph_write_modules_are_banned_in_every_import_spelling():
         "from ..integrations import graphiti_ingest": True,
         "from central_command.integrations import graphiti": False,
         "from central_command.integrations import neo4j_reader": False,
+        "from central_command.integrations import google": True,
+        "from ..integrations.google import mail_request": True,
+        "from central_command import google_consent": True,
+        "from central_command.integrations import email_facade": False,
     }
     for source, banned in cases.items():
         node = ast.parse(source).body[0]

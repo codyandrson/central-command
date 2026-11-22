@@ -17,6 +17,14 @@ each function rather than in a wrapper so a test that patches
 `email_facade.list_refs` still patches the whole thing. `ExchangeError` is
 mapped to `EmailFacadeError` at the seam: a caller's `except EmailFacadeError`
 covers both providers.
+
+**The native Google client (DL-234).** With `CC_GOOGLE_PROVIDER=native` (and no
+Exchange) the one place that posts to n8n, `_call`, hands the SAME payload to
+`integrations/google.py:mail_request` instead, which answers the envelope the
+n8n workflow would have answered, or the status it would have set (422 a
+refusal, 503 a failure). Everything after `_call` is shared by both paths. The
+error carries the `google` dependency, so an outage parks on Google, not on the
+n8n host. The default (`n8n`) never imports the module.
 """
 
 from __future__ import annotations
@@ -42,6 +50,18 @@ def _exchange():
     return exchange if exchange.configured() else None
 
 
+def _google():
+    """The native Google client when this deployment selected it
+    (`CC_GOOGLE_PROVIDER=native`), else None. Deferred like `_exchange`, so the
+    n8n default never imports it. Exchange, when configured, is asked first by
+    every function and still wins."""
+    if settings.google_provider != "native":
+        return None
+    from central_command.integrations import google
+
+    return google
+
+
 def configured() -> bool:
     """True when the n8n email façade has an address AND a token. The default
     URL is never empty, so the token is the signal (as selfcheck and the EA
@@ -50,6 +70,9 @@ def configured() -> bool:
 
 
 async def _call(payload: dict, timeout: float = 60.0) -> dict:
+    google = _google()
+    if google is not None:
+        return await _call_google(google, payload, timeout)
     if not configured():
         # No transient marker word here ('connection', 'timeout' — see
         # contract/failures.py): this must classify SEMANTIC and land FAILED,
@@ -80,6 +103,24 @@ async def _call(payload: dict, timeout: float = 60.0) -> dict:
             status_code=resp.status_code,
         )
     return resp.json()
+
+
+async def _call_google(google, payload: dict, timeout: float) -> dict:
+    """The native path of `_call`: the same payload, the same envelope, and on
+    failure the same error the n8n path raises for the façade's answer
+    (`HTTP <status> {"message": …}`, status typed), stamped `google`."""
+    mode = payload.get("mode")
+    missing = google.missing_settings()
+    if missing:
+        # Semantic, like the n8n path's "not configured": FAILED, never parked.
+        raise EmailFacadeError(f"email façade {mode} not configured — set {', '.join(missing)}")
+    try:
+        return await google.mail_request(payload, timeout=timeout)
+    except google.GoogleError as e:
+        raise google.stamp(EmailFacadeError(
+            f"email façade {mode} failed: HTTP {e.status_code} {google.answer_text(e)[:200]}",
+            status_code=e.status_code,
+        )) from e
 
 
 async def list_refs(scope_query: str) -> list[dict]:

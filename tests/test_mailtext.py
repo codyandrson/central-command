@@ -107,9 +107,11 @@ def test_nothing_reads_a_mail_body_except_through_the_converter():
     # the raw `body_html`/`body_text` pair from an EWS message. It never reads
     # them for a model — the record goes to `ledger.provider_body`, which is
     # `mailtext.body_text`, the one converter (Exchange native client design,
-    # 2026-09-25).
+    # 2026-09-25). `integrations/google.py` is the third provider for the same
+    # reason: it builds the pair from a Gmail `format=full` read, the record the
+    # n8n Normalize node built (DL-234), and reads neither for a model.
     allowed = {"ingest/ledger.py", "ingest/mailtext.py", "integrations/email_facade.py",
-               "integrations/exchange.py"}
+               "integrations/exchange.py", "integrations/google.py"}
     # `.as_posix()`, not `str()`: on Windows `str(relative_to(...))` is
     # `ingest\ledger.py`, which matches nothing in `allowed`, so the allowlist
     # empties and every legitimate reader is reported as an offender. The

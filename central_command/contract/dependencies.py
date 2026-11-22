@@ -39,6 +39,12 @@ GRAPH = "graph"
 LITELLM = "litellm"
 N8N = "n8n"
 CALENDAR = "calendar"
+# The native Google client (DL-234), when `CC_GOOGLE_PROVIDER=native`. The mail
+# and calendar entries below keep `n8n` and `calendar`, the default path; an
+# error from the Google path carries `google` itself (`DEPENDENCIES_ATTR`,
+# stamped by the façades), so a Google outage parks on `google` and the sweep
+# probes Google, never the n8n host.
+GOOGLE = "google"
 JIRA = "jira"
 CONFLUENCE = "confluence"
 FORGE = "forge"
@@ -48,8 +54,8 @@ LOCAL = "local"
 # THE list of dependency names — every tuple in this module, every recorded park
 # and every `dependency_probe` row uses one of these and nothing else. `local`
 # is Postgres: it is never probed and never gated (nothing waits for it).
-DEPENDENCIES = (LLM, EMBEDDER, GRAPH, LITELLM, N8N, CALENDAR, JIRA, CONFLUENCE,
-                FORGE, SANDBOX, LOCAL)
+DEPENDENCIES = (LLM, EMBEDDER, GRAPH, LITELLM, N8N, CALENDAR, GOOGLE, JIRA,
+                CONFLUENCE, FORGE, SANDBOX, LOCAL)
 
 # What a probe exists for: every name but `local`. `heartbeat/probes.py` keys
 # its probe table by exactly these (a parity test pins it).
@@ -218,7 +224,8 @@ def stamped_dependencies(exc: BaseException | None) -> tuple[str, ...]:
 # - graph writes embed (a node's name is embedded before it is written) and an
 #   add_episode is the ingest path: `graph` AND `embedder`;
 # - `graph.get_status` only talks bolt;
-# - `mail.*` and `email.*` ride the n8n façade;
+# - `mail.*` and `email.*` ride the n8n façade (on the native Google path the
+#   error itself carries `google`, which the Executor reads first);
 # - `autodiscovery.skip` reads the proxy's catalog;
 # - `mcp.*` runs in the sandbox pod;
 # - `catalog`, `charter`, `skill`, `memory`, `loe`, `work`, `plan` write Postgres only (`local`);

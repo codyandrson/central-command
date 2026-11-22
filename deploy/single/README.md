@@ -51,7 +51,11 @@ storage for a rollback; remove it by hand once you no longer need one.
   then re-run `./setup.sh` — the same phase applies the shipped façade workflows
   (`stack/n8n-workflows`, through `deploy/n8n/apply-workflows.sh`;
   `deploy/n8n/README.md`), and `update.sh apply` re-applies them through that
-  phase on every release that changes them.
+  phase on every release that changes them. An alternative without n8n exists
+  and is off by default: the native Google client (`CC_GOOGLE_PROVIDER=native`
+  with your own OAuth client in `.env`, and the refresh token written by
+  `.venv/bin/python -m central_command.google_consent`; its `--help` has the
+  steps, DL-234). Nothing about this profile changes until you set it.
 - `crawler` — cc-crawler, the browser-rendering crawl service (rung 2 of docs
   ingestion). On by default. Its image is built locally and is large
   (Chromium); rung 1, a plain HTTP fetch, keeps working without it.

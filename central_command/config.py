@@ -1,6 +1,7 @@
 """Environment configuration. All vars are prefixed CC_ (see .env.example)."""
 
 import os
+from typing import Literal
 
 from dotenv import load_dotenv
 from pydantic import Field, PrivateAttr, field_validator
@@ -337,6 +338,22 @@ class Settings(BaseSettings):
     exchange_username: str = ""   # DOMAIN\\user or user@corp.example
     exchange_password: str = ""
     exchange_email: str = ""      # primary SMTP address; defaults to the username when it is a UPN
+
+    # Native Google client (DL-234) — Gmail and Google Calendar over Google's
+    # REST APIs from this process, in place of the two n8n façade workflows.
+    # The ONE switch is `google_provider`: "n8n" (the default) keeps every mail
+    # and calendar call on the n8n webhooks exactly as before and no Google code
+    # runs; "native" routes the email and calendar façades to
+    # `integrations/google.py`. Exchange still wins when it is configured. The
+    # client id and secret are the operator's own Desktop-app OAuth client; the
+    # refresh token is written into `.env` by the one-time consent command
+    # (`python -m central_command.google_consent`), never typed by hand. Trust is
+    # the global CC_CA_BUNDLE / CC_CLIENT_CERT / CC_TLS_INSECURE surface, as for
+    # every other client.
+    google_provider: Literal["n8n", "native"] = "n8n"
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_refresh_token: str = ""
 
     # Web fetch (D-web-read): an ungated read, granted only via the `web-read`
     # pack. The cert/key/CA-bundle settings configure ONE outbound identity for
