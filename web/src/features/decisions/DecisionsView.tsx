@@ -1018,6 +1018,40 @@ function McpSyncBlock({ diffs, args }: { diffs: { path: string; diff: string }[]
   );
 }
 
+/** mcp.server_register (DL-233): the URL is what the operator is approving —
+ *  where the proxy will send every call to this server's tools — so it leads,
+ *  in full, beside the transport; the name, description and id follow. */
+function McpRegisterBlock({ args }: { args: Record<string, unknown> }) {
+  const { url, transport, server_id, display_name, description, ...rest } = args;
+  if (typeof url !== 'string') return <JsonBlock value={args} />;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[0.7rem] text-foreground/80">
+        <span className="font-semibold text-muted-foreground">URL: </span>
+        <span className="wrap-anywhere font-mono text-foreground/90">{url}</span>
+        {typeof transport === 'string' && <span className="cockpit-badge ml-2">{transport}</span>}
+      </p>
+      {typeof display_name === 'string' && display_name && (
+        <p className="text-[0.7rem] text-foreground/80">
+          <span className="font-semibold text-muted-foreground">name: </span>{display_name}
+          {typeof server_id === 'string' && <span className="ml-2 font-mono text-muted-foreground">({server_id})</span>}
+        </p>
+      )}
+      {typeof description === 'string' && description && (
+        <blockquote className="whitespace-pre-wrap cockpit-wrap rounded-lg border-l-2 border-primary/40 bg-muted/40 p-2.5 text-[0.7rem] leading-relaxed text-foreground/90">
+          {description}
+        </blockquote>
+      )}
+      {Object.keys(rest).length > 0 && (
+        <details className="text-[0.7rem] text-muted-foreground">
+          <summary className="cursor-pointer">other arguments</summary>
+          <JsonBlock value={rest} />
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** What to call a work item in the reviewer's source pane. `kind` is what the
  *  ledger routed on; anything unset is email, the column's default. */
 function sourceLabel(items: WorkItem[]): string {
@@ -1493,6 +1527,7 @@ function ProposalPane({
               : cap === 'skill.doc_add' || cap === 'skill.create'
                 ? (a.skill_diff ? <DiffBlock diff={a.skill_diff} /> : <SkillDocBlock args={a.arguments ?? {}} />)
               : cap === 'mcp.sync_source' ? <McpSyncBlock diffs={a.mcp_diffs ?? []} args={a.arguments ?? {}} />
+              : cap === 'mcp.server_register' ? <McpRegisterBlock args={a.arguments ?? {}} />
               : cap === 'loe.create' ? <LoeCreateBlock args={a.arguments ?? {}} />
               : cap === 'mail.create_rule' ? <MailCreateRuleBlock args={a.arguments ?? {}} />
               : <JsonBlock value={a.arguments ?? {}} />}

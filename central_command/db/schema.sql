@@ -1014,6 +1014,7 @@ create table if not exists mcp_server (
     id              text primary key,      -- server slug, matches servers/<id>/
     status          text not null default 'proposed',
         -- 'proposed' | 'synced' | 'built' | 'deployed' | 'registered' | 'retired'
+        -- (a source='url' row is only ever 'registered' or 'retired')
     image_ref       text,
     digest          text,
     namespace       text,
@@ -1022,6 +1023,20 @@ create table if not exists mcp_server (
     created_at      timestamptz not null default now(),
     retired_at      timestamptz
 );
+
+-- How a server came to be registered (DL-233, 2026-11-22). Every MCP server is
+-- its own container registered on the proxy by URL; `mcp.server_register`
+-- records one that already runs somewhere ('url'), beside the agent-drafted
+-- servers the sync/build/deploy/register pipeline carries ('pipeline', which
+-- every row written before this is). `url` and `transport` are what the
+-- operator approved for a 'url' row; a pipeline row leaves them null (its URL
+-- is derived from its namespace). Additive and idempotent: the updater re-runs
+-- this file against the live database.
+alter table mcp_server add column if not exists source text not null default 'pipeline';
+alter table mcp_server add column if not exists url text;
+alter table mcp_server add column if not exists transport text;
+alter table mcp_server add column if not exists display_name text;
+alter table mcp_server add column if not exists description text not null default '';
 
 -- Sandbox slice 5 (2026-08-04, design doc §6-§7): a REGISTERED server's tools
 -- become grantable. `mcp_tool` carries the per-tool DEFAULT gate, discovered

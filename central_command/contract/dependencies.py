@@ -135,6 +135,8 @@ TOOL_DEPENDENCY: dict[str, tuple[str, ...]] = {
     "sandbox_read_file": ("sandbox",),
     "sandbox_copy_in": ("sandbox",),
     "sandbox_reset": ("sandbox",),
+    # --- Central Command's own MCP tables (DL-233) ----------------------------
+    "mcp_list_servers": (LOCAL,),
     # --- Postgres-only reads: never probed, never gated, never parked ---------
     "read_team_roster": (LOCAL,),
     "read_agent_charter": (LOCAL,),
@@ -272,7 +274,10 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
             "autodiscovery.skip litellm.list_models litellm.list_credentials "
             "litellm.list_keys litellm.get_routing litellm.list_teams "
             "litellm.get_health litellm.check_model_health litellm.get_spend "
-            "litellm.list_mcp_servers litellm.register_mcp_server"),
+            "litellm.list_mcp_servers litellm.register_mcp_server "
+            # An existing server registered or unregistered by URL (DL-233)
+            # touches the proxy alone: no sandbox, no cluster.
+            "mcp.server_register mcp.server_unregister"),
     # A file in this checkout, and the cluster's pod logs: same as the tools.
     **_each((LOCAL,), "litellm.read_config"),
     **_each((), "litellm.read_logs web.fetch"),
@@ -291,7 +296,9 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
             "plan.record_day plan.record_review "
             # Releasing an event from the plan ledger reads and changes nothing
             # on the calendar: it retires a Postgres row.
-            "calendar.release_event"),
+            "calendar.release_event"
+            # What Central Command's own MCP tables record (DL-233).
+            " mcp.list_servers"),
 }
 
 

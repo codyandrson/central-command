@@ -21,9 +21,11 @@ nothing looked at arguments before approval.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import TYPE_CHECKING, Callable
+from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
     from .models import Proposal
@@ -72,6 +74,49 @@ _COST_CEILINGS = {
 
 
 PLAN_KINDS = ("placeholder", "work_block")
+
+
+# An MCP server id (DL-233): the same shape `mcp.sync_source` has always
+# required (`executor._MCP_SERVER_ID_RE`, `tools._MCP_SERVER_ID_RE`), a
+# Kubernetes-valid slug, with `cc-` reserved for this system's own services.
+MCP_SERVER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
+# The upstream transports LiteLLM's MCP gateway reaches a server over by URL
+# (`http` is streamable HTTP). stdio is not one of them on purpose: a server is
+# its own container, registered by URL, never a subprocess of the proxy.
+MCP_URL_TRANSPORTS = ("http", "sse")
+
+
+def _mcp_server_id_problems(capability: str, args: dict) -> list[str]:
+    server_id = args.get("server_id")
+    if not server_id:
+        return []  # `required` already reports it
+    if (not isinstance(server_id, str) or not MCP_SERVER_ID_RE.match(server_id)
+            or server_id.startswith("cc-")):
+        return [
+            f"{capability}: server_id={server_id!r} must be a lowercase slug "
+            "(letters, digits and hyphens, 2 to 40 characters, starting and ending "
+            "with a letter or digit) and must not start with 'cc-'"
+        ]
+    return []
+
+
+def _mcp_url_problems(capability: str, args: dict) -> list[str]:
+    """SHAPE only: an http(s) URL with a host. Whether anything answers there
+    is the operator's review and the registration's own loud failure."""
+    url = args.get("url")
+    if not url:
+        return []  # `required` already reports it
+    if not isinstance(url, str) or any(c.isspace() for c in url):
+        return [f"{capability}: url={url!r} must be one http:// or https:// URL"]
+    parsed = urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return [f"{capability}: url={url!r} must be an http:// or https:// URL with a host"]
+    if parsed.username or parsed.password:
+        return [
+            f"{capability}: url carries credentials — a secret never rides a "
+            "proposal; register a server that needs none"
+        ]
+    return []
 
 
 def _calendar_plan_shape(capability: str, args: dict) -> list[str]:
@@ -446,6 +491,16 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "mcp.build_image": ArgSpec(required=("server_id",)),
     "mcp.server_deploy": ArgSpec(required=("server_id",)),
     "mcp.server_remove": ArgSpec(required=("server_id",)),
+    # An existing server registered on the proxy by its URL (DL-233). Shape
+    # only: that the id is free, here and on the proxy, is world state the
+    # Executor reads at execution.
+    "mcp.server_register": ArgSpec(
+        required=("server_id", "display_name", "url", "transport"),
+        enums={"transport": MCP_URL_TRANSPORTS},
+        checks=(_mcp_server_id_problems, _mcp_url_problems),
+    ),
+    "mcp.server_unregister": ArgSpec(required=("server_id",),
+                                     checks=(_mcp_server_id_problems,)),
     "mcp.tool_call": ArgSpec(required=("server_id", "tool_name")),
 }
 

@@ -146,10 +146,46 @@ Tool: `propose_mcp_remove(server_id, rationale)`.
 - Archive-in-place: `servers/<id>/` source and built image tags are **never
   touched** — a later `mcp.server_deploy` (re-approved) can bring the same
   server back.
-- A separate "deregister-only, keep the pod running" capability is discussed
-  in the design doc
+- A separate "deregister-only, keep the pod running" capability for a
+  pipeline server is discussed in the design doc
   (`docs/superpowers/research/2026-08-03-mcp-sandbox-creation-design.md`) for
   the debugging case but was **not built** — don't propose it as if it exists.
+  (`mcp.server_unregister`, below, is for servers registered by URL only, and
+  refuses a pipeline server.)
+- Refuses a server registered by URL (`source='url'`): that one is
+  `mcp.server_unregister`'s.
+
+## Registering an existing server by URL (DL-233)
+
+Not part of the pipeline: a server that already runs in its own container
+(a packaged server, or one the operator runs) is registered on the proxy by
+its URL, with no sync, build or deploy, on every install profile.
+
+Tool: `propose_mcp_server_register(server_id, display_name, description, url,
+transport, rationale)` → `mcp.server_register`.
+
+- Shape (`contract.ARG_SPECS`, checked at propose time and again by the
+  Executor): the same id slug as `mcp.sync_source`, an `http://` or
+  `https://` URL with a host and no credentials in it, `transport` `http`
+  (streamable HTTP) or `sse`.
+- Executor precondition: NO `mcp_server` row with that id, in any status (an
+  id names one server for good — a retired id is not reused), and no server
+  on the proxy whose name or alias is the underscored id.
+- Registers under the underscored LiteLLM name with the approved URL and
+  transport and no `auth_type` (so only a server needing no upstream
+  credential is registered this way), records the row `status='registered'`,
+  `source='url'`, `url`, `transport`, `display_name`, `description`, then runs
+  the same tool discovery and key-permission steps as §4.
+- From there it is used exactly like a pipeline server: `mcp:<id>` grants,
+  per-tool gates, `mcp.tool_call`, the ungated toolset.
+
+Tool: `propose_mcp_server_unregister(server_id, rationale)` →
+`mcp.server_unregister`: only for `source='url'` rows that are not retired;
+deregisters (skipped when the proxy no longer lists it), removes the id from
+the shared key, retires the row. The server itself is untouched.
+
+Read first: `mcp_list_servers()` shows every row with its `source`, `url`,
+`transport` and tools, so an id is never guessed.
 
 ## `mcp.tool_call` — the one gated wrapper for every server's gated tools
 

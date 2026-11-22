@@ -6252,6 +6252,33 @@ async def mark_mcp_server_registered(server_id: str, litellm_id: str) -> None:
         await conn.close()
 
 
+async def insert_mcp_server_registered_by_url(
+    server_id: str, *, url: str, transport: str, display_name: str,
+    description: str, litellm_id: str | None, created_by: str,
+) -> bool:
+    """`mcp.server_register`'s write (DL-233), after the proxy accepted the
+    registration: one new row, born 'registered' with source 'url'. An id names
+    one server for good, so an id already in the table (any status, either
+    source) is never overwritten: False then, and the caller fails loudly.
+    `litellm_alias` holds the proxy's own server id, as for a pipeline row."""
+    conn = await _conn()
+    try:
+        result = await conn.execute(
+            """
+            insert into mcp_server
+                (id, status, source, url, transport, display_name, description,
+                 litellm_alias, created_by)
+            values ($1, 'registered', 'url', $2, $3, $4, $5, $6, $7)
+            on conflict (id) do nothing
+            """,
+            server_id, url, transport, display_name, description or "",
+            litellm_id, created_by,
+        )
+        return result.endswith(" 1")
+    finally:
+        await conn.close()
+
+
 # --- MCP tool grants (sandbox slice 5) ---------------------------------------
 # mcp_tool carries the DEFAULT gate per (server_id, tool_name), discovered at
 # registration time; agent_mcp_gate_override is the operator's per-agent

@@ -1,6 +1,6 @@
 ---
 name: MCP
-description: The MCP server creation pipeline as Central Command actually built it — the sandbox that authors servers from scratch, the one gated exit (mcp.sync_source), and the state machine that carries a server through build, deploy and LiteLLM registration. Load before working in the sandbox, before proposing any mcp.* or litellm.register_mcp_server capability, or before advising on a server's naming/removal.
+description: The MCP server creation pipeline as Central Command actually built it — the sandbox that authors servers from scratch, the one gated exit (mcp.sync_source), the state machine that carries a server through build, deploy and LiteLLM registration, and registering an existing server by URL. Load before working in the sandbox, before proposing any mcp.* or litellm.register_mcp_server capability, or before advising on a server's naming/removal.
 default_agents: mcp-manager
 ---
 
@@ -53,7 +53,13 @@ plumbing — not upstream MCP or LiteLLM documentation.
    docs/`--help`/source live in the sandbox before writing code — is the
    whole lesson; see `echo-demo-and-image-lessons`.
 
-Removal is coupled, not two capabilities: an approved `mcp.server_remove`
+A server that **already runs** in its own container is not built at all: it
+is registered by its URL with `propose_mcp_server_register` and taken off
+again with `propose_mcp_server_unregister` — see
+`pipeline-and-state-machine`, "Registering an existing server by URL".
+`mcp_list_servers` shows what is registered and how, before you name an id.
+
+For a pipeline server, removal is coupled, not two capabilities: an approved `mcp.server_remove`
 tears down the Deployment+Service, deregisters from LiteLLM, and retires the
 `mcp_server` row, all in one approval — never propose "just deregister" or
 "just delete the pod" as if they were separate acts. It archives in place:
@@ -62,8 +68,8 @@ server can be redeployed later.
 
 ## References
 
-- `pipeline-and-state-machine` — the 5 gated capabilities with their exact
-  arguments and Executor preconditions, the `mcp_server` status column, the
+- `pipeline-and-state-machine` — the 5 pipeline capabilities and the two
+  by-URL ones with their exact arguments and Executor preconditions, the `mcp_server` status column, the
   immutable per-proposal image tag, and the mandatory resource limits.
 - `sandbox-mechanics` — the 5 sandbox tools, what `sandbox_copy_in` actually
   checks, and why containment (not restriction) means egress stays open.

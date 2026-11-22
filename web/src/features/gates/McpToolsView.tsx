@@ -42,8 +42,8 @@ export function McpToolsView() {
       {actionError && <p className="text-[0.667rem] text-red" role="alert">{actionError}</p>}
       {servers.length === 0 && !error && !loading && (
         <p className="text-[0.7rem] text-muted-foreground">
-          MCP servers appear here once one is registered through the MCP pipeline; nothing is
-          gated differently until then.
+          MCP servers appear here once one is registered, by URL or through the MCP pipeline;
+          nothing is gated differently until then.
         </p>
       )}
       {servers.map((s) => (
@@ -52,6 +52,14 @@ export function McpToolsView() {
             <span className="font-medium">{s.id}</span>
             <span className="cockpit-badge">{s.status}</span>
             {s.retired_at && <span className="cockpit-badge">retired</span>}
+            {s.source === 'url' && (
+              <span className="cockpit-badge" title="An existing server, registered on the proxy by its URL">
+                by URL{s.transport ? ` (${s.transport})` : ''}
+              </span>
+            )}
+            {s.source === 'url' && s.url && (
+              <span className="min-w-0 wrap-anywhere font-mono text-[0.667rem] text-muted-foreground">{s.url}</span>
+            )}
             <span className="text-muted-foreground">
               held by {s.holders.length} agent{s.holders.length === 1 ? '' : 's'}
             </span>

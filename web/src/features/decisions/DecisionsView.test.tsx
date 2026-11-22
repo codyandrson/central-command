@@ -311,6 +311,22 @@ describe('DecisionsView proposal pane', () => {
     expect(screen.getByText(/This week/)).toBeInTheDocument();
   });
 
+  it('renders an mcp.server_register proposal with its URL and transport in full', async () => {
+    state.detail = {
+      id: 'p1', agent_id: 'mcp-manager', intent: 'Register the notes search server', status: 'AWAITING_HUMAN',
+      created_at: hoursAgo(1), evidence: [],
+      actions: [{ capability: 'mcp.server_register@v1', arguments: {
+        server_id: 'notes-search', display_name: 'Notes search',
+        description: 'Searches the team notes', url: 'http://notes.example.com:8000/mcp', transport: 'http',
+      } }],
+    };
+    await openProposal();
+    await waitFor(() => expect(screen.getByText('http://notes.example.com:8000/mcp')).toBeInTheDocument());
+    expect(screen.getByText('http')).toBeInTheDocument();
+    expect(screen.getByText('(notes-search)').closest('p')).toHaveTextContent('name: Notes search(notes-search)');
+    expect(screen.getByText('Searches the team notes')).toBeInTheDocument();
+  });
+
   it('shows no badge when the agent stated none — absent is not low', async () => {
     state.detail = {
       id: 'p1', agent_id: 'inbox-triage', intent: 'Record it', status: 'AWAITING_HUMAN',

@@ -555,6 +555,9 @@ the collector would need a redesign rather than a port. Use `podman compose -f
 deploy/single/compose.yaml logs <service>` and `./setup.sh report` instead.
 The **MCP server deploy/remove pipeline** is absent: `mcp.server_deploy` and
 `mcp.server_remove` refuse while `CC_MCP_DEPLOY_KUBECONFIG` is empty, and only `deploy/k3s` provides it.
+Registering a server that already runs in its own container by its URL
+(`mcp.server_register`, and `mcp.server_unregister` to take it off) needs only
+the LiteLLM proxy and works here.
 
 **When a `--proxy` probe fails, re-run it direct** (`./discover-llm.sh chat
 <upstream-model-id>`): a bad upstream URL/key and a broken

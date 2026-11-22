@@ -130,7 +130,7 @@ Rows for the same package are grouped by what the modules are for.
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py` (the cap is `settings.attachment_max_bytes`, `CC_ATTACHMENT_MAX_BYTES`, default 50 MiB, read at call time; a validator refuses a cap whose base64 size would pass the transport ceiling `config.WS_MAX_SIZE_BYTES`, the `--ws-max-size` both API launchers, the k3s unit and the single-node `boot.sh`, pass uvicorn), `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (108 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `rerun.py` (`rerun_session`, `eligibility`), `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
+| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (111 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `rerun.py` (`rerun_session`, `eligibility`), `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `session_recall.py` (the episodic-recall index and `search_my_sessions`' four shapes), `notes.py` (the note store's one rendering seam `standing_sections` and the `propose_note` / `propose_note_retire` builders, DL-217), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic per-agent doubles `resolve_model` swaps in under `settings.test_model`, which only the test suite sets; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
@@ -1221,6 +1221,31 @@ are one click. Each write re-reads from the API; the screens add no
 rule of their own (`GET /mcp/servers`, `GET`/`PUT`/`DELETE
 /agents/{id}/mcp-overrides`, `PATCH /mcp/servers/{id}/tools/{tool}`).
 
+**How an MCP server gets registered (DL-233).** Every MCP server, packaged or
+custom, is its own container, registered on the LiteLLM proxy by URL; the proxy
+never launches one as a subprocess. Two gated ways lead there, both proposals of
+the `mcp-propose` pack and both ending in the same registration path. An
+existing server is registered with `mcp.server_register` (`server_id`,
+`display_name`, `description`, `url`, `transport` `http` or `sse`;
+`contract.ARG_SPECS` checks the shape): the Executor refuses an id Central
+Command already knows, in any status, or a name the proxy already has, then
+`POST /v1/mcp/server` with the admin key and records an `mcp_server` row born
+`registered` with `source='url'` and the approved `url` and `transport`. It
+needs no build host and no kubeconfig, so it runs on both install profiles.
+`mcp.server_unregister` takes such a server off the proxy and the shared key and
+retires the row; the server keeps running. A server the agent drafted travels
+the pipeline instead (`mcp.sync_source` → `mcp.build_image` →
+`mcp.server_deploy` → `litellm.register_mcp_server`, `source='pipeline'`), and
+`mcp.server_remove` takes it down; each pair refuses the other's rows. After
+the proxy accepts either registration, `executor._after_proxy_registration`
+discovers the tools into `mcp_tool` at `human approval` and adds the server to
+the shared key's `object_permission`, so from there a server registered by URL
+is listed, granted (`mcp:<id>`), gated and called (`mcp.tool_call`, or the
+ungated toolset at `/{name}/mcp`) exactly as a pipeline server is.
+`mcp_list_servers` is the agents' read of the table. No secret rides a
+registration: only a server that needs no upstream credential is registered
+this way, and the URL is refused when it carries credentials.
+
 **The inbox mark.** The Decisions Inbox shows, per action of a proposal, the
 capability registry's server-held `reversibility` mark and whether the capability
 requires an acknowledgement, joined at read time on `proposals.get`
@@ -1610,7 +1635,7 @@ A service that is not configured probes up (nothing to wait for). `TOOL_DEPENDEN
 maps every read tool to a tuple of these and `CAPABILITY_DEPENDENCY` maps every
 row of the Executor's registry the same way (graph writes need `graph` and
 `embedder`; `jira.*`, `confluence.*`, `calendar.*`; `mail.*` and `email.*` on
-`n8n`; `litellm.*` and `autodiscovery.*`; `sandbox.*` and `mcp.*`; `catalog`,
+`n8n`; `litellm.*`, `autodiscovery.*` and the two MCP writes by URL (`mcp.server_register`, `mcp.server_unregister`) on `litellm`; `sandbox.*` and the other `mcp.*`; `catalog`,
 `charter`, `skill`, `loe`, `work` on `local`; `web.*` on none). A read tool
 without a map entry fails at import, and a parity test pins both maps against
 the tool packs, the registry, the handler table and the probe table. The sweep

@@ -1898,9 +1898,9 @@ PACKS: dict[str, Pack] = {
             "them. "
             "MCP OWNERSHIP (decided 2026-08-06): you can SEE the MCP servers "
             "registered on the proxy (litellm_list_mcp_servers) for diagnosis "
-            "and reporting, but registration, removal, and every other MCP "
-            "write belong to the MCP pipeline's owner (mcp-manager), which "
-            "drives that lifecycle end-to-end as one gated state machine. If "
+            "and reporting, but registration (by URL or through the "
+            "pipeline), removal, and every other MCP write belong to the MCP "
+            "manager (mcp-manager), which proposes each one through the gate. If "
             "a registered server misbehaves at the proxy level, read and "
             "report — never propose the fix yourself."
         ),
@@ -2053,15 +2053,41 @@ PACKS: dict[str, Pack] = {
     "mcp-propose": Pack(
         name="mcp-propose",
         description=(
-            "Propose syncing reviewed files from your sandbox into "
-            "servers/<id>/ (the one gated exit from the sandbox pack), then "
-            "building and deploying a synced server's image."
+            "Read the MCP servers Central Command knows; propose registering "
+            "an existing server by its URL or unregistering it; propose "
+            "syncing reviewed files from your sandbox into servers/<id>/ (the "
+            "one gated exit from the sandbox pack), then building and "
+            "deploying a synced server's image."
         ),
         tool_names=(
             "propose_mcp_sync_source", "propose_mcp_build", "propose_mcp_deploy",
             "propose_mcp_register", "propose_mcp_remove",
+            "propose_mcp_server_register", "propose_mcp_server_unregister",
+            "mcp_list_servers",
         ),
         guidance=(
+            "WHAT IS REGISTERED: `mcp_list_servers()` lists every server "
+            "Central Command knows — id, status, source ('pipeline' or "
+            "'url'), the URL and transport of one registered by URL, and its "
+            "tools with their default gate. Read it before naming a server "
+            "id; never guess one. "
+            "REGISTERING AN EXISTING SERVER BY URL: a server that already "
+            "runs in its own container (a packaged server, or one the "
+            "operator deployed) is registered with "
+            "`propose_mcp_server_register(server_id, display_name, "
+            "description, url, transport, rationale)` — no sync, build or "
+            "deploy, and it works on every install. `server_id` must be new "
+            "(an id names one server for good, retired ones included); "
+            "`transport` is 'http' (streamable HTTP) or 'sse'. Only a server "
+            "that needs no credential registers this way: never put a "
+            "token, key or password in the URL or any argument — if a server "
+            "needs one, ask the operator. Its tools are discovered at 'human "
+            "approval', and an agent can use them once the operator grants "
+            "it mcp:<server_id>. `propose_mcp_server_unregister(server_id, "
+            "rationale)` takes a server registered by URL off the gateway "
+            "(the server itself keeps running); it refuses a pipeline "
+            "server, which `propose_mcp_remove` takes down with its "
+            "deployment. "
             "THE MCP PIPELINE is a state machine, one gated step at a time: "
             "synced -> built -> deployed -> registered. mcp.sync_source is "
             "the ONLY way anything you build in your sandbox can become "
@@ -2144,9 +2170,31 @@ PACKS: dict[str, Pack] = {
                 notes=(
                     "One approval deletes the Deployment+Service (idempotent, "
                     "ignore-not-found) AND deregisters from LiteLLM AND "
-                    "retires the row. Refuses a missing row or one already "
-                    "retired. Archive-in-place — never touches servers/<id>/ "
-                    "source or built image tags."
+                    "retires the row. Refuses a missing row, one already "
+                    "retired, or a server registered by URL. Archive-in-place "
+                    "— never touches servers/<id>/ source or built image tags."
+                ),
+            ),
+            GatedCapability(
+                name="mcp.server_register",
+                arguments=(
+                    "{'server_id': '<new slug>', 'display_name': '<text>', "
+                    "'description': '<text>', 'url': 'http(s)://…', "
+                    "'transport': 'http'|'sse'}"
+                ),
+                notes=(
+                    "An existing server, registered by URL with no build or "
+                    "deploy. Refused when the id is already known here or the "
+                    "proxy already has a server by that name. No credential "
+                    "can be registered with it."
+                ),
+            ),
+            GatedCapability(
+                name="mcp.server_unregister",
+                arguments="{'server_id': '<slug>'}",
+                notes=(
+                    "Only for a server registered by URL: deregisters it from "
+                    "LiteLLM and retires the row; the server keeps running."
                 ),
             ),
         ),
@@ -2378,6 +2426,10 @@ NON_ADVISORY_TOOLS = frozenset({
     "propose_mcp_deploy",
     "propose_mcp_register",
     "propose_mcp_remove",
+    # Registering by URL (DL-233) is the MCP manager's own lifecycle step, and
+    # the family is barred whole for the same reason as its siblings.
+    "propose_mcp_server_register",
+    "propose_mcp_server_unregister",
     # propose_mcp_tool_call (D-sandbox slice 5): same reasoning as its
     # siblings above — a consult specialist has no coherent stand-in for
     # "gated for THIS caller", since the effective gate is per-AGENT, and

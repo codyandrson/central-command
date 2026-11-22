@@ -52,11 +52,26 @@ describe('McpToolsView', () => {
     expect(screen.getByText('No agent overrides.')).toBeInTheDocument();
   });
 
+  it('marks a server registered by URL with its transport and URL', async () => {
+    servers = [server({ id: 'notes-search', source: 'url', url: 'http://notes.example.com:8000/mcp', transport: 'http' })];
+    render(<McpToolsView />);
+    expect(await screen.findByText('notes-search')).toBeInTheDocument();
+    expect(screen.getByText('by URL (http)')).toBeInTheDocument();
+    expect(screen.getByText('http://notes.example.com:8000/mcp')).toBeInTheDocument();
+  });
+
+  it('shows no URL mark on a pipeline server', async () => {
+    servers = [server({ source: 'pipeline', url: null, transport: null })];
+    render(<McpToolsView />);
+    expect(await screen.findByText('echo-demo')).toBeInTheDocument();
+    expect(screen.queryByText(/by URL/)).not.toBeInTheDocument();
+  });
+
   it('shows one plain sentence when no server is registered', async () => {
     servers = [];
     render(<McpToolsView />);
     expect(await screen.findByText(
-      /MCP servers appear here once one is registered through the MCP pipeline; nothing is gated differently until then\./,
+      /MCP servers appear here once one is registered, by URL or through the MCP pipeline; nothing is gated differently until then\./,
     )).toBeInTheDocument();
   });
 

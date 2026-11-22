@@ -35,6 +35,13 @@ export interface McpServer {
   id: string;
   status: string;
   retired_at: string | null;
+  /** How it was registered (DL-233): 'pipeline' (sync, build, deploy,
+   *  register) or 'url' (an existing server registered by its URL). */
+  source?: 'pipeline' | 'url';
+  /** The approved URL and transport of a server registered by URL; null on a
+   *  pipeline row. */
+  url?: string | null;
+  transport?: string | null;
   tools: McpTool[];
   /** Agents holding an unrevoked `mcp:<id>` grant. */
   holders: string[];

@@ -4,6 +4,43 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-22 — v2.128.0: An MCP server that already runs can be registered by its URL, through the gate, on both install profiles
+
+- **Why.** Only a server built and deployed by the pipeline could be registered and used, and that
+  pipeline works on the multi-node profile alone. The operator ruled in the 2026-11-21 system review:
+  every MCP server, packaged or custom, runs as its own container and is registered on the LiteLLM
+  proxy by URL; the `mcp-manager` agent stays as the MCP expert (DL-233). This release is the first
+  part: registration by URL. The old build and deploy steps are unchanged until a one-click deploy
+  replaces them, so no ability is lost in between.
+- **Two capabilities, both gated by default.** `mcp.server_register` takes `server_id`,
+  `display_name`, `description`, `url` and `transport` (`http` for streamable HTTP, or `sse`);
+  `mcp.server_unregister` takes `server_id`. The Executor registers the server on the proxy, records
+  it (`mcp_server.source = 'url'`, five additive columns), discovers its tools and adds it to the
+  shared key, through the same code the pipeline's registration uses. From there it is listed,
+  granted, gated and called exactly like a pipeline-built server; its tools start at
+  `human approval`.
+- **Checks.** Shape in `ARG_SPECS`: the id is a slug that does not start with `cc-`, the URL is http
+  or https with a host and no credentials in it. At execution: the id is free in our table (retired
+  ids included: an id names one server for good) and on the proxy. `mcp.sync_source` and
+  `mcp.server_remove` refuse a server registered by URL, and unregister refuses a pipeline server.
+- **Unauthenticated servers only.** A secret never rides a proposal, and the proxy's management API
+  documents no way to name a provisioned secret, so a server that needs an auth header cannot be
+  registered this way yet.
+- **Agents can read what is registered.** A new read tool, `mcp_list_servers`, in the `mcp-propose`
+  pack: id, status, how the server was registered, URL, tools and their default gates.
+- **Cockpit.** A registration proposal shows the URL in full with the transport, name and id; the MCP
+  tools view marks a server registered by URL and shows its URL.
+- **The `mcp-manager` charter is rewritten** for the role. An installed database keeps its saved
+  charter (nothing overwrites one); the new tools and their guidance reach an installed agent
+  through the pack on its next run. The built-in text is `runtime/mcp_manager_profile.py`.
+- **Bundled skill docs changed** (`skills/mcp/`), so this is the first update to use v2.127.0's
+  comparison: an unedited library follows the release.
+- **Not exercised.** The whole path ran end to end (agent run, gateway, Executor, a real throwaway MCP
+  server, a tool call through the gate and one ungated) against a stub proxy that recorded each
+  request; the requests were compared with the vendored LiteLLM docs. A real LiteLLM v1.110.2 proxy
+  was not called, so its acceptance of the request (transport `sse` in particular) is unproven until
+  the first real registration.
+
 ## 2026-11-22 — v2.127.0: Bundled skill docs are compared after an update, not reviewed before it; nothing about them blocks an update
 
 - **Why.** Since v2.77.0 (DL-198) an update that changed bundled skill docs was reviewed before it ran:

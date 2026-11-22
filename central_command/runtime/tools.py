@@ -3942,6 +3942,138 @@ async def propose_mcp_remove(ctx: RunContext, server_id: str, rationale: str) ->
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 
+# --- mcp.server_register / mcp.server_unregister (DL-233) --------------------
+# An MCP server runs in its own container and is registered on the proxy by
+# URL. These two need no sandbox and no pipeline state: the arguments are the
+# whole proposal, shape-checked from `contract.ARG_SPECS` before it parks, and
+# the Executor reads the world (is the id free here and on the proxy) at
+# execution. `mcp_list_servers` is the read that answers which ids exist.
+
+
+async def mcp_list_servers(ctx: RunContext) -> str:
+    """List every MCP server Central Command knows: its id, status, how it was
+    registered (`pipeline`: drafted here and carried through sync, build,
+    deploy and register; `url`: an existing server registered by its URL),
+    the URL and transport of a server registered by URL, and each discovered
+    tool with its DEFAULT gate. Read it before proposing anything about a
+    server, so the id you name is one that exists (or, for a new
+    registration, one that does not). Read-only.
+    """
+    from central_command.db import repo
+
+    try:
+        servers = await repo.list_mcp_servers()
+        tools = await repo.list_mcp_tools()
+    except Exception as e:  # noqa: BLE001
+        return f"mcp servers unavailable ({type(e).__name__})"
+    by_server: dict[str, list[dict]] = {}
+    for t in tools:
+        by_server.setdefault(t["server_id"], []).append(
+            {"tool_name": t["tool_name"], "default_gate": t["default_gate"],
+             "description": t.get("description") or ""}
+        )
+    rows = []
+    for s in servers:
+        row = {
+            "server_id": s["id"], "status": s["status"],
+            "source": s.get("source") or "pipeline",
+            "display_name": s.get("display_name"),
+            "description": s.get("description") or "",
+            "url": s.get("url"), "transport": s.get("transport"),
+            "created_by": s.get("created_by"),
+            "retired_at": s.get("retired_at"),
+            "tools": by_server.get(s["id"], []),
+        }
+        rows.append(row)
+    if not rows:
+        return "no MCP servers are known to Central Command yet"
+    return _clip(json.dumps(rows, default=str))
+
+
+async def propose_mcp_server_register(
+    ctx: RunContext, server_id: str, display_name: str, description: str,
+    url: str, transport: str, rationale: str,
+) -> str:
+    """Propose registering an MCP server that ALREADY RUNS in its own
+    container on LiteLLM's MCP gateway, by its URL. Reviewed and, once
+    approved, registered by the control-plane Executor, which alone holds the
+    proxy admin key — this tool does not register anything itself. From then
+    on its tools are discovered (each at 'human approval' until the operator
+    says otherwise), and an agent the operator grants `mcp:<server_id>` can
+    use them.
+
+    `server_id` is a NEW slug (lowercase letters, digits, hyphens; not
+    starting with 'cc-'): read `mcp_list_servers` first, an id already known
+    is refused. `display_name` and `description` say what the server is for.
+    `url` is the server's MCP endpoint (http:// or https://, for example
+    http://notes.example.com:8000/mcp), never one with credentials in it.
+    `transport` is 'http' (streamable HTTP, what most servers speak) or
+    'sse' (an older server that only offers server-sent events). Only a
+    server that needs no credential can be registered this way. `rationale`
+    is one sentence for the operator: why this server, and what you checked.
+    """
+    if _settings.test_model:
+        return "(test model: propose_mcp_server_register is a stub — no registration runs under the test model)"
+    args = {
+        "server_id": server_id, "display_name": display_name,
+        "description": description or "", "url": url, "transport": transport,
+    }
+    proposal = Proposal(
+        intent=rationale,
+        actions=[Action(
+            capability="mcp.server_register@v1",
+            arguments=args,
+            target_ref={"system": "mcp_server", "id": server_id},
+            reversibility=Reversibility.reversible,
+        )],
+        evidence=[Evidence(
+            kind="mcp_server",
+            source_ref=url,
+            locator="the URL and transport named in this proposal",
+            claim=f"an MCP server ({transport}) answers at {url}",
+        )],
+        expected_effect=(
+            f"mcp_server '{server_id}' ({display_name}) is registered by URL at "
+            f"{url} and its tools are discovered at 'human approval'"
+        ),
+    )
+    await _validate_proposal(ctx, proposal, agent_authored=False)
+    raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
+
+
+async def propose_mcp_server_unregister(ctx: RunContext, server_id: str, rationale: str) -> str:
+    """Propose taking a server that was registered BY URL off LiteLLM's MCP
+    gateway: once approved, the Executor deregisters it, removes it from the
+    shared key and marks it retired. The server itself keeps running wherever
+    it runs. A pipeline server (one this system built and deployed) is not
+    unregistered this way — `propose_mcp_remove` takes it down with its
+    deployment. `rationale` is one sentence for the operator.
+    """
+    if _settings.test_model:
+        return "(test model: propose_mcp_server_unregister is a stub — no change runs under the test model)"
+    proposal = Proposal(
+        intent=rationale,
+        actions=[Action(
+            capability="mcp.server_unregister@v1",
+            arguments={"server_id": server_id},
+            target_ref={"system": "mcp_server", "id": server_id},
+            reversibility=Reversibility.reversible,
+        )],
+        evidence=[Evidence(
+            kind="mcp_server",
+            source_ref=f"mcp_server:{server_id}",
+            locator="mcp_server table, status and source columns",
+            claim=f"{server_id} is registered by URL and should come off the gateway",
+        )],
+        expected_effect=(
+            f"mcp_server '{server_id}' has status='retired' and is no longer "
+            "registered on LiteLLM's MCP gateway"
+        ),
+    )
+    await _validate_proposal(ctx, proposal, agent_authored=False)
+    raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
+
+
 # --- mcp.tool_call (D-sandbox slice 5) ----------------------------------------
 # The ONE generic gated wrapper for every MCP-served tool whose EFFECTIVE gate
 # (default from mcp_tool, overridden per-agent by an operator-written

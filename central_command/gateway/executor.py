@@ -2164,6 +2164,17 @@ async def _mcp_sync_source(args: dict, approver: str, proposer: str | None) -> s
     if bad:
         raise ExecutorError(f"refusing mcp.sync_source: unsafe path(s) {bad!r}")
 
+    from central_command.db import repo as db_repo
+
+    existing = await db_repo.get_mcp_server(server_id)
+    if existing is not None and existing.get("source") == "url":
+        # A sync would flip the row to 'synced' and break a server that is in
+        # use: an id registered by URL is not a pipeline server (DL-233).
+        raise ExecutorError(
+            f"refusing mcp.sync_source: {server_id!r} is a server registered by "
+            "URL, not one this pipeline builds — choose a new server_id"
+        )
+
     root = _mcp_servers_root()
     repo_root = root.parent
     server_rel = f"{root.name}/{server_id}"
@@ -2206,8 +2217,6 @@ async def _mcp_sync_source(args: dict, approver: str, proposer: str | None) -> s
     # locally, and the operator already approved the content; only the
     # push status is recorded as degraded.
     push_status = "pushed" if push_rc == 0 else f"push failed: {(push_err or push_out).strip()}"
-
-    from central_command.db import repo as db_repo
 
     await db_repo.upsert_mcp_server_synced(server_id, proposer or approver)
 
@@ -2477,6 +2486,44 @@ async def _mcp_server_deploy(args: dict, approver: str, proposer: str | None) ->
 # place: servers/<id>/ source and image tags are never touched here.
 
 
+async def _deregister_from_proxy(existing_id: str | None) -> tuple[str, str]:
+    """Take one server off the proxy and out of the shared key's permission
+    list: the half of a removal both `mcp.server_remove` and
+    `mcp.server_unregister` perform. Idempotent (an id the proxy no longer
+    lists is skipped). The key cleanup is non-fatal but says so loudly, because
+    nothing downstream will. Returns (deregistration note, key note)."""
+    if not existing_id:
+        return "no litellm registration to remove", ""
+    registered = await litellm_client.list_mcp_servers()
+    if any(s.get("server_id") == existing_id for s in registered if isinstance(s, dict)):
+        await litellm_client.deregister_mcp_server(existing_id)
+        dereg_note = f"deregistered litellm_server_id {existing_id}"
+    else:
+        dereg_note = f"litellm_server_id {existing_id} already gone from proxy — skipped"
+
+    # Key cleanup (counterpart to registration's key-permission coupling):
+    # best-effort/non-fatal — removal stands either way — but say so
+    # LOUDLY on failure, because nothing downstream will and a dangling
+    # id would otherwise sit silently in the shared key's permission list.
+    try:
+        removed = await litellm_client.remove_mcp_server_from_key(
+            settings.llm_api_key, existing_id
+        )
+        key_note = (
+            " key permission: removed from shared key"
+            if removed.get("changed") else
+            " key permission: shared key already lacked access"
+        )
+    except Exception as e:  # noqa: BLE001 — removal stands; say so loudly
+        err = str(e).replace(settings.llm_api_key, "<redacted>") if settings.llm_api_key else str(e)
+        key_note = (
+            f" key permission cleanup FAILED: {err} — the shared key's "
+            "object_permission.mcp_servers may still list a dangling "
+            f"litellm_server_id {existing_id} until removed by hand (/key/update)"
+        )
+    return dereg_note, key_note
+
+
 async def _mcp_server_remove(args: dict, approver: str, proposer: str | None) -> str:
     from central_command.db import repo as db_repo
 
@@ -2490,6 +2537,12 @@ async def _mcp_server_remove(args: dict, approver: str, proposer: str | None) ->
         raise ExecutorError(
             f"refusing mcp.server_remove: mcp_server {server_id!r} "
             f"(status={status!r}) is missing or already retired"
+        )
+
+    if row.get("source") == "url":
+        raise ExecutorError(
+            f"refusing mcp.server_remove: {server_id!r} was registered by URL and "
+            "runs nowhere this system deploys — propose mcp.server_unregister"
         )
 
     kubeconfig = settings.mcp_deploy_kubeconfig
@@ -2507,37 +2560,7 @@ async def _mcp_server_remove(args: dict, approver: str, proposer: str | None) ->
     if rc != 0:
         raise ExecutorError(f"mcp.server_remove: kubectl delete failed: {err or out}")
 
-    existing_id = row.get("litellm_alias")
-    dereg_note = "no litellm registration to remove"
-    key_note = ""
-    if existing_id:
-        registered = await litellm_client.list_mcp_servers()
-        if any(s.get("server_id") == existing_id for s in registered if isinstance(s, dict)):
-            await litellm_client.deregister_mcp_server(existing_id)
-            dereg_note = f"deregistered litellm_server_id {existing_id}"
-        else:
-            dereg_note = f"litellm_server_id {existing_id} already gone from proxy — skipped"
-
-        # Key cleanup (counterpart to registration's key-permission coupling):
-        # best-effort/non-fatal — removal stands either way — but say so
-        # LOUDLY on failure, because nothing downstream will and a dangling
-        # id would otherwise sit silently in the shared key's permission list.
-        try:
-            removed = await litellm_client.remove_mcp_server_from_key(
-                settings.llm_api_key, existing_id
-            )
-            key_note = (
-                " key permission: removed from shared key"
-                if removed.get("changed") else
-                " key permission: shared key already lacked access"
-            )
-        except Exception as e:  # noqa: BLE001 — removal stands; say so loudly
-            err = str(e).replace(settings.llm_api_key, "<redacted>") if settings.llm_api_key else str(e)
-            key_note = (
-                f" key permission cleanup FAILED: {err} — the shared key's "
-                "object_permission.mcp_servers may still list a dangling "
-                f"litellm_server_id {existing_id} until removed by hand (/key/update)"
-            )
+    dereg_note, key_note = await _deregister_from_proxy(row.get("litellm_alias"))
 
     await db_repo.mark_mcp_server_retired(server_id)
 
@@ -2612,7 +2635,25 @@ async def _litellm_register_mcp_server(args: dict, approver: str, proposer: str 
     litellm_id = s.get("litellm_server_id")
 
     await db_repo.mark_mcp_server_registered(server_id, litellm_id)
+    discovery_note, key_note = await _after_proxy_registration(server_id, litellm_id)
 
+    return (
+        f"litellm.register_mcp_server {server_id}: registered as "
+        f"litellm_server_id {litellm_id}, url {url}, transport {transport}. "
+        f"{discovery_note}. {key_note}"
+    )
+
+
+async def _after_proxy_registration(server_id: str, litellm_id: str | None) -> tuple[str, str]:
+    """What follows a registration the proxy accepted, for a pipeline server
+    and a server registered by URL alike (one path, DL-233): tool discovery
+    into `mcp_tool`, then the shared key's permission. The caller has already
+    written the `mcp_server` row (`mcp_tool` references it). Both steps are
+    non-fatal — the registration stands — and say so loudly when they fail.
+    Returns (discovery note, key note)."""
+    from central_command.db import repo as db_repo
+
+    litellm_name = _litellm_server_name(server_id)
     # Tool discovery (D-sandbox slice 5): best-effort, right after a
     # successful registration. ANY failure here is non-fatal — registration
     # itself already succeeded and stands; a failed discovery just means the
@@ -2652,11 +2693,108 @@ async def _litellm_register_mcp_server(args: dict, approver: str, proposer: str 
             "tools list until the server is added to the key's "
             "object_permission.mcp_servers by hand (/key/update)"
         )
+    return discovery_note, key_note
 
+
+# --- mcp.server_register / mcp.server_unregister (DL-233) --------------------
+# Every MCP server is its OWN container, registered on the proxy by URL. These
+# two register one that already runs somewhere, and take it off again, with no
+# build, no deploy and no kubeconfig, so they work on both install profiles.
+# After the proxy accepts, the server follows the pipeline's registration path
+# exactly (`_after_proxy_registration`): its tools land in `mcp_tool` at the
+# default gate, it is grantable as `mcp:<id>`, and `mcp.tool_call` and the
+# ungated toolset reach it by the same underscored proxy name. No secret rides
+# these arguments: only a server that needs no upstream credential registers
+# here (the proxy is sent no auth_type, which its docs read as `none`).
+
+
+async def _mcp_server_register(args: dict, approver: str, proposer: str | None) -> str:
+    from central_command.db import repo as db_repo
+
+    server_id = args["server_id"]
+    url = args["url"]
+    transport = args["transport"]
+    display_name = args["display_name"]
+    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+        raise ExecutorError(f"refusing mcp.server_register: bad server_id {server_id!r}")
+
+    # World state, read now (the world can change between propose and
+    # approve): an id names one server for good, in our table and on the proxy.
+    row = await db_repo.get_mcp_server(server_id)
+    if row is not None:
+        raise ExecutorError(
+            f"refusing mcp.server_register: server_id {server_id!r} already exists "
+            f"(status={row['status']!r}, source={row.get('source')!r}) — an id names "
+            "one server for good, so choose a new one"
+        )
+    litellm_name = _litellm_server_name(server_id)
+    on_proxy = await litellm_client.list_mcp_servers()
+    clash = [
+        srv for srv in on_proxy if isinstance(srv, dict)
+        and litellm_name in (srv.get("server_name"), srv.get("alias"))
+    ]
+    if clash:
+        raise ExecutorError(
+            f"refusing mcp.server_register: the proxy already has a server named "
+            f"{litellm_name!r} (litellm_server_id {clash[0].get('server_id')!r}), "
+            "registered outside this system — choose another server_id"
+        )
+
+    proposal_id = _current_proposal_id.get() or "unknown-proposal"
+    description = (
+        f"{display_name}: {args.get('description') or ''} — Central Command "
+        f"mcp_server '{server_id}' registered by URL via {proposal_id} "
+        f"(drafted by {proposer or 'unknown'}, approved by {approver})"
+    )
+    out = await litellm_client.register_mcp_server(
+        litellm_name, litellm_name, url, transport=transport, description=description,
+    )
+    litellm_id = (out.get("server") or {}).get("litellm_server_id")
+
+    recorded = await db_repo.insert_mcp_server_registered_by_url(
+        server_id, url=url, transport=transport, display_name=display_name,
+        description=args.get("description") or "", litellm_id=litellm_id,
+        created_by=proposer or approver,
+    )
+    if not recorded:
+        raise ExecutorError(
+            f"mcp.server_register {server_id}: the proxy registered it as "
+            f"litellm_server_id {litellm_id}, but a row with this id appeared "
+            "meanwhile and was left as it is — unregister it on the proxy by hand"
+        )
+    discovery_note, key_note = await _after_proxy_registration(server_id, litellm_id)
     return (
-        f"litellm.register_mcp_server {server_id}: registered as "
-        f"litellm_server_id {litellm_id}, url {url}, transport {transport}. "
-        f"{discovery_note}. {key_note}"
+        f"mcp.server_register {server_id}: registered by URL as litellm_server_id "
+        f"{litellm_id}, url {url}, transport {transport}. {discovery_note}. {key_note}"
+    )
+
+
+async def _mcp_server_unregister(args: dict, approver: str, proposer: str | None) -> str:
+    from central_command.db import repo as db_repo
+
+    server_id = args["server_id"]
+    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+        raise ExecutorError(f"refusing mcp.server_unregister: bad server_id {server_id!r}")
+    row = await db_repo.get_mcp_server(server_id)
+    if row is None or row["status"] == "retired":
+        status = row["status"] if row else "no row"
+        raise ExecutorError(
+            f"refusing mcp.server_unregister: mcp_server {server_id!r} "
+            f"(status={status!r}) is missing or already retired"
+        )
+    if row.get("source") != "url":
+        # Taking a pipeline server off the proxy alone would leave its
+        # deployment running with nothing in front of it: removal is coupled.
+        raise ExecutorError(
+            f"refusing mcp.server_unregister: {server_id!r} is a pipeline server "
+            "this system deployed — propose mcp.server_remove, which also takes "
+            "its deployment down"
+        )
+    dereg_note, key_note = await _deregister_from_proxy(row.get("litellm_alias"))
+    await db_repo.mark_mcp_server_retired(server_id)
+    return (
+        f"mcp.server_unregister {server_id}: {dereg_note}, status=retired; the "
+        f"server at {row.get('url')} itself is untouched.{key_note}"
     )
 
 
@@ -2774,6 +2912,8 @@ HANDLERS = {
     "mcp.server_deploy": _mcp_server_deploy,
     "mcp.server_remove": _mcp_server_remove,
     "litellm.register_mcp_server": _litellm_register_mcp_server,
+    "mcp.server_register": _mcp_server_register,
+    "mcp.server_unregister": _mcp_server_unregister,
     "mcp.tool_call": _mcp_tool_call,
     **_GRAPH_CURATION_HANDLERS,
 }

@@ -378,10 +378,11 @@ MCP_MANAGER_TEMPLATE = HireTemplate(
     id="mcp-manager",
     label="MCP manager",
     description=(
-        "Authors MCP servers in its own sandbox, tests them there, then "
-        "drives the gated pipeline (sync_source -> build_image -> "
-        "server_deploy -> register) and retires servers with "
-        "mcp.server_remove. Taskable and conversational."
+        "The team's MCP expert: knows what is registered, registers an "
+        "existing server by its URL, authors and tests new servers in its "
+        "own sandbox and drives the gated pipeline (sync_source -> "
+        "build_image -> server_deploy -> register), and retires servers. "
+        "Taskable and conversational."
     ),
     charter="",  # unused: the MCP manager's charter is a finished document
     default_packs=("sandbox", "mcp-propose", "ask-operator", "web-read", "consult",

@@ -70,15 +70,18 @@ def test_register_is_registered_gated_and_dispatched():
     assert "litellm.register_mcp_server" in executor.HANDLERS
 
 
-def test_mcp_propose_pack_carries_all_five_tools_and_capabilities():
+def test_mcp_propose_pack_carries_its_tools_and_capabilities():
     pack = packs.PACKS["mcp-propose"]
     assert pack.tool_names == (
         "propose_mcp_sync_source", "propose_mcp_build", "propose_mcp_deploy",
         "propose_mcp_register", "propose_mcp_remove",
+        "propose_mcp_server_register", "propose_mcp_server_unregister",
+        "mcp_list_servers",
     )
     assert {c.name for c in pack.capabilities} == {
         "mcp.sync_source", "mcp.build_image", "mcp.server_deploy",
         "litellm.register_mcp_server", "mcp.server_remove",
+        "mcp.server_register", "mcp.server_unregister",
     }
     for agent_id, names in packs.DEFAULT_PACKS.items():
         assert "mcp-propose" not in names, f"{agent_id} should not default-hold it"

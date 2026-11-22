@@ -2285,10 +2285,89 @@ REGISTRY: list[Capability] = [
         description=(
             "Remove an mcp_server: delete its k8s objects (idempotent,"
             "ignore-not-found), deregister it from LiteLLM if registered, "
-            "and flip the row to status='retired'. Refuses a missing row or "
-            "one already retired. Does NOT touch servers/<id>/ source or "
-            "image tags — a deregister-only capability is a later slice, not "
-            "this one."
+            "and flip the row to status='retired'. Refuses a missing row, "
+            "one already retired, and a server registered by URL (that one "
+            "is mcp.server_unregister's). Does NOT touch servers/<id>/ "
+            "source or image tags."
+        ),
+    ),
+
+    # --- mcp.server_register / mcp.server_unregister (DL-233) -----------------
+    Capability(
+        name="mcp.server_register",
+        target_args=("server_id",),
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="reversible",
+        risk=(
+            "makes an existing server's tools reachable through the LiteLLM "
+            "MCP gateway to any agent later granted access; the URL the "
+            "operator approves is where the proxy will send every call. No "
+            "secret rides the proposal (only a server needing no upstream "
+            "credential registers here); reversible via mcp.server_unregister"
+        ),
+        holder="Executor",
+        route=(
+            "gateway/executor.py → central_command/integrations/litellm.py: "
+            "POST /v1/mcp/server with the proxy admin key (Executor-only), "
+            "then tool discovery (GET /mcp-rest/tools/list) and the shared "
+            "key's object_permission — the same path a pipeline server's "
+            "registration takes"
+        ),
+        arguments=["server_id", "display_name", "description", "url", "transport"],
+        description=(
+            "Register an MCP server that already runs in its own container, "
+            "by its URL, on both install profiles (no build, deploy or "
+            "kubeconfig). `transport` is 'http' (streamable HTTP) or 'sse'. "
+            "Refused when the id exists in Central Command's tables (any "
+            "status — an id names one server for good) or the proxy already "
+            "has a server by that name. The row is recorded with source "
+            "'url' and status 'registered'; its tools are discovered at "
+            "'human approval', like a pipeline server's, and the server is "
+            "grantable as mcp:<server_id>."
+        ),
+    ),
+    Capability(
+        name="mcp.server_unregister",
+        target_args=("server_id",),
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        reversibility="reversible",
+        risk=(
+            "takes a server registered by URL off the LiteLLM MCP gateway: "
+            "every agent holding it loses its tools; the server itself keeps "
+            "running wherever it runs, untouched"
+        ),
+        holder="Executor",
+        route=(
+            "central_command/integrations/litellm.py: DELETE "
+            "/v1/mcp/server/{litellm_server_id} (skipped when the proxy no "
+            "longer lists it), then the shared key's object_permission "
+            "cleanup, then status='retired'"
+        ),
+        arguments=["server_id"],
+        description=(
+            "Unregister a server registered by URL (mcp.server_register). "
+            "Refuses a pipeline server — mcp.server_remove takes that one "
+            "down with its deployment — and a missing or retired row."
+        ),
+    ),
+    Capability(
+        name="mcp.list_servers",
+        kind="read",
+        gate="ungated read",
+        default_gate="none",
+        risk="none to the world — reads Central Command's own MCP tables",
+        holder="agent (mcp_list_servers tool)",
+        route="central_command/db/repo.py → Postgres mcp_server and mcp_tool",
+        arguments=[],
+        description=(
+            "Every MCP server Central Command knows: id, status, how it was "
+            "registered (pipeline or by URL), its URL and transport when "
+            "registered by URL, and its discovered tools with their default "
+            "gate — so a server id is read, never guessed."
         ),
     ),
 
