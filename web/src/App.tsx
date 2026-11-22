@@ -23,7 +23,6 @@ import { useSettings } from '@/contexts/SettingsContext';
 import { getSessionKey } from '@/types';
 import { useConnectionManager } from '@/hooks/useConnectionManager';
 import { useDashboardData } from '@/hooks/useDashboardData';
-import { ConnectDialog } from '@/features/connect/ConnectDialog';
 import { OutageBanners } from '@/features/outages/OutageBanners';
 import { TopBar } from '@/components/TopBar';
 import { StatusBar } from '@/components/StatusBar';
@@ -105,7 +104,7 @@ function getInitialViewMode(canShowKanban: boolean): ViewMode {
 export default function App({ onLogout }: AppProps) {
   // Gateway state
   const {
-    connectionState, connectError, reconnectAttempt, sparkline,
+    connectionState, reconnectAttempt, sparkline,
     operatorName, nameOperator,
   } = useGateway();
   // First-run prompt: the in-product half of onboarding (v2.37.0). Shown
@@ -126,7 +125,6 @@ export default function App({ onLogout }: AppProps) {
   const {
     sessions, sessionsLoading, currentSession, setCurrentSession, setViewingChat,
     busyState, agentStatus, unreadSessions, refreshSessions, deleteSession, openNewSession, abortSession,
-    agentLogEntries, eventEntries,
     agentName,
   } = useSessionContext();
 
@@ -146,22 +144,14 @@ export default function App({ onLogout }: AppProps) {
     ttsProvider, ttsModel, setTtsProvider, setTtsModel,
     wakeWordEnabled, handleToggleWakeWord, handleWakeWordState,
     liveTranscriptionPreview, toggleLiveTranscriptionPreview,
-    eventsVisible, logVisible,
-    toggleEvents, toggleLog, toggleTelemetry,
+    toggleTelemetry,
     setTheme, setFont,
     kanbanVisible,
     commandPaletteButtonVisible,
   } = useSettings();
 
   // Connection management (extracted hook)
-  const {
-    dialogOpen,
-    editableUrl, setEditableUrl,
-    officialUrl,
-    editableToken, setEditableToken,
-    handleConnect, handleReconnect,
-    serverSideAuth, authEnabled,
-  } = useConnectionManager();
+  const { handleReconnect } = useConnectionManager();
 
   const [revealRequest, setRevealRequest] = useState<{
     id: number;
@@ -315,9 +305,7 @@ export default function App({ onLogout }: AppProps) {
   // UI state
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [booted, setBooted] = useState(false);
-  const [logGlow, setLogGlow] = useState(false);
   const [isMobileTopBarHidden, setIsMobileTopBarHidden] = useState(false);
-  const prevLogCount = useRef(0);
   const chatPanelRef = useRef<ChatPanelHandle>(null);
 
   // Command palette state
@@ -507,15 +495,13 @@ export default function App({ onLogout }: AppProps) {
     onSetFont: setFont,
     onTtsProviderChange: setTtsProvider,
     onToggleWakeWord: handleToggleWakeWord,
-    onToggleEvents: toggleEvents,
-    onToggleLog: toggleLog,
     onToggleTelemetry: toggleTelemetry,
     onOpenSettings: openSettings,
     onRefreshSessions: refreshSessions,
     onSetViewMode: setViewMode,
     canShowKanban: kanbanVisible,
   }), [openSpawnDialog, handleReset, toggleSound, handleAbort, openSettings, openSearch,
-    setTheme, setFont, setTtsProvider, handleToggleWakeWord, toggleEvents, toggleLog, toggleTelemetry,
+    setTheme, setFont, setTtsProvider, handleToggleWakeWord, toggleTelemetry,
     refreshSessions, setViewMode, kanbanVisible]);
 
   // Keyboard shortcut handlers with useCallback
@@ -669,20 +655,6 @@ export default function App({ onLogout }: AppProps) {
       return () => clearTimeout(timer);
     }
   }, [connectionState, booted]);
-
-  // Log header glow when new entries arrive
-  // This effect legitimately needs to set state in response to prop changes
-  // (visual feedback for new log entries)
-  useEffect(() => {
-    const currentCount = agentLogEntries.length;
-    if (currentCount > prevLogCount.current) {
-      setLogGlow(true);
-      const timer = setTimeout(() => setLogGlow(false), 500);
-      prevLogCount.current = currentCount;
-      return () => clearTimeout(timer);
-    }
-    prevLogCount.current = currentCount;
-  }, [agentLogEntries.length]);
 
   const handleCompactLayoutChange = useCallback((nextIsCompactLayout: boolean) => {
     setIsCompactLayout(nextIsCompactLayout);
@@ -880,17 +852,6 @@ export default function App({ onLogout }: AppProps) {
       >
         Skip to chat
       </a>
-      <ConnectDialog
-        open={dialogOpen && connectionState !== 'connected' && connectionState !== 'reconnecting'}
-        onConnect={handleConnect}
-        error={connectError}
-        defaultUrl={editableUrl}
-        defaultToken={editableToken}
-        officialUrl={officialUrl}
-        serverSideAuth={serverSideAuth}
-        authEnabled={authEnabled}
-      />
-
       {/*
        * Gateway state banners.
        * Kept compact and centered so they read as transient shell notices instead of old alarm strips.
@@ -939,12 +900,7 @@ export default function App({ onLogout }: AppProps) {
       {(!isCompactLayout || !isMobileTopBarHidden) && (
         <TopBar
           onSettings={openSettings}
-          agentLogEntries={agentLogEntries}
           tokenData={tokenData}
-          logGlow={logGlow}
-          eventEntries={eventEntries}
-          eventsVisible={eventsVisible}
-          logVisible={logVisible}
           mobilePanelButtonsVisible={isCompactLayout}
           sessionsPanel={compactSessionsPanel}
           workspacePanel={compactWorkspacePanel}
@@ -969,10 +925,6 @@ export default function App({ onLogout }: AppProps) {
           <SettingsDrawer
             open={settingsOpen}
             onClose={closeSettings}
-            gatewayUrl={editableUrl}
-            gatewayToken={editableToken}
-            onUrlChange={setEditableUrl}
-            onTokenChange={setEditableToken}
             onReconnect={handleReconnect}
             connectionState={connectionState}
             soundEnabled={soundEnabled}

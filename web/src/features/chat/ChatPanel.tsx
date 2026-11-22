@@ -274,10 +274,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
     setCollapsed(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const toggleMemory = (key: string) => {
-    setCollapsed(prev => ({ ...prev, [key]: !(prev[key] ?? true) }));
-  };
-
   // First message time for mission time calculation
   const firstMessageTime = messages.length > 0 ? messages[0].timestamp : null;
 
@@ -337,8 +333,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
           const isTool = msg.role === 'tool' || msg.role === 'toolResult';
           const collapseKey = msg.msgId || msg.tempId || i;
           const isCollapsed = collapsed[collapseKey] ?? (msg.isThinking || isMessageCollapsible(msg));
-          const memoryKey = `mem-${collapseKey}`;
-          const isMemoryCollapsed = collapsed[memoryKey] ?? true;
           const isCurrentMatch = search.currentMatch?.messageIndex === i;
           const stableKey = msg.msgId || msg.tempId || `${msg.role}-${msg.timestamp.getTime()}-${i}`;
 
@@ -384,10 +378,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(function Ch
                 msg={msg}
                 index={i}
                 isCollapsed={isCollapsed}
-                isMemoryCollapsed={isMemoryCollapsed}
-                memoryKey={memoryKey}
                 onToggleCollapse={toggleCollapse}
-                onToggleMemory={toggleMemory}
                 firstMessageTime={firstMessageTime}
                 searchQuery={search.query}
                 isCurrentMatch={isCurrentMatch}

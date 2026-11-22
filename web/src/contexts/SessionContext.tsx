@@ -2,18 +2,15 @@
 import { createContext, useContext, useCallback, useRef, useEffect, useState, useMemo, type ReactNode } from 'react';
 import { useGateway } from './GatewayContext';
 import { useSettings } from './SettingsContext';
-import { getSessionKey, type Session, type AgentLogEntry, type EventEntry, type GatewayEvent, type EventPayload, type AgentEventPayload, type ChatEventPayload, type ContentBlock, type SessionsListResponse, type ChatHistoryResponse, type ChatMessage, type GranularAgentState } from '@/types';
+import { getSessionKey, type Session, type GatewayEvent, type EventPayload, type AgentEventPayload, type ChatEventPayload, type SessionsListResponse, type GranularAgentState } from '@/types';
 import { playPing } from '@/features/voice/audio-feedback';
 import { describeToolUse } from '@/utils/helpers';
 import {
-  extractIdentityName,
-  getSessionDisplayLabel,
   getTopLevelAgentSessions,
   isSubagentSessionKey,
   isTopLevelAgentSessionKey,
   isCentralCommandSessionKey,
   pickDefaultSessionKey,
-  getRootAgentId,
 } from '@/features/sessions/sessionKeys';
 
 const BUSY_STATES = new Set(['running', 'thinking', 'tool_use', 'delta', 'started']);
@@ -43,8 +40,6 @@ interface SessionContextValue {
   deleteSession: (sessionKey: string) => Promise<void>;
   openNewSession: (rootOrAgentKey: string) => Promise<void>;
   updateSession: (sessionKey: string, updates: Partial<Session>) => void;
-  agentLogEntries: AgentLogEntry[];
-  eventEntries: EventEntry[];
   agentName: string;
 }
 
@@ -77,17 +72,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     isViewingChatRef.current = isViewingChat;
   }, [isViewingChat]);
-  const [agentLogEntries, setAgentLogEntries] = useState<AgentLogEntry[]>([]);
-  const [eventEntries, setEventEntries] = useState<EventEntry[]>([]);
   const [agentStatus, setAgentStatus] = useState<Record<string, GranularAgentState>>({});
   const [agentName, setAgentName] = useState('Agent');
-  const [rootIdentityNames, setRootIdentityNames] = useState<Record<string, string>>({});
-  const [rootIdentityMisses, setRootIdentityMisses] = useState<Record<string, true>>({});
   const [unreadSessionKeys, setUnreadSessionKeys] = useState<Set<string>>(new Set());
   const unreadSessionKeysRef = useRef(unreadSessionKeys);
   const soundEnabledRef = useRef(soundEnabled);
-  const logStateRef = useRef<Record<string, boolean>>({});
-  const toolSeenRef = useRef<Map<string, number>>(new Map());
   const doneTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const delayedRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -163,98 +152,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     })();
     return () => controller.abort();
   }, []);
+
+  // An agent's display name is its roster name: `sessions.list` sends one root
+  // row per roster agent (`agent:<id>:main`) whose `label` IS that name
+  // (`nerve_gateway._sessions_list`), and getSessionDisplayLabel shows `label`,
+  // falling back to the agent id. Nothing is read from workspace files.
   const sessionsRef = useRef(sessions);
-  
-  // Update refs in effect to avoid render-time mutations
   useEffect(() => {
-    const rootAgentIds = Array.from(new Set(
-      sessions
-        .map((session) => getSessionKey(session))
-        .filter(isTopLevelAgentSessionKey)
-        .map((sessionKey) => getRootAgentId(sessionKey))
-        .filter((rootId): rootId is string => Boolean(rootId) && rootId !== 'main'),
-    )).filter((rootId) => !rootIdentityNames[rootId] && !rootIdentityMisses[rootId]);
-
-    if (rootAgentIds.length === 0) return;
-
-    const controller = new AbortController();
-    void Promise.all(rootAgentIds.map(async (rootId) => {
-      try {
-        const params = new URLSearchParams({ agentId: rootId });
-        const res = await fetch(`/api/workspace/identity?${params.toString()}`, { signal: controller.signal });
-        // A failed fetch caches as a miss too: returning null left the agent in
-        // neither map, so every sessions update refetched it — on 2026-08-17
-        // that was dozens of doomed agents.files.get RPCs per second against a
-        // gateway that doesn't serve workspace files.
-        if (!res.ok) return { rootId, kind: 'miss' as const };
-        const data = await res.json() as { ok?: boolean; content?: string };
-        const identityName = typeof data.content === 'string' ? extractIdentityName(data.content) : null;
-        if (identityName) return { rootId, identityName, kind: 'hit' as const };
-        return { rootId, kind: 'miss' as const };
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') return null;
-        return null;
-      }
-    })).then((results) => {
-      if (controller.signal.aborted) return;
-      const resolved = results.filter((result): result is NonNullable<typeof result> => Boolean(result));
-      if (resolved.length === 0) return;
-
-      setRootIdentityMisses((prev) => {
-        let changed = false;
-        const next = { ...prev };
-        for (const result of resolved) {
-          if (result.kind === 'hit') {
-            if (!next[result.rootId]) continue;
-            delete next[result.rootId];
-            changed = true;
-            continue;
-          }
-          if (next[result.rootId]) continue;
-          next[result.rootId] = true;
-          changed = true;
-        }
-        return changed ? next : prev;
-      });
-
-      setRootIdentityNames((prev) => {
-        const next = { ...prev };
-        let changed = false;
-        for (const result of resolved) {
-          if (result.kind !== 'hit') continue;
-          const { rootId, identityName } = result;
-          if (next[rootId] === identityName) continue;
-          next[rootId] = identityName;
-          changed = true;
-        }
-        return changed ? next : prev;
-      });
-    });
-
-    return () => controller.abort();
-  }, [rootIdentityMisses, rootIdentityNames, sessions]);
-
-  const displaySessions = useMemo(() => sessions.map((session) => {
-    const sessionKey = getSessionKey(session);
-    if (!isTopLevelAgentSessionKey(sessionKey)) return session;
-
-    const rootId = getRootAgentId(sessionKey);
-    if (!rootId) return session;
-
-    const identityName = rootId === 'main' ? agentName : rootIdentityNames[rootId];
-    if (rootId !== 'main' && !identityName) {
-      if (!session.identityName) return session;
-      const rest = { ...session };
-      delete rest.identityName;
-      return rest;
-    }
-    if (!identityName || session.identityName === identityName) return session;
-    return { ...session, identityName };
-  }), [agentName, rootIdentityNames, sessions]);
-
-  useEffect(() => {
-    sessionsRef.current = displaySessions;
-  }, [displaySessions]);
+    sessionsRef.current = sessions;
+  }, [sessions]);
   
   const currentSessionRef = useRef(currentSession);
   useEffect(() => {
@@ -342,205 +248,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return { ...prev, [sessionKey]: state };
     });
   }, [markSessionUnread]);
-
-  const shouldLogTool = useCallback((toolId: string) => {
-    if (!toolId) return false;
-    const now = Date.now();
-    const map = toolSeenRef.current;
-    const DEDUP_MS = 5 * 60 * 1000;
-    const last = map.get(toolId);
-    if (last && now - last < DEDUP_MS) return false;
-    map.set(toolId, now);
-    // Prune expired entries when map grows too large
-    if (map.size > 500) {
-      for (const [key, ts] of map) {
-        if (now - ts > DEDUP_MS) map.delete(key);
-      }
-    }
-    return true;
-  }, []);
-
-  const addAgentLogEntry = useCallback((icon: string, text: string) => {
-    const entry: AgentLogEntry = { icon, text, ts: Date.now() };
-    setAgentLogEntries(prev => [entry, ...prev].slice(0, 100));
-    fetch('/api/agentlog', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(entry)
-    }).catch(() => {});
-  }, []);
-
-  const friendlyName = useCallback((sk: string) => {
-    if (!sk) return 'unknown';
-    const sess = sessionsRef.current.find(s => getSessionKey(s) === sk);
-    if (sess) return getSessionDisplayLabel(sess, agentName);
-    if (isSubagentSessionKey(sk)) return 'sub-agent ' + sk.split(':').pop()?.slice(0, 8);
-    return sk.split(':').pop() || sk;
-  }, [agentName]);
-
-  const rpcRef = useRef(rpc);
-  
-  useEffect(() => {
-    rpcRef.current = rpc;
-  }, [rpc]);
-
-  const streamFrameLogRef = useRef(0);
-
-  const addEvent = useCallback((msg: GatewayEvent) => {
-    // Durable-log events arrive prefixed "cc.<kind>" (nerve_gateway.py's
-    // _forward_events); native gateway events (chat/agent/cron/connect.challenge)
-    // never carry the prefix. Strip it before categorizing so both land the
-    // same way instead of falling through to SYSTEM.
-    const evt = (msg.event || 'response').replace(/^cc\./, '');
-    const p = (msg.payload || {}) as EventPayload;
-
-    // Streaming frames arrive once per token, and every setEventEntries call
-    // is a new context value that re-renders every useSessionContext()
-    // consumer — composer included. One "Response streaming" entry per 5s
-    // carries the same information as five hundred.
-    const isStreamFrame =
-      (evt === 'chat' && p.state === 'delta') ||
-      (evt === 'agent' && (p as AgentEventPayload).stream === 'assistant');
-    if (isStreamFrame) {
-      const now = Date.now();
-      if (now - streamFrameLogRef.current < 5000) return;
-      streamFrameLogRef.current = now;
-    }
-
-    const chatStateDescs: Record<string, string> = {
-      delta: 'Response streaming', final: 'Response complete',
-      error: 'Chat error', aborted: 'Response aborted',
-    };
-
-    let badge = 'SYSTEM', badgeCls = 'badge-system', desc = evt;
-
-    // Domain segment -> existing badge category (no dedicated badge per
-    // domain; these are the closest fit among CHAT/AGENT/CRON/SYSTEM/ERROR).
-    const domainBadge: Record<string, ['CHAT' | 'AGENT' | 'CRON', 'badge-chat' | 'badge-agent' | 'badge-cron']> = {
-      session: ['CHAT', 'badge-chat'],
-      proposal: ['AGENT', 'badge-agent'],
-      task: ['AGENT', 'badge-agent'],
-      work: ['CRON', 'badge-cron'],
-      heartbeat: ['CRON', 'badge-cron'],
-      feed: ['CRON', 'badge-cron'],
-    };
-
-    if (evt.startsWith('chat')) {
-      badge = 'CHAT'; badgeCls = 'badge-chat';
-      desc = chatStateDescs[p.state || ''] || (p.sessionKey ? 'Message from ' + p.sessionKey : 'Chat event');
-    } else if (evt.startsWith('agent')) {
-      badge = 'AGENT'; badgeCls = 'badge-agent';
-      const ap = p as AgentEventPayload;
-      if (ap.stream === 'lifecycle') {
-        const phase = String((ap.data as Record<string, unknown> | undefined)?.phase || '');
-        desc = 'Agent lifecycle: ' + (phase || 'unknown');
-      } else if (ap.stream === 'assistant') {
-        desc = 'Agent assistant output';
-      } else {
-        const state = p.state || p.agentState || '';
-        desc = state ? 'Agent state: ' + state : 'Agent event';
-      }
-    } else if (evt.startsWith('cron')) {
-      badge = 'CRON'; badgeCls = 'badge-cron';
-      desc = p.name ? 'Cron job: ' + p.name : 'Cron job triggered';
-    } else if (evt === 'connect.challenge') {
-      desc = 'Connection challenge received';
-    } else if (evt.startsWith('presence')) {
-      desc = 'Presence update';
-    } else if (evt.includes('error')) {
-      badge = 'ERROR'; badgeCls = 'badge-error';
-      desc = (typeof p.message === 'string' ? p.message : p.error) || 'Error occurred';
-    } else if (domainBadge[evt.split('.')[0]]) {
-      [badge, badgeCls] = domainBadge[evt.split('.')[0]];
-      desc = evt;
-    }
-
-    setEventEntries(prev => [{ badge, badgeCls, desc, ts: new Date() }, ...prev].slice(0, 50));
-  }, []);
-
-  const feedAgentLog = useCallback((evt: string, p: EventPayload) => {
-    const sk = p.sessionKey || '';
-    const name = friendlyName(sk);
-    const isSubagent = isSubagentSessionKey(sk);
-    const isMain = isTopLevelAgentSessionKey(sk);
-
-    const processToolBlocks = (blocks: ContentBlock[]) => {
-      for (const block of blocks) {
-        if (block.type !== 'tool_use' && block.type !== 'toolCall') continue;
-        if (!block.name) continue;
-        let toolInput: Record<string, unknown> = typeof block.input === 'object' && block.input ? block.input : {};
-        if (!toolInput || Object.keys(toolInput).length === 0) {
-          const args = block.arguments;
-          if (typeof args === 'string') {
-            try { toolInput = JSON.parse(args); } catch { toolInput = {}; }
-          } else if (typeof args === 'object' && args) {
-            toolInput = args;
-          }
-        }
-        const toolId = String(block.id || block.toolCallId || block.name);
-        if (shouldLogTool(toolId)) {
-          const desc = describeToolUse(block.name, toolInput);
-          if (desc) addAgentLogEntry('🔧', desc);
-        }
-      }
-    };
-
-    const processMessages = (msgs: ChatMessage[]) => {
-      for (const m of msgs) {
-        if (m.role === 'assistant' && Array.isArray(m.content)) {
-          processToolBlocks(m.content as ContentBlock[]);
-        }
-      }
-    };
-
-    // Handle lifecycle events from CLI agents (Codex, Claude Code CLI)
-    if (evt === 'agent') {
-      const ap = p as AgentEventPayload;
-      if (ap.stream === 'lifecycle') {
-        const phase = (ap.data as Record<string, unknown> | undefined)?.phase;
-        if (phase === 'start') {
-          logStateRef.current['_conv_' + sk] = true;
-          addAgentLogEntry(isMain ? '🧠' : '⚡', isMain ? 'thinking…' : isSubagent ? 'spawned ' + name : name + ' started');
-        } else if (phase === 'end') {
-          addAgentLogEntry(isMain ? '✦' : '✅', isMain ? 'finished response' : name + ' completed');
-          delete logStateRef.current['_conv_' + sk];
-        } else if (phase === 'error') {
-          addAgentLogEntry('❌', isMain ? 'generation failed' : name + ' failed');
-          delete logStateRef.current['_conv_' + sk];
-        }
-        return;
-      }
-    }
-
-    if (evt === 'chat') {
-      if ((p.state === 'delta' || p.state === 'started') && !logStateRef.current['_conv_' + sk]) {
-        logStateRef.current['_conv_' + sk] = true;
-        addAgentLogEntry(isMain ? '🧠' : '⚡', isMain ? 'thinking…' : isSubagent ? 'spawned ' + name : name + ' started');
-      }
-      if (Array.isArray(p.content)) processToolBlocks(p.content as ContentBlock[]);
-      if (Array.isArray(p.messages)) processMessages(p.messages as ChatMessage[]);
-      if (p.state === 'final') {
-        if (sk && rpcRef.current) {
-          rpcRef.current('chat.history', { sessionKey: sk, limit: 10 })
-            .then((res: unknown) => processMessages((res as ChatHistoryResponse)?.messages || []))
-            .catch(() => {});
-        }
-        addAgentLogEntry(isMain ? '✦' : '✅', isMain ? 'finished response' : name + ' completed');
-        delete logStateRef.current['_conv_' + sk];
-      } else if (p.state === 'error' || p.state === 'aborted') {
-        const icon = p.state === 'error' ? '❌' : '⛔';
-        const verb = p.state === 'error' ? 'failed' : 'aborted';
-        addAgentLogEntry(icon, isMain ? (p.state === 'error' ? 'generation failed' : 'response aborted') : name + ' ' + verb);
-        delete logStateRef.current['_conv_' + sk];
-      }
-    } else if (evt === 'cron') {
-      addAgentLogEntry('⏰', 'cron: ' + (p.name || 'scheduled task fired'));
-    } else if (evt === 'connect.challenge') {
-      addAgentLogEntry('🔗', 'connected to gateway');
-    } else if (evt.includes('error')) {
-      addAgentLogEntry('❌', (typeof p.message === 'string' ? p.message : p.error) || 'something went wrong');
-    }
-  }, [addAgentLogEntry, friendlyName, shouldLogTool]);
 
   const refreshSessions = useCallback(async () => {
     if (connectionState !== 'connected') return;
@@ -654,13 +361,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }, 1500);
   }, []);
 
-  // Subscribe to gateway events for granular status tracking + session state sync + agent log + event log
+  // Subscribe to gateway events for granular status tracking + session state sync
   useEffect(() => {
     const unsub = subscribe((msg: GatewayEvent) => {
       const evt = msg.event;
       const p = (msg.payload || {}) as EventPayload;
-
-      addEvent(msg);
 
       // Session granular status tracking + state sync from agent/chat events
       if ((evt === 'agent' || evt === 'chat') && p.sessionKey) {
@@ -804,14 +509,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       ) {
         refreshSessions();
       }
-
-      feedAgentLog(evt, p);
     });
 
     return () => {
       unsub();
     };
-  }, [subscribe, addEvent, setGranularStatus, markSessionUnread, pingSession, feedAgentLog, updateSessionFromEvent, extractSessionUpdates, refreshSessions, scheduleDelayedRefresh]);
+  }, [subscribe, setGranularStatus, markSessionUnread, pingSession, updateSessionFromEvent, extractSessionUpdates, refreshSessions, scheduleDelayedRefresh]);
 
   useEffect(() => {
     return () => {
@@ -834,23 +537,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const iv = setInterval(() => refreshSessions(), 30000);
     return () => clearInterval(iv);
   }, [connectionState, refreshSessions]);
-
-  // Load agent log on mount
-  useEffect(() => {
-    const controller = new AbortController();
-    (async () => {
-      try {
-        const res = await fetch('/api/agentlog', { signal: controller.signal });
-        const entries: AgentLogEntry[] = await res.json();
-        setAgentLogEntries(entries.slice().reverse().slice(0, 100));
-      } catch (err) {
-        if (err instanceof Error && err.name !== 'AbortError') {
-          console.debug('[SessionContext] Failed to load agent log:', err.message);
-        }
-      }
-    })();
-    return () => controller.abort();
-  }, []);
 
   const deleteSession = useCallback(async (sessionKey: string) => {
     // Central Command semantics: CLOSE, never delete — the session row and its
@@ -895,7 +581,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [rpc]);
 
   const value = useMemo<SessionContextValue>(() => ({
-    sessions: displaySessions,
+    sessions,
     sessionsLoading,
     currentSession,
     setCurrentSession,
@@ -910,14 +596,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     deleteSession,
     openNewSession,
     updateSession: updateSessionFromEvent,
-    agentLogEntries,
-    eventEntries,
     agentName,
   }), [
-    displaySessions, sessionsLoading, currentSession, setCurrentSession, isViewingChat, setViewingChat, busyState, agentStatus,
+    sessions, sessionsLoading, currentSession, setCurrentSession, isViewingChat, setViewingChat, busyState, agentStatus,
     unreadSessions, markSessionRead,
     abortSession, refreshSessions, deleteSession, openNewSession,
-    updateSessionFromEvent, agentLogEntries, eventEntries, agentName,
+    updateSessionFromEvent, agentName,
   ]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

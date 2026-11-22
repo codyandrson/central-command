@@ -1,5 +1,4 @@
 import { useState, useCallback, lazy, Suspense, memo } from 'react';
-import { MemoriesSection } from './MemoriesSection';
 import { ImageLightbox } from './ImageLightbox';
 import { isMessageCollapsible } from './types';
 import { decodeHtmlEntities } from '@/lib/formatting';
@@ -11,17 +10,6 @@ import { SpeakButton } from '@/features/tts/SpeakButton';
 const MarkdownRenderer = lazy(() => import('@/features/markdown/MarkdownRenderer').then(m => ({ default: m.MarkdownRenderer })));
 const InlineChart = lazy(() => import('@/features/charts/InlineChart'));
 const GoalPreviewCard = lazy(() => import('@/features/loe/GoalPreviewCard').then(m => ({ default: m.GoalPreviewCard })));
-
-// Extract relevant-memories section from user messages
-function extractMemories(rawText: string): { memories: string | null; content: string } {
-  const match = rawText.match(/<relevant-memories>([\s\S]*?)<\/relevant-memories>\s*/);
-  if (match) {
-    const memories = match[1].trim();
-    const content = rawText.replace(match[0], '').trim();
-    return { memories, content };
-  }
-  return { memories: null, content: rawText };
-}
 
 function formatMissionTime(msgTime: Date, firstTime: Date | null): string {
   if (!firstTime) return '';
@@ -44,10 +32,7 @@ interface MessageBubbleProps {
   msg: ChatMsg;
   index: number;
   isCollapsed: boolean;
-  isMemoryCollapsed: boolean;
-  memoryKey?: string;
   onToggleCollapse: (idx: number) => void;
-  onToggleMemory: (key: string) => void;
   firstMessageTime?: Date | null;
   searchQuery?: string;
   isCurrentMatch?: boolean;
@@ -83,7 +68,7 @@ function RoleBadge({ role, agentName = 'Agent' }: { role: string; agentName?: st
   return <span className="cockpit-badge">System</span>;
 }
 
-function MessageBubbleInner({ msg, index, isCollapsed, isMemoryCollapsed, memoryKey, onToggleCollapse, onToggleMemory, firstMessageTime, searchQuery, isCurrentMatch, agentName, onOpenWorkspacePath, pathLinkPrefixes, pathLinkAliases }: MessageBubbleProps) {
+function MessageBubbleInner({ msg, index, isCollapsed, onToggleCollapse, firstMessageTime, searchQuery, isCurrentMatch, agentName, onOpenWorkspacePath, pathLinkPrefixes, pathLinkAliases }: MessageBubbleProps) {
   const isUser = msg.role === 'user';
   const isAssistant = msg.role === 'assistant';
   const isSystem = msg.role === 'system' || msg.role === 'event';
@@ -130,12 +115,10 @@ function MessageBubbleInner({ msg, index, isCollapsed, isMemoryCollapsed, memory
     );
   }
 
-  const { memories, content: cleanContent } = isUser ? extractMemories(msg.rawText) : { memories: null, content: msg.rawText };
-  const rawForDisplay = isUser && memories ? cleanContent : msg.rawText;
-  const isVoiceMessage = isUser && (msg.isVoice || rawForDisplay.includes('[voice] '));
+  const isVoiceMessage = isUser && (msg.isVoice || msg.rawText.includes('[voice] '));
   // Strip [voice] tag and timestamp prefix like [Wed 2026-02-18 17:35 GMT+1]
   const displayContent = (() => {
-    let text = rawForDisplay;
+    let text = msg.rawText;
     if (isUser) {
       text = text.replace(/^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+GMT[+-]\d+\]\s*/g, '');
       text = text.replace(/\[voice\]\s*/g, '');
@@ -155,8 +138,6 @@ function MessageBubbleInner({ msg, index, isCollapsed, isMemoryCollapsed, memory
   const preview = isCollapsible && msg.rawText
     ? decodeHtmlEntities(systemPreview || msg.rawText.slice(0, 60).replace(/\n/g, ' ') + (msg.rawText.length > 60 ? '…' : ''))
     : '';
-
-  const memoryCollapsedKey = memoryKey ?? `mem-${msg.msgId || msg.tempId || index}`;
 
   // Visual indicator for current search match
   const matchClass = isCurrentMatch ? 'ring-2 ring-primary/60 ring-offset-1 ring-offset-background' : '';
@@ -242,14 +223,6 @@ function MessageBubbleInner({ msg, index, isCollapsed, isMemoryCollapsed, memory
 
   return (
     <div className={`group msg msg-${msg.role} relative max-w-full break-words ${isUser ? 'ml-auto w-fit max-w-full overflow-visible flex flex-col sm:max-w-[72ch]' : 'overflow-hidden'} ${bgClass(msg.role)} ${matchClass} ${pendingClass} ${failedClass}`}>
-      {/* Collapsible memories section for user messages */}
-      {isUser && memories && (
-        <MemoriesSection
-          memories={memories}
-          isCollapsed={isMemoryCollapsed}
-          onToggle={() => onToggleMemory(memoryCollapsedKey)}
-        />
-      )}
       {/* Message header — click to collapse/expand */}
       <div
         role="button"
@@ -394,7 +367,6 @@ export const MessageBubble = memo(MessageBubbleInner, (prev, next) => {
   
   // Collapse states
   if (prev.isCollapsed !== next.isCollapsed) return false;
-  if (prev.isMemoryCollapsed !== next.isMemoryCollapsed) return false;
   
   // Search highlighting
   if (prev.searchQuery !== next.searchQuery) return false;

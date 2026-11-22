@@ -38,16 +38,18 @@ describe('assigneeOptions', () => {
     ]);
   });
 
-  it('uses identity-backed labels for hydrated root agents', () => {
+  it('labels root agents by their roster name (the row label), else the agent id', () => {
     const sessions = [
       session('agent:main:main'),
-      session('agent:designer:main', { identityName: 'Designer Prime' }),
+      session('agent:designer:main', { label: 'Designer Prime' }),
+      session('agent:builder:main'),
     ];
 
     expect(buildAssigneeOptions(sessions, 'Nerve')).toEqual([
       { value: '', label: 'Unassigned' },
       { value: 'operator', label: 'Operator' },
-      { value: 'agent:designer', label: 'Designer Prime (designer)' },
+      { value: 'agent:builder', label: 'builder' },
+      { value: 'agent:designer', label: 'Designer Prime' },
     ]);
   });
 

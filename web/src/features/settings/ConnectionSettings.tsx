@@ -2,10 +2,6 @@ import { RefreshCw } from 'lucide-react';
 import { GatewayRestartCard } from './GatewayRestartCard';
 
 interface ConnectionSettingsProps {
-  url: string;
-  token: string;
-  onUrlChange: (url: string) => void;
-  onTokenChange: (token: string) => void;
   onReconnect: () => void;
   connectionState: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 }
@@ -24,7 +20,8 @@ const STATUS_LABELS: Record<string, string> = {
   disconnected: 'Disconnected',
 };
 
-/** Settings section for gateway URL, auth token, reconnection, and gateway restart. */
+/** Settings section for gateway status, reconnection, and gateway restart. The
+ *  gateway is fixed at install (GATEWAY_URL); there is nothing to enter here. */
 export function ConnectionSettings({
   onReconnect,
   connectionState,

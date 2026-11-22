@@ -35,8 +35,6 @@ export function getRealClientIp(req: {
  * 
  * NOTE: When config.auth is enabled, this function assumes the caller has
  * independently verified the session (as the WebSocket upgrade handler does).
- * In unauthenticated contexts like connect-defaults, it reflects the server's
- * CAPABILITY to inject tokens once trust is established.
  * 
  * A request is trusted if:
  * 1. Global auth is enabled (requires independent session verification for injection).

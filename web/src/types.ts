@@ -15,7 +15,6 @@ export interface Session {
   key?: string;
   id?: string;
   label?: string;
-  identityName?: string;
   state?: string;
   agentState?: string;
   busy?: boolean;
@@ -84,21 +83,6 @@ export interface SourceEmail {
 /** Extract the canonical key from a Session object (handles API inconsistency). */
 export function getSessionKey(s: Session): string {
   return s.sessionKey || s.key || s.id || '';
-}
-
-/** A single entry in the agent activity log (displayed in the TopBar). */
-export interface AgentLogEntry {
-  icon: string;
-  text: string;
-  ts: number;
-}
-
-/** A gateway event entry shown in the events panel. */
-export interface EventEntry {
-  badge: string;
-  badgeCls: string;
-  desc: string;
-  ts: Date;
 }
 
 /** Aggregated token usage and cost data from the gateway. */

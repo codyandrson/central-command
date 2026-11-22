@@ -12,7 +12,6 @@ import {
   Activity,
   BarChart3,
   Settings,
-  Radio,
   Users,
   Brain,
   MessageSquare,
@@ -26,15 +25,9 @@ import {
   FolderTree,
 } from "lucide-react";
 import type { ViewMode } from "@/features/command-palette/commands";
-import type { AgentLogEntry, EventEntry, TokenData } from "@/types";
+import type { TokenData } from "@/types";
 import NerveLogo from "./NerveLogo";
 
-const AgentLog = lazy(() =>
-  import("@/features/activity/AgentLog").then((m) => ({ default: m.AgentLog })),
-);
-const EventLog = lazy(() =>
-  import("@/features/activity/EventLog").then((m) => ({ default: m.EventLog })),
-);
 const TokenUsage = lazy(() =>
   import("@/features/dashboard/TokenUsage").then((m) => ({
     default: m.TokenUsage,
@@ -43,9 +36,7 @@ const TokenUsage = lazy(() =>
 
 /** Identifies which dropdown panel is currently open, or `null` for none. */
 type PanelId =
-  | "agent-log"
   | "usage"
-  | "events"
   | "sessions"
   | "workspace"
   | null;
@@ -67,17 +58,7 @@ const PANEL_CONFIG: Record<Exclude<PanelId, null> | "default", PanelConfig> = {
     heightClass: "max-h-[75vh] opacity-100",
     contentClass: "h-[70vh] max-h-[70vh] overflow-hidden",
   },
-  "agent-log": {
-    boxClass: "w-[480px] max-w-[calc(100vw-1.067rem)]",
-    heightClass: "max-h-[400px] opacity-100",
-    contentClass: "max-h-[400px] overflow-y-auto",
-  },
   usage: {
-    boxClass: "w-[480px] max-w-[calc(100vw-1.067rem)]",
-    heightClass: "max-h-[400px] opacity-100",
-    contentClass: "max-h-[400px] overflow-y-auto",
-  },
-  events: {
     boxClass: "w-[480px] max-w-[calc(100vw-1.067rem)]",
     heightClass: "max-h-[400px] opacity-100",
     contentClass: "max-h-[400px] overflow-y-auto",
@@ -93,18 +74,8 @@ const PANEL_CONFIG: Record<Exclude<PanelId, null> | "default", PanelConfig> = {
 interface TopBarProps {
   /** Callback to open the settings modal. */
   onSettings: () => void;
-  /** Agent log entries rendered in the dropdown log panel. */
-  agentLogEntries: AgentLogEntry[];
   /** Token usage data for the usage panel (null while loading). */
   tokenData: TokenData | null;
-  /** Whether the agent-log icon should pulse green to indicate recent activity. */
-  logGlow: boolean;
-  /** Event log entries for the events panel. */
-  eventEntries: EventEntry[];
-  /** Whether the Events button/panel should be shown (feature flag). */
-  eventsVisible: boolean;
-  /** Whether the Log button/panel should be shown (feature flag). */
-  logVisible: boolean;
   /** Show compact-layout panel launchers (Sessions/Workspace). */
   mobilePanelButtonsVisible?: boolean;
   /** Renderable Sessions panel content (compact mode). */
@@ -147,17 +118,11 @@ function TabBadge({ count, tone }: { count: number; tone: 'action' | 'info' }) {
  * Top navigation bar for the Nerve cockpit.
  *
  * Displays the Nerve logo/brand, and provides toggle buttons for the
- * Agent Log, Events, Token Usage, and (in compact mode) Sessions +
- * Workspace panels.
+ * Token Usage and (in compact mode) Sessions + Workspace panels.
  */
 export function TopBar({
   onSettings,
-  agentLogEntries,
   tokenData,
-  logGlow,
-  eventEntries,
-  eventsVisible,
-  logVisible,
   mobilePanelButtonsVisible = false,
   sessionsPanel,
   workspacePanel,
@@ -199,21 +164,13 @@ export function TopBar({
   const isPanelAvailable = useCallback(
     (panel: PanelId) => {
       if (!panel) return true;
-      if (panel === "events") return eventsVisible;
-      if (panel === "agent-log") return logVisible;
       if (panel === "sessions")
         return mobilePanelButtonsVisible && Boolean(sessionsPanel);
       if (panel === "workspace")
         return mobilePanelButtonsVisible && Boolean(workspacePanel);
       return true;
     },
-    [
-      eventsVisible,
-      logVisible,
-      mobilePanelButtonsVisible,
-      sessionsPanel,
-      workspacePanel,
-    ],
+    [mobilePanelButtonsVisible, sessionsPanel, workspacePanel],
   );
 
   const visiblePanel = useMemo<PanelId>(() => {
@@ -535,54 +492,6 @@ export function TopBar({
             </button>
           )}
 
-          {/* Agent Log button */}
-          {logVisible && (
-            <button
-              onClick={() => togglePanel("agent-log")}
-              title="Agent Log"
-              aria-label="Toggle agent log panel"
-              aria-expanded={visiblePanel === "agent-log"}
-              aria-haspopup="true"
-              aria-controls="topbar-panel"
-              data-active={visiblePanel === "agent-log"}
-              className={buttonBase}
-            >
-              <Activity
-                size={14}
-                className={logGlow ? "text-green" : ""}
-                aria-hidden="true"
-              />
-              <span className="hidden sm:inline">Log</span>
-              {agentLogEntries.length > 0 && (
-                <span className="hidden min-w-5 items-center justify-center rounded-full bg-background/80 px-1.5 py-0.5 text-[0.6rem] tabular-nums text-foreground/80 md:inline-flex">
-                  {agentLogEntries.length}
-                </span>
-              )}
-            </button>
-          )}
-
-          {/* Events button */}
-          {eventsVisible && (
-            <button
-              onClick={() => togglePanel("events")}
-              title="Events"
-              aria-label="Toggle events panel"
-              aria-expanded={visiblePanel === "events"}
-              aria-haspopup="true"
-              aria-controls="topbar-panel"
-              data-active={visiblePanel === "events"}
-              className={buttonBase}
-            >
-              <Radio size={14} aria-hidden="true" />
-              <span className="hidden sm:inline">Events</span>
-              {eventEntries.length > 0 && (
-                <span className="hidden min-w-5 items-center justify-center rounded-full bg-background/80 px-1.5 py-0.5 text-[0.6rem] tabular-nums text-foreground/80 md:inline-flex">
-                  {eventEntries.length}
-                </span>
-              )}
-            </button>
-          )}
-
           {/* Usage button */}
           <button
             onClick={() => togglePanel("usage")}
@@ -631,10 +540,6 @@ export function TopBar({
               <div className="p-4 text-muted-foreground text-xs">Loading…</div>
             }
           >
-            {visiblePanel === "agent-log" && (
-              <AgentLog entries={agentLogEntries} glow={logGlow} />
-            )}
-            {visiblePanel === "events" && <EventLog entries={eventEntries} />}
             {visiblePanel === "usage" && <TokenUsage data={tokenData} />}
             {visiblePanel === "sessions" && sessionsPanel}
             {visiblePanel === "workspace" && workspacePanel}

@@ -86,17 +86,6 @@ function SessionStatusProbe() {
   return <div data-testid="reviewer-status">{agentStatus['agent:reviewer:main']?.status ?? 'NONE'}</div>;
 }
 
-function EventEntriesProbe() {
-  const { eventEntries } = useSessionContext();
-  return (
-    <ul data-testid="event-entries">
-      {eventEntries.map((e, i) => (
-        <li key={i} data-testid={`event-badge-${i}`}>{e.badge}</li>
-      ))}
-    </ul>
-  );
-}
-
 describe('SessionContext', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -150,7 +139,6 @@ describe('SessionContext', () => {
           : input.url;
 
       if (url.includes('/api/server-info')) return Promise.resolve(jsonResponse({ agentName: 'Jen' }));
-      if (url.includes('/api/agentlog')) return Promise.resolve(jsonResponse([]));
       return Promise.resolve(jsonResponse({}));
     }) as typeof fetch;
   });
@@ -170,33 +158,21 @@ describe('SessionContext', () => {
     expect(rpcMock).not.toHaveBeenCalledWith('sessions.list', expect.objectContaining({ activeMinutes: expect.any(Number) }));
   });
 
-  it('hydrates root session labels from IDENTITY.md names', async () => {
+  it('shows each root agent by its roster name, the label sessions.list sends, and reads no identity file', async () => {
     rpcMock.mockImplementation(async (method: string) => {
       if (method === 'sessions.list') {
         return {
           sessions: [
             { sessionKey: 'agent:main:main', label: 'Main' },
-            { sessionKey: 'agent:reviewer:main', displayName: 'stale reviewer label' },
+            // nerve_gateway._sessions_list: one root row per roster agent, label = roster name.
+            { sessionKey: 'agent:reviewer:main', label: 'Reviewer Prime', displayName: 'Reviewer Prime' },
+            // A root with no roster name falls back to the agent id.
+            { sessionKey: 'agent:builder:main' },
           ],
         };
       }
       return {};
     });
-
-    globalThis.fetch = vi.fn((input: string | URL | Request) => {
-      const url = typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-
-      if (url.includes('/api/server-info')) return Promise.resolve(jsonResponse({ agentName: 'Jen' }));
-      if (url.includes('/api/workspace/identity?agentId=reviewer')) {
-        return Promise.resolve(jsonResponse({ ok: true, content: '# IDENTITY.md\n- Name: Reviewer Prime\n- Role: Review agent\n' }));
-      }
-      if (url.includes('/api/agentlog')) return Promise.resolve(jsonResponse([]));
-      return Promise.resolve(jsonResponse({}));
-    }) as typeof fetch;
 
     render(
       <SessionProvider>
@@ -205,123 +181,13 @@ describe('SessionContext', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Jen (main)')).toBeInTheDocument();
-      expect(screen.getByText('Reviewer Prime (reviewer)')).toBeInTheDocument();
-    });
-  });
-
-
-  it('clears stale identity labels when a non-main root has no parseable identity name', async () => {
-    rpcMock.mockImplementation(async (method: string) => {
-      if (method === 'sessions.list') {
-        return {
-          sessions: [
-            { sessionKey: 'agent:main:main', label: 'Main' },
-            { sessionKey: 'agent:reviewer:main', identityName: 'Reviewer Prime' },
-          ],
-        };
-      }
-      return {};
+      expect(screen.getByText('Reviewer Prime')).toBeInTheDocument();
+      expect(screen.getByText('builder')).toBeInTheDocument();
     });
 
-    globalThis.fetch = vi.fn((input: string | URL | Request) => {
-      const url = typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-
-      if (url.includes('/api/server-info')) return Promise.resolve(jsonResponse({ agentName: 'Jen' }));
-      if (url.includes('/api/workspace/identity?agentId=reviewer')) {
-        return Promise.resolve(jsonResponse({ ok: true, content: '# IDENTITY.md\n- Role: Review agent\n' }));
-      }
-      if (url.includes('/api/agentlog')) return Promise.resolve(jsonResponse([]));
-      return Promise.resolve(jsonResponse({}));
-    }) as typeof fetch;
-
-    render(
-      <SessionProvider>
-        <SessionDisplayLabels />
-      </SessionProvider>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Jen (main)')).toBeInTheDocument();
-      expect(screen.getByText('reviewer')).toBeInTheDocument();
-    });
-
-    expect(screen.queryByText('Reviewer Prime (reviewer)')).not.toBeInTheDocument();
-  });
-
-  it('does not refetch identity content for roots whose identity files have no parseable name', async () => {
-    rpcMock.mockImplementation(async (method: string) => {
-      if (method === 'sessions.list') {
-        return {
-          sessions: [
-            { sessionKey: 'agent:main:main', label: 'Main' },
-            { sessionKey: 'agent:reviewer:main', displayName: 'stale reviewer label' },
-          ],
-        };
-      }
-      return {};
-    });
-
-    const fetchSpy = vi.fn((input: string | URL | Request) => {
-      const url = typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-
-      if (url.includes('/api/server-info')) return Promise.resolve(jsonResponse({ agentName: 'Jen' }));
-      if (url.includes('/api/workspace/identity?agentId=reviewer')) {
-        return Promise.resolve(jsonResponse({ ok: true, content: '# IDENTITY.md\n- Role: Review agent\n' }));
-      }
-      if (url.includes('/api/agentlog')) return Promise.resolve(jsonResponse([]));
-      return Promise.resolve(jsonResponse({}));
-    }) as typeof fetch;
-    globalThis.fetch = fetchSpy;
-
-    const { getByTestId } = render(
-      <SessionProvider>
-        <SessionRefreshProbe />
-      </SessionProvider>,
-    );
-
-    await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(
-        '/api/workspace/identity?agentId=reviewer',
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
-      );
-    });
-
-    const identityCallsBeforeRefresh = fetchSpy.mock.calls.filter(([input]) => {
-      const url = typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-      return url.includes('/api/workspace/identity?agentId=reviewer');
-    }).length;
-    expect(identityCallsBeforeRefresh).toBe(1);
-
-    await act(async () => {
-      getByTestId('refresh-sessions').click();
-    });
-
-    await waitFor(() => {
-      expect(rpcMock).toHaveBeenCalledWith('sessions.list', { limit: 1000 });
-    });
-
-    const identityCallsAfterRefresh = fetchSpy.mock.calls.filter(([input]) => {
-      const url = typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-      return url.includes('/api/workspace/identity?agentId=reviewer');
-    }).length;
-    expect(identityCallsAfterRefresh).toBe(1);
+    const urls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(([input]) => String(input));
+    expect(urls.some((url) => url.includes('/api/workspace'))).toBe(false);
+    expect(urls.some((url) => url.includes('/api/agentlog'))).toBe(false);
   });
 
   // The refresh merge preserves object references for unchanged sessions. It
@@ -687,36 +553,5 @@ describe('SessionContext', () => {
 
     expect(rpcBeforeReconnect.mock.calls.filter(([method]) => method === 'sessions.list')).toHaveLength(preReconnectSessionsListCalls);
     expect(rpcAfterReconnect).not.toHaveBeenCalledWith('sessions.list', expect.anything());
-  });
-
-  it('categorizes cc.-prefixed durable-log events by domain instead of falling through to SYSTEM', async () => {
-    render(
-      <SessionProvider>
-        <EventEntriesProbe />
-      </SessionProvider>,
-    );
-
-    await waitFor(() => {
-      expect(subscribedHandler).not.toBeNull();
-    });
-
-    act(() => {
-      subscribedHandler?.({ type: 'event', event: 'cc.chat.delta', payload: {} });
-      subscribedHandler?.({ type: 'event', event: 'cc.agent.lifecycle', payload: { stream: 'lifecycle', data: { phase: 'start' } } });
-      subscribedHandler?.({ type: 'event', event: 'cc.proposal.created', payload: {} });
-      subscribedHandler?.({ type: 'event', event: 'cc.session.closed', payload: {} });
-      subscribedHandler?.({ type: 'event', event: 'cc.task.created', payload: {} });
-      subscribedHandler?.({ type: 'event', event: 'cc.work.enrolled', payload: {} });
-      subscribedHandler?.({ type: 'event', event: 'cc.heartbeat.fired', payload: {} });
-      subscribedHandler?.({ type: 'event', event: 'cc.feed.polled', payload: {} });
-      subscribedHandler?.({ type: 'event', event: 'cc.something.unknown', payload: {} });
-    });
-
-    // Entries prepend, so index 0 is the last event fed above.
-    const badges = () => screen.getByTestId('event-entries').textContent;
-
-    await waitFor(() => {
-      expect(badges()).toBe('SYSTEMCRONCRONCRONAGENTCHATAGENTAGENTCHAT');
-    });
   });
 });

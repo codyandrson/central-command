@@ -3,7 +3,6 @@ import type { Session } from '@/types';
 import { getSessionKey } from '@/types';
 import {
   buildAgentRootSessionKey,
-  extractIdentityName,
   getAgentRegistrationName,
   getRootAgentId,
   getRootAgentSessionKey,
@@ -23,13 +22,6 @@ function session(sessionKey: string, extra: Partial<Session> = {}): Session {
 }
 
 describe('sessionKeys', () => {
-  it('extracts agent names from IDENTITY.md variants', () => {
-    expect(extractIdentityName('# IDENTITY.md - Who Am I?\n\n- **Name:** Blende\n- **Creature:** AI workshop familiar\n')).toBe('Blende');
-    expect(extractIdentityName('# IDENTITY.md\n- Name: forge\n- Role: Coding\n')).toBe('forge');
-    expect(extractIdentityName('# IDENTITY.md\nName: Reviewer Prime\nRole: Review agent\n')).toBe('Reviewer Prime');
-    expect(extractIdentityName('# IDENTITY.md\n- Role: Coding only\n')).toBeNull();
-  });
-
   it('detects top-level agent sessions', () => {
     expect(isTopLevelAgentSessionKey('agent:main:main')).toBe(true);
     expect(isTopLevelAgentSessionKey('agent:reviewer:main')).toBe(true);
@@ -102,11 +94,9 @@ describe('sessionKeys', () => {
     expect(pickDefaultSessionKey(sessions, 'agent:retired:main')).toBe('agent:main:main');
   });
 
-  it('prefers explicit labels for root sessions, then falls back to identity name and root id', () => {
+  it('shows a root session by its label (the roster name), then falls back to the root id', () => {
     expect(getSessionDisplayLabel(session('agent:reviewer:main', { label: 'Reviewer', displayName: 'webchat:reviewer' }), 'Nerve')).toBe('Reviewer');
-    expect(getSessionDisplayLabel(session('agent:reviewer:main', { label: 'Release QA', identityName: 'Reviewer Prime' }), 'Nerve')).toBe('Release QA');
     expect(getSessionDisplayLabel(session('agent:reviewer:main', { displayName: 'Reviewer Prime' }), 'Nerve')).toBe('reviewer');
-    expect(getSessionDisplayLabel(session('agent:reviewer:main', { identityName: 'Reviewer Prime' }), 'Nerve')).toBe('Reviewer Prime (reviewer)');
     expect(getSessionDisplayLabel(session('agent:reviewer:main'), 'Nerve')).toBe('reviewer');
     expect(getSessionDisplayLabel(session('agent:main:main'), 'Nerve')).toBe('Nerve (main)');
   });

@@ -44,15 +44,20 @@ client code that called or rendered it, its settings and its tests:
 | the OpenClaw session-file routes `GET /api/sessions/hidden`, `/api/sessions/media`, `/api/sessions/runtime` and `/api/sessions/:id/model` (all of `routes/sessions.ts`, and `SESSIONS_DIR`), with their callers in `SessionContext.tsx`, `loadHistory.ts`, `useModelEffort.ts` and `SessionInfoPanel.tsx` | they read `~/.openclaw/agents/*/sessions`, which no deployment has, so each answered empty or "missing". Sessions, models and thinking levels come over the `/ws` relay and `GET /api/gateway/models` |
 | the file watcher (`server/lib/file-watcher.ts`, `NERVE_WATCH_WORKSPACE_RECURSIVE`), `routes/events.ts` (`GET /api/events` SSE, `POST /api/events/test`, `broadcast()`) and the client's `src/hooks/useServerEvents.ts` | they pushed `file.changed` / `memory.changed` for upstream's workspace files. The file tree (kept, UI off) has no live refresh: it loads when opened and has a Refresh button. Everything live in Central Command rides `/ws` or its own polling |
 
+## Removed in the release after v2.116.0 (the operator's rulings of 2026-11-21)
+
+| removed | why |
+|---|---|
+| the top bar's Log and Events dropdowns: `routes/agent-log.ts` (`GET/POST /api/agentlog` and the `agent-log.json` it wrote; `config.agentLogPath`, `agentLogMax`, `limits.agentLog`; `readJSON`/`writeJSON` in `server/lib/files.ts`), `src/features/activity/AgentLog.tsx` and `EventLog.tsx`, the agent-log and raw-event state in `SessionContext.tsx`, the Appearance toggles "Show events" and "Show activity log" (`nerve:showEvents`, `nerve:showLog`) and their command-palette entries | the Activity screen covers both. `agent-log.json` stays in `.gitignore` and in the file browser's exclusions, so a file an older install left behind stays out of both |
+| the connect dialog (`src/features/connect/`, `routes/connect-defaults.ts`, `src/lib/gatewayUrls.ts`, `DEFAULT_GATEWAY_WS`) and the editable URL and token that `useConnectionManager` carried for it | the gateway is fixed at install (`GATEWAY_URL`). The client never connected with the defaults it fetched: it connects with an empty target, which the `/ws` relay resolves server-side and injects the token for. Settings > Connection keeps its status, its Reconnect button and the restart card |
+| the slash-command autocomplete in `src/features/chat/InputBar.tsx` (the empty `SLASH_COMMANDS` list, its helpers, menu and keyboard handling) | no slash command is wired server-side; a leading `/` is ordinary chat text |
+| the `<relevant-memories>` block (`src/features/chat/MemoriesSection.tsx`, its parsing in `MessageBubble.tsx` and the collapse props `ChatPanel.tsx` passed it) | nothing in the application emits that tag |
+| the `identity` key of `routes/workspace.ts` (`GET /api/workspace/identity`, which read and created `IDENTITY.md` in `~/.openclaw/workspace-<agent>/`), the client's lookup of it in `SessionContext.tsx` and `extractIdentityName` | an agent's display name is its roster name, which `sessions.list` already sends as the `label` of the agent's root row (`nerve_gateway._sessions_list`); a root row without one shows the agent id. `routes/workspace.ts` stays for `chatPathLinks` |
+
 ## Still present from upstream, to be removed or adapted in a later release
 
 Inert here, or only partly used, and kept for now by decision:
 
-- the connect dialog (`src/features/connect/`, `routes/connect-defaults.ts`);
-- the Log and Events dropdowns;
-- the slash-command code (`src/features/chat/InputBar.tsx`; none is wired
-  server-side);
-- the relevant-memories block;
 - device identity and pairing (`server/lib/device-identity.ts`);
 - `server/lib/gateway-rpc.ts`, and `server/lib/ws-proxy.ts`, which is live as
   the `/ws` relay and carries upstream's gateway handshake.

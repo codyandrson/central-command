@@ -1,4 +1,4 @@
-import { Monitor, Eye, Type, Activity, ALargeSmall, Code2, Columns3, Command, Bell } from 'lucide-react';
+import { Monitor, Eye, Type, ALargeSmall, Code2, Columns3, Command, Bell } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { InlineSelect } from '@/components/ui/InlineSelect';
 import { useSettings, type ToastMode } from '@/contexts/SettingsContext';
@@ -43,10 +43,6 @@ const FONT_SIZE_OPTIONS = [
 /** Settings section for theme, font, font size, and panel visibility. */
 export function AppearanceSettings() {
   const {
-    eventsVisible,
-    toggleEvents,
-    logVisible,
-    toggleLog,
     showHiddenWorkspaceEntries,
     toggleShowHiddenWorkspaceEntries,
     commandPaletteButtonVisible,
@@ -191,38 +187,6 @@ export function AppearanceSettings() {
             menuClassName={INLINE_SELECT_MENU_CLASS}
           />
         </div>
-      </div>
-
-      {/* Events Panel Visibility */}
-      <div className="cockpit-row items-start justify-between">
-        <div className="flex items-center gap-3">
-          <Eye size={14} className={eventsVisible ? 'text-primary' : 'text-muted-foreground'} aria-hidden="true" />
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-foreground" id="events-label">Show events</span>
-            <span className="text-xs text-muted-foreground">Keep the event rail visible in the telemetry row.</span>
-          </div>
-        </div>
-        <Switch
-          checked={eventsVisible}
-          onCheckedChange={toggleEvents}
-          aria-label="Toggle events panel visibility"
-        />
-      </div>
-
-      {/* Log Panel Visibility */}
-      <div className="cockpit-row items-start justify-between">
-        <div className="flex items-center gap-3">
-          <Activity size={14} className={logVisible ? 'text-green' : 'text-muted-foreground'} aria-hidden="true" />
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-foreground" id="log-label">Show activity log</span>
-            <span className="text-xs text-muted-foreground">Surface agent activity in the top chrome.</span>
-          </div>
-        </div>
-        <Switch
-          checked={logVisible}
-          onCheckedChange={toggleLog}
-          aria-label="Toggle log panel visibility"
-        />
       </div>
 
       {/* Hidden workspace entries visibility */}

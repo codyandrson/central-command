@@ -11,12 +11,7 @@ function renderTopBar(props: Partial<React.ComponentProps<typeof TopBar>> = {}) 
   return render(
     <TopBar
       onSettings={vi.fn()}
-      agentLogEntries={[]}
       tokenData={null}
-      logGlow={false}
-      eventEntries={[]}
-      eventsVisible={false}
-      logVisible={false}
       viewMode="chat"
       onViewModeChange={vi.fn()}
       {...props}

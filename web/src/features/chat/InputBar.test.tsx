@@ -267,13 +267,13 @@ describe('InputBar', () => {
     expect(screen.queryByText(/Ctrl\+F search/i)).not.toBeInTheDocument();
   });
 
-  it('does not open the slash command menu — the list is trimmed to empty (no server-side commands wired)', async () => {
+  it('opens no menu on a leading slash — there are no slash commands', async () => {
     render(<InputBar onSend={vi.fn()} isGenerating={false} />);
 
     const input = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     fireEvent.input(input, { target: { value: '/' } });
 
-    expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
   it('offers a mic button that starts recording — the touch path to voice input', () => {

@@ -57,8 +57,6 @@ const {
     refreshSessions: vi.fn(),
     deleteSession: vi.fn(),
     abortSession: vi.fn(),
-    agentLogEntries: [],
-    eventEntries: [],
     agentName: 'Nerve',
   };
 
@@ -126,7 +124,6 @@ const {
 vi.mock('@/contexts/GatewayContext', () => ({
   useGateway: () => ({
     connectionState: 'connected',
-    connectError: null,
     reconnectAttempt: 0,
     model: 'gpt-test',
     sparkline: [],
@@ -172,10 +169,6 @@ vi.mock('@/contexts/SettingsContext', () => ({
     handleWakeWordState: vi.fn(),
     liveTranscriptionPreview: false,
     toggleLiveTranscriptionPreview: vi.fn(),
-    eventsVisible: false,
-    logVisible: false,
-    toggleEvents: vi.fn(),
-    toggleLog: vi.fn(),
     toggleTelemetry: vi.fn(),
     setTheme: vi.fn(),
     setFont: vi.fn(),
@@ -186,15 +179,7 @@ vi.mock('@/contexts/SettingsContext', () => ({
 
 vi.mock('@/hooks/useConnectionManager', () => ({
   useConnectionManager: () => ({
-    dialogOpen: false,
-    editableUrl: 'ws://localhost:18789/ws',
-    setEditableUrl: vi.fn(),
-    officialUrl: 'ws://localhost:18789/ws',
-    editableToken: '',
-    setEditableToken: vi.fn(),
-    handleConnect: vi.fn(),
     handleReconnect: vi.fn(),
-    serverSideAuth: true,
   }),
 }));
 
@@ -251,10 +236,6 @@ vi.mock('@/features/file-browser', () => ({
       </div>
     );
   },
-}));
-
-vi.mock('@/features/connect/ConnectDialog', () => ({
-  ConnectDialog: () => null,
 }));
 
 vi.mock('@/components/TopBar', () => ({

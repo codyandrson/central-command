@@ -4,6 +4,27 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.117.0: The last inert inherited cockpit features are removed; agent names come from the roster
+
+- **Why.** The third removal release under DL-224, covering inherited features with no server-side
+  product behind them. The operator ruled on each in the system review of 2026-11-21.
+- **The Log and Events dropdowns** in the top bar, their two Appearance toggles and palette entries,
+  and `/api/agentlog` with the `agent-log.json` file it wrote. The Activity screen shows both.
+- **The connect dialog** and `/api/connect-defaults`. The connection is fixed at install, and nothing
+  could open the dialog any more. Settings > Connection keeps its status, Reconnect and the restart
+  card.
+- **The slash-command autocomplete** in the chat input. Its list had been empty since no command was
+  ever wired to anything here. The command palette, input history and Tab-completion stay.
+- **The `<relevant-memories>` block** in chat. Nothing in the application emits it; an agent's
+  lookups already show as tool calls.
+- **Agent names.** The sessions panel no longer asks the server to read an `IDENTITY.md` file per
+  agent. The name it shows was already the roster's (the `label` on the agent's row in the session
+  list), with the agent id when there is none; the file lookup and the code that created a default
+  file are gone.
+- **Checked before release.** The built cockpit was loaded in a headless browser against a running
+  API: all roster agents listed by name, no Log or Events button, no menu on "/", no console error and
+  no failed request.
+
 ## 2026-11-21 — v2.116.0: Inert inherited cockpit features with server code behind them are removed
 
 - **Why.** The second removal release under DL-224. Each feature below came with the cockpit's origin

@@ -1969,7 +1969,7 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
   authority on which routes are live; the inherited routes it also mounts
   (auth, files, workspace, TTS and transcription, and others) came from upstream.
 - **Feature directories** under `web/src/features/`: `activity`, `agents`,
-  `attention`, `auth`, `charts`, `chat`, `command-palette`, `connect`,
+  `attention`, `auth`, `charts`, `chat`, `command-palette`,
   `dashboard`, `decisions`, `file-browser`, `gates` (the gate-override hooks and
   the capabilities view), `graph`, `graph-verifications`,
   `kanban`, `loe`, `markdown`, `notifications`, `outages` (the

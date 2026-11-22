@@ -70,7 +70,6 @@ export const config = {
 
   // Paths (configurable via env, with OpenClaw defaults)
   dist: path.join(PROJECT_ROOT, 'dist'),
-  agentLogPath: path.join(PROJECT_ROOT, 'agent-log.json'),
   fileBrowserRoot: process.env.FILE_BROWSER_ROOT || '',
   // The file browser's mutation routes answer 403 unless this is set
   // (server/routes/cc-file-browser-guard.ts; R18 / COCKPIT-028).
@@ -84,14 +83,10 @@ export const config = {
   // Limits
   limits: {
     tts: 64 * 1024,                  // 64 KB
-    agentLog: 64 * 1024,             // 64 KB
     transcribe: 12 * 1024 * 1024,    // 12 MB
     /** Global max request body size (transcribe + 1 MB overhead) */
     maxBodyBytes: 12 * 1024 * 1024 + 1024 * 1024,  // ~13 MB
   },
-
-  // Agent log
-  agentLogMax: 200,
 
   // TTS cache
   ttsCacheTtlMs: Number(process.env.TTS_CACHE_TTL_MS || 3_600_000), // 1 hour

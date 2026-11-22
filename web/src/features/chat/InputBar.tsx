@@ -52,83 +52,6 @@ export interface InputBarHandle {
   addWorkspacePath: (path: string, kind: 'file' | 'directory', agentId?: string) => Promise<void>;
 }
 
-type SlashCommandCategory = 'session' | 'status' | 'model' | 'subagents' | 'config' | 'tools';
-
-interface SlashCommandOption {
-  command: string;
-  description: string;
-  keywords: string[];
-  category: SlashCommandCategory;
-  argumentHint?: string;
-}
-
-const CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
-  session: 'Session',
-  status: 'Status & Info',
-  model: 'Model & Options',
-  subagents: 'Subagents',
-  config: 'Config',
-  tools: 'Tools & Actions',
-};
-
-const CATEGORY_ORDER: Record<SlashCommandCategory, number> = {
-  session: 0,
-  status: 1,
-  model: 2,
-  subagents: 3,
-  config: 4,
-  tools: 5,
-};
-
-// None of the vendored Nerve slash commands are wired server-side in
-// Central Command (verified 2026-08-03: no route/handler anywhere in
-// web/server or central_command/api intercepts a leading "/" — the typed text
-// goes straight to the LLM as a chat message). Trimmed the decorative list
-// to empty rather than delete the autocomplete machinery below, so a real
-// command can be added here the day one is actually wired up.
-const SLASH_COMMANDS: SlashCommandOption[] = [];
-
-function getSlashCommandQuery(text: string, cursor: number): string | null {
-  if (!text.startsWith('/')) return null;
-  const commandEnd = text.search(/\s/);
-  const tokenEnd = commandEnd === -1 ? text.length : commandEnd;
-  if (cursor > tokenEnd) return null;
-  const query = text.slice(0, cursor).trim().toLowerCase();
-  return query.startsWith('/') ? query : null;
-}
-
-function filterSlashCommands(query: string | null): SlashCommandOption[] {
-  if (!query) return [];
-  return SLASH_COMMANDS.filter((option) => {
-    if (option.command.startsWith(query)) return true;
-    return option.keywords.some((keyword) => keyword.startsWith(query.slice(1)));
-  });
-}
-
-function groupSlashCommands(commands: SlashCommandOption[]): Map<SlashCommandCategory, SlashCommandOption[]> {
-  const grouped = new Map<SlashCommandCategory, SlashCommandOption[]>();
-  for (const cmd of commands) {
-    const existing = grouped.get(cmd.category) || [];
-    existing.push(cmd);
-    grouped.set(cmd.category, existing);
-  }
-  const sorted = new Map<SlashCommandCategory, SlashCommandOption[]>();
-  const categories = [...grouped.keys()].sort((a, b) => CATEGORY_ORDER[a] - CATEGORY_ORDER[b]);
-  for (const cat of categories) {
-    sorted.set(cat, grouped.get(cat)!);
-  }
-  return sorted;
-}
-
-function getFlatIndexFromGrouped(grouped: Map<SlashCommandCategory, SlashCommandOption[]>, groupIndex: number, itemIndex: number): number {
-  let flatIndex = 0;
-  const entries = [...grouped.entries()];
-  for (let i = 0; i < groupIndex; i++) {
-    flatIndex += entries[i][1].length;
-  }
-  return flatIndex + itemIndex;
-}
-
 interface StagedAttachment {
   id: string;
   file: File;
@@ -370,11 +293,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const [pathPickerCustomRoot, setPathPickerCustomRoot] = useState(() => persistedComposerSnapshot.pathPickerCustomRoot);
   const [sendPulse, setSendPulse] = useState(false);
   const [sendError, setSendError] = useState(false);
-  const [slashCommandQuery, setSlashCommandQuery] = useState<string | null>(null);
-  const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
-  const [dismissedSlashQuery, setDismissedSlashQuery] = useState<string | null>(null);
-  const slashMenuRef = useRef<HTMLDivElement | null>(null);
-  const slashOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const uploadsEnabled = isUploadsEnabled(uploadConfig);
   const attachByPathEnabled = uploadConfig.fileReferenceEnabled;
@@ -400,39 +318,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [sessions, ctxAgentName]);
 
   const { handleKeyDown: handleTabKey, reset: resetTabCompletion } = useTabCompletion(getSessionLabels, inputRef);
-
-  const slashSuggestions = useMemo(
-    () => filterSlashCommands(slashCommandQuery),
-    [slashCommandQuery],
-  );
-
-  const groupedSlashSuggestions = useMemo(
-    () => groupSlashCommands(slashSuggestions),
-    [slashSuggestions],
-  );
-
-  const isSlashMenuOpen = slashSuggestions.length > 0 && slashCommandQuery !== dismissedSlashQuery;
-
-  useEffect(() => {
-    slashOptionRefs.current.length = slashSuggestions.length;
-  }, [slashSuggestions.length]);
-
-  useEffect(() => {
-    if (!isSlashMenuOpen) return;
-
-    const menu = slashMenuRef.current;
-    const option = slashOptionRefs.current[selectedSlashIndex];
-    if (!menu || !option) return;
-
-    const menuRect = menu.getBoundingClientRect();
-    const optionRect = option.getBoundingClientRect();
-
-    if (optionRect.top < menuRect.top) {
-      menu.scrollTop -= menuRect.top - optionRect.top;
-    } else if (optionRect.bottom > menuRect.bottom) {
-      menu.scrollTop += optionRect.bottom - menuRect.bottom;
-    }
-  }, [isSlashMenuOpen, selectedSlashIndex, slashSuggestions.length]);
 
   const resizeInput = useCallback(() => {
     const input = inputRef.current;
@@ -582,13 +467,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     }
   }, [uploadsEnabled, stagedAttachments]);
 
-  const syncSlashStateFromInput = useCallback((input: HTMLTextAreaElement) => {
-    const nextQuery = getSlashCommandQuery(input.value, input.selectionStart ?? input.value.length);
-    setSlashCommandQuery(nextQuery);
-    if (nextQuery === null) setDismissedSlashQuery(null);
-    setSelectedSlashIndex(0);
-  }, []);
-
   const injectComposerText = useCallback((text: string, mode: 'replace' | 'append' = 'append') => {
     const input = inputRef.current;
     if (!input) return;
@@ -597,13 +475,12 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       ? mergeAddToChatText(input.value, text)
       : text;
     setDraftText(input.value);
-    syncSlashStateFromInput(input);
     resizeInput();
     focusInput();
     scheduleDeferredResize();
     input.setSelectionRange(input.value.length, input.value.length);
     resetTabCompletion();
-  }, [focusInput, resetTabCompletion, resizeInput, scheduleDeferredResize, syncSlashStateFromInput]);
+  }, [focusInput, resetTabCompletion, resizeInput, scheduleDeferredResize]);
 
   // Fetch current language for voice phrase matching
   const [voiceLang, setVoiceLang] = useState('en');
@@ -651,7 +528,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       input.style.height = 'auto';
       input.style.fontStyle = '';
       input.style.opacity = '';
-      syncSlashStateFromInput(input);
     }
     setDraftText('');
     onSend('[voice] ' + text);
@@ -675,11 +551,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         inputRef.current.style.opacity = '0.5';
         inputRef.current.style.height = 'auto';
         inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 160) + 'px';
-        syncSlashStateFromInput(inputRef.current);
       } else {
         inputRef.current.value = '';
         inputRef.current.style.height = 'auto';
-        syncSlashStateFromInput(inputRef.current);
       }
     } else {
       // Clear provisional styling when not recording
@@ -690,10 +564,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       if (voiceState === 'transcribing' || hadVoicePreviewStyling) {
         inputRef.current.value = '';
         inputRef.current.style.height = 'auto';
-        syncSlashStateFromInput(inputRef.current);
       }
     }
-  }, [interimTranscript, liveTranscriptionPreview, voiceState, syncSlashStateFromInput]);
+  }, [interimTranscript, liveTranscriptionPreview, voiceState]);
 
   const processFiles = useCallback(async (files: FileList | File[]) => {
     const selected = Array.from(files);
@@ -1192,9 +1065,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         input.style.height = 'auto';
       }
       setDraftText('');
-      setSlashCommandQuery(null);
-      setDismissedSlashQuery(null);
-      setSelectedSlashIndex(0);
 
       await onSend(text || '', inlineAttachments.length > 0 ? inlineAttachments : undefined, uploadPayload);
       clearStagedAttachments();
@@ -1236,51 +1106,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     clearVoiceError,
   ]);
 
-  const applySlashCommand = useCallback((option: SlashCommandOption) => {
-    const input = inputRef.current;
-    if (!input) return;
-    input.value = `${option.command} `;
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
-    setDraftText(input.value);
-    setSlashCommandQuery(null);
-    setDismissedSlashQuery(null);
-    setSelectedSlashIndex(0);
-  }, []);
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // IME composition guard: during active CJK composition the browser may
     // fire keydown for Enter/Escape/etc.  Let the IME handle them – acting
     // on these events causes ghost messages (issue #65).
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-
-    // Slash command menu keyboard handling
-    if (isSlashMenuOpen) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedSlashIndex((index) => (index + 1) % slashSuggestions.length);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedSlashIndex((index) => (index - 1 + slashSuggestions.length) % slashSuggestions.length);
-        return;
-      }
-      // Only autocomplete on plain Enter/Tab (no modifiers) to preserve send shortcuts
-      if ((e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.shiftKey) || (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.shiftKey)) {
-        e.preventDefault();
-        applySlashCommand(slashSuggestions[selectedSlashIndex]);
-        return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setDismissedSlashQuery(slashCommandQuery);
-        setSelectedSlashIndex(0);
-        return;
-      }
-    }
 
     // Tab completion for session names (Tab cycles, Escape cancels)
     if (e.key === 'Tab' || e.key === 'Escape') {
@@ -1296,7 +1126,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       if (input) {
         input.value = '';
         input.style.height = 'auto';
-        syncSlashStateFromInput(input);
       }
       setDraftText('');
       return;
@@ -1339,7 +1168,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         e.preventDefault();
         input.value = entry;
         setDraftText(entry);
-        syncSlashStateFromInput(input);
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 160) + 'px';
         input.setSelectionRange(input.value.length, input.value.length);
@@ -1361,7 +1189,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           input.value = '';
           setDraftText('');
         }
-        syncSlashStateFromInput(input);
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 160) + 'px';
         input.setSelectionRange(input.value.length, input.value.length);
@@ -1378,7 +1205,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     // remount still restores it. Keeps plain typing at zero React renders and
     // one resizeInput reflow instead of two.
     persistedComposerSnapshot.text = input.value;
-    syncSlashStateFromInput(input);
     resetTabCompletion();
     clearVoiceError();
     // rAF-batched: resizeInput forces a synchronous layout (height='auto' then
@@ -1485,49 +1311,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             set input.value directly, which is safe without a `value` prop.
             Do NOT add a `value={state}` prop without also passing a
             setValue callback to useTabCompletion. */}
-        {isSlashMenuOpen && (
-          <div className="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-border/70 bg-popover/95 shadow-[0_18px_40px_rgba(0,0,0,0.28)]">
-            <div ref={slashMenuRef} role="listbox" aria-label="Slash commands" className="max-h-64 overflow-y-auto p-2">
-              {[...groupedSlashSuggestions.entries()].map(([category, commands], groupIndex) => (
-                <div key={category} className="mb-1">
-                  <div className="px-3 py-1 text-[0.6875rem] font-semibold text-muted-foreground/80">
-                    {CATEGORY_LABELS[category]} <span className="text-muted-foreground/60">({commands.length})</span>
-                  </div>
-                  {commands.map((option, itemIndex) => {
-                    const flatIndex = getFlatIndexFromGrouped(groupedSlashSuggestions, groupIndex, itemIndex);
-                    const isSelected = flatIndex === selectedSlashIndex;
-                    return (
-                      <button
-                        key={option.command}
-                        ref={(node) => {
-                          slashOptionRefs.current[flatIndex] = node;
-                        }}
-                        type="button"
-                        role="option"
-                        aria-label={option.command}
-                        aria-selected={isSelected}
-                        className={`flex w-full items-start gap-3 rounded-xl px-3 py-2 text-left transition-colors ${isSelected ? 'bg-accent text-accent-foreground' : 'text-popover-foreground hover:bg-accent/70'}`}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => applySlashCommand(option)}
-                      >
-                        <span className="min-w-[5.5rem] font-mono text-[0.8125rem] font-semibold">
-                          {option.command}
-                          {option.argumentHint && <span className="text-muted-foreground/70 ml-1">{option.argumentHint}</span>}
-                        </span>
-                        <span className="text-[0.75rem] text-muted-foreground">{option.description}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
         <textarea
           ref={inputRef}
           onKeyDown={handleKeyDown}
           onInput={handleInput}
-          onSelect={e => syncSlashStateFromInput(e.currentTarget)}
           placeholder="Message..."
           aria-label="Message input"
           rows={1}

@@ -14,10 +14,6 @@ interface SettingsDrawerProps {
   open: boolean;
   onClose: () => void;
   // Connection settings
-  gatewayUrl: string;
-  gatewayToken: string;
-  onUrlChange: (url: string) => void;
-  onTokenChange: (token: string) => void;
   onReconnect: () => void;
   connectionState: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
   // Audio settings
@@ -62,10 +58,6 @@ const SETTINGS_CATEGORIES = [
 export function SettingsDrawer({
   open,
   onClose,
-  gatewayUrl,
-  gatewayToken,
-  onUrlChange,
-  onTokenChange,
   onReconnect,
   connectionState,
   soundEnabled,
@@ -235,10 +227,6 @@ export function SettingsDrawer({
 
             {currentCategory === 'advanced' && (
               <ConnectionSettings
-                url={gatewayUrl}
-                token={gatewayToken}
-                onUrlChange={onUrlChange}
-                onTokenChange={onTokenChange}
                 onReconnect={onReconnect}
                 connectionState={connectionState}
               />

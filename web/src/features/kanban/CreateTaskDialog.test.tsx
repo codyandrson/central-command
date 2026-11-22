@@ -47,8 +47,8 @@ describe('CreateTaskDialog', () => {
     mockUseSessionContext.mockReturnValue({
       sessions: [
         { sessionKey: 'agent:main:main', label: 'Kim (main)' },
-        { sessionKey: 'agent:designer:main', identityName: 'Designer' },
-        { sessionKey: 'agent:reviewer:main', identityName: 'Reviewer' },
+        { sessionKey: 'agent:designer:main', label: 'Designer' },
+        { sessionKey: 'agent:reviewer:main', label: 'Reviewer' },
         { sessionKey: 'agent:designer:subagent:abc', label: 'Designer helper' },
       ],
       agentName: 'Kim',
@@ -63,8 +63,8 @@ describe('CreateTaskDialog', () => {
 
     expect(await screen.findByRole('option', { name: 'Unassigned' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Operator' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Designer (designer)' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Reviewer (reviewer)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Designer' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Reviewer' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Kim (main)' })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Designer helper' })).not.toBeInTheDocument();
   });
@@ -76,7 +76,7 @@ describe('CreateTaskDialog', () => {
 
     await user.type(screen.getByLabelText(/title/i), 'Test task');
     await user.click(screen.getByRole('combobox', { name: 'Assignee' }));
-    await user.click(await screen.findByRole('option', { name: 'Designer (designer)' }));
+    await user.click(await screen.findByRole('option', { name: 'Designer' }));
     await user.click(screen.getByRole('button', { name: /create task/i }));
 
     await waitFor(() => {

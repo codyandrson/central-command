@@ -62,22 +62,23 @@ describe('workspace self-heal (default-path auto-create)', () => {
     return app;
   }
 
-  it('auto-creates a DB-only agent\'s default workspace dir and self-heals identity + chatPathLinks', async () => {
+  it('auto-creates a DB-only agent\'s default workspace dir and self-heals chatPathLinks', async () => {
     const app = await buildApp();
     const workspaceRoot = path.join(homeDir, '.openclaw', 'workspace-freshagent');
 
-    const identityRes = await app.request('/api/workspace/identity?agentId=freshagent');
-    expect(identityRes.status).toBe(200);
-    const identityJson = (await identityRes.json()) as { ok: boolean; content: string };
-    expect(identityJson.ok).toBe(true);
-    expect(identityJson.content).toContain('Name:');
-    expect(identityJson.content).toContain('freshagent');
-    await expect(fs.readFile(path.join(workspaceRoot, 'IDENTITY.md'), 'utf-8')).resolves.toBe(identityJson.content);
-
     const chatLinksRes = await app.request('/api/workspace/chatPathLinks?agentId=freshagent');
     expect(chatLinksRes.status).toBe(200);
-    const chatLinksJson = (await chatLinksRes.json()) as { ok: boolean };
+    const chatLinksJson = (await chatLinksRes.json()) as { ok: boolean; content: string };
     expect(chatLinksJson.ok).toBe(true);
+    await expect(fs.readFile(path.join(workspaceRoot, 'CHAT_PATH_LINKS.json'), 'utf-8')).resolves.toBe(chatLinksJson.content);
+  });
+
+  it('no longer serves IDENTITY.md: agent names come from the roster', async () => {
+    const app = await buildApp();
+    const res = await app.request('/api/workspace/identity?agentId=freshagent');
+
+    expect(res.status).toBe(400);
+    await expect(fs.access(path.join(homeDir, '.openclaw', 'workspace-freshagent', 'IDENTITY.md'))).rejects.toThrow();
   });
 
   it('does not auto-create an explicitly-configured but missing workspace path (stays 404)', async () => {
@@ -90,7 +91,7 @@ describe('workspace self-heal (default-path auto-create)', () => {
     );
 
     const app = await buildApp();
-    const res = await app.request('/api/workspace/identity?agentId=configuredagent');
+    const res = await app.request('/api/workspace/soul?agentId=configuredagent');
 
     expect(res.status).toBe(404);
     await expect(fs.access(configuredMissingPath)).rejects.toThrow();
@@ -98,7 +99,7 @@ describe('workspace self-heal (default-path auto-create)', () => {
 
   it('rejects a malformed agentId before touching the filesystem', async () => {
     const app = await buildApp();
-    const res = await app.request('/api/workspace/identity?agentId=..%2Fbad');
+    const res = await app.request('/api/workspace/soul?agentId=..%2Fbad');
 
     expect(res.status).toBe(400);
     const json = (await res.json()) as { ok: boolean; error: string };

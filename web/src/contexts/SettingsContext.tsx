@@ -37,10 +37,6 @@ interface SettingsContextValue {
   speakingPhase: SpeakingPhase | null;
   telemetryVisible: boolean;
   toggleTelemetry: () => void;
-  eventsVisible: boolean;
-  toggleEvents: () => void;
-  logVisible: boolean;
-  toggleLog: () => void;
   showHiddenWorkspaceEntries: boolean;
   toggleShowHiddenWorkspaceEntries: () => void;
   commandPaletteButtonVisible: boolean;
@@ -134,12 +130,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [telemetryVisible, setTelemetryVisible] = useState(() => {
     const saved = localStorage.getItem('oc-telemetry-visible');
     return saved !== 'false'; // Default to true (visible)
-  });
-  const [eventsVisible, setEventsVisible] = useState(() => {
-    return localStorage.getItem('nerve:showEvents') === 'true'; // Default to false (hidden)
-  });
-  const [logVisible, setLogVisible] = useState(() => {
-    return localStorage.getItem('nerve:showLog') === 'true'; // Default to false (hidden)
   });
   const [showHiddenWorkspaceEntries, setShowHiddenWorkspaceEntries] = useState(() => {
     return localStorage.getItem('nerve:showHiddenWorkspaceEntries') === 'true';
@@ -256,22 +246,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const toggleEvents = useCallback(() => {
-    setEventsVisible(prev => {
-      const next = !prev;
-      localStorage.setItem('nerve:showEvents', String(next));
-      return next;
-    });
-  }, []);
-
-  const toggleLog = useCallback(() => {
-    setLogVisible(prev => {
-      const next = !prev;
-      localStorage.setItem('nerve:showLog', String(next));
-      return next;
-    });
-  }, []);
-
   const toggleShowHiddenWorkspaceEntries = useCallback(() => {
     setShowHiddenWorkspaceEntries(prev => {
       const next = !prev;
@@ -344,10 +318,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     speakingPhase,
     telemetryVisible,
     toggleTelemetry,
-    eventsVisible,
-    toggleEvents,
-    logVisible,
-    toggleLog,
     showHiddenWorkspaceEntries,
     toggleShowHiddenWorkspaceEntries,
     commandPaletteButtonVisible,
@@ -369,7 +339,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     wakeWordEnabled, handleToggleWakeWord, handleWakeWordState,
     liveTranscriptionPreview, toggleLiveTranscriptionPreview,
     speak, speakNow, stopSpeaking, speaking, speakingPhase, telemetryVisible, toggleTelemetry,
-    eventsVisible, toggleEvents, logVisible, toggleLog, showHiddenWorkspaceEntries, toggleShowHiddenWorkspaceEntries,
+    showHiddenWorkspaceEntries, toggleShowHiddenWorkspaceEntries,
     commandPaletteButtonVisible, toggleCommandPaletteButtonVisible,
     theme, setTheme, font, setFont,
     fontSize, setFontSize, editorFontSize, setEditorFontSize, kanbanVisible, toggleKanbanVisible,

@@ -25,7 +25,6 @@ import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import ttsRoutes from './routes/tts.js';
 import transcribeRoutes from './routes/transcribe.js';
-import agentLogRoutes from './routes/agent-log.js';
 // Central Command: usage numbers come from LiteLLM (the system of record).
 import tokensRoutes from './routes/cc-tokens.js';
 // Central Command: the workspace Memory tab's note store and learned aggregate.
@@ -35,11 +34,10 @@ import versionRoutes from './routes/version.js';
 import versionCheckRoutes from './routes/version-check.js';
 import updateProxyRoutes from './routes/cc-update-proxy.js';
 import gatewayRoutes from './routes/gateway.js';
-import connectDefaultsRoutes from './routes/connect-defaults.js';
 import workspaceRoutes from './routes/workspace.js';
 // The Config tab's per-agent config is the governed charter, not a filesystem
-// workspace. workspaceRoutes stays registered: SessionContext (identity) and
-// App.tsx (chatPathLinks) still call /api/workspace.
+// workspace. workspaceRoutes stays registered: App.tsx (chatPathLinks) still
+// calls /api/workspace.
 import charterRoutes from './routes/cc-charter.js';
 import mailRulesRoutes from './routes/cc-mail-rules.js';
 import mcpRoutes from './routes/cc-mcp.js';
@@ -109,10 +107,10 @@ app.use('*', cacheHeaders);
 // ── API routes ───────────────────────────────────────────────────────
 
 const routes = [
-  healthRoutes, authRoutes, ttsRoutes, transcribeRoutes, agentLogRoutes,
+  healthRoutes, authRoutes, ttsRoutes, transcribeRoutes,
   tokensRoutes, learnedRoutes, serverInfoRoutes,
   versionRoutes, versionCheckRoutes,
-  gatewayRoutes, connectDefaultsRoutes,
+  gatewayRoutes,
   workspaceRoutes, charterRoutes, mailRulesRoutes, mcpRoutes, cronsRoutes, filesRoutes,
   voicePhrasesRoutes, fileBrowserRoutes, uploadConfigRoutes, uploadReferenceRoutes, kanbanRoutes,
   graphRoutes, activityRoutes, loeRoutes, skillsRoutes, decisionsRoutes, sourcesRoutes,

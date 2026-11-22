@@ -27,7 +27,6 @@ const app = new Hono();
 const FILE_MAP: Record<string, string> = {
   soul: 'SOUL.md',
   tools: 'TOOLS.md',
-  identity: 'IDENTITY.md',
   user: 'USER.md',
   agents: 'AGENTS.md',
   heartbeat: 'HEARTBEAT.md',
@@ -70,7 +69,6 @@ app.get('/api/workspace/:key', rateLimitGeneral, async (c) => {
     } catch (err) {
       const isEnoent = (err as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
       const isMissingChatPathLinks = key === 'chatPathLinks' && isEnoent;
-      const isMissingIdentity = key === 'identity' && isEnoent;
 
       if (isMissingChatPathLinks) {
         const content = createChatPathLinksTemplate({
@@ -90,21 +88,6 @@ app.get('/api/workspace/:key', rateLimitGeneral, async (c) => {
         }
       }
 
-      if (isMissingIdentity) {
-        // Minimal default whose parsed display name (see extractIdentityName)
-        // is just the agent id — enough for the subagent name lookup to
-        // succeed instead of retrying forever.
-        const content = `# IDENTITY.md\n\n- **Name:** ${workspace.agentId}\n`;
-
-        try {
-          await fs.mkdir(path.dirname(filePath), { recursive: true });
-          await fs.writeFile(filePath, content, 'utf-8');
-          console.warn(`[workspace] Missing ${filename}; regenerated local default template at ${filePath}`);
-          return c.json({ ok: true, content });
-        } catch (writeErr) {
-          console.warn('[workspace] Failed to regenerate local identity default:', (writeErr as Error).message);
-        }
-      }
       // Local failed — try gateway fallback
     }
   }

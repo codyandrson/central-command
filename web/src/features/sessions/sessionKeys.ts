@@ -166,12 +166,6 @@ export function getTopLevelAgentSessions(sessions: Session[]): Session[] {
     });
 }
 
-export function extractIdentityName(content: string): string | null {
-  const normalized = content.replace(/\*\*/g, '');
-  const match = normalized.match(/^\s*(?:[-*]\s*)?Name\s*:\s*(.+?)\s*$/im);
-  return match?.[1]?.trim() || null;
-}
-
 /** "Sep 20 21:05" in the browser's timezone, 24h. Central Command: the
  *  server sends `createdAt` as an ISO instant and never pre-renders it — a
  *  server-formatted time is UTC text the viewer cannot re-localise. */
@@ -186,7 +180,6 @@ export function formatLabelStamp(createdAt: string | number): string {
 export function getSessionDisplayLabel(session: Session, agentName = 'Agent'): string {
   const sessionKey = getSessionKey(session);
   const rootId = getRootAgentId(sessionKey);
-  const identityName = session.identityName?.trim();
   let explicitLabel = session.label?.trim();
   if (explicitLabel && session.labelStamped && session.createdAt != null) {
     const stamp = formatLabelStamp(session.createdAt);
@@ -200,8 +193,8 @@ export function getSessionDisplayLabel(session: Session, agentName = 'Agent'): s
   }
 
   if (isTopLevelAgentSessionKey(sessionKey)) {
+    // The roster name: Central Command's root rows carry it as `label`.
     if (explicitLabel) return explicitLabel;
-    if (identityName && rootId) return `${identityName} (${rootId})`;
     if (rootId) return rootId;
   }
 

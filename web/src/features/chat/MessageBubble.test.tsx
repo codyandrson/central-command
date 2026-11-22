@@ -31,9 +31,7 @@ describe('MessageBubble', () => {
         msg={makeMessage()}
         index={0}
         isCollapsed={false}
-        isMemoryCollapsed={false}
         onToggleCollapse={() => {}}
-        onToggleMemory={() => {}}
       />,
     );
 
@@ -56,9 +54,7 @@ describe('MessageBubble', () => {
         msg={makeMessage({ role: 'assistant', rawText: '[notes](docs/todo.md)' })}
         index={0}
         isCollapsed={false}
-        isMemoryCollapsed={false}
         onToggleCollapse={() => {}}
-        onToggleMemory={() => {}}
         onOpenWorkspacePath={handlerOne}
       />,
     );
@@ -72,9 +68,7 @@ describe('MessageBubble', () => {
         msg={makeMessage({ role: 'assistant', rawText: '[notes](docs/todo.md)' })}
         index={0}
         isCollapsed={false}
-        isMemoryCollapsed={false}
         onToggleCollapse={() => {}}
-        onToggleMemory={() => {}}
         onOpenWorkspacePath={handlerTwo}
       />,
     );
@@ -115,9 +109,7 @@ describe('MessageBubble', () => {
         })}
         index={0}
         isCollapsed={false}
-        isMemoryCollapsed={false}
         onToggleCollapse={() => {}}
-        onToggleMemory={() => {}}
       />,
     );
 
@@ -156,9 +148,7 @@ describe('MessageBubble', () => {
         msg={makeMessage({ rawText: 'Please review these.', uploadAttachments: [attachment] })}
         index={0}
         isCollapsed={false}
-        isMemoryCollapsed={false}
         onToggleCollapse={() => {}}
-        onToggleMemory={() => {}}
       />,
     );
 
@@ -174,9 +164,7 @@ describe('MessageBubble', () => {
         })}
         index={0}
         isCollapsed={false}
-        isMemoryCollapsed={false}
         onToggleCollapse={() => {}}
-        onToggleMemory={() => {}}
       />,
     );
 
@@ -214,9 +202,7 @@ describe('MessageBubble', () => {
         msg={makeMessage({ rawText: 'Please review these.', uploadAttachments: [attachment] })}
         index={0}
         isCollapsed={false}
-        isMemoryCollapsed={false}
         onToggleCollapse={() => {}}
-        onToggleMemory={() => {}}
       />,
     );
 
@@ -232,9 +218,7 @@ describe('MessageBubble', () => {
         })}
         index={0}
         isCollapsed={false}
-        isMemoryCollapsed={false}
         onToggleCollapse={() => {}}
-        onToggleMemory={() => {}}
       />,
     );
 

@@ -16,8 +16,6 @@ export interface CommandActions {
   onSetFont: (font: FontName) => void;
   onTtsProviderChange: (provider: TTSProvider) => void;
   onToggleWakeWord: () => void;
-  onToggleEvents: () => void;
-  onToggleLog: () => void;
   onToggleTelemetry: () => void;
   onOpenSettings: () => void;
   onRefreshSessions: () => void;
@@ -108,20 +106,6 @@ export function createCommands(actions: CommandActions): Command[] {
       action: actions.onRefreshSessions,
       category: 'actions',
       keywords: ['refresh', 'reload', 'sessions'],
-    },
-    {
-      id: 'toggle-events',
-      label: 'Toggle Events Panel',
-      action: actions.onToggleEvents,
-      category: 'navigation',
-      keywords: ['events', 'log', 'panel'],
-    },
-    {
-      id: 'toggle-log',
-      label: 'Toggle Log Panel',
-      action: actions.onToggleLog,
-      category: 'navigation',
-      keywords: ['activity', 'log', 'panel'],
     },
     {
       id: 'toggle-telemetry',
