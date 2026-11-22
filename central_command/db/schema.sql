@@ -837,12 +837,12 @@ create table if not exists skill_bundled_text (
     first_seen_at      timestamptz not null default now()
 );
 
--- The review of one target release against the library, computed by
--- `skills/refresh.py` (epic-skills-refresh-on-update R2). Keyed to the target: a
--- review for another target replaces every row, and a verdict is bound to the
--- (ours_hash, theirs_hash) it was decided over, so a recompute voids it when
--- either moved. No foreign key to `skill`: a `new` row names a skill the
--- library does not hold yet. A whole-skill row carries doc_key '*'.
+-- UNUSED since DL-232 (the pre-update review it stored, and the gate that read
+-- it, are gone). Kept because this file is additive only: dropping a table is
+-- not, and v2.126.0's updater, which drives the update into the release that
+-- retired it, still writes and reads it from its own tree at stage and resolve.
+-- Nothing in the current tree reads or writes it; a later release may drop it
+-- deliberately.
 create table if not exists skill_doc_review (
     target           text not null,          -- '2.68.0'
     ref              text not null,          -- 'v2.68.0' | 'upstream'
@@ -863,6 +863,27 @@ create table if not exists skill_doc_review (
     applied_at       timestamptz,
     apply_error      text,
     primary key (target, skill_id, doc_key)
+);
+
+-- A bundled doc the operator edited that a release changed or removed (DL-232):
+-- the release comparison at the start of a release (`skills/refresh.py sync`)
+-- kept the library's text and wrote this row for the operator to decide in the
+-- Skills page. One row per doc and release; an open row has no decision. The
+-- release's text is `skill_bundled_text` under `release_hash` (null when the
+-- release removed the doc). A decided row stays: it is also what stops the
+-- comparison flagging the same release text over the same base again.
+create table if not exists skill_doc_flag (
+    skill_id     text not null references skill (id) on delete cascade,
+    doc_key      text not null,
+    release      text not null,          -- the release whose change met the edit: '2.130.0'
+    change       text not null,          -- 'changed' | 'removed'
+    bundled_path text not null,          -- the file under the checkout: 'skills/jira/references/api.md'
+    base_hash    text,                   -- the base the edit was made over; null when none was recorded
+    release_hash text,                   -- what the release ships; null when it removed the doc
+    flagged_at   timestamptz not null default now(),
+    decision     text,                   -- null while open | 'take_release' | 'keep_mine' | 'edit'
+    decided_at   timestamptz,
+    primary key (skill_id, doc_key, release)
 );
 
 -- Exactly one CURRENT version per document. The invariant is the index, not a

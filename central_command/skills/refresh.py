@@ -1,61 +1,55 @@
-"""The review of a target release's bundled skills against the library
-(epic-skills-refresh-on-update R2).
+"""The bundled skill docs at the start of a release (DL-232, amending DL-198).
 
-One module computes, for a target ref, the status of every bundled doc, the
-three-way merge of the ones both sides changed, and stores the result keyed to
-the target. The API route, the updaters' stage step and their gate all call it.
+Per bundled doc, three texts: the stored BASE (the newest version's
+`bundled_hash`, its text in `skill_bundled_text`: what the last release shipped
+to this library), the LIBRARY's text (what agents are served now) and the DISK
+text (the release's file under the checkout's `skills/`, rendered through the
+skill overlay exactly as an import renders it). Then:
 
-The command line is the contract the two updaters build to. It opens the
-database directly, so it answers with the API up or down, and takes its settings
-from the checkout's `.env` as the API does:
+    library == base            nobody edited it: library and base become the disk
+                               text (a new doc is added, a removed one retired);
+    disk == base               the release did not change it: nothing changes;
+    otherwise                  edited here AND changed by the release: the
+                               library's text is KEPT, the new base is recorded
+                               (a version carrying the library's text with the
+                               release's provenance), and the doc is FLAGGED in
+                               `skill_doc_flag` for the operator to decide in the
+                               Skills page: take the release's text, keep theirs,
+                               or edit. Nothing merges automatically.
 
-    python -m central_command.skills.refresh review --target <version> --ref <ref>
-        compute and store; prints the counts, never doc text.
-        exit 0 stored; exit 2 could not be computed or stored.
+An edit is never overwritten: every write re-checks the library's text under a
+row lock (`repo.apply_bundled_skill_doc`). A retired skill is left alone; a doc
+retired here counts as edited. A flag is written once per (doc, change, base,
+release text), so a flag the operator decided is not raised again for the same
+release text. No git is read: the disk is the release.
 
-    python -m central_command.skills.refresh check --target <version> --ref <ref>
-        the gate; recomputes first, so it answers for the library as it is now
-        and not as it was when the release was staged (a verdict survives where
-        its hashes did).
-        exit 0 nothing unresolved; exit 3 docs unresolved, each named on stdout;
-        exit 2 could not be computed, which leaves the gate closed.
+It runs where the updaters already loaded skills after an update: the `skills`
+phase of `deploy/k3s/cc-update.sh` and `refresh_bundled_skills` in
+`deploy/single/update.sh`'s `deploy_current_tree`, with the API stopped. It
+opens the database directly and takes its settings from the checkout's `.env`:
 
-    python -m central_command.skills.refresh apply --target <version> --ref <ref> [--actor updater]
-        post the STORED review, never a recomputed one: the updater runs this
-        after the merge, when HEAD is already the target. Each row is its own
-        transaction, a row that fails records `apply_error` and the run goes on,
-        and a row already applied is skipped, so a re-run posts only what is
-        missing. `--actor` is who posts what nobody decided; a verdict's version
-        is always the operator's.
-        exit 0 every row applied or nothing was due; exit 1 a row failed, each
-        named on stderr with its reason and no doc text; exit 2 could not run
-        (no review stored, the ref unreadable, the database down), nothing
-        posted; exit 3 docs unresolved, each named on stdout, nothing posted.
+    python -m central_command.skills.refresh sync
+        exit 0 every doc compared; exit 1 a doc's write failed (each named on
+        stderr with its reason, never doc text; the rest went on, and a re-run
+        retries it); exit 2 could not run (no bundled skills on disk, a file the
+        importer would refuse, the database down) and nothing was written.
 
-`<ref>` is what the stage names: `v<target>` on k3s, `upstream` on single-node.
-
-Everything read from git passes `importer.normalise_doc_text` with the live
-overlay before it is hashed or merged, so every comparison is between texts as
-the library stores them (A5). A missing ref, an unreadable repo, a file the
-importer would refuse or a database error raises, and nothing is stored: the
-computation finishes before the one transaction that writes.
+The older command lines `review`, `check` and `apply --target --ref [--actor]`
+are kept for ONE release only (see `_LEGACY`): v2.126.0's updater drives the
+update into this release and calls `apply` on the merged tree.
 
 API tier: this module imports nothing from `gateway/` or `executor`, and nothing
-under `runtime/` imports it (`tests/test_skills_update_review.py` walks both).
+under `runtime/` imports it (`tests/test_skills_refresh_boundary.py`).
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import os
-import subprocess
 import sys
-import tempfile
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from central_command import events
 from central_command.config import settings
@@ -64,22 +58,13 @@ from central_command.skills import importer
 from central_command.skills import overlay as skill_overlay
 from central_command.skills.ids import validate_skill_id
 
-# The doc_key of a row about a skill as a whole (`skill-retired`). A slug from
-# `importer._doc_key` can never be this.
-WHOLE_SKILL_KEY = "*"
-
-# Who may post what nobody decided. An apply never posts as the operator on its
-# own account: a verdict is what makes a version the operator's.
-APPLY_ACTORS = ("updater",)
-
-# A checkout's git variables would point a read at the wrong repository when
-# this runs under a git hook.
-_GIT_ENV_DROPPED = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+# What the operator may decide on a flag.
+DECISIONS = ("take_release", "keep_mine", "edit")
 
 
 @dataclass(frozen=True)
 class BundledDoc:
-    """One bundled file at one ref, as the library would store it."""
+    """One bundled file on disk, as the library would store it."""
 
     path: str   # relative to the checkout: 'skills/jira/references/api.md'
     kind: str   # 'guidance' | 'reference'
@@ -87,480 +72,339 @@ class BundledDoc:
     meta: dict  # frontmatter fields, as written
 
 
-def _git(root: Path, *args: str) -> bytes:
-    env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_DROPPED}
-    done = subprocess.run(["git", *args], cwd=root, env=env, capture_output=True)
-    if done.returncode != 0:
-        detail = done.stderr.decode("utf-8", "replace").strip()
-        raise ValueError(f"git {' '.join(args)} failed in {root}: {detail}")
-    return done.stdout
+def read_disk(root: Path, overlay: dict[str, str]) -> dict[tuple[str, str], BundledDoc]:
+    """Every bundled doc under `root/skills/`, keyed (skill_id, doc_key).
 
-
-def _decode(raw: bytes, source: str) -> str:
-    """Bytes from git -> the text an import reads from the same file. An import
-    goes through `Path.read_text`, whose universal newlines turn CRLF and lone CR
-    into LF; skipping that here would make a CRLF file read as a release change."""
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as e:
-        raise ValueError(f"{source} is not valid UTF-8: {e}") from e
-    return text.replace("\r\n", "\n").replace("\r", "\n")
-
-
-def read_tree(root: Path, ref: str, overlay: dict[str, str]) -> dict[tuple[str, str], BundledDoc]:
-    """Every bundled doc at `ref`, keyed (skill_id, doc_key).
-
-    The same shape an import walks: a skill is a folder directly under `skills/`
-    holding a SKILL.md, its docs are that file and `references/*.md`, and the
-    keys are the importer's. Two files on one key raise, as an import does.
+    The shape an import walks: a skill is a folder directly under `skills/`
+    holding a SKILL.md, its docs are that file and `references/*.md`, the id is
+    the folder's name (what the install's import passes) and the keys are the
+    importer's. Two files on one key raise, as an import does, and so does a
+    file the importer would refuse: everything is read before anything is written.
     """
-    commit = _git(root, "rev-parse", "--verify", f"{ref}^{{commit}}").decode().strip()
-    listed = _git(root, "ls-tree", "-r", "--name-only", "-z", commit, "--", "skills/")
-    paths = [PurePosixPath(p) for p in listed.decode("utf-8").split("\0") if p]
-    skills = {p.parts[1] for p in paths if len(p.parts) == 3 and p.name == "SKILL.md"}
-
     docs: dict[tuple[str, str], BundledDoc] = {}
-    for p in sorted(paths):
-        if len(p.parts) < 3 or p.parts[1] not in skills:
-            continue
-        if len(p.parts) == 3 and p.name == "SKILL.md":
-            kind, key = "guidance", "guidance"
-        elif len(p.parts) == 4 and p.parts[2] == "references" and p.suffix == ".md":
-            kind, key = "reference", importer._doc_key(p.name)
-        else:
-            continue
-        skill_id = validate_skill_id(p.parts[1])
-        source = f"{ref}:{p}"
-        if (skill_id, key) in docs:
-            raise ValueError(
-                f"{source} and {docs[(skill_id, key)].path} collide on doc_key {key!r}"
-            )
-        raw = _git(root, "show", f"{commit}:{p}")
-        doc = importer.normalise_doc_text(kind, _decode(raw, source), source, overlay=overlay)
-        docs[(skill_id, key)] = BundledDoc(str(p), kind, doc.text, doc.meta)
+    skills_dir = root / "skills"
+    for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
+        folder = skill_md.parent
+        skill_id = validate_skill_id(folder.name)
+        files = [("guidance", "guidance", skill_md)]
+        ref_dir = folder / "references"
+        if ref_dir.is_dir():
+            files += [
+                ("reference", importer._doc_key(f.name), f)
+                for f in sorted(ref_dir.glob("*.md")) if f.is_file()
+            ]
+        for kind, key, f in files:
+            rel = f.relative_to(root).as_posix()
+            if (skill_id, key) in docs:
+                raise ValueError(f"{rel} and {docs[(skill_id, key)].path} collide on doc_key {key!r}")
+            doc = importer.normalise_doc_text(kind, importer._read_text(f), str(f), overlay=overlay)
+            docs[(skill_id, key)] = BundledDoc(rel, kind, doc.text, doc.meta)
     return docs
 
 
-def merge_three_way(ours: str, base: str, theirs: str, installed: str, target: str) -> tuple[str, int]:
-    """`git merge-file --diff3` over the three texts -> (merged, conflict count),
-    markers kept. Git reports an error as a negative exit status, which a process
-    sees as 255, so anything above the documented cap of 127 raises."""
-    with tempfile.TemporaryDirectory(prefix="cc-skill-merge-") as d:
-        files = []
-        for name, text in (("ours", ours), ("base", base), ("theirs", theirs)):
-            f = Path(d) / name
-            f.write_bytes(text.encode("utf-8"))
-            files.append(str(f))
-        done = subprocess.run(
-            [
-                "git", "merge-file", "-p", "--diff3",
-                "-L", "mine (library)",
-                "-L", f"base (v{installed})",
-                "-L", f"release (v{target})",
-                *files,
-            ],
-            cwd=d, capture_output=True,
-        )
-    if not 0 <= done.returncode <= 127:
-        detail = done.stderr.decode("utf-8", "replace").strip()
-        raise ValueError(f"git merge-file failed (exit {done.returncode}): {detail}")
-    return done.stdout.decode("utf-8"), done.returncode
+def _hash(text: str | None) -> str | None:
+    return importer.bundled_text_hash(text) if text is not None else None
 
 
-def _classify(
-    key: tuple[str, str],
-    installed: dict[tuple[str, str], BundledDoc],
-    theirs_tree: dict[tuple[str, str], BundledDoc],
-    library: dict,
-    labels: tuple[str, str],
+def decide(
+    disk_doc: BundledDoc | None, lib: dict | None, prov: dict | None, seen: set[tuple], key: tuple,
 ) -> dict | None:
-    """One doc's row, or None when nothing anywhere holds it any more (a file of
-    the installed tree the library never received and the target dropped)."""
-    skill_id, doc_key = key
-    theirs_doc, installed_doc = theirs_tree.get(key), installed.get(key)
-    lib, prov = library["docs"].get(key), library["provenance"].get(key)
-    theirs = theirs_doc.text if theirs_doc else None
-    ours = lib["content"] if lib and lib["is_current"] else None
+    """One doc's act, or None when nothing changes. Pure: the rule in one place.
 
+    Acts: `follow` (post the release text with its provenance, which also adds a
+    doc the library never held), `retire` (the release removed a doc nobody
+    edited), `keep` (record the new base under the library's text and flag it),
+    `flag` (flag only: the doc is retired here, or the release removed an edited
+    doc, so there is no version to carry a new base and the flag row records it).
+    """
+    theirs = disk_doc.text if disk_doc else None
+    if lib is None:
+        return {"act": "follow"} if theirs is not None else None
+    ours = lib["content"] if lib["is_current"] else None
+    base = None
     if prov is not None:
         if prov["bundled_text"] is None:
-            raise ValueError(
-                f"{skill_id}/{doc_key}: no bundled text is stored for hash {prov['bundled_hash']}"
-            )
-        base, base_hash, base_origin = prov["bundled_text"], prov["bundled_hash"], "library"
-    elif installed_doc is not None:
-        base = installed_doc.text
-        base_hash, base_origin = importer.bundled_text_hash(base), "installed-tree"
+            raise ValueError(f"no bundled text is stored for hash {prov['bundled_hash']}")
+        base = prov["bundled_text"]
+
+    if theirs is not None and theirs == base:
+        return None                                   # the release did not change it
+    if ours is not None and ours == base:             # nobody edited it
+        return {"act": "follow"} if theirs is not None else {"act": "retire"}
+    if theirs is None:
+        if ours is None or base is None:
+            return None                               # retired on both sides, or never bundled
+        change = "removed"
     else:
-        base, base_hash, base_origin = None, None, "installed-tree"
-    ours_hash = importer.bundled_text_hash(ours) if ours is not None else None
-    theirs_hash = importer.bundled_text_hash(theirs) if theirs is not None else None
-
-    merged, conflicts = None, 0
-    if lib is None:
-        if theirs is None:
-            return None
-        status = "new"
-    elif theirs is None:
-        # Retired upstream means the installed release shipped the file and the
-        # target does not. Absent from both, a doc is the library's own, which
-        # is also what a keep-mine of an earlier retirement leaves behind; and a
-        # doc both sides retired has nothing left to decide.
-        status = "retired-upstream" if ours is not None and installed_doc else "local-only"
-    elif theirs_hash == base_hash:
-        status = "unchanged-upstream"
-    elif ours is None:
-        status = "retired-locally"
-    elif ours_hash == base_hash:
-        status = "unmodified"
-    else:
-        status = "modified"
-        merged, conflicts = merge_three_way(ours, base or "", theirs, *labels)
-
-    path = theirs_doc or installed_doc
-    return {
-        "skill_id": skill_id,
-        "doc_key": doc_key,
-        "status": status,
-        "bundled_path": path.path if path else (prov["bundled_path"] if prov else ""),
-        "base_hash": base_hash,
-        "base_origin": base_origin,
-        "ours_hash": ours_hash,
-        "theirs_hash": theirs_hash,
-        "merged": merged,
-        "conflicts": conflicts,
+        if ours == theirs:
+            return {"act": "follow"}                  # already the release's text: the base catches up
+        change = "changed"
+    flag = {
+        "change": change,
+        "bundled_path": disk_doc.path if disk_doc else prov["bundled_path"],
+        "base_hash": prov["bundled_hash"] if prov else None,
+        "release_hash": _hash(theirs),
     }
+    if (*key, change, flag["base_hash"], flag["release_hash"]) in seen:
+        return None                                   # already put to the operator
+    act = "keep" if change == "changed" and ours is not None else "flag"
+    return {"act": act, "flag": flag}
 
 
-def _classify_all(installed, theirs_tree, library, labels) -> list[dict]:
-    bundled = {skill for skill, _ in (*installed, *theirs_tree)}
-    retired = {s for s in bundled if library["skills"].get(s) == "RETIRED"}
-    rows = [
-        {
-            "skill_id": s, "doc_key": WHOLE_SKILL_KEY, "status": "skill-retired",
-            "bundled_path": f"skills/{s}", "base_hash": None, "base_origin": "library",
-            "ours_hash": None, "theirs_hash": None, "merged": None, "conflicts": 0,
-        }
-        for s in sorted(retired)
-    ]
-    keys = {*installed, *theirs_tree, *library["docs"]}
-    for key in sorted(k for k in keys if k[0] not in retired):
-        row = _classify(key, installed, theirs_tree, library, labels)
-        if row is not None:
-            rows.append(row)
-    return rows
-
-
-@dataclass(frozen=True)
-class _StatusRule:
-    """What one status asks of the operator and what the apply does with it."""
-
-    # Whether the operator must decide the row: a bool, or a test of the row.
-    decides: bool | Callable[[dict], bool] = False
-    # The act posted, as the updater, when nobody had to decide (a row with a
-    # verdict only when `verdict_free`: those rows never carry one).
-    auto: str | None = None
-    verdict_free: bool = False
-    # verdict -> act, posted as the operator.
-    verdicts: Mapping[str, str] = field(default_factory=dict)
-
-
-# THE status table (the contract's apply table): the eight statuses, which of
-# them wait for a verdict, and what each verdict does. `needs_verdict` and the
-# apply's `_apply_act` both read it, so neither can drift from the other.
-STATUS_RULES: dict[str, _StatusRule] = {
-    "unchanged-upstream": _StatusRule(),
-    "unmodified": _StatusRule(auto="post_theirs", verdict_free=True),
-    "new": _StatusRule(auto="post_theirs", verdict_free=True),
-    "local-only": _StatusRule(),
-    "skill-retired": _StatusRule(),
-    # A clean merge still must be decided: a `modified` doc is never resolved
-    # automatically.
-    "modified": _StatusRule(
-        decides=True,
-        verdicts={"take_release": "post_theirs", "keep_mine": "post_ours", "edit": "post_edit"},
-    ),
-    "retired-upstream": _StatusRule(
-        decides=lambda row: row["ours_hash"] != row["base_hash"],
-        auto="retire", verdicts={"take_release": "retire"},
-    ),
-    "retired-locally": _StatusRule(decides=True, verdicts={"take_release": "post_theirs"}),
-}
-_NO_RULE = _StatusRule()
-
-
-def needs_verdict(row: dict) -> bool:
-    """Whether the operator must decide this row."""
-    decides = STATUS_RULES.get(row["status"], _NO_RULE).decides
-    return decides(row) if callable(decides) else decides
-
-
-def unresolved_rows(rows: list[dict]) -> list[dict]:
-    return [r for r in rows if needs_verdict(r) and r.get("verdict") is None]
-
-
-def review_counts(rows: list[dict]) -> dict[str, int]:
-    def count(status: str) -> int:
-        return sum(r["status"] == status for r in rows)
-
-    return {
-        "unmodified": count("unmodified"),
-        "new": count("new"),
-        "modified": count("modified"),
-        "unresolved": len(unresolved_rows(rows)),
-        "retired_upstream": count("retired-upstream"),
-        "retired_locally": count("retired-locally"),
-        "skill_retired": count("skill-retired"),
-    }
-
-
-async def compute_review(target: str, ref: str) -> dict:
-    """Compute `target`'s review from `ref`, store it whole, record the event.
-    Returns `{target, ref, counts, items}`, items being the stored rows."""
-    root = importer.checkout_root()
-    overlay = skill_overlay.load(settings.resolved_skill_overlay_dir())
-
-    def _read_trees():
-        return (
-            read_tree(root, "HEAD", overlay),
-            read_tree(root, ref, overlay),
-            importer.checkout_release(root),
-        )
-
-    installed, theirs_tree, release = await asyncio.to_thread(_read_trees)
-    if not theirs_tree:
-        # Every doc would read as retired upstream, most of them silently.
-        raise ValueError(f"{ref} carries no bundled skills under skills/ in {root}")
-
-    bundled = sorted({skill for skill, _ in (*installed, *theirs_tree)})
-    library = await repo.skill_review_library(bundled)
-    computed = await asyncio.to_thread(
-        _classify_all, installed, theirs_tree, library, (release, target),
-    )
-    items = await repo.replace_skill_doc_review(target, ref, computed)
-    counts = review_counts(items)
-    await events.emit("skill.review_computed", target, {"target": target, "counts": counts})
-    return {"target": target, "ref": ref, "counts": counts, "items": items}
-
-
-# --- apply -------------------------------------------------------------------
-
-
-class ReviewNotStored(ValueError):
-    """Nothing to apply: no review is stored for the target."""
-
-
-class ReviewUnresolved(Exception):
-    """Docs still need a verdict, so nothing was applied."""
-
-    def __init__(self, rows: list[dict]) -> None:
-        super().__init__(f"{len(rows)} docs still need a verdict")
-        self.rows = rows
-
-
-def _apply_act(row: dict, actor: str) -> tuple[str, str | None]:
-    """The contract's apply table: (act, who posts it). `actor` posts what nobody
-    decided; a verdict is the operator's."""
-    rule = STATUS_RULES.get(row["status"], _NO_RULE)
-    verdict = row["verdict"]
-    if verdict in rule.verdicts:
-        return rule.verdicts[verdict], "operator"
-    if rule.auto and (verdict is None or rule.verdict_free) and not needs_verdict(row):
-        return rule.auto, actor
-    if needs_verdict(row) and verdict != "keep_mine":
-        raise ValueError(f"no apply rule for a {row['status']} doc with verdict {verdict!r}")
-    return "nothing", None
-
-
-async def _apply_row(row: dict, tree: dict, target: str, actor: str) -> dict | None:
-    key = (row["skill_id"], row["doc_key"])
-    act, added_by = _apply_act(row, actor)
-    if act == "nothing":
-        return await repo.apply_skill_doc_review_row(row)
-
-    theirs = tree.get(key)
-    if (importer.bundled_text_hash(theirs.text) if theirs else None) != row["theirs_hash"]:
-        raise ValueError(f"the release text changed since the review (theirs_hash, {key[1]})")
-    if act == "retire":
-        reason = f"removed in v{target}"
-        out = await repo.apply_skill_doc_review_row(row, retire_reason=reason)
-        if out is not None:
-            await events.emit(
-                "skill.doc_retired", ref_id=key[0],
-                payload={"doc_key": key[1], "version": out["retired"]["version"], "reason": reason},
-                actor=added_by,
-            )
-        return out
-
-    # A2: the skill's title and summary follow the guidance doc's text, so they
-    # move with the release's text and stay with a kept or edited one. A new row
-    # may be the first of a whole new skill, in any order, so it carries them.
-    takes_release = act == "post_theirs"
-    is_guidance = key[1] == "guidance"
+def _release_post(key: tuple, doc: BundledDoc, disk: dict, release: str, actor: str,
+                  *, is_new_skill: bool) -> tuple[dict, dict | None]:
+    """The version that takes the release's text, and the skill fields that go
+    with it: the skill's title and summary follow the guidance doc's frontmatter
+    (A2), and a new skill takes its default holders."""
+    skill_id, doc_key = key
+    is_guidance = doc_key == "guidance"
     skill = None
-    if row["status"] == "new" or (is_guidance and takes_release):
-        meta = tree[(key[0], "guidance")].meta
-        title, summary = importer.skill_title_summary(meta, key[0])
+    if is_new_skill or is_guidance:
+        meta = disk[(skill_id, "guidance")].meta
+        title, summary = importer.skill_title_summary(meta, skill_id)
         skill = {
             "title": title, "summary": summary, "follow": is_guidance,
             "default_agents": importer.parse_id_list(meta.get("default_agents", "")),
         }
-    doc_title = None
-    if takes_release:
-        doc_title = skill["title"] if is_guidance else PurePosixPath(theirs.path).stem
-    content = {"post_theirs": theirs.text, "post_ours": None, "post_edit": row["resolved_content"]}[act]
-    if act == "post_edit" and content is None:
-        raise ValueError("an edit verdict with no text to post")
-    out = await repo.apply_skill_doc_review_row(
-        row, skill=skill,
-        post={
-            "kind": theirs.kind, "title": doc_title, "content": content,
-            "added_by": added_by, "captured_at": datetime.now(timezone.utc),
-            **importer.provenance(target, theirs.path, theirs.text),
-            "bundled_text": theirs.text,
-        },
-    )
-    if out is None:
-        return None
+    post = {
+        "kind": doc.kind,
+        "title": skill["title"] if is_guidance else Path(doc.path).stem,
+        "content": doc.text, "added_by": actor,
+        "captured_at": datetime.now(timezone.utc),
+        **importer.provenance(release, doc.path, doc.text),
+        "bundled_text": doc.text,
+    }
+    return post, skill
+
+
+async def _emit_written(key: tuple, out: dict, skill: dict | None, release: str, actor: str,
+                        *, kept: bool = False) -> None:
+    skill_id, doc_key = key
     if out["created_skill"]:
         await events.emit(
-            "skill.created", ref_id=key[0],
-            payload={"title": skill["title"], "summary": skill["summary"]}, actor=added_by,
+            "skill.created", ref_id=skill_id,
+            payload={"title": skill["title"], "summary": skill["summary"]}, actor=actor,
         )
         for agent_id in out["grants"]["applied"]:
             await events.emit(
                 "skill.granted", ref_id=agent_id,
-                payload={"skill_id": key[0], "default": True}, actor="seed:skill",
+                payload={"skill_id": skill_id, "default": True}, actor="seed:skill",
             )
-    await events.emit(
-        "skill.doc_added", ref_id=key[0],
-        payload={
-            "doc_key": key[1], "kind": theirs.kind, "version": out["doc"]["version"],
-            "describes": out["doc"]["describes"], "bundled_release": target,
-        },
-        actor=added_by,
-    )
-    return out
+    if out["doc"] is not None:
+        await events.emit(
+            "skill.doc_added", ref_id=skill_id,
+            payload={
+                "doc_key": doc_key, "kind": out["doc"]["kind"], "version": out["doc"]["version"],
+                "describes": out["doc"]["describes"], "bundled_release": out["doc"]["bundled_release"],
+                **({"kept": True} if kept else {}),
+            },
+            actor=actor,
+        )
+    if out["retired"] is not None:
+        await events.emit(
+            "skill.doc_retired", ref_id=skill_id,
+            payload={"doc_key": doc_key, "version": out["retired"]["version"],
+                     "reason": out["retired"]["retired_reason"]},
+            actor=actor,
+        )
 
 
-async def apply_review(target: str, ref: str | None = None, actor: str = "updater") -> dict:
-    """Run the stored review of `target` through the apply table, row by row.
+async def _write(key, act, disk, library, release, actor="updater") -> None:
+    skill_id, doc_key = key
+    lib = library["docs"].get(key)
+    ours_hash = _hash(lib["content"]) if lib and lib["is_current"] else None
+    doc = disk.get(key)
+    if act["act"] == "follow":
+        post, skill = _release_post(
+            key, doc, disk, release, actor, is_new_skill=skill_id not in library["skills"],
+        )
+        out = await repo.apply_bundled_skill_doc(
+            skill_id, doc_key, ours_hash=ours_hash, post=post, skill=skill,
+        )
+        await _emit_written(key, out, skill, release, actor)
+    elif act["act"] == "retire":
+        out = await repo.apply_bundled_skill_doc(
+            skill_id, doc_key, ours_hash=ours_hash, retire_reason=f"removed in v{release}",
+        )
+        await _emit_written(key, out, None, release, actor)
+    else:
+        post = None
+        if act["act"] == "keep":
+            post = {
+                "kind": doc.kind, "title": None, "content": None, "added_by": actor,
+                "captured_at": datetime.now(timezone.utc),
+                **importer.provenance(release, doc.path, doc.text),
+                "bundled_text": doc.text,
+            }
+        out = await repo.apply_bundled_skill_doc(
+            skill_id, doc_key, ours_hash=ours_hash, post=post,
+            flag={**act["flag"], "release": release},
+        )
+        await _emit_written(key, out, None, release, actor, kept=True)
 
-    Returns `{target, ref, applied, failed, skipped, counts, items}`: `applied`
-    rows closed by this run, `failed` rows that recorded an `apply_error`,
-    `skipped` rows an earlier run already closed; each item says what became of
-    its row, and never holds doc text. Raises `ReviewNotStored`, or
-    `ReviewUnresolved` before anything is posted. A failure to read the target
-    tree raises too: nothing has been posted by then. `ref` defaults to the one
-    the review was computed from.
+
+async def sync() -> dict:
+    """Compare every bundled doc on disk with the library and act on each.
+
+    Returns {release, counts, flagged, failed}: `flagged` and `failed` name docs
+    (`skill/doc`), `failed` with the reason; never doc text. Reading the disk
+    and the library raises before anything is written; a doc whose write fails
+    is recorded in `failed` and the rest go on.
     """
-    rows = await repo.list_skill_doc_review(target)
-    if not rows:
-        raise ReviewNotStored(f"no bundled-skill review is stored for {target!r}")
-    unresolved = unresolved_rows(rows)
-    if unresolved:
-        raise ReviewUnresolved(unresolved)
+    root = importer.checkout_root()
+    overlay = skill_overlay.load(settings.resolved_skill_overlay_dir())
+    release = importer.checkout_release(root)
+    disk = await asyncio.to_thread(read_disk, root, overlay)
+    if not disk:
+        # Every bundled doc would read as removed, most of them silently.
+        raise ValueError(f"{root} carries no bundled skills under skills/")
+    library = await repo.skill_review_library()
+    seen = await repo.skill_doc_flags_seen()
 
-    ref = ref or rows[0]["ref"]
-    due = [r for r in rows if r["applied_at"] is None]
-    tree: dict = {}
-    if due:
+    keys = sorted({*disk, *library["provenance"]})
+    plan: list[tuple[tuple, dict]] = []
+    for key in keys:
+        if library["skills"].get(key[0]) == "RETIRED":
+            continue
+        act = decide(disk.get(key), library["docs"].get(key), library["provenance"].get(key), seen, key)
+        if act is not None:
+            plan.append((key, act))
+
+    counts = {"follow": 0, "retire": 0, "keep": 0, "flag": 0, "failed": 0}
+    flagged: list[str] = []
+    failed: list[dict] = []
+    for key, act in plan:
+        label = f"{key[0]}/{key[1]}"
+        try:
+            await _write(key, act, disk, library, release)
+        except Exception as e:
+            counts["failed"] += 1
+            failed.append({"doc": label, "error": str(e) or type(e).__name__})
+            continue
+        counts[act["act"]] += 1
+        if act["act"] in ("keep", "flag"):
+            flagged.append(label)
+    counts["unchanged"] = len(keys) - len(plan)
+    await events.emit(
+        "skill.review_computed", release,
+        {"release": release, "counts": counts, "flagged": flagged,
+         "failed": [f["doc"] for f in failed]},
+    )
+    return {"release": release, "counts": counts, "flagged": flagged, "failed": failed}
+
+
+# --- the operator's decision on a flag ------------------------------------------
+
+
+class FlagMoved(ValueError):
+    """What the operator was shown is no longer what is there."""
+
+
+async def resolve_flag(
+    skill_id: str, doc_key: str, decision: str, *, ours_hash: str | None,
+    content: str | None = None,
+) -> dict:
+    """Carry out the operator's decision on a doc's open flag, and close it.
+
+    take_release: post what the release ships (read from disk, and only while it
+    still renders to the flagged text), or retire a doc the release removed;
+    keep_mine: nothing is written but the decision; edit: post `content` as the
+    operator's version. `ours_hash` is the library text the operator was shown,
+    re-checked under the lock. Raises `repo.SkillDocFlagClosed` when no flag is
+    open and `FlagMoved` (a ValueError) when a text moved.
+    """
+    if decision not in DECISIONS:
+        raise ValueError(f"decision must be one of {', '.join(DECISIONS)}")
+    if (decision == "edit") != (content is not None):
+        raise ValueError("`content` comes with an edit, and only with an edit")
+    key = (skill_id, doc_key)
+    flags = {(f["skill_id"], f["doc_key"]): f for f in await repo.list_open_skill_doc_flags()}
+    flag = flags.get(key)
+    if flag is None:
+        raise repo.SkillDocFlagClosed(f"{skill_id}/{doc_key} has no open flag")
+    release = flag["release"]
+    post = retire = skill = None
+    if decision == "take_release" and flag["change"] == "removed":
+        retire = f"removed in v{release}"
+    elif decision == "take_release":
         root = importer.checkout_root()
         overlay = skill_overlay.load(settings.resolved_skill_overlay_dir())
-        tree = await asyncio.to_thread(read_tree, root, ref, overlay)
-
-    applied = failed = 0
-    skipped = len(rows) - len(due)
-    for row in due:
-        try:
-            done = await _apply_row(row, tree, target, actor)
-        except Exception as e:
-            failed += 1
-            await repo.record_skill_doc_review_error(
-                target, row["skill_id"], row["doc_key"], str(e) or type(e).__name__,
+        disk = await asyncio.to_thread(read_disk, root, overlay)
+        doc = disk.get(key)
+        if doc is None or _hash(doc.text) != flag["release_hash"]:
+            raise FlagMoved(
+                f"the bundled file for {skill_id}/{doc_key} no longer renders to the text this "
+                "flag showed (the release on disk or the overlay changed)"
             )
-            continue
-        if done is None:
-            skipped += 1
-        else:
-            applied += 1
-
-    stored = await repo.list_skill_doc_review(target)
-    return {
-        "target": target, "ref": ref,
-        "applied": applied, "failed": failed, "skipped": skipped,
-        "counts": review_counts(stored),
-        "items": [
-            {k: r[k] for k in (
-                "skill_id", "doc_key", "status", "verdict", "applied_at", "apply_error",
-            )}
-            for r in stored
-        ],
-    }
+        post, skill = _release_post(key, doc, disk, release, "operator", is_new_skill=False)
+    elif decision == "edit":
+        post = {"kind": None, "title": None, "content": content, "added_by": "operator"}
+    try:
+        out = await repo.apply_bundled_skill_doc(
+            skill_id, doc_key, ours_hash=ours_hash, post=post, retire_reason=retire,
+            skill=skill, decision=decision,
+        )
+    except repo.SkillDocFlagClosed:
+        raise
+    except ValueError as e:
+        raise FlagMoved(str(e)) from e
+    await _emit_written(key, out, skill, release, "operator")
+    await events.emit(
+        "skill.review_resolved", ref_id=skill_id,
+        payload={"release": release, "skill_id": skill_id, "doc_key": doc_key,
+                 "verdict": decision},
+        actor="operator",
+    )
+    return {"skill_id": skill_id, "doc_key": doc_key, "release": release, "decision": decision}
 
 
 # --- command line -------------------------------------------------------------
 
+# The command lines of the pre-update review (DL-198), kept for ONE release so
+# the update INTO this release, which v2.126.0's updater drives, cannot fail:
+# its stage and its gate run the INSTALLED tree's copy of this module (they
+# never reach this one), and after the merge its `skills` phase (k3s) or
+# `refresh_bundled_skills` (single-node) calls `apply --target T --ref R
+# --actor updater` here. `apply` runs the comparison, which is this release's
+# own step at that same point; `review` and `check` answer "nothing to review".
+# Delete `_LEGACY` in the first release whose `min_upgrade_from` is at least
+# the release that ships DL-232.
+_LEGACY = ("review", "check", "apply")
 
-async def _run_apply(args: argparse.Namespace) -> int:
+
+async def _run_sync() -> int:
     try:
-        result = await apply_review(args.target, args.ref, args.actor)
-    except ReviewUnresolved as e:
-        for r in e.rows:
-            print(f"unresolved: {r['skill_id']}/{r['doc_key']} ({r['status']})")
-        print(f"error: {e}; decide them in the cockpit", file=sys.stderr)
-        return 3
+        result = await sync()
     finally:
         await repo.close_pool()
-    print(
-        f"skill refresh for {args.target} ({args.ref}): applied={result['applied']} "
-        f"failed={result['failed']} skipped={result['skipped']}"
-    )
-    errors = [i for i in result["items"] if i["apply_error"]]
-    for i in errors:
-        print(f"failed: {i['skill_id']}/{i['doc_key']}: {i['apply_error']}", file=sys.stderr)
-    return 1 if errors else 0
-
-
-async def _run(args: argparse.Namespace) -> int:
-    if args.command == "apply":
-        return await _run_apply(args)
-    try:
-        review = await compute_review(args.target, args.ref)
-    finally:
-        await repo.close_pool()
-    counts = " ".join(f"{k}={v}" for k, v in review["counts"].items())
-    print(f"skill review for {args.target} ({args.ref}): {counts}")
-    if args.command == "review":
-        return 0
-    unresolved = unresolved_rows(review["items"])
-    for r in unresolved:
-        print(f"unresolved: {r['skill_id']}/{r['doc_key']} ({r['status']})")
-    return 3 if unresolved else 0
+    counts = " ".join(f"{k}={v}" for k, v in result["counts"].items())
+    print(f"bundled skills for {result['release']}: {counts}")
+    for label in result["flagged"]:
+        print(f"kept and flagged for the operator: {label}")
+    for f in result["failed"]:
+        print(f"failed: {f['doc']}: {f['error']}", file=sys.stderr)
+    return 1 if result["failed"] else 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m central_command.skills.refresh",
-        description="Review a target release's bundled skills against the library.",
+        description="Compare the bundled skill docs on disk with the library (DL-232).",
     )
     sub = parser.add_subparsers(dest="command", required=True)
-    for name, text in (
-        ("review", "compute and store the review; exit 0, or 2 if it cannot be computed"),
-        ("check", "the gate; exit 0 nothing unresolved, 3 docs unresolved, 2 cannot be computed"),
-        ("apply", "post the stored review; exit 0 done, 1 a row failed, 2 could not run, 3 unresolved"),
-    ):
-        p = sub.add_parser(name, help=text)
-        p.add_argument("--target", required=True, help="the release under review, e.g. 2.68.0")
-        p.add_argument("--ref", required=True, help="the git ref holding it, e.g. v2.68.0 or upstream")
+    sub.add_parser("sync", help="compare and act; exit 0 done, 1 a doc failed, 2 could not run")
+    for name in _LEGACY:
+        p = sub.add_parser(name, help="kept for v2.126.0's updater for one release (DL-232)")
+        p.add_argument("--target", required=True)
+        p.add_argument("--ref", required=True)
         if name == "apply":
-            p.add_argument(
-                "--actor", choices=APPLY_ACTORS, default="updater",
-                help="who posts what nobody decided",
-            )
+            p.add_argument("--actor", choices=("updater",), default="updater")
     args = parser.parse_args(argv)
+    if args.command in ("review", "check"):
+        print(f"nothing to review for {args.target}: bundled skill docs are compared at the start of the release (DL-232)")
+        return 0
     try:
-        return asyncio.run(_run(args))
+        return asyncio.run(_run_sync())
     except Exception as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

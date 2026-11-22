@@ -333,5 +333,6 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-229 | A conversation can be renamed; the name is a display label on its own column, never the record | active | 2026-11-21 | test: `tests/test_session_rename.py::test_a_rename_leaves_the_transcript_untouched` (+3 more) | [process.md](process.md) |
 | DL-230 | A quote is a copied passage, contiguous or with marked omissions, checked against every source the record shows the session was given | active | 2026-11-22 | test: `tests/test_claim_check_sources.py::test_passages_joined_by_an_ellipsis_are_supported` (+9 more) | [process.md](process.md) |
 | DL-231 | The dismissal auditor is given triage's time context, and the drafter's reason is a claim to test, never evidence | active | 2026-11-22 | test: `tests/test_auditor_time_context.py::test_an_old_mails_audit_input_carries_the_reference_time_and_age` (+3 more) | [process.md](process.md) |
+| DL-232 | A bundled doc is compared with the files on disk at the start of a release; an edited one the release changed keeps its text and is flagged, and nothing gates the update | active | 2026-11-22 | test: `tests/test_skills_release_sync.py::test_a_doc_nobody_edited_follows_the_release` (+8 more) | [process.md](process.md) |
 
 <!-- END GENERATED INDEX -->

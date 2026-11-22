@@ -414,6 +414,8 @@ hygiene, and how the test suite itself must be written. See
   **Amended 2026-10-31 (DL-198):** this stays the rule for the install step. An update
   now refreshes a doc the operator did not change and asks about one they did, because
   create-only left the library stale whenever a release changed a bundled doc.
+  **Amended 2026-11-22 (DL-232):** an update no longer asks first: a doc the operator
+  changed is kept and flagged for them after the update.
 - **Enforced:** test: `tests/test_single_boot_supervision.py::test_skills_are_create_only_and_a_new_bundled_folder_is_imported`, `::test_a_tree_input_moves_the_fingerprint_only_when_the_tree_moves`
 - **Source:** CHANGELOG v2.57.0 / `docs/superpowers/specs/2026-10-01-setup-ledger-selfcheck-design.md`
 
@@ -1730,8 +1732,14 @@ hygiene, and how the test suite itself must be written. See
 - **Date:** 2026-10-31
 - **Rule:** [.claude/rules/deploy-k3s.md](../../.claude/rules/deploy-k3s.md) — "A bundled doc follows the release when the operator did not change it; one they changed is decided, never auto-resolved"
 - **Why:** Bundled docs were imported create-only (DL-119, which this amends: create-only stays true at install, and updates now refresh and review), so a release that changed a reference doc left the live library stale: v2.66.0 changed three that the library kept reading in their old form. Overwriting would destroy what the operator and the coach wrote, and a default that picks for them would too, so the rule is dpkg's conffile rule: ask only when both sides changed, and never resolve it automatically. "Modified" is decided against the last bundled text the library received, kept content-addressed so the three-way base never depends on a git ref, and over the text as stored, after the overlay render, so an overlay edit alone is never a release conflict. The steps ship one release ahead because the update into a release runs the previous release's updater; the operator confirmed the direct-database command line on 2026-10-31, because it runs inside the updater's rollback window with the API stopped and leaves no moment where a run reads a stale library.
-- **Enforced:** test: `tests/test_skills_refresh_boundary.py`, `tests/test_skills_update_review.py`, `tests/test_k3s_skills_refresh.py`, `tests/test_single_update_skills_refresh.py`
+- **Enforced:** test: `tests/test_skills_refresh_boundary.py`, `tests/test_skills_release_sync.py`, `tests/test_k3s_skills_refresh.py`, `tests/test_single_update_skills_refresh.py`
 - **Source:** `central_command/skills/refresh.py` (module docstring); docs/ARCHITECTURE.md §2 and §6; deploy/k3s/README.md §7; `docs/PRD.md` FR-23; epic-skills-refresh-on-update (kept privately)
+- **Note (2026-11-22):** Amended by DL-232: an edited doc a release changed is no
+  longer decided before the update. The comparison runs at the start of the release
+  against the files on disk, keeps the library's text, records the new base and flags
+  the doc for the operator in the Skills page. The pre-update gate, the stage step,
+  the three-way merge and every git read are gone; "an edit is never overwritten" and
+  "nothing merges automatically" stand.
 
 ### DL-199 — Reversibility is the server-held mark; the inbox shows it and the auditor never graduates an irreversible class
 
@@ -3234,3 +3242,45 @@ hygiene, and how the test suite itself must be written. See
   backlog mail whose dismissal rests on facts outside the mail.
 - **Enforced:** test: `tests/test_auditor_time_context.py::test_an_old_mails_audit_input_carries_the_reference_time_and_age`, `::test_the_age_comes_from_the_shared_helper`, `::test_the_input_labels_the_reason_as_a_claim`, `::test_the_charter_states_the_claim_not_fact_rule_and_the_time_rule`
 - **Source:** the operator's ruling on the review-mechanisms analysis, 2026-11-22; `central_command/gateway/auditor.py` (`time_context`, `audit_prompt`); `central_command/runtime/auditor_profile.py`; `central_command/ingest/dispatcher.py` (`email_age_line`); CHANGELOG v2.82.6, v2.82.9; DL-002
+
+### DL-232 — A bundled doc is compared with the files on disk at the start of a release; an edited one the release changed keeps its text and is flagged, and nothing gates the update
+
+- **Status:** active
+- **Date:** 2026-11-22
+- **Rule:** [.claude/rules/deploy-k3s.md](../../.claude/rules/deploy-k3s.md) — "A bundled doc follows the release when the operator did not change it; one they changed keeps their text and is flagged for them after the update, never overwritten"
+- **Why:** Amends DL-198. The update-time review compared installed, target and
+  library text per doc with `git show` on two refs and `git merge-file`, stored a
+  review per target version and blocked the update at four places (the cockpit
+  proxy, the API route and both updaters) until every doc changed on both sides had
+  a verdict. In five weeks no library doc ever differed from its bundled text: 39
+  review rows, all "unchanged upstream". The base it needed was already stored
+  (`skill_bundled_text`), and the git reads tie the application to being a git
+  checkout, which a planned container image removes. The operator ruled: simplify.
+  At the start of a new release (the updaters' step after the merge, with the API
+  stopped) the stored base is compared with the library and with the file on disk,
+  rendered through the overlay exactly as an import renders it. A doc nobody edited
+  (library equal to base) follows the release: library and base become the disk
+  text, a new doc is added and a removed one retired. A doc the release did not
+  change (disk equal to base) is left alone. A doc edited here and changed by the
+  release keeps the library's text; the new base is recorded (a version carrying
+  the library's text with the release's provenance) so the comparison does not
+  repeat, and a `skill_doc_flag` row flags it for the operator, who sees it in the
+  Skills page after the update beside what the release now ships and takes the
+  release's text, keeps theirs, or edits. A doc retired here, or removed by the
+  release while edited here, has no version to carry a base, so its flag row records
+  it and the same (base, release text) is never flagged twice. KEPT: an edit is never
+  overwritten (every write re-checks the library text under a row lock), nothing
+  merges automatically, a retired skill is left alone, the import at install stays
+  create-only (DL-119). DROPPED: the pre-update gate at all four points, the stage
+  step, the three-way merge and its conflict-marker checks, every git read in this
+  feature, the per-target review storage (`skill_doc_review` is left in `schema.sql`
+  unused, because the file is additive only) and the Update dialog's review. The
+  flags take a table of their own rather than `skill_doc_review`: the previous
+  release's stage step, which drives the update into this one and still runs after
+  a rollback, deletes every row of that table whenever it computes a review. The
+  update into this release is driven by v2.126.0's updater, whose stage and gate run
+  its own installed module and whose post-merge step calls `refresh apply --target
+  --ref --actor updater`, so that command line runs the comparison here and `review`
+  and `check` answer "nothing to review", for one release.
+- **Enforced:** test: `tests/test_skills_release_sync.py::test_a_doc_nobody_edited_follows_the_release`, `::test_an_edited_doc_the_release_did_not_change_is_left_alone`, `::test_an_edited_doc_the_release_changed_is_kept_based_anew_and_flagged`, `::test_the_new_base_stops_the_comparison_flagging_it_again`, `::test_an_edit_landing_while_it_runs_is_never_overwritten`, `::test_the_old_updaters_apply_command_runs_the_comparison`; test: `tests/test_skills_refresh_boundary.py::test_nothing_refuses_an_update_over_the_bundled_docs`, `::test_no_git_is_read_by_the_module`, `::test_the_old_updaters_apply_runs_the_comparison`
+- **Source:** the operator's ruling of 2026-11-22 ("Simplify. On start of a new release compare the stored base with the files on disk"); `central_command/skills/refresh.py` (module docstring, `decide`, `_LEGACY`); `central_command/db/repo.py` (`apply_bundled_skill_doc`); `central_command/db/schema.sql` (`skill_doc_flag`); docs/ARCHITECTURE.md §2 and §6; DL-198

@@ -3,8 +3,7 @@
  * over HTTP rather than the WebSocket RPC dispatch table (`nerve_gateway.py`):
  * the three Skills-page ingest routes — import-doc and import-site (JSON),
  * import-file (multipart, the reason these are REST at all; a File doesn't
- * ride the RPC channel) — and the four bundled-skill update-review routes the
- * update dialog polls and posts to (compute, read, resolve one item, apply).
+ * ride the RPC channel).
  *
  * Every other Skills operation goes over RPC. These three shipped 2026-08-07
  * as direct `fetch('/api/skills/…')` calls with no Hono route behind them, so
@@ -45,18 +44,5 @@ async function forward(c: Context, path: string, method: 'GET' | 'POST' = 'POST'
 app.post('/api/skills/import-doc', rateLimitGeneral, (c) => forward(c, '/skills/import-doc'));
 app.post('/api/skills/import-file', rateLimitGeneral, (c) => forward(c, '/skills/import-file'));
 app.post('/api/skills/import-site', rateLimitGeneral, (c) => forward(c, '/skills/import-site'));
-
-// The update review: the path is forwarded as received, so its percent-encoding
-// reaches the backend as the dialog wrote it.
-const reviewPath = (c: Context) => new URL(c.req.url).pathname.slice('/api'.length);
-app.post('/api/skills/update-review', rateLimitGeneral, (c) => forward(c, '/skills/update-review'));
-app.get('/api/skills/update-review', rateLimitGeneral, (c) => forward(c, '/skills/update-review', 'GET'));
-app.get('/api/skills/update-review/:target', rateLimitGeneral, (c) => forward(c, reviewPath(c), 'GET'));
-app.post(
-  '/api/skills/update-review/:target/items/:skill_id/:doc_key/resolve',
-  rateLimitGeneral,
-  (c) => forward(c, reviewPath(c)),
-);
-app.post('/api/skills/update-review/:target/apply', rateLimitGeneral, (c) => forward(c, reviewPath(c)));
 
 export default app;

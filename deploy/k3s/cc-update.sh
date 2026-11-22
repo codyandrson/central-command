@@ -443,55 +443,30 @@ refuse_if_capability_pending() { # <phase>
 }
 
 # ── bundled skill docs ───────────────────────────────────────────────────────
-# Three steps over `central_command/skills/refresh.py`, each keyed on the tree
-# holding that module, never on a version: the update INTO a release runs the
-# previous release's copy of this script, so these take effect from the update
-# AFTER the release that ships them, and a rollback onto an older tree finds no
-# module and skips. The module opens the database directly, so it answers with
-# the API up or stopped. Exits: review 0/2, check 0/3/2, apply 0/1/2/3.
+# One step over `central_command/skills/refresh.py` (DL-232): after the merge it
+# compares each bundled doc on disk with the stored base and the library. A doc
+# nobody edited follows the release; an edited one keeps the library's text and
+# is flagged for the operator in the Skills page after the update. Nothing is
+# asked before the update and nothing here blocks it. Keyed on the tree holding
+# the module, never on a version. The module opens the database directly, so it
+# answers with the API stopped. Exits: 0 done, 1 a doc failed, 2 could not run.
 #
 # Under `env -i`, from the repo root: Settings load the ROOT .env, and this
 # script sourced deploy/k3s/.env into its own shell, where a variable already set
 # would beat it (the same rule as verify.sh's self-check). HOME is the owner's,
-# for git and for the default state directory the overlay lives under.
-skills_refresh_cli() { # <review|check|apply> <args...>
+# for the default state directory the overlay lives under.
+skills_refresh_cli() { # <sync>
   "${RUNAS[@]}" env -i -C "$REPO" PATH="$PATH" HOME="$OWNER_HOME" LANG="${LANG:-C.UTF-8}" \
     "$REPO/.venv/bin/python" -m central_command.skills.refresh "$@"
 }
 
-# Stage, keyed on the INSTALLED tree: the stage never checks the target out, and
-# the module reads the target's files through `git show`. Its counts line goes to
-# the journal. A failure costs nothing: the cockpit computes the review on open.
-skills_review_stage() {
-  [[ -f "$REPO/central_command/skills/refresh.py" ]] || return 0
-  skills_refresh_cli review --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" \
-    || note "WARNING: bundled-skill review not computed — the cockpit will compute it on open"
-  return 0
-}
-
-# Apply, keyed on the INSTALLED tree, before the busy gate and the checkpoint so
-# a refusal changes nothing. FORCE does not reach this: "Update anyway" answers
-# the busy gate, and a doc nobody decided cannot be decided by a restart. Fails
-# closed: anything but a clean answer refuses (`check` recomputes, so it answers
-# for the library as it is now).
-skills_review_gate() {
-  [[ -f "$REPO/central_command/skills/refresh.py" ]] || return 0
-  local rc=0
-  skills_refresh_cli check --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" || rc=$?
-  case $rc in
-    0) ;;
-    3) die resolve "bundled skill docs were changed here and by v$TARGET_VERSION — decide each in the cockpit (Settings > Update) before applying" ;;
-    *) die resolve "could not review the bundled skill docs for v$TARGET_VERSION (exit $rc) — the gate cannot be proven; see journalctl -u cc-update" ;;
-  esac
-}
-
 # After the merge, keyed on the MERGED tree. WARN-only: a die here stops a merged
-# tree with no rollback, and a doc not refreshed stays on the record with its
-# apply_error, to re-run from the cockpit (a re-run posts only what is missing).
+# tree with no rollback, and a doc not written is left as it was (an edit is never
+# overwritten); the next run, or the command by hand, retries it.
 refresh_bundled_skills() {
   [[ -f "$REPO/central_command/skills/refresh.py" ]] || return 0
-  skills_refresh_cli apply --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" --actor updater \
-    || note "WARNING: bundled skill docs not refreshed — rows with apply_error stay in the review; re-run from Settings > Skills"
+  skills_refresh_cli sync \
+    || note "WARNING: bundled skill docs not all compared — the lines above name each; re-run: cd $REPO && .venv/bin/python -m central_command.skills.refresh sync"
   return 0
 }
 
@@ -601,7 +576,6 @@ main() {
   if [[ -n "$minfrom" && "$(printf '%s\n%s\n' "$CUR_VERSION" "$minfrom" | sort -V | head -1)" == "$CUR_VERSION" && "$CUR_VERSION" != "$minfrom" ]]; then
     die resolve "v$TARGET_VERSION requires upgrading from >= $minfrom (installed $CUR_VERSION) — apply the intermediate release first"
   fi
-  skills_review_gate
   refuse_if_npm_too_old resolve
 
   # Twice: here so the common refusal costs nothing, and again right before
@@ -975,7 +949,6 @@ stage_main() {
   if [[ -n "$minfrom" && "$(printf '%s\n%s\n' "$CUR_VERSION" "$minfrom" | sort -V | head -1)" == "$CUR_VERSION" && "$CUR_VERSION" != "$minfrom" ]]; then
     die resolve "v$TARGET_VERSION requires upgrading from >= $minfrom (installed $CUR_VERSION) — apply the intermediate release first"
   fi
-  skills_review_stage
 
   PHASE_NOW=stage-build; phase "prebuilding changed image caches (nothing imported, services stay up)"
   CKPT=HEAD   # changed_between diffs $CKPT..target; at stage time HEAD is the installed state

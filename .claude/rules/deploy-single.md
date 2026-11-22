@@ -417,16 +417,16 @@ Moved from the root instructions; loads when a matching file is read. How a rule
   `@skills`: a TREE input — a content hash of that directory, CR-insensitive,
   no git — so the row re-runs when a bundled folder changes or is added.
   `@<dir>` in `reads` is the only non-`.env` input the manifest knows. An update
-  refreshes and reviews a held skill instead (DL-198, `skills/refresh.py`):
-  `update.sh`'s `skills_review_stage` in `cmd_stage` (WARN), `skills_review_gate` in
-  `cmd_apply`'s non-resume branch after `version_gate` and before `acquire_staged` (a
-  `fail` row naming the cockpit, exit 1, nothing changed; a resume skips it because the
-  merge already happened) and `refresh_bundled_skills` first in `deploy_current_tree`
-  after `apply_schema` (WARN, guarded by `merged_already` so a rollback never applies the
-  staged review onto the restored tree). The CLI's stdout joins stderr there, because
-  `update.sh`'s stdout is the stage route's protocol stream. `api/update.py` refuses
-  with a 409 `skills-unresolved` before the runner starts. They take effect from the
-  update AFTER the release that ships them, keyed on the tree holding the module.
+  compares a held skill instead (DL-198 as amended by DL-232, `skills/refresh.py`):
+  `refresh_bundled_skills` first in `deploy_current_tree` after `apply_schema` runs
+  `sync` (WARN, guarded by `merged_already` so a rollback onto the restored older
+  tree compares nothing): a doc nobody edited follows the release, an edited one is
+  kept and flagged in the Skills page. The CLI's stdout joins stderr there, because
+  `update.sh`'s stdout is the stage route's protocol stream. Nothing reviews at
+  `stage` and nothing gates `apply`, in `update.sh` or in `api/update.py`. The update
+  into that release runs v2.126.0's `update.sh`, which calls `apply --target T --ref
+  upstream --actor updater` here after the merge; the module keeps that command line
+  for one release (`_LEGACY`).
 - **The updater ACQUIRES before it merges, from a staged copy of the new
   release** (v2.57.0, D5). `update.sh apply` checks `upstream` out SPARSELY
   (`STAGE_PATHS` — never `docs/vendor`: 47k files and MAX_PATH on Windows)

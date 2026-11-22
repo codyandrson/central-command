@@ -18,18 +18,9 @@ async function buildApp(config: Record<string, unknown> = {}) {
   return app;
 }
 
-// The API behind the route: a review with this answer, the hold accepting.
-function gateway(review: Response | (() => Promise<Response>) = reviewWith(0)) {
-  return vi.fn(async (url: string | URL | Request) => {
-    if (String(url).includes('/api/skills/update-review/')) {
-      return typeof review === 'function' ? review() : review.clone();
-    }
-    return new Response(JSON.stringify({ active: true }), { status: 200 });
-  });
-}
-
-function reviewWith(unresolved: number) {
-  return new Response(JSON.stringify({ counts: { unresolved } }), { status: 200 });
+// The API behind the route: the hold accepting.
+function gateway() {
+  return vi.fn(async () => new Response(JSON.stringify({ active: true }), { status: 200 }));
 }
 
 const apply = (app: Hono, body: object) => app.request('/api/update/apply', {
@@ -73,81 +64,11 @@ describe('cc-update routes', () => {
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ triggered: false, held: true });
     expect(existsSync(join(dir, 'trigger'))).toBe(false);
-    // The review is read first, and only then is the hold engaged.
-    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
-      'http://cc.test/api/skills/update-review/1.2.3',
+    // The hold is the only call: no bundled-skill review gates an apply (DL-232).
+    expect(fetchMock.mock.calls.map((call) => String((call as unknown[])[0]))).toEqual([
       'http://cc.test/api/update/hold',
     ]);
     vi.unstubAllGlobals();
-  });
-
-  describe.each([[false], [true]])('apply over the bundled-skill review (force: %s)', (force) => {
-    const noEffect = (fetchMock: ReturnType<typeof gateway>) => {
-      expect(existsSync(join(dir, 'trigger'))).toBe(false);
-      expect(fetchMock.mock.calls.map((call) => String(call[0]))).not.toContain('http://cc.test/api/update/hold');
-    };
-
-    it('answers 409 naming the count while docs are unresolved, and engages nothing', async () => {
-      const fetchMock = gateway(reviewWith(2));
-      vi.stubGlobal('fetch', fetchMock);
-      const res = await apply(await buildApp(), { target: '1.2.3', force });
-      expect(res.status).toBe(409);
-      expect(await res.json()).toEqual({ error: 'skills-unresolved', reason: 'skills-unresolved', unresolved: 2 });
-      noEffect(fetchMock);
-    });
-
-    it('answers 409 when no review is stored for the target', async () => {
-      const fetchMock = gateway(new Response('{"detail":"none"}', { status: 404 }));
-      vi.stubGlobal('fetch', fetchMock);
-      const res = await apply(await buildApp(), { target: '1.2.3', force });
-      expect(res.status).toBe(409);
-      expect((await res.json() as { error: string }).error).toContain('skills-unresolved');
-      noEffect(fetchMock);
-    });
-
-    it('answers 409 over a stale review, which must be recomputed first', async () => {
-      const fetchMock = gateway(new Response('{"detail":"recompute"}', { status: 409 }));
-      vi.stubGlobal('fetch', fetchMock);
-      const res = await apply(await buildApp(), { target: '1.2.3', force });
-      expect(res.status).toBe(409);
-      expect((await res.json() as { error: string }).error).toContain('skills-unresolved');
-      noEffect(fetchMock);
-    });
-
-    it('answers 409 over a review that does not say how many are unresolved', async () => {
-      const fetchMock = gateway(new Response('{"counts":{}}', { status: 200 }));
-      vi.stubGlobal('fetch', fetchMock);
-      expect((await apply(await buildApp(), { target: '1.2.3', force })).status).toBe(409);
-      noEffect(fetchMock);
-    });
-
-    it('passes through once nothing is unresolved', async () => {
-      vi.stubGlobal('fetch', gateway(reviewWith(0)));
-      const res = await apply(await buildApp(), { target: '1.2.3', force });
-      expect(res.status).toBe(202);
-      expect(existsSync(join(dir, 'trigger'))).toBe(force);
-    });
-  });
-
-  it('reads the review of the staged target when the request names none', async () => {
-    const fetchMock = gateway(reviewWith(1));
-    vi.stubGlobal('fetch', fetchMock);
-    writeFileSync(join(dir, 'stage.json'), JSON.stringify({ state: 'success', target: '1.2.3' }));
-    expect((await apply(await buildApp(), {})).status).toBe(409);
-    expect(String(fetchMock.mock.calls[0][0])).toBe('http://cc.test/api/skills/update-review/1.2.3');
-  });
-
-  it.each([
-    ['refuses', () => Promise.reject(new Error('connection refused'))],
-    ['answers 500', async () => new Response('{}', { status: 500 })],
-  ])('when the API %s: unforced is a 502, forced goes on to the updater, whose gate reads the database', async (_name, review) => {
-    vi.stubGlobal('fetch', gateway(review));
-    const app = await buildApp();
-    expect((await apply(app, { target: '1.2.3' })).status).toBe(502);
-    expect(existsSync(join(dir, 'trigger'))).toBe(false);
-
-    expect((await apply(app, { target: '1.2.3', force: true })).status).toBe(202);
-    expect(existsSync(join(dir, 'trigger'))).toBe(true);
   });
 
   it('apply with force writes the trigger file itself and reports 202 (the "update anyway" path)', async () => {
@@ -381,9 +302,8 @@ describe('cc-update routes', () => {
       expect((await apply(app, { target: '1.2.3' })).status).toBe(409);
       rmSync(join(dir, 'restart.json'));
 
-      vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request) => String(url).includes('/api/skills/')
-        ? reviewWith(0)
-        : new Response(JSON.stringify({ detail: 'a restart hold is engaged' }), { status: 409 })));
+      vi.stubGlobal('fetch', vi.fn(async () =>
+        new Response(JSON.stringify({ detail: 'a restart hold is engaged' }), { status: 409 })));
       const res = await apply(app, { target: '1.2.3' });
       expect(res.status).toBe(409);
       expect((await res.json() as { error: string }).error).toBe('a restart hold is engaged');

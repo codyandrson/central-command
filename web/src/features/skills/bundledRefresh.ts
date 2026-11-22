@@ -1,61 +1,56 @@
 /**
- * The Skills page's "not refreshed" state (epic-skills-refresh-on-update
- * story 8; updater-contract.md §Status and visibility): the wire type of
- * `GET /api/skills/update-review` (RPC `skills.update_review_latest`) and the
- * pure wording the banner renders from it. No network in this file.
+ * The Skills page's flagged bundled docs (DL-232): the wire type of
+ * `GET /api/skills/release-flags` (RPC `skills.release_flags`) and the pure
+ * wording the banner renders from it. No network in this file.
  *
- * The read is deliberately LIGHT — no texts, no hashes — and the server decides
- * which rows are `pending_apply` (not applied, and either an `apply_error` or a
- * decision the finished update never carried out) and which `moved` (the error
- * says a text changed since the review, so a plain retry fails forever).
+ * A flag is a bundled doc the operator edited that a release then changed or
+ * removed: the release comparison kept the library's text, and the operator
+ * decides here — take the release's text, keep theirs, or edit.
  */
 
-export interface LatestItem {
+export type Decision = 'take_release' | 'keep_mine' | 'edit';
+
+export interface ReleaseFlag {
   skill_id: string;
   doc_key: string;
-  status: string;
-  verdict: string | null;
-  resolved_at: string | null;
-  applied_at: string | null;
-  apply_error: string | null;
-  pending_apply: boolean;
-  moved: boolean;
+  release: string;
+  change: 'changed' | 'removed';
+  bundled_path: string;
+  flagged_at: string;
+  /** The library's text now; null when the doc is retired here. */
+  ours: string | null;
+  ours_hash: string | null;
+  /** What the release ships; null when it removed the doc. */
+  theirs: string | null;
 }
 
-export interface LatestReview {
-  target: string;
-  ref: string;
-  computed_at: string;
-  installed: string;
-  finished: boolean;
-  counts: { not_refreshed: number } & Record<string, number>;
-  items: LatestItem[];
+export function isFlagList(v: unknown): v is { items: ReleaseFlag[] } {
+  return !!v && typeof v === 'object' && Array.isArray((v as { items?: unknown }).items);
 }
 
-export function isLatestReview(v: unknown): v is LatestReview {
-  if (!v || typeof v !== 'object') return false;
-  const r = v as Partial<LatestReview>;
-  return typeof r.target === 'string' && Array.isArray(r.items);
+export function bannerText(n: number): string {
+  return `${n} bundled ${n === 1 ? 'doc you edited was' : 'docs you edited were'} changed by a release — your text was kept`;
 }
 
-/** The rows the banner is about. */
-export function notRefreshed(review: LatestReview | null): LatestItem[] {
-  return review ? review.items.filter((i) => i.pending_apply) : [];
+export function rowLabel(f: Pick<ReleaseFlag, 'skill_id' | 'doc_key'>): string {
+  return `${f.skill_id}/${f.doc_key}`;
 }
 
-export function bannerText(n: number, target: string): string {
-  return `${n} bundled ${n === 1 ? 'doc' : 'docs'} not refreshed for v${target} — retry`;
+/** What happened to the doc, in one phrase. */
+export function changeWord(f: ReleaseFlag): string {
+  if (f.change === 'removed') return `v${f.release} no longer ships it`;
+  if (f.ours === null) return `retired here; v${f.release} changed it`;
+  return `changed here and in v${f.release}`;
 }
 
-/** What one row says. A whole-skill row has doc_key '*'. */
-export function rowLabel(i: LatestItem): string {
-  return i.doc_key === '*' ? i.skill_id : `${i.skill_id}/${i.doc_key}`;
+/** The label of the take-the-release button for this flag. */
+export function takeLabel(f: ReleaseFlag): string {
+  if (f.change === 'removed') return 'Retire it (as the release did)';
+  if (f.ours === null) return 'Reactivate with the release text';
+  return 'Take the release text';
 }
 
-export function rowReason(i: LatestItem): string {
-  return i.apply_error ?? 'decided in the review, but the update did not apply it';
+/** Whether an edit is offered: there is a text to start from. */
+export function canEdit(f: ReleaseFlag): boolean {
+  return f.ours !== null || f.theirs !== null;
 }
-
-export const MOVED_HINT =
-  'A plain retry cannot fix this: the library or the release text changed since the review. '
-  + 'Open the Update dialog (Settings › Updates) to recompute the review, decide this doc again, and apply.';

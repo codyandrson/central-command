@@ -65,7 +65,7 @@ AREAS: dict[str, str] = {
     ),
     "Skills library": (
         "Curated subject knowledge held as governed, versioned data, granted per agent, "
-        "plus the bookkeeping that reviews bundled releases against it."
+        "plus the bookkeeping that compares each release's bundled docs with it."
     ),
     "Goals (lines of effort)": (
         "The operator's goal-tracking substrate: lines of effort, their append-only "
@@ -111,6 +111,7 @@ TABLE_AREA: dict[str, str] = {
     "skill_chunk": "Skills library",
     "skill_bundled_text": "Skills library",
     "skill_doc_review": "Skills library",
+    "skill_doc_flag": "Skills library",
     "agent_skill_grant": "Skills library",
     "line_of_effort": "Goals (lines of effort)",
     "loe_checkin": "Goals (lines of effort)",
@@ -154,7 +155,8 @@ TABLE_PURPOSE: dict[str, str] = {
     "skill_doc": "One version of a skill document (guidance or reference); a correction is a new version.",
     "skill_chunk": "Search chunks of the current version of a reference document.",
     "skill_bundled_text": "Content-addressed record of the bundled document texts the library has received.",
-    "skill_doc_review": "Review of one target release against the library: per-document merge status and the operator's verdict.",
+    "skill_doc_review": "Unused since DL-232: the pre-update review of a target release, kept because the schema is additive only.",
+    "skill_doc_flag": "A bundled doc the operator edited that a release changed or removed: kept, and flagged for the operator's decision.",
     "agent_skill_grant": "Which skills each agent holds; revocation is a timestamp kept on the record.",
     "line_of_effort": "One of the operator's goals, with its versioned scoring semantics and display settings.",
     "loe_checkin": "Append-only check-in recording a light, confidence and summary under a stamped semantic version.",

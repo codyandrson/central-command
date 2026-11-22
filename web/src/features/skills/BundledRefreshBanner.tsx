@@ -1,36 +1,117 @@
 import { useState } from 'react';
 import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { MOVED_HINT, bannerText, rowLabel, rowReason, type LatestItem } from './bundledRefresh';
+import {
+  bannerText, canEdit, changeWord, rowLabel, takeLabel, type Decision, type ReleaseFlag,
+} from './bundledRefresh';
+import { sideBySideRows } from './skillReview';
+import type { ResolveResult } from './useBundledRefresh';
 
-interface Props {
-  target: string;
-  items: LatestItem[];
-  retrying: boolean;
-  error: string;
-  onRetry: () => void;
+type Resolve = (flag: ReleaseFlag, decision: Decision, content?: string) => Promise<ResolveResult>;
+
+function SideBySide({ ours, theirs }: { ours: string | null; theirs: string | null }) {
+  const rows = sideBySideRows(ours, theirs);
+  return (
+    <div className="font-mono text-[0.7rem] leading-snug rounded border border-border">
+      <div className="grid grid-cols-2 border-b border-border font-sans text-[0.65rem] font-semibold text-muted-foreground">
+        <span className="px-2 py-1">yours (library)</span>
+        <span className="px-2 py-1 border-l border-border">the release</span>
+      </div>
+      <div className="max-h-72 overflow-auto">
+        {rows.map((r, i) => (
+          <div key={i} className="grid grid-cols-2">
+            <span className={`px-2 whitespace-pre-wrap break-all ${!r.same && r.left !== null ? 'bg-blue-500/10' : ''}`}>
+              {!r.same && r.left !== null && <span aria-hidden className="mr-1">~</span>}{r.left ?? ''}
+            </span>
+            <span className={`px-2 border-l border-border whitespace-pre-wrap break-all ${!r.same && r.right !== null ? 'bg-green-500/10' : ''}`}>
+              {!r.same && r.right !== null && <span aria-hidden className="mr-1">+</span>}{r.right ?? ''}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FlagCard({ flag, resolve }: { flag: ReleaseFlag; resolve: Resolve }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [posting, setPosting] = useState(false);
+  const label = rowLabel(flag);
+
+  const post = async (decision: Decision, content?: string) => {
+    setPosting(true);
+    setError(null);
+    const out = await resolve(flag, decision, content);
+    setPosting(false);
+    if (out.ok) setEditing(null);
+    else setError(out.message);
+  };
+
+  return (
+    <li aria-label={label} className="rounded border border-border bg-background px-3 py-2 space-y-2">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className="font-mono text-foreground">{label}</span>
+        <span className="text-muted-foreground">{changeWord(flag)}</span>
+      </div>
+      {editing !== null ? (
+        <textarea
+          aria-label={`Edited text for ${label}`}
+          value={editing}
+          onChange={(e) => setEditing(e.target.value)}
+          rows={14}
+          className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[0.7rem]"
+        />
+      ) : (
+        <SideBySide ours={flag.ours} theirs={flag.theirs} />
+      )}
+      {error && <p role="alert" className="text-destructive">{error}</p>}
+      <div className="flex flex-wrap gap-2">
+        {editing !== null ? (
+          <>
+            <Button size="sm" disabled={posting} onClick={() => post('edit', editing)}>Save</Button>
+            <Button size="sm" variant="outline" disabled={posting} onClick={() => { setEditing(null); setError(null); }}>
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button size="sm" variant="outline" disabled={posting} onClick={() => post('take_release')}>
+              {takeLabel(flag)}
+            </Button>
+            <Button size="sm" variant="outline" disabled={posting} onClick={() => post('keep_mine')}>
+              Keep mine
+            </Button>
+            {canEdit(flag) && (
+              <Button size="sm" variant="outline" disabled={posting}
+                onClick={() => setEditing(flag.ours ?? flag.theirs ?? '')}>
+                Edit
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+    </li>
+  );
 }
 
 /**
- * One banner when a release's bundled skill docs were not all refreshed:
- * the count, the per-row reasons on expand, and Retry. It clears when every
- * row has been applied (the parent renders it only while rows are pending).
+ * One banner while bundled docs the operator edited wait on a decision after a
+ * release changed them (DL-232): the count, and on expand one card per doc with
+ * the library's text beside the release's and the three decisions. It clears
+ * when every flag is decided (the parent renders it only while flags are open).
  */
-export function BundledRefreshBanner({ target, items, retrying, error, onRetry }: Props) {
+export function BundledRefreshBanner({ flags, resolve }: { flags: ReleaseFlag[]; resolve: Resolve }) {
   const [open, setOpen] = useState(false);
-  const moved = items.some((i) => i.moved);
   return (
     <div
       role="status"
-      aria-label="bundled skill docs not refreshed"
+      aria-label="bundled skill docs kept for your decision"
       className="shrink-0 border-b border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-[0.733rem]"
     >
       <div className="flex items-start gap-2">
         <AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
-        <span className="min-w-0 flex-1 text-foreground">{bannerText(items.length, target)}</span>
-        <Button size="sm" variant="outline" disabled={retrying} onClick={onRetry}>
-          {retrying ? 'Retrying…' : 'Retry'}
-        </Button>
+        <span className="min-w-0 flex-1 text-foreground">{bannerText(flags.length)}</span>
       </div>
       <button
         type="button"
@@ -39,25 +120,13 @@ export function BundledRefreshBanner({ target, items, retrying, error, onRetry }
         className="mt-1 ml-5 flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronDown size={11} className={open ? '' : '-rotate-90'} />
-        {open ? 'Hide reasons' : 'Show reasons'}
+        {open ? 'Hide docs' : 'Show docs'}
       </button>
       {open && (
-        <ul className="mt-1.5 ml-5 space-y-1.5">
-          {items.map((i) => (
-            <li key={`${i.skill_id}/${i.doc_key}`}>
-              <span className="font-mono text-foreground">{rowLabel(i)}</span>
-              <span className="text-muted-foreground"> — {rowReason(i)}</span>
-              {i.moved && <p className="mt-0.5 text-amber-700 dark:text-amber-300">{MOVED_HINT}</p>}
-            </li>
-          ))}
+        <ul className="mt-1.5 ml-5 max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+          {flags.map((f) => <FlagCard key={rowLabel(f)} flag={f} resolve={resolve} />)}
         </ul>
       )}
-      {!open && moved && (
-        <p className="mt-1 ml-5 text-amber-700 dark:text-amber-300">
-          A plain retry cannot fix every row — expand for what to do.
-        </p>
-      )}
-      {error && <p role="alert" className="mt-1.5 ml-5 text-destructive">{error}</p>}
     </div>
   );
 }

@@ -88,8 +88,7 @@ def normalise_doc_text(
     the skill's id, title and summary), and reported lines are lines of the
     source. `kind` is 'guidance' (SKILL.md) or 'reference'; both take the same
     steps today, and an unknown kind raises rather than being guessed at.
-    `source` names the text in errors (a path on disk, or `<ref>:<path>` for
-    a file read from git). `overlay` is the loaded field map; None loads it
+    `source` names the text in errors (a path on disk). `overlay` is the loaded field map; None loads it
     from the configured directory, which a caller normalising many files
     loads once and passes.
     """
@@ -117,7 +116,7 @@ def provenance(release: str, path: str, text: str) -> dict:
     """The provenance triple a version posted from a bundled file carries: the
     release it came from, the file's path under the checkout, and the hash of
     the text as stored. The ONE builder — the import stamps with it and the
-    review's apply posts with it, so the two cannot name a version differently."""
+    release comparison posts with it, so the two cannot name a version differently."""
     return {
         "bundled_release": release,
         "bundled_path": path,
@@ -128,8 +127,9 @@ def provenance(release: str, path: str, text: str) -> dict:
 def checkout_root() -> Path:
     """The checkout the bundled skills are read from: `CC_REPO_ROOT` when set,
     else the one this code runs from (`central_command/skills/` is two levels
-    below it). The ONE root seam: the import's stamp and the review's git reads
-    both come through here, and a test points it at a tmp checkout."""
+    below it). The ONE root seam: the import's stamp and the release
+    comparison's reads both come through here, and a test points it at a tmp
+    checkout."""
     if settings.repo_root:
         return Path(settings.repo_root).expanduser()
     return Path(__file__).resolve().parents[2]
@@ -138,7 +138,7 @@ def checkout_root() -> Path:
 def checkout_release(root: Path) -> str:
     """The checkout's release: the `version=` line of its `VERSION` file, the
     one the updaters call current. Unreadable or missing raises, because a
-    stamp of a guessed release would put a wrong base into every later review."""
+    stamp of a guessed release would put a wrong base into every later comparison."""
     version_file = root / "VERSION"
     try:
         text = version_file.read_text(encoding="utf-8")

@@ -191,7 +191,7 @@ erDiagram
 
 ## Skills library
 
-Curated subject knowledge held as governed, versioned data, granted per agent, plus the bookkeeping that reviews bundled releases against it.
+Curated subject knowledge held as governed, versioned data, granted per agent, plus the bookkeeping that compares each release's bundled docs with it.
 
 ```mermaid
 erDiagram
@@ -218,6 +218,12 @@ erDiagram
         text kind
         timestamptz retired_at
     }
+    skill_doc_flag {
+        text skill_id PK, FK
+        text doc_key PK
+        text release PK
+        timestamptz decided_at
+    }
     skill_doc_review {
         text target PK
         text skill_id PK
@@ -228,6 +234,7 @@ erDiagram
     agent ||--o{ agent_skill_grant : "agent_id"
     skill ||--o{ agent_skill_grant : "skill_id"
     skill ||--o{ skill_doc : "skill_id"
+    skill ||--o{ skill_doc_flag : "skill_id"
     skill_doc ||--o{ skill_chunk : "doc_id"
 ```
 
@@ -359,7 +366,8 @@ erDiagram
 | `skill_bundled_text` | Skills library | Content-addressed record of the bundled document texts the library has received. |
 | `skill_chunk` | Skills library | Search chunks of the current version of a reference document. |
 | `skill_doc` | Skills library | One version of a skill document (guidance or reference); a correction is a new version. |
-| `skill_doc_review` | Skills library | Review of one target release against the library: per-document merge status and the operator's verdict. |
+| `skill_doc_flag` | Skills library | A bundled doc the operator edited that a release changed or removed: kept, and flagged for the operator's decision. |
+| `skill_doc_review` | Skills library | Unused since DL-232: the pre-update review of a target release, kept because the schema is additive only. |
 | `calendar_plan_event` | Goals (lines of effort) | Executor-written ledger of the calendar events the assistant created or adopted (work block or placeholder), retired by timestamp. |
 | `day_plan` | Goals (lines of effort) | Executor-written record of the day's approved plan (ranked issues, reasons, planning numbers re-read from the tracker), superseded by timestamp. |
 | `day_plan_outcome` | Goals (lines of effort) | Executor-written evening-review outcome per date and issue (done, actual hours, note, planned or not), superseded by timestamp. |

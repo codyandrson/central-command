@@ -4,6 +4,38 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-22 — v2.127.0: Bundled skill docs are compared after an update, not reviewed before it; nothing about them blocks an update
+
+- **Why.** Since v2.77.0 (DL-198) an update that changed bundled skill docs was reviewed before it ran:
+  the installed, target and library text of each doc were read with `git show` on two refs and merged
+  with `git merge-file`, a review was stored per target, and the update was refused at three points
+  until every doc changed on both sides had a verdict. In five weeks no library doc ever differed from
+  its bundled text, and the git reads tied the app to being a git checkout. The operator ruled in the
+  2026-11-21 system review: simplify, and keep "an edit is never overwritten" (DL-232 amends DL-198).
+- **The rule now.** After the update, each bundled doc on disk is compared with the stored base and the
+  library. A doc nobody edited follows the release. An edited doc the release did not change is left
+  alone. An edited doc the release also changed keeps the library's text, records the new base so it
+  is not flagged twice, and is flagged for the operator.
+- **Where the operator decides.** The Skills page shows a banner when something is flagged; each card
+  shows the library's text beside the release's, with Take the release text (or Retire / Reactivate),
+  Keep mine, and Edit. New routes `GET /api/skills/release-flags` and
+  `POST /api/skills/release-flags/{skill_id}/{doc_key}/resolve`; a new additive table
+  `skill_doc_flag`.
+- **What went.** The pre-update gate in the cockpit proxy, the API and both updaters; the stage step;
+  every git read in this feature; the review section of the Update dialog; the `update-review` routes
+  and RPCs. `skill_doc_review` stays in the schema, unused (the schema is additive only, and the
+  v2.126.0 updater still touches it during the update into this release).
+- **Updating from an older release.** The update into this release is driven by the installed
+  release's updater, which still calls `review`, `check` and `apply` on the refresh module. Those
+  three command lines are kept for one release: `review` and `check` report nothing to review, and
+  `apply` runs the new comparison. This release changes nothing under `skills/`, so the old gate has
+  nothing to ask and nothing is flagged. `min_upgrade_from` is unchanged.
+- **On apply.** The update journal gains one line, `bundled skills for <release>: follow=… retire=…
+  keep=… flag=… failed=… unchanged=…`. A failed comparison is a warning that names the command to
+  re-run; it does not fail the update.
+- **Not checked.** `shellcheck` is not installed on the build host; both updaters pass `bash -n` and
+  the tests that read them.
+
 ## 2026-11-22 — v2.126.0: The cockpit's device pairing handshake is removed; the `/ws` relay forwards frames unchanged
 
 - **Why.** The cockpit server still carried the device identity and pairing handshake of the project

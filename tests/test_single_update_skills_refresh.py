@@ -1,19 +1,17 @@
-"""The single-node updater's three bundled-skill steps
-(epic-skills-refresh-on-update story 6; updater-contract.md §single-node;
-rehearsal.md R2).
+"""The single-node updater's one bundled-skill step (DL-232).
 
-`update.sh` reviews the staged release at `stage`, refuses at `apply` while a
-verdict is missing, and refreshes the library right after the schema. Each step
-is a function keyed on the tree carrying `central_command/skills/refresh.py`
-and calls that module's command line through the install's python.
+`update.sh` compares the bundled docs on disk with the library right after the
+schema (`refresh_bundled_skills`: `python -m central_command.skills.refresh
+sync`). Nothing reviews the staged release and nothing refuses an apply. The
+step is keyed on the tree carrying `central_command/skills/refresh.py` and calls
+that module's command line through the install's python.
 
 Nothing here runs the real updater. The functions are lifted out of update.sh
 by name (`tests.installer_source.functions_in`) and run under bash against a
 temp git repo with `local`/`upstream` branches and a STUB python that records
 its argv and exits with the code a file names. The ORDER of the call sites is
-asserted on the source text of `cmd_stage`, `cmd_apply` and
-`deploy_current_tree`, because a function that is right in the wrong place is
-the failure this story exists to prevent.
+asserted on the source text of `deploy_current_tree`, because a function that
+is right in the wrong place is the failure these tests exist to prevent.
 """
 
 from __future__ import annotations
@@ -42,7 +40,7 @@ TARGET = "2.99.0"
 LIFTED = (
     "logline pass warn fail note G branch_kv merged_already "
     "skills_refresh_module skills_python skills_refresh_cli "
-    "skills_review_stage skills_review_gate refresh_bundled_skills"
+    "refresh_bundled_skills"
 ).split()
 
 
@@ -133,145 +131,55 @@ def _protocol(out: subprocess.CompletedProcess) -> list[str]:
     return [ln for ln in out.stdout.splitlines() if ln.split(" ", 1)[0] in ("PASS", "WARN", "FAIL", "USERACTION")]
 
 
-# ── the module is absent: every step is a skip ───────────────────────────────
+# ── the module is absent: the step is a skip ─────────────────────────────────
 
-@pytest.mark.parametrize("call", ["skills_review_stage", "skills_review_gate", "refresh_bundled_skills"])
-def test_a_tree_without_the_module_skips_every_step(tmp_path, call):
+def test_a_tree_without_the_module_skips_the_step(tmp_path):
     inst = Install(tmp_path, module=False)
-    inst.merge_upstream()   # so the refresh's own merged-tree guard is not what skips it
-    out = inst.run(call)
+    inst.merge_upstream()
+    out = inst.run("refresh_bundled_skills")
     assert "rc=0 fails=0 warns=0" in out.stdout
-    assert _protocol(out) == []
-    assert inst.calls() == []
-
-
-# ── skills_review_stage ──────────────────────────────────────────────────────
-
-def test_stage_review_names_the_staged_trees_version_and_the_upstream_ref(install):
-    out = install.run("skills_review_stage")
-    assert "rc=0 fails=0 warns=0" in out.stdout
-    assert install.calls() == [f"-m central_command.skills.refresh review --target {TARGET} --ref upstream"]
-
-
-def test_the_clis_stdout_never_joins_the_protocol_stream(install):
-    out = install.run("skills_review_stage")
-    # update.sh's stdout is parsed by the cockpit's stage route; the CLI's
-    # counts line goes to stderr.
-    assert "counts line" not in out.stdout
-    assert "counts line" in out.stderr
-
-
-@pytest.mark.parametrize("code", [1, 2])
-def test_a_failed_stage_review_is_a_warning_and_the_stage_goes_on(install, code):
-    install.exits(code)
-    out = install.run("skills_review_stage")
-    assert "rc=0 fails=0 warns=1" in out.stdout
-    assert any(ln.startswith("WARN skills-review:") and "cockpit will compute it on open" in ln
-               for ln in _protocol(out))
-
-
-def test_stage_review_has_nothing_to_review_when_local_already_holds_upstream(install):
-    install.merge_upstream()
-    out = install.run("skills_review_stage")
-    assert "rc=0 fails=0 warns=0" in out.stdout
-    assert install.calls() == []
-
-
-def test_stage_review_does_not_run_after_a_failed_plan(install):
-    out = install.run("skills_review_stage", fails=1)
-    assert install.calls() == []
-    assert "rc=0" in out.stdout
-
-
-def test_stage_review_with_no_interpreter_warns(tmp_path):
-    inst = Install(tmp_path, venv=False)
-    out = inst.run("skills_review_stage")
-    assert "rc=0 fails=0 warns=1" in out.stdout
-    assert inst.calls() == []
-
-
-# ── skills_review_gate ───────────────────────────────────────────────────────
-
-def test_gate_passes_when_nothing_is_unresolved(install):
-    out = install.run("skills_review_gate")
-    assert "rc=0 fails=0 warns=0" in out.stdout
-    assert any(ln.startswith("PASS skills-review:") for ln in _protocol(out))
-    assert install.calls() == [f"-m central_command.skills.refresh check --target {TARGET} --ref upstream"]
-
-
-def test_gate_exit_3_is_a_fail_row_naming_the_cockpit_and_returns_1(install):
-    install.exits(3)
-    out = install.run("skills_review_gate")
-    assert "rc=1 fails=1" in out.stdout
-    lines = _protocol(out)
-    assert len(lines) == 1 and lines[0].startswith("FAIL skills-review:")
-    assert "cockpit" in lines[0] and f"v{TARGET}" in lines[0]
-    # The fix is in the cockpit, not the shell: never a useraction (exit 3).
-    assert not any(ln.startswith("USERACTION") for ln in _protocol(out))
-
-
-@pytest.mark.parametrize("code", [1, 2, 4])
-def test_gate_any_other_non_zero_is_a_fail_row_that_cannot_be_proven(install, code):
-    install.exits(code)
-    out = install.run("skills_review_gate")
-    assert "rc=1 fails=1" in out.stdout
-    lines = _protocol(out)
-    assert len(lines) == 1 and lines[0].startswith("FAIL skills-review:")
-    assert f"exit {code}" in lines[0] and "cannot be proven" in lines[0]
-
-
-def test_gate_with_no_interpreter_cannot_be_proven(tmp_path):
-    inst = Install(tmp_path, venv=False)
-    out = inst.run("skills_review_gate")
-    assert "rc=1 fails=1" in out.stdout
-    assert "cannot be proven" in out.stdout
-
-
-def test_gate_without_an_upstream_version_cannot_be_proven(tmp_path):
-    inst = Install(tmp_path, upstream_version=None)
-    out = inst.run("skills_review_gate")
-    assert "rc=1 fails=1" in out.stdout
     assert inst.calls() == []
 
 
 # ── refresh_bundled_skills ───────────────────────────────────────────────────
 
-def test_refresh_applies_the_stored_review_as_the_updater_after_the_merge(install):
+def test_refresh_runs_the_comparison_after_the_merge_with_no_target_or_ref(install):
     install.merge_upstream()
     out = install.run("refresh_bundled_skills")
     assert "rc=0 fails=0 warns=0" in out.stdout
-    assert install.calls() == [
-        f"-m central_command.skills.refresh apply --target {TARGET} --ref upstream --actor updater"]
+    assert install.calls() == ["-m central_command.skills.refresh sync"]
 
 
-@pytest.mark.parametrize("code", [1, 2, 3])
-def test_a_refresh_that_does_not_apply_is_a_warning_never_a_failure(install, code):
+def test_the_clis_stdout_never_joins_the_protocol_stream(install):
+    install.merge_upstream()
+    out = install.run("refresh_bundled_skills")
+    assert "counts line on stdout" not in out.stdout
+    assert "counts line on stdout" in out.stderr
+
+
+@pytest.mark.parametrize("code", [1, 2])
+def test_a_comparison_that_fails_is_a_warning_never_a_failure(install, code):
     install.merge_upstream()
     install.exits(code)
     out = install.run("refresh_bundled_skills")
     assert "rc=0 fails=0 warns=1" in out.stdout
-    assert any(ln.startswith("WARN skills-refresh:") and "retry from the Skills page" in ln
+    assert any(ln.startswith("WARN skills-refresh:") and "refresh sync" in ln
                for ln in _protocol(out))
 
 
+def test_with_no_interpreter_the_comparison_warns(tmp_path):
+    inst = Install(tmp_path, venv=False)
+    inst.merge_upstream()
+    out = inst.run("refresh_bundled_skills")
+    assert "rc=0 fails=0 warns=1" in out.stdout
+
+
 def test_a_rollback_refreshes_nothing(install):
-    # Rollback resets `local` BEHIND `upstream`: the staged release's review
-    # must never be applied onto the restored older tree.
+    # Rollback resets `local` BEHIND `upstream`: the restored older tree is not
+    # a new release, so nothing is compared.
     out = install.run("refresh_bundled_skills")
     assert "rc=0 fails=0 warns=0" in out.stdout
     assert install.calls() == []
-
-
-def test_every_argv_carries_ref_upstream(install):
-    for call, code in (("skills_review_stage", 0), ("skills_review_gate", 0)):
-        install.exits(code)
-        install.run(call)
-    install.merge_upstream()
-    install.run("refresh_bundled_skills")
-    calls = install.calls()
-    assert len(calls) == 3
-    assert all(c.endswith("--ref upstream") or "--ref upstream " in c for c in calls)
-    assert not any(re.search(r"--ref v\d", c) for c in calls)   # single-node has no tag
 
 
 # ── where the steps sit: order assertions on update.sh's own text ────────────
@@ -281,26 +189,16 @@ def _calls_of(name: str) -> list[str]:
     return [ln for ln in TEXT.splitlines() if re.match(rf"^\s+{name}\b", ln)]
 
 
-@pytest.mark.parametrize("name", ["skills_review_stage", "skills_review_gate", "refresh_bundled_skills"])
-def test_each_step_is_defined_once_and_called_once(name):
-    assert len(re.findall(rf"^{name}\(\)", TEXT, re.M)) == 1
-    assert len(_calls_of(name)) == 1
+def test_the_step_is_defined_once_and_called_once():
+    assert len(re.findall(r"^refresh_bundled_skills\(\)", TEXT, re.M)) == 1
+    assert len(_calls_of("refresh_bundled_skills")) == 1
 
 
-def test_stage_reviews_after_the_plan():
-    body = FUNCS["cmd_stage"]
-    assert body.index("cmd_plan") < body.index("skills_review_stage")
-
-
-def test_apply_gates_after_the_version_gate_and_before_the_acquisition():
-    body = FUNCS["cmd_apply"]
-    gate = body.index("skills_review_gate")
-    assert body.rindex("version_gate", 0, gate) >= 0
-    assert gate < body.index("acquire_staged")
-    # Before anything moves: the backup, the checkpoint and the merge follow.
-    assert gate < body.index("backup_spine") < body.index("git merge --ff-only")
-    # A refusal ends the apply: it is `|| return 1`, not a warning.
-    assert re.search(r"skills_review_gate \|\| return 1", body)
+def test_nothing_reviews_at_stage_or_gates_the_apply():
+    """DL-232 dropped the pre-update gate and the stage step."""
+    for gone in ("skills_review_stage", "skills_review_gate", "skills-unresolved"):
+        assert gone not in TEXT
+    assert "skills_refresh_cli review" not in TEXT and "skills_refresh_cli check" not in TEXT
 
 
 def test_deploy_refreshes_after_the_schema_and_before_the_ledger_phases():

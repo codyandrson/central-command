@@ -1,10 +1,11 @@
-"""What the bundled-skill refresh must keep true across releases (epic-skills-
-refresh-on-update R7, R8, DL-198): the module's tier, the schema's shapes, the gate
-strings in every place that gates, and the bridge rule.
+"""What the bundled-skill comparison must keep true across releases (DL-198,
+amended by DL-232): the module's tier, the schema's shapes, that no apply is gated
+on the bundled docs any more, the routes, and the command line the previous
+release's updater calls.
 
-The update INTO a release runs the previous release's updater, so the release that
-ships the steps merges with no refresh. A change under `skills/` in that release would
-reach the library as `modified` at the next update, against a base it never received.
+The update INTO a release runs the previous release's updater: v2.126.0's calls
+`apply --target T --ref R --actor updater` on the merged tree, so that command line
+must still run the comparison for one release (`refresh._LEGACY`).
 """
 
 from __future__ import annotations
@@ -77,31 +78,40 @@ def test_the_provenance_columns_are_added_idempotently(column: str):
     ), column
 
 
-@pytest.mark.parametrize("table", ["skill_bundled_text", "skill_doc_review"])
+# `skill_doc_review` is unused since DL-232 and stays because the file is additive.
+@pytest.mark.parametrize("table", ["skill_bundled_text", "skill_doc_flag", "skill_doc_review"])
 def test_the_tables_are_created_idempotently(table: str):
     schema = SCHEMA.read_text(encoding="utf-8")
     assert f"create table if not exists {table} (" in schema
     assert not re.search(rf"create table {table}\b", schema)
 
 
-# ── the gate, wherever an apply can start ───────────────────────────────────
+# ── no apply is gated on the bundled docs (DL-232) ──────────────────────────
+
+
+@pytest.mark.parametrize("path", [
+    "deploy/k3s/cc-update.sh", "deploy/single/update.sh",
+    "web/server/routes/cc-update.ts", "central_command/api/update.py",
+    "web/src/components/UpdateBadge.tsx",
+])
+def test_nothing_refuses_an_update_over_the_bundled_docs(path: str):
+    text = _text(path)
+    assert "skills-unresolved" not in text
+    assert "skills_review_gate" not in text and "skills_review_stage" not in text
+    assert "update-review" not in text
 
 
 @pytest.mark.parametrize("updater", ["deploy/k3s/cc-update.sh", "deploy/single/update.sh"])
-@pytest.mark.parametrize("step", ["skills_review_stage", "skills_review_gate", "refresh_bundled_skills"])
-def test_both_updaters_hold_the_three_steps(updater: str, step: str):
+def test_both_updaters_run_the_comparison_after_the_merge(updater: str):
     text = _text(updater)
-    assert f"\n{step}() {{" in text, (updater, step)
-    assert re.search(rf"^\s+{step}\b", text, re.M), (updater, step)
+    assert "\nrefresh_bundled_skills() {" in text
+    assert re.search(r"^\s+refresh_bundled_skills\b", text, re.M)
+    assert re.search(r"skills_refresh_cli sync\b", text)
 
 
-@pytest.mark.parametrize("route", ["web/server/routes/cc-update.ts", "central_command/api/update.py"])
-def test_both_apply_routes_refuse_by_the_string_the_dialog_reads(route: str):
-    assert "skills-unresolved" in _text(route)
-
-
-def test_the_dialog_reads_that_string():
-    assert "includes('skills-unresolved')" in _text("web/src/components/UpdateBadge.tsx")
+def test_no_git_is_read_by_the_module():
+    text = REFRESH.read_text(encoding="utf-8")
+    assert "subprocess" not in text and "merge-file" not in text and '"git"' not in text
 
 
 # ── the routes reach their handlers ─────────────────────────────────────────
@@ -110,17 +120,14 @@ def test_the_dialog_reads_that_string():
 @pytest.mark.parametrize(
     "method,path,handler",
     [
-        ("POST", "/api/skills/update-review", "compute_skill_review_route"),
-        ("GET", "/api/skills/update-review", "get_latest_skill_review_route"),
-        ("GET", "/api/skills/update-review/2.68.0", "get_skill_review_route"),
-        ("POST", "/api/skills/update-review/2.68.0/items/jira/api/resolve", "resolve_skill_review_item_route"),
-        ("POST", "/api/skills/update-review/2.68.0/apply", "apply_skill_review_route"),
+        ("GET", "/api/skills/release-flags", "list_skill_release_flags_route"),
+        ("POST", "/api/skills/release-flags/jira/api/resolve", "resolve_skill_release_flag_route"),
     ],
 )
-def test_the_first_route_that_matches_is_the_reviews_own(method: str, path: str, handler: str):
-    """The tests call handlers directly, which proves nothing about routing: the
-    no-target read once sat behind `/skills/{skill_id}`, and every request became
-    a 404 for a skill named `update-review`."""
+def test_the_first_route_that_matches_is_the_flags_own(method: str, path: str, handler: str):
+    """The tests call handlers directly, which proves nothing about routing: a
+    read once sat behind `/skills/{skill_id}`, and every request became a 404 for
+    a skill named after the route."""
     from starlette.routing import Match
 
     from central_command.api.routes import router
@@ -130,91 +137,69 @@ def test_the_first_route_that_matches_is_the_reviews_own(method: str, path: str,
     assert first.endpoint.__name__ == handler
 
 
-# ── the bridge ──────────────────────────────────────────────────────────────
+# ── the previous release's updater (one release only) ───────────────────────
+# v2.126.0's updaters, read with `git show v2.126.0:<path>`, call the module
+# three ways. Stage and resolve run the INSTALLED tree's copy (their functions
+# test `[[ -f "$REPO/…/refresh.py" ]]` before the merge), so only `apply` reaches
+# this tree, from the `skills` phase (k3s) and `deploy_current_tree` (single):
+#   k3s:    skills_refresh_cli apply --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" --actor updater
+#   single: "$py" -m central_command.skills.refresh apply --target "$target" --ref upstream --actor updater
+# Each must still run here and exit 0 on a clean comparison.
 
-_HEADING = re.compile(r"^## .*?\bv(\d+\.\d+\.\d+)\b:?\s*(.*)$", re.M)
-
-
-def _bridge_problem(changelog: str, repo_root: Path) -> str | None:
-    """The bridge rule over a CHANGELOG's top two headings. Returns what is wrong,
-    None when it holds, or 'skip' when the rule cannot be checked here."""
-    top = _HEADING.findall(changelog)[:2]
-    if len(top) < 2:
-        return "skip"
-    (newer, title), (older, _) = top
-    if not re.search(r"\bbridge\b", title, re.I):
-        return None
-
-    def git(*args: str) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", *args], cwd=repo_root, capture_output=True, text=True)
-
-    for version in (older, newer):
-        if git("rev-parse", "--verify", "--quiet", f"refs/tags/v{version}").returncode != 0:
-            return "skip"
-    changed = git("diff", "--quiet", f"v{older}", f"v{newer}", "--", "skills/")
-    if changed.returncode == 0:
-        return None
-    return f"v{newer} names itself a bridge and changes skills/ since v{older}"
+OLD_ARGVS = [
+    ["apply", "--target", "9.9.9", "--ref", "v9.9.9", "--actor", "updater"],
+    ["apply", "--target", "9.9.9", "--ref", "upstream", "--actor", "updater"],
+]
 
 
-def test_a_release_named_a_bridge_changes_nothing_under_skills():
-    problem = _bridge_problem(_text("CHANGELOG.md"), ROOT)
-    if problem == "skip":
-        pytest.skip("a tag of the top two CHANGELOG versions is absent here")
-    assert problem is None, problem
+@pytest.mark.parametrize("argv", OLD_ARGVS)
+def test_the_old_updaters_apply_runs_the_comparison(monkeypatch, argv):
+    from central_command.skills import refresh
+
+    ran = []
+
+    async def fake_sync():
+        ran.append(True)
+        return {"release": "9.9.9", "counts": {"follow": 0}, "flagged": [], "failed": []}
+
+    monkeypatch.setattr(refresh, "sync", fake_sync)
+    assert refresh.main(argv) == 0
+    assert ran == [True]
 
 
-@pytest.fixture
-def tagged_repo(tmp_path: Path) -> Path:
+@pytest.mark.parametrize("command", ["review", "check"])
+def test_the_old_stage_and_gate_commands_answer_nothing_to_review(monkeypatch, capsys, command):
+    from central_command.skills import refresh
+
+    async def must_not_run():
+        raise AssertionError("review and check never compare")
+
+    monkeypatch.setattr(refresh, "sync", must_not_run)
+    assert refresh.main([command, "--target", "9.9.9", "--ref", "v9.9.9"]) == 0
+    assert "nothing to review" in capsys.readouterr().out
+
+
+def test_the_old_updaters_argv_is_what_v2_126_0_shipped():
+    """Where the tag is here, read the old updaters and check the shapes above."""
     if not shutil.which("git"):
         pytest.skip("git needed")
-
-    def git(*args: str) -> None:
-        subprocess.run(
-            ["git", "-c", "user.name=t", "-c", "user.email=t@example.com",
-             "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *args],
-            cwd=tmp_path, check=True, capture_output=True,
-        )
-
-    git("init", "-q")
-    (tmp_path / "skills").mkdir()
-    (tmp_path / "skills" / "doc.md").write_text("one\n")
-    git("add", "--all")
-    git("commit", "-q", "-m", "older")
-    git("tag", "v1.0.0")
-    (tmp_path / "other.txt").write_text("code\n")
-    git("add", "--all")
-    git("commit", "-q", "-m", "clean")
-    git("tag", "v1.1.0")
-    (tmp_path / "skills" / "doc.md").write_text("two\n")
-    git("add", "--all")
-    git("commit", "-q", "-m", "changes a doc")
-    git("tag", "v1.2.0")
-    return tmp_path
-
-
-def _log(newer: str, older: str, title: str = "the bridge: docs follow the release") -> str:
-    return (
-        f"# Changelog\n\n## 2026-11-01 — v{newer}: {title}\n\nbody\n\n"
-        f"## 2026-10-30 — v{older}: an older entry\n\nbody\n"
+    have = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/tags/v2.126.0"],
+        cwd=ROOT, capture_output=True,
     )
+    if have.returncode != 0:
+        pytest.skip("tag v2.126.0 is absent here")
 
+    def old(path: str) -> str:
+        return subprocess.run(
+            ["git", "show", f"v2.126.0:{path}"], cwd=ROOT, capture_output=True, text=True, check=True,
+        ).stdout
 
-def test_the_bridge_check_refuses_a_bridge_that_changed_a_doc(tagged_repo: Path):
-    problem = _bridge_problem(_log("1.2.0", "1.1.0"), tagged_repo)
-    assert problem and "changes skills/" in problem
-
-
-def test_the_bridge_check_passes_a_bridge_that_changed_no_doc(tagged_repo: Path):
-    assert _bridge_problem(_log("1.1.0", "1.0.0"), tagged_repo) is None
-
-
-def test_the_bridge_check_ignores_a_release_not_named_a_bridge(tagged_repo: Path):
-    assert _bridge_problem(_log("1.2.0", "1.1.0", "an ordinary release"), tagged_repo) is None
-
-
-def test_the_bridge_check_skips_when_a_tag_is_absent(tagged_repo: Path):
-    assert _bridge_problem(_log("9.9.9", "1.1.0"), tagged_repo) == "skip"
+    k3s = old("deploy/k3s/cc-update.sh")
+    single = old("deploy/single/update.sh")
+    assert 'skills_refresh_cli apply --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" --actor updater' in k3s
+    assert '-m central_command.skills.refresh "$sub" --target "$target" --ref upstream "$@"' in single
+    assert 'skills_refresh_cli apply "$target" --actor updater' in single
 
 
 # ── verify.sh's row ─────────────────────────────────────────────────────────

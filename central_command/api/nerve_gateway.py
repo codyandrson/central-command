@@ -1559,25 +1559,15 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         )
     if method == "skills.import":
         return await rest.import_skill_route(rest.SkillImportIn(**params))
-    if method == "skills.update_review":
-        return await rest.compute_skill_review_route(
-            rest.SkillReviewIn(target=params["target"], ref=params["ref"])
-        )
-    if method == "skills.update_review_latest":
-        return await rest.get_latest_skill_review_route()
-    if method == "skills.update_review_get":
-        return await rest.get_skill_review_route(params["target"])
-    if method == "skills.update_review_resolve":
-        return await rest.resolve_skill_review_item_route(
-            params["target"], params["skill_id"], params["doc_key"],
-            rest.SkillReviewResolveIn(
-                verdict=params["verdict"], content=params.get("content"),
-                ours_hash=params.get("ours_hash"), theirs_hash=params.get("theirs_hash"),
+    if method == "skills.release_flags":
+        return await rest.list_skill_release_flags_route()
+    if method == "skills.release_flag_resolve":
+        return await rest.resolve_skill_release_flag_route(
+            params["skill_id"], params["doc_key"],
+            rest.SkillFlagResolveIn(
+                decision=params["decision"], content=params.get("content"),
+                ours_hash=params.get("ours_hash"),
             ),
-        )
-    if method == "skills.update_review_apply":
-        return await rest.apply_skill_review_route(
-            params["target"], rest.SkillReviewApplyIn(actor=params.get("actor", "updater")),
         )
     if method == "gaps.list":
         return await rest.list_gaps_route(params.get("limit", 100))

@@ -375,14 +375,8 @@ export function SkillsView() {
             New skill
           </Button>
         </div>
-        {refreshState.review && refreshState.pending.length > 0 && (
-          <BundledRefreshBanner
-            target={refreshState.review.target}
-            items={refreshState.pending}
-            retrying={refreshState.retrying}
-            error={refreshState.retryError}
-            onRetry={refreshState.retry}
-          />
+        {refreshState.flags.length > 0 && (
+          <BundledRefreshBanner flags={refreshState.flags} resolve={refreshState.resolve} />
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {error && <p className="px-4 py-2 text-[0.733rem] text-destructive">{error}</p>}

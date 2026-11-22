@@ -167,7 +167,6 @@ sequenceDiagram
 
     Upd->>Src: fetch tags, pick the target
     Upd->>Upd: version gate (no downgrade, min_upgrade_from, clean tree)
-    Upd->>Upd: bundled skill review gate
     Upd->>API: busy check, any run still RUNNING?
     Upd->>Upd: removed-capability check, undecided proposals refuse
     Upd->>Upd: tag a rollback checkpoint
@@ -203,8 +202,8 @@ sequenceDiagram
 
 | Step | What happens | Where in the script (`deploy/k3s/cc-update.sh`) |
 |---|---|---|
-| 1 to 4 | The cockpit route refuses an unreviewed skill-doc change, then engages the hold. The API's poller writes the trigger once nothing is running. "Update anyway" skips the wait and writes the trigger from the cockpit route. A path unit then starts the updater, and its `ExecStartPre` moves the trigger to `request.json` so a left-over file cannot loop. | `web/server/routes/cc-update.ts` (262-312), `central_command/api/hold.py`, `cc-update.path`, `cc-update.service.in` |
-| 5 to 7 | Resolve and gates: refuse uncommitted tracked files (561), fetch tags (565), pick the target, refuse a downgrade or a source below `min_upgrade_from` (570-583), bundled skill review gate (584). | `main()` from 547 |
+| 1 to 4 | The cockpit route engages the hold. The API's poller writes the trigger once nothing is running. "Update anyway" skips the wait and writes the trigger from the cockpit route. A path unit then starts the updater, and its `ExecStartPre` moves the trigger to `request.json` so a left-over file cannot loop. | `web/server/routes/cc-update.ts` (262-312), `central_command/api/hold.py`, `cc-update.path`, `cc-update.service.in` |
+| 5 to 7 | Resolve and gates: refuse uncommitted tracked files (561), fetch tags (565), pick the target, refuse a downgrade or a source below `min_upgrade_from` (570-583). | `main()` from 547 |
 | 8 to 10 | Busy check (589), removed-capability check (591), rollback checkpoint tag (593-599). The "Update anyway" request bypasses only the busy check, not the other gates. | 588-599, 388-423 |
 | 11 | Prebuild changed images (sandbox, crawler) on the compute node from a detached worktree of the target tag, while services stay up. The running image bytes are retagged first so a rollback can restore them. A failed build changes nothing. | 601-657 |
 | 12 | Three database dumps and a keys file (without the keys the LiteLLM and n8n dumps are unreadable). A failed dump refuses the update. | 659-706 |
@@ -213,7 +212,7 @@ sequenceDiagram
 | 15 to 17 | Merge (715-719). Then the env-file path migration (721, not drawn), the schema (724-726) and the venv and cockpit rebuild (728-729). | 715-729 |
 | 18 | Manifests phase: apply changed yaml, refresh the two file-built configmaps, delete the `removed.txt` tombstones, restart deployments whose image bytes moved, wait for rollouts. | 731-793 |
 | 19 | Changed unit files are rendered from templates and installed, then systemd reloads. A changed updater unit only takes effect on the next run. | 795-826 |
-| 20 to 21 | n8n workflows on every update (836), bundled skill docs (841), app settings and the app key's scope (847). | 828-848 |
+| 20 to 21 | n8n workflows on every update (836), bundled skill docs compared with the library, an edited one kept and flagged (841, DL-232), app settings and the app key's scope (847). | 828-848 |
 | 22 to 23 | Start services (850), then poll `/health` 30 times, 4 seconds apart. | 145-154, 850-854 |
 | 24 to 25 | Healthy: apply the LiteLLM policy, then record `success`. | 855-871 |
 | 26 to 29 | Unhealthy: stop, `git reset --hard` to the checkpoint, rebuild, restore retagged images, re-apply the old manifests, restart and wait, start services, poll again. | 874-905 |

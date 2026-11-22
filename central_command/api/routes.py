@@ -3315,51 +3315,54 @@ async def list_skills_route(include_retired: bool = True) -> dict:
 
 
 # Registered before `/skills/{skill_id}`, which would otherwise take the request as a
-# skill named `update-review` (first match wins).
-@router.get("/skills/update-review")
-async def get_latest_skill_review_route() -> dict:
-    """The stored review without naming its target — what the Skills page asks
-    to learn whether a refresh did not fully apply. The review is single-target
-    by design (computing another target drops the old rows), so "the latest" is
-    the one stored; 404 when none is. Deliberately LIGHTER than the by-target
-    read: no texts, so no git reads and no 409 for a text that moved — a page
-    polling for a banner must never fail on the very state it is reporting.
+# skill named `release-flags` (first match wins).
+@router.get("/skills/release-flags")
+async def list_skill_release_flags_route() -> dict:
+    """The bundled docs the operator edited that a release then changed or
+    removed (DL-232): the release comparison kept the library's text and flagged
+    each. One item per doc, with the library's text now (`ours`, null when the
+    doc is retired here) and what the release ships (`theirs`, null when it
+    removed the doc), so the Skills page can offer take, keep or edit."""
+    from central_command.skills.importer import bundled_text_hash
 
-    An item is `pending_apply` when it was not applied and either recorded an
-    `apply_error`, or holds a verdict while the update is finished (the
-    installed version has reached the target) — a decision the updater never
-    carried out. `moved` marks an error saying a text changed since the review,
-    which a plain retry cannot fix.
-    """
-    from central_command.api.update import _semver_key, read_product_version
+    items = []
+    for f in await repo.list_open_skill_doc_flags():
+        items.append({
+            "skill_id": f["skill_id"], "doc_key": f["doc_key"], "release": f["release"],
+            "change": f["change"], "bundled_path": f["bundled_path"],
+            "flagged_at": f["flagged_at"],
+            "ours": f["ours"],
+            "ours_hash": bundled_text_hash(f["ours"]) if f["ours"] is not None else None,
+            "theirs": f["release_text"],
+        })
+    return {"items": items}
+
+
+class SkillFlagResolveIn(BaseModel):
+    decision: str                  # 'take_release' | 'keep_mine' | 'edit'
+    content: str | None = None     # the text to post, for 'edit' only
+    # The library text the operator was shown; null when the doc is retired here.
+    ours_hash: str | None
+
+
+@router.post("/skills/release-flags/{skill_id}/{doc_key}/resolve")
+async def resolve_skill_release_flag_route(
+    skill_id: str, doc_key: str, body: SkillFlagResolveIn,
+) -> dict:
+    """The operator's decision on one flagged doc. 404 when nothing is open for
+    it, 409 when the library or the release text moved since it was shown."""
     from central_command.skills import refresh
 
-    target = await repo.latest_skill_review_target()
-    rows = await repo.list_skill_doc_review(target) if target else []
-    if not rows:
-        raise HTTPException(404, "no bundled-skill review is stored")
-    installed = read_product_version()
-    finished = _semver_key(installed) >= _semver_key(target)
-    items = []
-    for r in rows:
-        err = r["apply_error"]
-        pending = r["applied_at"] is None and (
-            err is not None or (finished and r["verdict"] is not None)
+    try:
+        return await refresh.resolve_flag(
+            skill_id, doc_key, body.decision, ours_hash=body.ours_hash, content=body.content,
         )
-        items.append({
-            "skill_id": r["skill_id"], "doc_key": r["doc_key"], "status": r["status"],
-            "verdict": r["verdict"], "resolved_at": r["resolved_at"],
-            "applied_at": r["applied_at"], "apply_error": err,
-            "pending_apply": pending,
-            "moved": bool(err) and "changed since the review" in err,
-        })
-    return {
-        "target": target, "ref": rows[0]["ref"],
-        "computed_at": max(r["computed_at"] for r in rows),
-        "installed": installed, "finished": finished,
-        "counts": {**refresh.review_counts(rows), "not_refreshed": sum(i["pending_apply"] for i in items)},
-        "items": items,
-    }
+    except repo.SkillDocFlagClosed as e:
+        raise HTTPException(404, str(e)) from e
+    except refresh.FlagMoved as e:
+        raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
 
 
 @router.get("/skills/{skill_id}")
@@ -3729,231 +3732,6 @@ async def import_skill_route(body: SkillImportIn) -> dict:
             payload={"skill_id": result["skill_id"], "default": True}, actor="seed:skill",
         )
     return result
-
-
-# --- Bundled-skill update review (epic-skills-refresh-on-update R2/R3) -----
-# The review itself is computed and stored by `skills/refresh.py`; these routes
-# serve it, take the operator's verdicts and run the apply the updater also runs
-# from the command line.
-
-_REVIEW_VERDICTS = ("take_release", "keep_mine", "edit")
-# What `git merge-file` writes, exactly: a marker run of seven, a space and a
-# label (the label is what separates it from prose); the divider has none.
-_CONFLICT_MARKER = re.compile(r"(?:<{7}|\|{7}|>{7}) \S.*")
-_REVIEW_STALE = (
-    "the {what} changed since this review was computed; recompute it "
-    "(POST /api/skills/update-review)"
-)
-
-
-class SkillReviewIn(BaseModel):
-    target: str                    # the release under review: '2.68.0'
-    ref: str                       # the git ref holding it: 'v2.68.0' | 'upstream'
-
-
-class SkillReviewResolveIn(BaseModel):
-    verdict: str                   # 'take_release' | 'keep_mine' | 'edit'
-    content: str | None = None     # the text to post, for 'edit' only
-    # The hashes of the item the operator was shown. Required but nullable: a
-    # retired-* row has no library text or no release text on one side.
-    ours_hash: str | None
-    theirs_hash: str | None
-
-
-def has_conflict_marker(text: str) -> bool:
-    """A line `git merge-file` writes as a conflict marker. A Markdown setext
-    underline of any other length is not one."""
-    return any(
-        line == "=======" or _CONFLICT_MARKER.fullmatch(line) for line in text.splitlines()
-    )
-
-
-async def _review_shape(target: str) -> dict:
-    """The stored review of `target` with each item's texts, or 404.
-
-    The table holds hashes and the merge only. The texts are read back here, and
-    each is checked against the hash the review stored: a text that no longer
-    hashes to it (the library doc, the installed tree or the target ref moved
-    since the compute) is a 409, never a stale diff shown as current.
-
-    The exception is a row an apply has already touched: its own post moved the
-    library, and the failed rows are what the cockpit has to show. A text that
-    no longer matches on such a row is null, so the review stays readable.
-    """
-    import asyncio
-
-    from central_command.config import settings
-    from central_command.skills import importer, refresh
-    from central_command.skills import overlay as skill_overlay
-
-    rows = await repo.list_skill_doc_review(target)
-    if not rows:
-        raise HTTPException(404, f"no bundled-skill review is stored for {target!r}")
-    ref = rows[0]["ref"]
-    library = await repo.skill_review_library(sorted({r["skill_id"] for r in rows}))
-
-    def _read(tree_ref: str) -> dict:
-        overlay = skill_overlay.load(settings.resolved_skill_overlay_dir())
-        return refresh.read_tree(importer.checkout_root(), tree_ref, overlay)
-
-    stored = {
-        r["hash"]: r["content"]
-        for r in await repo.get_skill_bundled_texts(
-            sorted({r["base_hash"] for r in rows if r["base_hash"]})
-        )
-    }
-    try:
-        installed = (
-            await asyncio.to_thread(_read, "HEAD")
-            if any(r["base_hash"] and r["base_hash"] not in stored for r in rows) else {}
-        )
-        release = (
-            await asyncio.to_thread(_read, ref)
-            if any(r["theirs_hash"] for r in rows) else {}
-        )
-    except ValueError as e:
-        raise HTTPException(500, f"could not read the trees for this review: {e}") from e
-
-    def _text(value: str | None, want: str | None, what: str, row: dict) -> str | None:
-        if want is None:
-            return None
-        if value is None or importer.bundled_text_hash(value) != want:
-            if row["applied_at"] is not None or row["apply_error"] is not None:
-                return None
-            raise HTTPException(409, _REVIEW_STALE.format(what=what))
-        return value
-
-    items = []
-    for r in rows:
-        key = (r["skill_id"], r["doc_key"])
-        lib = library["docs"].get(key)
-        base = stored.get(r["base_hash"]) if r["base_hash"] else None
-        if base is None and r["base_hash"]:
-            base = installed[key].text if key in installed else None
-        theirs_doc = release.get(key)
-        items.append({
-            "skill_id": r["skill_id"], "doc_key": r["doc_key"], "status": r["status"],
-            "bundled_path": r["bundled_path"], "base_origin": r["base_origin"],
-            "base": _text(base, r["base_hash"], "installed copy", r),
-            "ours": _text(
-                lib["content"] if lib and lib["is_current"] else None,
-                r["ours_hash"], "library text", r,
-            ),
-            "theirs": _text(
-                theirs_doc.text if theirs_doc else None, r["theirs_hash"], "release text", r,
-            ),
-            "merged": r["merged"], "conflicts": r["conflicts"],
-            "ours_hash": r["ours_hash"], "theirs_hash": r["theirs_hash"],
-            "needs_verdict": refresh.needs_verdict(r),
-            "verdict": r["verdict"], "resolved_content": r["resolved_content"],
-            "resolved_at": r["resolved_at"],
-            "applied_at": r["applied_at"], "apply_error": r["apply_error"],
-        })
-    return {
-        "target": target, "ref": ref,
-        "computed_at": max(r["computed_at"] for r in rows),
-        "counts": refresh.review_counts(rows), "items": items,
-    }
-
-
-@router.post("/skills/update-review")
-async def compute_skill_review_route(body: SkillReviewIn) -> dict:
-    """Compute and store the review of `target` from `ref`, then answer as
-    the GET does. A review that cannot be computed stores nothing (the module
-    writes only after it has finished) and says why."""
-    from central_command.skills import refresh
-
-    try:
-        await refresh.compute_review(body.target, body.ref)
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from e
-    except Exception as e:
-        raise HTTPException(500, f"could not compute the review: {e}") from e
-    return await _review_shape(body.target)
-
-
-@router.get("/skills/update-review/{target}")
-async def get_skill_review_route(target: str) -> dict:
-    return await _review_shape(target)
-
-
-@router.post("/skills/update-review/{target}/items/{skill_id}/{doc_key}/resolve")
-async def resolve_skill_review_item_route(
-    target: str, skill_id: str, doc_key: str, body: SkillReviewResolveIn,
-) -> dict:
-    """One verdict on one item. A verdict replaces a verdict; nothing unresolves."""
-    from central_command.skills import refresh
-
-    row = await repo.get_skill_doc_review_row(target, skill_id, doc_key)
-    if row is None:
-        raise HTTPException(
-            404, f"no review item {skill_id}/{doc_key} is stored for {target!r}"
-        )
-    if not refresh.needs_verdict(row):
-        raise HTTPException(
-            422,
-            f"{skill_id}/{doc_key} is {row['status']!r}: there is nothing to decide "
-            "(only a modified doc, or one retired on either side, takes a verdict)",
-        )
-    if body.verdict not in _REVIEW_VERDICTS:
-        raise HTTPException(422, f"verdict must be one of {', '.join(_REVIEW_VERDICTS)}")
-    if body.verdict == "edit":
-        if row["status"] != "modified":
-            raise HTTPException(
-                422, f"edit is not offered for a {row['status']!r} doc: take the release or keep yours"
-            )
-        if body.content is None:
-            raise HTTPException(422, "an edit verdict carries the text to post in `content`")
-        if has_conflict_marker(body.content):
-            raise HTTPException(
-                422, "the edited text still holds git conflict markers (<<<<<<<, |||||||, ======= or >>>>>>>)"
-            )
-    elif body.content is not None:
-        raise HTTPException(422, "`content` belongs to an edit verdict only")
-    if row["applied_at"] is not None:
-        raise HTTPException(409, f"{skill_id}/{doc_key} was already applied; recompute the review")
-    saved = await repo.resolve_skill_doc_review(
-        target, skill_id, doc_key, body.verdict, body.content,
-        body.ours_hash, body.theirs_hash,
-    )
-    if saved is None:
-        raise HTTPException(409, _REVIEW_STALE.format(what="doc"))
-    await events.emit(
-        "skill.review_resolved", ref_id=skill_id,
-        payload={
-            "target": target, "skill_id": skill_id, "doc_key": doc_key,
-            "verdict": body.verdict,
-        },
-        actor="operator",
-    )
-    return {
-        "target": target, "skill_id": skill_id, "doc_key": doc_key,
-        "verdict": saved["verdict"], "resolved_at": saved["resolved_at"],
-        "counts": refresh.review_counts(await repo.list_skill_doc_review(target)),
-    }
-
-
-class SkillReviewApplyIn(BaseModel):
-    actor: str = "updater"         # who posts what nobody decided
-
-
-@router.post("/skills/update-review/{target}/apply")
-async def apply_skill_review_route(target: str, body: SkillReviewApplyIn) -> dict:
-    """Run the stored review through the apply table. A row that fails records
-    its `apply_error` and the rest go on, so a partial failure is still a 200;
-    a re-run posts only what is missing."""
-    from central_command.skills import refresh
-
-    if body.actor not in refresh.APPLY_ACTORS:
-        raise HTTPException(422, f"actor must be one of {', '.join(refresh.APPLY_ACTORS)}")
-    try:
-        return await refresh.apply_review(target, actor=body.actor)
-    except refresh.ReviewUnresolved as e:
-        raise HTTPException(409, f"{e}; decide them first") from e
-    except refresh.ReviewNotStored as e:
-        raise HTTPException(404, str(e)) from e
-    except Exception as e:
-        raise HTTPException(500, f"could not apply the review: {e}") from e
 
 
 @router.get("/gaps")

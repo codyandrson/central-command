@@ -5564,27 +5564,23 @@ async def list_skill_docs(
         await conn.close()
 
 
-async def skill_review_library(skill_ids: list[str]) -> dict:
-    """What the bundled-skill review reads about the named skills, from one
-    snapshot: `skills` {id: status}; `docs` {(skill, doc_key): the current row,
-    or the newest one when the key is retired}; `provenance` {(skill, doc_key):
-    the newest row carrying a bundled_hash, with `bundled_text` from
-    `skill_bundled_text`, None if that row is missing}."""
+async def skill_review_library() -> dict:
+    """What the release comparison (`skills/refresh.py`) reads about the whole
+    library, from one snapshot: `skills` {id: status}; `docs` {(skill, doc_key):
+    the current row, or the newest one when the key is retired}; `provenance`
+    {(skill, doc_key): the newest row carrying a bundled_hash — the stored base —
+    with `bundled_text` from `skill_bundled_text`, None if that row is missing}."""
     conn = await _conn()
     try:
         async with conn.transaction(isolation="repeatable_read", readonly=True):
-            skills = await conn.fetch(
-                "select id, status from skill where id = any($1::text[])", skill_ids,
-            )
+            skills = await conn.fetch("select id, status from skill")
             docs = await conn.fetch(
                 """
                 select distinct on (skill_id, doc_key)
-                       skill_id, doc_key, is_current, content
+                       skill_id, doc_key, kind, is_current, content
                   from skill_doc
-                 where skill_id = any($1::text[])
                  order by skill_id, doc_key, is_current desc, version desc
-                """,
-                skill_ids,
+                """
             )
             provenance = await conn.fetch(
                 """
@@ -5593,10 +5589,9 @@ async def skill_review_library(skill_ids: list[str]) -> dict:
                        t.content as bundled_text
                   from skill_doc d
                   left join skill_bundled_text t on t.hash = d.bundled_hash
-                 where d.skill_id = any($1::text[]) and d.bundled_hash is not null
+                 where d.bundled_hash is not null
                  order by d.skill_id, d.doc_key, d.version desc
-                """,
-                skill_ids,
+                """
             )
         return {
             "skills": {r["id"]: r["status"] for r in skills},
@@ -5607,202 +5602,101 @@ async def skill_review_library(skill_ids: list[str]) -> dict:
         await conn.close()
 
 
-_SKILL_REVIEW_COMPUTED = (
-    "skill_id", "doc_key", "status", "bundled_path", "base_hash", "base_origin",
-    "ours_hash", "theirs_hash", "merged", "conflicts",
-)
-# What a recompute carries over from a row whose hashes did not move: the
-# decision and what became of it. Everything else is recomputed.
-_SKILL_REVIEW_DECISION = (
-    "verdict", "resolved_content", "resolved_at", "applied_at", "apply_error",
-)
+class SkillDocFlagClosed(ValueError):
+    """No open flag for the doc: nothing waits on the operator there."""
 
 
-async def replace_skill_doc_review(target: str, ref: str, rows: list[dict]) -> list[dict]:
-    """Store a computed review as `target`'s whole review, in one transaction.
-
-    Every other target's rows go, resolutions included. A row of this target
-    keeps its decision only where `ours_hash` and `theirs_hash` are both
-    unchanged, which is what returns a doc re-posted between verdict and apply
-    to unresolved. The table lock serialises two reviews (the cockpit's and the
-    stage's), so neither reads decisions the other is about to replace; readers
-    are not blocked. Any failure rolls back to the review that was stored.
-    """
-    columns = ("target", "ref", *_SKILL_REVIEW_COMPUTED, *_SKILL_REVIEW_DECISION)
-    placeholders = ", ".join(f"${i}" for i in range(1, len(columns) + 1))
-    conn = await _conn()
-    try:
-        async with conn.transaction():
-            await conn.execute("lock table skill_doc_review in exclusive mode")
-            prior = {
-                (r["skill_id"], r["doc_key"]): r
-                for r in await conn.fetch(
-                    "select * from skill_doc_review where target = $1", target,
-                )
-            }
-            await conn.execute("delete from skill_doc_review")
-
-            def _values(row: dict) -> tuple:
-                old = prior.get((row["skill_id"], row["doc_key"]))
-                keep = old is not None and (old["ours_hash"], old["theirs_hash"]) == (
-                    row["ours_hash"], row["theirs_hash"],
-                )
-                return (
-                    target, ref,
-                    *(row[c] for c in _SKILL_REVIEW_COMPUTED),
-                    *(old[c] if keep else None for c in _SKILL_REVIEW_DECISION),
-                )
-
-            await conn.executemany(
-                f"insert into skill_doc_review ({', '.join(columns)}) values ({placeholders})",
-                [_values(r) for r in rows],
-            )
-        return await list_skill_doc_review(target)
-    finally:
-        await conn.close()
-
-
-async def list_skill_doc_review(target: str) -> list[dict]:
-    """The stored review of `target`, empty when none is stored."""
+async def skill_doc_flags_seen() -> set[tuple]:
+    """Every flag ever written, open or decided, as (skill_id, doc_key, change,
+    base_hash, release_hash): what the release comparison has already put in
+    front of the operator, so the same release text over the same base is never
+    flagged twice (DL-232)."""
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            "select * from skill_doc_review where target = $1 order by skill_id, doc_key",
-            target,
+            "select skill_id, doc_key, change, base_hash, release_hash from skill_doc_flag"
         )
-        return [dict(r) for r in rows]
+        return {tuple(r) for r in rows}
     finally:
         await conn.close()
 
 
-async def latest_skill_review_target() -> str | None:
-    """The target of the stored review (there is only ever one: a compute for
-    another target drops the old rows), or None when none is stored."""
-    conn = await _conn()
-    try:
-        return await conn.fetchval(
-            "select target from skill_doc_review order by computed_at desc, target limit 1"
-        )
-    finally:
-        await conn.close()
-
-
-async def get_skill_bundled_texts(hashes: list[str]) -> list[dict]:
-    """The stored bundled texts for these hashes (`hash`, `content`); a hash
-    the library never received is simply absent."""
-    if not hashes:
-        return []
+async def list_open_skill_doc_flags() -> list[dict]:
+    """The open flags, the newest per doc, each with the library's text now
+    (`ours`, None when the doc is retired here) and what the release ships
+    (`release_text`, None when the release removed it)."""
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            "select hash, content from skill_bundled_text where hash = any($1::text[])",
-            hashes,
-        )
-        return [dict(r) for r in rows]
-    finally:
-        await conn.close()
-
-
-async def get_skill_doc_review_row(target: str, skill_id: str, doc_key: str) -> dict | None:
-    """One stored review row, or None when `target` has no such row."""
-    conn = await _conn()
-    try:
-        row = await conn.fetchrow(
-            "select * from skill_doc_review where target = $1 and skill_id = $2 and doc_key = $3",
-            target, skill_id, doc_key,
-        )
-        return dict(row) if row else None
-    finally:
-        await conn.close()
-
-
-async def resolve_skill_doc_review(
-    target: str, skill_id: str, doc_key: str, verdict: str,
-    resolved_content: str | None, ours_hash: str | None, theirs_hash: str | None,
-) -> dict | None:
-    """Store a verdict on one review row, and only on the row the caller saw.
-
-    One conditional UPDATE: it matches only while the stored `ours_hash` and
-    `theirs_hash` still equal the ones the caller was shown (null-safe: a
-    retired-* row has a null on one side) and nothing has been applied, so a
-    recompute or an apply that lands between the route's read and this write
-    cannot take a verdict meant for a different text. Returns the updated row,
-    or None when nothing matched. A new verdict replaces the old one outright
-    (its content too, and a failed apply's error), and there is no way back to
-    no verdict.
-    """
-    conn = await _conn()
-    try:
-        row = await conn.fetchrow(
             """
-            update skill_doc_review
-               set verdict = $4, resolved_content = $5, resolved_at = now(),
-                   apply_error = null
-             where target = $1 and skill_id = $2 and doc_key = $3
-               and ours_hash is not distinct from $6
-               and theirs_hash is not distinct from $7
-               and applied_at is null
-            returning *
-            """,
-            target, skill_id, doc_key, verdict, resolved_content, ours_hash, theirs_hash,
+            select distinct on (f.skill_id, f.doc_key)
+                   f.*, d.kind,
+                   case when d.is_current then d.content end as ours,
+                   t.content as release_text
+              from skill_doc_flag f
+              left join lateral (
+                    select kind, content, is_current from skill_doc
+                     where skill_id = f.skill_id and doc_key = f.doc_key
+                     order by is_current desc, version desc limit 1
+              ) d on true
+              left join skill_bundled_text t on t.hash = f.release_hash
+             where f.decision is null
+             order by f.skill_id, f.doc_key, f.flagged_at desc
+            """
         )
-        return dict(row) if row else None
+        return [dict(r) for r in rows]
     finally:
         await conn.close()
 
 
-async def apply_skill_doc_review_row(
-    row: dict, *, post: dict | None = None, retire_reason: str | None = None,
-    skill: dict | None = None,
-) -> dict | None:
-    """Apply one stored review row, in ONE transaction: the act and its
-    `applied_at` land together or not at all, so a crash between them cannot
-    leave a posted doc that a re-run would post again.
+async def apply_bundled_skill_doc(
+    skill_id: str, doc_key: str, *, ours_hash: str | None,
+    post: dict | None = None, retire_reason: str | None = None,
+    skill: dict | None = None, flag: dict | None = None, decision: str | None = None,
+) -> dict:
+    """One bundled doc's write, in ONE transaction: what the release comparison
+    does to a doc (`skills/refresh.py`), or what the operator decided on its flag.
 
-    `row` is the review row the caller planned from. `post` is the version's
-    fields (a `content` of None keeps the current version's content, which is
-    keep-mine; a `title` of None keeps the doc's title) and `retire_reason`
-    retires the doc; with neither, the row only closes. `skill` {title, summary,
-    follow, default_agents} creates a skill the library lacks, and retitles an
-    existing one only when `follow` is set.
+    `post` is a new version's fields (a `content` of None keeps the current
+    version's content, which records a new base under an edit the library
+    keeps; a `title` or `kind` of None keeps the doc's own); `retire_reason`
+    retires the doc; `skill` {title, summary, follow, default_agents} creates a
+    skill the library lacks, and retitles an existing one only when `follow` is
+    set; `flag` {release, change, bundled_path, base_hash, release_hash} writes
+    the flag for the operator; `decision` closes every open flag of the doc and
+    raises `SkillDocFlagClosed` when none is open.
 
-    Anything that moved since the review raises `ValueError`, naming what, and
-    changes nothing: the row itself (a recompute or a new verdict), the library's
-    current text against `ours_hash` (checked under a row lock, so a hand post
-    cannot slip between the check and the write), a skill the operator retired.
-    Returns None when the row is already applied, else what happened:
-    {doc, retired, created_skill, grants}.
+    Before a post or a retirement, the library's current text is checked
+    against `ours_hash` under a row lock, so an edit that landed after the
+    caller read the library is never overwritten: a mismatch raises
+    `ValueError` and changes nothing; so does a skill the operator retired.
+    Returns {doc, retired, created_skill, grants}.
     """
-    if post is not None:
+    if post is not None and post.get("bundled_hash") is not None:
         _require_bundled_text_hash(post["bundled_hash"], post["bundled_text"])
     from central_command.skills.importer import bundled_text_hash
 
-    target, skill_id, doc_key = row["target"], row["skill_id"], row["doc_key"]
     conn = await _conn()
     try:
         async with conn.transaction():
-            locked = await conn.fetchrow(
-                """
-                select * from skill_doc_review
-                 where target = $1 and skill_id = $2 and doc_key = $3 for update
-                """,
-                target, skill_id, doc_key,
-            )
-            if locked is None:
-                raise ValueError("the review row is gone; recompute the review")
-            if locked["applied_at"] is not None:
-                return None
-            if any(
-                locked[c] != row[c]
-                for c in ("ours_hash", "theirs_hash", "verdict", "resolved_content")
-            ):
-                raise ValueError("the review row changed while the apply ran")
+            if decision is not None:
+                open_flags = await conn.fetch(
+                    """
+                    select release from skill_doc_flag
+                     where skill_id = $1 and doc_key = $2 and decision is null
+                     for update
+                    """,
+                    skill_id, doc_key,
+                )
+                if not open_flags:
+                    raise SkillDocFlagClosed(f"{skill_id}/{doc_key} has no open flag")
 
             out = {"doc": None, "retired": None, "created_skill": False, "grants": None}
-            if post is not None or retire_reason is not None:
+            current = None
+            if post is not None or retire_reason is not None or flag is not None:
                 status = await conn.fetchval("select status from skill where id = $1", skill_id)
-                if status == "RETIRED":
-                    raise ValueError("the skill was retired after the review")
+                if status == "RETIRED" and (post is not None or retire_reason is not None):
+                    raise ValueError(f"the skill {skill_id} is retired")
                 current = await conn.fetchval(
                     """
                     select content from skill_doc
@@ -5811,8 +5705,11 @@ async def apply_skill_doc_review_row(
                     skill_id, doc_key,
                 )
                 ours = bundled_text_hash(current) if current is not None else None
-                if ours != row["ours_hash"]:
-                    raise ValueError("the library text changed since the review (ours_hash)")
+                if ours != ours_hash:
+                    raise ValueError(
+                        f"the library text of {skill_id}/{doc_key} changed while this ran; "
+                        "nothing was written"
+                    )
 
             if skill is not None:
                 created = await conn.fetchval(
@@ -5836,54 +5733,54 @@ async def apply_skill_doc_review_row(
             if post is not None:
                 newest = await conn.fetchrow(
                     """
-                    select title, source_url, describes from skill_doc
+                    select kind, title, source_url, describes from skill_doc
                      where skill_id = $1 and doc_key = $2
                      order by is_current desc, version desc limit 1
                     """,
                     skill_id, doc_key,
                 )
-                title = post["title"] or (newest["title"] if newest else doc_key)
+                kind = post.get("kind") or (newest["kind"] if newest else None)
+                if kind is None:
+                    raise ValueError(f"{skill_id}/{doc_key}: no kind for a doc the library never held")
+                content = post["content"] if post["content"] is not None else current
+                if content is None:
+                    raise ValueError(f"{skill_id}/{doc_key}: no text to keep")
                 doc = await _insert_skill_doc(
-                    conn, skill_id, doc_key, post["kind"], title,
-                    post["content"] if post["content"] is not None else current,
+                    conn, skill_id, doc_key, kind,
+                    post.get("title") or (newest["title"] if newest else doc_key),
+                    content,
                     source_url=newest["source_url"] if newest else None,
                     describes=newest["describes"] if newest else None,
-                    captured_at=post["captured_at"], added_by=post["added_by"],
-                    bundled_release=post["bundled_release"],
-                    bundled_path=post["bundled_path"], bundled_hash=post["bundled_hash"],
-                    bundled_text=post["bundled_text"],
+                    captured_at=post.get("captured_at"), added_by=post["added_by"],
+                    bundled_release=post.get("bundled_release"),
+                    bundled_path=post.get("bundled_path"),
+                    bundled_hash=post.get("bundled_hash"),
+                    bundled_text=post.get("bundled_text"),
                 )
                 out["doc"] = dict(doc)
             if retire_reason is not None:
                 retired = await _retire_skill_doc(conn, skill_id, doc_key, retire_reason)
-                out["retired"] = dict(retired)
-
-            await conn.execute(
-                """
-                update skill_doc_review set applied_at = now(), apply_error = null
-                 where target = $1 and skill_id = $2 and doc_key = $3
-                """,
-                target, skill_id, doc_key,
-            )
+                out["retired"] = dict(retired) if retired else None
+            if flag is not None:
+                await conn.execute(
+                    """
+                    insert into skill_doc_flag
+                        (skill_id, doc_key, release, change, bundled_path, base_hash, release_hash)
+                    values ($1, $2, $3, $4, $5, $6, $7)
+                    on conflict (skill_id, doc_key, release) do nothing
+                    """,
+                    skill_id, doc_key, flag["release"], flag["change"], flag["bundled_path"],
+                    flag["base_hash"], flag["release_hash"],
+                )
+            if decision is not None:
+                await conn.execute(
+                    """
+                    update skill_doc_flag set decision = $3, decided_at = now()
+                     where skill_id = $1 and doc_key = $2 and decision is null
+                    """,
+                    skill_id, doc_key, decision,
+                )
         return out
-    finally:
-        await conn.close()
-
-
-async def record_skill_doc_review_error(
-    target: str, skill_id: str, doc_key: str, error: str,
-) -> None:
-    """Why this row did not apply. A row already applied keeps its `applied_at`
-    and takes no error."""
-    conn = await _conn()
-    try:
-        await conn.execute(
-            """
-            update skill_doc_review set apply_error = $4
-             where target = $1 and skill_id = $2 and doc_key = $3 and applied_at is null
-            """,
-            target, skill_id, doc_key, error,
-        )
     finally:
         await conn.close()
 

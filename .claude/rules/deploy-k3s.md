@@ -119,27 +119,24 @@ Moved from the root instructions; loads when a matching file is read. How a rule
   keys are retired. `APP_ENV_DEFAULTS` and `setup.sh app`'s defaults loop are
   one table in two places — keep them in step.
 - **A bundled doc follows the release when the operator did not change it; one
-  they changed is decided, never auto-resolved** (DL-198;
-  `central_command/skills/refresh.py`). `cc-update.sh` has three steps over its command line, each keyed on the tree holding that module, never
-  on a version: `skills_review_stage` in `stage_main` after the floor and before the
-  images diff (`review`, WARN); `skills_review_gate` in `main` at resolve, after the
-  floor and BEFORE `refuse_if_busy` and the checkpoint (`check`: exit 3 names the
-  cockpit, anything else "cannot be proven", both `die resolve`; FORCE does not bypass
-  it, because "Update anyway" answers the busy gate); `refresh_bundled_skills` as the
-  `skills` phase after n8n and before `reconcile_app_config` (`apply --actor updater`,
-  WARN: a `die` there stops a MERGED tree, and the row keeps its `apply_error`). They
-  run under `env -i` from the checkout through `skills_refresh_cli`, because this
-  script sourced `deploy/k3s/.env` and a variable already set beats the root `.env`.
-  `cc-update.ts` refuses with a 409 `skills-unresolved` before the hold or the trigger,
-  and a forced apply with the API down goes on to the gate, which reads the database
-  directly. The steps ship ONE RELEASE AHEAD, as the "What a release needs an EXISTING
-  install to gain" bullet says: the update into the release that ships them runs the
-  previous `cc-update.sh`, so the first update after it is the first to run them, and a
-  rollback onto an older tree finds no module and skips. That release changes nothing
-  under `skills/` (its updater would merge the change with no refresh, and the doc would
-  read as `modified` next time against a base the library never received), and the
-  first later release that changes a bundled doc names it in `min_upgrade_from`.
-  Guarded by `tests/test_k3s_skills_refresh.py` and `tests/test_skills_refresh_boundary.py`.
+  they changed keeps their text and is flagged for them after the update, never
+  overwritten** (DL-198 as amended by DL-232; `central_command/skills/refresh.py`).
+  `cc-update.sh` has ONE step, `refresh_bundled_skills`, the `skills` phase after
+  n8n and before `reconcile_app_config`: `sync`, which compares the stored base, the
+  library and the files on disk, WARN-only (a `die` there stops a MERGED tree), keyed
+  on the tree holding the module, never on a version. It runs under `env -i` from the
+  checkout through `skills_refresh_cli`, because this script sourced
+  `deploy/k3s/.env` and a variable already set beats the root `.env`. Nothing reviews
+  at stage, nothing gates the resolve, and `cc-update.ts` reads nothing about skills
+  before the hold: an update is never blocked by a bundled doc, because the reason the
+  gate existed (a doc the operator changed must not be overwritten) is held at the
+  write instead. The update INTO the release that made this change runs v2.126.0's
+  script, whose stage and gate run that installed tree's module and whose `skills`
+  phase calls `apply --target --ref --actor updater` on the merged tree, so `refresh`
+  keeps `review`, `check` and `apply` for one release (`_LEGACY`; `apply` runs the
+  comparison). Delete them in the first release whose `min_upgrade_from` is at least
+  that one, and set it when a later release changes a bundled doc. Guarded by
+  `tests/test_k3s_skills_refresh.py` and `tests/test_skills_refresh_boundary.py`.
 - **`verify.sh` ends with the application self-check, and the nightly backup
   keeps the three environment files** (epic small-fixes, rulings 4 and 5 of
   2026-10-29). Section F runs `python -m central_command.selfcheck` from the

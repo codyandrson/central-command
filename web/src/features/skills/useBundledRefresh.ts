@@ -1,37 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useGateway } from '@/contexts/GatewayContext';
-import { isLatestReview, notRefreshed, type LatestReview } from './bundledRefresh';
+import { isFlagList, type Decision, type ReleaseFlag } from './bundledRefresh';
 
 const POLL_MS = 60_000;
-const NONE = /no bundled-skill review/;
-/** Events that can change the answer: an apply posts docs (`skill.doc_added`,
- *  forwarded as `cc.skill.doc_added`), a verdict is `cc.skill.review_resolved`. */
+/** Events that can change the answer: a decision is `cc.skill.review_resolved`,
+ *  a post `cc.skill.doc_added`, the release comparison `cc.skill.review_computed`. */
 const EVENT_PREFIX = 'cc.skill';
 
+export type ResolveResult = { ok: true } | { ok: false; message: string };
+
 /**
- * The most recent bundled-skill review, for the Skills page's retry banner.
+ * The open flags on bundled docs (DL-232), for the Skills page's banner.
  *
- * Over the gateway RPC like `useSkills` (this page always has the socket; the
- * Update dialog, which has not, uses `useSkillReview` over the HTTP proxy).
- * "No review stored" is the normal state, not an error. A failed read keeps
- * the last answer — a banner that vanished because one poll failed would be a
- * silent failure — and the Retry's own failure is shown beside the Retry.
+ * Over the gateway RPC like `useSkills`. A failed read keeps the last answer —
+ * a banner that vanished because one poll failed would be a silent failure.
  */
 export function useBundledRefresh() {
   const { rpc, connectionState, subscribe } = useGateway();
-  const [review, setReview] = useState<LatestReview | null>(null);
-  const [retrying, setRetrying] = useState(false);
-  const [retryError, setRetryError] = useState('');
+  const [flags, setFlags] = useState<ReleaseFlag[]>([]);
   const rpcRef = useRef(rpc);
   useEffect(() => { rpcRef.current = rpc; }, [rpc]);
 
   const load = useCallback(async () => {
     try {
-      const res = await rpcRef.current('skills.update_review_latest');
-      setReview(isLatestReview(res) ? res : null);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (NONE.test(msg)) setReview(null);
+      const res = await rpcRef.current('skills.release_flags');
+      if (isFlagList(res)) setFlags(res.items);
+    } catch {
+      // keep the last answer
     }
   }, []);
 
@@ -54,20 +49,20 @@ export function useBundledRefresh() {
     return () => { unsub(); if (t) clearTimeout(t); };
   }, [connectionState, load, subscribe]);
 
-  /** POST .../apply as the updater: only rows with no `applied_at` run. */
-  const retry = useCallback(async () => {
-    if (!review) return;
-    setRetrying(true);
-    setRetryError('');
+  /** One decision on one flag, over the text the operator was shown. */
+  const resolve = useCallback(async (flag: ReleaseFlag, decision: Decision, content?: string): Promise<ResolveResult> => {
     try {
-      await rpcRef.current('skills.update_review_apply', { target: review.target, actor: 'updater' });
+      await rpcRef.current('skills.release_flag_resolve', {
+        skill_id: flag.skill_id, doc_key: flag.doc_key, decision,
+        ours_hash: flag.ours_hash, ...(decision === 'edit' ? { content } : {}),
+      });
     } catch (e: unknown) {
-      setRetryError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRetrying(false);
+      await load();
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
     }
     await load();
-  }, [review, load]);
+    return { ok: true };
+  }, [load]);
 
-  return { review, pending: notRefreshed(review), retrying, retryError, retry, reload: load };
+  return { flags, resolve, reload: load };
 }

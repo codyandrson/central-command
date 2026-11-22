@@ -1018,8 +1018,8 @@ class Settings(BaseSettings):
     # default under the state directory.
     skill_overlay_dir: str = ""
 
-    # The checkout whose `skills/` tree and git history the bundled-skill review
-    # reads (`importer.checkout_root()` is the one reader). Blank = the checkout
+    # The checkout whose `skills/` tree the release comparison and the import's
+    # provenance stamp read (`importer.checkout_root()` is the one reader). Blank = the checkout
     # this code runs from, which is what every deployment wants.
     repo_root: str = ""
 
