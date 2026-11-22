@@ -62,6 +62,8 @@ fi
 : "${CC_ENABLE_SANDBOX:=1}"
 : "${CC_SPEECH_PORT:=8093}"
 : "${CC_ENABLE_SPEECH:=1}"
+: "${CC_PGWEB_PORT:=8092}"
+: "${CC_ENABLE_PGWEB:=1}"
 # The runner's port is not a second fact: it is the one in the app's
 # CC_SANDBOX_RUNNER_URL (which is what actually dials it). Derived, not
 # declared — v2.42.0's rule is that the same fact has one key.
@@ -291,6 +293,25 @@ if [[ "$CC_ENABLE_SPEECH" == "1" ]]; then
   fi
 else
   skip "speech not started (CC_ENABLE_SPEECH=0 — cc-tts/cc-stt are yours)"
+fi
+
+# pgweb follows the crawler pattern (DL-228): off is a skip, enabled-and-dead a
+# failure. GET / is the question the k3s readinessProbe asks.
+echo
+echo "== pgweb (optional, CC_ENABLE_PGWEB=${CC_ENABLE_PGWEB})"
+if [[ "$CC_ENABLE_PGWEB" == "1" ]]; then
+  if grep -qE "^${CC_POD_PREFIX}pgweb " <<<"$ctrs"; then
+    ok "container ${CC_POD_PREFIX}pgweb exists"
+    if wait_for 60 curl -fsS -o /dev/null "http://127.0.0.1:${CC_PGWEB_PORT}/"; then
+      ok "pgweb answers on 127.0.0.1:${CC_PGWEB_PORT}"
+    else
+      bad "pgweb answers on 127.0.0.1:${CC_PGWEB_PORT}"
+    fi
+  else
+    bad "container ${CC_POD_PREFIX}pgweb exists (started by the stack phase of ./setup.sh)"
+  fi
+else
+  skip "pgweb not started (CC_ENABLE_PGWEB=0)"
 fi
 
 # The sandbox has no service: sandbox CONTAINERS are created on demand by the

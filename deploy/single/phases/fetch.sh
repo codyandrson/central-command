@@ -29,6 +29,7 @@
 #     image-python                       run    p_image_python
 #     image-playwright_python            run    p_image_playwright_python
 #     image-speaches_ai_speaches         run    p_image_speaches_ai_speaches
+#     image-sosedoff_pgweb               run    p_image_sosedoff_pgweb
 #     image-sandbox                      run    p_image_sandbox  (setup.sh)
 #     image-crawler                      run    p_image_crawler  (setup.sh)
 #     venv                               run    p_venv  (setup.sh)
@@ -54,6 +55,26 @@ CC_PHASE_FETCH_LOADED=1
 # (grep exits at the first match, podman takes SIGPIPE, the pipeline reports
 # failure on success).
 have_image() { local imgs; imgs="$(podman images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)"; grep -qx "$1" <<<"$imgs"; }
+
+# The images.txt component of a CC_IMG_* name (`core` when no row derives it,
+# an operator's extra key included), so a pull failure can name the switch
+# that drops an OPTIONAL image (cc_component_switch_hint). The same derivation
+# p_image_vars and the resolver's img_var make.
+fetch_image_component() { # fetch_image_component <CC_IMG_var>
+  local want="$1" line n
+  [[ -f "$HERE/images.txt" ]] || { printf 'core'; return 0; }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="${line%%#*}"
+    [[ -n "${line//[[:space:]]/}" ]] || continue
+    # shellcheck disable=SC2086
+    set -- $line
+    (( $# == 6 )) || continue
+    n="${2^^}"; n="${n//[\/-]/_}"
+    if [[ "CC_IMG_${n#LIBRARY_}" == "$want" ]]; then printf '%s' "$6"; return 0; fi
+  done <"$HERE/images.txt"
+  printf 'core'
+}
 
 # Pull every ref resolve-images.sh wrote into .env. The refs are TAGGED, not
 # digest-pinned: the lock's digest is verified at resolution time against the
@@ -129,7 +150,7 @@ fetch_images() {
     if podman pull -q "${PULL_TLS[@]}" "$ref" >/dev/null 2>&1 </dev/null; then
       pass "$check" "$ref pulled"
     else
-      fail "$check" "$ref could not be pulled — seams: the CC_REGISTRY_* entry for its registry in .env, $var itself (an exact ref the resolver must use as-is, including a re-namespaced PATH), or the registries drop-in the machine phase writes"
+      fail "$check" "$ref could not be pulled — seams: the CC_REGISTRY_* entry for its registry in .env, $var itself (an exact ref the resolver must use as-is, including a re-namespaced PATH), or the registries drop-in the machine phase writes$(cc_component_switch_hint "$(fetch_image_component "$var")")"
     fi
   done < <(compgen -A variable CC_IMG_ | sort)
 }
@@ -344,6 +365,7 @@ p_image_vars() {
       speech)       p_off CC_ENABLE_SPEECH 1 1 && continue ;;
       sandbox-base) p_off CC_ENABLE_SANDBOX 1 1 && continue ;;
       crawler-base) p_off CC_ENABLE_CRAWLER 1 1 && continue ;;
+      pgweb)        p_off CC_ENABLE_PGWEB 1 1 && continue ;;
     esac
     n="${path^^}"; n="${n//[\/-]/_}"
     printf 'CC_IMG_%s\n' "${n#LIBRARY_}"
@@ -401,5 +423,10 @@ p_image_playwright_python() {
 p_image_speaches_ai_speaches() {
   p_off CC_ENABLE_SPEECH 1 1 && return 0
   p_img CC_IMG_SPEACHES_AI_SPEACHES
+}
+
+p_image_sosedoff_pgweb() {
+  p_off CC_ENABLE_PGWEB 1 1 && return 0
+  p_img CC_IMG_SOSEDOFF_PGWEB
 }
 

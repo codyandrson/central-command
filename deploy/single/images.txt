@@ -37,7 +37,7 @@
 #                   postgres: an exact tag there (16.16-trixie) is re-pushed
 #                   whenever its Debian base is rebuilt, so that row pins the
 #                   tag and carries `-`.
-#     component     core | n8n | sandbox-base | crawler-base | speech
+#     component     core | n8n | sandbox-base | crawler-base | speech | pgweb
 #                   (resolution skips components whose CC_ENABLE_* flag is 0)
 #
 #   The CC_IMG_* variable name is derived from the path: uppercase, `/` and
@@ -87,3 +87,7 @@ dockerio  n8nio/n8n                   2                     2.48.7             s
 dockerio  library/python              3.12                  3.12-slim-trixie   -                                                                        sandbox-base
 mcr       playwright/python           v1.64                 v1.64.1-noble      sha256:330d401ae23c905896a0c26c66c36fc971b621519e7b11b435a8328d7bf6e031  crawler-base
 ghcr      speaches-ai/speaches        0.8                   0.8.3-cpu          sha256:21e3df06d842fb7802ab470dd77c25f0e8c0d22950e8d8c6ae886e851af53ef8  speech
+# pgweb, the operator's read-and-fix window onto the spine (DL-228): the same
+# image and version the k3s profile's 85-pgweb.yaml runs. 0.x, so the minor IS
+# the series: 0.17 admits 0.17.x and refuses 0.18. Multi-arch index digest.
+dockerio  sosedoff/pgweb              0.17                  0.17.0             sha256:a5256d416e2e8b92d69a4459058e3eca33a9f075d8325491644411d0bc3bd70b  pgweb

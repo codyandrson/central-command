@@ -129,6 +129,7 @@ set +a
 : "${CC_ENABLE_CRAWLER:=1}"
 : "${CC_ENABLE_SANDBOX:=1}"
 : "${CC_ENABLE_SPEECH:=1}"
+: "${CC_ENABLE_PGWEB:=1}"
 : "${CC_TLS_INSECURE:=0}"
 
 # The two trust knobs, fanned out in ONE place (design record D4). It also
@@ -191,6 +192,7 @@ component_wanted() { # images.txt's last column vs the flags
     sandbox-base)  [[ "$CC_ENABLE_SANDBOX" == 1 ]] ;;
     crawler-base)  [[ "$CC_ENABLE_CRAWLER" == 1 ]] ;;
     speech)        [[ "$CC_ENABLE_SPEECH" == 1 ]] ;;
+    pgweb)         [[ "$CC_ENABLE_PGWEB" == 1 ]] ;;
     *) return 1 ;;
   esac
 }
@@ -454,9 +456,14 @@ UNRESOLVED=0
 #                            an operator pin that is malformed or does not
 #                            exist (the rule names the key), or a malformed
 #                            images.txt row.
-resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-digest>
-  local key="$1" path="$2" cons="$3" lock="$4" ldig="$5"
-  local host api check var tags cand="" chosen="" mode="" dig=""
+resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-digest> [component]
+  local key="$1" path="$2" cons="$3" lock="$4" ldig="$5" comp="${6:-core}"
+  local host api check var tags cand="" chosen="" mode="" dig="" off
+  # An OPTIONAL image's way out besides the mirror seam: its CC_ENABLE_* switch
+  # (empty for core). Appended to the two "this registry cannot give you the
+  # image" lines below, so an operator whose mirror lacks, say, pgweb reads the
+  # switch that drops it (DL-228).
+  off="$(cc_component_switch_hint "$comp")"
   host="$(registry_host "$key")" || { fail "images-txt" "unknown registry key '$key' in images.txt"; return 1; }
   api="$(api_host "$host")"
   var="$(img_var "$path")"
@@ -559,7 +566,7 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
       warn "$check" "${host}/${path}: the registry answered no tag list${LAST_CURL_ERR:+ ($LAST_CURL_ERR)} — resolved BLIND to the locked tag ${lock}, which pulled (podman's own egress, which a proxy/CA seam on the HOST does not govern — see deploy/AIRGAP.md)"
       chosen="$lock"; mode=locked; dig="(blind)"
     else
-      fail "$check" "${host}/${path}: the registry's tags API is unreachable and the locked tag ${lock} could not be pulled either — seam: CC_REGISTRY_${key^^} in .env (or a registries.conf mirror podman sees)"
+      fail "$check" "${host}/${path}: the registry's tags API is unreachable and the locked tag ${lock} could not be pulled either — seam: CC_REGISTRY_${key^^} in .env (or a registries.conf mirror podman sees)${off}"
       return 1
     fi
   elif grep -qx -- "$lock" <<<"$tags"; then
@@ -581,7 +588,7 @@ resolve_one() { # resolve_one <key> <path> <constraint> <locked-tag> <locked-dig
       # The registry ANSWERED and does not hold the tag: a mirror that lacks
       # it, which only the operator can fill — a USERACTION (D5), never a
       # FAIL, so the stop is exit 3 and a retrying caller stops retrying.
-      useraction "$check" "${host}/${path}: nothing satisfies the constraint '${cons}' (locked tag ${lock} is absent). The registry offers, most recent last: ${sample}— seam: CC_REGISTRY_${key^^} in .env, or mirror the tested tag"
+      useraction "$check" "${host}/${path}: nothing satisfies the constraint '${cons}' (locked tag ${lock} is absent). The registry offers, most recent last: ${sample}— seam: CC_REGISTRY_${key^^} in .env, or mirror the tested tag${off}"
       return 1
     fi
     mode=substituted
@@ -622,7 +629,7 @@ while read -r key path cons lock ldig comp; do
   # </dev/null: curl and podman must not eat the manifest we are reading from.
   # Every `return 1` of resolve_one is an image NOT resolved (a FAIL or a
   # USERACTION row): keep the image's old record.
-  resolve_one "$key" "$path" "$cons" "$lock" "$ldig" </dev/null \
+  resolve_one "$key" "$path" "$cons" "$lock" "$ldig" "$comp" </dev/null \
     || { carry_forward "$(img_var "$path")"; UNRESOLVED=$((UNRESOLVED+1)); }
 done <"$IMAGES"
 

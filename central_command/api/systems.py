@@ -78,6 +78,23 @@ def _origin(url: str) -> str | None:
     return f"{parts.scheme}://{parts.netloc}"
 
 
+def _db_ui_health_url() -> str | None:
+    """Where pgweb answers on THIS host, or None when no link is configured.
+
+    The single-node profile links pgweb at its loopback port
+    (``http://127.0.0.1:<CC_PGWEB_PORT>/``), so that link IS the probe and an
+    operator who moved the port is still probed where pgweb listens. The k3s
+    link is a tailscale-serve https URL in front of the manifest's fixed
+    loopback hostPort (deploy/k3s/85-pgweb.yaml), which is probed directly."""
+    url = settings.db_ui_url
+    if not url:
+        return None
+    parts = urlsplit(url)
+    if parts.scheme == "http" and parts.hostname == "127.0.0.1":
+        return url
+    return "http://127.0.0.1:8092/"
+
+
 def _api_health_url() -> str | None:
     """This process's own /health — host normalised to loopback since
     api_host is typically 0.0.0.0 (bind-all), which cannot be dialed back."""
@@ -220,15 +237,14 @@ def _entries() -> list[dict]:
             "name": "pgweb (DB UI)",
             "kind": "ui",
             "url": settings.db_ui_url or None,
-            # Same pattern as VictoriaLogs: no internal CC_* URL exists, only
-            # the browser one — the loopback hostPort is fixed by the manifest
-            # (deploy/k3s/85-pgweb.yaml).
-            "health": _http_check(
-                "http://127.0.0.1:8092/" if settings.db_ui_url else None
-            ),
+            # No internal CC_* URL exists, only the browser one: on k3s the
+            # loopback hostPort is fixed by the manifest
+            # (deploy/k3s/85-pgweb.yaml); on the single-node profile the link
+            # is the loopback port itself (DL-228).
+            "health": _http_check(_db_ui_health_url()),
             "credential": {
                 "label": "none — auto-connected to the spine",
-                "location": "tailnet-gated (tailscale serve)",
+                "location": "loopback-only port (k3s: tailnet-gated by tailscale serve)",
             },
         },
         {

@@ -65,6 +65,21 @@ storage for a rollback; remove it by hand once you no longer need one.
   you point BOTH aliases at engines of your own (hosted Whisper-convention
   models for `cc-stt` is the expected case); the aliases are required either
   way.
+- `pgweb` — cc-pgweb, the browser window onto the spine database (DL-228: no
+  profile ships less than another, and the k3s profile has always had it).
+  **On by default.** The same image and version as `deploy/k3s/85-pgweb.yaml`
+  (`docker.io/sosedoff/pgweb`, `images.txt` row `pgweb`), started by the
+  `stack` phase after `postgres` is healthy, published on loopback only at
+  `127.0.0.1:${CC_PGWEB_PORT:-8092}`. It runs the image's own entrypoint with
+  no further flags, exactly as on k3s — so it is **not** read-only, and sets no
+  session or bookmark options — and auto-connects to the spine at boot from
+  `PGWEB_DATABASE_URL`, an environment variable carrying the spine's in-tree
+  default credential (never an argument, so it is in no process listing), so
+  there is no login form. The `app` phase writes `CC_DB_UI_URL` as that
+  loopback URL, which is the Systems page's "pgweb (DB UI)" link; with the
+  switch off it stays empty. `CC_ENABLE_PGWEB=0` is for a registry mirror
+  that does not carry the image: the `check` and `fetch` lines for
+  `image-sosedoff_pgweb` name both the mirror seam and this switch.
 
 The **sandbox** has no service: sandbox containers are created on demand by the
 runner, and on this profile the runner's backend is rootless podman rather than
@@ -530,12 +545,11 @@ bare 404.
 
 ### What this profile does NOT install
 
-The `verify` phase ends by printing the capability manifest; three things
+The `verify` phase ends by printing the capability manifest; two things
 are deliberately absent. The **vlogs log console**: Fluent Bit's container input
 tails CRI-format `/var/log/containers/*.log`, which podman does not produce, so
 the collector would need a redesign rather than a port. Use `podman compose -f
 deploy/single/compose.yaml logs <service>` and `./setup.sh report` instead.
-The **pgweb database UI** is not part of this profile either (`CC_DB_UI_URL` stays empty).
 The **MCP server deploy/remove pipeline** is absent: `mcp.server_deploy` and
 `mcp.server_remove` refuse while `CC_MCP_DEPLOY_KUBECONFIG` is empty, and only `deploy/k3s` provides it.
 
@@ -644,6 +658,17 @@ start again on it — run `./setup.sh`, which resumes at `boot`, then confirm wi
 before the ledger (v2.55.0) stops after the merge with `USERACTION
 ledger-adopt`: run `./setup.sh` once, which adopts it.
 
+A service a release ADDS arrives through that same order, with nothing to run
+by hand. pgweb is the case in point (DL-228): an install made before it has no
+`CC_ENABLE_PGWEB` in `.env`, so the switch reads its default, ON — the staged
+acquisition and then `fetch` resolve and pull `sosedoff/pgweb` (a mirror
+without it stops the update BEFORE the merge, naming `CC_REGISTRY_DOCKERIO`
+and `CC_ENABLE_PGWEB=0`), `stack` starts `cc-pgweb` (its row reads the new
+switch, and an enabled service with no container is drift, so the row is not
+done until it runs), `app` writes `CC_DB_UI_URL`, `verify` checks it answers,
+and the restart at the end puts the link on the Systems page. To leave it out,
+set `CC_ENABLE_PGWEB=0` in `.env` before `./update.sh apply`.
+
 Rules that will save you:
 
 - **The tree must already be pristine, or `apply` refuses.** A tracked file
@@ -665,7 +690,7 @@ One command, and the profiles must be named or their containers are left
 behind:
 
 ```bash
-podman compose -f compose.yaml --profile n8n --profile crawler --profile speech down
+podman compose -f compose.yaml --profile n8n --profile crawler --profile speech --profile pgweb down
 ```
 
 Add `-v` to remove the named volumes too (the databases, the graph, the speech

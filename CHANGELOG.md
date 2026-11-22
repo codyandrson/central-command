@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-22 — v2.121.0: pgweb on the single-node profile; six imported libraries are declared
+
+- **pgweb everywhere.** The k3s profile has shipped pgweb, a web view of the application's database
+  linked from the Systems page, and the single-node profile did not, for no recorded reason. The
+  operator ruled in the system review of 2026-11-21 that it is available on every deployment
+  (DL-228; no profile ships less than another, DL-179). The single-node profile gains it as an
+  optional service, on by default: `CC_ENABLE_PGWEB` (default 1) and `CC_PGWEB_PORT` (default 8092,
+  loopback only), the same image and behaviour as the k3s manifest, the database address passed in the
+  environment, never on a command line. The `app` phase writes `CC_DB_UI_URL` so the Systems page
+  links to it.
+- **A mirror that does not carry the image.** The install or update stops before anything changes and
+  the message names the image and the way out: mirror `sosedoff/pgweb` 0.17.0, or set
+  `CC_ENABLE_PGWEB=0`. Every optional image's failure message now names its switch the same way.
+- **At a single-node update.** With no `CC_ENABLE_PGWEB` in an older `.env` the default applies: the
+  update fetches the image and starts the service. Set `CC_ENABLE_PGWEB=0` before `./update.sh apply`
+  to leave it out.
+- **Declared dependencies.** `openai`, `starlette`, `python-multipart`, `lxml`, `requests` and
+  `beautifulsoup4` were imported by the application but arrived only as other packages' dependencies;
+  `python-multipart`, which two upload routes need, came only through `mcp`. Each is declared as a
+  range whose floor is at or below the tested version. The resolved set is unchanged.
+- **Systems page.** The pgweb health dot follows the configured port on the single-node profile.
+
 ## 2026-11-21 — v2.120.0: The limit on concurrent model turns uses the framework's limiter
 
 - **Why.** The application kept its own registry of semaphores to limit how many model requests run at

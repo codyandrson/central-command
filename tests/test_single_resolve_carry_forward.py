@@ -99,7 +99,8 @@ class Tree:
         shutil.copy2(ROOT / "deploy" / "env-lib.sh", self.repo / "deploy" / "env-lib.sh")
         for f in ("resolve-images.sh", "images.txt"):
             shutil.copy2(ROOT / "deploy" / "single" / f, single / f)
-        # Only the core + graphiti-base rows: the optional components are off.
+        # The core rows, plus pgweb (on by default, DL-228): the other optional
+        # components are off.
         write_lf(self.repo / ".env",
                  f"CC_STATE_DIR={self.state.as_posix()}\nCC_ENABLE_N8N=0\nCC_ENABLE_SPEECH=0\n"
                  "CC_ENABLE_SANDBOX=0\nCC_ENABLE_CRAWLER=0\n")
@@ -320,3 +321,37 @@ def test_a_component_that_was_never_on_carries_nothing(tree: Tree):
     r = tree.resolve()
     assert r.returncode == 0, r.stdout + r.stderr
     assert N8N not in tree.manifest_rows()
+
+
+# ── pgweb is on by default, so a mirror without it must name the way out ────
+# DL-228: every profile ships pgweb, so its switch defaults ON — and an
+# operator whose mirror does not carry the image must read, on the image's own
+# line, both seams: the mirror host and CC_ENABLE_PGWEB=0. A core image has no
+# switch, so its line offers none.
+PGWEB = "CC_IMG_SOSEDOFF_PGWEB"
+
+
+def test_pgweb_is_resolved_by_default(tree: Tree):
+    r = tree.resolve()
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _line(r.stdout, "image-sosedoff_pgweb").startswith("PASS "), r.stdout
+    assert tree.env_value(PGWEB) == "docker.io/sosedoff/pgweb:0.17.0"
+
+
+def test_a_mirror_without_pgweb_names_the_image_and_the_switch(tree: Tree):
+    r = tree.resolve(missing=("sosedoff/pgweb", "library/neo4j"))
+    assert r.returncode == 3, r.stdout + r.stderr          # the operator's seam
+    line = _line(r.stdout, "image-sosedoff_pgweb")
+    assert line.startswith("USERACTION "), r.stdout
+    assert "sosedoff/pgweb" in line and "CC_REGISTRY_DOCKERIO" in line
+    assert "CC_ENABLE_PGWEB=0" in line
+    core = _line(r.stdout, "image-neo4j")
+    assert core.startswith("USERACTION ") and "CC_ENABLE_" not in core, core
+
+
+def test_pgweb_switched_off_is_not_asked_for(tree: Tree):
+    tree.set_env("CC_ENABLE_PGWEB", "0")
+    r = tree.resolve(missing=("sosedoff/pgweb",))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "image-sosedoff_pgweb" not in r.stdout
+    assert PGWEB not in tree.manifest_rows()

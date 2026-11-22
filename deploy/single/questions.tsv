@@ -44,6 +44,7 @@ CC_ENABLE_N8N	features	Install n8n? It is needed only by an n8n-backed integrati
 CC_ENABLE_CRAWLER	features	Install the browser-rendering crawl service? Its image is built locally and is large (Chromium); plain HTTP fetch still works without it (1/0)	1	n	v_bool01	-	n
 CC_ENABLE_SANDBOX	features	Install the agent sandbox? On this profile its backend is rootless podman, which is weaker isolation than the k3s profile's gVisor (1/0)	1	n	v_bool01	-	n
 CC_ENABLE_SPEECH	features	Install the bundled speech engine behind cc-tts/cc-stt? 0 means you point both aliases at engines of your own instead (1/0)	1	n	v_bool01	-	n
+CC_ENABLE_PGWEB	features	Install pgweb, the browser window onto the spine database that the cockpit Systems page links to? It is on everywhere by default; 0 only when your registry mirror does not carry its image (1/0)	1	n	v_bool01	-	n
 CC_EXCHANGE_URL	features	EWS endpoint of an on-premises Microsoft Exchange mailbox, as a full URL like https://mail.corp.example/ews/exchange.asmx — setting it (with the username and password below) routes mail and calendar to Exchange instead of the n8n Gmail façade; blank = no Exchange	-	n	v_url	-	n
 CC_EXCHANGE_USERNAME	features	The Exchange login for NTLM, as DOMAIN\\user or a UPN like user@corp.example; blank = no Exchange	-	n	-	-	n
 CC_EXCHANGE_PASSWORD	features	Its password, never printed and never logged; blank = no Exchange	-	n	v_nonempty	-	y
@@ -95,5 +96,6 @@ CC_NEO4J_HTTP_PORT	advanced	Loopback port for Neo4j's HTTP browser	7474	n	v_port
 CC_N8N_PORT	advanced	Loopback port for n8n, used only with the n8n profile on	5678	n	v_port	-	n
 CC_CRAWLER_PORT	advanced	Loopback port for the crawl service	8091	n	v_port	-	n
 CC_SPEECH_PORT	advanced	Loopback port for the speech engine	8093	n	v_port	-	n
+CC_PGWEB_PORT	advanced	Loopback port for the pgweb database UI	8092	n	v_port	-	n
 CC_JIRA_API_FLAVOR	advanced	Which Jira this is: cloud (REST API v3, ADF rich text, cursor search) or server (Data Center/Server — REST API v2 only, wiki markup, and no filter-search/dashboard/gadget endpoints at all)	cloud	n	v_atlassian_flavor	CC_JIRA_BASE_URL!=	n
 CC_CONFLUENCE_API_FLAVOR	advanced	Which Confluence this is: cloud (REST API v2 plus v1 search) or server (Data Center 9.x — REST API v1 throughout)	cloud	n	v_atlassian_flavor	CC_CONFLUENCE_BASE_URL!=	n

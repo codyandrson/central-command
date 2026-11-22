@@ -14,11 +14,28 @@ dependencies = [
     # open-ended per-agent CC_LLM_PROXY_KEY_* / CC_MODEL_* lookups).
     "python-dotenv>=1.0,<2",
     "fastapi>=0.111,<1",
+    # Imported by name, so declared rather than left to fastapi's own pin:
+    # api/speech.py checks uploads against Starlette's UploadFile (request.form()
+    # yields it). >=1.3.1: CVE-2026-54283 (GHSA-82w8-qh3p-5jfq).
+    "starlette>=1.3.1,<2",
+    # Never imported by name: FastAPI and Starlette parse multipart bodies with
+    # it and refuse to without it — POST /api/skills/import-file (Form/File in
+    # api/routes.py) and POST /api/transcribe (request.form() in api/speech.py).
+    # It used to arrive only through the `mcp` package. >=0.0.31: the six
+    # 2026-07 advisories, the last CVE-2026-53540 (GHSA-v9pg-7xvm-68hf).
+    "python-multipart>=0.0.31,<1",
     "uvicorn[standard]>=0.30,<1",
     # >=0.32: two pool-release deadlocks fixed (a release after a protocol abort,
     # a stuck cancellation).
     "asyncpg>=0.32,<1",
     "httpx>=0.27,<1",
+    # The OpenAI SDK, imported directly: graphiti-core's LLM and embedder
+    # clients are built on it (integrations/graphiti_client.py), the one
+    # AsyncOpenAI factory with the integration trust settings lives in
+    # integrations/http.py, and contract/failures.py classifies its errors.
+    # It used to arrive only through graphiti-core (>=1.91) and pydantic-ai's
+    # openai extra (>=3.31, the floor here).
+    "openai>=3.31,<4",
     # Cron-expression schedules for the heartbeat (D27).
     "croniter>=2.0,<7",
     # Bolt for the cockpit Graph panel (integrations/neo4j_reader.py, every
@@ -49,6 +66,10 @@ dependencies = [
     # >=2.7.7: three denial-of-service fixes on hostile HTML (GHSA-q87h-c5m7-659j,
     # GHSA-4wxf-43cv-cfxx, GHSA-r39g-x868-w7r7).
     "inscriptis>=2.7.7,<3",
+    # ingest/mailtext.py parses the mail body with lxml.html itself before
+    # handing the tree to inscriptis (which also requires it).
+    # >=6.1.0: CVE-2026-41066 (GHSA-vfmq-68hx-4jfw).
+    "lxml>=6.1.0,<7",
     # Decrypting LiteLLM's stored credentials for autodiscovery
     # (integrations/litellm_credstore.py): pynacl for its default SecretBox
     # scheme (still the default in 1.110.2, read from the image's
@@ -62,6 +83,10 @@ dependencies = [
     # otherwise lacks — 1,000 lines of hand-rolled SOAP is the wrong trade for
     # one dependency. Capped below 6 because the majors move the Account API.
     "exchangelib>=5.6,<6",
+    # integrations/exchange.py subclasses requests' HTTPAdapter to carry the
+    # integration trust settings into exchangelib's session.
+    # >=2.33.0: CVE-2026-25645 (GHSA-gc5v-m9x4-r6x2).
+    "requests>=2.33.0,<3",
     "pynacl>=1.5,<2",
     "cryptography>=42,<51",
     # SECURITY FLOORS for packages this code does not import itself. A
@@ -103,6 +128,9 @@ runtime = [
     # can't extract from (e.g. very short/empty bodies).
     "trafilatura>=1.12,<3",
     "markdownify>=0.13,<2",
+    # integrations/webfetch.py parses with BeautifulSoup itself (the fallback
+    # path's cleanup), not only through markdownify; the floor is markdownify's.
+    "beautifulsoup4>=4.9,<5",
     # File->markdown conversion for the skills-library file-upload import
     # (POST /api/skills/import-file) and, behind the extraction seam
     # (ingest/extract.py), for Word, PowerPoint, HTML, CSV and EPUB. The

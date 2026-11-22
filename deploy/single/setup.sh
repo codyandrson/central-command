@@ -473,7 +473,7 @@ compose_profile_flags() {
   PROFILE_FLAGS=()
   # compose_profile_on is the ONE flag->profile mapping: the image catch-up
   # asks it which services are enabled, so the two cannot disagree.
-  for prof in n8n crawler speech; do
+  for prof in n8n crawler speech pgweb; do
     compose_profile_on "$prof" && PROFILE_FLAGS+=(--profile "$prof")
   done
   return 0
@@ -538,12 +538,14 @@ load_env() {
   : "${CC_LITELLM_DB_PORT:=5443}"
   : "${CC_CRAWLER_PORT:=8091}"
   : "${CC_SPEECH_PORT:=8093}"
+  : "${CC_PGWEB_PORT:=8092}"
   : "${CC_SPEECH_TTS_MODEL:=speaches-ai/Kokoro-82M-v1.0-ONNX}"
   : "${CC_SPEECH_STT_MODEL:=Systran/faster-whisper-small}"
   : "${CC_ENABLE_N8N:=0}"
   : "${CC_ENABLE_CRAWLER:=1}"
   : "${CC_ENABLE_SANDBOX:=1}"
   : "${CC_ENABLE_SPEECH:=1}"
+  : "${CC_ENABLE_PGWEB:=1}"
   : "${CC_AIRGAP:=0}"
   : "${CC_TLS_INSECURE:=0}"
   # Tool-facing exports. uv reads no PIP_* variable (and UV_INDEX_URL is
@@ -1072,6 +1074,7 @@ compose_profile_on() { # compose_profile_on <profile[,profile...]|->
       n8n)     [[ "$(p_flag CC_ENABLE_N8N 0)" == 1 ]] && return 0 ;;
       crawler) [[ "$(p_flag CC_ENABLE_CRAWLER 1)" == 1 ]] && return 0 ;;
       speech)  [[ "$(p_flag CC_ENABLE_SPEECH 1)" == 1 ]] && return 0 ;;
+      pgweb)   [[ "$(p_flag CC_ENABLE_PGWEB 1)" == 1 ]] && return 0 ;;
     esac
   done
   return 1

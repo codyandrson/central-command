@@ -128,7 +128,7 @@ class Stack:
             # Forward slashes: setup.sh SOURCES .env (bash drops the backslashes).
             "CC_STATE_DIR": (tmp / "state").as_posix(),
             "CC_ENABLE_N8N": "0", "CC_ENABLE_CRAWLER": "1", "CC_ENABLE_SPEECH": "0",
-            "CC_ENABLE_SANDBOX": "0",
+            "CC_ENABLE_SANDBOX": "0", "CC_ENABLE_PGWEB": "0",
             "CC_IMG_POSTGRES": "docker.io/library/postgres:16.16-trixie",
             "CC_IMG_NEO4J": "docker.io/library/neo4j:5.26.33",
             "CC_IMG_BERRIAI_LITELLM_DATABASE": "ghcr.io/berriai/litellm-database:main-stable",
@@ -384,6 +384,29 @@ def test_a_disabled_service_is_not_asked_about(stack: Stack):
     assert stack.drift()[1] == {"crawler": "absent"}
     stack.env_lines["CC_ENABLE_CRAWLER"] = "0"
     stack.write_env()
+    assert stack.drift() == (0, {})
+
+
+@drives_installer
+def test_pgweb_switched_on_is_a_service_the_stack_must_run(stack: Stack):
+    """DL-228: pgweb is a profile like the others. Switched on (the default an
+    install that predates it inherits), its absent container is drift, so the
+    stack phase an update runs is not done until it exists; on its locked ref
+    it is current; switched off it is never asked about."""
+    stack.env_lines["CC_ENABLE_PGWEB"] = "1"
+    stack.write_env()
+    assert stack.drift() == (1, {"pgweb": "absent"})
+    ref = "docker.io/sosedoff/pgweb:0.17.0"
+    stack.containers["pgweb"] = OLD
+    stack.images[ref] = ("sha256:" + "d" * 64, OLD)
+    stack.sync()
+    assert stack.drift() == (0, {})
+    flags = stack.call("eval", 'compose_profile_flags; echo "FLAGS ${PROFILE_FLAGS[*]}"')
+    assert "--profile crawler --profile pgweb" in flags.stdout, flags.stdout + flags.stderr
+    stack.env_lines["CC_ENABLE_PGWEB"] = "0"
+    stack.write_env()
+    del stack.containers["pgweb"]
+    stack.sync()
     assert stack.drift() == (0, {})
 
 

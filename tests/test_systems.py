@@ -277,3 +277,16 @@ async def test_the_graph_row_names_the_command_when_the_check_found_a_mismatch(m
         embedder_record.clear_cache()
     assert "embedder: cc-embedding 1024 epoch 3 (stable) — MISMATCH: " in detail
     assert "run: python -m central_command.graph_reembed status" in detail
+
+
+def test_the_db_ui_row_probes_where_pgweb_listens_on_each_profile(monkeypatch):
+    """DL-228: the single-node profile links pgweb at its loopback port, which
+    the operator may move (CC_PGWEB_PORT), so that link is the probe; the k3s
+    link is a tailscale-serve https URL in front of the manifest's fixed
+    loopback hostPort, which is probed directly; no link is no probe."""
+    monkeypatch.setattr(settings, "db_ui_url", "http://127.0.0.1:18092/")
+    assert systems._db_ui_health_url() == "http://127.0.0.1:18092/"
+    monkeypatch.setattr(settings, "db_ui_url", "https://anchor.tail.example:8092/")
+    assert systems._db_ui_health_url() == "http://127.0.0.1:8092/"
+    monkeypatch.setattr(settings, "db_ui_url", "")
+    assert systems._db_ui_health_url() is None

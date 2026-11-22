@@ -54,6 +54,8 @@ capability_manifest() {
     echo "     speech      Whisper STT + Kokoro TTS engine on 127.0.0.1:${CC_SPEECH_PORT} (cc-tts / cc-stt)"
   [[ "$CC_ENABLE_N8N" == "1" ]] && \
     echo "     n8n         the integration facade (Gmail OAuth lives here)"
+  [[ "$CC_ENABLE_PGWEB" == "1" ]] && \
+    echo "     pgweb       the database UI over the spine on 127.0.0.1:${CC_PGWEB_PORT} (the Systems page links it)"
   echo
   echo "   NOT in this profile:"
   echo "     vlogs       the log console. Fluent Bit's container input tails"
@@ -66,6 +68,7 @@ capability_manifest() {
   [[ "$CC_ENABLE_CRAWLER" == "1" ]] || echo "     crawler     disabled by CC_ENABLE_CRAWLER=0 (rung-1 HTTP fetch still works)"
   [[ "$CC_ENABLE_SPEECH" == "1" ]] || echo "     speech      disabled by CC_ENABLE_SPEECH=0 (cc-tts / cc-stt point at your own engines)"
   [[ "$CC_ENABLE_N8N" == "1" ]] || echo "     n8n         disabled by CC_ENABLE_N8N=0 (no n8n-backed integration selected)"
+  [[ "$CC_ENABLE_PGWEB" == "1" ]] || echo "     pgweb       disabled by CC_ENABLE_PGWEB=0 (psql to 127.0.0.1:${CC_PG_PORT:-5442} still reaches the spine)"
   return 0
 }
 

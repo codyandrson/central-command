@@ -11,7 +11,7 @@ This walk keeps that true: the list of link settings is read from
 central_command/api/systems.py itself, so a new Systems row whose link nobody
 taught the installers to derive fails here, not on the next rebuild. Only
 llama-swap is exempt on both profiles (it runs on a host the installer cannot
-see), plus the two services the single profile does not deploy.
+see), plus the one service the single profile does not deploy (VictoriaLogs).
 """
 
 import re
@@ -27,8 +27,9 @@ ENV_EXAMPLE = ROOT / ".env.example"
 
 # Typed by hand everywhere: nothing in either env file says where llama-swap runs.
 NOT_DERIVABLE = {"CC_LLAMA_SWAP_UI_URL"}
-# Not part of the single-node profile (k3s-only services), so no link there.
-NOT_ON_SINGLE = {"CC_VLOGS_UI_URL", "CC_DB_UI_URL"}
+# Not part of the single-node profile (a k3s-only service), so no link there.
+# pgweb left this set with DL-228: every profile ships it.
+NOT_ON_SINGLE = {"CC_VLOGS_UI_URL"}
 
 
 def link_settings() -> set[str]:

@@ -699,3 +699,20 @@ when a matching file is read.
   result showed the runner's link failing until someone pressed Run. The
   runner depends on nothing, so it goes first (manifest order, `phase_boot`,
   and `After=` on the API unit).
+- **pgweb ships here too, ON by default, and its switch is the way out of a
+  mirror that lacks it** (DL-228; DL-179: no profile ships less than another).
+  The `pgweb` profile in `compose.yaml` mirrors `deploy/k3s/85-pgweb.yaml`:
+  the same image and version (the `images.txt` row, component `pgweb`), the
+  image's own entrypoint with NO added flags (not `--readonly`, no session or
+  bookmark options), the spine's URL in `PGWEB_DATABASE_URL` (an environment
+  variable, never `--url`, so it is in no argv), loopback only at
+  `CC_PGWEB_PORT` (8092, the k3s hostPort). Change one profile's flags and
+  the other's in the same release, or neither. `CC_ENABLE_PGWEB` defaults to
+  1 in every reader (`load_env`, `resolve-images.sh`, `verify.sh`, `p_flag`
+  callers), so an install that predates it gains it on its next update with
+  nothing to run; `app/app-link-pgweb` writes `CC_DB_UI_URL` only while it is
+  on. An OPTIONAL image that cannot be resolved or pulled names its
+  `CC_ENABLE_*` switch on its own `image-*` line (`cc_component_switch_hint`
+  in `deploy/env-lib.sh`) beside the mirror seam; a new optional component
+  adds its case there, in `component_wanted`, in `p_image_vars` and in
+  `compose_profile_on` — the one flag-to-profile mapping.

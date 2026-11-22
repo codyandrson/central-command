@@ -72,7 +72,7 @@ SCRIPTS = [
     *phase_files(),
 ]
 REGISTRY_KEYS = {"dockerio", "ghcr", "mcr"}
-COMPONENTS = {"core", "n8n", "sandbox-base", "crawler-base", "speech"}
+COMPONENTS = {"core", "n8n", "sandbox-base", "crawler-base", "speech", "pgweb"}
 REGISTRY_VAR = {"CC_REGISTRY_DOCKERIO": "dockerio", "CC_REGISTRY_GHCR": "ghcr", "CC_REGISTRY_MCR": "mcr"}
 REGISTRY_HOST = {"docker.io": "dockerio", "ghcr.io": "ghcr", "mcr.microsoft.com": "mcr"}
 

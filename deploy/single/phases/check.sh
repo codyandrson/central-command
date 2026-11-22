@@ -183,7 +183,7 @@ validate_answers() {
 
   # Mode flags must be exactly 0 or 1 — "true" would read as false everywhere.
   local f
-  for f in CC_ENABLE_N8N CC_ENABLE_CRAWLER CC_ENABLE_SANDBOX CC_ENABLE_SPEECH CC_AIRGAP; do
+  for f in CC_ENABLE_N8N CC_ENABLE_CRAWLER CC_ENABLE_SANDBOX CC_ENABLE_SPEECH CC_ENABLE_PGWEB CC_AIRGAP; do
     if [[ "${!f}" == "0" || "${!f}" == "1" ]]; then
       pass "flag-${f}" "${!f}"
     else
@@ -225,7 +225,7 @@ validate_answers() {
 # and then adds a LISTENER probe per port, which needs no second list.
 CC_PORT_KEYS=(CC_PG_PORT CC_LITELLM_PORT CC_LITELLM_DB_PORT
               CC_NEO4J_BOLT_PORT CC_NEO4J_HTTP_PORT CC_N8N_PORT CC_CRAWLER_PORT
-              CC_SPEECH_PORT CC_COCKPIT_PORT CC_API_PORT)
+              CC_SPEECH_PORT CC_PGWEB_PORT CC_COCKPIT_PORT CC_API_PORT)
 validate_ports() {
   local seen="" p val dup=0 bad_port=0
   for p in "${CC_PORT_KEYS[@]}"; do
@@ -255,7 +255,7 @@ validate_compose_config() {
     return 0
   }
   local out rc=0
-  out="$(compose --profile n8n --profile crawler --profile speech config 2>&1 >/dev/null)" || rc=$?
+  out="$(compose --profile n8n --profile crawler --profile speech --profile pgweb config 2>&1 >/dev/null)" || rc=$?
   if (( rc )); then
     note "$out"
     fail "compose-config" "compose.yaml does not validate — see: $(printf '%s ' "${COMPOSE_BIN[@]}")--env-file .env -f deploy/single/compose.yaml config"

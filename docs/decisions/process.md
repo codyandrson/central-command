@@ -3303,3 +3303,27 @@ hygiene, and how the test suite itself must be written. See
   the operator are unchanged, and the test model stays ungated.
 - **Enforced:** test: `tests/test_model_concurrency.py::test_the_live_seam_puts_the_gate_inside_the_window_wrapper`, `::test_aliases_in_one_pool_share_its_single_slot`, `::test_waiting_is_first_in_first_out_with_no_rejection`, `::test_a_cancelled_request_releases_its_slot_and_its_place`, `::test_a_streamed_request_holds_its_slot_until_the_stream_closes`, `::test_the_test_model_path_stays_ungated`
 - **Source:** the operator's ruling in the system review, 2026-11-21; `central_command/runtime/context.py` (`limit_concurrency`); `central_command/runtime/models.py` (`_live_model`); pydantic-ai 2.66 `pydantic_ai/models/concurrency.py` and `pydantic_ai/concurrency.py`
+
+### DL-228 — pgweb is on every deployment: the single-node profile ships it, on by default, optional by switch
+
+- **Status:** active
+- **Date:** 2026-11-21
+- **Rule:** `.claude/rules/deploy-single.md` — "pgweb ships here too, ON by default, and its switch is the way out of a mirror that lacks it"
+- **Why:** No deployment profile ships less than another (DL-179), and the
+  single-node profile listed pgweb under what it does not install with no
+  reason recorded. The operator ruled in the system review that pgweb is
+  essential for insight into the database and belongs on every deployment:
+  it is the operator's window into the spine at every site. So the Compose
+  profile gains a `pgweb` service mirroring the k3s manifest (same image and
+  version, the image's own entrypoint with no added flags, so it is not
+  read-only; the spine's URL in an environment variable; loopback only), the
+  `app` phase derives `CC_DB_UI_URL` as its loopback URL, and the Systems
+  page probes that URL where the k3s profile's fixed hostPort does not apply.
+  It is optional by `CC_ENABLE_PGWEB` because a registry mirror may not carry
+  the image, and defaults on because the operator wants it everywhere; an
+  image the mirror lacks names that switch on its own line beside the mirror
+  seam, so an install is never stuck on an optional image. An existing install
+  gains it on its next update with nothing to run, because the switch's
+  default is read wherever the key is absent.
+- **Enforced:** test: `tests/test_single_resolve_carry_forward.py::test_a_mirror_without_pgweb_names_the_image_and_the_switch`, `::test_pgweb_is_resolved_by_default`, `::test_pgweb_switched_off_is_not_asked_for`, `tests/test_single_stack_catch_up.py::test_pgweb_switched_on_is_a_service_the_stack_must_run`, `tests/test_systems.py::test_the_db_ui_row_probes_where_pgweb_listens_on_each_profile`, `tests/test_systems_links_derived.py::test_single_driver_derives_every_link_it_deploys`
+- **Source:** the operator's ruling in the system review, 2026-11-21; `deploy/k3s/85-pgweb.yaml`; `deploy/single/compose.yaml`; `deploy/single/images.txt`

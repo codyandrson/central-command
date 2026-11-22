@@ -1000,6 +1000,34 @@ cc_alias_env_key() { # cc_alias_env_key <alias>
   printf 'CC_LLM_UPSTREAM_MODEL_%s' "${a//[!A-Z0-9]/_}"
 }
 
+# The CC_ENABLE_* switch that turns an images.txt COMPONENT off (its last
+# column), or nothing for `core`, which no switch removes. The single-node
+# resolver and fetch phase append it to an unresolvable or unpullable image's
+# line, so an operator whose mirror lacks an OPTIONAL image reads its second
+# way out — the switch — beside the mirror seam (DL-228: pgweb is on by
+# default, and a mirror without its image must not leave the install stuck).
+# The flag DEFAULTS live where they always have (load_env, resolve-images.sh);
+# this is only the name.
+cc_component_switch() { # cc_component_switch <component>
+  case "$1" in
+    n8n)          printf 'CC_ENABLE_N8N' ;;
+    sandbox-base) printf 'CC_ENABLE_SANDBOX' ;;
+    crawler-base) printf 'CC_ENABLE_CRAWLER' ;;
+    speech)       printf 'CC_ENABLE_SPEECH' ;;
+    pgweb)        printf 'CC_ENABLE_PGWEB' ;;
+  esac
+  return 0
+}
+
+# The same, as the clause a message appends: empty for `core`, otherwise
+# "; or, since this image is optional, set CC_ENABLE_X=0 in .env and that
+# component is not installed".
+cc_component_switch_hint() { # cc_component_switch_hint <component>
+  local sw; sw="$(cc_component_switch "$1")"
+  [[ -n "$sw" ]] || return 0
+  printf '; or, since this image is optional, set %s=0 in .env and that component is not installed' "$sw"
+}
+
 # WHICH aliases a given deployment requires. ONE list, read by the `check`
 # command (a missing key is a USERACTION naming it) and by setup's `llm` phase
 # (all declared = no UI pause). The three core aliases are always required; the

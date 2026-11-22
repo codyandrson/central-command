@@ -47,7 +47,8 @@
 #   credential).
 #
 #   ── PROFILES ────────────────────────────────────────────────────────────
-#   n8n · crawler · speech. setup.sh maps CC_ENABLE_* to COMPOSE_PROFILES.
+#   n8n · crawler · speech · pgweb. setup.sh maps CC_ENABLE_* to --profile
+#   flags (compose_profile_on is the one mapping).
 #   The sandbox has no container here by design: sandbox containers are
 #   created on demand by the runner, a HOST process (see README.md), so its
 #   only deployable artifact is the image.
@@ -361,6 +362,43 @@ services:
     networks:
       default:
         aliases: [cc-speech]
+
+  # ── OPTIONAL: pgweb ───────────────────────────────────────────────────────
+  # The operator's window onto the spine (DL-228): the browser UI the cockpit's
+  # Systems page links as "pgweb (DB UI)". Mirrors the k3s profile's
+  # deploy/k3s/85-pgweb.yaml exactly — the same image and version, the image's
+  # own entrypoint (`pgweb --bind=0.0.0.0 --listen=8081`) with NO further flags
+  # (so not --readonly: the window is for fixing as well as reading, and no
+  # --sessions or bookmark options), and the connection string in
+  # PGWEB_DATABASE_URL, which pgweb auto-connects at boot, so there is no login
+  # form. An ENVIRONMENT variable, never a --url argument, so it is in no argv
+  # and no process listing. The credential in it is the spine's in-tree default
+  # that the `postgres` service above already declares: nothing new is
+  # disclosed. The gate is reachability — loopback only, like every port here.
+  #
+  # Stateless: no volume, so a recreate loses nothing. The image ships curl
+  # (its Debian layer installs it), which is what the healthcheck uses; it is
+  # the same question the k3s readinessProbe asks (GET / on 8081).
+  # CC_ENABLE_PGWEB=0 is the way out for a mirror that does not carry the image.
+  pgweb:
+    profiles: [pgweb]
+    container_name: ${CC_POD_PREFIX:-cc-}pgweb
+    image: ${CC_IMG_SOSEDOFF_PGWEB:-docker.io/sosedoff/pgweb:0.17.0}
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGWEB_DATABASE_URL: postgres://central_command:central_command@postgres:5432/central_command?sslmode=disable
+    ports:
+      - "127.0.0.1:${CC_PGWEB_PORT:-8092}:8081"
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8081/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
 
 volumes:
   pgdata:

@@ -34,6 +34,7 @@
 #     app-link-n8n                       run    p_link_n8n
 #     app-link-crawler                   run    p_link_crawler
 #     app-link-sandbox                   run    p_link_sandbox
+#     app-link-pgweb                     run    p_link_pgweb
 #     cockpit                            run    p_cockpit_build
 # ============================================================================
 
@@ -296,8 +297,9 @@ phase_app() {
   # machine — so the link IS the port. Composed like the three above; an
   # operator's own URL (a reverse proxy, a tailnet name) is never overwritten.
   # Off-by-flag services get no link: an absent link is "not installed", not
-  # "misconfigured". VictoriaLogs, pgweb and llama-swap are not part of this
-  # profile, so their keys stay empty on purpose.
+  # "misconfigured". VictoriaLogs and llama-swap are not part of this profile,
+  # so their keys stay empty on purpose. pgweb is (DL-228): CC_DB_UI_URL is its
+  # loopback port while CC_ENABLE_PGWEB=1 and stays empty with it off.
   set_kv_if_unset "$ENV_FILE" CC_LLM_PROXY_UI_URL "http://127.0.0.1:${CC_LITELLM_PORT}/ui/" "app-link-litellm"
   set_kv_if_unset "$ENV_FILE" CC_NEO4J_BROWSER_URL \
     "http://127.0.0.1:${CC_NEO4J_HTTP_PORT:-7474}/browser/?dbms=bolt%3A%2F%2F127.0.0.1%3A${CC_NEO4J_BOLT_PORT:-7687}" \
@@ -311,6 +313,11 @@ phase_app() {
   if [[ "${CC_ENABLE_SANDBOX:-1}" == 1 ]]; then
     local sbx; sbx="$(get_kv "$ENV_FILE" CC_SANDBOX_RUNNER_URL)"
     set_kv_if_unset "$ENV_FILE" CC_SANDBOX_DOCS_URL "${sbx:-http://127.0.0.1:8090}/docs" "app-link-sandbox"
+  fi
+  if [[ "${CC_ENABLE_PGWEB:-1}" == 1 ]]; then
+    set_kv_if_unset "$ENV_FILE" CC_DB_UI_URL "http://127.0.0.1:${CC_PGWEB_PORT:-8092}/" "app-link-pgweb"
+  else
+    pass "app-link-pgweb" "skipped (CC_ENABLE_PGWEB=0 — no pgweb is installed, so CC_DB_UI_URL is not derived)"
   fi
 
   # No run-mode key is written: a fresh install starts live, and `check` FAILS
@@ -440,4 +447,9 @@ p_link_crawler() {
 p_link_sandbox() {
   p_off CC_ENABLE_SANDBOX 1 1 && return 0
   p_kv_set CC_SANDBOX_DOCS_URL
+}
+
+p_link_pgweb() {
+  p_off CC_ENABLE_PGWEB 1 1 && return 0
+  p_kv_set CC_DB_UI_URL
 }
