@@ -4,6 +4,17 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-22 — v2.123.0: pgweb runs read-only on the k3s profile too
+
+- **Why.** pgweb has no login. The tailnet and the loopback bind decide who can reach it, but neither
+  stops a page open in the operator's own browser from sending it a request, and pgweb cannot tell
+  that request from a click. v2.122.0 made the single-node service read-only; the operator ruled the
+  same for k3s on 2026-11-22.
+- **What changes.** `deploy/k3s/85-pgweb.yaml` runs pgweb with `--readonly --lock-session --no-ssh`:
+  every query is forced read-only and write keywords are refused, the session cannot be pointed at
+  another database, and SSH tunnelling is off. The updater applies the manifest and the pod restarts.
+- **What this gives up.** Changing a row from the browser. Writes go through `psql`.
+
 ## 2026-11-22 — v2.122.0: Rename a conversation; "Central Command" in the UI; fonts served locally; speech model pickers; pgweb read-only on single-node
 
 - **Rename a conversation.** The sessions panel's rename control now works on conversation rows. The
