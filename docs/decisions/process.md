@@ -3191,3 +3191,24 @@ hygiene, and how the test suite itself must be written. See
   2026-11-21.
 - **Enforced:** test: `tests/test_governance.py`, `tests/test_update_precondition.py`, `tests/test_k3s_removed.py`
 - **Source:** the operator's ruling in the system review, 2026-11-21; `docs/superpowers/research/2026-08-06-litellm-config-change-design.md` (the removed design); `deploy/k3s/removed-capabilities.txt`; `deploy/k3s/removed.txt`; `central_command/config.py` (`RETIRED_ENV_KEYS`)
+
+### DL-224 — The cockpit is owned code; dead inherited code is removed, not quarantined
+
+- **Status:** active
+- **Date:** 2026-11-21
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "Dead inherited code is removed, not quarantined"
+- **Why:** The fork of openclaw-nerve v1.5.3 brought a working cockpit, but
+  after the divergence that followed, tracking upstream is not feasible, and
+  upstream is heading elsewhere. Quarantined and unreachable upstream code read
+  as coverage (its tests passed over code the server never loads) or as
+  documentation (upstream's manual, installer and self-updater) while
+  describing a different product. The operator ruled in the system review on
+  2026-11-21 that the project owns the code outright: `web/vendor-unused/`,
+  `web/docs/`, upstream's installer and self-updater, its project files, the
+  modules nothing reachable imported, the gateway restart route and the
+  sub-agent spawn route are removed, and an inherited feature stays only where
+  the operator chose to keep or adapt it. The chat-marker reference agents rely
+  on moved to `docs/CHAT_MARKERS.md`; what of upstream is still present is
+  listed in `web/VENDORED.md` for a later release.
+- **Enforced:** code structure only (`web/server/app.ts`; what it does not import does not run, and `npm run build` typechecks what remains)
+- **Source:** the operator's ruling in the system review, 2026-11-21; `web/VENDORED.md`; PRD FR-44 (amended 2026-11-21); `docs/CHAT_MARKERS.md`

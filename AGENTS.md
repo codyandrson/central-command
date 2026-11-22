@@ -25,7 +25,7 @@ A human-supervised agentic-team framework: a control plane where the operator ta
 
 ## Where things are
 
-- `web/` is a vendored fork of openclaw-nerve; ours are `web/server/routes/cc-*.ts`, the `/ws` relay `web/server/lib/ws-proxy.ts` and the Central Command screens under `web/src/features/` (`web/server/lib/gateway-rpc.ts` is upstream's). Ignore `web/vendor-unused/`, `web/docs/` and `web/.github/` — upstream leftovers; see `web/VENDORED.md`.
+- `web/` is our own code, forked from openclaw-nerve and no longer tracking it; written here are `web/server/routes/cc-*.ts`, the `/ws` relay `web/server/lib/ws-proxy.ts` and the Central Command screens under `web/src/features/` (`web/server/lib/gateway-rpc.ts` is inherited). Dead inherited code is removed, not quarantined; what of upstream is still present, and the file browser's guard: `web/VENDORED.md`.
 - Touching `deploy/`? `deploy/k3s/README.md` is the multi-node runbook, `deploy/single/` the Compose profile, and read `deploy/AIRGAP.md` FIRST for any mirrored or no-egress install.
 - Queue operations (enrolling the fixture backlog, stepping the dispatcher, reading the audit trail): `docs/QUEUE.md`.
 - Subtree bite marks load from `.claude/rules/` when a matching file is read: `graph`, `deploy-k3s`, `deploy-single`, `models`, `cockpit`, `integrations`, `runtime-resilience`, `tests`. Working in one of those areas without having opened its files? Read the rule file first.

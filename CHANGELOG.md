@@ -4,6 +4,33 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-21 — v2.115.0: The cockpit is owned code; dead inherited code is removed
+
+- **Why.** `web/` began as a wholesale fork of openclaw-nerve v1.5.3. About 170 of its files have been
+  changed since and upstream is not tracked, so "vendored" no longer described it, and the tree still
+  carried upstream code that nothing loads beside documentation for a different product. The operator
+  ruled in the system review of 2026-11-21 that the cockpit is Central Command's own code: dead
+  inherited code is removed, and an inherited feature stays only where he chose to keep or adapt it
+  (DL-224; PRD FR-44 amended). This is the first of two removal releases; about 27,800 lines go.
+- **Removed.** `web/vendor-unused/` (the quarantined upstream kanban, cron, memory and token routes);
+  `web/docs/` (upstream's manual); upstream's installer and self-updater (`install.sh`,
+  `scripts/setup.ts`, `bin/nerve-update.ts`, `server/lib/updater/`, the `setup` and `update` package
+  scripts, `@inquirer/prompts`); upstream's `.github/`, changelog and contributing guide; server
+  modules nothing imported (`usage-tracker`, `token-usage`, the kanban chat-marker parsers);
+  `POST /api/gateway/restart` with `openclaw-bin.ts` (the restart card in Settings uses its own
+  route); `POST /api/sessions/spawn-subagent` with `subagent-spawn.ts` (agents are started through
+  tasks, consults and the new-conversation dialog).
+- **Kept.** The upstream MIT notice in `web/LICENSE`. `server/lib/release-source.ts`, which the update
+  badge uses. The file browser and editor, by the operator's choice.
+- **Moved.** The chat-marker reference that every charter relies on is now `docs/CHAT_MARKERS.md`: the
+  `[chart:{...}]` types the cockpit parses and `[goal-preview:{...}]`. The `tv` chart type loads a
+  script from the internet and cannot render on a network with no egress.
+- **Documents.** `web/VENDORED.md` is rewritten as the present state, with the list of inherited
+  features still present and due to be removed or adapted. `AGENTS.md`, the cockpit rules file and
+  `docs/ARCHITECTURE.md` describe owned code.
+- **At the update.** The cockpit is rebuilt once: its build inputs changed. Four startup messages that
+  said to run `npm run setup` now name the `.env` setting to change.
+
 ## 2026-11-21 — v2.114.0: The LiteLLM config-change capability is removed
 
 - **Why.** `litellm.apply_config_change` let an approved proposal overwrite the proxy's config files in

@@ -25,15 +25,4 @@ export default defineConfig([
       'react-hooks/exhaustive-deps': 'warn',
     },
   },
-  // Node.js scripts (setup CLI, etc.) — use Node globals, not browser
-  {
-    files: ['scripts/**/*.ts'],
-    languageOptions: {
-      globals: globals.node,
-    },
-    rules: {
-      'react-hooks/exhaustive-deps': 'off',
-      'react-refresh/only-export-components': 'off',
-    },
-  },
 ])

@@ -26,14 +26,12 @@
     "dev": "vite",
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc -b && vite build && npm run build:server",
-    "build:server": "rm -rf server-dist && tsc -p config/tsconfig.server.json --outDir server-dist --noEmit false --declaration false && tsc -p config/tsconfig.bin.json",
-    "update": "node bin-dist/bin/nerve-update.js",
+    "build:server": "rm -rf server-dist && tsc -p config/tsconfig.server.json --outDir server-dist --noEmit false --declaration false",
     "lint": "eslint .",
     "preview": "vite preview",
     "start": "node server-dist/index.js",
     "start:server": "tsx server/index.ts",
     "prod": "npm run build && node server-dist/index.js",
-    "setup": "tsx scripts/setup.ts",
     "test": "vitest",
     "test:coverage": "vitest --coverage"
   },
@@ -87,7 +85,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@inquirer/prompts": "^8.2.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

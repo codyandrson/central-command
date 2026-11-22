@@ -16,7 +16,6 @@ node_modules/
 web/node_modules/
 web/dist/
 web/server-dist/
-web/bin-dist/
 
 # OS
 .DS_Store

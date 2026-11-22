@@ -34,7 +34,6 @@ agent-log.json
 .env.backup.*
 tsconfig.server.tsbuildinfo
 server-dist/
-bin-dist/
 .nerve/
 tts-config.json
 voice-phrases.json

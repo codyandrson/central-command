@@ -1,192 +1,93 @@
-# What in `web/` is Central Command and what is upstream Nerve
+# Where `web/` came from, and what of upstream is still in it
 
-`web/` is a fork of **openclaw-nerve v1.5.3** (MIT), vendored wholesale on
-2026-07-22 (commit `5b1a7d7`). That was deliberate — the fork brought a working
-cockpit, and the plan was always to keep its capabilities rather than rebuild
-them. The cost is that a lot of this tree describes, tests, and documents a
-*different product*. This file says which is which, so nobody has to guess.
+`web/` is Central Command's own code. It originated as a fork of
+**openclaw-nerve v1.5.3** (MIT; the copyright notice stays in `LICENSE`, as the
+licence requires), taken wholesale on 2026-07-22, and has diverged since: about
+170 upstream files modified, plus Central Command's own routes and screens.
+Upstream is not tracked and nothing is merged from it. The operator ruled on
+2026-11-21 that the cockpit is owned code: dead inherited code is removed, and
+an inherited feature stays only where the operator chose to keep or adapt it
+(DL-224; PRD FR-44).
 
-## Central Command's own code
+`server/app.ts` is the authority on what is live: a route module it does not
+import does not run. The seam to the FastAPI control plane is two channels:
+every `cc-*` route is a thin HTTP proxy to `config.gatewayUrl + '/api'`, and
+chat, sessions and live push ride the cockpit server's `/ws`
+(`server/lib/ws-proxy.ts`), which relays to FastAPI's `/ws`
+(`central_command/api/nerve_gateway.py`, which answers the wire protocol the
+inherited client speaks). `server/lib/gateway-rpc.ts` is not that seam: it is
+upstream's WebSocket client for remote workspace-file access.
 
-- **`server/routes/cc-*.ts`** — the routes Central Command actually serves:
-  `cc-kanban`, `cc-crons`, `cc-tokens` (each replacing an
-  upstream route of the same name minus the prefix), plus the Central Command-only
-  `cc-activity`, `cc-charter`, `cc-graph`, `cc-learned` (the workspace Memory
-  tab's note-store and aggregate reads), `cc-loe` and `cc-skills` (proxies
-  for the three Skills-page import routes; the upstream `skills.ts` was
-  deleted outright rather than quarantined — it had no `cc-` twin to point
-  at). **`server/app.ts` is the authority** on what is live: if a route module
-  is not imported there, it does not run.
-- **The seam to the FastAPI control plane is two channels, neither of them
-  `server/lib/gateway-rpc.ts`** (corrected 2026-09-20 — that file is upstream's
-  WebSocket client for remote *workspace-file* access, unrelated to Central
-  Command). (1) Every `cc-*` route is a thin HTTP proxy:
-  `fetch(config.gatewayUrl + '/api' + path)`. (2) Chat, sessions and live push
-  ride a WebSocket: the browser connects to the cockpit server's `/ws`
-  (`server/lib/ws-proxy.ts`), which relays to FastAPI's own `/ws`
-  (`central_command/api/nerve_gateway.py`) — FastAPI answers the gateway wire
-  protocol the upstream client already speaks — that module is the boundary the
-  pivot was designed around.
-- **`src/features/decisions`, `agents`, `workspace`, `skills`, `attention`** —
-  the Central Command screens. The workspace panel's Memory tab
-  (`workspace/tabs/MemoryTab.tsx`, `MemorySections.tsx`,
-  `workspace/hooks/useAgentLearned.ts`) is ours end to end: upstream's MEMORY.md
-  editor (`features/memory/`, `features/dashboard/MemoryList.tsx`) is gone.
+## Removed on 2026-11-21 (the release after v2.114.0)
 
-## `vendor-unused/` — upstream code that never runs
-
-Quarantined 2026-07-29. ~9,900 lines of upstream route and store modules that
-**`server/app.ts` never imports**, each superseded by a `cc-*` twin:
-
-| quarantined | replaced by |
+| removed | why |
 |---|---|
-| `server/routes/kanban.ts` (+ test) | `server/routes/cc-kanban.ts` |
-| `server/lib/kanban-store.ts`, `kanban-assignee.ts`, `kanban-subagent-fallback.ts` (+ tests) | — reachable only from the above |
-| `server/routes/crons.ts` (+ test) | `server/routes/cc-crons.ts` |
-| `server/routes/memories.ts` (+ test) | the workspace Memory tab: `server/routes/cc-learned.ts` + `cc-graph.ts`'s `/api/graph/episodes` (`cc-memories.ts` itself was removed with the MEMORY.md editor) |
-| `server/routes/tokens.ts` | `server/routes/cc-tokens.ts` |
+| `vendor-unused/` (upstream kanban, crons, memories and tokens routes and stores, about 9,900 lines) | quarantined since 2026-07-29; nothing imported them, and each had a `cc-*` replacement |
+| `docs/` (upstream's manual, about 6,900 lines of text plus three images) | it documented openclaw-nerve's install, API and deployment, which contradict Central Command's; the chat-marker reference agents rely on is now `docs/CHAT_MARKERS.md` at the repository root |
+| `install.sh`, `scripts/setup.ts` and `scripts/lib/`, `bin/nerve-update.ts`, `server/lib/updater/`, the `setup` and `update` package scripts, `config/tsconfig.bin.json`, `config/tsconfig.scripts.json` and the `@inquirer/prompts` dependency | upstream's installer and self-updater; a self-update would have fetched upstream's releases over this code. The cockpit is installed and updated by Central Command's own setup and updater. `server/lib/release-source.ts` stays: the version badge (`routes/version-check.ts`) and `routes/cc-update.ts` read it |
+| `.github/`, `CHANGELOG.md`, `CONTRIBUTING.md`, and upstream's `README.md` (replaced) | upstream's project files; GitHub reads `.github/` only at a repository root, so its CI never ran |
+| `server/lib/usage-tracker.ts`, `server/lib/token-usage.ts` (and the `USAGE_FILE` setting), the server and client kanban `parseMarkers` | nothing reachable imported them |
+| `POST /api/gateway/restart` and `server/lib/openclaw-bin.ts` | it shelled out to an `openclaw` CLI no deployment has; the restart card in Settings > Connection uses `routes/cc-update.ts` |
+| `POST /api/sessions/spawn-subagent` and `server/lib/subagent-spawn.ts` | nothing in the cockpit called it |
 
-None had been modified since the vendoring commit. They are **quarantined, not
-deleted**, on purpose: a `cc-*` route may yet want to borrow logic from its
-upstream twin, and the standing rule is that vendored Nerve capabilities are not
-discarded without a decision.
+## Still present from upstream, to be removed or adapted in a later release
 
-Why they had to leave `server/`: their tests **passed**, and ran on every
-`vitest` invocation. A green test over code the server never loads is worse than
-no test — it reads as coverage. They are now excluded from `vitest.config.ts`
-and from `config/tsconfig.server.json`.
+Inert here, or only partly used, and kept for now by decision:
 
-**The live `cc-kanban.ts` twin is itself read-mostly**, and `src/features/kanban/`
-was cut 2026-08-31 to match: `TaskDetailDrawer.tsx` lost its whole
-edit-and-save UI (title/description/priority/labels/assignee editors, dirty
-tracking, a Save button whose PATCH always 400s except `status:"CANCELLED"`)
-down to a read-only view plus the workflow levers that actually work
-(execute/approve/reject/abort/resume/cancel); `CreateTaskDialog.tsx` dropped
-its Status/Priority selects (the server hardcodes both on creation);
-same-column drag reorder was cut (`columnOrder` is always 0 server-side, so a
-reorder silently self-reverted on the next poll) while cross-column
-drag-to-Cancelled — the one drag that is real — stays; and the whole
-agent-proposal-inbox tree (`ProposalInbox.tsx`, `useProposals.ts`, the header
-wiring) is gone — `GET /api/kanban/proposals` always returned `[]` and
-`POST` was a permanent 501, because Central Command proposals flow through the
-Decisions Inbox / approval gateway, not the board.
+- beads (`routes/beads.ts`, `src/features/beads/`);
+- the connect dialog (`src/features/connect/`, `routes/connect-defaults.ts`);
+- the OpenClaw session-file routes in `routes/sessions.ts` (media, hidden,
+  runtime, model);
+- the file watcher (`server/lib/file-watcher.ts`) and `/api/events`;
+- the Log and Events dropdowns;
+- the usage-limit blocks and their routes (`routes/codex-limits.ts`,
+  `routes/claude-code-limits.ts`), which report "unavailable" because neither
+  CLI runs here;
+- the channels route (`routes/channels.ts`, an empty list) and the schedule
+  dialog's delivery control;
+- the other speech engines and the API-key form (`routes/api-keys.ts`);
+- the slash-command code (`src/features/chat/InputBar.tsx`; none is wired
+  server-side);
+- the relevant-memories block;
+- device identity and pairing (`server/lib/device-identity.ts`);
+- `server/lib/gateway-rpc.ts`, and `server/lib/ws-proxy.ts`, which is live as
+  the `/ws` relay and carries upstream's gateway handshake.
 
-**To restore one:** `git mv` it back to its original path under `server/`, then
-register it in `server/app.ts`. The directory layout inside `vendor-unused/`
-mirrors `server/` so relative imports *within* the quarantine still resolve;
-imports reaching into live `server/lib` (e.g. `../lib/config.js`) will not
-resolve until the file is moved back. Nothing typechecks the quarantine, so that
-breakage is invisible until you restore — which is the intended trade.
+The product branding (the `openclaw-nerve` package name, `NERVE_*` settings)
+is unchanged.
 
-## Live but permanently inert — mounted routes with no Central Command backing
+## The file browser — kept, UI off, read-only unless the operator says otherwise
 
-These are registered in `server/app.ts` and do run, but Central Command has
-nothing behind them and never will: no OpenClaw channel config, no Codex/CC
-CLI installed on the Pi. Both were checked 2026-08-03 and confirmed to
-degrade honestly (empty list / "unavailable") rather than error, so they are
-kept as-is rather than quarantined:
+**`server/routes/file-browser.ts`** is mounted in `server/app.ts` and works
+(tree, read, write, rename, move, trash, restore, traversal-guarded); the
+operator kept it and the editor. The UI that drives it sits behind
+`src/App.tsx`'s `FILE_BROWSER_ENABLED = false` (decided 2026-07-23, re-affirmed
+2026-08-05: every governed artifact already has its own surface). Facts
+operators and sessions still need before anyone turns it on:
 
-- **`server/routes/channels.ts`** — the OpenClaw channels route. Returns an
-  empty channel list; nothing in Central Command's UI depends on it having data.
-- **`server/routes/codex-limits.ts`, `claude-code-limits.ts`** — CLI usage
-  panels for Codex / Claude Code CLI. Report "unavailable" since neither CLI
-  runs here (Central Command talks to Claude via the LiteLLM proxy, not a local
-  CLI).
-- **`server/routes/gateway.ts`'s `/api/gateway/restart` handler** — shells out
-  to an `openclaw` CLI that has never existed on the Pi. The cockpit's own
-  trigger for it (a confirm dialog + spinner + banner in `App.tsx`, driven by
-  `useGatewayRestart`) was removed 2026-08-31 since it could never open and
-  the route just 500s; the route itself is left mounted (same "degrade
-  honestly, don't quarantine a live route" call as the two above).
-  Settings > Connection's restart card no longer uses it: it
-  restarts the API process through the updater's trigger seam
-  (`routes/cc-update.ts`, `/api/restart/*`), and this route stays inert.
-
-## The file browser — live-mounted upstream code, UI off by decision
-
-**`server/routes/file-browser.ts`** is registered in `server/app.ts` and fully
-functional (tree/read/write/rename/move/**trash**/restore, traversal-guarded),
-but the UI that drives it sits behind `src/App.tsx` `FILE_BROWSER_ENABLED =
-false` (2026-07-23 decision: every governed artifact already has a first-class
-surface; re-affirmed 2026-08-05 — leave off). Two facts recorded here so nobody
-"just turns it on" (investigated 2026-08-05):
-
-- **The `.env`/`.git` exclusion list silently goes EMPTY whenever
-  `FILE_BROWSER_ROOT` is customized** (`server/lib/file-utils.ts` —
-  `getExcludedNames()`/`getExcludedPatterns()` return empty sets on a custom
-  root). Pointing the root at the repo to browse `servers/` would serve `.env`
-  — and its secrets — over HTTP. If it is ever enabled, scope the root to a
-  directory that contains no secrets (e.g. `servers/` itself) and add a
-  read-only guard first (both now exist: see the guard section below).
-- **Agent sandbox workspaces are unreachable regardless**: they live in k8s
-  pods, and the remote fallback this route would use (`agents.files.list/get/set`
-  gateway RPC) has no handler in `nerve_gateway.py`. The default root
-  (`~/.openclaw/workspace`) is an upstream leftover with nothing in it.
-
-### The read-only guard (R18 / COCKPIT-028, story 11.11)
-
-The "no off switch" and "exclusion list goes EMPTY" facts above are now closed
-by two Central Command pieces:
-
-- **`server/routes/cc-file-browser-guard.ts`** — OUR middleware. Every
-  non-read request under `/api/files/*` (write, rename, move, trash, restore
+- **`server/routes/cc-file-browser-guard.ts`** is middleware on
+  `/api/files/*`: every non-read request (write, rename, move, trash, restore,
   and the remote `gatewayFilesSet` fallback inside write, agent-scoped
   workspaces included) answers `403 { ok: false, error: 'the file browser is
-  read-only' }` unless `FILE_BROWSER_WRITABLE=1` (read in `server/lib/config.ts`
-  as `config.fileBrowserWritable`). The GETs (tree, read, raw, resolve) stay
-  open. Test: `cc-file-browser-guard.test.ts`; the vendored
-  `file-browser.test.ts` sets the flag in its config mock.
-- **The one upstream edit, in `server/routes/file-browser.ts`:** an import of
-  the guard plus `app.use('/api/files/*', fileBrowserGuard);` immediately after
-  `const app = new Hono();`. It lives inside the vendored file (not in
-  `app.ts`) so the vendored suites, which build their app from
-  `file-browser.ts` alone, run under the guard.
-- **Custom `FILE_BROWSER_ROOT`: chosen = REFUSE AT CONFIG LOAD**, not "keep the
-  exclusions on". `validateConfig()` discards a root whose top level holds
-  `.env*`, `.git` or `certs` (error logged, default workspace used), reusing the
-  existing "inaccessible root falls back to default" path. Why: it leaves
-  upstream's `file-utils.ts` untouched (no second vendored edit), and a root
-  that holds secrets is an operator mistake worth surfacing loudly at boot
-  rather than silently serving a trimmed view. Limit: it checks the top level
-  at boot only, so a secret created later or nested deeper is not caught —
-  keep a custom root scoped to a directory that never holds secrets.
+  read-only' }` unless `FILE_BROWSER_WRITABLE=1` (`config.fileBrowserWritable`
+  in `server/lib/config.ts`). The GETs (tree, read, raw, resolve) stay open.
+  It is registered inside `file-browser.ts` itself (an import plus
+  `app.use('/api/files/*', fileBrowserGuard);` right after
+  `const app = new Hono();`), so the suites that build their app from that
+  file alone run under the guard, and any route added to the file is guarded by
+  the prefix. Tests: `cc-file-browser-guard.test.ts`; `file-browser.test.ts`
+  sets the flag in its config mock.
+- **A custom `FILE_BROWSER_ROOT` that holds secrets is refused at config
+  load.** `server/lib/file-utils.ts` returns EMPTY exclusion lists (no `.env`,
+  no `.git`) on a custom root, so `validateConfig()` discards a root whose top
+  level holds `.env*`, `.git` or `certs` (error logged, default workspace
+  used). It checks the top level at boot only: a secret created later or nested
+  deeper is not caught, so keep a custom root scoped to a directory that never
+  holds secrets.
+- **Agent sandbox workspaces are unreachable** from it: they live in pods, and
+  the remote fallback (`agents.files.list/get/set` gateway RPC) has no handler
+  in `nerve_gateway.py`. The default root (`~/.openclaw/workspace`) is an
+  upstream leftover with nothing in it.
 
-## `docs/`, `README.md`, `CHANGELOG.md`, `install.sh`, `.github/` — upstream
-
-**All frozen at the fork date and describing openclaw-nerve, not Central Command.**
-Treat every one as third-party documentation:
-
-- **`docs/DEPLOYMENT-A.md`, `-B`, `-C`, `INSTALL.md`, `INSTALLER-STEPS.md`,
-  `UPDATING.md`, `TAILSCALE.md`** — upstream's install and deploy paths. They
-  **contradict** how Central Command is actually deployed. The real deployment is
-  `deploy/k3s/` at the repo root (the two-node k3s cluster, 2026-07-31).
-  The live set (`deploy/k3s/.env`, `deploy/shared/litellm/`,
-  `deploy/k3s/cc-nerve.service`) lives in `deploy/shared/` and `deploy/k3s/`;
-  until v2.66.0 it lived in `deploy/pi/` beside the retired Compose stack, and
-  that directory was deleted whole in v2.67.0.
-  Nothing in *this* `docs/` directory is used, including `install.sh` (49 KB).
-- **`docs/API.md` (2,125 lines), `ARCHITECTURE.md`, `CONFIGURATION.md`** —
-  accurate for upstream's API surface, partially true here. The Central Command
-  contract is `central_command/api/nerve_gateway.py` plus `docs/DESIGN.md`.
-- **`.github/workflows/ci.yml` + issue templates** — inert. GitHub only reads
-  `.github/` at the repository root, and there isn't one; this CI has never run.
-- **`CHANGELOG.md`** — upstream's release history. Central Command's own
-  public what-changed record is the repo-root `CHANGELOG.md` (not this one —
-  the operator's live-state/incident journal moved to the private instance
-  repo 2026-08-27 and is not in this tree at all).
-- **`bin/nerve-update.ts`** (+ its gitignored `bin-dist/` build output, wired
-  as the `npm run update` script and `server/lib/release-source.ts`) —
-  upstream's SELF-UPDATE tooling, fetching releases from upstream's GitHub.
-  Never run it here: Central Command's cockpit updates by `git pull` + `npm run
-  build`, and a self-update would overwrite the fork with upstream.
-- **`skills/nerve-kanban/`** — DELETED 2026-08-31. It documented upstream
-  Nerve's kanban API (arbitrary status/priority, freeform column moves,
-  agent-proposed edits) which `cc-kanban.ts` contradicts wholesale — Central
-  Command's board is read-mostly (tasks are the operator's ask verbatim; only
-  cancel/execute/approve/reject/abort/resume exist server-side). Kept no
-  longer than the other quarantined-but-not-deleted upstream code because a
-  skill an agent could actually read and act on is worse than dead code: it
-  actively taught the wrong API.
-
-When you need to know how something in the cockpit behaves *here*, read
-`server/app.ts`, the `cc-*` routes, and `nerve_gateway.py`. Not these.
+When you need to know how something in the cockpit behaves, read
+`server/app.ts`, the `cc-*` routes and `nerve_gateway.py`.

@@ -40,6 +40,7 @@ const CHART_PREFIX = '[chart:';
 
 /**
  * Extract [chart:{...}] markers using bracket-balanced parsing.
+ * Marker reference: docs/CHAT_MARKERS.md at the repository root.
  * Regex can't handle nested brackets in JSON, so we find the opening
  * `[chart:{` and then scan for the matching closing `}]`.
  */

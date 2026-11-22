@@ -1960,14 +1960,14 @@ extraction waits; nothing is lost.
 
 ## 5. The cockpit (`web/`)
 
-A vendored fork of openclaw-nerve (React client, Hono server); provenance and
-the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
+Central Command's own code (React client, Hono server), originally a fork of
+openclaw-nerve v1.5.3; provenance, what was removed and what inherited code is
+still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
 
-- **Ours:** `web/server/routes/cc-*.ts`, and the Central Command screens under
-  `web/src/features/` (VENDORED.md names which). **Ignore:**
-  `web/vendor-unused/`, `web/docs/`, `web/.github/`. `web/server/app.ts` is the
-  authority on which routes are live; the upstream routes it also mounts
-  (auth, files, workspace, TTS and transcription, and others) are not ours.
+- **Written here:** `web/server/routes/cc-*.ts`, the `/ws` relay and the
+  Central Command screens under `web/src/features/`. `web/server/app.ts` is the
+  authority on which routes are live; the inherited routes it also mounts
+  (auth, files, workspace, TTS and transcription, and others) came from upstream.
 - **Feature directories** under `web/src/features/`: `activity`, `agents`,
   `attention`, `auth`, `beads`, `charts`, `chat`, `command-palette`, `connect`,
   `dashboard`, `decisions`, `file-browser`, `gates` (the gate-override hooks and
@@ -2034,7 +2034,7 @@ the quarantine list are in [`web/VENDORED.md`](../web/VENDORED.md).
 | `cc-mcp` | the MCP tool gates (`/api/cc/mcp/servers`, `/api/cc/mcp-overrides/:agentId`): the server list with default gates, active overrides and holders; the default-gate change; one agent's effective gates and override history; setting and revoking an override |
 | `cc-update`, `cc-update-proxy` | update status / stage / apply / hold |
 | `cc-context` | context-window settings, including the two note budgets |
-| `cc-file-browser-guard` | not a proxy: middleware inside the vendored file browser; its mutations (write, rename, move, trash, restore) answer 403 unless `FILE_BROWSER_WRITABLE=1` |
+| `cc-file-browser-guard` | not a proxy: middleware inside the inherited file browser; its mutations (write, rename, move, trash, restore) answer 403 unless `FILE_BROWSER_WRITABLE=1` |
 
 ## 6. Deploy surfaces
 

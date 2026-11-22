@@ -788,12 +788,11 @@ cc_resolve_py() {
 #         it. A new node major is a new native-module ABI (the cockpit carries
 #         a native whisper addon), which only a reinstall rebuilds; npm's major
 #         decides how the ranges resolve (npm >= 11 is required).
-#   build what `npm run build` reads — `tsc -b` (tsconfig.json and its four
-#         referenced projects: config/tsconfig.{app,node,server,scripts}.json
-#         over src/, vite.config.ts, server/ and scripts/), `vite build`
+#   build what `npm run build` reads — `tsc -b` (tsconfig.json and its three
+#         referenced projects: config/tsconfig.{app,node,server}.json
+#         over src/, vite.config.ts and server/), `vite build`
 #         (index.html, vite.config.ts, package.json's version, src/, public/)
-#         and `build:server` (config/tsconfig.server.json and
-#         config/tsconfig.bin.json over server/ and bin/) — plus package.json,
+#         and `build:server` (config/tsconfig.server.json over server/) — plus package.json,
 #         because the installed dependencies are compiled in. The config FILES
 #         are named one by one rather than hashing config/: tsc writes its
 #         .tsbuildinfo beside a config, and a hash that the build itself
@@ -857,9 +856,8 @@ cc_cockpit_build_inputs() { # cc_cockpit_build_inputs <repo-root>  -> the hash; 
   # The list above, as data — web-relative. A new build input goes HERE, or
   # the cockpit silently stops rebuilding when it changes.
   local -a files=(package.json index.html vite.config.ts tsconfig.json
-    config/tsconfig.app.json config/tsconfig.node.json config/tsconfig.server.json
-    config/tsconfig.scripts.json config/tsconfig.bin.json)
-  local -a dirs=(src server public bin scripts)
+    config/tsconfig.app.json config/tsconfig.node.json config/tsconfig.server.json)
+  local -a dirs=(src server public)
   declare -F cc_tree_hash >/dev/null || return 1
   for f in "${files[@]}"; do
     line="$(cc__cockpit_file_line "$root" "$f")" || return 1

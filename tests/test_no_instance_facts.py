@@ -17,9 +17,10 @@ be written down here:
      <name>); the templates and their render are R6, tests/test_k3s_unit_templates.py
 
 Scope: `git ls-files` (the tracked tree, not the working tree), minus docs/vendor/;
-under web/ only the paths web/VENDORED.md names as ours (server/routes/cc-*.ts,
-server/lib/ws-proxy.ts and the src/features folders decisions, agents, workspace,
-skills, attention), so upstream fixtures and docs are out by construction. NAMES
+under web/ only the paths Central Command added to the inherited cockpit
+(server/routes/cc-*.ts, server/lib/ws-proxy.ts and the src/features folders
+decisions, agents, workspace, skills, attention; web/VENDORED.md has the
+provenance), so inherited upstream fixtures are out by construction. NAMES
 (hostnames, accounts, addresses, the private repo's name) are not checked here:
 `scripts/prepush-scan.sh --tree` checks them against the operator's private list
 (tests/test_prepush_scan.py), and this test never reads that list.

@@ -260,7 +260,6 @@ ALLOWED = {
                              _contains("D9 / Story 2.1")),
     ".claude/rules/deploy-k3s.md": ("the dated v2.66.0 bite mark on the env move",
                                     _block("- **The containers' env is")),
-    "web/VENDORED.md": ("past tense: where the live set lived until v2.66.0", _contains("lived in", "v2.66.0")),
     "deploy/shared/README.md": ("past tense: where these files lived until v2.66.0", _contains("lived in", "v2.66.0")),
     "tests/test_deploy_pi_boundary.py": ("this guard: its docstrings, regexes and negative assertions name the path", None),
     "tests/test_graphiti_server_boundary.py": ("the Graphiti removal's guard asserts deploy/pi/graphiti is never named", None),

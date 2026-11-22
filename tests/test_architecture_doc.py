@@ -39,7 +39,7 @@ PKG = ROOT / "central_command"
 
 # Directories never walked: huge, generated, or not ours.
 _PRUNE = {".git", "node_modules", ".venv", "__pycache__", "server-dist", "dist",
-          ".pytest_cache", "_bmad-output", "worktrees", "vendor-unused"}
+          ".pytest_cache", "_bmad-output", "worktrees"}
 
 # Event types are counted from `emit("kind", ...)` call sites by AST. A new
 # event type should not fail every other session's suite, so the documented

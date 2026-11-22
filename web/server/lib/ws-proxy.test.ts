@@ -43,10 +43,6 @@ vi.mock('./device-identity.js', () => ({
   })),
 }));
 
-vi.mock('./openclaw-bin.js', () => ({
-  resolveOpenclawBin: vi.fn(() => '/usr/bin/echo'),
-}));
-
 import { setupWebSocketProxy, closeAllWebSockets, _internals } from './ws-proxy.js';
 import { config } from './config.js';
 import { verifySession, parseSessionCookie } from './session.js';

@@ -81,7 +81,7 @@ LAYER0 = (
 
 
 # The cockpit renders `[chart:{...}]` markers in chat text as interactive
-# charts (web/src/features/charts/ — full reference: web/docs/AGENT-MARKERS.md).
+# charts (web/src/features/charts/ — full reference: docs/CHAT_MARKERS.md).
 # Nothing injects that syntax at runtime, so an agent that was never told it
 # exists can never use it. Appended for every agent in build_charter — like the
 # date stamp, it is presentation doctrine, not a capability, so it rides no

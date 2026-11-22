@@ -44,7 +44,7 @@ when a matching file is read.
   COCKPIT-028). `routes/file-browser.ts` is mounted whatever the UI flag says
   and upstream gave its write, rename, move, trash and restore routes no off
   switch, so `routes/cc-file-browser-guard.ts` is middleware on `/api/files/*`
-  (the one upstream edit, recorded in `web/VENDORED.md`) that refuses every
+  (registered inside `file-browser.ts` itself, recorded in `web/VENDORED.md`) that refuses every
   non-read request unless the flag is `1`. A `FILE_BROWSER_ROOT` holding `.env*`,
   `.git` or certificates is refused at config load (the default workspace
   is used instead), so the browser cannot be aimed at a secret. A new route in that file is guarded by the prefix, not by

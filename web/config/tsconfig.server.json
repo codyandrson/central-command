@@ -19,5 +19,5 @@
     "noUncheckedSideEffectImports": true
   },
   "include": ["../server"],
-  "exclude": ["../server/**/*.test.ts", "../vendor-unused"]
+  "exclude": ["../server/**/*.test.ts"]
 }

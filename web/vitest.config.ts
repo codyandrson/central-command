@@ -12,10 +12,6 @@ export default defineConfig({
       'node_modules/**',
       'server-dist/**',  // Exclude compiled server output (contains duplicate .test.js files)
       '.worktrees/**',
-      // Upstream Nerve modules the server never registers, superseded by the
-      // cc-* routes. Their tests passed, which is precisely the problem: they
-      // proved code that does not run. See web/VENDORED.md.
-      'vendor-unused/**',
     ],
     coverage: {
       provider: 'v8',
