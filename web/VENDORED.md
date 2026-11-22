@@ -62,8 +62,11 @@ Inert here, or only partly used, and kept for now by decision:
 - `server/lib/gateway-rpc.ts`, and `server/lib/ws-proxy.ts`, which is live as
   the `/ws` relay and carries upstream's gateway handshake.
 
-The product branding (the `openclaw-nerve` package name, `NERVE_*` settings)
-is unchanged.
+The visible product name is Central Command (the page title, the wordmark, the
+login page and the logo's label; changed in the release after v2.121.0). The
+internal names stay so that stored settings keep working: the `openclaw-nerve`
+package name, `NERVE_*` settings, `nerve:*` storage keys and event names, file
+and component names (`NerveLogo`), and the server's log lines.
 
 ## The file browser — kept, UI off, read-only unless the operator says otherwise
 

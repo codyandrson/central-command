@@ -227,4 +227,81 @@ describe('AudioSettings', () => {
       }
     });
   });
+
+  describe('speech models from LiteLLM (GET/PUT /api/speech/models)', () => {
+    function serveSpeech(body: unknown, put?: (init: RequestInit) => Response) {
+      const base = globalThis.fetch as Mock;
+      const fallback = base.getMockImplementation()!;
+      base.mockImplementation((input: string | URL, init?: RequestInit) => {
+        if (String(input) === '/api/speech/models') {
+          if (init?.method === 'PUT' && put) return Promise.resolve(put(init));
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(body) } as Response);
+        }
+        return fallback(input, init);
+      });
+    }
+
+    const LISTED = {
+      tts: { selected: 'cc-tts', default: 'cc-tts', models: ['cc-tts', 'kokoro-alt'] },
+      stt: { selected: 'cc-stt', default: 'cc-stt', models: ['cc-stt', 'whisper-large'] },
+      error: null,
+    };
+
+    it('offers exactly the models LiteLLM lists, for read-aloud and for dictation', async () => {
+      serveSpeech(LISTED);
+      render(<AudioSettings {...baseProps} section="all" ttsModel="tts-1" />);
+
+      const tts = await screen.findByLabelText('Read-aloud Model');
+      expect(tts).toHaveValue('cc-tts');
+      expect([...(tts as HTMLSelectElement).options].map((o) => o.value)).toEqual(['cc-tts', 'kokoro-alt']);
+      const stt = screen.getByLabelText('Dictation Model');
+      expect([...(stt as HTMLSelectElement).options].map((o) => o.value)).toEqual(['cc-stt', 'whisper-large']);
+      // The plain-OpenAI model list does not apply to a LiteLLM-routed deployment.
+      expect(screen.queryByLabelText('TTS Model')).not.toBeInTheDocument();
+    });
+
+    it('saves a choice with PUT and shows what the server answered', async () => {
+      const puts: string[] = [];
+      serveSpeech(LISTED, (init) => {
+        puts.push(String(init.body));
+        return { ok: true, json: () => Promise.resolve({ ...LISTED, tts: { ...LISTED.tts, selected: 'kokoro-alt' } }) } as Response;
+      });
+      render(<AudioSettings {...baseProps} section="output" />);
+
+      fireEvent.change(await screen.findByLabelText('Read-aloud Model'), { target: { value: 'kokoro-alt' } });
+      expect(await screen.findByDisplayValue('kokoro-alt')).toBeInTheDocument();
+      expect(puts).toEqual([JSON.stringify({ tts: 'kokoro-alt' })]);
+    });
+
+    it('shows the current model and says the list is unavailable when LiteLLM cannot be read', async () => {
+      serveSpeech({
+        tts: { selected: 'cc-tts', default: 'cc-tts', models: [] },
+        stt: { selected: 'whisper-large', default: 'cc-stt', models: [] },
+        error: 'speech model catalog — unreachable',
+      });
+      render(<AudioSettings {...baseProps} section="all" />);
+
+      expect(await screen.findByTestId('deployment-tts-model')).toHaveTextContent('cc-tts');
+      expect(screen.getByTestId('deployment-tts-model-unavailable')).toHaveTextContent(/unavailable/);
+      expect(screen.getByTestId('deployment-stt-model')).toHaveTextContent('whisper-large');
+      expect(screen.queryByLabelText('Read-aloud Model')).not.toBeInTheDocument();
+      expect(screen.queryByLabelText('Dictation Model')).not.toBeInTheDocument();
+    });
+
+    it('in deployment speech mode keeps showing the alias when the list route fails', async () => {
+      ttsState.deploymentSpeech = { model: 'cc-tts', voice: 'af_heart', voiceSource: 'default' };
+      const base = globalThis.fetch as Mock;
+      const fallback = base.getMockImplementation()!;
+      base.mockImplementation((input: string | URL, init?: RequestInit) => (
+        String(input) === '/api/speech/models'
+          ? Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) } as Response)
+          : fallback(input, init)
+      ));
+      render(<AudioSettings {...baseProps} section="output" />);
+
+      expect(await screen.findByTestId('deployment-tts-model-unavailable')).toHaveTextContent(/404/);
+      expect(screen.getByTestId('deployment-tts-model')).toHaveTextContent('cc-tts');
+    });
+  });
 });
+

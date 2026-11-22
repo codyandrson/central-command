@@ -151,10 +151,13 @@ export const SessionNode = memo(function SessionNode({
     onDelete?.(sessionKey, label);
   }, [onDelete, sessionKey, label]);
 
+  // The rename starts from the operator's own name when there is one, else from
+  // the label as shown.
+  const renameFrom = node.session.operatorTitle || label;
   const handleRenameClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    onStartRename?.(sessionKey, label);
-  }, [onStartRename, sessionKey, label]);
+    onStartRename?.(sessionKey, renameFrom);
+  }, [onStartRename, sessionKey, renameFrom]);
 
   const handleAbortClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -174,7 +177,9 @@ export const SessionNode = memo(function SessionNode({
   // deleted) — without this, plain session rows had NO close control at all.
   const isConversation = node.session.mode === 'conversation';
   const hasAbortAction = Boolean(onAbort && running);
-  const hasRenameAction = Boolean(canRenameDelete && onStartRename && !isRenaming);
+  // Rename is for CONVERSATIONS only (`sessions.patch` with `label`): an agent's
+  // root row carries the roster's name and a run is named by its task.
+  const hasRenameAction = Boolean(isConversation && !isRootAgent && onStartRename && !isRenaming);
   const hasDeleteAction = Boolean(
     (canRenameDelete || isConversation || Boolean(node.session.execFailure)) && onDelete
   );

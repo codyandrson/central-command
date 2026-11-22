@@ -930,6 +930,13 @@ alter table session add column if not exists charter_version integer;
 -- manual close: it is the WHY on the session.failed record.
 alter table session add column if not exists exec_failure text;
 
+-- The operator's name for a conversation, set from the cockpit's sessions panel
+-- (`sessions.patch` with `label`, DL-229). NULL = never renamed: the sidebar
+-- falls back to the task title, then "<agent> · <mode>" with the start time.
+-- A display label only: the transcript, the proposals and every event keep what
+-- they recorded, and an agent's root row is the roster's name, never this.
+alter table session add column if not exists operator_title text;
+
 -- Operator stop (2026-08-02). A cooperative flag, not a kill: `_run_live` reads
 -- it at each NODE BOUNDARY (the snapshot's UPDATE returns it, so the check costs
 -- no extra query) and parks the session STOPPED with its transcript intact.

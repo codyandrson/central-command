@@ -51,7 +51,7 @@ export function LoginPage({ onLogin, error }: LoginPageProps) {
               Sign in to your agent control surface
             </h1>
             <p className="mt-4 max-w-[48ch] text-sm leading-6 text-muted-foreground sm:text-base">
-              Nerve is the high visibility workspace for OpenClaw agents. Authenticate once, then manage chats, tasks, files, memory, and telemetry from one place.
+              Central Command is the control plane for your agent team. Authenticate once, then manage chats, tasks, approvals, and telemetry from one place.
             </p>
 
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
@@ -75,7 +75,7 @@ export function LoginPage({ onLogin, error }: LoginPageProps) {
               Authentication Required
             </div>
             <h2 className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-foreground">
-              Unlock Nerve
+              Unlock Central Command
             </h2>
             <p className="mt-3 text-sm leading-6 text-muted-foreground">
               Enter the password configured for this deployment. Your gateway token also works if password auth is using the fallback path.
@@ -110,7 +110,7 @@ export function LoginPage({ onLogin, error }: LoginPageProps) {
                 size="lg"
                 className="w-full text-[0.733rem] uppercase tracking-[0.22em]"
               >
-                {submitting ? 'Signing In…' : 'Enter Nerve'}
+                {submitting ? 'Signing In…' : 'Enter Central Command'}
               </Button>
             </form>
 

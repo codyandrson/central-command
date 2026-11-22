@@ -292,3 +292,66 @@ describe('SessionList agent-initiated lanes', () => {
     expect(screen.queryByTestId('session-asked-chip')).not.toBeInTheDocument();
   });
 });
+
+describe('SessionList rename (conversations only)', () => {
+  const root: Session = { sessionKey: 'agent:inbox-triage:main', label: 'Inbox Triage', agentId: 'inbox-triage', status: 'IDLE' };
+  const lane: Session = {
+    sessionKey: 'agent:inbox-triage:sess_abc123',
+    parentSessionKey: 'agent:inbox-triage:main',
+    label: 'Budget questions',
+    operatorTitle: 'Budget questions',
+    labelStamped: false,
+    agentId: 'inbox-triage',
+    mode: 'conversation',
+    status: 'AWAITING_OPERATOR',
+  };
+  const run: Session = {
+    sessionKey: 'agent:inbox-triage:sess_run999',
+    parentSessionKey: 'agent:inbox-triage:main',
+    label: 'Reconcile the sprint board',
+    agentId: 'inbox-triage',
+    mode: 'oneshot',
+    status: 'RUNNING',
+  };
+
+  it('offers rename on a conversation row and on no other row', () => {
+    renderSessionList({ sessions: [root, lane, run], onRename: vi.fn() });
+    // One rename control: the conversation's. The agent root and the run have none.
+    expect(screen.getAllByTitle('Rename session')).toHaveLength(1);
+  });
+
+  it('saves a changed name and starts from the operator name', async () => {
+    const onRename = vi.fn().mockResolvedValue(undefined);
+    renderSessionList({ sessions: [root, lane], onRename });
+    fireEvent.click(screen.getByTitle('Rename session'));
+    const input = screen.getByDisplayValue('Budget questions');
+    fireEvent.change(input, { target: { value: '  Budget 2027 ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.blur(input);
+    await Promise.resolve();
+    expect(onRename).toHaveBeenCalledTimes(1);
+    expect(onRename).toHaveBeenCalledWith('agent:inbox-triage:sess_abc123', 'Budget 2027');
+  });
+
+  it('saves nothing when the name is unchanged or the rename is cancelled', () => {
+    const onRename = vi.fn().mockResolvedValue(undefined);
+    renderSessionList({ sessions: [root, lane], onRename });
+    fireEvent.click(screen.getByTitle('Rename session'));
+    fireEvent.keyDown(screen.getByDisplayValue('Budget questions'), { key: 'Enter' });
+    fireEvent.click(screen.getByTitle('Rename session'));
+    const input = screen.getByDisplayValue('Budget questions');
+    fireEvent.change(input, { target: { value: 'Something else' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it('says on screen when the server refuses the rename', async () => {
+    const onRename = vi.fn().mockRejectedValue(new Error('name too long (120 characters max)'));
+    renderSessionList({ sessions: [root, lane], onRename });
+    fireEvent.click(screen.getByTitle('Rename session'));
+    const input = screen.getByDisplayValue('Budget questions');
+    fireEvent.change(input, { target: { value: 'x'.repeat(130) } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(await screen.findByRole('alert')).toHaveTextContent('name too long');
+  });
+});

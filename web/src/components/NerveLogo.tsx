@@ -253,5 +253,5 @@ export default function NerveLogo({ size = 28 }: NerveLogoProps) {
     };
   }, [size]);
 
-  return <canvas ref={canvasRef} role="img" aria-label="Nerve logo" style={{ display: 'block' }} />;
+  return <canvas ref={canvasRef} role="img" aria-label="Central Command logo" style={{ display: 'block' }} />;
 }

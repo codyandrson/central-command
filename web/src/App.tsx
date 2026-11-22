@@ -124,7 +124,7 @@ export default function App({ onLogout }: AppProps) {
   // Session state
   const {
     sessions, sessionsLoading, currentSession, setCurrentSession, setViewingChat,
-    busyState, agentStatus, unreadSessions, refreshSessions, deleteSession, openNewSession, abortSession,
+    busyState, agentStatus, unreadSessions, refreshSessions, deleteSession, renameSession, openNewSession, abortSession,
     agentName,
   } = useSessionContext();
 
@@ -778,6 +778,7 @@ export default function App({ onLogout }: AppProps) {
               onSelect={onSelect}
               onRefresh={refreshSessions}
               onDelete={deleteSession}
+              onRename={renameSession}
               onNewSession={openNewSession}
               onAbort={abortSession}
               isLoading={sessionsLoading}
@@ -815,6 +816,7 @@ export default function App({ onLogout }: AppProps) {
           onSelect={handleSessionChange}
           onRefresh={refreshSessions}
           onDelete={deleteSession}
+          onRename={renameSession}
           onNewSession={openNewSession}
           onAbort={abortSession}
           isLoading={sessionsLoading}

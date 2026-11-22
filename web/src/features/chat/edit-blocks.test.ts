@@ -109,3 +109,48 @@ describe('extractWriteBlocks', () => {
     expect(extractWriteBlocks(text2)[0].filePath).toBe('f');
   });
 });
+
+describe('sandbox_write_file (Central Command agents write files in their sandbox)', () => {
+  // The chat's rawText for a tool call, exactly as loadHistory.ts builds it from
+  // the gateway's tool_use block: name + pretty-printed arguments. The arguments
+  // are the tool's own signature, sandbox_write_file(path: str, content: str)
+  // in central_command/runtime/tools.py.
+  const toolCall = (name: string, args: Record<string, unknown>) =>
+    `**tool:** \`${name}\`\n\`\`\`json\n${JSON.stringify(args, null, 2)}\n\`\`\``;
+
+  it('shows the path and the whole new content as an added-file block', () => {
+    const text = toolCall('sandbox_write_file', {
+      path: 'report/summary.md',
+      content: '# Summary\n\nThree invoices are overdue.\n',
+    });
+    expect(extractWriteBlocks(text)).toEqual([
+      { filePath: 'report/summary.md', content: '# Summary\n\nThree invoices are overdue.\n' },
+    ]);
+    // Only the new content exists, so no edit (before/after) block is made up.
+    expect(extractEditBlocks(text)).toEqual([]);
+  });
+
+  it('keeps an absolute workspace path as given', () => {
+    const text = toolCall('sandbox_write_file', { path: '/workspace/src/app.py', content: 'print("hi")\n' });
+    expect(extractWriteBlocks(text)[0].filePath).toBe('/workspace/src/app.py');
+  });
+
+  it('is not cut short by a code fence inside the file content', () => {
+    const content = 'Usage:\n\n```bash\npython app.py\n```\n';
+    const text = toolCall('sandbox_write_file', { path: 'README.md', content });
+    expect(extractWriteBlocks(text)).toEqual([{ filePath: 'README.md', content }]);
+  });
+
+  it('does not treat the sandbox read or exec tools as writes', () => {
+    const text = [
+      toolCall('sandbox_read_file', { path: 'README.md' }),
+      toolCall('sandbox_exec', { command: 'echo hi > a.txt' }),
+    ].join('\n');
+    expect(extractWriteBlocks(text)).toEqual([]);
+  });
+
+  it('skips an empty write', () => {
+    expect(extractWriteBlocks(toolCall('sandbox_write_file', { path: 'empty.txt', content: '' }))).toEqual([]);
+  });
+});
+

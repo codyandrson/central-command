@@ -9,7 +9,7 @@ export interface EditBlock {
 export function extractEditBlocks(rawText: string): EditBlock[] {
   const blocks: EditBlock[] = [];
   
-  const toolPattern = /\*\*tool:\*\*\s*`(Edit|edit)`\s*\n```json\n([\s\S]*?)```/g;
+  const toolPattern = /\*\*tool:\*\*\s*`(Edit|edit)`\s*\n```json\n([\s\S]*?)\n```/g;
   let match;
 
   const collectBlock = (input: Record<string, unknown>, fallbackPath = '') => {
@@ -43,7 +43,15 @@ export function extractEditBlocks(rawText: string): EditBlock[] {
   return blocks;
 }
 
-/** Extract Write tool_use blocks — new file content */
+/**
+ * Extract file-write tool_use blocks — full new file content.
+ *
+ * Central Command's agents write files inside their sandbox with
+ * `sandbox_write_file(path, content)` (central_command/runtime/tools.py). It
+ * replaces the whole file and its call carries only the new content, so it is
+ * shown as an added-file block: no "before" is invented. `Write` is the inherited
+ * name (`file_path` + `content`), kept because it costs one alternative here.
+ */
 export interface WriteBlock {
   filePath: string;
   content: string;
@@ -53,7 +61,9 @@ export interface WriteBlock {
 export function extractWriteBlocks(rawText: string): WriteBlock[] {
   const blocks: WriteBlock[] = [];
   
-  const toolPattern = /\*\*tool:\*\*\s*`(Write|write)`\s*\n```json\n([\s\S]*?)```/g;
+  const toolPattern = /\*\*tool:\*\*\s*`(Write|write|sandbox_write_file)`\s*\n```json\n([\s\S]*?)\n```/g;
+  // The closing fence must start a line: JSON escapes newlines inside strings,
+  // so a fence in the file's own text (a Markdown file) never ends the match.
   let match;
   
   while ((match = toolPattern.exec(rawText)) !== null) {

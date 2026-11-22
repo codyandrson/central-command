@@ -8,6 +8,7 @@
 
 import { config } from '../lib/config.js';
 import { OPENAI_WHISPER_URL, OPENAI_STT_MODEL } from '../lib/constants.js';
+import { getDeploymentSttModel } from '../lib/tts-config.js';
 import { FifoGateAborted, sttGate } from '../lib/fifo-gate.js';
 
 export interface WhisperResult {
@@ -51,8 +52,10 @@ export async function transcribe(
     `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safeFilename}"\r\nContent-Type: ${mimeType}\r\n\r\n`,
   );
 
-  // Model field
-  let footer = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${OPENAI_STT_MODEL}\r\n`;
+  // Model field: the operator's dictation choice in deployment speech mode
+  // (Settings > Audio), else the env alias, else OPENAI_STT_MODEL's default.
+  const model = getDeploymentSttModel() ?? OPENAI_STT_MODEL;
+  let footer = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${model}\r\n`;
 
   // Optional language hint (ISO 639-1) — improves accuracy when known
   const effectiveLang = language || config.language;

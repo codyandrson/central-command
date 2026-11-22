@@ -109,22 +109,39 @@ export function SessionList({ sessions, currentSession, isViewingChat = true, bu
     }
   }, [deleteTarget, onDelete]);
 
+  // The rename in progress, held in a ref as well as state: Enter commits and
+  // the input's blur commits too, and Escape followed by that blur must not
+  // save. The ref is cleared by whichever ends the rename first.
+  const renameStartRef = useRef<{ key: string; initial: string } | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+
   const startRename = useCallback((sessionKey: string, currentLabel: string) => {
+    renameStartRef.current = { key: sessionKey, initial: currentLabel };
+    setRenameError(null);
     setRenamingKey(sessionKey);
     setRenameValue(currentLabel);
     setTimeout(() => renameInputRef.current?.focus(), 0);
   }, []);
 
   const commitRename = useCallback(async () => {
-    if (!renamingKey || !onRename) return;
-    const trimmed = renameValue.trim();
-    if (trimmed) {
-      try { await onRename(renamingKey, trimmed); } catch (err) { console.error('Failed to rename session:', err); }
-    }
+    const started = renameStartRef.current;
+    renameStartRef.current = null;
     setRenamingKey(null);
-  }, [renamingKey, renameValue, onRename]);
+    if (!started || !onRename) return;
+    const trimmed = renameValue.trim();
+    // Unchanged: nothing to save. Empty: clears the name back to the default label.
+    if (trimmed === started.initial.trim()) return;
+    try {
+      await onRename(started.key, trimmed);
+    } catch (err) {
+      // Said on screen, not only in the console: a rename that silently did
+      // nothing reads as the panel ignoring the operator.
+      setRenameError(err instanceof Error ? err.message : String(err));
+    }
+  }, [renameValue, onRename]);
 
   const cancelRename = useCallback(() => {
+    renameStartRef.current = null;
     setRenamingKey(null);
   }, []);
 
@@ -264,6 +281,12 @@ export function SessionList({ sessions, currentSession, isViewingChat = true, bu
           </button>
         </div>
       </div>
+      {renameError && (
+        <div role="alert" className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/8 px-3 py-2 text-[0.733rem] text-destructive">
+          <span className="min-w-0 flex-1">Rename failed: {renameError}</span>
+          <button type="button" onClick={() => setRenameError(null)} className="shrink-0 underline" aria-label="Dismiss rename error">Dismiss</button>
+        </div>
+      )}
       <div className={compact ? 'overflow-y-auto' : 'flex-1 overflow-y-auto'}>
         {isLoading && flatNodes.length === 0 ? (
           <SessionSkeletonGroup count={4} />

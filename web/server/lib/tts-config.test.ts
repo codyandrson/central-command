@@ -18,11 +18,11 @@ async function loadTtsModule(stored?: Record<string, unknown>) {
 }
 
 describe('getTTSConfig', () => {
-  it('returns only the openai section, with defaults, when the config file is missing', async () => {
+  it('returns only the openai and transcribe sections, with defaults, when the config file is missing', async () => {
     const { mod, written } = await loadTtsModule();
 
     const cfg = mod.getTTSConfig();
-    expect(Object.keys(cfg)).toEqual(['openai']);
+    expect(Object.keys(cfg)).toEqual(['openai', 'transcribe']);
     expect(cfg.openai.deploymentVoice).toBe('');
     expect(typeof cfg.openai.voice).toBe('string');
     expect(written).toHaveLength(1);
@@ -37,7 +37,7 @@ describe('getTTSConfig', () => {
     });
 
     const cfg = mod.getTTSConfig();
-    expect(Object.keys(cfg)).toEqual(['openai']);
+    expect(Object.keys(cfg)).toEqual(['openai', 'transcribe']);
     expect(cfg.openai.voice).toBe('onyx');
     expect(cfg.openai.deploymentVoice).toBe('');
   });

@@ -1063,6 +1063,34 @@ async def set_session_thinking_override(session_id: str, level: str | None) -> b
         await conn.close()
 
 
+async def get_session_operator_title(session_id: str) -> str | None:
+    """The operator's name for this conversation, or None if never renamed."""
+    conn = await _conn()
+    try:
+        row = await conn.fetchrow(
+            "select operator_title from session where id = $1", session_id
+        )
+        return row["operator_title"] if row else None
+    finally:
+        await conn.close()
+
+
+async def set_session_operator_title(session_id: str, title: str | None) -> bool:
+    """Set (or clear, with None) the operator's name for a session. Writes that
+    one column only: `updated_at` is left alone, because a rename is not
+    activity (the sidebar's waiting clocks read it), and the transcript is never
+    touched. False if there is no such session."""
+    conn = await _conn()
+    try:
+        result = await conn.execute(
+            "update session set operator_title = $2 where id = $1",
+            session_id, title,
+        )
+        return result.endswith(" 1")
+    finally:
+        await conn.close()
+
+
 async def set_session_model_override(session_id: str, model: str | None) -> bool:
     """Set (or clear, with None) this session's model override. False if there
     is no such session — the caller says so rather than reporting a silent win."""
@@ -1390,7 +1418,7 @@ async def list_sessions(
             select s.id, s.agent_id, s.status, s.mode, s.created_at, s.updated_at,
                    s.parent_session_id, s.closed_reason, s.model_override,
                    s.thinking_override, s.exec_failure, s.rerun_of, s.rerun_by,
-                   s.charter_version,
+                   s.charter_version, s.operator_title,
                    {_current_charter_sql('s.agent_id')} as charter_current,
                    (select par.agent_id from session par
                      where par.id = s.parent_session_id) as parent_agent_id,
@@ -2191,7 +2219,7 @@ async def get_session(session_id: str) -> dict | None:
         row = await conn.fetchrow(
             "select id, agent_id, status, mode, parent_session_id, closed_reason, "
             "model_override, thinking_override, stop_requested, exec_failure, "
-            "rerun_of, rerun_by, charter_version, "
+            "rerun_of, rerun_by, charter_version, operator_title, "
             f"{_current_charter_sql('session.agent_id')} as charter_current, "
             "created_at, updated_at "
             "from session where id = $1",

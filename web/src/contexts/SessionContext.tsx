@@ -38,6 +38,8 @@ interface SessionContextValue {
   abortSession: (sessionKey: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
   deleteSession: (sessionKey: string) => Promise<void>;
+  /** Rename a conversation (an empty label clears the name). Throws the server's refusal. */
+  renameSession: (sessionKey: string, label: string) => Promise<void>;
   openNewSession: (rootOrAgentKey: string) => Promise<void>;
   updateSession: (sessionKey: string, updates: Partial<Session>) => void;
   agentName: string;
@@ -506,6 +508,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         || evt === 'cc.session.exec_failed'
         // A re-run writes the link on the old row and starts a new one.
         || evt === 'cc.session.rerun'
+        // A rename in another tab or window.
+        || evt === 'cc.session.renamed'
       ) {
         refreshSessions();
       }
@@ -561,6 +565,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await refreshSessionsRef.current();
   }, [rpc, setCurrentSession]);
 
+  // Rename a conversation: the gateway stores the operator's name on the row
+  // (display only; the transcript is untouched), then the list is re-read so
+  // the label comes from the source of truth.
+  const renameSession = useCallback(async (sessionKey: string, label: string) => {
+    await rpc('sessions.patch', { key: sessionKey, label });
+    await refreshSessionsRef.current();
+  }, [rpc]);
+
   // Open an ADDITIONAL session with an agent — everything already open stays
   // open (multi-session per agent). Selects the fresh session when it lands.
   const openNewSession = useCallback(async (rootOrAgentKey: string) => {
@@ -594,13 +606,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     abortSession,
     refreshSessions,
     deleteSession,
+    renameSession,
     openNewSession,
     updateSession: updateSessionFromEvent,
     agentName,
   }), [
     sessions, sessionsLoading, currentSession, setCurrentSession, isViewingChat, setViewingChat, busyState, agentStatus,
     unreadSessions, markSessionRead,
-    abortSession, refreshSessions, deleteSession, openNewSession,
+    abortSession, refreshSessions, deleteSession, renameSession, openNewSession,
     updateSessionFromEvent, agentName,
   ]);
 

@@ -68,6 +68,7 @@ import updateRoutes from './routes/cc-update.js';
 // Systems view (launchpad): every deployed/integrated system, live status,
 // and where its credential lives — never the value.
 import systemsRoutes from './routes/cc-systems.js';
+import speechModelsRoutes from './routes/cc-speech-models.js';
 
 const app = new Hono();
 
@@ -114,7 +115,7 @@ const routes = [
   workspaceRoutes, charterRoutes, mailRulesRoutes, mcpRoutes, cronsRoutes, filesRoutes,
   voicePhrasesRoutes, fileBrowserRoutes, uploadConfigRoutes, uploadReferenceRoutes, kanbanRoutes,
   graphRoutes, activityRoutes, loeRoutes, skillsRoutes, decisionsRoutes, sourcesRoutes,
-  updateRoutes, systemsRoutes, contextRoutes,
+  updateRoutes, systemsRoutes, contextRoutes, speechModelsRoutes,
 ];
 for (const route of routes) app.route('/', route);
 

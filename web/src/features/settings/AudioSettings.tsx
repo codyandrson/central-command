@@ -4,6 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import { InlineSelect } from '@/components/ui/InlineSelect';
 import { OFFERED_PROVIDER_LABEL, type TTSProvider } from '@/features/tts/useTTS';
 import { useTTSConfig, type DeploymentSpeech } from '@/features/tts/useTTSConfig';
+import { useSpeechModels, type SpeechSide } from '@/features/tts/useSpeechModels';
 import { VoicePhrasesModal } from './VoicePhrasesModal';
 import { buildPrimaryWakePhrase } from '@/lib/constants';
 import { getWakeWordSupport } from '@/features/voice/wakeWordSupport';
@@ -207,6 +208,75 @@ function DeploymentVoiceField({
   );
 }
 
+/**
+ * A speech model dropdown fed from LiteLLM (`GET /api/speech/models`): the
+ * models LiteLLM serves for this mode, nothing else. When the list cannot be
+ * read (or is empty) the current model is shown as text with the reason, so a
+ * model that is not in LiteLLM's list is never offered.
+ */
+function SpeechModelPicker({
+  title,
+  description,
+  ariaLabel,
+  testId,
+  current,
+  side,
+  unavailable,
+  saveError,
+  onChoose,
+}: {
+  title: string;
+  description: string;
+  ariaLabel: string;
+  testId: string;
+  current: string;
+  side: SpeechSide | null;
+  /** Why the list is not available, or null when it is. */
+  unavailable: string | null;
+  saveError?: string;
+  onChoose: (model: string) => void;
+}) {
+  const listed = !unavailable && side !== null && side.models.length > 0;
+  const options = listed
+    ? [
+        // The model in use stays visible even when LiteLLM stopped listing it.
+        ...(side.models.includes(current) ? [] : [{ value: current, label: `${current} (not in LiteLLM's list)` }]),
+        ...side.models.map((m) => ({ value: m, label: m === side.default ? `${m} (default)` : m })),
+      ]
+    : [];
+  return (
+    <div className="cockpit-row flex-col items-stretch gap-3">
+      <div className="min-w-0">
+        <span className="text-sm font-medium text-foreground">{title}</span>
+        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        {unavailable && (
+          <p className="mt-1 text-xs text-muted-foreground" data-testid={`${testId}-unavailable`}>
+            The list of speech models is unavailable ({unavailable}); the current model stays in use.
+          </p>
+        )}
+        {!unavailable && side && side.models.length === 0 && (
+          <p className="mt-1 text-xs text-muted-foreground" data-testid={`${testId}-unavailable`}>
+            LiteLLM lists no models for this; the current model stays in use.
+          </p>
+        )}
+        {saveError && <p className="mt-1 text-xs text-destructive">{saveError}</p>}
+      </div>
+      {listed ? (
+        <InlineSelect
+          value={current}
+          onChange={(m) => { if (m !== current) onChoose(m); }}
+          options={options}
+          ariaLabel={ariaLabel}
+          triggerClassName={`${INLINE_SELECT_TRIGGER_CLASS} min-w-[188px]`}
+          menuClassName={`${INLINE_SELECT_MENU_CLASS} min-w-[200px]`}
+        />
+      ) : (
+        <span className="font-mono text-sm text-foreground/82" data-testid={testId}>{current}</span>
+      )}
+    </div>
+  );
+}
+
 /** Models of the OpenAI-shaped endpoint outside deployment speech mode. */
 const PROVIDER_MODELS: Record<TTSProvider, { value: string; label: string }[]> = {
   openai: [
@@ -248,6 +318,18 @@ export function AudioSettings({
   const deployment = ttsProvider === 'openai' ? config?.deploymentSpeech ?? null : null;
   // Until the config answers, do not flash the OpenAI model list for a deployment.
   const awaitingDeploymentMode = ttsProvider === 'openai' && ttsConfigLoading === true;
+  // The speech models LiteLLM serves, and the ones in use (both profiles).
+  const {
+    models: speechModels,
+    loading: speechModelsLoading,
+    loadError: speechModelsLoadError,
+    saveError: speechSaveError,
+    choose: chooseSpeechModel,
+  } = useSpeechModels();
+  const ttsSide = speechModels?.tts ?? null;
+  const sttSide = speechModels?.stt ?? null;
+  // Read-aloud goes through LiteLLM: the dropdown replaces the OpenAI model list.
+  const ttsViaLiteLLM = ttsSide !== null || deployment !== null;
   const { state: langState, setLanguage } = useLanguage();
 
   // Voice phrases modal — opens when switching to non-English without configured phrases
@@ -433,19 +515,23 @@ export function AudioSettings({
         </div>
       )}
 
-      {/* TTS Model: the deployment's alias as a plain label in deployment speech mode */}
-      {showOutput && deployment && (
-        <div className="cockpit-row items-start justify-between">
-          <div className="min-w-0 flex-1">
-            <span className="text-sm font-medium text-foreground">TTS model</span>
-            <p className="mt-1 text-xs text-muted-foreground">The model is set by the deployment.</p>
-          </div>
-          <span className="font-mono text-sm text-foreground/82" data-testid="deployment-tts-model">{deployment.model}</span>
-        </div>
+      {/* TTS Model: a speech model LiteLLM serves (mode audio_speech) */}
+      {showOutput && ttsViaLiteLLM && (
+        <SpeechModelPicker
+          title="TTS model"
+          description="A read-aloud model from LiteLLM. The deployment's alias is the default."
+          ariaLabel="Read-aloud Model"
+          testId="deployment-tts-model"
+          current={ttsSide?.selected ?? deployment?.model ?? ''}
+          side={ttsSide}
+          unavailable={ttsSide ? speechModels?.error ?? null : speechModelsLoadError ?? (speechModelsLoading ? null : 'not reported by the server')}
+          saveError={speechSaveError.tts}
+          onChoose={(m) => { void chooseSpeechModel('tts', m); }}
+        />
       )}
 
       {/* TTS Model (shown when provider has multiple models) */}
-      {showOutput && !deployment && !awaitingDeploymentMode && models.length > 0 && (
+      {showOutput && !ttsViaLiteLLM && !speechModelsLoading && !awaitingDeploymentMode && models.length > 0 && (
         <div className="cockpit-row items-start justify-between">
           <div className="min-w-0 flex-1">
             <span className="text-sm font-medium text-foreground">TTS model</span>
@@ -552,8 +638,28 @@ export function AudioSettings({
         <div className="space-y-2">
           <span className="cockpit-field-label">STT Provider</span>
           <p className="text-sm font-medium text-foreground">{OFFERED_PROVIDER_LABEL}</p>
-          <span className="cockpit-field-hint px-1">Using the deployment speech service (cc-stt)</span>
+          <span className="cockpit-field-hint px-1">Using the deployment speech service ({sttSide?.selected ?? 'cc-stt'})</span>
         </div>
+      )}
+
+      {/* STT Model: a speech model LiteLLM serves (mode audio_transcription) */}
+      {showInput && sttSide && (
+        <SpeechModelPicker
+          title="Dictation model"
+          description="A transcription model from LiteLLM. The deployment's alias is the default."
+          ariaLabel="Dictation Model"
+          testId="deployment-stt-model"
+          current={sttSide.selected}
+          side={sttSide}
+          unavailable={speechModels?.error ?? null}
+          saveError={speechSaveError.stt}
+          onChoose={(m) => { void chooseSpeechModel('stt', m); }}
+        />
+      )}
+      {showInput && !sttSide && speechModelsLoadError && (
+        <p className="cockpit-field-hint px-1" data-testid="deployment-stt-model-unavailable">
+          The list of speech models is unavailable ({speechModelsLoadError}).
+        </p>
       )}
 
       {showInput && (

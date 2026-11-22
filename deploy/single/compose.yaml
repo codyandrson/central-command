@@ -388,6 +388,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Appended to the image's entrypoint (`/usr/bin/pgweb --bind=0.0.0.0
+    # --listen=8081`). pgweb has no login here and answers any page the
+    # operator's browser has open, so a loopback bind alone does not stop
+    # another site from sending it a query (cross-site request). --readonly
+    # makes pgweb force every query read-only and refuse write keywords;
+    # --lock-session stops it being pointed at another database; --no-ssh
+    # turns off its SSH tunnel feature. It is a window into the database, not
+    # a way to change it.
+    command: ["--readonly", "--lock-session", "--no-ssh"]
     environment:
       PGWEB_DATABASE_URL: postgres://central_command:central_command@postgres:5432/central_command?sslmode=disable
     ports:

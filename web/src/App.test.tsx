@@ -56,6 +56,7 @@ const {
     unreadSessions: new Set<string>(),
     refreshSessions: vi.fn(),
     deleteSession: vi.fn(),
+    renameSession: vi.fn(),
     abortSession: vi.fn(),
     agentName: 'Nerve',
   };

@@ -211,6 +211,27 @@ async def _fetch_model_info(op: str) -> list:
     return resp.json().get("data") or []
 
 
+# The two LiteLLM `model_info.mode` values the cockpit's speech pickers list.
+SPEECH_MODES = ("audio_speech", "audio_transcription")
+
+
+async def speech_model_ids() -> dict[str, list[str]]:
+    """`{mode: [model_name, ...]}` for read-aloud (`audio_speech`) and dictation
+    (`audio_transcription`): the speech models LiteLLM serves, by the `mode`
+    each row DECLARES in model_info (an undeclared mode is in neither list).
+    Read through the agents' door like `exposed_model_ids`, so the list is what
+    the speech routes' key can be served. Raises LiteLLMError when the proxy
+    cannot be read: an empty list would claim "no speech models"."""
+    out: dict[str, set[str]] = {mode: set() for mode in SPEECH_MODES}
+    for entry in await _fetch_model_info("speech model catalog"):
+        if not isinstance(entry, dict) or not entry.get("model_name"):
+            continue
+        mode = (entry.get("model_info") or {}).get("mode")
+        if mode in out:
+            out[mode].add(str(entry["model_name"]))
+    return {mode: sorted(names) for mode, names in out.items()}
+
+
 # Plain data + a monotonic stamp — deliberately NOT an asyncio.Lock or Event,
 # which bind to the first loop that awaits them and raise from every other one
 # (the module-scope loop-bound bite mark). A duplicated fetch under a race is

@@ -80,6 +80,9 @@ storage for a rollback; remove it by hand once you no longer need one.
   switch off it stays empty. `CC_ENABLE_PGWEB=0` is for a registry mirror
   that does not carry the image: the `check` and `fetch` lines for
   `image-sosedoff_pgweb` name both the mirror seam and this switch.
+  It runs read-only (`--readonly --lock-session --no-ssh`): with no login, a
+  loopback bind alone does not stop a page open in the operator's browser from
+  sending it a query, so it is a window into the database and cannot change it.
 
 The **sandbox** has no service: sandbox containers are created on demand by the
 runner, and on this profile the runner's backend is rootless podman rather than

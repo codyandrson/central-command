@@ -1,4 +1,9 @@
-// Font definitions for Nerve UI
+// Font definitions for the cockpit UI.
+//
+// Every font is bundled with the cockpit (web/public/fonts/, from the @fontsource
+// packages, SIL Open Font License — each folder carries its OFL.txt) and served
+// from the cockpit's own origin: a deployment with no internet access renders
+// the same as one with it, and nothing is requested from an outside host.
 
 export type FontName = 'instrument-sans' | 'space-grotesk' | 'jetbrains-mono';
 
@@ -6,7 +11,8 @@ export interface Font {
   name: FontName;
   label: string;
   family: string;
-  googleFontsUrl?: string; // URL for lazy-loading from Google Fonts
+  /** Same-origin stylesheet holding this font's @font-face rules (lazy-loaded). */
+  stylesheetUrl?: string;
 }
 
 export const fonts: Record<FontName, Font> = {
@@ -14,19 +20,19 @@ export const fonts: Record<FontName, Font> = {
     name: 'instrument-sans',
     label: 'Instrument Sans',
     family: "'Instrument Sans', 'Helvetica Neue', Arial, sans-serif",
-    googleFontsUrl: 'https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap',
+    stylesheetUrl: '/fonts/instrument-sans/instrument-sans.css',
   },
   'space-grotesk': {
     name: 'space-grotesk',
     label: 'Space Grotesk',
     family: "'Space Grotesk', 'Instrument Sans', 'Helvetica Neue', Arial, sans-serif",
-    googleFontsUrl: 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap',
+    stylesheetUrl: '/fonts/space-grotesk/space-grotesk.css',
   },
   'jetbrains-mono': {
     name: 'jetbrains-mono',
     label: 'JetBrains Mono',
     family: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
-    googleFontsUrl: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap',
+    stylesheetUrl: '/fonts/jetbrains-mono/jetbrains-mono.css',
   },
 };
 
@@ -39,8 +45,8 @@ export const monoFont = "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consol
 // Track which fonts have been loaded
 const loadedFonts = new Set<string>();
 
-// Lazy-load a font from Google Fonts
-function loadGoogleFont(url: string): void {
+// Lazy-load a bundled font's stylesheet (same origin).
+function loadFontStylesheet(url: string): void {
   if (loadedFonts.has(url)) return;
   
   const link = document.createElement('link');
@@ -50,14 +56,14 @@ function loadGoogleFont(url: string): void {
   loadedFonts.add(url);
 }
 
-/** Apply a font to the document root by setting CSS custom properties and lazy-loading from Google Fonts. */
+/** Apply a font to the document root by setting CSS custom properties and lazy-loading its bundled stylesheet. */
 export function applyFont(fontName: FontName): void {
   const font = fonts[fontName];
   if (!font) return;
   
-  // Lazy-load the font if it has a Google Fonts URL
-  if (font.googleFontsUrl) {
-    loadGoogleFont(font.googleFontsUrl);
+  // Lazy-load the font's bundled stylesheet
+  if (font.stylesheetUrl) {
+    loadFontStylesheet(font.stylesheetUrl);
   }
   
   const root = document.documentElement;
@@ -70,5 +76,5 @@ export function applyFont(fontName: FontName): void {
 }
 
 // Initialize fonts used in the default shell before settings hydrate
-loadGoogleFont(fonts['instrument-sans'].googleFontsUrl!);
-loadGoogleFont(fonts['jetbrains-mono'].googleFontsUrl!);
+loadFontStylesheet(fonts['instrument-sans'].stylesheetUrl!);
+loadFontStylesheet(fonts['jetbrains-mono'].stylesheetUrl!);

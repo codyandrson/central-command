@@ -4,6 +4,32 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-22 — v2.122.0: Rename a conversation; "Central Command" in the UI; fonts served locally; speech model pickers; pgweb read-only on single-node
+
+- **Rename a conversation.** The sessions panel's rename control now works on conversation rows. The
+  name is stored in a new column, `session.operator_title`, and is the only thing a rename writes: the
+  transcript, the proposals and the waiting clocks are untouched. An agent's root row cannot be
+  renamed (its name is the roster's), nor a task run. Each rename is recorded as a `session.renamed`
+  event (DL-229). The updater adds the column at this release.
+- **The product name.** The page title, the top-bar wordmark and the login page say "Central Command".
+  Internal names (`NERVE_*` settings, stored preference keys, the package name) are unchanged, so
+  saved preferences keep working.
+- **Fonts.** The three UI fonts (Instrument Sans, Space Grotesk, JetBrains Mono) are served by the
+  cockpit itself, with their Open Font License files, in place of a fetch from Google at startup that
+  a network with no egress could not make. The Content-Security-Policy no longer names Google's font
+  hosts. A built cockpit makes no request to any outside host on load.
+- **Sandbox writes show in chat.** A `sandbox_write_file` tool call renders as a new-file block with
+  its path and content. A file whose content holds a code fence no longer makes the block vanish.
+- **Speech model pickers.** Settings > Audio has a read-aloud model and a dictation model dropdown,
+  listing the models LiteLLM has in the `audio_speech` and `audio_transcription` modes
+  (`GET`/`PUT /api/speech/models`, on both profiles). The defaults are the `cc-tts` and `cc-stt`
+  aliases, so an install with nothing chosen behaves as before. A model not in the list cannot be
+  chosen; if the list cannot be read the current model is shown with a note.
+- **pgweb on the single-node profile runs read-only.** v2.121.0 added it there with no login and the
+  application's full database account. A loopback bind does not stop a page open in the operator's
+  browser from sending it a query, so it now runs with `--readonly --lock-session --no-ssh`: a window
+  into the database that cannot change it. The k3s manifest is unchanged in this release.
+
 ## 2026-11-22 — v2.121.0: pgweb on the single-node profile; six imported libraries are declared
 
 - **pgweb everywhere.** The k3s profile has shipped pgweb, a web view of the application's database

@@ -3327,3 +3327,23 @@ hygiene, and how the test suite itself must be written. See
   default is read wherever the key is absent.
 - **Enforced:** test: `tests/test_single_resolve_carry_forward.py::test_a_mirror_without_pgweb_names_the_image_and_the_switch`, `::test_pgweb_is_resolved_by_default`, `::test_pgweb_switched_off_is_not_asked_for`, `tests/test_single_stack_catch_up.py::test_pgweb_switched_on_is_a_service_the_stack_must_run`, `tests/test_systems.py::test_the_db_ui_row_probes_where_pgweb_listens_on_each_profile`, `tests/test_systems_links_derived.py::test_single_driver_derives_every_link_it_deploys`
 - **Source:** the operator's ruling in the system review, 2026-11-21; `deploy/k3s/85-pgweb.yaml`; `deploy/single/compose.yaml`; `deploy/single/images.txt`
+
+### DL-229 — A conversation can be renamed; the name is a display label on its own column, never the record
+
+- **Status:** active
+- **Date:** 2026-11-21
+- **Rule:** [AGENTS.md](../../AGENTS.md) — "**Sessions are never destroyed.**"
+- **Why:** The sessions panel carried rename controls that nothing wired, so a
+  conversation could only be told apart by its agent and start time. The
+  operator ruled in the system review that renaming a conversation should
+  work. The name is the operator's own label, so it lives in its own nullable
+  column (`session.operator_title`) and is the only thing the rename writes:
+  the transcript, the proposals and the recorded events keep what they said,
+  and `updated_at` is untouched because a rename is not activity. It applies to
+  conversations only: an agent's root row is labelled with the roster's name
+  (changed on the Agents page) and a run is named by its task, so both are
+  refused loudly rather than accepted and ignored. The rename is recorded as
+  `session.renamed` with the old and new name, actor operator, like the other
+  operator levers on a session.
+- **Enforced:** test: `tests/test_session_rename.py::test_a_rename_leaves_the_transcript_untouched`, `::test_renaming_a_conversation_stores_the_name_and_records_it`, `::test_an_agents_root_row_cannot_be_renamed_here`, `::test_a_renamed_conversation_is_labelled_with_the_operators_name`
+- **Source:** the operator's ruling in the system review, 2026-11-21; `central_command/api/nerve_gateway.py` (`_patch_session_label`); `central_command/db/schema.sql`

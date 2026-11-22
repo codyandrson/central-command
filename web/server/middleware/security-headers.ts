@@ -51,8 +51,9 @@ function getCspDirectives(): string {
   _cspDirectives = [
     "default-src 'self'",
     "script-src 'self' https://s3.tradingview.com",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com data:",
+    // Fonts are bundled and served from this origin (public/fonts/).
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self' data:",
     `connect-src ${connectSrc}`,
     "img-src 'self' data: blob:",
     "media-src 'self' blob:",  // Allow blob: URLs for TTS audio playback

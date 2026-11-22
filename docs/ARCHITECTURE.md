@@ -2020,7 +2020,24 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
   `OPENAI_STT_MODEL` and the scoped `OPENAI_API_KEY` in the cockpit server's env
   file, written by setup); on the single-node profile the API's own `api/speech.py` answers the
   same routes. The language setting (`PUT /api/language`) writes
-  `NERVE_LANGUAGE` to that env file.
+  `NERVE_LANGUAGE` to that env file. Settings › Audio chooses the read-aloud and
+  dictation models from what LiteLLM serves: `GET /api/speech/models` lists the
+  `/v1/model/info` rows whose declared `mode` is `audio_speech` or
+  `audio_transcription` (`speech_model_ids()` in `integrations/litellm.py`, read with the
+  spine's key) and `PUT` saves a choice that must be in the list for its mode.
+  On k3s the cockpit server answers both (`routes/cc-speech-models.ts`): it reads
+  the lists from the API and keeps the choice in `tts-config.json`
+  (`openai.deploymentModel`, `transcribe.deploymentModel`); on the single-node
+  profile `api/speech.py` keeps it in `app_setting` (`speech_models`). With no
+  choice saved the aliases are used; the voice setting is unchanged.
+- **Sessions panel.** A conversation row can be renamed (`sessions.patch` with
+  `label`, stored in `session.operator_title` and recorded as
+  `session.renamed`, DL-229); an agent's root row carries the roster name and a
+  run is named by its task, so neither is renamed there.
+- **Fonts.** Instrument Sans, Space Grotesk and JetBrains Mono are bundled in
+  `web/public/fonts/` (WOFF2 from the `@fontsource` packages, each folder with
+  its SIL Open Font License `OFL.txt`) and served from the cockpit's own origin;
+  the built cockpit requests nothing from an outside host for them.
 - **Defaults.** Cockpit server on 3080 (`web/server/lib/constants.ts`); API on
   8080. The vendored default gateway URL does **not** point at the API —
   `GATEWAY_URL` in the cockpit server's env file must, or every `cc-*` route
@@ -2048,6 +2065,7 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
 | `cc-mcp` | the MCP tool gates (`/api/cc/mcp/servers`, `/api/cc/mcp-overrides/:agentId`): the server list with default gates, active overrides and holders; the default-gate change; one agent's effective gates and override history; setting and revoking an override |
 | `cc-update`, `cc-update-proxy` | update status / stage / apply / hold |
 | `cc-context` | context-window settings, including the two note budgets |
+| `cc-speech-models` | the speech model pickers: reads the lists from `/api/speech/models`; the choice is kept by the cockpit server itself (`tts-config.json`) |
 | `cc-file-browser-guard` | not a proxy: middleware inside the inherited file browser; its mutations (write, rename, move, trash, restore) answer 403 unless `FILE_BROWSER_WRITABLE=1` |
 
 ## 6. Deploy surfaces

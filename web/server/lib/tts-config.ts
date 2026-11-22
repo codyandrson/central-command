@@ -33,6 +33,19 @@ export interface TTSVoiceConfig {
      * OpenAI voice name that the deployment's engine does not know; '' = unset.
      */
     deploymentVoice: string;
+    /**
+     * Read-aloud model the operator chose FOR the deployment's speech service
+     * (Settings > Audio, `PUT /api/speech/models`): a model LiteLLM lists with
+     * mode `audio_speech`. '' = unset, and the environment's alias is used.
+     * Kept apart from `model`, which holds an OpenAI model name that a stale
+     * file may still carry from before the deployment's service existed.
+     */
+    deploymentModel: string;
+  };
+  /** Dictation (speech-to-text) settings. */
+  transcribe: {
+    /** Dictation model chosen for the deployment's speech service ('' = the env alias). */
+    deploymentModel: string;
   };
 }
 
@@ -44,6 +57,10 @@ const DEFAULTS: TTSVoiceConfig = {
     instructions:
       'Speak naturally and conversationally, like a real person. Warm, friendly tone with a slight British accent. Keep it casual and relaxed, not robotic or overly formal.',
     deploymentVoice: '',
+    deploymentModel: '',
+  },
+  transcribe: {
+    deploymentModel: '',
   },
 };
 
@@ -56,7 +73,10 @@ export function getTTSConfig(): TTSVoiceConfig {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-      cached = { openai: deepMerge(DEFAULTS.openai, raw?.openai ?? {}) };
+      cached = {
+        openai: deepMerge(DEFAULTS.openai, raw?.openai ?? {}),
+        transcribe: deepMerge(DEFAULTS.transcribe, raw?.transcribe ?? {}),
+      };
       return cached;
     }
   } catch (err) {
@@ -64,7 +84,7 @@ export function getTTSConfig(): TTSVoiceConfig {
   }
 
   // First run — write defaults to disk
-  cached = { openai: { ...DEFAULTS.openai } };
+  cached = { openai: { ...DEFAULTS.openai }, transcribe: { ...DEFAULTS.transcribe } };
   saveTTSConfig(cached);
   return cached;
 }
@@ -101,9 +121,20 @@ export const DEFAULT_DEPLOYMENT_VOICE = 'af_heart';
 /** A deployment voice is a short token: letters, digits, underscore, hyphen. */
 export const DEPLOYMENT_VOICE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
+/**
+ * A speech model id as LiteLLM names it (same shape as the API's model alias
+ * check in central_command/integrations/litellm.py, which also allows slashes).
+ */
+export const SPEECH_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+
 export interface DeploymentSpeech {
-  /** The model alias the deployment serves; always the environment's value. */
+  /**
+   * The model read-aloud uses: the operator's choice (`openai.deploymentModel`)
+   * when one is saved, else the environment's alias (OPENAI_TTS_MODEL).
+   */
   model: string;
+  /** Where `model` came from. */
+  modelSource: 'env' | 'saved';
   /** The voice that will be sent when a request names none. */
   voice: string;
   /** Where `voice` came from. */
@@ -127,16 +158,36 @@ export function deploymentVoiceFromEnv(): string {
  * Outside the mode this returns null and the provider behaves as before.
  */
 export function getDeploymentSpeech(): DeploymentSpeech | null {
-  const model = (process.env.OPENAI_TTS_MODEL || '').trim();
-  if (!model) return null;
+  const envModel = (process.env.OPENAI_TTS_MODEL || '').trim();
+  if (!envModel) return null;
+
+  // The operator's choice from Settings > Audio, validated against LiteLLM's
+  // list when it was saved (routes/cc-speech-models.ts); the env alias otherwise.
+  const savedModel = (getTTSConfig().openai.deploymentModel || '').trim();
+  const fromSaved = SPEECH_MODEL_PATTERN.test(savedModel);
+  const model = fromSaved ? savedModel : envModel;
+  const modelSource = fromSaved ? 'saved' as const : 'env' as const;
 
   const envVoice = deploymentVoiceFromEnv();
-  if (envVoice) return { model, voice: envVoice, voiceSource: 'env' };
+  if (envVoice) return { model, modelSource, voice: envVoice, voiceSource: 'env' };
 
   const saved = (getTTSConfig().openai.deploymentVoice || '').trim();
-  if (DEPLOYMENT_VOICE_PATTERN.test(saved)) return { model, voice: saved, voiceSource: 'saved' };
+  if (DEPLOYMENT_VOICE_PATTERN.test(saved)) return { model, modelSource, voice: saved, voiceSource: 'saved' };
 
-  return { model, voice: DEFAULT_DEPLOYMENT_VOICE, voiceSource: 'default' };
+  return { model, modelSource, voice: DEFAULT_DEPLOYMENT_VOICE, voiceSource: 'default' };
+}
+
+/**
+ * The dictation model in deployment speech mode — OPENAI_STT_MODEL is set (the
+ * `cc-stt` alias): the operator's saved choice, else that alias. null outside
+ * the mode, where the transcription endpoint is sent OPENAI_STT_MODEL's
+ * default (`whisper-1`) as before.
+ */
+export function getDeploymentSttModel(): string | null {
+  const envModel = (process.env.OPENAI_STT_MODEL || '').trim();
+  if (!envModel) return null;
+  const saved = (getTTSConfig().transcribe?.deploymentModel || '').trim();
+  return SPEECH_MODEL_PATTERN.test(saved) ? saved : envModel;
 }
 
 /** Simple deep merge (target ← source). Only merges plain objects, overwrites everything else. */

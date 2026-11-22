@@ -90,7 +90,13 @@ def _row_label(row: dict, names: dict[str, str] | None) -> str:
     browser could not re-localise — the cockpit read "Sep 21 03:05" at 21:05
     on Sep 20 in the operator's zone (2026-09-20). The server does not know
     the viewer's timezone; `createdAt` goes over the wire as an ISO instant
-    and `labelStamped` tells the cockpit to append it in local time."""
+    and `labelStamped` tells the cockpit to append it in local time.
+
+    The operator's own name for a conversation (`operator_title`, set by
+    `sessions.patch` with `label`) wins over everything: it is the one label a
+    person chose."""
+    if row.get("operator_title"):
+        return row["operator_title"]
     if row.get("task_title"):
         return row["task_title"]
     who = (names or {}).get(row["agent_id"], row["agent_id"])
@@ -123,7 +129,10 @@ def _session_row_dict(
         "label": _row_label(row, names),
         # True when `label` is the generic fallback and the cockpit should
         # append `createdAt` in the VIEWER's timezone (see `_row_label`).
-        "labelStamped": not row.get("task_title"),
+        "labelStamped": not (row.get("operator_title") or row.get("task_title")),
+        # The operator's rename (null: never renamed). `label` already carries
+        # it; this says the label is the operator's own, not derived.
+        "operatorTitle": row.get("operator_title"),
         "status": row["status"],
         # The badge's "is it working" test is lowercase `state`; Central Command's
         # vocabulary is uppercase and other panels read it (SessionList's
@@ -470,6 +479,61 @@ async def _patch_session_thinking(key: str, level) -> dict:
         actor="operator",
     )
     return {"key": key, "sessionId": session_id, "thinkingLevel": new}
+
+
+# A conversation's name is a sidebar label: one line, short enough to read.
+SESSION_TITLE_MAX = 120
+
+
+async def _patch_session_label(key: str, label) -> dict:
+    """Rename a conversation (or clear its name, with an empty or null label).
+
+    Conversation rows only. An agent's root row (`agent:<id>:main`) is labelled
+    with the ROSTER's name, which is changed on the Agents page, and a run's row
+    is a record of work named by its task — so both are refused, loudly, rather
+    than accepted and ignored. The name is display only: `operator_title` is the
+    one column written; the transcript, the proposals and every recorded event
+    keep what they said. Recorded as `session.renamed`, actor operator, like
+    the other operator levers on a session (`session.model_override`)."""
+    _agent_id, lane = _parse_session_key(key)
+    if not lane.startswith("sess_"):
+        raise HTTPException(
+            409,
+            "an agent's own row carries its roster name — rename the agent on "
+            "the Agents page; only a conversation can be renamed here",
+        )
+    session = await repo.get_session(lane)
+    if session is None:
+        raise HTTPException(404, f"no session {lane}")
+    if session.get("mode") != "conversation":
+        raise HTTPException(
+            409,
+            "this session is a triage/task run — a run is named by its task; "
+            "only a conversation can be renamed",
+        )
+    if label is not None and not isinstance(label, str):
+        raise HTTPException(422, "label must be a string (or null to clear it)")
+    # One line: any run of whitespace (a pasted newline included) is one space.
+    new = " ".join((label or "").split()) or None
+    if new and len(new) > SESSION_TITLE_MAX:
+        raise HTTPException(
+            422, f"name too long ({SESSION_TITLE_MAX} characters max)"
+        )
+    old = session.get("operator_title")
+    if new == old:
+        return {"key": key, "sessionId": lane, "label": new}
+    if not await repo.set_session_operator_title(lane, new):
+        raise HTTPException(404, f"no session {lane}")
+    # A name authorises nothing, so it is recorded after the save, as the
+    # override levers are.
+    await events.emit(
+        "session.renamed",
+        ref_id=lane,
+        payload={"session_id": lane, "agent_id": session.get("agent_id"),
+                 "old": old, "new": new},
+        actor="operator",
+    )
+    return {"key": key, "sessionId": lane, "label": new}
 
 
 async def _send_target(key: str) -> dict:
@@ -1526,8 +1590,11 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
             return await _patch_session_thinking(
                 str(params.get("key") or ""), params.get("thinkingLevel")
             )
-        # Label patching (the spawn flow) has no Central Command counterpart yet;
-        # the no-op keeps it working.
+        if "label" in params:
+            # The sessions panel's rename (conversation rows only).
+            return await _patch_session_label(
+                str(params.get("key") or ""), params.get("label")
+            )
         return {}
     if method == "sessions.new":
         # Open an ADDITIONAL conversation with an agent — everything already

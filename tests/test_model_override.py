@@ -274,11 +274,24 @@ async def test_no_thinking_override_builds_no_extra_body(monkeypatch):
     assert "extra_body" not in m.settings
 
 
-async def test_label_only_patches_stay_a_no_op():
-    """The spawn flow patches labels; nothing in Central Command stores them, and
-    refusing would break session creation."""
+async def test_a_label_patch_on_an_agent_root_is_refused_not_ignored():
+    """`label` used to be a silent no-op for upstream's spawn flow, which patched
+    labels; that flow is gone (`POST /api/sessions/spawn-subagent`, removed
+    2026-11-21) and `label` now renames a CONVERSATION (DL-229,
+    tests/test_session_rename.py). An agent's root row carries the roster name,
+    so a label patch there is refused loudly rather than accepted and ignored."""
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        await nerve_gateway._dispatch(
+            "sessions.patch", {"key": "agent:inbox-triage:main", "label": "renamed"}, _noop,
+        )
+    assert exc.value.status_code == 409
+
+
+async def test_a_patch_naming_nothing_known_stays_a_no_op():
     assert await nerve_gateway._dispatch(
-        "sessions.patch", {"key": "agent:inbox-triage:main", "label": "renamed"}, _noop,
+        "sessions.patch", {"key": "agent:inbox-triage:main"}, _noop,
     ) == {}
 
 

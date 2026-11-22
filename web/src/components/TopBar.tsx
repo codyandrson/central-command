@@ -249,7 +249,9 @@ export function TopBar({
   return (
     <div className="relative z-40 px-2 pt-2 sm:px-4 sm:pt-3">
       <header className="topbar-mobile-compact shell-panel flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl px-3 py-2 shrink-0 max-[371px]:gap-x-1.5 max-[371px]:px-2 sm:flex-nowrap sm:px-4">
-        <div className="flex min-w-0 items-center gap-3 max-[371px]:gap-2">
+        {/* The brand block keeps its width from sm up (the tab strip beside it
+            scrolls), so "Central Command" is never truncated on the desktop. */}
+        <div className="flex min-w-0 items-center gap-3 max-[371px]:gap-2 sm:shrink-0">
           <div className="relative flex h-10 w-10 items-center justify-center rounded-2xl border border-primary/20 bg-background/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] max-[371px]:h-9 max-[371px]:w-9">
             <NerveLogo size={24} />
             {/* The tab strip scrolls sideways in both layouts, so a badge on
@@ -273,8 +275,8 @@ export function TopBar({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="truncate text-sm font-semibold uppercase tracking-[0.34em] text-primary max-[371px]:text-xs max-[371px]:tracking-[0.22em] sm:text-base">
-                Nerve
+              <span className="truncate whitespace-nowrap text-sm font-semibold uppercase tracking-[0.14em] text-primary max-[371px]:text-xs max-[371px]:tracking-[0.08em]">
+                Central Command
               </span>
             </div>
             <div className="hidden xl:block text-[0.733rem] text-muted-foreground/80">
