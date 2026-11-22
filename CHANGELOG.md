@@ -4,6 +4,28 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-22 — v2.126.0: The cockpit's device pairing handshake is removed; the `/ws` relay forwards frames unchanged
+
+- **Why.** The cockpit server still carried the device identity and pairing handshake of the project
+  it was forked from: an Ed25519 key in `~/.nerve/device-identity.json`, a signed `device` block added
+  to the connect frame, a wait for the challenge nonce, and a retry without identity on a pairing
+  rejection. The API's `/ws` reads no connect parameter (it answers `connect` with its protocol and
+  version and checks no device, signature, token or scope), so all of it was inert. The operator ruled
+  it cut in the 2026-11-21 system review, with the relay kept.
+- **What went.** `web/server/lib/device-identity.ts` and `trust-utils.ts` with their tests; in
+  `ws-proxy.ts` the held connect frame, the challenge deadline, the retry and the injection of
+  `GATEWAY_TOKEN` into the connect frame; the `device` block `gateway-rpc.ts` sent; the
+  `operator.pairing` scope the browser asked for. About 1,350 lines removed, no dependency changed.
+- **What stays.** The relay: origin and session-cookie checks, the target allowlist, buffering of
+  client frames until the API socket opens, the keepalive and the connection logs. The API still
+  sends `connect.challenge`, which the browser waits for before it connects. `GATEWAY_TOKEN` is still
+  read by the gateway RPC client and as the login password fallback; leave it in the env.
+- **On apply.** Reload open cockpit tabs. The key file `~/.nerve/device-identity.json` is no longer
+  read or written and may be deleted. The start-up line `[device-identity] Loaded existing identity`
+  and the "Challenge nonce timeout" lines stop appearing.
+- **Checked.** Cockpit type-check, build and tests; a connect and a `sessions.list` round trip through
+  the built cockpit server against an API on the dev database.
+
 ## 2026-11-22 — v2.125.0: The quote check accepts real passages and looks in the right places; the dismissal auditor knows the date and tests the drafter's reason
 
 - **Why.** A read-only analysis of the record on 2026-11-22 looked at two review aids. Most checked

@@ -7,9 +7,8 @@
  * gateway is read from or written to browser storage, and nothing asks the
  * operator for an address or a token.
  *
- * The token stays EMPTY on purpose: the proxy injects `config.gatewayToken` for
- * trusted clients only when the browser supplies none, so a placeholder would
- * suppress the injection.
+ * The token stays EMPTY: the API's /ws reads no connect parameters, and the
+ * proxy relays the connect frame unchanged.
  *
  * A connection that drops after it was up retries on its own (useWebSocket)
  * and shows the "Signal lost" banner; one that cannot be made at all reads

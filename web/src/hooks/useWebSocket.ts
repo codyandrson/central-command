@@ -220,7 +220,7 @@ export function useWebSocket(): UseWebSocketReturn {
                 instanceId: instanceIdRef.current,
               },
               role: 'operator',
-              scopes: ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals', 'operator.pairing'],
+              scopes: ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals'],
               auth: { token },
               caps: ['tool-events']
             }

@@ -54,13 +54,23 @@ client code that called or rendered it, its settings and its tests:
 | the `<relevant-memories>` block (`src/features/chat/MemoriesSection.tsx`, its parsing in `MessageBubble.tsx` and the collapse props `ChatPanel.tsx` passed it) | nothing in the application emits that tag |
 | the `identity` key of `routes/workspace.ts` (`GET /api/workspace/identity`, which read and created `IDENTITY.md` in `~/.openclaw/workspace-<agent>/`), the client's lookup of it in `SessionContext.tsx` and `extractIdentityName` | an agent's display name is its roster name, which `sessions.list` already sends as the `label` of the agent's root row (`nerve_gateway._sessions_list`); a root row without one shows the agent id. `routes/workspace.ts` stays for `chatPathLinks` |
 
+## Removed in v2.126.0
+
+| removed | why |
+|---|---|
+| device identity and pairing: `server/lib/device-identity.ts` (the Ed25519 key in `~/.nerve/device-identity.json`, the signed `device` block in the connect frame), the relay's wait for the challenge nonce, its retry without identity on a pairing rejection, its injection of `GATEWAY_TOKEN` into the connect frame with `server/lib/trust-utils.ts`, the `device` block `server/lib/gateway-rpc.ts` sent, and the `operator.pairing` scope the client asked for | the API's `/ws` reads no connect parameters (`nerve_gateway._dispatch` answers `connect` with the protocol and server name whatever the frame holds), so the signature, the nonce and the token were never checked. The relay now forwards every frame unchanged. A `~/.nerve/device-identity.json` an older install wrote is no longer read and can be deleted |
+
 ## Still present from upstream, to be removed or adapted in a later release
 
 Inert here, or only partly used, and kept for now by decision:
 
-- device identity and pairing (`server/lib/device-identity.ts`);
-- `server/lib/gateway-rpc.ts`, and `server/lib/ws-proxy.ts`, which is live as
-  the `/ws` relay and carries upstream's gateway handshake.
+- `server/lib/gateway-rpc.ts` (the workspace-file fallback client, and the
+  relay's route for `sessions.patch`, `.delete`, `.reset` and `.compact` from a
+  client that does not identify as the control UI; the cockpit's own client
+  always does, so that route is unused);
+- the connect frame's upstream fields (`client`, `role`, `scopes`, `auth`),
+  which the browser still sends and the API ignores, and the API's
+  `connect.challenge` event, which the browser waits for before it connects.
 
 The visible product name is Central Command (the page title, the wordmark, the
 login page and the logo's label; changed in the release after v2.121.0). The

@@ -27,26 +27,9 @@ vi.mock('./session.js', () => ({
   parseSessionCookie: vi.fn(),
 }));
 
-vi.mock('./device-identity.js', () => ({
-  getDeviceIdentity: vi.fn(() => ({
-    deviceId: 'mock-device-id-' + '0'.repeat(48),
-    publicKeyRaw: Buffer.alloc(32),
-    publicKeyB64url: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-    privateKeyPem: '',
-  })),
-  createDeviceBlock: vi.fn(() => ({
-    id: 'mock-device-id-' + '0'.repeat(48),
-    publicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-    signature: 'mock-signature',
-    signedAt: Date.now(),
-    nonce: 'test-nonce',
-  })),
-}));
-
-import { setupWebSocketProxy, closeAllWebSockets, _internals } from './ws-proxy.js';
+import { setupWebSocketProxy, closeAllWebSockets } from './ws-proxy.js';
 import { config } from './config.js';
 import { verifySession, parseSessionCookie } from './session.js';
-import { createDeviceBlock } from './device-identity.js';
 import { createServer as createHttpServer } from 'node:http';
 
 const mockedConfig = config as { auth: boolean; sessionSecret: string; gatewayUrl: string };
@@ -346,10 +329,8 @@ describe('ws-proxy', () => {
     });
   });
 
-  describe('challenge-nonce timing', () => {
-    const mockedCreateDeviceBlock = createDeviceBlock as ReturnType<typeof vi.fn>;
-
-    it('injects gateway token when connect params omit token for authenticated clients', async () => {
+  describe('connect handshake and buffering', () => {
+    it('forwards the connect frame unchanged (no identity or token added)', async () => {
       mockedConfig.auth = true;
       mockedParseSessionCookie.mockReturnValue('good-token');
       mockedVerifySession.mockReturnValue({ exp: Date.now() + 60000, iat: Date.now() });
@@ -361,107 +342,17 @@ describe('ws-proxy', () => {
       );
 
       await new Promise<void>((resolve) => ws.on('open', resolve));
-      ws.send(JSON.stringify({
-        type: 'req',
-        method: 'connect',
-        id: 'c-token-1',
-        params: { client: { id: 'nerve-ui', mode: 'webchat' } },
-      }));
-
-      // Wait for connect response
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('timeout waiting for connect response')), 5000);
-        ws.on('message', (data) => {
-          try {
-            const msg = JSON.parse(data.toString());
-            if (msg.type === 'res' && msg.id === 'c-token-1') {
-              clearTimeout(timer);
-              resolve();
-            }
-          } catch { /* ignore */ }
-        });
-      });
-
-      const connectMsg = mockGw.received.find((m) => {
-        const d = m.data as Record<string, unknown>;
-        return d.type === 'req' && d.method === 'connect';
-      });
-      expect(connectMsg).toBeTruthy();
-      const params = (connectMsg!.data as Record<string, unknown>).params as Record<string, unknown>;
-      const auth = (params.auth as Record<string, unknown> | undefined) ?? {};
-      expect(auth.token).toBe('test-token');
-
-      ws.close();
-    });
-
-    it('injects gateway token when connect params provide empty token for authenticated clients', async () => {
-      mockedConfig.auth = true;
-      mockedParseSessionCookie.mockReturnValue('good-token');
-      mockedVerifySession.mockReturnValue({ exp: Date.now() + 60000, iat: Date.now() });
-      mockGw.clearReceived();
-
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-        { headers: { Cookie: 'nerve_session_3080=good-token' } },
-      );
-
-      await new Promise<void>((resolve) => ws.on('open', resolve));
-      ws.send(JSON.stringify({
-        type: 'req',
-        method: 'connect',
-        id: 'c-token-2',
-        params: { auth: { token: '' }, client: { id: 'nerve-ui', mode: 'webchat' } },
-      }));
-
-      // Wait for connect response
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('timeout waiting for connect response')), 5000);
-        ws.on('message', (data) => {
-          try {
-            const msg = JSON.parse(data.toString());
-            if (msg.type === 'res' && msg.id === 'c-token-2') {
-              clearTimeout(timer);
-              resolve();
-            }
-          } catch { /* ignore */ }
-        });
-      });
-
-      const connectMsg = mockGw.received.find((m) => {
-        const d = m.data as Record<string, unknown>;
-        return d.type === 'req' && d.method === 'connect';
-      });
-      expect(connectMsg).toBeTruthy();
-      const params = (connectMsg!.data as Record<string, unknown>).params as Record<string, unknown>;
-      const auth = (params.auth as Record<string, unknown> | undefined) ?? {};
-      expect(auth.token).toBe('test-token');
-
-      ws.close();
-    });
-
-    it('injects device identity when connect is buffered before gateway opens', async () => {
-      mockGw.clearReceived();
-
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-      );
-
-      // Wait for WS to open to the proxy, then send connect immediately
-      // (will be buffered because gateway relay isn't open yet or just opened)
-      await new Promise<void>((resolve) => ws.on('open', resolve));
-      ws.send(JSON.stringify({
+      const sent = {
         type: 'req',
         method: 'connect',
         id: 'c1',
-        params: { auth: { token: 'test-token' }, client: { id: 'nerve-ui', mode: 'webchat' } },
-      }));
+        params: { auth: { token: '' }, client: { id: 'openclaw-control-ui', mode: 'webchat' } },
+      };
+      ws.send(JSON.stringify(sent));
 
-      // Wait for the connect response from mock gateway
-      const messages: string[] = [];
       await new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('timeout waiting for connect response')), 5000);
         ws.on('message', (data) => {
-          messages.push(data.toString());
           try {
             const msg = JSON.parse(data.toString());
             if (msg.type === 'res' && msg.id === 'c1') {
@@ -472,127 +363,17 @@ describe('ws-proxy', () => {
         });
       });
 
-      // Verify the gateway received a connect message WITH device identity
       const connectMsg = mockGw.received.find((m) => {
         const d = m.data as Record<string, unknown>;
         return d.type === 'req' && d.method === 'connect';
       });
       expect(connectMsg).toBeTruthy();
-      const params = (connectMsg!.data as Record<string, unknown>).params as Record<string, unknown>;
-      expect(params.device).toBeTruthy();
-      expect((params.device as Record<string, unknown>).id).toMatch(/^mock-device-id/);
+      expect(connectMsg!.data).toEqual(sent);
 
       ws.close();
     });
 
-    it('waits for challenge nonce before sending connect (not flushed early)', async () => {
-      mockGw.clearReceived();
-      mockedCreateDeviceBlock.mockClear();
-
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-      );
-      await new Promise<void>((resolve) => ws.on('open', resolve));
-
-      // Send connect
-      ws.send(JSON.stringify({
-        type: 'req',
-        method: 'connect',
-        id: 'c2',
-        params: { auth: { token: 'test-token' }, client: { id: 'nerve-ui', mode: 'webchat' } },
-      }));
-
-      // Wait for the connect response
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('timeout')), 5000);
-        ws.on('message', (data) => {
-          try {
-            const msg = JSON.parse(data.toString());
-            if (msg.type === 'res' && msg.id === 'c2') {
-              clearTimeout(timer);
-              resolve();
-            }
-          } catch { /* ignore */ }
-        });
-      });
-
-      // createDeviceBlock should have been called (identity was injected)
-      expect(mockedCreateDeviceBlock).toHaveBeenCalled();
-
-      ws.close();
-    });
-
-    it('sends connect without device identity on challenge timeout', async () => {
-      const originalTimeout = _internals.challengeTimeoutMs;
-      _internals.challengeTimeoutMs = 200; // Short timeout for testing
-
-      // Create a minimal gateway that never sends a challenge
-      const ncServer = createHttpServer();
-      const ncWss = new WebSocketServer({ server: ncServer });
-      const ncReceived: unknown[] = [];
-
-      ncWss.on('connection', (ncWs: WebSocket) => {
-        // Intentionally do NOT send connect.challenge
-        ncWs.on('message', (data: Buffer | string) => {
-          const raw = data.toString();
-          try {
-            const parsed = JSON.parse(raw);
-            ncReceived.push(parsed);
-            // Respond to connect
-            if (parsed.type === 'req' && parsed.method === 'connect') {
-              ncWs.send(JSON.stringify({
-                type: 'res',
-                id: parsed.id,
-                ok: true,
-                payload: { session: { id: 'test' }, scopes: ['operator.read'] },
-              }));
-            }
-          } catch { ncReceived.push(raw); }
-        });
-      });
-
-      await new Promise<void>((resolve) => {
-        ncServer.listen(0, '127.0.0.1', () => resolve());
-      });
-      const addr = ncServer.address();
-      const ncPort = typeof addr === 'object' && addr ? addr.port : 0;
-
-      try {
-        const ws = new WebSocket(
-          `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(`ws://127.0.0.1:${ncPort}`)}`,
-        );
-        await new Promise<void>((resolve) => ws.on('open', resolve));
-
-        ws.send(JSON.stringify({
-          type: 'req',
-          method: 'connect',
-          id: 'c3',
-          params: { auth: { token: 'test-token' }, client: { id: 'nerve-ui' } },
-        }));
-
-        // Wait for the connect response (arrives after 200ms timeout fires)
-        const response = await waitForMessage(ws, 5000);
-        const parsed = JSON.parse(response);
-        expect(parsed.type).toBe('res');
-        expect(parsed.id).toBe('c3');
-        expect(parsed.ok).toBe(true);
-
-        // Verify gateway received connect WITHOUT device block (timeout degradation)
-        const connectMsg = ncReceived.find(
-          (m: unknown) => (m as Record<string, unknown>).type === 'req' && (m as Record<string, unknown>).method === 'connect',
-        ) as Record<string, unknown> | undefined;
-        expect(connectMsg).toBeTruthy();
-        expect((connectMsg!.params as Record<string, unknown>).device).toBeUndefined();
-
-        ws.close();
-      } finally {
-        ncWss.close();
-        await new Promise<void>((resolve) => ncServer.close(() => resolve()));
-        _internals.challengeTimeoutMs = originalTimeout;
-      }
-    });
-
-    it('preserves non-connect messages in pending buffer during nonce wait', async () => {
+    it('preserves messages sent before the connect handshake', async () => {
       mockGw.clearReceived();
 
       const ws = new WebSocket(
@@ -633,37 +414,28 @@ describe('ws-proxy', () => {
       ws.close();
     });
 
-    it('dispatches deferred connect before queued non-connect messages', async () => {
-      // Gateway that delays connect.challenge to force nonce-wait buffering
+    it('flushes messages buffered before the gateway opens, in order', async () => {
+      // A gateway whose upgrade is delayed, so the relay must buffer.
       const delayedServer = createHttpServer();
-      const delayedWss = new WebSocketServer({ server: delayedServer });
+      const delayedWss = new WebSocketServer({ noServer: true });
       const requestOrder: string[] = [];
 
-      delayedWss.on('connection', (delayedWs: WebSocket) => {
+      delayedServer.on('upgrade', (req, socket, head) => {
         setTimeout(() => {
-          delayedWs.send(JSON.stringify({
-            type: 'event',
-            event: 'connect.challenge',
-            payload: { nonce: 'late-nonce' },
-          }));
+          delayedWss.handleUpgrade(req, socket, head, (delayedWs) => {
+            delayedWs.on('message', (data: Buffer | string) => {
+              try {
+                const parsed = JSON.parse(data.toString());
+                if (parsed.type === 'req' && typeof parsed.method === 'string') {
+                  requestOrder.push(parsed.method);
+                  if (parsed.id) {
+                    delayedWs.send(JSON.stringify({ type: 'res', id: parsed.id, ok: true, payload: {} }));
+                  }
+                }
+              } catch { /* ignore */ }
+            });
+          });
         }, 120);
-
-        delayedWs.on('message', (data: Buffer | string) => {
-          try {
-            const parsed = JSON.parse(data.toString());
-            if (parsed.type === 'req' && typeof parsed.method === 'string') {
-              requestOrder.push(parsed.method);
-              if (parsed.id) {
-                delayedWs.send(JSON.stringify({
-                  type: 'res',
-                  id: parsed.id,
-                  ok: true,
-                  payload: {},
-                }));
-              }
-            }
-          } catch { /* ignore */ }
-        });
       });
 
       await new Promise<void>((resolve) => {
@@ -678,12 +450,11 @@ describe('ws-proxy', () => {
         );
         await new Promise<void>((resolve) => ws.on('open', resolve));
 
-        // Connect should be deferred until challenge; ping must remain queued behind it.
         ws.send(JSON.stringify({
           type: 'req',
           method: 'connect',
           id: 'c5',
-          params: { auth: { token: 'test-token' }, client: { id: 'nerve-ui' } },
+          params: { auth: { token: '' }, client: { id: 'openclaw-control-ui' } },
         }));
         ws.send(JSON.stringify({ type: 'req', method: 'ping', id: 'p5' }));
 
@@ -701,55 +472,13 @@ describe('ws-proxy', () => {
           });
         });
 
-        const connectIndex = requestOrder.indexOf('connect');
-        const pingIndex = requestOrder.indexOf('ping');
-        expect(connectIndex).toBeGreaterThanOrEqual(0);
-        expect(pingIndex).toBeGreaterThanOrEqual(0);
-        expect(connectIndex).toBeLessThan(pingIndex);
+        expect(requestOrder).toEqual(['connect', 'ping']);
 
         ws.close();
       } finally {
         delayedWss.close();
         await new Promise<void>((resolve) => delayedServer.close(() => resolve()));
       }
-    });
-
-    it('denies token injection for external users behind a local reverse proxy', async () => {
-      mockGw.clearReceived();
-
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-        {
-          headers: {
-            // Spoof/forward an external IP. Since the direct connection is 127.0.0.1,
-            // the proxy will resolve the client IP to this external address.
-            'X-Forwarded-For': '203.0.113.5',
-          },
-        },
-      );
-
-      await new Promise<void>((resolve) => ws.on('open', resolve));
-      ws.send(JSON.stringify({
-        type: 'req',
-        method: 'connect',
-        id: 'c-proxy-1',
-        params: { client: { id: 'nerve-ui' } },
-      }));
-
-      // Wait for the connect request to be received by the gateway
-      await mockGw.expectMessages(1);
-
-      const connectMsg = mockGw.received.find((m) => {
-        const d = m.data as Record<string, unknown>;
-        return d.type === 'req' && d.method === 'connect';
-      });
-      expect(connectMsg).toBeTruthy();
-      const params = (connectMsg!.data as Record<string, unknown>).params as Record<string, unknown>;
-      const auth = (params.auth as Record<string, unknown> | undefined) ?? {};
-      // Should NOT have injected the token because the resolved IP is not loopback
-      expect(auth.token).toBeUndefined();
-
-      ws.close();
     });
   });
 });

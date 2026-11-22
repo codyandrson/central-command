@@ -15,21 +15,6 @@ vi.mock('./config.js', () => ({
   },
 }));
 
-const { createDeviceBlockMock } = vi.hoisted(() => ({
-  createDeviceBlockMock: vi.fn(({ nonce, clientId, clientMode, role, scopes, token }) => ({
-    id: 'device-123',
-    publicKey: 'pubkey-123',
-    signature: `sig-${nonce}`,
-    signedAt: 1234567890,
-    nonce,
-    _debug: { clientId, clientMode, role, scopes, token },
-  })),
-}));
-
-vi.mock('./device-identity.js', () => ({
-  createDeviceBlock: createDeviceBlockMock,
-}));
-
 import {
   gatewayRpcCall,
   gatewayFilesList,
@@ -118,32 +103,19 @@ describe('gateway-rpc (persistent WebSocket)', () => {
   });
 
   describe('gatewayRpcCall', () => {
-    it('injects device identity into the gateway connect handshake', async () => {
+    it('sends the connect handshake after the gateway challenge', async () => {
       rpcHandler = () => ({ ok: true });
 
       await gatewayRpcCall('test.method', { foo: 'bar' });
 
-      expect(createDeviceBlockMock).toHaveBeenCalledWith({
-        clientId: 'openclaw-control-ui',
-        clientMode: 'webchat',
-        role: 'operator',
-        scopes: ['operator.admin', 'operator.read', 'operator.write'],
-        token: 'test-token',
-        nonce: 'test-nonce',
-      });
       expect(lastConnectParams).toMatchObject({
         client: {
           id: 'openclaw-control-ui',
           mode: 'webchat',
         },
         auth: { token: 'test-token' },
-        device: {
-          id: 'device-123',
-          publicKey: 'pubkey-123',
-          signature: 'sig-test-nonce',
-          nonce: 'test-nonce',
-        },
       });
+      expect((lastConnectParams as Record<string, unknown>).device).toBeUndefined();
     });
 
     it('uses the configured public origin for the gateway websocket handshake', async () => {

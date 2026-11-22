@@ -14,7 +14,6 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { config } from './config.js';
-import { createDeviceBlock } from './device-identity.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -101,34 +100,20 @@ function getGatewayRequestOrigin(): string {
   return `http://127.0.0.1:${config.port}`;
 }
 
-function buildConnectParams(nonce: string) {
-  const clientId = 'openclaw-control-ui';
-  const clientMode = 'webchat';
-  const role = 'operator';
-  const scopes = ['operator.admin', 'operator.read', 'operator.write'];
-  const token = config.gatewayToken;
-
+function buildConnectParams() {
   return {
     minProtocol: 3,
     maxProtocol: 3,
     client: {
-      id: clientId,
+      id: 'openclaw-control-ui',
       version: '0.1.0',
       platform: 'web',
-      mode: clientMode,
+      mode: 'webchat',
       instanceId: `nerve-rpc-${randomUUID().slice(0, 8)}`,
     },
-    role,
-    scopes,
-    auth: { token },
-    device: createDeviceBlock({
-      clientId,
-      clientMode,
-      role,
-      scopes,
-      token,
-      nonce,
-    }),
+    role: 'operator',
+    scopes: ['operator.admin', 'operator.read', 'operator.write'],
+    auth: { token: config.gatewayToken },
   };
 }
 
@@ -185,12 +170,12 @@ function ensureConnection(): void {
       const msg = JSON.parse(data.toString());
 
       // Handle connect.challenge → send connect
-      if (msg.type === 'event' && msg.event === 'connect.challenge' && msg.payload?.nonce) {
+      if (msg.type === 'event' && msg.event === 'connect.challenge') {
         socket.send(JSON.stringify({
           type: 'req',
           id: '__connect__',
           method: 'connect',
-          params: buildConnectParams(msg.payload.nonce),
+          params: buildConnectParams(),
         }));
         return;
       }
