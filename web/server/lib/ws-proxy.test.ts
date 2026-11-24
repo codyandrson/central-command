@@ -1,594 +1,309 @@
-/** Tests for ws-proxy — connection, relaying, auth, and lifecycle. */
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
-import { WebSocket, WebSocketServer } from 'ws';
-import { createServer, type Server } from 'node:http';
-import { MockGateway } from '../../src/test/mock-gateway.js';
+// @vitest-environment node
+/**
+ * Integration tests for the `/ws` relay: a real upstream WebSocket server, the
+ * real relay in front of it and a real client, all on ephemeral loopback ports.
+ * Only the cockpit config is replaced (a plain object the tests point at the
+ * upstream); sessions, the Origin check and http-proxy-3 run for real.
+ */
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createServer, type Server, type IncomingMessage } from 'node:http';
+import type { AddressInfo, Socket } from 'node:net';
+import { WebSocket, WebSocketServer, type RawData } from 'ws';
 
-// Mock config before importing ws-proxy
-vi.mock('./config.js', () => {
-  const WS_ALLOWED_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
-  return {
-    config: {
-      auth: false,
-      host: '127.0.0.1',
-      port: 3080,
-      sslPort: 3443,
-      sessionSecret: 'test-secret',
-      gatewayToken: 'test-token',
-      gatewayUrl: '',
-    },
-    WS_ALLOWED_HOSTS,
-    SESSION_COOKIE_NAME: 'nerve_session_3080',
-  };
-});
-
-vi.mock('./session.js', () => ({
-  verifySession: vi.fn(),
-  parseSessionCookie: vi.fn(),
+vi.mock('./config.js', () => ({
+  config: {
+    auth: false,
+    host: '127.0.0.1',
+    port: 3080,
+    sslPort: 3443,
+    sessionSecret: 'test-secret',
+    gatewayUrl: '',
+  },
+  WS_ALLOWED_HOSTS: new Set(['localhost', '127.0.0.1', '::1']),
+  SESSION_COOKIE_NAME: 'nerve_session_test',
 }));
 
 import { setupWebSocketProxy, closeAllWebSockets } from './ws-proxy.js';
 import { config } from './config.js';
-import { verifySession, parseSessionCookie } from './session.js';
-import { createServer as createHttpServer } from 'node:http';
+import { createSession } from './session.js';
 
-const mockedConfig = config as { auth: boolean; sessionSecret: string; gatewayUrl: string };
-const mockedVerifySession = verifySession as ReturnType<typeof vi.fn>;
-const mockedParseSessionCookie = parseSessionCookie as ReturnType<typeof vi.fn>;
+const cfg = config as { auth: boolean; sessionSecret: string; gatewayUrl: string };
+const ORIGIN = 'http://localhost:3080';
 
-function waitForMessage(ws: WebSocket, timeoutMs = 3000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('WS message timeout')), timeoutMs);
-    ws.once('message', (data) => {
-      clearTimeout(timer);
-      resolve(data.toString());
-    });
+/** Everything a test starts, closed in afterEach. */
+const servers: Server[] = [];
+const clients: WebSocket[] = [];
+const sockets = new Set<Socket>();
+
+function listen(server: Server): Promise<number> {
+  servers.push(server);
+  server.on('connection', (s) => {
+    sockets.add(s);
+    s.on('close', () => sockets.delete(s));
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve((server.address() as AddressInfo).port));
   });
 }
 
-function waitForClose(ws: WebSocket, timeoutMs = 3000): Promise<{ code: number; reason: string }> {
+interface Upstream {
+  port: number;
+  wss: WebSocketServer;
+  /** TCP connections the upstream accepted — 0 means the relay never dialled it. */
+  tcpConnections: () => number;
+  /** The upgrade requests the upstream saw. */
+  requests: IncomingMessage[];
+  /** Resolves with the next upstream-side socket. */
+  nextConnection: () => Promise<WebSocket>;
+}
+
+async function startUpstream(): Promise<Upstream> {
+  const http = createServer((_req, res) => { res.writeHead(404); res.end(); });
+  const wss = new WebSocketServer({ server: http });
+  let tcp = 0;
+  http.on('connection', () => { tcp++; });
+  const requests: IncomingMessage[] = [];
+  const waiting: ((ws: WebSocket) => void)[] = [];
+  const ready: WebSocket[] = [];
+  wss.on('connection', (ws, req) => {
+    requests.push(req);
+    const w = waiting.shift();
+    if (w) w(ws); else ready.push(ws);
+  });
+  const port = await listen(http);
+  cfg.gatewayUrl = `http://127.0.0.1:${port}`;
+  return {
+    port,
+    wss,
+    tcpConnections: () => tcp,
+    requests,
+    nextConnection: () => new Promise((resolve) => {
+      const r = ready.shift();
+      if (r) resolve(r); else waiting.push(resolve);
+    }),
+  };
+}
+
+async function startRelay(): Promise<number> {
+  const http = createServer((_req, res) => { res.writeHead(404); res.end(); });
+  setupWebSocketProxy(http);
+  return listen(http);
+}
+
+function connect(port: number, opts: { path?: string; origin?: string; cookie?: string } = {}): WebSocket {
+  const headers: Record<string, string> = { Origin: opts.origin ?? ORIGIN };
+  if (opts.cookie) headers.Cookie = opts.cookie;
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${opts.path ?? '/ws'}`, { headers });
+  clients.push(ws);
+  return ws;
+}
+
+function opened(ws: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('WS close timeout')), timeoutMs);
-    ws.once('close', (code, reason) => {
-      clearTimeout(timer);
-      resolve({ code, reason: reason.toString() });
-    });
+    ws.once('open', () => resolve());
+    ws.once('error', reject);
   });
 }
 
-/** Wait for close or error — useful when server rejects the upgrade entirely */
-function waitForCloseOrError(ws: WebSocket, timeoutMs = 3000): Promise<{ code: number; reason: string }> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('WS close/error timeout')), timeoutMs);
-    const done = (code: number, reason: string) => {
-      clearTimeout(timer);
-      resolve({ code, reason });
-    };
-    ws.once('close', (code, reason) => done(code, reason.toString()));
-    ws.once('error', (err) => {
-      // ws library throws errors for HTTP rejection or socket destruction
-      done(1006, err.message);
-    });
+function nextMessage(ws: WebSocket): Promise<{ data: Buffer; isBinary: boolean }> {
+  return new Promise((resolve) => {
+    ws.once('message', (data: RawData, isBinary: boolean) => resolve({ data: data as Buffer, isBinary }));
   });
 }
 
-describe('ws-proxy', () => {
-  let mockGw: MockGateway;
-  let proxyServer: Server;
-  let proxyPort: number;
+function closed(ws: WebSocket): Promise<{ code: number; reason: string }> {
+  return new Promise((resolve) => {
+    if (ws.readyState === WebSocket.CLOSED) return resolve({ code: 1006, reason: '' });
+    ws.once('close', (code, reason) => resolve({ code, reason: reason.toString() }));
+  });
+}
 
-  beforeAll(async () => {
-    mockGw = new MockGateway();
-    await mockGw.start();
+/** The HTTP status the relay refused the upgrade with, or the error if it gave none. */
+function refusal(ws: WebSocket): Promise<{ status?: number; error?: string }> {
+  return new Promise((resolve) => {
+    ws.once('unexpected-response', (_req, res) => {
+      resolve({ status: res.statusCode });
+      res.resume();
+      ws.terminate();
+    });
+    ws.once('error', (err) => resolve({ error: err.message }));
+    ws.once('open', () => resolve({ error: 'opened' }));
+  });
+}
+
+afterEach(async () => {
+  closeAllWebSockets();
+  for (const c of clients.splice(0)) c.terminate();
+  for (const s of sockets) s.destroy();
+  sockets.clear();
+  await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))));
+  cfg.auth = false;
+  cfg.gatewayUrl = '';
+});
+
+describe('ws-proxy relaying', () => {
+  it('relays text and binary frames both ways unchanged', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    const client = connect(relay);
+    await opened(client);
+    const server = await up.nextConnection();
+
+    const bin = Buffer.from([0, 1, 2, 250, 255]);
+    let got = nextMessage(server);
+    client.send('{"type":"req","id":"1"}');
+    expect(await got).toEqual({ data: Buffer.from('{"type":"req","id":"1"}'), isBinary: false });
+    got = nextMessage(server);
+    client.send(bin);
+    expect(await got).toEqual({ data: bin, isBinary: true });
+
+    got = nextMessage(client);
+    server.send('{"type":"event"}');
+    expect(await got).toEqual({ data: Buffer.from('{"type":"event"}'), isBinary: false });
+    got = nextMessage(client);
+    server.send(bin);
+    expect(await got).toEqual({ data: bin, isBinary: true });
   });
 
-  afterAll(async () => {
-    closeAllWebSockets();
-    await mockGw.close();
+  it('delivers a frame the client sends the moment it opens, and one the API sends on accept', async () => {
+    const up = await startUpstream();
+    up.wss.on('connection', (ws) => ws.send('challenge'));
+    const relay = await startRelay();
+    const client = connect(relay);
+    const fromApi = nextMessage(client);
+    client.on('open', () => client.send('first'));
+    const server = await up.nextConnection();
+    const first = await nextMessage(server);
+    expect(first.data.toString()).toBe('first');
+    expect((await fromApi).data.toString()).toBe('challenge');
   });
 
-  beforeEach(async () => {
-    mockedConfig.auth = false;
-    mockedConfig.gatewayUrl = '';
-    mockedVerifySession.mockReset();
-    mockedParseSessionCookie.mockReset();
-    mockGw.clearReceived();
-
-    // Create a new HTTP server and attach ws-proxy
-    proxyServer = createServer();
-    setupWebSocketProxy(proxyServer);
-
-    await new Promise<void>((resolve) => {
-      proxyServer.listen(0, '127.0.0.1', () => resolve());
-    });
-    const addr = proxyServer.address();
-    proxyPort = typeof addr === 'object' && addr ? addr.port : 0;
-  });
-
-  afterEach(async () => {
-    closeAllWebSockets();
-    await new Promise<void>((resolve) => {
-      proxyServer.close(() => resolve());
-    });
-  });
-
-  describe('connection establishment', () => {
-    it('derives the target from config.gatewayUrl when ?target is absent', async () => {
-      // Server config is trusted — a host outside WS_ALLOWED_HOSTS would still
-      // be used; the allowlist only guards client-supplied targets.
-      mockedConfig.gatewayUrl = mockGw.url.replace(/^ws:/, 'http:');
-      const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/ws`);
-      const parsed = JSON.parse(await waitForMessage(ws));
-      expect(parsed.event).toBe('connect.challenge');
-      ws.close();
-    });
-
-    it('rejects connections without ?target when no gateway url is configured', async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/ws`);
-      const { code, reason } = await waitForClose(ws);
-      expect(code).toBe(1008);
-      expect(reason).toContain('Missing');
-    });
-
-    it('still allowlist-checks an explicit target even with a gateway url configured', async () => {
-      mockedConfig.gatewayUrl = mockGw.url.replace(/^ws:/, 'http:');
-      const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/ws?target=ws://evil.com:9999`);
-      const { code, reason } = await waitForClose(ws);
-      expect(code).toBe(1008);
-      expect(reason).toContain('not allowed');
-    });
-
-    it('rejects connections with invalid target URL', async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/ws?target=not-a-url`);
-      const { code } = await waitForClose(ws);
-      expect(code).toBe(1008);
-    });
-
-    it('rejects connections with disallowed host', async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/ws?target=ws://evil.com:9999`);
-      const { code, reason } = await waitForClose(ws);
-      expect(code).toBe(1008);
-      expect(reason).toContain('not allowed');
-    });
-
-    it('allows root path for gateway target', async () => {
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url)}`,
-      );
-      const msg = await waitForMessage(ws);
-      const parsed = JSON.parse(msg);
-      expect(parsed.type).toBe('event');
-      expect(parsed.event).toBe('connect.challenge');
-      ws.close();
-    });
-
-    it('accepts connections to allowed gateway target', async () => {
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-      );
-      // Should receive connect.challenge from mock gateway (relayed through proxy)
-      const msg = await waitForMessage(ws);
-      const parsed = JSON.parse(msg);
-      expect(parsed.type).toBe('event');
-      expect(parsed.event).toBe('connect.challenge');
-      expect(parsed.payload.nonce).toBeTruthy();
-      ws.close();
-    });
-
-    it('destroys non-/ws upgrade requests', async () => {
-      const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/other`);
-      const { code } = await waitForCloseOrError(ws);
-      // Socket gets destroyed = abnormal close
-      expect(code).toBe(1006);
-    });
-
-    it('rejects websocket upgrades from disallowed browser origins', async () => {
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-        { origin: 'https://evil.example' },
-      );
-      const { code, reason } = await waitForCloseOrError(ws);
-      expect(code).toBe(1006);
-      expect(reason).toContain('Unexpected server response: 403');
-    });
-  });
-
-  describe('message relaying', () => {
-    it('forwards restricted session mutations for control-ui clients instead of intercepting them', async () => {
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-      );
-
-      const challenge = await waitForMessage(ws);
-      expect(JSON.parse(challenge).event).toBe('connect.challenge');
-
-      ws.send(JSON.stringify({
-        type: 'req',
-        method: 'connect',
-        id: 'c-control-1',
-        params: { auth: { token: 'test-token' }, client: { id: 'openclaw-control-ui', mode: 'webchat' } },
-      }));
-
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('timeout waiting for connect response')), 5000);
-        ws.on('message', (data) => {
-          try {
-            const msg = JSON.parse(data.toString());
-            if (msg.type === 'res' && msg.id === 'c-control-1') {
-              clearTimeout(timer);
-              resolve();
-            }
-          } catch { /* ignore */ }
-        });
-      });
-
-      mockGw.clearReceived();
-      ws.send(JSON.stringify({
-        type: 'req',
-        method: 'sessions.delete',
-        id: 'delete-1',
-        params: { key: 'agent:main:subagent:test', deleteTranscript: true },
-      }));
-
-      await mockGw.expectMessages(1);
-      const deleteMsg = mockGw.received.find((m) => {
-        const d = m.data as Record<string, unknown>;
-        return d.type === 'req' && d.method === 'sessions.delete';
-      });
-      expect(deleteMsg).toBeTruthy();
-
-      ws.close();
-    });
-
-    it('relays gateway messages to client', async () => {
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-      );
-      // First message is the connect.challenge
-      const challenge = await waitForMessage(ws);
-      expect(JSON.parse(challenge).event).toBe('connect.challenge');
-
-      // Gateway broadcasts a custom event
-      mockGw.broadcast(JSON.stringify({ type: 'event', event: 'test', payload: { hello: true } }));
-
-      const msg = await waitForMessage(ws);
-      const parsed = JSON.parse(msg);
-      expect(parsed.type).toBe('event');
-      expect(parsed.event).toBe('test');
-      expect(parsed.payload.hello).toBe(true);
-
-      ws.close();
-    });
-
-    it('relays client messages to gateway', async () => {
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-      );
-      await waitForMessage(ws); // consume challenge
-
-      // Send a message from client through proxy
-      ws.send(JSON.stringify({ type: 'req', method: 'ping', id: 'p1' }));
-
-      // Wait for it to arrive at the mock gateway
-      const msgs = await mockGw.expectMessages(1, 2000);
-      const received = msgs[0].data as Record<string, unknown>;
-      expect(received.type).toBe('req');
-      expect(received.method).toBe('ping');
-
-      ws.close();
-    });
-  });
-
-  describe('auth enforcement', () => {
-    it('rejects WS upgrade when auth is enabled and no cookie', async () => {
-      mockedConfig.auth = true;
-      mockedParseSessionCookie.mockReturnValue(null);
-
-      const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`);
-      const { code } = await waitForCloseOrError(ws);
-      // Should get rejected (socket destroyed = 1006 or HTTP 401)
-      expect(code).toBe(1006);
-    });
-
-    it('rejects WS upgrade when auth is enabled and session is invalid', async () => {
-      mockedConfig.auth = true;
-      mockedParseSessionCookie.mockReturnValue('bad-token');
-      mockedVerifySession.mockReturnValue(null);
-
-      const ws = new WebSocket(`ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`);
-      const { code } = await waitForCloseOrError(ws);
-      expect(code).toBe(1006);
-    });
-
-    it('allows WS upgrade when auth is enabled and session is valid', async () => {
-      mockedConfig.auth = true;
-      mockedParseSessionCookie.mockReturnValue('good-token');
-      mockedVerifySession.mockReturnValue({ exp: Date.now() + 60000, iat: Date.now() });
-
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-        { headers: { Cookie: 'nerve_session_3080=good-token' } },
-      );
-      const msg = await waitForMessage(ws);
-      expect(JSON.parse(msg).event).toBe('connect.challenge');
-      ws.close();
-    });
-  });
-
-  describe('closeAllWebSockets', () => {
-    it('closes all active connections', async () => {
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-      );
-      await waitForMessage(ws); // Wait for challenge = connection established
-
-      const closePromise = waitForClose(ws);
-      closeAllWebSockets();
-      const { code } = await closePromise;
-      expect(code).toBe(1001); // Server shutting down
-    });
-  });
-
-  describe('connect handshake and buffering', () => {
-    it('forwards the connect frame unchanged (no identity or token added)', async () => {
-      mockedConfig.auth = true;
-      mockedParseSessionCookie.mockReturnValue('good-token');
-      mockedVerifySession.mockReturnValue({ exp: Date.now() + 60000, iat: Date.now() });
-      mockGw.clearReceived();
-
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-        { headers: { Cookie: 'nerve_session_3080=good-token' } },
-      );
-
-      await new Promise<void>((resolve) => ws.on('open', resolve));
-      const sent = {
-        type: 'req',
-        method: 'connect',
-        id: 'c1',
-        params: { auth: { token: '' }, client: { id: 'openclaw-control-ui', mode: 'webchat' } },
-      };
-      ws.send(JSON.stringify(sent));
-
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('timeout waiting for connect response')), 5000);
-        ws.on('message', (data) => {
-          try {
-            const msg = JSON.parse(data.toString());
-            if (msg.type === 'res' && msg.id === 'c1') {
-              clearTimeout(timer);
-              resolve();
-            }
-          } catch { /* ignore */ }
-        });
-      });
-
-      const connectMsg = mockGw.received.find((m) => {
-        const d = m.data as Record<string, unknown>;
-        return d.type === 'req' && d.method === 'connect';
-      });
-      expect(connectMsg).toBeTruthy();
-      expect(connectMsg!.data).toEqual(sent);
-
-      ws.close();
-    });
-
-    it('preserves messages sent before the connect handshake', async () => {
-      mockGw.clearReceived();
-
-      const ws = new WebSocket(
-        `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(mockGw.url + '/ws')}`,
-      );
-      await new Promise<void>((resolve) => ws.on('open', resolve));
-
-      // Send a non-connect message first, then connect
-      ws.send(JSON.stringify({ type: 'req', method: 'ping', id: 'p1' }));
-      ws.send(JSON.stringify({
-        type: 'req',
-        method: 'connect',
-        id: 'c4',
-        params: { auth: { token: 'test-token' }, client: { id: 'nerve-ui' } },
-      }));
-
-      // Wait for the connect response
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('timeout')), 5000);
-        ws.on('message', (data) => {
-          try {
-            const msg = JSON.parse(data.toString());
-            if (msg.type === 'res' && msg.id === 'c4') {
-              clearTimeout(timer);
-              resolve();
-            }
-          } catch { /* ignore */ }
-        });
-      });
-
-      // Both ping and connect should have reached the gateway
-      const allMsgs = mockGw.received;
-      const pingMsg = allMsgs.find((m) => (m.data as Record<string, unknown>).method === 'ping');
-      const connectMsg = allMsgs.find((m) => (m.data as Record<string, unknown>).method === 'connect');
-      expect(pingMsg).toBeTruthy();
-      expect(connectMsg).toBeTruthy();
-
-      ws.close();
-    });
-
-    it('flushes messages buffered before the gateway opens, in order', async () => {
-      // A gateway whose upgrade is delayed, so the relay must buffer.
-      const delayedServer = createHttpServer();
-      const delayedWss = new WebSocketServer({ noServer: true });
-      const requestOrder: string[] = [];
-
-      delayedServer.on('upgrade', (req, socket, head) => {
-        setTimeout(() => {
-          delayedWss.handleUpgrade(req, socket, head, (delayedWs) => {
-            delayedWs.on('message', (data: Buffer | string) => {
-              try {
-                const parsed = JSON.parse(data.toString());
-                if (parsed.type === 'req' && typeof parsed.method === 'string') {
-                  requestOrder.push(parsed.method);
-                  if (parsed.id) {
-                    delayedWs.send(JSON.stringify({ type: 'res', id: parsed.id, ok: true, payload: {} }));
-                  }
-                }
-              } catch { /* ignore */ }
-            });
-          });
-        }, 120);
-      });
-
-      await new Promise<void>((resolve) => {
-        delayedServer.listen(0, '127.0.0.1', () => resolve());
-      });
-      const addr = delayedServer.address();
-      const delayedPort = typeof addr === 'object' && addr ? addr.port : 0;
-
-      try {
-        const ws = new WebSocket(
-          `ws://127.0.0.1:${proxyPort}/ws?target=${encodeURIComponent(`ws://127.0.0.1:${delayedPort}`)}`,
-        );
-        await new Promise<void>((resolve) => ws.on('open', resolve));
-
-        ws.send(JSON.stringify({
-          type: 'req',
-          method: 'connect',
-          id: 'c5',
-          params: { auth: { token: '' }, client: { id: 'openclaw-control-ui' } },
-        }));
-        ws.send(JSON.stringify({ type: 'req', method: 'ping', id: 'p5' }));
-
-        // Wait until ping response confirms both requests were forwarded.
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error('timeout waiting for ping response')), 5000);
-          ws.on('message', (data) => {
-            try {
-              const msg = JSON.parse(data.toString());
-              if (msg.type === 'res' && msg.id === 'p5') {
-                clearTimeout(timer);
-                resolve();
-              }
-            } catch { /* ignore */ }
-          });
-        });
-
-        expect(requestOrder).toEqual(['connect', 'ping']);
-
-        ws.close();
-      } finally {
-        delayedWss.close();
-        await new Promise<void>((resolve) => delayedServer.close(() => resolve()));
-      }
-    });
+  it('dials the configured /ws path, with the API host and without the cockpit cookie', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    const client = connect(relay, { cookie: 'nerve_session_test=abc; other=1' });
+    await opened(client);
+    const [req] = up.requests;
+    expect(req.url).toBe('/ws');
+    expect(req.headers.cookie).toBeUndefined();
+    expect(req.headers.host).toBe(`127.0.0.1:${up.port}`);
+    expect(req.headers.origin).toBe(ORIGIN);
   });
 });
 
-// ── Observability tests (appended) ──────────────────────────────────
-// These are added in a separate describe block outside the main one
-// since the main describe block is already closed.
-
-describe('ws-proxy observability', () => {
-  let mockGw2: MockGateway;
-  let proxyServer2: Server;
-  let proxyPort2: number;
-
-  beforeAll(async () => {
-    mockGw2 = new MockGateway();
-    await mockGw2.start();
+describe('ws-proxy refusals open no upstream connection', () => {
+  it('refuses an unauthenticated upgrade when auth is on', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    cfg.auth = true;
+    expect(await refusal(connect(relay))).toEqual({ status: 401 });
+    expect(await refusal(connect(relay, { cookie: 'nerve_session_test=forged.token' }))).toEqual({ status: 401 });
+    expect(up.tcpConnections()).toBe(0);
   });
 
-  afterAll(async () => {
+  it('lets a valid session through when auth is on', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    cfg.auth = true;
+    const token = createSession(cfg.sessionSecret, 60_000);
+    const client = connect(relay, { cookie: `nerve_session_test=${token}` });
+    await opened(client);
+    expect(up.tcpConnections()).toBe(1);
+  });
+
+  it('refuses a disallowed Origin', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    expect(await refusal(connect(relay, { origin: 'https://evil.example.com' }))).toEqual({ status: 403 });
+    expect(up.tcpConnections()).toBe(0);
+  });
+
+  it('refuses a ?target= that is malformed, not ws, or not on an allowed host', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    const q = (t: string) => `/ws?target=${encodeURIComponent(t)}`;
+    expect(await refusal(connect(relay, { path: q('not a url') }))).toEqual({ status: 400 });
+    expect(await refusal(connect(relay, { path: q(`http://127.0.0.1:${up.port}/ws`) }))).toEqual({ status: 403 });
+    expect(await refusal(connect(relay, { path: q('ws://gateway.example.com/ws') }))).toEqual({ status: 403 });
+    expect(up.tcpConnections()).toBe(0);
+  });
+
+  it('accepts an allowlisted ?target= and dials exactly that URL', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    cfg.gatewayUrl = '';
+    const client = connect(relay, { path: `/ws?target=${encodeURIComponent(`ws://localhost:${up.port}/ws`)}` });
+    await opened(client);
+    expect(up.requests[0].url).toBe('/ws');
+  });
+
+  it('refuses when there is no ?target= and no usable gateway url', async () => {
+    const relay = await startRelay();
+    cfg.gatewayUrl = '';
+    expect(await refusal(connect(relay))).toEqual({ status: 502 });
+  });
+
+  it('drops an upgrade on any other path', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    const r = await refusal(connect(relay, { path: '/other' }));
+    expect(r.error).toBeDefined();
+    expect(r.error).not.toBe('opened');
+    expect(up.tcpConnections()).toBe(0);
+  });
+});
+
+describe('ws-proxy lifecycle', () => {
+  it('fails promptly when the API is down', async () => {
+    // A port that was just free: listen, note it, close.
+    const probe = createServer();
+    const deadPort = await new Promise<number>((r) => probe.listen(0, '127.0.0.1', () => r((probe.address() as AddressInfo).port)));
+    await new Promise<void>((r) => probe.close(() => r()));
+    cfg.gatewayUrl = `http://127.0.0.1:${deadPort}`;
+    const relay = await startRelay();
+    const t0 = Date.now();
+    const client = connect(relay);
+    const r = await refusal(client);
+    expect(r.error).toBeDefined();
+    expect(r.error).not.toBe('opened');
+    await closed(client);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it('closes the client when the API closes, passing the close code through', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    const client = connect(relay);
+    await opened(client);
+    const server = await up.nextConnection();
+    const c = closed(client);
+    server.close(4001, 'api says bye');
+    expect(await c).toEqual({ code: 4001, reason: 'api says bye' });
+  });
+
+  it('closes the API side when the client closes, passing the close code through', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    const client = connect(relay);
+    await opened(client);
+    const server = await up.nextConnection();
+    const s = closed(server);
+    client.close(1000, 'tab closed');
+    expect(await s).toEqual({ code: 1000, reason: 'tab closed' });
+  });
+
+  it('closeAllWebSockets closes live connections on both sides', async () => {
+    const up = await startUpstream();
+    const relay = await startRelay();
+    const a = connect(relay);
+    const b = connect(relay);
+    await Promise.all([opened(a), opened(b)]);
+    const sa = await up.nextConnection();
+    const sb = await up.nextConnection();
+    const all = Promise.all([closed(a), closed(b), closed(sa), closed(sb)]);
     closeAllWebSockets();
-    await mockGw2.close();
-  });
-
-  beforeEach(async () => {
-    (config as { auth: boolean }).auth = false;
-    proxyServer2 = createServer();
-    setupWebSocketProxy(proxyServer2);
-    await new Promise<void>((resolve) => {
-      proxyServer2.listen(0, '127.0.0.1', () => resolve());
-    });
-    const addr = proxyServer2.address();
-    proxyPort2 = typeof addr === 'object' && addr ? addr.port : 0;
-  });
-
-  afterEach(async () => {
-    closeAllWebSockets();
-    await new Promise<void>((resolve) => {
-      proxyServer2.close(() => resolve());
-    });
-  });
-
-  it('logs connection ID in [ws-proxy:XXXXXXXX] format on new connection', async () => {
-    const logSpy = vi.spyOn(console, 'log');
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${proxyPort2}/ws?target=${encodeURIComponent(mockGw2.url + '/ws')}`,
-    );
-    await waitForMessage(ws);
-
-    const newConnLog = logSpy.mock.calls.find(
-      (args) => typeof args[0] === 'string' && args[0].includes('New connection'),
-    );
-    expect(newConnLog).toBeTruthy();
-    expect(newConnLog![0]).toMatch(/\[ws-proxy:[0-9a-f]{8}\]/);
-
-    ws.close();
-    await new Promise((r) => setTimeout(r, 50));
-    logSpy.mockRestore();
-  });
-
-  it('logs summary with duration and message counts on close', async () => {
-    const logSpy = vi.spyOn(console, 'log');
-    const ws = new WebSocket(
-      `ws://127.0.0.1:${proxyPort2}/ws?target=${encodeURIComponent(mockGw2.url + '/ws')}`,
-    );
-    await waitForMessage(ws);
-
-    const closePromise = waitForClose(ws);
-    ws.close();
-    await closePromise;
-    await new Promise((r) => setTimeout(r, 100));
-
-    const summaryLog = logSpy.mock.calls.find(
-      (args) => typeof args[0] === 'string' && args[0].includes('Summary:'),
-    );
-    expect(summaryLog).toBeTruthy();
-    expect(summaryLog![0]).toMatch(/\[ws-proxy:[0-9a-f]{8}\] Summary: duration=\d+ms/);
-    expect(summaryLog![0]).toContain('client->gw=');
-    expect(summaryLog![0]).toContain('gw->client=');
-
-    logSpy.mockRestore();
-  });
-
-  it('uses unique connection IDs for concurrent connections', async () => {
-    const logSpy = vi.spyOn(console, 'log');
-
-    const ws1 = new WebSocket(
-      `ws://127.0.0.1:${proxyPort2}/ws?target=${encodeURIComponent(mockGw2.url + '/ws')}`,
-    );
-    await waitForMessage(ws1);
-
-    const ws2 = new WebSocket(
-      `ws://127.0.0.1:${proxyPort2}/ws?target=${encodeURIComponent(mockGw2.url + '/ws')}`,
-    );
-    await waitForMessage(ws2);
-
-    const connLogs = logSpy.mock.calls.filter(
-      (args) => typeof args[0] === 'string' && args[0].includes('New connection'),
-    );
-    expect(connLogs.length).toBeGreaterThanOrEqual(2);
-
-    const ids = connLogs.map((args) => {
-      const match = (args[0] as string).match(/\[ws-proxy:([0-9a-f]{8})\]/);
-      return match?.[1];
-    });
-    const uniqueIds = new Set(ids);
-    expect(uniqueIds.size).toBe(ids.length);
-
-    ws1.close();
-    ws2.close();
-    await new Promise((r) => setTimeout(r, 50));
-    logSpy.mockRestore();
+    const results = await all;
+    expect(results).toHaveLength(4);
+    expect([a, b, sa, sb].every((w) => w.readyState === WebSocket.CLOSED)).toBe(true);
   });
 });

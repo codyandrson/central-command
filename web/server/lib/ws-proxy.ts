@@ -1,28 +1,61 @@
 /**
  * WebSocket proxy — bridges browser clients to the Central Command API's `/ws`.
  *
- * Clients connect to `ws(s)://host:port/ws[?target=<gateway-ws-url>]` and this
- * module opens a corresponding connection to the gateway, relaying messages
- * bidirectionally. `?target=` is OPTIONAL — omitted, the target is derived from
- * `config.gatewayUrl` (Central Command has exactly one gateway, and the browser
- * should need to know nothing about it).
+ * Clients connect to `ws(s)://host:port/ws[?target=<gateway-ws-url>]`. This
+ * module runs the cockpit's own checks on the upgrade request (Origin, session
+ * cookie, target) and only then hands it to `http-proxy-3`, which opens the
+ * upstream connection, relays the API's handshake answer, and pipes the two
+ * TCP sockets together. No upstream connection is opened for a refused upgrade.
  *
- * Frames are relayed unchanged, connect handshake included: the API's `/ws`
- * reads no connect parameters (`nerve_gateway._dispatch`), so the relay
- * injects no identity or token. Client frames that arrive before the gateway
- * socket opens are buffered and flushed in order.
+ * `?target=` is OPTIONAL — omitted, the target is derived from
+ * `config.gatewayUrl` (Central Command has exactly one gateway, and the browser
+ * should need to know nothing about it). A client-supplied target must be
+ * `ws:`/`wss:` on a host in `WS_ALLOWED_HOSTS`.
+ *
+ * Because the sockets are piped, the WebSocket session is end to end between
+ * the browser and the API: frames, close codes, keepalive pings and the message
+ * size limit are the API's (uvicorn's), unchanged.
  * @module
  */
 
 import type { Server as HttpsServer } from 'node:https';
-import type { Server as HttpServer } from 'node:http';
-import { WebSocket, WebSocketServer } from 'ws';
-import type { IncomingMessage } from 'node:http';
+import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
-import { randomUUID } from 'node:crypto';
+import type { Socket } from 'node:net';
+import { createProxyServer } from 'http-proxy-3';
 import { config, WS_ALLOWED_HOSTS, SESSION_COOKIE_NAME } from './config.js';
 import { verifySession, parseSessionCookie } from './session.js';
 import { isAllowedOrigin } from './origin-utils.js';
+
+/** How long to wait for the API to accept the TCP connection. */
+const CONNECT_TIMEOUT_MS = 10_000;
+
+const proxy = createProxyServer({
+  ws: true,
+  changeOrigin: true, // Host: the API's, as a direct client would send
+  ignorePath: true, // the upstream path is the target's `/ws`, never the client's query
+  connectTimeout: CONNECT_TIMEOUT_MS,
+});
+
+// The cockpit session cookie is the cockpit's credential; the API never reads it.
+proxy.on('proxyReqWs', (proxyReq) => {
+  proxyReq.removeHeader('cookie');
+});
+
+// An upstream that refuses, times out or drops: the library destroys the
+// client socket itself; this listener only logs (without one it would throw).
+proxy.on('error', (err) => {
+  console.error('[ws-proxy] upstream error:', err.message);
+});
+
+/** Live client sockets, for graceful shutdown. */
+const liveSockets = new Set<Duplex>();
+
+/** Close every proxied WebSocket connection (the library closes its upstream half). */
+export function closeAllWebSockets(): void {
+  for (const socket of liveSockets) socket.destroy();
+  liveSockets.clear();
+}
 
 /**
  * The one gateway this cockpit serves, derived from server config.
@@ -40,219 +73,60 @@ function defaultTarget(): URL | null {
   }
 }
 
-/** Active WSS instances — used for graceful shutdown */
-const activeWssInstances: WebSocketServer[] = [];
-
-/** Close all active WebSocket connections */
-export function closeAllWebSockets(): void {
-  for (const wss of activeWssInstances) {
-    for (const client of wss.clients) client.close(1001, 'Server shutting down');
-    wss.close();
+/** The upstream URL for this request, or the HTTP refusal to send instead. */
+function resolveTarget(req: IncomingMessage): URL | { status: string; why: string } {
+  const target = new URL(req.url || '/', 'http://localhost').searchParams.get('target');
+  if (!target) {
+    return defaultTarget() ?? { status: '502 Bad Gateway', why: 'Missing ?target= param and no usable GATEWAY_URL' };
   }
-  activeWssInstances.length = 0;
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    return { status: '400 Bad Request', why: 'Invalid target URL' };
+  }
+  if (!['ws:', 'wss:'].includes(url.protocol) || !WS_ALLOWED_HOSTS.has(url.hostname)) {
+    console.warn(`[ws-proxy] Rejected: target not allowed: ${target}`);
+    return { status: '403 Forbidden', why: 'Target not allowed' };
+  }
+  return url;
 }
 
-/**
- * Set up the WS/WSS proxy on an HTTP or HTTPS server.
- * Proxies ws(s)://host:port/ws?target=ws://gateway/ws to the OpenClaw gateway.
- */
+function refuse(socket: Duplex, status: string, why: string): void {
+  socket.write(`HTTP/1.1 ${status}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n${why}`);
+  socket.destroy();
+}
+
+/** Set up the `/ws` proxy on an HTTP or HTTPS server. */
 export function setupWebSocketProxy(server: HttpServer | HttpsServer): void {
-  const wss = new WebSocketServer({ noServer: true });
-  activeWssInstances.push(wss);
-
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    if (req.url?.startsWith('/ws')) {
-      const originHeader = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
-      if (!isAllowedOrigin(originHeader)) {
-        socket.write('HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nOrigin not allowed');
-        socket.destroy();
-        return;
-      }
-
-      // Auth check for WebSocket connections
-      if (config.auth) {
-        const token = parseSessionCookie(req.headers.cookie, SESSION_COOKIE_NAME);
-        if (!token || !verifySession(token, config.sessionSecret)) {
-          socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nAuthentication required');
-          socket.destroy();
-          return;
-        }
-      }
-      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
-    } else {
+    if (!req.url?.startsWith('/ws')) {
       socket.destroy();
+      return;
     }
-  });
 
-  wss.on('connection', (clientWs: WebSocket, req: IncomingMessage) => {
-    const connId = randomUUID().slice(0, 8);
-    const tag = `[ws-proxy:${connId}]`;
-    const url = new URL(req.url || '/', 'https://localhost');
-    const target = url.searchParams.get('target');
+    const originHeader = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
+    if (!isAllowedOrigin(originHeader)) {
+      refuse(socket, '403 Forbidden', 'Origin not allowed');
+      return;
+    }
 
-    console.log(`${tag} New connection: target=${target ?? '(server default)'}`);
-
-    let targetUrl: URL;
-    if (target) {
-      try {
-        targetUrl = new URL(target);
-      } catch {
-        clientWs.close(1008, 'Invalid target URL');
+    if (config.auth) {
+      const token = parseSessionCookie(req.headers.cookie, SESSION_COOKIE_NAME);
+      if (!token || !verifySession(token, config.sessionSecret)) {
+        refuse(socket, '401 Unauthorized', 'Authentication required');
         return;
       }
-      // Allowlist applies to CLIENT-supplied targets only.
-      if (!['ws:', 'wss:'].includes(targetUrl.protocol) || !WS_ALLOWED_HOSTS.has(targetUrl.hostname)) {
-        console.warn(`${tag} Rejected: target not allowed: ${target}`);
-        clientWs.close(1008, 'Target not allowed');
-        return;
-      }
-    } else {
-      const derived = defaultTarget();
-      if (!derived) {
-        clientWs.close(1008, 'Missing ?target= param and no usable GATEWAY_URL');
-        return;
-      }
-      targetUrl = derived;
     }
 
-    const targetPort = Number(targetUrl.port) || (targetUrl.protocol === 'wss:' ? 443 : 80);
-    if (targetPort < 1 || targetPort > 65535) {
-      console.warn(`${tag} Rejected: invalid port ${targetPort}`);
-      clientWs.close(1008, 'Invalid target port');
+    const target = resolveTarget(req);
+    if (!(target instanceof URL)) {
+      refuse(socket, target.status, target.why);
       return;
     }
 
-    const isEncrypted = !!(req.socket as unknown as { encrypted?: boolean }).encrypted;
-    const scheme = isEncrypted ? 'https' : 'http';
-    const clientOrigin = (Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin)
-      || `${scheme}://${req.headers.host}`;
-
-    createGatewayRelay(clientWs, targetUrl, clientOrigin, connId);
-  });
-}
-
-/**
- * Create a relay between a browser WebSocket and the gateway.
- *
- * Client frames are buffered until the gateway socket opens, then flushed in
- * order; after that every frame is forwarded as it arrives.
- */
-function createGatewayRelay(
-  clientWs: WebSocket,
-  targetUrl: URL,
-  clientOrigin: string,
-  connId: string,
-): void {
-  const tag = `[ws-proxy:${connId}]`;
-  const connStartTime = Date.now();
-  let clientToGatewayCount = 0;
-  let gatewayToClientCount = 0;
-
-  // ─── Keepalive: ping both sides every 30s, kill dead connections ────────
-  const PING_INTERVAL = 30_000;
-  let clientAlive = true;
-  let gatewayAlive = true;
-
-  clientWs.on('pong', () => { clientAlive = true; });
-
-  const pingTimer = setInterval(() => {
-    // Check client
-    if (!clientAlive) {
-      console.log(`${tag} Client pong timeout — terminating`);
-      clientWs.terminate();
-      return;
-    }
-    clientAlive = false;
-    if (clientWs.readyState === WebSocket.OPEN) clientWs.ping();
-
-    // Check gateway
-    if (!gatewayAlive) {
-      console.log(`${tag} Gateway pong timeout — terminating`);
-      gwWs.terminate();
-      return;
-    }
-    gatewayAlive = false;
-    if (gwWs.readyState === WebSocket.OPEN) gwWs.ping();
-  }, PING_INTERVAL);
-
-  // Buffer client messages until gateway connection is open (with cap)
-  const MAX_PENDING = 100;
-  const MAX_BYTES = 1024 * 1024; // 1 MB
-  let pending: { data: Buffer | string; isBinary: boolean }[] = [];
-  let pendingBytes = 0;
-
-  /** Queue a client message for deferred forwarding. Returns false if limits exceeded. */
-  function enqueuePending(data: Buffer | string, isBinary: boolean): boolean {
-    const size = typeof data === 'string' ? Buffer.byteLength(data) : data.length;
-    if (pending.length >= MAX_PENDING || pendingBytes + size > MAX_BYTES) {
-      return false;
-    }
-    pendingBytes += size;
-    pending.push({ data, isBinary });
-    return true;
-  }
-
-  /** Flush buffered messages to gateway in FIFO order. */
-  function flushPending(): void {
-    if (gwWs.readyState !== WebSocket.OPEN) return;
-    for (const msg of pending) {
-      gwWs.send(msg.isBinary ? msg.data : msg.data.toString());
-    }
-    pending = [];
-    pendingBytes = 0;
-  }
-
-  const gwWs = new WebSocket(targetUrl.toString(), {
-    headers: { Origin: clientOrigin },
-  });
-
-  gwWs.on('pong', () => { gatewayAlive = true; });
-
-  // Gateway → Client
-  gwWs.on('message', (data: Buffer | string, isBinary: boolean) => {
-    if (clientWs.readyState === WebSocket.OPEN) {
-      gatewayToClientCount++;
-      clientWs.send(isBinary ? data : data.toString());
-    }
-  });
-
-  gwWs.on('open', () => {
-    flushPending();
-  });
-
-  gwWs.on('error', (err) => {
-    console.error(`${tag} Gateway error:`, err.message);
-    clientWs.close();
-  });
-
-  gwWs.on('close', (code, reason) => {
-    console.log(`${tag} Gateway closed: code=${code}, reason=${reason?.toString() || ''}`);
-    clientWs.close();
-  });
-
-  // Client → Gateway
-  clientWs.on('message', (data: Buffer | string, isBinary: boolean) => {
-    if (gwWs.readyState !== WebSocket.OPEN) {
-      if (!enqueuePending(data, isBinary)) {
-        clientWs.close(1008, 'Too many pending messages');
-      }
-      return;
-    }
-
-    clientToGatewayCount++;
-    gwWs.send(isBinary ? data : data.toString());
-  });
-
-  clientWs.on('close', (code, reason) => {
-    clearInterval(pingTimer);
-    const duration = Date.now() - connStartTime;
-    console.log(`${tag} Client closed: code=${code}, reason=${reason?.toString()}`);
-    console.log(`${tag} Summary: duration=${duration}ms, client->gw=${clientToGatewayCount}, gw->client=${gatewayToClientCount}`);
-    gwWs.close();
-  });
-  clientWs.on('error', (err) => {
-    clearInterval(pingTimer);
-    console.error(`${tag} Client error:`, err.message);
-    gwWs.close();
+    liveSockets.add(socket);
+    socket.once('close', () => liveSockets.delete(socket));
+    proxy.ws(req, socket as Socket, head, { target });
   });
 }

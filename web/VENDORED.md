@@ -71,6 +71,12 @@ client code that called or rendered it, its settings and its tests:
 | the hand-copied font files and `@font-face` CSS in `public/fonts/` | the same families, weights and subsets come from the `@fontsource/instrument-sans`, `@fontsource/space-grotesk` and `@fontsource/jetbrains-mono` packages, imported per weight by `src/lib/fonts.ts` and bundled by Vite (still same-origin) |
 | `msw` in `package.json`'s `allowScripts` | it is in no dependency block; it was only an optional peer of `@vitest/mocker`, never installed |
 
+## Changed in v2.132.0
+
+| changed | why |
+|---|---|
+| `server/lib/ws-proxy.ts` no longer relays frame by frame on the `ws` package (its `WebSocketServer`, the buffer for frames sent before the upstream opened, the 30-second pings of both sides, the 100-frame / 1 MB buffer cap and the 1008 / 1001 close codes it chose). It runs the Origin check, the session-cookie check and the `?target=` check (`WS_ALLOWED_HOSTS` for a client-supplied target, `GATEWAY_URL` otherwise) on the upgrade request, and only then hands it to the `http-proxy-3` package, which forwards the handshake to the API's `/ws` and pipes the two sockets together. `ws` moved to `devDependencies` (only tests import it) | the WebSocket session is now end to end between the browser and uvicorn, so what the relay re-implemented is the API's own: uvicorn pings every 20 s (its default) and the browser answers, its `--ws-max-size` is the size limit, its close codes reach the browser unchanged, and the browser cannot send before the API's 101 arrives, so nothing needs buffering. A refused upgrade (Origin, session, target) gets an HTTP 401 / 403 / 400 / 502 and opens no upstream connection, where a bad target used to be accepted and then closed 1008; an API that refuses the connection fails the browser's handshake at once, and one that does not answer after a 10 s connect timeout. The cockpit's session cookie is not forwarded to the API. On shutdown the relay drops its sockets instead of sending close 1001; the browser reconnects on any close code (`src/hooks/useWebSocket.ts` reads none). The per-connection `[ws-proxy:<id>]` log lines are gone; upstream errors still log |
+
 ## Still present from upstream, to be removed or adapted in a later release
 
 Inert here, or only partly used, and kept for now by decision:

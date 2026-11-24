@@ -2102,8 +2102,13 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
   serves** (`api/nerve_gateway.py`) by answering the wire protocol the upstream
   client already speaks. The cockpit server has no event stream of its own
   (its SSE endpoint and file watcher were removed, DL-224): the file tree
-  loads when opened and has a Refresh button. The relay forwards every frame
-  unchanged; the cockpit server holds no other connection to the API's `/ws`.
+  loads when opened and has a Refresh button. The relay checks the upgrade
+  request (Origin, the cockpit session cookie, the target: `GATEWAY_URL`, or an
+  allowlisted `?target=`) before it dials anything, then hands it to the
+  `http-proxy-3` package, which pipes the two sockets together: frames, close
+  codes, keepalive pings (uvicorn's) and the message-size limit
+  (`--ws-max-size`) are end to end between the browser and the API. The
+  cockpit server holds no other connection to the API's `/ws`.
 - **Speech.** Read-aloud and voice input have one engine: the deployment's
   speech service behind the LiteLLM aliases `cc-tts` and `cc-stt`. On k3s the
   cockpit server's `POST /api/tts` and `POST /api/transcribe` call it as an

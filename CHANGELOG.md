@@ -4,6 +4,29 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-23 — v2.132.0: The cockpit's `/ws` relay runs on http-proxy-3
+
+- **Why.** The last item of the existing-libraries review. The relay was 258 hand-written lines on
+  the `ws` package: a second WebSocket to the API, a buffer, a ping, close-code mapping. After
+  v2.126.0 and v2.131.0 it only copied frames, which is what a proxy library does.
+- **What it is now.** `web/server/lib/ws-proxy.ts` is our checks (Origin, the session cookie, the
+  target) followed by one call into `http-proxy-3` (2.0.2, MIT), which joins the browser's
+  connection to the API's. The checks run before any connection to the API is opened; a refused
+  upgrade is now an HTTP 401, 403, 400 or 502 instead of an accepted socket closed with 1008.
+- **Dropped, and why it is safe.** The pre-open buffer (the browser cannot send until the API's own
+  handshake reply arrives); the relay's 30-second ping (uvicorn pings every 20 seconds through the
+  pipe); the buffer caps (the message limit is uvicorn's `--ws-max-size`); close-code mapping (the
+  API's codes reach the browser unchanged, and the browser reads none). The cockpit's session
+  cookie is stripped before the request reaches the API. On a cockpit-server shutdown the browser
+  sees an abrupt close instead of code 1001 and reconnects as before.
+- **One difference to know.** If `GATEWAY_URL` pointed at another host and that host vanished
+  without resetting the connection, the browser would no longer learn of it from the relay's own
+  ping. Shipped configurations point at loopback.
+- **Tests.** The mock-based tests are replaced by 14 tests over real sockets on loopback ports,
+  including that a refused upgrade opens no connection upstream. `ws` moves to `devDependencies`.
+- **Operator action.** After applying, reload open cockpit tabs and confirm chat connects. Not
+  verified: the relay in front of the real API (the tests use a stand-in WebSocket server).
+
 ## 2026-11-23 — v2.131.0: The cockpit half of the existing-libraries review: the shared diff view, packaged fonts, zod validation, and the last inherited gateway client removed
 
 - **Why.** Same ruling and review as v2.130.0; this is the cockpit half.

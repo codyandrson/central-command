@@ -69,6 +69,7 @@
     "graphology-communities-louvain": "^2.0.2",
     "highlight.js": "^11.11.1",
     "hono": "^4.11.7",
+    "http-proxy-3": "^2.0.2",
     "json5": "^2.2.3",
     "lightweight-charts": "^5.1.0",
     "lucide-react": "^0.563.0",
@@ -81,7 +82,6 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.18",
-    "ws": "^8.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -108,7 +108,8 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "ws": "^8.19.0"
   },
   "allowScripts": {
     "esbuild": true
