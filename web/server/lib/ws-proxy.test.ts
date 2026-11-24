@@ -237,6 +237,37 @@ describe('ws-proxy refusals open no upstream connection', () => {
     expect(up.requests[0].url).toBe('/ws');
   });
 
+  it('never relays an ordinary HTTP response from the target, and pins the path to /ws', async () => {
+    const seen: string[] = [];
+    const http = createServer((req, res) => {
+      seen.push(req.url ?? '');
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('SECRET-BODY');
+    });
+    http.on('upgrade', (req, socket) => {
+      seen.push(req.url ?? '');
+      socket.end('HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnection: close\r\n\r\nSECRET-BODY');
+    });
+    const upPort = await listen(http);
+    const relay = await startRelay();
+    const { connect: tcp } = await import('node:net');
+    const got = await new Promise<string>((resolve) => {
+      let buf = '';
+      const s = tcp(relay, '127.0.0.1', () => {
+        s.write(
+          `GET /ws?target=${encodeURIComponent(`ws://localhost:${upPort}/api/secret?q=1`)} HTTP/1.1\r\n` +
+          `Host: localhost\r\nOrigin: ${ORIGIN}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n',
+        );
+      });
+      s.on('data', (d) => { buf += d.toString(); });
+      s.on('close', () => resolve(buf));
+      s.on('error', () => resolve(buf));
+    });
+    expect(got).not.toContain('SECRET-BODY');
+    expect(seen).toEqual(['/ws']);
+  });
+
   it('refuses when there is no ?target= and no usable gateway url', async () => {
     const relay = await startRelay();
     cfg.gatewayUrl = '';

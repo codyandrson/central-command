@@ -38,8 +38,19 @@ const proxy = createProxyServer({
 });
 
 // The cockpit session cookie is the cockpit's credential; the API never reads it.
-proxy.on('proxyReqWs', (proxyReq) => {
+// Neither is any other credential the client sent. And an upstream that
+// answers with an ordinary HTTP response instead of the WebSocket handshake is
+// NOT relayed: the library would copy that response to the client, which would
+// turn the relay into a way to read any HTTP service on an allowed host. This
+// listener is added before the library's own, so the client socket is already
+// destroyed when the library looks at it (it writes only to a live socket).
+proxy.on('proxyReqWs', (proxyReq, _req, socket) => {
   proxyReq.removeHeader('cookie');
+  proxyReq.removeHeader('authorization');
+  proxyReq.on('response', (res) => {
+    res.resume();
+    socket.destroy();
+  });
 });
 
 // An upstream that refuses, times out or drops: the library destroys the
@@ -89,6 +100,12 @@ function resolveTarget(req: IncomingMessage): URL | { status: string; why: strin
     console.warn(`[ws-proxy] Rejected: target not allowed: ${target}`);
     return { status: '403 Forbidden', why: 'Target not allowed' };
   }
+  // A client names a HOST, never a path, query or credentials: the upstream is
+  // always that host's `/ws`.
+  url.pathname = '/ws';
+  url.search = '';
+  url.username = '';
+  url.password = '';
   return url;
 }
 

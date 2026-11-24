@@ -4,6 +4,20 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-23 — v2.132.1: The relay never hands a client an ordinary HTTP response
+
+- **What was wrong in v2.132.0.** `http-proxy-3` copies an upstream's non-WebSocket HTTP response
+  back to the client. With the inherited `?target=` parameter (any port and any path on an allowed
+  host, loopback by default) a client that reached the cockpit port could read an HTTP service on
+  the cockpit's own host through the relay. The hand-written relay before v2.132.0 spoke only
+  WebSocket, so this was new in that release. Found by review before v2.132.0 was applied anywhere.
+- **Fix.** An upstream that answers with anything but the WebSocket handshake gets the client
+  socket destroyed and nothing relayed. A client-supplied target now names a host only: the path
+  is always `/ws`, and its query and credentials are dropped. The client's `Authorization` header
+  is no longer forwarded. A test sends a raw upgrade at a plain HTTP server through the relay and
+  asserts the body never arrives; it fails without the fix.
+- **Operator action.** Apply this instead of v2.132.0.
+
 ## 2026-11-23 — v2.132.0: The cockpit's `/ws` relay runs on http-proxy-3
 
 - **Why.** The last item of the existing-libraries review. The relay was 258 hand-written lines on
