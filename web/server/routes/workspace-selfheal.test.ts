@@ -49,11 +49,6 @@ describe('workspace self-heal (default-path auto-create)', () => {
     vi.doMock('../middleware/rate-limit.js', () => ({
       rateLimitGeneral: vi.fn((_c: unknown, next: () => Promise<void>) => next()),
     }));
-    vi.doMock('../lib/gateway-rpc.js', () => ({
-      gatewayFilesList: vi.fn(),
-      gatewayFilesGet: vi.fn().mockResolvedValue(null),
-      gatewayFilesSet: vi.fn(),
-    }));
 
     const mod = await import('./workspace.js');
     const { Hono } = await import('hono');

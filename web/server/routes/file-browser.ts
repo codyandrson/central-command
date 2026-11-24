@@ -5,9 +5,9 @@
  * file browser UI. All paths are relative to the workspace root
  * (~/.openclaw/workspace/) and validated against traversal + exclusion rules.
  *
- * When the workspace is not locally accessible, falls back to gateway RPC
- * for top-level persona files. Mutation endpoints (rename, move, trash,
- * restore) return 501 for remote workspaces.
+ * A workspace that is not on this host's filesystem lists empty and reads
+ * 404; writes and the mutation endpoints (rename, move, trash, restore) return
+ * 501 for it.
  *
  * GET  /api/files/tree  — List directory entries (lazy, depth-limited)
  * GET  /api/files/read  — Read a text file's content
@@ -37,7 +37,6 @@ import {
 } from '../lib/file-ops.js';
 import { InvalidAgentIdError, resolveAgentWorkspace } from '../lib/agent-workspace.js';
 import { isWorkspaceLocal } from '../lib/workspace-detect.js';
-import { gatewayFilesList, gatewayFilesGet, gatewayFilesSet } from '../lib/gateway-rpc.js';
 import { fileBrowserGuard } from './cc-file-browser-guard.js';
 
 const app = new Hono();
@@ -165,23 +164,6 @@ function handleFileOpError(c: Context, err: unknown) {
   return c.json({ ok: false, error: message }, 500);
 }
 
-/** Convert gateway file list to TreeEntry format for the UI. */
-function gatewayFilesToTree(
-  files: Awaited<ReturnType<typeof gatewayFilesList>>,
-  showHidden: boolean,
-): TreeEntry[] {
-  return files
-    .filter((f) => !f.missing)
-    .filter((f) => showHidden || !f.name.startsWith('.') || f.name === '.nerveignore' || f.name === '.trash')
-    .map((f) => ({
-      name: f.name,
-      path: f.name,
-      type: 'file' as const,
-      size: f.size,
-      mtime: f.updatedAtMs,
-    }));
-}
-
 function normalizeWorkspaceLookupPath(input: string, workspaceRoots: string[] = []): string {
   const trimmed = input.trim();
   if (trimmed === '/workspace' || trimmed === '/workspace/') {
@@ -269,47 +251,17 @@ app.get('/api/files/tree', async (c) => {
     });
   }
 
-  // Remote workspace — gateway fallback (top-level only)
-  if (subPath) {
-    // Gateway only supports top-level files
-    return c.json({
-      ok: true,
-      root: subPath,
-      entries: [],
-      remoteWorkspace: true,
-      workspaceInfo: {
-        isCustomWorkspace: workspace.isCustomWorkspace,
-        rootPath: root,
-      },
-    });
-  }
-
-  try {
-    const remoteFiles = await gatewayFilesList(workspace.agentId);
-    const entries = gatewayFilesToTree(remoteFiles, showHidden);
-    return c.json({
-      ok: true,
-      root: '.',
-      entries,
-      remoteWorkspace: true,
-      workspaceInfo: {
-        isCustomWorkspace: workspace.isCustomWorkspace,
-        rootPath: root,
-      },
-    });
-  } catch (err) {
-    console.warn('[file-browser] Gateway tree fallback failed:', (err as Error).message);
-    return c.json({
-      ok: true,
-      root: '.',
-      entries: [],
-      remoteWorkspace: true,
-      workspaceInfo: {
-        isCustomWorkspace: workspace.isCustomWorkspace,
-        rootPath: root,
-      },
-    });
-  }
+  // A workspace that is not on this host has no entries here.
+  return c.json({
+    ok: true,
+    root: subPath || '.',
+    entries: [],
+    remoteWorkspace: true,
+    workspaceInfo: {
+      isCustomWorkspace: workspace.isCustomWorkspace,
+      rootPath: root,
+    },
+  });
 });
 
 // ── GET /api/files/resolve ───────────────────────────────────────────
@@ -393,7 +345,6 @@ app.get('/api/files/read', async (c) => {
     return handleAgentWorkspaceError(c, err);
   }
 
-  // Note: Write endpoint uses config.workspaceRemote instead to allow bootstrapping new workspaces
   const isLocal = await isWorkspaceLocal(workspace.workspaceRoot);
 
   if (isLocal) {
@@ -436,28 +387,6 @@ app.get('/api/files/read', async (c) => {
     }
   }
 
-  // Remote workspace fallback — only top-level files
-  const basename = path.basename(filePath);
-  if (filePath !== basename) {
-    // Subdirectory path — not supported via gateway
-    return c.json({ ok: false, error: 'File not found', remoteWorkspace: true }, 404);
-  }
-
-  if (isBinary(basename)) {
-    return c.json({ ok: false, error: 'Binary file', binary: true }, 415);
-  }
-
-  const file = await gatewayFilesGet(workspace.agentId, basename);
-  if (file) {
-    return c.json({
-      ok: true,
-      content: file.content,
-      size: file.size,
-      mtime: file.updatedAtMs,
-      remoteWorkspace: true,
-    });
-  }
-
   return c.json({ ok: false, error: 'File not found', remoteWorkspace: true }, 404);
 });
 
@@ -490,72 +419,46 @@ app.put('/api/files/write', async (c) => {
     return handleAgentWorkspaceError(c, err);
   }
 
-  // For writes, treat workspace as local unless explicitly forced remote.
-  // This allows bootstrapping new agent workspaces (directory doesn't exist yet).
-  const isLocal = !config.workspaceRemote;
-
-  if (isLocal) {
-    const resolved = await resolveWorkspacePathForRoot(workspace.workspaceRoot, filePath, { allowNonExistent: true });
-    if (!resolved) {
-      return c.json({ ok: false, error: 'Invalid or excluded path' }, 403);
-    }
-
-    if (isBinary(path.basename(resolved))) {
-      return c.json({ ok: false, error: 'Cannot write binary files' }, 415);
-    }
-
-    // Conflict detection: check mtime if expectedMtime provided
-    if (typeof expectedMtime === 'number') {
-      try {
-        const stat = await fs.stat(resolved);
-        const currentMtime = Math.floor(stat.mtimeMs);
-        if (currentMtime !== expectedMtime) {
-          return c.json({
-            ok: false,
-            error: 'File was modified since you loaded it',
-            currentMtime,
-          }, 409);
-        }
-      } catch {
-        // File doesn't exist yet — no conflict possible
-      }
-    }
-
-    // Ensure parent directory exists
-    await fs.mkdir(path.dirname(resolved), { recursive: true });
-
-    // Write the file
-    try {
-      await fs.writeFile(resolved, content, 'utf-8');
-      const stat = await fs.stat(resolved);
-      return c.json({
-        ok: true,
-        mtime: Math.floor(stat.mtimeMs),
-      });
-    } catch {
-      return c.json({ ok: false, error: 'Failed to write file' }, 500);
-    }
+  // A write may create the workspace directory (bootstrapping a new agent
+  // workspace), so it does not ask whether the directory exists yet.
+  const resolved = await resolveWorkspacePathForRoot(workspace.workspaceRoot, filePath, { allowNonExistent: true });
+  if (!resolved) {
+    return c.json({ ok: false, error: 'Invalid or excluded path' }, 403);
   }
 
-  // Remote workspace fallback — only top-level files
-  const basename = path.basename(filePath);
-  if (filePath !== basename) {
-    return c.json({
-      ok: false,
-      error: 'Not supported for remote workspaces',
-      code: 'REMOTE_WORKSPACE',
-    }, 501);
-  }
-
-  if (isBinary(basename)) {
+  if (isBinary(path.basename(resolved))) {
     return c.json({ ok: false, error: 'Cannot write binary files' }, 415);
   }
 
+  // Conflict detection: check mtime if expectedMtime provided
+  if (typeof expectedMtime === 'number') {
+    try {
+      const stat = await fs.stat(resolved);
+      const currentMtime = Math.floor(stat.mtimeMs);
+      if (currentMtime !== expectedMtime) {
+        return c.json({
+          ok: false,
+          error: 'File was modified since you loaded it',
+          currentMtime,
+        }, 409);
+      }
+    } catch {
+      // File doesn't exist yet — no conflict possible
+    }
+  }
+
+  // Ensure parent directory exists
+  await fs.mkdir(path.dirname(resolved), { recursive: true });
+
+  // Write the file
   try {
-    await gatewayFilesSet(workspace.agentId, basename, content);
-    return c.json({ ok: true, remoteWorkspace: true, mtime: Date.now() });
-  } catch (err) {
-    console.error('[file-browser] Gateway write fallback failed:', (err as Error).message);
+    await fs.writeFile(resolved, content, 'utf-8');
+    const stat = await fs.stat(resolved);
+    return c.json({
+      ok: true,
+      mtime: Math.floor(stat.mtimeMs),
+    });
+  } catch {
     return c.json({ ok: false, error: 'Failed to write file' }, 500);
   }
 });

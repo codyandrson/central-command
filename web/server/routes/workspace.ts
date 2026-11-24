@@ -4,11 +4,8 @@
  * GET  /api/workspace/:key  — Read a workspace file by key
  * PUT  /api/workspace/:key  — Write a workspace file by key
  *
- * Strict allowlist of keys → files. No directory traversal.
- *
- * When the workspace directory is not locally accessible (e.g. Nerve on
- * DGX host, workspace inside OpenShell sandbox), falls back to gateway
- * RPC via `agents.files.get/set/list`.
+ * Strict allowlist of keys → files. No directory traversal. A workspace
+ * directory that is not on this host's filesystem has no files here.
  */
 
 import { Hono, type Context } from 'hono';
@@ -18,7 +15,6 @@ import { readText } from '../lib/files.js';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { InvalidAgentIdError, isDefaultAgentWorkspacePath, resolveAgentWorkspace } from '../lib/agent-workspace.js';
 import { isWorkspaceLocal } from '../lib/workspace-detect.js';
-import { gatewayFilesList, gatewayFilesGet, gatewayFilesSet } from '../lib/gateway-rpc.js';
 import { createChatPathLinksTemplate } from '../lib/chat-path-links-config.js';
 
 const app = new Hono();
@@ -87,18 +83,7 @@ app.get('/api/workspace/:key', rateLimitGeneral, async (c) => {
           console.warn('[workspace] Failed to regenerate local chat path links config:', (writeErr as Error).message);
         }
       }
-
-      // Local failed — try gateway fallback
     }
-  }
-
-  try {
-    const file = await gatewayFilesGet(workspace.agentId, filename);
-    if (file) {
-      return c.json({ ok: true, content: file.content, remoteWorkspace: true });
-    }
-  } catch (err) {
-    console.warn('[workspace] Gateway fallback failed:', (err as Error).message);
   }
 
   // chatPathLinks is client DISPLAY config with a built-in default, and its
@@ -138,24 +123,16 @@ app.put('/api/workspace/:key', rateLimitGeneral, async (c) => {
 
   const filePath = path.join(workspace.workspaceRoot, filename);
 
-  // Try local first
-  if (await isWorkspaceLocal(workspace.workspaceRoot)) {
-    try {
-      await fs.mkdir(path.dirname(filePath), { recursive: true });
-      await fs.writeFile(filePath, body.content, 'utf-8');
-      return c.json({ ok: true });
-    } catch (err) {
-      console.error('[workspace] PUT local error:', (err as Error).message);
-      return c.json({ ok: false, error: 'Failed to write file' }, 500);
-    }
+  if (!(await isWorkspaceLocal(workspace.workspaceRoot))) {
+    console.error(`[workspace] PUT refused: workspace ${workspace.workspaceRoot} is not on this host`);
+    return c.json({ ok: false, error: 'Failed to write file' }, 500);
   }
-
-  // Gateway fallback
   try {
-    await gatewayFilesSet(workspace.agentId, filename, body.content);
-    return c.json({ ok: true, remoteWorkspace: true });
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, body.content, 'utf-8');
+    return c.json({ ok: true });
   } catch (err) {
-    console.error('[workspace] PUT gateway error:', (err as Error).message);
+    console.error('[workspace] PUT local error:', (err as Error).message);
     return c.json({ ok: false, error: 'Failed to write file' }, 500);
   }
 });
@@ -170,42 +147,22 @@ app.get('/api/workspace', rateLimitGeneral, async (c) => {
   }
 
   const files: Array<{ key: string; filename: string; exists: boolean }> = [];
-  let isRemote = false;
+  const isLocal = await isWorkspaceLocal(workspace.workspaceRoot);
 
-  // Try local first
-  if (await isWorkspaceLocal(workspace.workspaceRoot)) {
-    for (const [key, filename] of Object.entries(FILE_MAP)) {
-      const filePath = path.join(workspace.workspaceRoot, filename);
-      let exists = false;
+  for (const [key, filename] of Object.entries(FILE_MAP)) {
+    let exists = false;
+    if (isLocal) {
       try {
-        await fs.access(filePath);
+        await fs.access(path.join(workspace.workspaceRoot, filename));
         exists = true;
       } catch {
         // not found
       }
-      files.push({ key, filename, exists });
     }
-  } else {
-    // Gateway fallback
-    isRemote = true;
-    try {
-      const remoteFiles = await gatewayFilesList(workspace.agentId);
-      const remoteByName = new Map(remoteFiles.map((f) => [f.name, f]));
-
-      for (const [key, filename] of Object.entries(FILE_MAP)) {
-        const remote = remoteByName.get(filename);
-        files.push({ key, filename, exists: !!remote && !remote.missing });
-      }
-    } catch (err) {
-      console.warn('[workspace] Gateway list fallback failed:', (err as Error).message);
-      // Return all as non-existent
-      for (const [key, filename] of Object.entries(FILE_MAP)) {
-        files.push({ key, filename, exists: false });
-      }
-    }
+    files.push({ key, filename, exists });
   }
 
-  return c.json({ ok: true, files, ...(isRemote ? { remoteWorkspace: true } : {}) });
+  return c.json({ ok: true, files, ...(isLocal ? {} : { remoteWorkspace: true }) });
 });
 
 export default app;

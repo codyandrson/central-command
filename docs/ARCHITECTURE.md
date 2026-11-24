@@ -2102,8 +2102,8 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
   serves** (`api/nerve_gateway.py`) by answering the wire protocol the upstream
   client already speaks. The cockpit server has no event stream of its own
   (its SSE endpoint and file watcher were removed, DL-224): the file tree
-  loads when opened and has a Refresh button. `web/server/lib/gateway-rpc.ts`
-  is upstream's workspace-file fallback client, not part of this seam.
+  loads when opened and has a Refresh button. The relay forwards every frame
+  unchanged; the cockpit server holds no other connection to the API's `/ws`.
 - **Speech.** Read-aloud and voice input have one engine: the deployment's
   speech service behind the LiteLLM aliases `cc-tts` and `cc-stt`. On k3s the
   cockpit server's `POST /api/tts` and `POST /api/transcribe` call it as an
@@ -2125,10 +2125,11 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
   `label`, stored in `session.operator_title` and recorded as
   `session.renamed`, DL-229); an agent's root row carries the roster name and a
   run is named by its task, so neither is renamed there.
-- **Fonts.** Instrument Sans, Space Grotesk and JetBrains Mono are bundled in
-  `web/public/fonts/` (WOFF2 from the `@fontsource` packages, each folder with
-  its SIL Open Font License `OFL.txt`) and served from the cockpit's own origin;
-  the built cockpit requests nothing from an outside host for them.
+- **Fonts.** Instrument Sans, Space Grotesk and JetBrains Mono come from their
+  `@fontsource` npm packages (SIL Open Font License), imported per weight by
+  `web/src/lib/fonts.ts`; the build bundles the CSS and font files and they are
+  served from the cockpit's own origin, so the built cockpit requests nothing
+  from an outside host for them.
 - **Defaults.** Cockpit server on 3080 (`web/server/lib/constants.ts`); API on
   8080. The vendored default gateway URL does **not** point at the API —
   `GATEWAY_URL` in the cockpit server's env file must, or every `cc-*` route

@@ -50,8 +50,10 @@ describe('the Skills page flag banner (DL-232)', () => {
     expect(within(b).getByText('2 bundled docs you edited were changed by a release — your text was kept')).toBeInTheDocument();
     const card = within(b).getByRole('listitem', { name: 'jira/api' });
     expect(within(card).getByText('changed here and in v2.130.0')).toBeInTheDocument();
-    expect(card).toHaveTextContent('~mine');
-    expect(card).toHaveTextContent('+release');
+    expect(within(card).getByText('YOURS (LIBRARY)')).toBeInTheDocument();
+    expect(within(card).getByText('THE RELEASE')).toBeInTheDocument();
+    expect(card.querySelector('.diff-line-remove')).toHaveTextContent('mine');
+    expect(card.querySelector('.diff-line-add')).toHaveTextContent('release');
     const removed = within(b).getByRole('listitem', { name: 'confluence/macros' });
     expect(within(removed).getByText('v2.130.0 no longer ships it')).toBeInTheDocument();
     expect(within(removed).getByRole('button', { name: /retire it/i })).toBeInTheDocument();

@@ -51,7 +51,7 @@ function getCspDirectives(): string {
   _cspDirectives = [
     "default-src 'self'",
     "script-src 'self' https://s3.tradingview.com",
-    // Fonts are bundled and served from this origin (public/fonts/).
+    // Fonts are bundled (the @fontsource packages) and served from this origin.
     "style-src 'self' 'unsafe-inline'",
     "font-src 'self' data:",
     `connect-src ${connectSrc}`,

@@ -22,28 +22,7 @@ import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import { config, WS_ALLOWED_HOSTS, SESSION_COOKIE_NAME } from './config.js';
 import { verifySession, parseSessionCookie } from './session.js';
-import { gatewayRpcCall } from './gateway-rpc.js';
 import { isAllowedOrigin } from './origin-utils.js';
-
-/**
- * Methods the gateway restricts for webchat clients.
- * We intercept these and proxy via `openclaw gateway call` (full CLI scopes).
- */
-const RESTRICTED_METHODS = new Set([
-  'sessions.patch',
-  'sessions.delete',
-  'sessions.reset',
-  'sessions.compact',
-]);
-const CONTROL_UI_CLIENT_ID = 'openclaw-control-ui';
-
-/**
- * Execute a gateway RPC call, bypassing webchat restrictions.
- * Delegates to the shared gateway-rpc module.
- */
-function gatewayCall(method: string, params: Record<string, unknown>): Promise<unknown> {
-  return gatewayRpcCall(method, params);
-}
 
 /**
  * The one gateway this cockpit serves, derived from server config.
@@ -196,9 +175,6 @@ function createGatewayRelay(
     if (gwWs.readyState === WebSocket.OPEN) gwWs.ping();
   }, PING_INTERVAL);
 
-  /** Whether this connection is using the privileged OpenClaw control UI client id */
-  let isControlUiClient = false;
-
   // Buffer client messages until gateway connection is open (with cap)
   const MAX_PENDING = 100;
   const MAX_BYTES = 1024 * 1024; // 1 MB
@@ -256,44 +232,10 @@ function createGatewayRelay(
 
   // Client → Gateway
   clientWs.on('message', (data: Buffer | string, isBinary: boolean) => {
-    let msg: { type?: unknown; id?: unknown; method?: unknown; params?: unknown } | null = null;
-    if (!isBinary) {
-      try { msg = JSON.parse(data.toString()); } catch { /* pass through */ }
-    }
-
-    if (msg && msg.type === 'req' && msg.method === 'connect') {
-      const params = (msg.params || {}) as { client?: { id?: string } };
-      isControlUiClient = params.client?.id === CONTROL_UI_CLIENT_ID;
-    }
-
     if (gwWs.readyState !== WebSocket.OPEN) {
       if (!enqueuePending(data, isBinary)) {
         clientWs.close(1008, 'Too many pending messages');
       }
-      return;
-    }
-
-    // Intercept restricted RPC methods for plain webchat clients only.
-    // Control UI clients are allowed to call these directly on the gateway.
-    if (msg && msg.type === 'req' && typeof msg.method === 'string'
-      && RESTRICTED_METHODS.has(msg.method) && !isControlUiClient) {
-      const reqId = msg.id;
-      gatewayCall(msg.method, (msg.params || {}) as Record<string, unknown>)
-        .then((result) => {
-          if (clientWs.readyState === WebSocket.OPEN) {
-            clientWs.send(JSON.stringify({ type: 'res', id: reqId, ok: true, payload: result }));
-          }
-        })
-        .catch((err) => {
-          if (clientWs.readyState === WebSocket.OPEN) {
-            clientWs.send(JSON.stringify({
-              type: 'res',
-              id: reqId,
-              ok: false,
-              error: { code: -32000, message: (err as Error).message },
-            }));
-          }
-        });
       return;
     }
 

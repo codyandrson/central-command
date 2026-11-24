@@ -17,10 +17,7 @@ describe('workspace-detect', () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
-  async function loadModule(workspaceRemote = false) {
-    vi.doMock('./config.js', () => ({
-      config: { workspaceRemote },
-    }));
+  async function loadModule() {
     const mod = await import('./workspace-detect.js');
     mod.clearWorkspaceDetectCache();
     return mod;
@@ -38,15 +35,6 @@ describe('workspace-detect', () => {
   it('returns false when workspace directory does not exist', async () => {
     const { isWorkspaceLocal } = await loadModule();
     const workspaceRoot = path.join(tmpDir, 'nonexistent');
-
-    const result = await isWorkspaceLocal(workspaceRoot);
-    expect(result).toBe(false);
-  });
-
-  it('returns false when NERVE_WORKSPACE_REMOTE is true', async () => {
-    const { isWorkspaceLocal } = await loadModule(true);
-    const workspaceRoot = path.join(tmpDir, 'workspace');
-    await fs.mkdir(workspaceRoot);
 
     const result = await isWorkspaceLocal(workspaceRoot);
     expect(result).toBe(false);

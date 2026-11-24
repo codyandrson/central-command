@@ -34,13 +34,14 @@ describe('speech model routes', () => {
     vi.doMock('../middleware/rate-limit.js', () => ({
       rateLimitGeneral: vi.fn((_c: unknown, next: () => Promise<void>) => next()),
     }));
-    vi.doMock('../lib/tts-config.js', () => ({
+    vi.doMock('../lib/tts-config.js', async () => ({
       getDeploymentSpeech: () => (process.env.OPENAI_TTS_MODEL
         ? { model: stored.tts || process.env.OPENAI_TTS_MODEL, modelSource: stored.tts ? 'saved' : 'env', voice: 'af_heart', voiceSource: 'default' }
         : null),
       getDeploymentSttModel: () => (process.env.OPENAI_STT_MODEL ? stored.stt || process.env.OPENAI_STT_MODEL : null),
       updateTTSConfig,
-      SPEECH_MODEL_PATTERN: /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/,
+      SPEECH_MODEL_PATTERN: (await vi.importActual<typeof import('../lib/tts-config.js')>('../lib/tts-config.js'))
+        .SPEECH_MODEL_PATTERN,
     }));
     const fetchMock = vi.fn(listResponse);
     vi.stubGlobal('fetch', fetchMock);
@@ -90,6 +91,33 @@ describe('speech model routes', () => {
       expect((await put(app, bad)).status).toBe(422);
     }
     expect(stored).toEqual({ tts: 'kokoro-alt', stt: 'whisper-large' });
+  });
+
+  it('answers each refusal as plain text the Settings page shows', async () => {
+    const { app } = await buildApp(ok);
+    const cases: Array<[unknown, number, string]> = [
+      [{ tts: 7 }, 422, '"tts" must be a string or null'],
+      [{ stt: 'a b' }, 422, '"stt" is not a model id'],
+      [{ other: 'x' }, 422, 'Name tts and/or stt, and nothing else'],
+      [{}, 422, 'Name tts and/or stt, and nothing else'],
+      [['tts'], 400, 'Body must be a JSON object'],
+    ];
+    for (const [bad, status, text] of cases) {
+      const res = await put(app, bad);
+      expect(res.status).toBe(status);
+      expect(await res.text()).toBe(text);
+    }
+    const malformed = await app.request('/api/speech/models', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: '{nope',
+    });
+    expect(malformed.status).toBe(400);
+    expect(updateTTSConfig).not.toHaveBeenCalled();
+  });
+
+  it('trims a chosen model before checking and saving it', async () => {
+    const { app } = await buildApp(ok);
+    expect((await put(app, { tts: '  kokoro-alt  ' })).status).toBe(200);
+    expect(stored.tts).toBe('kokoro-alt');
   });
 
   it('a refused half saves nothing', async () => {

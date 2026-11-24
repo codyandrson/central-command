@@ -15,8 +15,9 @@ every `cc-*` route is a thin HTTP proxy to `config.gatewayUrl + '/api'`, and
 chat, sessions and live push ride the cockpit server's `/ws`
 (`server/lib/ws-proxy.ts`), which relays to FastAPI's `/ws`
 (`central_command/api/nerve_gateway.py`, which answers the wire protocol the
-inherited client speaks). `server/lib/gateway-rpc.ts` is not that seam: it is
-upstream's WebSocket client for remote workspace-file access.
+inherited client speaks). The cockpit server opens no other connection to the
+API's `/ws` (upstream's `server/lib/gateway-rpc.ts` client was removed in
+v2.131.0).
 
 ## Removed on 2026-11-21 (the release after v2.114.0)
 
@@ -60,14 +61,20 @@ client code that called or rendered it, its settings and its tests:
 |---|---|
 | device identity and pairing: `server/lib/device-identity.ts` (the Ed25519 key in `~/.nerve/device-identity.json`, the signed `device` block in the connect frame), the relay's wait for the challenge nonce, its retry without identity on a pairing rejection, its injection of `GATEWAY_TOKEN` into the connect frame with `server/lib/trust-utils.ts`, the `device` block `server/lib/gateway-rpc.ts` sent, and the `operator.pairing` scope the client asked for | the API's `/ws` reads no connect parameters (`nerve_gateway._dispatch` answers `connect` with the protocol and server name whatever the frame holds), so the signature, the nonce and the token were never checked. The relay now forwards every frame unchanged. A `~/.nerve/device-identity.json` an older install wrote is no longer read and can be deleted |
 
+## Removed in v2.131.0
+
+| removed | why |
+|---|---|
+| the relay's interception of `sessions.patch`, `.delete`, `.reset` and `.compact` (`RESTRICTED_METHODS`, `CONTROL_UI_CLIENT_ID` and the `client.id` check in `server/lib/ws-proxy.ts`), which sent those requests through `gateway-rpc.ts` unless the connect frame's `client.id` was `openclaw-control-ui` | the cockpit's only `/ws` client (`src/hooks/useWebSocket.ts`) always sends that id, so the interception never fired. Every frame now goes to the API's `/ws` as sent; the API answers `sessions.patch`, `.delete` and `.reset` itself |
+| `server/lib/gateway-rpc.ts` and its test, the remote-workspace fallbacks in `routes/workspace.ts` and `routes/file-browser.ts` that called it (`agents.files.list`, `.get`, `.set`), `NERVE_WORKSPACE_REMOTE` (`config.workspaceRemote`) and `NERVE_PUBLIC_ORIGIN` (`config.publicOrigin`) | the API serves no `agents.files.*` method (`nerve_gateway._dispatch` answers it as not wired), so every fallback ended in its failure answer. A workspace directory not on this host now gets that answer directly: the workspace and file-browser reads list it empty and answer 404, and the workspace write answers 500. `NERVE_WORKSPACE_REMOTE` only forced that path; with it gone a file-browser write (when `FILE_BROWSER_WRITABLE=1`) is always to the local directory, which it may create, and the mutations still answer 501 for a directory that is not there. `GATEWAY_TOKEN` stays (the login fallback) |
+| the hand-written side-by-side diff on the Skills page's flag banner (`src/features/skills/skillReview.ts` and its test) | the banner uses the chat's `src/features/chat/DiffView.tsx`, which gained optional panel labels |
+| the hand-copied font files and `@font-face` CSS in `public/fonts/` | the same families, weights and subsets come from the `@fontsource/instrument-sans`, `@fontsource/space-grotesk` and `@fontsource/jetbrains-mono` packages, imported per weight by `src/lib/fonts.ts` and bundled by Vite (still same-origin) |
+| `msw` in `package.json`'s `allowScripts` | it is in no dependency block; it was only an optional peer of `@vitest/mocker`, never installed |
+
 ## Still present from upstream, to be removed or adapted in a later release
 
 Inert here, or only partly used, and kept for now by decision:
 
-- `server/lib/gateway-rpc.ts` (the workspace-file fallback client, and the
-  relay's route for `sessions.patch`, `.delete`, `.reset` and `.compact` from a
-  client that does not identify as the control UI; the cockpit's own client
-  always does, so that route is unused);
 - the connect frame's upstream fields (`client`, `role`, `scopes`, `auth`),
   which the browser still sends and the API ignores, and the API's
   `connect.challenge` event, which the browser waits for before it connects.
@@ -89,8 +96,7 @@ operators and sessions still need before anyone turns it on:
 
 - **`server/routes/cc-file-browser-guard.ts`** is middleware on
   `/api/files/*`: every non-read request (write, rename, move, trash, restore,
-  and the remote `gatewayFilesSet` fallback inside write, agent-scoped
-  workspaces included) answers `403 { ok: false, error: 'the file browser is
+  agent-scoped workspaces included) answers `403 { ok: false, error: 'the file browser is
   read-only' }` unless `FILE_BROWSER_WRITABLE=1` (`config.fileBrowserWritable`
   in `server/lib/config.ts`). The GETs (tree, read, raw, resolve) stay open.
   It is registered inside `file-browser.ts` itself (an import plus
@@ -107,8 +113,8 @@ operators and sessions still need before anyone turns it on:
   deeper is not caught, so keep a custom root scoped to a directory that never
   holds secrets.
 - **Agent sandbox workspaces are unreachable** from it: they live in pods, and
-  the remote fallback (`agents.files.list/get/set` gateway RPC) has no handler
-  in `nerve_gateway.py`. The default root (`~/.openclaw/workspace`) is an
+  the cockpit has no remote-workspace path (the inherited `agents.files.*`
+  fallback, which the API never served, was removed in v2.131.0). The default root (`~/.openclaw/workspace`) is an
   upstream leftover with nothing in it.
 
 When you need to know how something in the cockpit behaves, read

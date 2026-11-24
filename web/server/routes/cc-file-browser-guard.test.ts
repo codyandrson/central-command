@@ -33,7 +33,6 @@ describe('file browser read-only guard', () => {
 
   async function buildApp(writable: boolean, opts?: { remote?: boolean }) {
     vi.resetModules();
-    vi.doUnmock('../lib/gateway-rpc.js');
     const remote = opts?.remote ?? false;
     const home = remote ? path.join(homeDir, 'remote-nonexistent') : homeDir;
     const wsRoot = remote ? path.join(home, '.openclaw', 'workspace') : ws;
@@ -44,24 +43,17 @@ describe('file browser read-only guard', () => {
         memoryDir: path.join(wsRoot, 'memory'),
         fileBrowserRoot: '',
         fileBrowserWritable: writable,
-        workspaceRemote: false,
       },
       SESSION_COOKIE_NAME: 'nerve_session_3000',
     }));
-    const gatewayFilesSet = vi.fn().mockResolvedValue({ ok: true });
     if (remote) {
-      vi.doMock('../lib/gateway-rpc.js', () => ({
-        gatewayFilesList: vi.fn().mockResolvedValue([]),
-        gatewayFilesGet: vi.fn(),
-        gatewayFilesSet,
-      }));
       const detect = await import('../lib/workspace-detect.js');
       detect.clearWorkspaceDetectCache();
     }
     const mod = await import('./file-browser.js');
     const app = new Hono();
     app.route('/', mod.default);
-    return { app, gatewayFilesSet };
+    return { app, wsRoot };
   }
 
   const json = (method: string, p: string, body: object) => ({
@@ -99,13 +91,13 @@ describe('file browser read-only guard', () => {
       expect(await res.json()).toEqual(READ_ONLY);
     });
 
-    it('guards the remote gateway files-set fallback', async () => {
-      const { app, gatewayFilesSet } = await buildApp(false, { remote: true });
+    it('guards a workspace that is not on this host', async () => {
+      const { app, wsRoot } = await buildApp(false, { remote: true });
       const res = await app.request('/api/files/write', json('PUT', '', {
         path: 'AGENTS.md', content: 'x',
       }).init);
       expect(res.status).toBe(403);
-      expect(gatewayFilesSet).not.toHaveBeenCalled();
+      await expect(fs.stat(path.join(wsRoot, 'AGENTS.md'))).rejects.toThrow();
     });
 
     it('keeps the GETs open: tree, resolve and raw', async () => {

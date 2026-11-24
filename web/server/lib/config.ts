@@ -61,7 +61,6 @@ export const config = {
   // profile); anything else = this server does (k3s helper units).
   updateBackend: process.env.CC_UPDATE_BACKEND || '',
   gatewayToken: process.env.GATEWAY_TOKEN || process.env.OPENCLAW_GATEWAY_TOKEN || '',
-  publicOrigin: process.env.NERVE_PUBLIC_ORIGIN || '',
 
   // Agent identity (used in UI)
   agentName: process.env.AGENT_NAME || 'Agent',
@@ -76,7 +75,6 @@ export const config = {
   fileBrowserWritable: process.env.FILE_BROWSER_WRITABLE === '1',
   memoryPath: process.env.MEMORY_PATH || path.join(HOME, '.openclaw', 'workspace', 'MEMORY.md'),
   memoryDir: process.env.MEMORY_DIR || path.join(HOME, '.openclaw', 'workspace', 'memory'),
-  workspaceRemote: process.env.NERVE_WORKSPACE_REMOTE === 'true',
   certPath: path.join(PROJECT_ROOT, 'certs', 'cert.pem'),
   keyPath: path.join(PROJECT_ROOT, 'certs', 'key.pem'),
   bunPath: path.join(HOME, '.bun', 'bin', 'bunx'),

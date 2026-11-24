@@ -4,6 +4,31 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-23 — v2.131.0: The cockpit half of the existing-libraries review: the shared diff view, packaged fonts, zod validation, and the last inherited gateway client removed
+
+- **Why.** Same ruling and review as v2.130.0; this is the cockpit half.
+- **Skills release flags use the cockpit's diff view.** The banner's hand-written comparison is
+  gone; it renders through the `DiffView` the chat, kanban and sessions screens already use (which
+  gained optional column labels). Changed lines show as red and green rows with line numbers.
+- **Fonts are npm packages.** `@fontsource/instrument-sans`, `@fontsource/space-grotesk` and
+  `@fontsource/jetbrains-mono` replace the 41 hand-copied files in `web/public/fonts/`. Same
+  families, weights and subsets, still bundled and served from the cockpit's own origin. **A site
+  that builds the cockpit from an npm mirror needs these three packages on it.**
+- **Request and response shapes are zod schemas.** The speech-model route's PUT body, the list it
+  reads from the API, the release-flag list and the speech-model hook's answer. Status codes the
+  Settings screen reads are unchanged; a body that is not JSON now answers 400 with different words.
+- **The relay really is a relay.** `ws-proxy.ts` still intercepted four session methods for any
+  client that was not the cockpit's own, and the cockpit is the only client; that code is removed.
+  With it go `server/lib/gateway-rpc.ts` (its last callers were workspace and file-browser
+  fallbacks that called methods the API does not serve) and the `NERVE_WORKSPACE_REMOTE` and
+  `NERVE_PUBLIC_ORIGIN` settings, which nothing else read. `web/VENDORED.md` lists the removals.
+- **Left as it is.** The speech-model picker exists in the API and in the cockpit server because
+  each install profile serves speech from a different process; the model lists are already shared.
+- **`web/package-lock.json`** gains the three packages and loses 148 entries left behind by
+  packages removed in earlier releases.
+- **Operator action.** After applying, reload open cockpit tabs. Not verified in a browser: the
+  banner's diff and the fonts' appearance.
+
 ## 2026-11-23 — v2.130.0: Mail and calendar packages follow the provider choice; the database UI logs in as a read-only role; mail text is tool-return metadata; four fixes
 
 - **Why.** The operator ruled on 2026-11-22 that an existing library or framework feature is used

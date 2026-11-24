@@ -20,12 +20,15 @@
  * the plain OpenAI provider's controls apply. `error` set with empty lists means
  * the list could not be read; `selected` still says what is in use.
  *
- * PUT body: { tts?: string | null, stt?: string | null }. A model must be in the
- * list for its mode (422; 502 when the list cannot be read). The env alias, '' or
- * null go back to the default and need no list.
+ * PUT body: { tts?: string | null, stt?: string | null }, checked by `putSchema`
+ * (400 when it is not a JSON object, 422 with the reason as plain text otherwise).
+ * A model must be in the list for its mode (422; 502 when the list cannot be
+ * read). The env alias, '' or null go back to the default and need no list.
  */
 
 import { Hono } from 'hono';
+import { zValidator } from '@hono/zod-validator';
+import { z } from 'zod';
 import { rateLimitGeneral } from '../middleware/rate-limit.js';
 import { config } from '../lib/config.js';
 import {
@@ -57,9 +60,13 @@ interface SpeechLists {
   error: string | null;
 }
 
-function stringList(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
-}
+/** What `GET {gatewayUrl}/api/speech/models` answers, as far as this route reads it. */
+const modelList = z.object({ models: z.array(z.string()).catch([]) }).nullish().catch(null);
+const listsSchema = z.object({
+  tts: modelList,
+  stt: modelList,
+  error: z.string().nullish().catch(null),
+});
 
 /** The two lists, from Central Command. Never throws: a failure is the `error`. */
 async function fetchSpeechLists(): Promise<SpeechLists> {
@@ -69,13 +76,11 @@ async function fetchSpeechLists(): Promise<SpeechLists> {
       signal: AbortSignal.timeout(SPEECH_LIST_TIMEOUT_MS),
     });
     if (!res.ok) return { tts: [], stt: [], error: `Central Command HTTP ${res.status}` };
-    const data = await res.json() as {
-      tts?: { models?: unknown } | null;
-      stt?: { models?: unknown } | null;
-      error?: string | null;
-    };
+    const parsed = listsSchema.safeParse(await res.json());
+    if (!parsed.success) return { tts: [], stt: [], error: 'Central Command answered an unexpected shape' };
+    const data = parsed.data;
     if (data.error) return { tts: [], stt: [], error: data.error };
-    return { tts: stringList(data.tts?.models), stt: stringList(data.stt?.models), error: null };
+    return { tts: data.tts?.models ?? [], stt: data.stt?.models ?? [], error: null };
   } catch (err) {
     console.warn('[speech/models] Central Command list fetch failed:', (err as Error).message);
     return { tts: [], stt: [], error: `Could not reach Central Command: ${(err as Error).message}` };
@@ -100,56 +105,68 @@ app.get('/api/speech/models', rateLimitGeneral, async (c) => {
   return c.json(body(await fetchSpeechLists()));
 });
 
-app.put('/api/speech/models', rateLimitGeneral, async (c) => {
-  let patch: Record<string, unknown>;
-  try {
-    patch = await c.req.json();
-  } catch {
-    return c.text('Body must be JSON', 400);
-  }
-  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
-    return c.text('Body must be a JSON object', 400);
-  }
-  const keys = Object.keys(patch);
-  if (keys.length === 0 || keys.some((k) => k !== 'tts' && k !== 'stt')) {
-    return c.text('Name tts and/or stt, and nothing else', 422);
-  }
+/** A side's value: a model id, or '' / null for the default (trimmed). */
+const sideValue = (key: 'tts' | 'stt') => z
+  .string({ error: `"${key}" must be a string or null` })
+  .trim()
+  .refine((v) => v === '' || SPEECH_MODEL_PATTERN.test(v), `"${key}" is not a model id`)
+  .nullable()
+  .optional();
 
-  const sides = [
-    { key: 'tts', env: 'OPENAI_TTS_MODEL', section: 'openai', mode: 'audio_speech' },
-    { key: 'stt', env: 'OPENAI_STT_MODEL', section: 'transcribe', mode: 'audio_transcription' },
-  ] as const;
+const putSchema = z
+  .strictObject(
+    { tts: sideValue('tts'), stt: sideValue('stt') },
+    { error: 'Name tts and/or stt, and nothing else' },
+  )
+  .refine((o) => Object.keys(o).length > 0, 'Name tts and/or stt, and nothing else');
 
-  // Check every named side before saving any, so a refused half saves nothing.
-  const updates: Array<{ section: 'openai' | 'transcribe'; value: string }> = [];
-  let lists: SpeechLists | null = null;
-  for (const side of sides) {
-    if (!(side.key in patch)) continue;
-    const raw = patch[side.key];
-    if (raw !== null && typeof raw !== 'string') return c.text(`"${side.key}" must be a string or null`, 422);
-    const alias = envAlias(side.env);
-    if (!alias) {
-      return c.text(`${side.env} is not set, so this deployment has no ${side.mode} model to choose`, 409);
+app.put(
+  '/api/speech/models',
+  rateLimitGeneral,
+  zValidator('json', putSchema, (result, c) => {
+    if (result.success) return;
+    const issue = result.error.issues[0];
+    if (issue?.code === 'invalid_type' && issue.path.length === 0) {
+      return c.text('Body must be a JSON object', 400);
     }
-    const value = (raw ?? '').trim();
-    if (!value || value === alias) {
-      updates.push({ section: side.section, value: '' });
-      continue;
+    return c.text(issue?.message || 'Invalid request', 422);
+  }),
+  async (c) => {
+    const patch = c.req.valid('json');
+
+    const sides = [
+      { key: 'tts', env: 'OPENAI_TTS_MODEL', section: 'openai', mode: 'audio_speech' },
+      { key: 'stt', env: 'OPENAI_STT_MODEL', section: 'transcribe', mode: 'audio_transcription' },
+    ] as const;
+
+    // Check every named side before saving any, so a refused half saves nothing.
+    const updates: Array<{ section: 'openai' | 'transcribe'; value: string }> = [];
+    let lists: SpeechLists | null = null;
+    for (const side of sides) {
+      if (!(side.key in patch)) continue;
+      const alias = envAlias(side.env);
+      if (!alias) {
+        return c.text(`${side.env} is not set, so this deployment has no ${side.mode} model to choose`, 409);
+      }
+      const value = patch[side.key] ?? '';
+      if (!value || value === alias) {
+        updates.push({ section: side.section, value: '' });
+        continue;
+      }
+      lists ??= await fetchSpeechLists();
+      if (lists.error) return c.text(`Cannot check the model right now: ${lists.error}`, 502);
+      const listed = side.key === 'tts' ? lists.tts : lists.stt;
+      if (!listed.includes(value)) {
+        return c.text(
+          `"${value}" is not a ${side.mode} model LiteLLM serves; choose one of: ${listed.join(', ') || '(none)'}`,
+          422,
+        );
+      }
+      updates.push({ section: side.section, value });
     }
-    if (!SPEECH_MODEL_PATTERN.test(value)) return c.text(`"${side.key}" is not a model id`, 422);
-    lists ??= await fetchSpeechLists();
-    if (lists.error) return c.text(`Cannot check the model right now: ${lists.error}`, 502);
-    const listed = side.key === 'tts' ? lists.tts : lists.stt;
-    if (!listed.includes(value)) {
-      return c.text(
-        `"${value}" is not a ${side.mode} model LiteLLM serves; choose one of: ${listed.join(', ') || '(none)'}`,
-        422,
-      );
-    }
-    updates.push({ section: side.section, value });
-  }
-  for (const u of updates) updateTTSConfig({ [u.section]: { deploymentModel: u.value } });
-  return c.json(body(lists ?? await fetchSpeechLists()));
-});
+    for (const u of updates) updateTTSConfig({ [u.section]: { deploymentModel: u.value } });
+    return c.json(body(lists ?? await fetchSpeechLists()));
+  },
+);
 
 export default app;

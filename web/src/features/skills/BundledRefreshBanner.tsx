@@ -1,37 +1,13 @@
 import { useState } from 'react';
 import { AlertTriangle, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DiffView } from '@/features/chat/DiffView';
 import {
   bannerText, canEdit, changeWord, rowLabel, takeLabel, type Decision, type ReleaseFlag,
 } from './bundledRefresh';
-import { sideBySideRows } from './skillReview';
 import type { ResolveResult } from './useBundledRefresh';
 
 type Resolve = (flag: ReleaseFlag, decision: Decision, content?: string) => Promise<ResolveResult>;
-
-function SideBySide({ ours, theirs }: { ours: string | null; theirs: string | null }) {
-  const rows = sideBySideRows(ours, theirs);
-  return (
-    <div className="font-mono text-[0.7rem] leading-snug rounded border border-border">
-      <div className="grid grid-cols-2 border-b border-border font-sans text-[0.65rem] font-semibold text-muted-foreground">
-        <span className="px-2 py-1">yours (library)</span>
-        <span className="px-2 py-1 border-l border-border">the release</span>
-      </div>
-      <div className="max-h-72 overflow-auto">
-        {rows.map((r, i) => (
-          <div key={i} className="grid grid-cols-2">
-            <span className={`px-2 whitespace-pre-wrap break-all ${!r.same && r.left !== null ? 'bg-blue-500/10' : ''}`}>
-              {!r.same && r.left !== null && <span aria-hidden className="mr-1">~</span>}{r.left ?? ''}
-            </span>
-            <span className={`px-2 border-l border-border whitespace-pre-wrap break-all ${!r.same && r.right !== null ? 'bg-green-500/10' : ''}`}>
-              {!r.same && r.right !== null && <span aria-hidden className="mr-1">+</span>}{r.right ?? ''}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 function FlagCard({ flag, resolve }: { flag: ReleaseFlag; resolve: Resolve }) {
   const [editing, setEditing] = useState<string | null>(null);
@@ -63,7 +39,15 @@ function FlagCard({ flag, resolve }: { flag: ReleaseFlag; resolve: Resolve }) {
           className="w-full rounded border border-border bg-background px-2 py-1 font-mono text-[0.7rem]"
         />
       ) : (
-        <SideBySide ours={flag.ours} theirs={flag.theirs} />
+        <div className="max-h-72 overflow-auto">
+          <DiffView
+            oldText={flag.ours ?? ''}
+            newText={flag.theirs ?? ''}
+            language="markdown"
+            oldLabel="YOURS (LIBRARY)"
+            newLabel="THE RELEASE"
+          />
+        </div>
       )}
       {error && <p role="alert" className="text-destructive">{error}</p>}
       <div className="flex flex-wrap gap-2">

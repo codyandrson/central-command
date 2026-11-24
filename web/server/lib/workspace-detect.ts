@@ -2,18 +2,15 @@
  * Workspace locality detection.
  *
  * Determines whether the agent workspace directory exists on the local
- * filesystem. When it doesn't (e.g. Nerve running on DGX host while the
- * workspace lives inside an OpenShell sandbox), route handlers fall back
- * to gateway RPC for file access.
+ * filesystem. When it doesn't, the workspace and file-browser routes answer
+ * as for an empty workspace (writes refused).
  *
  * The result is cached with a short TTL to avoid probing the filesystem
- * on every HTTP request. Setting `NERVE_WORKSPACE_REMOTE=true` forces
- * gateway-only mode unconditionally.
+ * on every HTTP request.
  * @module
  */
 
 import { access, mkdir } from 'node:fs/promises';
-import { config } from './config.js';
 
 const CACHE_TTL_MS = 60_000; // 60 seconds
 
@@ -28,7 +25,7 @@ const cache = new Map<string, CacheEntry>();
  * Check whether the workspace root directory exists locally.
  *
  * Returns `true` when the directory is accessible on the local filesystem,
- * `false` when it isn't (or when `NERVE_WORKSPACE_REMOTE=true` is set).
+ * `false` when it isn't.
  *
  * When `ensureDefault` is set and the directory is missing, it is created
  * (`mkdir -p`) and treated as local. Only pass this for a workspace root
@@ -40,9 +37,6 @@ export async function isWorkspaceLocal(
   workspaceRoot: string,
   options?: { ensureDefault?: boolean },
 ): Promise<boolean> {
-  // Env override — always treat as remote
-  if (config.workspaceRemote) return false;
-
   const now = Date.now();
   const cached = cache.get(workspaceRoot);
   if (cached && now < cached.expiresAt) {

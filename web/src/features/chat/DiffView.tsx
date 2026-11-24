@@ -13,6 +13,9 @@ interface DiffViewProps {
   newText: string;
   filePath?: string;
   language?: string;
+  /** Panel headings; default BEFORE / AFTER. */
+  oldLabel?: string;
+  newLabel?: string;
 }
 
 type DiffLineType = 'unchanged' | 'removed' | 'added';
@@ -96,7 +99,7 @@ function computeLineDiff(oldLines: string[], newLines: string[], oldHtmlLines: s
 }
 
 /** Side-by-side or unified diff view for file edit blocks. */
-export function DiffView({ oldText, newText, filePath, language }: DiffViewProps) {
+export function DiffView({ oldText, newText, filePath, language, oldLabel = 'BEFORE', newLabel = 'AFTER' }: DiffViewProps) {
   const lang = language || detectLanguage(filePath);
   
   const { diffLines, stats } = useMemo(() => {
@@ -134,7 +137,7 @@ export function DiffView({ oldText, newText, filePath, language }: DiffViewProps
       )}
       <div className="diff-panels">
         <div className="diff-panel diff-panel-old">
-          <div className="diff-panel-label">BEFORE</div>
+          <div className="diff-panel-label">{oldLabel}</div>
           <pre className="diff-code hljs">
             {diffLines.map((line, i) => {
               const showOld = line.type === 'unchanged' || line.type === 'removed';
@@ -155,7 +158,7 @@ export function DiffView({ oldText, newText, filePath, language }: DiffViewProps
           </pre>
         </div>
         <div className="diff-panel diff-panel-new">
-          <div className="diff-panel-label">AFTER</div>
+          <div className="diff-panel-label">{newLabel}</div>
           <pre className="diff-code hljs">
             {diffLines.map((line, i) => {
               const showNew = line.type === 'unchanged' || line.type === 'added';

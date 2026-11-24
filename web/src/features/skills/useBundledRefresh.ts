@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useGateway } from '@/contexts/GatewayContext';
-import { isFlagList, type Decision, type ReleaseFlag } from './bundledRefresh';
+import { flagListSchema, type Decision, type ReleaseFlag } from './bundledRefresh';
 
 const POLL_MS = 60_000;
 /** Events that can change the answer: a decision is `cc.skill.review_resolved`,
@@ -23,8 +23,8 @@ export function useBundledRefresh() {
 
   const load = useCallback(async () => {
     try {
-      const res = await rpcRef.current('skills.release_flags');
-      if (isFlagList(res)) setFlags(res.items);
+      const res = flagListSchema.safeParse(await rpcRef.current('skills.release_flags'));
+      if (res.success) setFlags(res.data.items);
     } catch {
       // keep the last answer
     }

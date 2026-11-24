@@ -1,32 +1,35 @@
 /**
  * The Skills page's flagged bundled docs (DL-232): the wire type of
- * `GET /api/skills/release-flags` (RPC `skills.release_flags`) and the pure
- * wording the banner renders from it. No network in this file.
+ * `GET /api/skills/release-flags` (RPC `skills.release_flags`) as a zod schema,
+ * and the pure wording the banner renders from it. No network in this file.
  *
  * A flag is a bundled doc the operator edited that a release then changed or
  * removed: the release comparison kept the library's text, and the operator
  * decides here — take the release's text, keep theirs, or edit.
  */
 
+import { z } from 'zod';
+
 export type Decision = 'take_release' | 'keep_mine' | 'edit';
 
-export interface ReleaseFlag {
-  skill_id: string;
-  doc_key: string;
-  release: string;
-  change: 'changed' | 'removed';
-  bundled_path: string;
-  flagged_at: string;
+const releaseFlagSchema = z.object({
+  skill_id: z.string(),
+  doc_key: z.string(),
+  release: z.string(),
+  change: z.enum(['changed', 'removed']),
+  bundled_path: z.string(),
+  flagged_at: z.string(),
   /** The library's text now; null when the doc is retired here. */
-  ours: string | null;
-  ours_hash: string | null;
+  ours: z.string().nullable(),
+  ours_hash: z.string().nullable(),
   /** What the release ships; null when it removed the doc. */
-  theirs: string | null;
-}
+  theirs: z.string().nullable(),
+});
 
-export function isFlagList(v: unknown): v is { items: ReleaseFlag[] } {
-  return !!v && typeof v === 'object' && Array.isArray((v as { items?: unknown }).items);
-}
+export type ReleaseFlag = z.infer<typeof releaseFlagSchema>;
+
+/** The `skills.release_flags` answer: `{ items: ReleaseFlag[] }`. */
+export const flagListSchema = z.object({ items: z.array(releaseFlagSchema) });
 
 export function bannerText(n: number): string {
   return `${n} bundled ${n === 1 ? 'doc you edited was' : 'docs you edited were'} changed by a release — your text was kept`;

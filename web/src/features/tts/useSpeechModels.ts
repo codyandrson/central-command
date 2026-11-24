@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { z } from 'zod';
 
 /**
  * One side of `GET /api/speech/models` (read-aloud or dictation). Served by the
@@ -37,24 +38,22 @@ interface UseSpeechModelsReturn {
   choose: (kind: SpeechKind, model: string) => Promise<void>;
 }
 
-function side(value: unknown): SpeechSide | null {
-  if (!value || typeof value !== 'object') return null;
-  const v = value as Record<string, unknown>;
-  if (typeof v.selected !== 'string' || !v.selected) return null;
-  return {
-    selected: v.selected,
-    default: typeof v.default === 'string' ? v.default : '',
-    models: Array.isArray(v.models) ? v.models.filter((m): m is string => typeof m === 'string') : [],
-  };
-}
+/** A side the route sent, or null when it sent none (or one without a model in use). */
+const sideSchema = z.object({
+  selected: z.string().min(1),
+  default: z.string().catch(''),
+  models: z.array(z.string()).catch([]),
+}).nullable().catch(null);
+
+/** The wire shape above, read leniently: a part that does not fit is absent, not an error. */
+const speechModelsSchema = z.object({
+  tts: sideSchema,
+  stt: sideSchema,
+  error: z.string().nullish().catch(null).transform((e) => e || null),
+}).catch({ tts: null, stt: null, error: null });
 
 function parse(data: unknown): SpeechModels {
-  const d = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
-  return {
-    tts: side(d.tts),
-    stt: side(d.stt),
-    error: typeof d.error === 'string' && d.error ? d.error : null,
-  };
+  return speechModelsSchema.parse(data);
 }
 
 /** Loads the speech model lists and the current choice; `choose` saves one side. */
