@@ -8,7 +8,7 @@ type EventHandler = (msg: GatewayEvent) => void;
 
 interface GatewayContextValue {
   connectionState: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
-  connect: (url: string, token: string) => Promise<void>;
+  connect: () => Promise<void>;
   disconnect: () => void;
   rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
   connectError: string;

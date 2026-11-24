@@ -70,15 +70,6 @@ describe('config module', () => {
     });
   });
 
-  describe('WS_ALLOWED_HOSTS', () => {
-    it('always includes localhost variants', async () => {
-      const { WS_ALLOWED_HOSTS } = await import('./config.js');
-      expect(WS_ALLOWED_HOSTS.has('localhost')).toBe(true);
-      expect(WS_ALLOWED_HOSTS.has('127.0.0.1')).toBe(true);
-      expect(WS_ALLOWED_HOSTS.has('::1')).toBe(true);
-    });
-  });
-
   describe('limits', () => {
     it('has reasonable TTS limit', async () => {
       const { config } = await import('./config.js');

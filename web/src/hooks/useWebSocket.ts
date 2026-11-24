@@ -10,7 +10,7 @@ interface PendingReq {
 
 interface UseWebSocketReturn {
   connectionState: ConnectionState;
-  connect: (url: string, token: string) => Promise<void>;
+  connect: () => Promise<void>;
   disconnect: () => void;
   rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
   onEvent: React.MutableRefObject<((msg: GatewayEvent) => void) | null>;
@@ -67,12 +67,12 @@ export function useWebSocket(): UseWebSocketReturn {
   const onEvent = useRef<((msg: GatewayEvent) => void) | null>(null);
   
   // Auto-reconnect state
-  const credentialsRef = useRef<{ url: string; token: string } | null>(null);
+  const wantConnectedRef = useRef(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttemptRef = useRef(0);
   const intentionalDisconnectRef = useRef(false);
   const hasConnectedRef = useRef(false);
-  const doConnectRef = useRef<((url: string, token: string, isReconnect: boolean) => Promise<void>) | null>(null);
+  const doConnectRef = useRef<((isReconnect: boolean) => Promise<void>) | null>(null);
   const instanceIdRef = useRef(getOrCreateInstanceId());
   const connectionGenRef = useRef(0);
 
@@ -139,7 +139,7 @@ export function useWebSocket(): UseWebSocketReturn {
     });
   }, []);
 
-  const doConnect = useCallback((url: string, token: string, isReconnect: boolean): Promise<void> => {
+  const doConnect = useCallback((isReconnect: boolean): Promise<void> => {
     return new Promise((resolve, reject) => {
       const gen = ++connectionGenRef.current;
       if (!isReconnect) {
@@ -168,11 +168,10 @@ export function useWebSocket(): UseWebSocketReturn {
         // This ensures the connection works regardless of how the user
         // accesses Nerve (direct, SSH tunnel, reverse proxy, HTTPS).
         // The server-side proxy handles Origin headers and auth.
-        // An EMPTY url means "the server's own gateway" — the proxy derives the
-        // target from GATEWAY_URL, so the browser never holds an address.
+        // The proxy dials the server's own gateway (GATEWAY_URL); the browser
+        // never holds or names an address.
         const proxyProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const proxyBase = `${proxyProtocol}//${window.location.host}/ws`;
-        ws = new WebSocket(url ? `${proxyBase}?target=${encodeURIComponent(url)}` : proxyBase);
+        ws = new WebSocket(`${proxyProtocol}//${window.location.host}/ws`);
       } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : String(e);
         setConnectError('Invalid URL: ' + errMsg);
@@ -221,7 +220,7 @@ export function useWebSocket(): UseWebSocketReturn {
               },
               role: 'operator',
               scopes: ['operator.admin', 'operator.read', 'operator.write', 'operator.approvals'],
-              auth: { token },
+              auth: { token: '' }, // the API reads no token; the frame's shape is unchanged
               caps: ['tool-events']
             }
           }));
@@ -292,8 +291,8 @@ export function useWebSocket(): UseWebSocketReturn {
           settleConnectFailure(new Error('WebSocket disconnected before connect completed'));
         }
 
-        // Don't reconnect if intentionally disconnected, no credentials, or never connected
-        if (intentionalDisconnectRef.current || !credentialsRef.current || !hasConnectedRef.current) {
+        // Don't reconnect if intentionally disconnected, not asked to connect, or never connected
+        if (intentionalDisconnectRef.current || !wantConnectedRef.current || !hasConnectedRef.current) {
           setConnectionState('disconnected');
           return;
         }
@@ -312,9 +311,8 @@ export function useWebSocket(): UseWebSocketReturn {
         setConnectionState('reconnecting');
 
         reconnectTimeoutRef.current = setTimeout(() => {
-          const creds = credentialsRef.current;
-          if (creds && !intentionalDisconnectRef.current && doConnectRef.current) {
-            doConnectRef.current(creds.url, creds.token, true).catch(() => {
+          if (wantConnectedRef.current && !intentionalDisconnectRef.current && doConnectRef.current) {
+            doConnectRef.current(true).catch(() => {
               // Error handling is done in onclose/onerror
             });
           }
@@ -348,7 +346,7 @@ export function useWebSocket(): UseWebSocketReturn {
     clearConnectTimeout();
     reconnectAttemptRef.current = 0;
     setReconnectAttempt(0);
-    credentialsRef.current = null;
+    wantConnectedRef.current = false;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -358,14 +356,13 @@ export function useWebSocket(): UseWebSocketReturn {
     setConnectionState('disconnected');
   }, [clearConnectTimeout, clearReconnectTimeout, rejectPending, settleConnectFailure]);
 
-  const connect = useCallback((url: string, token: string): Promise<void> => {
-    // Store credentials for reconnection
-    credentialsRef.current = { url, token };
+  const connect = useCallback((): Promise<void> => {
+    wantConnectedRef.current = true;
     intentionalDisconnectRef.current = false;
     clearReconnectTimeout();
     reconnectAttemptRef.current = 0;
     setReconnectAttempt(0);
-    return doConnect(url, token, false);
+    return doConnect(false);
   }, [doConnect, clearReconnectTimeout]);
 
   return { connectionState, connect, disconnect, rpc, onEvent, connectError, reconnectAttempt };

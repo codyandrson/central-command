@@ -2103,8 +2103,9 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
   client already speaks. The cockpit server has no event stream of its own
   (its SSE endpoint and file watcher were removed, DL-224): the file tree
   loads when opened and has a Refresh button. The relay checks the upgrade
-  request (Origin, the cockpit session cookie, the target: `GATEWAY_URL`, or an
-  allowlisted `?target=`) before it dials anything, then hands it to the
+  request (Origin, the cockpit session cookie) before it dials anything, and
+  the only thing it dials is the `/ws` of `GATEWAY_URL` (a client cannot name
+  another target), then hands it to the
   `http-proxy-3` package, which pipes the two sockets together: frames, close
   codes, keepalive pings (uvicorn's) and the message-size limit
   (`--ws-max-size`) are end to end between the browser and the API. The

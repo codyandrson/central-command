@@ -109,7 +109,7 @@ describe('useWebSocket', () => {
 
       let connectError: Error | null = null;
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch((err: Error) => {
+        result.current.connect().catch((err: Error) => {
           connectError = err;
         });
       });
@@ -149,7 +149,7 @@ describe('useWebSocket', () => {
 
       let connectError: Error | null = null;
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch((err: Error) => {
+        result.current.connect().catch((err: Error) => {
           connectError = err;
         });
       });
@@ -198,7 +198,7 @@ describe('useWebSocket', () => {
       let firstError: Error | null = null;
       let secondError: Error | null = null;
       act(() => {
-        result.current.connect('ws://localhost:8080', 'first-token').catch((err: Error) => {
+        result.current.connect().catch((err: Error) => {
           firstError = err;
         });
       });
@@ -209,7 +209,7 @@ describe('useWebSocket', () => {
 
       // Start a second connect before the first one settles.
       act(() => {
-        result.current.connect('ws://localhost:8080', 'second-token').catch((err: Error) => {
+        result.current.connect().catch((err: Error) => {
           secondError = err;
         });
       });
@@ -227,7 +227,7 @@ describe('useWebSocket', () => {
 
       let connectError: Error | null = null;
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch((err: Error) => {
+        result.current.connect().catch((err: Error) => {
           connectError = err;
         });
       });
@@ -246,7 +246,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       expect(result.current.connectionState).toBe('connecting');
@@ -256,7 +256,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       await act(async () => {
@@ -289,7 +289,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       await act(async () => {
@@ -321,7 +321,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       await act(async () => {
@@ -354,7 +354,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       await act(async () => {
@@ -438,7 +438,7 @@ describe('useWebSocket', () => {
       
       // Initial connection
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       await act(async () => {
@@ -480,7 +480,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       await act(async () => {
@@ -514,7 +514,7 @@ describe('useWebSocket', () => {
       expect(result.current.reconnectAttempt).toBe(0);
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       expect(result.current.reconnectAttempt).toBe(0);
@@ -539,7 +539,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
 
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       await act(async () => {
@@ -607,7 +607,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       await act(async () => {
@@ -663,7 +663,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       await act(async () => {
@@ -700,7 +700,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket());
       
       act(() => {
-        result.current.connect('wss://secure.example.com', 'token').catch(() => {});
+        result.current.connect().catch(() => {});
       });
 
       expect(result.current.connectionState).toBe('connecting');
@@ -711,7 +711,7 @@ describe('useWebSocket', () => {
       
       expect(() => {
         act(() => {
-          result.current.connect('ws://localhost:8080', 'test-token').catch(() => {});
+          result.current.connect().catch(() => {});
         });
       }).not.toThrow();
     });

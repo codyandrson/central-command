@@ -1,16 +1,15 @@
 /**
  * WebSocket proxy — bridges browser clients to the Central Command API's `/ws`.
  *
- * Clients connect to `ws(s)://host:port/ws[?target=<gateway-ws-url>]`. This
- * module runs the cockpit's own checks on the upgrade request (Origin, session
- * cookie, target) and only then hands it to `http-proxy-3`, which opens the
- * upstream connection, relays the API's handshake answer, and pipes the two
- * TCP sockets together. No upstream connection is opened for a refused upgrade.
+ * Clients connect to `ws(s)://host:port/ws`. This module runs the cockpit's own
+ * checks on the upgrade request (Origin, session cookie) and only then hands it
+ * to `http-proxy-3`, which opens the upstream connection, relays the API's
+ * handshake answer, and pipes the two TCP sockets together. No upstream
+ * connection is opened for a refused upgrade.
  *
- * `?target=` is OPTIONAL — omitted, the target is derived from
- * `config.gatewayUrl` (Central Command has exactly one gateway, and the browser
- * should need to know nothing about it). A client-supplied target must be
- * `ws:`/`wss:` on a host in `WS_ALLOWED_HOSTS`.
+ * The upstream is always the `/ws` of `config.gatewayUrl`: Central Command has
+ * exactly one gateway, and nothing the client sends (query, path, headers) can
+ * name another.
  *
  * Because the sockets are piped, the WebSocket session is end to end between
  * the browser and the API: frames, close codes, keepalive pings and the message
@@ -23,7 +22,7 @@ import type { Server as HttpServer, IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { Socket } from 'node:net';
 import { createProxyServer } from 'http-proxy-3';
-import { config, WS_ALLOWED_HOSTS, SESSION_COOKIE_NAME } from './config.js';
+import { config, SESSION_COOKIE_NAME } from './config.js';
 import { verifySession, parseSessionCookie } from './session.js';
 import { isAllowedOrigin } from './origin-utils.js';
 
@@ -41,7 +40,7 @@ const proxy = createProxyServer({
 // Neither is any other credential the client sent. And an upstream that
 // answers with an ordinary HTTP response instead of the WebSocket handshake is
 // NOT relayed: the library would copy that response to the client, which would
-// turn the relay into a way to read any HTTP service on an allowed host. This
+// turn the relay into a way to read whatever HTTP service answers there. This
 // listener is added before the library's own, so the client socket is already
 // destroyed when the library looks at it (it writes only to a live socket).
 proxy.on('proxyReqWs', (proxyReq, _req, socket) => {
@@ -68,45 +67,17 @@ export function closeAllWebSockets(): void {
   liveSockets.clear();
 }
 
-/**
- * The one gateway this cockpit serves, derived from server config.
- * Used when the client sends no `?target=` — server config is trusted, so it
- * skips WS_ALLOWED_HOSTS (which only guards client-supplied targets).
- */
-function defaultTarget(): URL | null {
+/** The one gateway this cockpit serves, from server config; null when unusable. */
+function gatewayTarget(): URL | null {
   try {
     const u = new URL(config.gatewayUrl);
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
     u.pathname = '/ws';
+    u.search = '';
     return u;
   } catch {
     return null;
   }
-}
-
-/** The upstream URL for this request, or the HTTP refusal to send instead. */
-function resolveTarget(req: IncomingMessage): URL | { status: string; why: string } {
-  const target = new URL(req.url || '/', 'http://localhost').searchParams.get('target');
-  if (!target) {
-    return defaultTarget() ?? { status: '502 Bad Gateway', why: 'Missing ?target= param and no usable GATEWAY_URL' };
-  }
-  let url: URL;
-  try {
-    url = new URL(target);
-  } catch {
-    return { status: '400 Bad Request', why: 'Invalid target URL' };
-  }
-  if (!['ws:', 'wss:'].includes(url.protocol) || !WS_ALLOWED_HOSTS.has(url.hostname)) {
-    console.warn(`[ws-proxy] Rejected: target not allowed: ${target}`);
-    return { status: '403 Forbidden', why: 'Target not allowed' };
-  }
-  // A client names a HOST, never a path, query or credentials: the upstream is
-  // always that host's `/ws`.
-  url.pathname = '/ws';
-  url.search = '';
-  url.username = '';
-  url.password = '';
-  return url;
 }
 
 function refuse(socket: Duplex, status: string, why: string): void {
@@ -136,9 +107,9 @@ export function setupWebSocketProxy(server: HttpServer | HttpsServer): void {
       }
     }
 
-    const target = resolveTarget(req);
-    if (!(target instanceof URL)) {
-      refuse(socket, target.status, target.why);
+    const target = gatewayTarget();
+    if (!target) {
+      refuse(socket, '502 Bad Gateway', 'No usable GATEWAY_URL');
       return;
     }
 

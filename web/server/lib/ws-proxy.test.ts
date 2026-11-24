@@ -19,7 +19,6 @@ vi.mock('./config.js', () => ({
     sessionSecret: 'test-secret',
     gatewayUrl: '',
   },
-  WS_ALLOWED_HOSTS: new Set(['localhost', '127.0.0.1', '::1']),
   SESSION_COOKIE_NAME: 'nerve_session_test',
 }));
 
@@ -218,26 +217,18 @@ describe('ws-proxy refusals open no upstream connection', () => {
     expect(up.tcpConnections()).toBe(0);
   });
 
-  it('refuses a ?target= that is malformed, not ws, or not on an allowed host', async () => {
+  it('ignores a client-supplied ?target=: the upstream is always the configured gateway', async () => {
     const up = await startUpstream();
+    const other = await startUpstream();
     const relay = await startRelay();
-    const q = (t: string) => `/ws?target=${encodeURIComponent(t)}`;
-    expect(await refusal(connect(relay, { path: q('not a url') }))).toEqual({ status: 400 });
-    expect(await refusal(connect(relay, { path: q(`http://127.0.0.1:${up.port}/ws`) }))).toEqual({ status: 403 });
-    expect(await refusal(connect(relay, { path: q('ws://gateway.example.com/ws') }))).toEqual({ status: 403 });
-    expect(up.tcpConnections()).toBe(0);
-  });
-
-  it('accepts an allowlisted ?target= and dials exactly that URL', async () => {
-    const up = await startUpstream();
-    const relay = await startRelay();
-    cfg.gatewayUrl = '';
-    const client = connect(relay, { path: `/ws?target=${encodeURIComponent(`ws://localhost:${up.port}/ws`)}` });
+    cfg.gatewayUrl = `http://127.0.0.1:${up.port}`;
+    const client = connect(relay, { path: `/ws?target=${encodeURIComponent(`ws://localhost:${other.port}/ws`)}` });
     await opened(client);
     expect(up.requests[0].url).toBe('/ws');
+    expect(other.tcpConnections()).toBe(0);
   });
 
-  it('never relays an ordinary HTTP response from the target, and pins the path to /ws', async () => {
+  it('never relays an ordinary HTTP response from the gateway, and pins the path to /ws', async () => {
     const seen: string[] = [];
     const http = createServer((req, res) => {
       seen.push(req.url ?? '');
@@ -250,12 +241,13 @@ describe('ws-proxy refusals open no upstream connection', () => {
     });
     const upPort = await listen(http);
     const relay = await startRelay();
+    cfg.gatewayUrl = `http://127.0.0.1:${upPort}/api/secret?q=1`;
     const { connect: tcp } = await import('node:net');
     const got = await new Promise<string>((resolve) => {
       let buf = '';
       const s = tcp(relay, '127.0.0.1', () => {
         s.write(
-          `GET /ws?target=${encodeURIComponent(`ws://localhost:${upPort}/api/secret?q=1`)} HTTP/1.1\r\n` +
+          'GET /ws/api/other?x=1 HTTP/1.1\r\n' +
           `Host: localhost\r\nOrigin: ${ORIGIN}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
           'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n',
         );
@@ -268,7 +260,7 @@ describe('ws-proxy refusals open no upstream connection', () => {
     expect(seen).toEqual(['/ws']);
   });
 
-  it('refuses when there is no ?target= and no usable gateway url', async () => {
+  it('refuses when there is no usable gateway url', async () => {
     const relay = await startRelay();
     cfg.gatewayUrl = '';
     expect(await refusal(connect(relay))).toEqual({ status: 502 });

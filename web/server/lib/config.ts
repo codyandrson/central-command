@@ -140,12 +140,6 @@ export function updateConfig<K extends keyof MutableConfigMap>(
 /** Session cookie name — suffixed with port to avoid collisions when running multiple instances. */
 export const SESSION_COOKIE_NAME = `nerve_session_${config.port}`;
 
-/** WebSocket proxy allowed hostnames (extend via WS_ALLOWED_HOSTS env var, comma-separated) */
-export const WS_ALLOWED_HOSTS = new Set([
-  'localhost', '127.0.0.1', '::1',
-  ...(process.env.WS_ALLOWED_HOSTS?.split(',').map(h => h.trim()).filter(Boolean) ?? []),
-]);
-
 /** Resolve the speech label for the startup banner (TTS and STT share the one endpoint). */
 function speechLabel(): string {
   if (!config.openaiApiKey) return 'off (no OPENAI_API_KEY)';

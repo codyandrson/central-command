@@ -4,6 +4,20 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-24 — v2.133.0: The cockpit's relay dials one gateway; a client cannot name another
+
+- **Removed.** The relay's `?target=` parameter, the `WS_ALLOWED_HOSTS` list that guarded it, and
+  the page-URL `?gateway=` override that fed it (all inherited). The cockpit has one API, fixed at
+  install as `GATEWAY_URL`; the override was the only reason the relay accepted a client-named
+  target, and that target was what made the v2.132.0 gap reachable. The operator's decision.
+- **What it is now.** `web/server/lib/ws-proxy.ts` checks Origin and the session cookie and dials
+  the `/ws` of `GATEWAY_URL`, whatever the client's query or path says. `connect()` in the browser
+  takes no arguments; the connect frame the API receives is unchanged.
+- **Kept.** The v2.132.1 guard (an upstream that answers with ordinary HTTP is never relayed) and
+  its test, now pointed at the configured gateway.
+- **Operator action.** None beyond applying. A `WS_ALLOWED_HOSTS` line in `web/.env` is now
+  ignored and can be deleted; a bookmark carrying `?gateway=` connects to the configured API.
+
 ## 2026-11-23 — v2.132.1: The relay never hands a client an ordinary HTTP response
 
 - **What was wrong in v2.132.0.** `http-proxy-3` copies an upstream's non-WebSocket HTTP response
