@@ -58,21 +58,14 @@ have_image() { local imgs; imgs="$(podman images --format '{{.Repository}}:{{.Ta
 
 # The images.txt component of a CC_IMG_* name (`core` when no row derives it,
 # an operator's extra key included), so a pull failure can name the switch
-# that drops an OPTIONAL image (cc_component_switch_hint). The same derivation
-# p_image_vars and the resolver's img_var make.
+# that drops an OPTIONAL image (cc_component_switch_hint). The rows and the
+# name are deploy/env-lib.sh's (cc_images_rows, cc_img_var), as for
+# p_image_vars and the resolver.
 fetch_image_component() { # fetch_image_component <CC_IMG_var>
-  local want="$1" line n
-  [[ -f "$HERE/images.txt" ]] || { printf 'core'; return 0; }
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%$'\r'}"
-    line="${line%%#*}"
-    [[ -n "${line//[[:space:]]/}" ]] || continue
-    # shellcheck disable=SC2086
-    set -- $line
-    (( $# == 6 )) || continue
-    n="${2^^}"; n="${n//[\/-]/_}"
-    if [[ "CC_IMG_${n#LIBRARY_}" == "$want" ]]; then printf '%s' "$6"; return 0; fi
-  done <"$HERE/images.txt"
+  local want="$1" path comp
+  while read -r path comp; do
+    if [[ "$(cc_img_var "$path")" == "$want" ]]; then printf '%s' "$comp"; return 0; fi
+  done < <(cc_images_rows "$HERE/images.txt")
   printf 'core'
 }
 
@@ -347,19 +340,11 @@ p_cockpit_npm() {
 
 # ── fetch ───────────────────────────────────────────────────────────────────
 # The CC_IMG_* names images.txt implies FOR THESE FLAGS — the resolver's own
-# derivation (its `img_var`), mirrored here so a probe needs no second list of
-# images and a disabled component's image is never demanded.
+# derivation (deploy/env-lib.sh's cc_img_var), so a probe needs no second list
+# of images and a disabled component's image is never demanded.
 p_image_vars() {
-  local line path comp n
-  [[ -f "$HERE/images.txt" ]] || return 0
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%$'\r'}"
-    line="${line%%#*}"
-    [[ -n "${line//[[:space:]]/}" ]] || continue
-    # shellcheck disable=SC2086
-    set -- $line
-    (( $# == 6 )) || continue
-    path="$2"; comp="$6"
+  local path comp
+  while read -r path comp; do
     case "$comp" in
       n8n)          p_off CC_ENABLE_N8N 0 1 && continue ;;
       speech)       p_off CC_ENABLE_SPEECH 1 1 && continue ;;
@@ -367,9 +352,8 @@ p_image_vars() {
       crawler-base) p_off CC_ENABLE_CRAWLER 1 1 && continue ;;
       pgweb)        p_off CC_ENABLE_PGWEB 1 1 && continue ;;
     esac
-    n="${path^^}"; n="${n//[\/-]/_}"
-    printf 'CC_IMG_%s\n' "${n#LIBRARY_}"
-  done <"$HERE/images.txt"
+    printf '%s\n' "$(cc_img_var "$path")"
+  done < <(cc_images_rows "$HERE/images.txt")
   return 0
 }
 

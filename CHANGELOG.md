@@ -4,6 +4,42 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-23 — v2.130.0: Mail and calendar packages follow the provider choice; the database UI logs in as a read-only role; mail text is tool-return metadata; four fixes
+
+- **Why.** The operator ruled on 2026-11-22 that an existing library or framework feature is used
+  wherever appropriate, and had this session's work reviewed against that rule. This release is the
+  Python and deploy half of what the review found, with the bugs it turned up on the way (DL-235).
+- **Provider packages are extras.** `exchangelib` is the `exchange` extra; Google's libraries
+  (now with `httplib2` and `google-auth-httplib2` declared, since the client imports them) are the
+  `google` extra. Both installers read the root `.env` through one function
+  (`deploy/env-lib.sh:cc_python_extras`) and install the extra only where the provider is selected:
+  Exchange when its URL, username and password are set, Google when `CC_GOOGLE_PROVIDER=native`.
+  The API refuses to start, naming the extra, when the selected provider's packages are missing.
+  An existing install keeps what it has (nothing is uninstalled). The developer install is now
+  `pip install -e ".[dev,runtime,exchange,google]"`; without the extras the four provider test
+  files skip. `requests` stays a core dependency.
+- **The database UI is read-only at the server.** pgweb's `--readonly` flag is a keyword list that
+  lets `ALTER`, `REVOKE`, `DO`, `CALL` and `SET` through. pgweb now logs in as `cc_pgweb`, a role
+  whose only privilege is `pg_read_all_data`, on both profiles; `schema.sql` creates it. The role
+  can still create temporary tables and large objects.
+- **Mail text is metadata, not a marker.** `mail_read` and `mail_search` return Pydantic AI's
+  `ToolReturn` with the mail's words in its metadata, and the quote check reads that. This fixes a
+  search snippet containing " — " being cut before it was compared. Sessions stored before this
+  release are read by the old marker rules. The agent no longer sees the `----- mail text -----`
+  line, and context-size estimates leave the metadata out because the model never receives it.
+- **Fixes.** An MCP server id with a trailing newline passed validation (one exported check in
+  `contract/` replaces three copies of the pattern). A malformed MCP URL raised instead of being
+  handed back to the agent as a problem. A proxy registration answered without a server id was
+  recorded anyway, so a later unregister retired the row and left the server on the proxy; it now
+  fails. The native Google client decoded any charset label Python knows, including `utf-7`; it now
+  accepts the WHATWG labels and reads anything else as UTF-8, as the n8n path does.
+- **Smaller.** Two request bodies are validated by Pydantic models instead of by hand (status codes
+  unchanged, wording differs); the decision-index script takes its flag through `argparse`, so an
+  unknown argument is an error; the image-name derivation in the single-node scripts has one copy.
+- **Not done.** The skill frontmatter parser stays hand-written: PyYAML rejects two fixtures whose
+  values contain `: `.
+- **Operator action.** None at apply. Not verified: a fresh install without the extras.
+
 ## 2026-11-22 — v2.129.0: A native Google mail and calendar client on Google's own libraries, selectable in place of n8n; the default is unchanged
 
 - **Why.** n8n, its database and four workflows serve one path: Gmail and Calendar for a Google

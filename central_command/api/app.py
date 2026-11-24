@@ -103,11 +103,29 @@ def _refuse_run_modes() -> None:
     raise RuntimeError("refusing to start: " + "; ".join(f.message() for f in findings))
 
 
+def _refuse_missing_provider_extras() -> None:
+    """Refuse to serve when the mail/calendar provider this deployment selected
+    has its optional packages missing (`integrations/provider_extras.py`,
+    DL-235): the feed and the Executor would otherwise fail on the first mail
+    with an ImportError. One critical line per provider, then the raise."""
+    from central_command.integrations import provider_extras
+
+    problems = provider_extras.missing()
+    if not problems:
+        return
+    log = logging.getLogger(__name__)
+    for problem in problems:
+        log.critical("refusing to start: %s", problem)
+    raise RuntimeError("refusing to start: " + "; ".join(problems))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # First, before anything opens: a deployment never runs on the test model
     # or the dry-run executor (central_command/run_modes.py).
     _refuse_run_modes()
+    # The selected mail/calendar provider's extra is installed (DL-235).
+    _refuse_missing_provider_extras()
     event_log.opened()
     # WARNING+ log records surface in Activity → Events (log.error/log.warning
     # events). Installed here because the handler needs the serving loop.

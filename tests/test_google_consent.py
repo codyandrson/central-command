@@ -28,6 +28,9 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 import pytest
 
+# The `google` extra (DL-235): an install that did not select Google skips this file.
+pytest.importorskip("google_auth_oauthlib")
+
 from central_command import google_consent as consent
 from central_command.integrations import google
 

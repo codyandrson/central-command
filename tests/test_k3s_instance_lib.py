@@ -383,6 +383,7 @@ def test_the_rebuild_finds_uv_under_the_owners_home(tmp_path: Path, stubs: Path)
         f"REPO='{repo}'",
         f"OWNER_HOME='{home}'",
         _fn("patch_graphiti"),
+        _fn("python_extras"),
         _fn("rebuild"),
         "rebuild",
     ])

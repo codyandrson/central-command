@@ -41,7 +41,7 @@ async def test_mail_search_reports_queue_state_per_match(monkeypatch):
     monkeypatch.setattr(email_facade, "list_refs", list_refs)
     monkeypatch.setattr(email_facade, "get_message", get_message)
     monkeypatch.setattr(repo, "mail_items_for_message_ids", items)
-    out = await tools.mail_search(None, "from:jane@example.com")
+    out = (await tools.mail_search(None, "from:jane@example.com")).return_value
     # A match the queue never enrolled (the operator's own reply, here) is
     # listed from the mailbox with the id `mail_read` opens, not only counted:
     # an agent that can see a reply exists and cannot read it asks the
@@ -72,7 +72,7 @@ async def test_mail_read_returns_the_message_as_fed_with_locators(monkeypatch):
                 "text": "From: Jane Doe\nSubject: Data\n\nhello"}
 
     monkeypatch.setattr(repo, "mail_item", item)
-    out = await tools.mail_read(None, "wi_1")
+    out = (await tools.mail_read(None, "wi_1")).return_value
     assert "session=sess_a" in out and "provider_uuid=u1" in out
     assert "audit: concur — casual share" in out
     assert out.endswith("\n\nhello")
@@ -91,7 +91,7 @@ async def test_mail_read_falls_back_to_the_mailbox_and_says_so(monkeypatch):
 
     monkeypatch.setattr(repo, "mail_item", item)
     monkeypatch.setattr(email_facade, "get_message", get_message)
-    out = await tools.mail_read(None, "u9")
+    out = (await tools.mail_read(None, "u9")).return_value
     assert out.startswith("NOT ENROLLED")
 
 
@@ -119,7 +119,7 @@ async def test_mail_read_fetches_an_unhydrated_backlog_row_from_the_mailbox(monk
 
     monkeypatch.setattr(repo, "mail_item", item)
     monkeypatch.setattr(email_facade, "get_message", get_message)
-    out = await tools.mail_read(None, "wi_7")
+    out = (await tools.mail_read(None, "wi_7")).return_value
     assert "wi_7 [UNPROCESSED] not yet fetched" in out
     assert "ENROLLED, not yet fetched by the queue" in out
     assert "Subject: Session" in out and out.endswith("Here's the link")
@@ -143,7 +143,7 @@ async def test_a_provider_refusal_reaches_the_agent_as_text_and_an_outage_still_
             'truncate; narrow scope_query"}', status_code=422)
 
     monkeypatch.setattr(email_facade, "list_refs", refused)
-    out = await tools.mail_search(None, "from:myprotein")
+    out = (await tools.mail_search(None, "from:myprotein")).return_value
     assert out.startswith("mail search failed (")
     assert "pagination cap hit" in out and "narrow it" in out
 
@@ -188,7 +188,7 @@ async def test_mail_search_bounds_the_matches_it_lists_from_outside_the_queue(mo
     monkeypatch.setattr(email_facade, "list_refs", list_refs)
     monkeypatch.setattr(email_facade, "get_message", get_message)
     monkeypatch.setattr(repo, "mail_items_for_message_ids", items)
-    out = await tools.mail_search(None, "in:sent to:b@example.com")
+    out = (await tools.mail_search(None, "in:sent to:b@example.com")).return_value
     assert len(fetched) == tools._MAIL_OUTSIDE_SHOWN == 8
     assert "Not in the queue (8 of 12 shown):" in out
     assert "- u1 [not in the queue] could not be fetched (message gone)" in out

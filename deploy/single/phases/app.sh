@@ -234,8 +234,11 @@ phase_app() {
   # configured index (CC_PYPI_INDEX_URL), air-gapped or not: a mirror needs a
   # version inside each range, not one exact pin. requirements.lock is not
   # read here; it records the set the test gate ran against.
-  step "install" "central_command installed editable with [dev,runtime]" \
-    in_repo uv pip install -e ".[dev,runtime]" || return 1
+  # The extras the root .env selects: the mail/calendar provider's packages
+  # (DL-235), from the ONE shared reader (deploy/env-lib.sh, cc_python_extras).
+  local extras; extras="$(cc_python_extras "$ENV_FILE")"
+  step "install" "central_command installed editable with [$extras]" \
+    in_repo uv pip install -e ".[$extras]" || return 1
 
   # app/graphiti-patches: the five carried graphiti-core fixes (design record
   # 2026-10-04, D7) onto the package the install just put down — after EVERY

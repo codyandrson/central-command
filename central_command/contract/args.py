@@ -76,10 +76,23 @@ _COST_CEILINGS = {
 PLAN_KINDS = ("placeholder", "work_block")
 
 
-# An MCP server id (DL-233): the same shape `mcp.sync_source` has always
-# required (`executor._MCP_SERVER_ID_RE`, `tools._MCP_SERVER_ID_RE`), a
-# Kubernetes-valid slug, with `cc-` reserved for this system's own services.
+# An MCP server id (DL-233): a Kubernetes-valid slug, with `cc-` reserved for
+# this system's own services. THE one definition: the runtime tools, the
+# Executor and the routes all ask `mcp_server_id_ok` (or, where only the shape
+# matters, `mcp_server_id_shape_ok`). Always applied with `fullmatch`: under
+# `.match`, `$` also matches before a trailing newline, so "abc\n" passed.
 MCP_SERVER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
+MCP_RESERVED_PREFIX = "cc-"
+
+
+def mcp_server_id_shape_ok(server_id: object) -> bool:
+    """A string that is the slug, whole."""
+    return isinstance(server_id, str) and MCP_SERVER_ID_RE.fullmatch(server_id) is not None
+
+
+def mcp_server_id_ok(server_id: object) -> bool:
+    """The slug, and not one of this system's own (`cc-`) names."""
+    return mcp_server_id_shape_ok(server_id) and not server_id.startswith(MCP_RESERVED_PREFIX)
 # The upstream transports LiteLLM's MCP gateway reaches a server over by URL
 # (`http` is streamable HTTP). stdio is not one of them on purpose: a server is
 # its own container, registered by URL, never a subprocess of the proxy.
@@ -90,8 +103,7 @@ def _mcp_server_id_problems(capability: str, args: dict) -> list[str]:
     server_id = args.get("server_id")
     if not server_id:
         return []  # `required` already reports it
-    if (not isinstance(server_id, str) or not MCP_SERVER_ID_RE.match(server_id)
-            or server_id.startswith("cc-")):
+    if not mcp_server_id_ok(server_id):
         return [
             f"{capability}: server_id={server_id!r} must be a lowercase slug "
             "(letters, digits and hyphens, 2 to 40 characters, starting and ending "
@@ -108,8 +120,12 @@ def _mcp_url_problems(capability: str, args: dict) -> list[str]:
         return []  # `required` already reports it
     if not isinstance(url, str) or any(c.isspace() for c in url):
         return [f"{capability}: url={url!r} must be one http:// or https:// URL"]
-    parsed = urlsplit(url)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+    except ValueError:  # an unclosed "[" IPv6 literal, say: a problem, never a raise
+        return [f"{capability}: url={url!r} must be an http:// or https:// URL with a host"]
+    if parsed.scheme not in ("http", "https") or not hostname:
         return [f"{capability}: url={url!r} must be an http:// or https:// URL with a host"]
     if parsed.username or parsed.password:
         return [

@@ -151,6 +151,24 @@ def test_a_malformed_registration_is_refused_by_shape(over, fragment):
     assert any(fragment in p for p in problems), problems
 
 
+@pytest.mark.parametrize("url", ["http://[::1", "http://[::1/mcp", "https://[notanip]/mcp"])
+def test_a_url_urlsplit_cannot_parse_is_a_problem_never_a_raise(url):
+    problems = validate_action_args("mcp.server_register", _register_args(url=url))
+    assert any("with a host" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("server_id", ["notes-search\n", "notes\nsearch", " notes-search"])
+def test_a_server_id_with_a_newline_or_blank_is_refused(server_id):
+    """`.match` with a `$` anchor let a trailing newline through; the one
+    predicate matches the whole string."""
+    from central_command.contract.args import mcp_server_id_ok, mcp_server_id_shape_ok
+
+    assert not mcp_server_id_shape_ok(server_id) and not mcp_server_id_ok(server_id)
+    problems = validate_action_args("mcp.server_register", _register_args(server_id=server_id))
+    assert any("server_id=" in p for p in problems), problems
+    assert validate_action_args("mcp.server_unregister", {"server_id": server_id})
+
+
 def test_every_problem_is_returned_at_once():
     problems = validate_action_args("mcp.server_register", {
         "server_id": "Bad_Id", "display_name": "x", "url": "ftp://x", "transport": "grpc",
@@ -246,6 +264,29 @@ async def test_register_records_a_url_row_discovers_tools_at_the_default_gate_an
         # The same default a pipeline server's tools get: never relaxed here.
         tools = await repo.list_mcp_tools(server_id)
         assert [(t["tool_name"], t["default_gate"]) for t in tools] == [("search", "human approval")]
+    finally:
+        await _delete_server(server_id)
+
+
+@needs_pg
+async def test_register_refuses_a_proxy_answer_without_an_id_and_inserts_no_row(monkeypatch):
+    server_id = "url-reg-noid"
+    proxy = _Proxy(monkeypatch)
+
+    async def no_id(server_name, alias, url, transport="http", description=None):
+        proxy.calls.append(("register", server_name))
+        return {"ok": True, "server": {"litellm_server_id": None}}
+
+    monkeypatch.setattr(litellm_client, "register_mcp_server", no_id)
+    try:
+        with pytest.raises(executor.ExecutionFailed, match="answered no server id"):
+            await executor.execute(
+                [_action("mcp.server_register", _register_args(server_id))],
+                approver="human:lee", source_refs=[], proposer="mcp-manager",
+                proposal_id="prop_urlreg_noid",
+            )
+        assert await repo.get_mcp_server(server_id) is None
+        assert not [c for c in proxy.calls if c[0] == "key_add"]
     finally:
         await _delete_server(server_id)
 

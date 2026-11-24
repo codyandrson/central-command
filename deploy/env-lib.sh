@@ -18,7 +18,8 @@
 #
 #   Consumed by: deploy/single/{setup,update,resolve-images,verify,make-secrets,
 #   discover-llm,build-*}.sh and deploy/discover.sh. The k3s profile is NOT in
-#   scope for this record and keeps its own deploy/k3s/.env and web/.env.
+#   scope for this record and keeps its own deploy/k3s/.env and web/.env; its
+#   installers source this file in a subshell for cc_python_extras alone.
 #
 #   Functions (all cc_-prefixed so a caller's own helpers never collide):
 #     cc_get_kv <file> <key>              read one dotenv value, no sourcing
@@ -42,6 +43,9 @@
 #     cc_staged_image_ref <live-ref>      where a STAGED build tags its image
 #     cc_sha256_stdin                     sha256 hex of stdin, three-way fallback
 #     cc_resolve_py                       the Python command the scripts' helpers run on
+#     cc_python_extras <app-env-file>     the pyproject extras the venv installs (DL-235)
+#     cc_img_var <path>                   the CC_IMG_* key of an images.txt image path
+#     cc_images_rows <images.txt>         its well-formed rows as `<path> <component>`
 #     cc_cockpit_npm_inputs / cc_cockpit_build_inputs <repo-root>
 #                                         what the cockpit's npm tree / build is made FROM
 #     cc_cockpit_current <state> <npm|build> <repo-root>   artifacts present + record equal
@@ -770,6 +774,72 @@ cc_resolve_py() {
     command -v "$c" >/dev/null 2>&1 && "$c" -c '' 2>/dev/null && { printf '%s' "$c"; return 0; }
   done
   printf '%s' "uv run --no-project --python 3.12 python"
+}
+
+# ── deploy/single/images.txt: the CC_IMG_* name and the rows ────────────────
+# CC_IMG_<NAME> from an image path: uppercase, / and - become _, LIBRARY_
+# dropped. Path-derived rather than basename-derived because library/python
+# and playwright/python would otherwise collide. THE one derivation:
+# resolve-images.sh writes the keys with it and phases/fetch.sh reads them back
+# with it (tests/test_single_airgap_seams.py mirrors it to check compose.yaml).
+cc_img_var() { # cc_img_var <path>
+  local n="${1^^}"; n="${n//[\/-]/_}"; printf 'CC_IMG_%s' "${n#LIBRARY_}"
+}
+
+# The well-formed rows of an images.txt, one per line as `<path> <component>`:
+# CR stripped (a CRLF checkout), comments and blank lines skipped, a row
+# without its six columns skipped. For the READERS; resolve-images.sh keeps
+# its own loop because it must FAIL a malformed row rather than skip it.
+cc_images_rows() { # cc_images_rows <images.txt>
+  local line
+  [[ -f "$1" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="${line%%#*}"
+    [[ -n "${line//[[:space:]]/}" ]] || continue
+    # shellcheck disable=SC2086
+    set -- $line
+    (( $# == 6 )) || continue
+    printf '%s %s\n' "$2" "$6"
+  done <"$1"
+}
+
+# ── which pyproject extras the app's venv installs (DL-235) ──────────────────
+# The mail and calendar providers' packages are the `exchange` and `google`
+# extras, installed only where the root .env selects that provider. The ONE
+# place both profiles' installers (deploy/k3s/{setup,cc-update}.sh,
+# deploy/single/{setup.sh,phases/app.sh}) get the list from. It mirrors the
+# app's own switches, never a new setting: Exchange is exchange.configured()
+# (CC_EXCHANGE_URL, _USERNAME and _PASSWORD all set), Google is
+# google.selected() (CC_GOOGLE_PROVIDER=native); the API refuses to start,
+# naming the extra, when the selected provider's packages are missing
+# (central_command/integrations/provider_extras.py), so a .env the reader below
+# misreads fails loud rather than silently. tests/test_provider_extras.py runs
+# this function and the Python test over the same files.
+# A value is read as python-dotenv reads it, in the cases a .env holds: one
+# layer of matching quotes removed, else a trailing ` # comment` and the
+# surrounding blanks dropped.
+cc__dotenv_value() { # cc__dotenv_value <raw>  -> the value
+  local v="$1"
+  v="${v#"${v%%[![:space:]]*}"}"
+  if [[ ${#v} -ge 2 && ( "$v" == \"*\" || "$v" == \'*\' ) && "${v:0:1}" == "${v: -1}" ]]; then
+    printf '%s' "${v:1:${#v}-2}"; return 0
+  fi
+  [[ "$v" == \#* ]] && v=""
+  v="${v%%[[:space:]]#*}"
+  v="${v%"${v##*[![:space:]]}"}"
+  printf '%s' "$v"
+}
+
+cc_python_extras() { # cc_python_extras <app-env-file>  -> e.g. dev,runtime,exchange
+  local f="$1" extras="dev,runtime" url user pass provider
+  url="$(cc__dotenv_value "$(cc_get_kv "$f" CC_EXCHANGE_URL)")"
+  user="$(cc__dotenv_value "$(cc_get_kv "$f" CC_EXCHANGE_USERNAME)")"
+  pass="$(cc__dotenv_value "$(cc_get_kv "$f" CC_EXCHANGE_PASSWORD)")"
+  provider="$(cc__dotenv_value "$(cc_get_kv "$f" CC_GOOGLE_PROVIDER)")"
+  [[ -n "$url" && -n "$user" && -n "$pass" ]] && extras+=",exchange"
+  [[ "$provider" == "native" ]] && extras+=",google"
+  printf '%s' "$extras"
 }
 
 # ── the cockpit: what its npm tree and its build were made FROM (P5, F12) ────

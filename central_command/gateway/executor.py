@@ -27,7 +27,7 @@ from central_command.config import settings
 from central_command.contract import ARG_SPECS, TRANSIENT, Action, Provenance, classify_failure, validate_action_args
 from central_command.contract.dependencies import dependencies_for_capability, stamped_dependencies
 from central_command.contract.failures import WorldMoved, is_world_moved
-from central_command.contract.args import COST_FIELDS
+from central_command.contract.args import COST_FIELDS, mcp_server_id_ok
 from central_command.integrations import calendar_facade, confluence, email_facade, graphiti, jira
 from central_command.integrations import litellm as litellm_client
 from central_command.gateway.overrides import OverrideRefused  # noqa: F401 — the backstop's typed refusal
@@ -2067,7 +2067,7 @@ async def _litellm_delete_fallbacks(args: dict, approver: str, proposer: str | N
 # proposal was well-formed when proposed" is not a promise the Executor gets
 # to assume; nothing at this trust boundary trusts an agent's arguments a
 # second time for free.
-_MCP_SERVER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
+# The server id rule is `contract.args.mcp_server_id_ok`, the one definition (DL-233).
 
 # proposal_id has no home in the (args, approver, proposer) handler signature
 # every other capability shares, and adding a fourth positional parameter to
@@ -2158,7 +2158,7 @@ async def _mcp_sync_source(args: dict, approver: str, proposer: str | None) -> s
     make the whole review theater (see the capabilities.py policy note)."""
     server_id = args["server_id"]
     files = args["files"]
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         raise ExecutorError(f"refusing mcp.sync_source: bad server_id {server_id!r}")
     bad = [f.get("path") for f in files if _mcp_bad_path(f.get("path", ""))]
     if bad:
@@ -2287,7 +2287,7 @@ async def _mcp_build_image(args: dict, approver: str, proposer: str | None) -> s
     from central_command.db import repo as db_repo
 
     server_id = args["server_id"]
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         raise ExecutorError(f"refusing mcp.build_image: bad server_id {server_id!r}")
 
     row = await db_repo.get_mcp_server(server_id)
@@ -2431,7 +2431,7 @@ async def _mcp_server_deploy(args: dict, approver: str, proposer: str | None) ->
     from central_command.db import repo as db_repo
 
     server_id = args["server_id"]
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         raise ExecutorError(f"refusing mcp.server_deploy: bad server_id {server_id!r}")
 
     row = await db_repo.get_mcp_server(server_id)
@@ -2528,7 +2528,7 @@ async def _mcp_server_remove(args: dict, approver: str, proposer: str | None) ->
     from central_command.db import repo as db_repo
 
     server_id = args["server_id"]
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         raise ExecutorError(f"refusing mcp.server_remove: bad server_id {server_id!r}")
 
     row = await db_repo.get_mcp_server(server_id)
@@ -2584,7 +2584,7 @@ async def _litellm_register_mcp_server(args: dict, approver: str, proposer: str 
     from central_command.db import repo as db_repo
 
     server_id = args["server_id"]
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         raise ExecutorError(f"refusing litellm.register_mcp_server: bad server_id {server_id!r}")
 
     row = await db_repo.get_mcp_server(server_id)
@@ -2631,8 +2631,7 @@ async def _litellm_register_mcp_server(args: dict, approver: str, proposer: str 
     out = await litellm_client.register_mcp_server(
         litellm_name, litellm_name, url, transport=transport, description=description,
     )
-    s = out.get("server") or {}
-    litellm_id = s.get("litellm_server_id")
+    litellm_id = _registered_server_id("litellm.register_mcp_server", server_id, litellm_name, out)
 
     await db_repo.mark_mcp_server_registered(server_id, litellm_id)
     discovery_note, key_note = await _after_proxy_registration(server_id, litellm_id)
@@ -2644,7 +2643,23 @@ async def _litellm_register_mcp_server(args: dict, approver: str, proposer: str 
     )
 
 
-async def _after_proxy_registration(server_id: str, litellm_id: str | None) -> tuple[str, str]:
+def _registered_server_id(capability: str, server_id: str, litellm_name: str, out: dict) -> str:
+    """The proxy's id for the server it just registered. An answer without one
+    FAILS the execution before anything is recorded: a row with no id could
+    never be taken off the proxy again (an unregister would retire the row and
+    leave the server registered), and the grant to the shared key needs it."""
+    litellm_id = ((out or {}).get("server") or {}).get("litellm_server_id")
+    if not isinstance(litellm_id, str) or not litellm_id:
+        raise ExecutorError(
+            f"{capability} {server_id}: the proxy accepted the registration but "
+            f"answered no server id, so nothing was recorded here — find the "
+            f"server named {litellm_name!r} on the proxy and delete it by hand "
+            "before proposing again"
+        )
+    return litellm_id
+
+
+async def _after_proxy_registration(server_id: str, litellm_id: str) -> tuple[str, str]:
     """What follows a registration the proxy accepted, for a pipeline server
     and a server registered by URL alike (one path, DL-233): tool discovery
     into `mcp_tool`, then the shared key's permission. The caller has already
@@ -2715,7 +2730,7 @@ async def _mcp_server_register(args: dict, approver: str, proposer: str | None) 
     url = args["url"]
     transport = args["transport"]
     display_name = args["display_name"]
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         raise ExecutorError(f"refusing mcp.server_register: bad server_id {server_id!r}")
 
     # World state, read now (the world can change between propose and
@@ -2749,7 +2764,7 @@ async def _mcp_server_register(args: dict, approver: str, proposer: str | None) 
     out = await litellm_client.register_mcp_server(
         litellm_name, litellm_name, url, transport=transport, description=description,
     )
-    litellm_id = (out.get("server") or {}).get("litellm_server_id")
+    litellm_id = _registered_server_id("mcp.server_register", server_id, litellm_name, out)
 
     recorded = await db_repo.insert_mcp_server_registered_by_url(
         server_id, url=url, transport=transport, display_name=display_name,
@@ -2773,7 +2788,7 @@ async def _mcp_server_unregister(args: dict, approver: str, proposer: str | None
     from central_command.db import repo as db_repo
 
     server_id = args["server_id"]
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         raise ExecutorError(f"refusing mcp.server_unregister: bad server_id {server_id!r}")
     row = await db_repo.get_mcp_server(server_id)
     if row is None or row["status"] == "retired":

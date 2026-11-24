@@ -217,48 +217,70 @@ def _as_message_dicts(messages) -> list[dict]:
 def read_mail_sources(messages) -> list[str]:
     """The mail text the session's OWN RECORD shows a mail read tool returned.
 
-    Proof from the record, never from the agent: only a `tool-return` part —
-    written by the framework with what the tool actually returned, never by the
-    model — counts, and only the part of it that is mail. The agent's
-    `source_ref` plays no part, so naming a mail it never opened cannot widen
-    the set; a quote is checked against every mail the session read, each on
-    its own.
+    Proof from the record, never from the agent: only a `tool-return` part of
+    `mail_read` or `mail_search` — written by the framework with what the tool
+    actually returned, never by the model — counts, and only the mail in it.
+    The agent's `source_ref` plays no part, so naming a mail it never opened
+    cannot widen the set; a quote is checked against every mail the session
+    read, each on its own.
 
-      mail_read   — everything after the LAST `tools.MAIL_TEXT_MARKER` in the
-                    return: the message's stored text, the headers and body read
-                    from the mailbox, or one attachment page. What `mail_read`
-                    prints above the marker (a dismissal rationale, the
-                    auditor's verdict, an operator note) is not mail and never
-                    counts. A return with no marker (an error line, or a read
-                    recorded before the marker existed) contributes nothing.
-      mail_search — the snippet of each match listed as NOT in the queue (the
-                    text after the line's last " — "): a few words of the mail
-                    the agent was shown. Queue lines carry a dismissal reason,
-                    so they contribute nothing.
+    The mail is the part's METADATA (`tools.MAIL_TEXT_METADATA_KEY`, a list of
+    strings): the tool put there exactly the mail words it showed — the
+    message's stored text, the headers and body read from the mailbox, one
+    attachment page, or the snippet of each search match outside the queue —
+    and nothing it printed beside them (a dismissal rationale, the auditor's
+    verdict, an operator note, a queue line's reason). The model never sees
+    metadata and cannot write it.
+
+    LEGACY FALLBACK, for sessions persisted before the metadata existed (their
+    parts carry no such key): `_legacy_mail_text` reads the old text form.
     """
-    from central_command.runtime.tools import MAIL_TEXT_MARKER
+    from central_command.runtime.tools import MAIL_TEXT_METADATA_KEY
 
     out: list[str] = []
     for msg in _as_message_dicts(messages):
         for part in msg.get("parts") or []:
             if part.get("part_kind") != "tool-return":
                 continue
-            content = part.get("content")
-            if not isinstance(content, str):
+            if part.get("tool_name") not in (_MAIL_READ_TOOL, _MAIL_SEARCH_TOOL):
                 continue
-            tool = part.get("tool_name")
-            if tool == _MAIL_READ_TOOL:
-                at = content.rfind(MAIL_TEXT_MARKER)
-                if at >= 0:
-                    text = content[at + len(MAIL_TEXT_MARKER):].strip()
-                    if text:
-                        out.append(text)
-            elif tool == _MAIL_SEARCH_TOOL:
-                for line in content.splitlines():
-                    if _OUTSIDE_QUEUE in line and " — " in line:
-                        snippet = line.rsplit(" — ", 1)[1].strip()
-                        if snippet:
-                            out.append(snippet)
+            meta = part.get("metadata")
+            if isinstance(meta, dict) and MAIL_TEXT_METADATA_KEY in meta:
+                texts = meta[MAIL_TEXT_METADATA_KEY]
+                if isinstance(texts, list):
+                    out += [t.strip() for t in texts if isinstance(t, str) and t.strip()]
+                continue
+            out += _legacy_mail_text(part)
+    return out
+
+
+def _legacy_mail_text(part: dict) -> list[str]:
+    """LEGACY: the mail in a tool return recorded before the mail text moved
+    to metadata (DL-230 as first built). Kept only so a session persisted then
+    is still checked; nothing writes this form any more.
+
+      mail_read   — everything after the LAST `tools.LEGACY_MAIL_TEXT_MARKER`
+                    line; a return without it contributes nothing.
+      mail_search — the text after the last " — " of each line listed as NOT
+                    in the queue. A snippet that itself contained " — " was
+                    cut to its tail by this reading (the bug the metadata
+                    ended); it is left as it was for these old records.
+    """
+    from central_command.runtime.tools import LEGACY_MAIL_TEXT_MARKER
+
+    content = part.get("content")
+    if not isinstance(content, str):
+        return []
+    if part.get("tool_name") == _MAIL_READ_TOOL:
+        at = content.rfind(LEGACY_MAIL_TEXT_MARKER)
+        text = content[at + len(LEGACY_MAIL_TEXT_MARKER):].strip() if at >= 0 else ""
+        return [text] if text else []
+    out = []
+    for line in content.splitlines():
+        if _OUTSIDE_QUEUE in line and " — " in line:
+            snippet = line.rsplit(" — ", 1)[1].strip()
+            if snippet:
+                out.append(snippet)
     return out
 
 

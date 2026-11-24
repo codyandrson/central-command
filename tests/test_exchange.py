@@ -34,6 +34,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+
+# The `exchange` extra (DL-235): an install that did not select Exchange skips this file.
+pytest.importorskip("exchangelib")
+
 from exchangelib.attachments import AttachmentId, FileAttachment, ItemAttachment
 from icalendar import Calendar
 

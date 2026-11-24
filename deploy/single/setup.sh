@@ -960,8 +960,9 @@ local_image_state() { # local_image_state <ref> <build-script>
 # what check proves is the resolution fetch performs. Needs a target
 # environment in VIRTUAL_ENV.
 resolve_python_deps() {
-  in_repo uv pip install --dry-run -e ".[dev,runtime]" >&2 \
-    && pass "python" "[dev,runtime] resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
+  local extras; extras="$(cc_python_extras "$ENV_FILE")"   # DL-235: what app installs
+  in_repo uv pip install --dry-run -e ".[$extras]" >&2 \
+    && pass "python" "[$extras] resolves against ${CC_PYPI_INDEX_URL:-PyPI}" \
     || fail "python" "the Python dependencies do not resolve — seam: CC_PYPI_INDEX_URL"
 }
 

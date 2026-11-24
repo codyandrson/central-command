@@ -2047,3 +2047,37 @@ create unique index if not exists day_plan_outcome_active_uq
     on day_plan_outcome (plan_date, issue_key) where superseded_at is null;
 create index if not exists day_plan_outcome_action_key_idx
     on day_plan_outcome (action_key) where action_key is not null;
+
+-- The database UI's login (DL-235): pgweb connects as `cc_pgweb`, a login role
+-- whose ONLY privilege is membership of the predefined `pg_read_all_data`, so
+-- the server itself refuses every write, DDL, grant, DO block or procedure call
+-- pgweb is sent (pgweb's own --readonly flag was a keyword blacklist that let
+-- ALTER, REVOKE, DO, CALL and SET through). The password is an in-tree default
+-- exactly like the spine's own `central_command` one: the gate is reachability
+-- (loopback only), and deploy/k3s/85-pgweb.yaml and deploy/single/compose.yaml
+-- carry the same string.
+-- Roles are CLUSTER-wide while this file runs per database, and it runs on
+-- every release and, under `pytest -n 4`, in four databases of one cluster at
+-- once: so the create tolerates a role that already exists or that a
+-- concurrent run is creating (a concurrent CREATE ROLE or GRANT loses with a
+-- unique violation on the catalogue), and an existing role's password is left
+-- as the operator may have changed it. A database where this file is applied
+-- without the privilege to create roles WARNs rather than failing the release;
+-- pgweb then cannot log in, which is where it shows.
+do $$
+begin
+    begin
+        create role cc_pgweb login password 'cc_pgweb'
+            nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+    exception when duplicate_object or unique_violation then
+        null;
+    end;
+    begin
+        grant pg_read_all_data to cc_pgweb;
+    exception when unique_violation then
+        null;
+    end;
+exception when insufficient_privilege then
+    raise warning 'cc_pgweb: could not create the read-only database UI role (%); pgweb will not log in until a superuser applies schema.sql', sqlerrm;
+end
+$$;

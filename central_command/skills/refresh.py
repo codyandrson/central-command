@@ -50,6 +50,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal, get_args
 
 from central_command import events
 from central_command.config import settings
@@ -58,8 +59,11 @@ from central_command.skills import importer
 from central_command.skills import overlay as skill_overlay
 from central_command.skills.ids import validate_skill_id
 
-# What the operator may decide on a flag.
-DECISIONS = ("take_release", "keep_mine", "edit")
+# What the operator may decide on a flag. The request body
+# (`api/routes.SkillFlagResolveIn`) validates a decision and its `content`
+# against this before `resolve_flag` is reached.
+Decision = Literal["take_release", "keep_mine", "edit"]
+DECISIONS: tuple[str, ...] = get_args(Decision)
 
 
 @dataclass(frozen=True)
@@ -301,7 +305,7 @@ class FlagMoved(ValueError):
 
 
 async def resolve_flag(
-    skill_id: str, doc_key: str, decision: str, *, ours_hash: str | None,
+    skill_id: str, doc_key: str, decision: Decision, *, ours_hash: str | None,
     content: str | None = None,
 ) -> dict:
     """Carry out the operator's decision on a doc's open flag, and close it.
@@ -311,12 +315,10 @@ async def resolve_flag(
     keep_mine: nothing is written but the decision; edit: post `content` as the
     operator's version. `ours_hash` is the library text the operator was shown,
     re-checked under the lock. Raises `repo.SkillDocFlagClosed` when no flag is
-    open and `FlagMoved` (a ValueError) when a text moved.
+    open and `FlagMoved` (a ValueError) when a text moved. The decision's shape
+    (one of `DECISIONS`, `content` with an edit and only with one) is the
+    request body's to check (`api/routes.SkillFlagResolveIn`).
     """
-    if decision not in DECISIONS:
-        raise ValueError(f"decision must be one of {', '.join(DECISIONS)}")
-    if (decision == "edit") != (content is not None):
-        raise ValueError("`content` comes with an edit, and only with an edit")
     key = (skill_id, doc_key)
     flags = {(f["skill_id"], f["doc_key"]): f for f in await repo.list_open_skill_doc_flags()}
     flag = flags.get(key)

@@ -336,5 +336,6 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-232 | A bundled doc is compared with the files on disk at the start of a release; an edited one the release changed keeps its text and is flagged, and nothing gates the update | active | 2026-11-22 | test: `tests/test_skills_release_sync.py::test_a_doc_nobody_edited_follows_the_release` (+8 more) | [process.md](process.md) |
 | DL-233 | Every MCP server is its own container, registered on LiteLLM by URL; registering one is a gated proposal | active | 2026-11-22 | test: `tests/test_mcp_register_by_url.py::test_both_capabilities_are_gated_dispatched_and_wait_on_the_proxy_only` (+8 more) | [process.md](process.md) |
 | DL-234 | Gmail and Google Calendar have a native client behind the same façades; n8n is an option until the operator switches | active | 2026-11-22 | test: `tests/test_google_parity.py::test_email_parity` (+8 more) | [process.md](process.md) |
+| DL-235 | The mail and calendar clients' packages are extras the `.env` selects; pgweb logs in as a read-only role | active | 2026-11-23 | test: `tests/test_provider_extras.py::test_the_table_names_exactly_what_each_extra_declares` (+8 more) | [process.md](process.md) |
 
 <!-- END GENERATED INDEX -->

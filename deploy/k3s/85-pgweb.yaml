@@ -2,18 +2,23 @@
 #
 #   pgweb over Adminer, deliberately: PGWEB_DATABASE_URL auto-connects at
 #   boot, so there is NO login form — the operator clicks the Systems link
-#   and is in. The connection string below is the same in-tree default
-#   credential 20-postgres.yaml already declares; nothing new is disclosed.
-#   The gate is reachability: loopback hostPort only, plus whatever
+#   and is in. The gate is reachability: loopback hostPort only, plus whatever
 #   tailscale-serve entry the operator adds (https:8092 -> 127.0.0.1:8092,
 #   tailnet-only). Single-operator posture — the tailnet is the perimeter.
 #
-#   READ-ONLY since v2.123.0 (operator ruling 2026-11-22). The tailnet decides
-#   who can REACH pgweb; it does not stop a page open in the operator's own
-#   browser from sending pgweb a request, and with no login pgweb cannot tell
-#   that request from a click. --readonly makes pgweb force every query
-#   read-only and refuse write keywords, --lock-session stops it being pointed
-#   at another database, --no-ssh turns off its SSH tunnel feature. Writes go
+#   READ-ONLY since v2.123.0 (operator ruling 2026-11-22), and enforced by
+#   POSTGRES since DL-235. The tailnet decides who can REACH pgweb; it does
+#   not stop a page open in the operator's own browser from sending pgweb a
+#   request, and with no login pgweb cannot tell that request from a click.
+#   So pgweb logs in as `cc_pgweb`, a role whose only privilege is membership
+#   of `pg_read_all_data` (created by schema.sql, which a fresh database and
+#   every release's schema phase both run): the server refuses every write,
+#   DDL statement, grant, DO block and procedure call it is sent. pgweb's own
+#   --readonly flag is NOT used — it is a keyword blacklist that let ALTER,
+#   REVOKE, DO, CALL and SET through. The role's password is an in-tree
+#   default like the spine's own credential in 20-postgres.yaml; it opens
+#   nothing that role can change. --lock-session stops pgweb being pointed at
+#   another database, --no-ssh turns off its SSH tunnel feature. Writes go
 #   through psql. The args are appended to the image's entrypoint.
 #
 #   Stateless, but PINNED to the anchor via the same loopback-hostPort
@@ -44,10 +49,10 @@ spec:
       containers:
         - name: pgweb
           image: docker.io/sosedoff/pgweb:0.17.0
-          args: ["--readonly", "--lock-session", "--no-ssh"]
+          args: ["--lock-session", "--no-ssh"]
           env:
             - name: PGWEB_DATABASE_URL
-              value: postgres://central_command:central_command@postgres:5432/central_command?sslmode=disable
+              value: postgres://cc_pgweb:cc_pgweb@postgres:5432/central_command?sslmode=disable
           ports:
             - name: http
               containerPort: 8081

@@ -721,7 +721,7 @@ async def test_mail_read_lists_each_attachment_as_read_or_not_read(monkeypatch):
         return _row()
 
     monkeypatch.setattr(repo, "mail_item", item)
-    out = await tools.mail_read(None, "wi_9")
+    out = (await tools.mail_read(None, "wi_9")).return_value
     assert "attachments: lease.pdf (read, 9,020 characters); photo.jpg (NOT READ: a picture" in out
 
 
@@ -733,15 +733,15 @@ async def test_mail_read_pages_through_one_attachment_and_says_where_the_next_pa
         return _row()
 
     monkeypatch.setattr(repo, "mail_item", item)
-    first = await tools.mail_read(None, "wi_9", attachment="lease.pdf")
+    first = (await tools.mail_read(None, "wi_9", attachment="lease.pdf")).return_value
     assert first.startswith("attachment 'lease.pdf' of wi_9 — characters 1-8,000 of 9,020")
     assert "next page: offset=8000" in first and "the deposit" not in first
-    last = await tools.mail_read(None, "wi_9", attachment="LEASE.PDF", offset=8000)
+    last = (await tools.mail_read(None, "wi_9", attachment="LEASE.PDF", offset=8000)).return_value
     assert "characters 8,001-9,020 of 9,020" in last and "END of the attachment" in last
     assert last.endswith("the deposit is 4,200")
-    unread = await tools.mail_read(None, "wi_9", attachment="photo.jpg")
+    unread = (await tools.mail_read(None, "wi_9", attachment="photo.jpg")).return_value
     assert "was NOT READ: a picture" in unread
-    missing = await tools.mail_read(None, "wi_9", attachment="nope.doc")
+    missing = (await tools.mail_read(None, "wi_9", attachment="nope.doc")).return_value
     assert "has no attachment named 'nope.doc'" in missing and "lease.pdf (read" in missing
 
 
@@ -759,7 +759,7 @@ async def test_a_mail_read_straight_from_the_mailbox_lists_attachments_by_name_o
 
     monkeypatch.setattr(repo, "mail_item", item)
     monkeypatch.setattr(email_facade, "get_message", get_message)
-    out = await tools.mail_read(None, "u9")
+    out = (await tools.mail_read(None, "u9")).return_value
     assert "ATTACHMENTS, listed but not read here" in out
     assert "- lease.pdf (application/pdf, 4096 bytes)" in out and "sig.png" not in out
 

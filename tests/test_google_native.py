@@ -14,6 +14,9 @@ import os
 import httpx
 import pytest
 
+# The `google` extra (DL-235): an install that did not select Google skips this file.
+pytest.importorskip("googleapiclient")
+
 from central_command.config import settings
 from central_command.contract import dependencies as deps
 from central_command.contract.failures import classify_failure, is_down
@@ -683,3 +686,51 @@ async def test_no_discovery_document_is_fetched_at_run_time(monkeypatch, native)
     fake = _wire(monkeypatch, FakeGoogle().on("GET", f"{GMAIL}/messages", (200, {})))
     await email_facade.list_refs("q")
     assert [gf.path(r) for r in fake.requests] == [gf.TOKEN, f"{GMAIL}/messages"]
+
+
+# --- the charset label is the sender's: WHATWG labels only -------------------
+
+
+def _b64url(raw: bytes) -> str:
+    import base64
+
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+@pytest.mark.parametrize(("label", "raw"), [
+    ("utf-7", b"+AGEAYgBj-"),             # would decode to "abc" under Python's utf-7
+    ("unicode-escape", b"\\u0041\\x42"),  # would decode the escapes
+    ("rot13", b"nop"),
+    ("x-user-defined", b"plain"),
+    ("iso-2022-kr", b"plain"),            # a WHATWG `replacement` label: TextDecoder refuses it
+])
+def test_a_label_outside_whatwg_decodes_as_utf8_like_the_node(label, raw):
+    assert google._decode(_b64url(raw), label) == raw.decode("utf-8")
+
+
+@pytest.mark.parametrize(("label", "raw", "text"), [
+    ("iso-8859-1", b"\x80 caf\xe9", "€ café"),      # WHATWG: windows-1252
+    ("latin1", b"\x80", "€"),
+    ("windows-1252", b"\x80", "€"),
+    ("iso-8859-2", b"\xb1", "ą"),
+    ("koi8-r", b"\xc1", "а"),
+    ("shift_jis", "日本".encode("cp932"), "日本"),
+    ("utf-16le", "hé".encode("utf-16-le"), "hé"),
+])
+def test_a_whatwg_label_decodes_with_its_encoding(label, raw, text):
+    assert google._decode(_b64url(raw), label) == text
+
+
+def test_every_whatwg_row_names_a_python_codec():
+    import codecs
+
+    for codec, labels in google._WHATWG_ENCODINGS:
+        codecs.lookup(codec)
+        assert labels.split() == [lbl.lower() for lbl in labels.split()]
+    assert "utf-7" not in google._WHATWG and "unicode-escape" not in google._WHATWG
+
+
+@pytest.mark.parametrize("value", ["1e20", "-1e300", "nan", "inf", "not a number"])
+def test_an_internal_date_no_date_has_is_the_nodes_invalid_time_value(value):
+    with pytest.raises(google._MailFail, match="Invalid time value"):
+        google._iso_from_ms(value)

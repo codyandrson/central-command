@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated
 
 from pydantic import BeforeValidator
-from pydantic_ai import CallDeferred, ModelRetry, RunContext
+from pydantic_ai import CallDeferred, ModelRetry, RunContext, ToolReturn
 
 from central_command.config import settings as _settings
 from central_command.contract import (
@@ -23,6 +23,7 @@ from central_command.contract import (
     validate_action_args, validate_proposal_shape,
 )
 from central_command.contract import dependencies as _dependencies
+from central_command.contract.args import MCP_SERVER_ID_RE, mcp_server_id_ok
 from central_command.contract.dependencies import TOOL_DEPENDENCY, is_parkable, parkable_reads
 from central_command.contract.failures import is_down as _is_down
 from central_command.integrations import confluence, forge, graphiti, jira, litellm_credstore
@@ -483,14 +484,53 @@ _MODEL_TEXT_CEILING = _settings.max_output_tokens * 4
 # chars/token.
 _MAIL_BODY_CEILING = 8000
 
-# The line `mail_read` writes in front of the mail's own words (body, headers
-# read from the mailbox, an attachment page). Everything after its LAST
-# occurrence in a recorded tool return is mail text, so the quote check can
-# count a mail the session read as a source without counting the dismissal
-# rationale, auditor verdict or operator note printed above it
-# (`proposals.read_mail_sources`, DL-230). The last occurrence, because a mail
-# that happens to contain this line can only shrink what counts, never widen it.
-MAIL_TEXT_MARKER = "----- mail text -----"
+# The mail a read tool showed the agent travels BESIDE the text it returns, as
+# the tool return's metadata (pydantic-ai `ToolReturn(metadata=…)`): the
+# framework writes it into the `tool-return` part of the session's record, the
+# model is never sent it and cannot write it, and it survives the record's
+# JSON round trip, a resume and the working window's clearing and clipping
+# (`runtime/context.py` replaces a part's content, never its metadata). So the
+# quote check (`proposals.read_mail_sources`, DL-230) counts exactly the mail
+# words the session was shown — the body, the headers read from the mailbox,
+# an attachment page, a search snippet — and never the dismissal rationale,
+# auditor verdict or operator note printed beside them, with no text to parse.
+MAIL_TEXT_METADATA_KEY = "mail_text"
+
+# LEGACY: the line `mail_read` wrote in front of the mail's own words before
+# the metadata above (DL-230 as first built). Sessions persisted then carry it,
+# and `proposals.read_mail_sources` still reads them by it; nothing writes it.
+LEGACY_MAIL_TEXT_MARKER = "----- mail text -----"
+
+
+def _mail_tool(fn):
+    """Every answer of a mail read tool is a `ToolReturn[str]`: a plain-text
+    answer (an error line, a miss) carries no mail text. The return annotation
+    stays a string for the tool's schema."""
+    @functools.wraps(fn)
+    async def wrapper(ctx, *args, **kwargs):
+        out = await fn(ctx, *args, **kwargs)
+        if isinstance(out, ToolReturn):
+            return out
+        return ToolReturn(return_value=out, metadata={MAIL_TEXT_METADATA_KEY: []})
+
+    wrapper.__annotations__ = {**fn.__annotations__, "return": ToolReturn[str]}
+    return wrapper
+
+
+def _mail_return(head: str, mail: str) -> ToolReturn:
+    """A mail read's answer: `head` (what the queue knows: state, rationale,
+    verdict, note — never a source) then the mail text, bounded by `_clip`, with
+    the part of the mail text that survived the clip as the metadata."""
+    from central_command.runtime import context
+
+    full = f"{head}\n\n{mail}" if head else mail
+    shown = _clip(full)
+    if shown == full:
+        seen = mail
+    else:
+        seen = mail[:max(0, context.tool_result_ceiling() - (len(full) - len(mail)))]
+    return ToolReturn(return_value=shown,
+                      metadata={MAIL_TEXT_METADATA_KEY: [seen] if seen.strip() else []})
 
 
 def _clip(payload: str, limit: int | None = None) -> str:
@@ -2516,16 +2556,19 @@ def _mail_line(row: dict) -> str:
 _MAIL_OUTSIDE_SHOWN = 8
 
 
-def _outside_line(ref: dict, msg: dict) -> str:
+def _outside_line(ref: dict, msg: dict) -> tuple[str, str]:
+    """The line for a match outside the queue, and its snippet (the mail's own
+    words the line shows, the quote check's source)."""
     snippet = " ".join(str(msg.get("snippet") or "").split())[:160]
     return (f"- {ref['uuid']} [not in the queue] {msg.get('date') or '?'} "
             f"from {msg.get('from') or '?'} to {msg.get('to') or '?'}: "
             f"{msg.get('subject') or '(no subject)'}"
-            + (f" — {snippet}" if snippet else ""))
+            + (f" — {snippet}" if snippet else "")), snippet
 
 
 @parkable_read
-async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
+@_mail_tool
+async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str | ToolReturn:
     """Search the mailbox with a Gmail query and see what the QUEUE knows about
     each match: its work-item id, state (UNPROCESSED / PROCESSED / FOLDED …),
     date, sender, subject, the session that handled it and — when it was
@@ -2580,16 +2623,25 @@ async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str:
     # mailbox, with the id `mail_read` opens.
     queued = {r["message_id"] for r in rows}
     outside = [r for r in refs if ref_message_id(r) not in queued]
+    snippets: list[tuple[str, str]] = []
     if outside:
         lines.append(f"Not in the queue ({min(len(outside), _MAIL_OUTSIDE_SHOWN)} "
                      f"of {len(outside)} shown):")
         for ref in outside[:_MAIL_OUTSIDE_SHOWN]:
             try:
-                lines.append(_outside_line(ref, await email_facade.get_message(ref["uuid"])))
+                line, snippet = _outside_line(ref, await email_facade.get_message(ref["uuid"]))
             except email_facade.EmailFacadeError as e:
                 _raise_if_down(e)
                 lines.append(f"- {ref['uuid']} [not in the queue] could not be fetched ({e})")
-    return _clip("\n".join([head, *lines]))
+                continue
+            lines.append(line)
+            if snippet:
+                snippets.append((line, snippet))
+    shown = _clip("\n".join([head, *lines]))
+    # Only a snippet whose whole line survived the clip was shown to the agent.
+    kept = shown.splitlines()
+    return ToolReturn(return_value=shown, metadata={
+        MAIL_TEXT_METADATA_KEY: [snippet for line, snippet in snippets if line in kept]})
 
 
 def _attachment_brief(rec: dict) -> str:
@@ -2614,8 +2666,9 @@ def _unread_attachment_lines(msg: dict) -> str:
             "queue processes this mail):\n" + lines)
 
 
-def _mail_attachment_page(row: dict, name: str, offset: int) -> str:
-    """One page of one attachment's stored text, with where the next begins."""
+def _mail_attachment_page(row: dict, name: str, offset: int) -> str | tuple[str, str]:
+    """One page of one attachment's stored text, with where the next begins:
+    `(head, page)`, or one line saying why there is no page."""
     records = row.get("attachments") or []
     match = next((r for r in records if r.get("name") == name), None) or next(
         (r for r in records if str(r.get("name") or "").lower() == name.lower()), None
@@ -2642,11 +2695,12 @@ def _mail_attachment_page(row: dict, name: str, offset: int) -> str:
         head += "; END of what was stored (the file itself is longer and the rest was not kept)"
     else:
         head += "; END of the attachment"
-    return f"{head}\n{MAIL_TEXT_MARKER}\n{page}"
+    return head, page
 
 
 @parkable_read
-async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int = 0) -> str:
+@_mail_tool
+async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int = 0) -> str | ToolReturn:
     """Read one mail record from the queue: the email exactly as it was fed to
     the agent that handled it (headers, body and the text of its attachments),
     its current state, the session and covering proposal that decided it, the
@@ -2679,15 +2733,16 @@ async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int
             return (f"{ref!r} is not in the queue, so its attachments have not been read: "
                     "they are read when the queue processes a mail."
                     + _unread_attachment_lines(msg))
-        return _clip(
-            f"NOT ENROLLED in the queue (read from the mailbox)\n{MAIL_TEXT_MARKER}\n"
+        return _mail_return(
+            "NOT ENROLLED in the queue (read from the mailbox)",
             f"From: {msg.get('from')}\nSubject: {msg.get('subject')}\n"
             f"Date: {msg.get('date')}\n\n"
             + _clip(ledger.provider_body(msg), _MAIL_BODY_CEILING)
             + _unread_attachment_lines(msg)
         )
     if (attachment or "").strip():
-        return _clip(_mail_attachment_page(row, attachment.strip(), offset))
+        page = _mail_attachment_page(row, attachment.strip(), offset)
+        return _clip(page) if isinstance(page, str) else _mail_return(*page)
     audit = row.get("audit") or {}
     parts = [
         _mail_line(row),
@@ -2702,7 +2757,6 @@ async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int
         parts.append(f"operator note: {row['operator_note']}")
     if row.get("attachments"):
         parts.append("attachments: " + "; ".join(_attachment_brief(a) for a in row["attachments"]))
-    parts.append("")
     text = row.get("text")
     if not text and row.get("provider_uuid"):
         # Enrolled as a reference only; the body is fetched at claim time. Read
@@ -2716,9 +2770,8 @@ async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int
         except email_facade.EmailFacadeError as e:
             _raise_if_down(e)
             text = f"(not yet fetched by the queue, and the mailbox could not return it: {e})"
-    parts.append(MAIL_TEXT_MARKER)
-    parts.append(_clip(text or "(no message text recorded)", _MAIL_BODY_CEILING))
-    return _clip("\n".join(parts))
+    return _mail_return("\n".join(parts),
+                        _clip(text or "(no message text recorded)", _MAIL_BODY_CEILING))
 
 
 # --- bulk dismissal, agent path (2026-08-17 design, slice 2) ------------------
@@ -3638,7 +3691,7 @@ async def sandbox_reset(ctx: RunContext) -> str:
 # a different version past review. That is the whole trust boundary this slice
 # adds; see gateway/capabilities.py's mcp.sync_source policy note.
 
-_MCP_SERVER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$")
+# The server id rule is `contract.args.mcp_server_id_ok`, the one definition (DL-233).
 
 
 def _mcp_servers_root() -> Path:
@@ -3678,10 +3731,10 @@ async def propose_mcp_sync_source(
     if _settings.test_model:
         return "(test model: propose_mcp_sync_source is a stub — no sandbox runs under the test model)"
 
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         return (
             f"refused: server_id {server_id!r} must match "
-            f"{_MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-' "
+            f"{MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-' "
             "(reserved for this system's own services)"
         )
     if not paths:
@@ -3776,10 +3829,10 @@ async def propose_mcp_build(ctx: RunContext, server_id: str, rationale: str) -> 
     """
     if _settings.test_model:
         return "(test model: propose_mcp_build is a stub — no build runs under the test model)"
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         return (
             f"refused: server_id {server_id!r} must match "
-            f"{_MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-'"
+            f"{MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-'"
         )
 
     proposal = Proposal(
@@ -3819,10 +3872,10 @@ async def propose_mcp_deploy(ctx: RunContext, server_id: str, rationale: str) ->
     """
     if _settings.test_model:
         return "(test model: propose_mcp_deploy is a stub — no deploy runs under the test model)"
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         return (
             f"refused: server_id {server_id!r} must match "
-            f"{_MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-'"
+            f"{MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-'"
         )
 
     proposal = Proposal(
@@ -3871,10 +3924,10 @@ async def propose_mcp_register(
     """
     if _settings.test_model:
         return "(test model: propose_mcp_register is a stub — no registration runs under the test model)"
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         return (
             f"refused: server_id {server_id!r} must match "
-            f"{_MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-'"
+            f"{MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-'"
         )
     if transport not in ("http", "sse"):
         return "refused: transport must be 'http' or 'sse'"
@@ -3921,10 +3974,10 @@ async def propose_mcp_remove(ctx: RunContext, server_id: str, rationale: str) ->
     """
     if _settings.test_model:
         return "(test model: propose_mcp_remove is a stub — no removal runs under the test model)"
-    if not _MCP_SERVER_ID_RE.match(server_id) or server_id.startswith("cc-"):
+    if not mcp_server_id_ok(server_id):
         return (
             f"refused: server_id {server_id!r} must match "
-            f"{_MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-'"
+            f"{MCP_SERVER_ID_RE.pattern!r} and must not start with 'cc-'"
         )
 
     proposal = Proposal(

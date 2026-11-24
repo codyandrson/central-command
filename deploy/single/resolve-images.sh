@@ -197,10 +197,9 @@ component_wanted() { # images.txt's last column vs the flags
   esac
 }
 
-# CC_IMG_<NAME> from the path: uppercase, / and - become _, drop LIBRARY_.
-# Path-derived rather than basename-derived because library/python and
-# playwright/python would otherwise collide.
-img_var() { local n="${1^^}"; n="${n//[\/-]/_}"; printf 'CC_IMG_%s' "${n#LIBRARY_}"; }
+# CC_IMG_<NAME> from the path — deploy/env-lib.sh's cc_img_var, the one
+# derivation the readers in phases/fetch.sh share.
+img_var() { cc_img_var "$1"; }
 
 # docker.io is the PULL name; its registry API lives on registry-1.docker.io.
 # Every other host (including a mirror) answers /v2 on itself.

@@ -17,6 +17,8 @@ check at all. Every text here is synthetic.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -25,13 +27,14 @@ from central_command import events
 from central_command.config import settings
 from central_command.contract import Evidence, Proposal, claim_supported, quote_supported
 from central_command.db import repo
+from central_command.runtime import tools
 from central_command.runtime.proposals import (
     read_mail_sources,
     verified_email_evidence,
     verified_operator_evidence,
 )
 from central_command.runtime.spike_model import _PROPOSAL
-from central_command.runtime.tools import MAIL_TEXT_MARKER
+from central_command.runtime.tools import LEGACY_MAIL_TEXT_MARKER, MAIL_TEXT_METADATA_KEY
 from tests.conftest import needs_pg
 from tests.fake_world import fake_world
 
@@ -133,12 +136,125 @@ def _returned(tool: str, content: str, call_id: str = "c1") -> dict:
     ]}
 
 
-def test_a_mail_read_return_counts_from_the_marker_on():
+def _recorded(tool: str, tool_return) -> list:
+    """The session record a real agent run writes when `tool` answers
+    `tool_return`: the framework, not the test, builds the tool-return part,
+    and it goes through the stored JSON form and back."""
+    from pydantic_ai import Agent
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    def model(messages, info: AgentInfo):
+        if len(messages) == 1:
+            return ModelResponse(parts=[ToolCallPart(tool, {}, tool_call_id="c1")])
+        return ModelResponse(parts=[TextPart("done")])
+
+    agent = Agent(FunctionModel(model))
+    agent.tool_plain(name=tool)(lambda: tool_return)
+    stored = ModelMessagesTypeAdapter.dump_python(agent.run_sync("go").all_messages(), mode="json")
+    return ModelMessagesTypeAdapter.validate_python(stored)
+
+
+def test_a_mail_read_return_counts_its_metadata_and_never_the_head():
+    head = ("- wi_1 [PROCESSED] 2025-01-02 from billing@example.com: Invoice\n"
+            "dismissal rationale: the agent wrote this reason itself\n"
+            "audit: concur — the auditor wrote this")
+    record = _recorded("mail_read", tools._mail_return(head, SOURCE))
+    texts = read_mail_sources(record)
+    assert texts == [SOURCE]
+    assert LEGACY_MAIL_TEXT_MARKER not in str(record)  # nothing writes the old form
+    ev = [Evidence(kind="email", source_ref="wi_1", locator="mail_read", claim=c)
+          for c in ("call the billing desk on weekdays", "the agent wrote this reason itself")]
+    out = verified_email_evidence(ev, texts)
+    assert out[0]["claim_matches_source"] is True
+    assert out[1]["claim_matches_source"] is False
+
+
+def test_metadata_on_another_tool_or_an_empty_list_is_no_source():
+    assert read_mail_sources(_recorded("search_knowledge_graph", tools._mail_return("", SOURCE))) == []
+    # A mail tool's plain answer (an error line) records an empty list, and the
+    # legacy reader is NOT consulted for it, even if the text had the marker.
+    plain = tools.ToolReturn(return_value=f"{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}",
+                             metadata={MAIL_TEXT_METADATA_KEY: []})
+    assert read_mail_sources(_recorded("mail_read", plain)) == []
+
+
+def test_a_parked_read_resumed_with_its_result_keeps_the_metadata():
+    """The parked-read resume hands the re-run read's `ToolReturn` to the run as
+    its deferred result (`api/orchestration.py`, `durable.deferred_results`):
+    the framework records it with its metadata, through the stored form."""
+    from pydantic_ai import Agent, CallDeferred, DeferredToolRequests, DeferredToolResults
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    def model(messages, info: AgentInfo):
+        if len(messages) == 1:
+            return ModelResponse(parts=[ToolCallPart("mail_read", {}, tool_call_id="c1")])
+        return ModelResponse(parts=[TextPart("done")])
+
+    agent = Agent(FunctionModel(model), output_type=[str, DeferredToolRequests])
+
+    @agent.tool_plain(name="mail_read")
+    def parked() -> str:
+        raise CallDeferred(metadata={"kind": "read"})
+
+    adapter = ModelMessagesTypeAdapter
+    paused = adapter.validate_python(adapter.dump_python(agent.run_sync("go").all_messages(), mode="json"))
+    results = DeferredToolResults()
+    results.calls["c1"] = tools._mail_return("head", SOURCE)
+    resumed = agent.run_sync(message_history=paused, deferred_tool_results=results)
+    stored = adapter.dump_python(resumed.all_messages(), mode="json")
+    assert read_mail_sources(stored) == [SOURCE]
+
+
+def test_a_clipped_read_counts_only_the_mail_the_agent_was_shown(monkeypatch):
+    from central_command.runtime import context
+
+    monkeypatch.setattr(context, "tool_result_ceiling", lambda: 60)
+    ret = tools._mail_return("head line", SOURCE)
+    (seen,) = ret.metadata[MAIL_TEXT_METADATA_KEY]
+    assert ret.return_value.startswith("head line\n\n" + seen)
+    assert SOURCE.startswith(seen) and len(seen) == 60 - len("head line\n\n")
+
+
+def test_a_search_snippet_containing_the_line_separator_counts_whole(monkeypatch):
+    """The snippet is the mail's own words, " — " and all: the old text reader
+    split the line at its LAST " — " and kept only the tail."""
+    from central_command.db import repo
+    from central_command.integrations import email_facade
+
+    snippet = "The balance — all of it — was received in full on the 12th."
+
+    async def list_refs(query):
+        return [{"uuid": "u7"}]
+
+    async def items(message_ids):
+        return []
+
+    async def get_message(uuid):
+        return {"date": "2025-01-03", "from": "billing@example.com", "to": "doe@example.com",
+                "subject": "Re: Invoice", "snippet": snippet}
+
+    monkeypatch.setattr(email_facade, "list_refs", list_refs)
+    monkeypatch.setattr(email_facade, "get_message", get_message)
+    monkeypatch.setattr(repo, "mail_items_for_message_ids", items)
+    ret = asyncio.run(tools.mail_search(None, "from:billing@example.com"))
+    assert f"Re: Invoice — {snippet}" in ret.return_value
+    texts = read_mail_sources(_recorded("mail_search", ret))
+    assert texts == [snippet]
+    ev = Evidence(kind="email", source_ref="u7", locator="mail_search",
+                  claim="The balance — all of it — was received in full")
+    assert verified_email_evidence([ev], texts)[0]["claim_matches_source"] is True
+
+
+# LEGACY records (persisted before the mail text moved to metadata): the
+# fallback reader still checks them, with the old rules.
+
+
+def test_a_legacy_mail_read_return_counts_from_the_marker_on():
     content = (
         "- wi_1 [PROCESSED] 2025-01-02 from billing@example.com: Invoice\n"
         "dismissal rationale: the agent wrote this reason itself\n"
         "audit: concur — the auditor wrote this\n"
-        f"{MAIL_TEXT_MARKER}\n{SOURCE}"
+        f"{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}"
     )
     texts = read_mail_sources([_returned("mail_read", content)])
     assert texts == [SOURCE]
@@ -156,11 +272,11 @@ def test_only_a_recorded_tool_return_counts_never_the_agents_own_words():
     messages = [
         {"kind": "response", "parts": [
             {"part_kind": "tool-call", "tool_name": "mail_read",
-             "args": {"ref": f"{MAIL_TEXT_MARKER} {SOURCE}"}, "tool_call_id": "c1"},
-            {"part_kind": "text", "content": f"{MAIL_TEXT_MARKER}\n{SOURCE}"},
+             "args": {"ref": f"{LEGACY_MAIL_TEXT_MARKER} {SOURCE}"}, "tool_call_id": "c1"},
+            {"part_kind": "text", "content": f"{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}"},
         ]},
         # A different tool's return, even with the marker in it, is not a mail read.
-        _returned("search_knowledge_graph", f"{MAIL_TEXT_MARKER}\n{SOURCE}"),
+        _returned("search_knowledge_graph", f"{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}"),
         # A mail_read return with no marker (an error line) adds nothing.
         _returned("mail_read", "'wi_9' is not in the queue and the mailbox could not return it"),
     ]
@@ -183,17 +299,18 @@ def test_pydantic_ai_message_objects_are_read_the_same_way():
     from pydantic_ai.messages import ModelRequest
 
     msgs = [ModelRequest(parts=[ToolReturnPart(
-        tool_name="mail_read", content=f"head\n{MAIL_TEXT_MARKER}\n{SOURCE}", tool_call_id="c1")])]
+        tool_name="mail_read", content=f"head\n{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}", tool_call_id="c1")])]
     assert read_mail_sources(msgs) == [SOURCE]
 
 
-def test_the_mail_read_attachment_page_carries_the_marker():
+def test_the_mail_read_attachment_page_carries_the_page_as_metadata():
     from central_command.runtime.tools import _mail_attachment_page
 
     row = {"id": "wi_1", "attachments": [
         {"name": "terms.txt", "status": "read", "reader": "text", "text": SOURCE}]}
-    page = _mail_attachment_page(row, "terms.txt", 0)
-    assert read_mail_sources([_returned("mail_read", page)]) == [SOURCE]
+    head, page = _mail_attachment_page(row, "terms.txt", 0)
+    assert page == SOURCE and SOURCE not in head
+    assert read_mail_sources(_recorded("mail_read", tools._mail_return(head, page))) == [SOURCE]
 
 
 # --- A2: every operator word of the session -----------------------------------

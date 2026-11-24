@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from central_command import events
 from central_command.contract import EmbedderDown, EmbedderMismatch, is_transient
@@ -28,6 +28,7 @@ from central_command.ingest.feed import feed, sweeper
 from central_command.integrations import neo4j_reader, neo4j_writer
 from central_command.runtime.models import resolve_model, resolve_session_model
 from central_command.skills.ids import SKILL_ID_HELP, SKILL_ID_RE
+from central_command.skills.refresh import Decision
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -2695,14 +2696,15 @@ async def get_proposal(proposal_id: str) -> dict:
         # each proposed file against what is CURRENTLY on disk, through the
         # exact path resolution the Executor writes through, so the diff the
         # reviewer sees is the diff the write will produce.
-        from central_command.gateway.executor import _MCP_SERVER_ID_RE, _mcp_bad_path, _mcp_servers_root
+        from central_command.contract.args import mcp_server_id_shape_ok
+        from central_command.gateway.executor import _mcp_bad_path, _mcp_servers_root
 
         for a in row["actions"]:
             if a.get("capability", "").split("@")[0] != "mcp.sync_source":
                 continue
             args = a.get("arguments") or {}
             server_id = args.get("server_id", "")
-            root = _mcp_servers_root() / server_id if _MCP_SERVER_ID_RE.match(server_id or "") else None
+            root = _mcp_servers_root() / server_id if mcp_server_id_shape_ok(server_id) else None
             diffs = []
             for f in args.get("files") or []:
                 path, proposed = f.get("path", ""), f.get("content", "")
@@ -3339,10 +3341,36 @@ async def list_skill_release_flags_route() -> dict:
 
 
 class SkillFlagResolveIn(BaseModel):
-    decision: str                  # 'take_release' | 'keep_mine' | 'edit'
+    """The operator's decision on one flagged doc. A wrong shape is FastAPI's
+    422 over HTTP; the RPC path builds it through `from_params`, which answers
+    the same 422 with the validator's sentence."""
+    decision: Decision
     content: str | None = None     # the text to post, for 'edit' only
     # The library text the operator was shown; null when the doc is retired here.
     ours_hash: str | None
+
+    @model_validator(mode="after")
+    def _content_only_with_an_edit(self) -> SkillFlagResolveIn:
+        if (self.decision == "edit") != (self.content is not None):
+            raise ValueError("`content` comes with an edit, and only with an edit")
+        return self
+
+    @classmethod
+    def from_params(cls, params: dict) -> SkillFlagResolveIn:
+        try:
+            return cls.model_validate({k: params.get(k) for k in ("decision", "content", "ours_hash")})
+        except ValidationError as e:
+            raise HTTPException(422, validation_sentence(e)) from e
+
+
+def validation_sentence(e: ValidationError) -> str:
+    """A request model's validation errors as one sentence, for the RPC path,
+    which answers a message rather than FastAPI's error list."""
+    return "; ".join(
+        (f"{'.'.join(map(str, err['loc']))}: " if err["loc"] else "")
+        + err["msg"].removeprefix("Value error, ")
+        for err in e.errors()
+    )
 
 
 @router.post("/skills/release-flags/{skill_id}/{doc_key}/resolve")
@@ -3361,8 +3389,6 @@ async def resolve_skill_release_flag_route(
         raise HTTPException(404, str(e)) from e
     except refresh.FlagMoved as e:
         raise HTTPException(409, str(e)) from e
-    except ValueError as e:
-        raise HTTPException(422, str(e)) from e
 
 
 @router.get("/skills/{skill_id}")

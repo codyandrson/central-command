@@ -1048,8 +1048,13 @@ phase_app() {
   # configured index (CC_PYPI_INDEX_URL), air-gapped or not: a mirror needs a
   # version inside each range, not one exact pin. requirements.lock is not
   # read here; it records the set the test gate ran against.
-  step "install" "central_command installed editable with [dev,runtime]" \
-    in_repo uv pip install -e ".[dev,runtime]" || return 1
+  # The extras the root .env selects — the mail/calendar provider's packages
+  # (DL-235) — from the ONE shared reader, deploy/env-lib.sh.
+  local extras
+  extras="$( . "$REPO_ROOT/deploy/env-lib.sh" && cc_python_extras "$APP_ENV" )" \
+    || { fail "install" "could not read the Python extras from $APP_ENV (deploy/env-lib.sh)"; return 1; }
+  step "install" "central_command installed editable with [$extras]" \
+    in_repo uv pip install -e ".[$extras]" || return 1
   # The five carried graphiti-core fixes (deploy/graphiti-patches/, design
   # record 2026-10-04 D7), applied after EVERY dependency install — an install
   # puts back a pristine package. Idempotent; a hunk that matches neither the

@@ -701,9 +701,11 @@ Moved from the root instructions; loads when a matching file is read. How a rule
   mirror that lacks it** (DL-228; DL-179: no profile ships less than another).
   The `pgweb` profile in `compose.yaml` mirrors `deploy/k3s/85-pgweb.yaml`:
   the same image and version (the `images.txt` row, component `pgweb`), the
-  image's own entrypoint with NO added flags (not `--readonly`, no session or
-  bookmark options), the spine's URL in `PGWEB_DATABASE_URL` (an environment
-  variable, never `--url`, so it is in no argv), loopback only at
+  image's own entrypoint with `--lock-session --no-ssh` and no session or
+  bookmark options, the spine's URL in `PGWEB_DATABASE_URL` as the read-only
+  `cc_pgweb` role schema.sql creates (DL-235: Postgres refuses the writes,
+  not pgweb's `--readonly` keyword list; an environment variable, never
+  `--url`, so it is in no argv), loopback only at
   `CC_PGWEB_PORT` (8092, the k3s hostPort). Change one profile's flags and
   the other's in the same release, or neither. `CC_ENABLE_PGWEB` defaults to
   1 in every reader (`load_env`, `resolve-images.sh`, `verify.sh`, `p_flag`

@@ -38,6 +38,9 @@ from pathlib import Path
 import httpx
 import pytest
 
+# The `google` extra (DL-235): an install that did not select Google skips this file.
+pytest.importorskip("googleapiclient")
+
 from central_command.config import settings
 from central_command.contract.failures import classify_failure, is_down
 from central_command.integrations import calendar_facade, email_facade

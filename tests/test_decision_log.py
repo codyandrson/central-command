@@ -24,6 +24,7 @@ and reports every failure at once.
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -64,7 +65,10 @@ def _resolve(rel: str) -> Path | None:
 
 
 def _defines(path: Path, name: str) -> bool:
-    return bool(re.search(rf"^\s*(?:async\s+)?def {re.escape(name)}\s*\(", path.read_text(encoding="utf-8"), re.MULTILINE))
+    """Whether the module defines a function (sync or async, at any nesting) named `name`."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+               for node in ast.walk(tree))
 
 
 def test_the_generator_and_the_area_files_agree_on_the_entry_list():

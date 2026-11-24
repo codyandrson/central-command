@@ -75,34 +75,11 @@ dependencies = [
     # scheme (still the default in 1.110.2, read from the image's
     # encrypt_decrypt_utils.py 2026-11-21), cryptography for the opt-in AES-GCM
     # "v2:gcm:" scheme (general_settings.encryption_algorithm: aes-256-gcm).
-    # On-premises Microsoft Exchange over EWS (integrations/exchange.py). CORE,
-    # not an extra: the mail FEED and the Executor both reach it on a site
-    # whose only mailbox is Exchange, so an install missing it has no mail at
-    # all. It brings NTLM (requests-ntlm/pyspnego), the SOAP layer (lxml,
-    # defusedxml, isodate) and the Windows→IANA time-zone map this codebase
-    # otherwise lacks — 1,000 lines of hand-rolled SOAP is the wrong trade for
-    # one dependency. Capped below 6 because the majors move the Account API.
-    "exchangelib>=5.6,<6",
-    # integrations/exchange.py subclasses requests' HTTPAdapter to carry the
-    # integration trust settings into exchangelib's session.
-    # >=2.33.0: CVE-2026-25645 (GHSA-gc5v-m9x4-r6x2).
-    "requests>=2.33.0,<3",
-    # The native Google client (integrations/google.py, DL-234): Google's own
-    # libraries, not a hand-written request layer. google-api-python-client
-    # builds and pages the Gmail and Calendar calls from its BUNDLED discovery
-    # documents (no run-time fetch); google-auth (with google-auth-httplib2,
-    # which the client pulls in) holds and refreshes the token; and
-    # google-auth-oauthlib's InstalledAppFlow is the one-time consent command
-    # (central_command/google_consent.py). google-auth arrived earlier with
-    # google-genai and is declared because this code imports it itself.
-    "google-api-python-client>=2.200,<3",
-    "google-auth>=2.40,<3",
-    "google-auth-oauthlib>=1.5,<2",
     "pynacl>=1.5,<2",
     "cryptography>=42,<51",
     # SECURITY FLOORS for packages this code does not import itself. A
     # non-air-gapped install and the k3s updater resolve from THIS file
-    # (`uv pip install -e ".[dev,runtime]"`), and an installed version that
+    # (`uv pip install -e ".[dev,runtime,…]"`), and an installed version that
     # still satisfies the bounds is left alone: a fix that lives only in
     # requirements.lock never reaches such a deployment (found 2026-11-21: a
     # deployment updated through v2.108.2 still ran certifi 2026.7.22). So a
@@ -111,6 +88,12 @@ dependencies = [
     # certifi: the trust store for every outbound HTTPS call (GHSA-6q48-6c7w-9gw2).
     "certifi>=2026.10.19,<2027",
     "urllib3>=2.8.0,<3",
+    # requests: inscriptis (above) needs it on every install, and
+    # integrations/exchange.py imports it by name (it subclasses requests'
+    # HTTPAdapter to carry the integration trust settings into exchangelib's
+    # session), so it stays core rather than moving to the `exchange` extra.
+    # >=2.33.0: CVE-2026-25645 (GHSA-gc5v-m9x4-r6x2).
+    "requests>=2.33.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -172,6 +155,47 @@ runtime = [
     "mcp>=1.30,<2",
     "pyjwt>=2.15,<3",
     "authlib>=1.9.1,<2",
+]
+# The mail and calendar providers' client libraries (DL-235). A deployment
+# runs one provider or neither, and each package is imported by name only
+# inside its provider's module, lazily, so the application imports without it.
+# The installers add the extra the root .env selects (deploy/env-lib.sh,
+# cc_python_extras: Exchange when CC_EXCHANGE_URL, _USERNAME and _PASSWORD are
+# set, Google when CC_GOOGLE_PROVIDER=native), and the API refuses to start,
+# naming the extra, when the selected provider's packages are missing
+# (integrations/provider_extras.py). A development or test install takes both:
+# `pip install -e ".[dev,runtime,exchange,google]"`; the suite skips the
+# provider tests whose package is absent, so an installer's test phase still
+# runs on a site that selected one provider or none.
+#
+# On-premises Microsoft Exchange over EWS (integrations/exchange.py), the mail
+# FEED's and the Executor's only path on a site whose mailbox is Exchange. It
+# brings NTLM (requests-ntlm/pyspnego), the SOAP layer (lxml, defusedxml,
+# isodate) and the Windows→IANA time-zone map this codebase otherwise lacks —
+# 1,000 lines of hand-rolled SOAP is the wrong trade for one dependency.
+# Capped below 6 because the majors move the Account API.
+exchange = [
+    "exchangelib>=5.6,<6",
+]
+# The native Google client (integrations/google.py, DL-234): Google's own
+# libraries, not a hand-written request layer. google-api-python-client builds
+# and pages the Gmail and Calendar calls from its BUNDLED discovery documents
+# (no run-time fetch); google-auth (with google-auth-httplib2, which the client
+# pulls in) holds and refreshes the token; and google-auth-oauthlib's
+# InstalledAppFlow is the one-time consent command
+# (central_command/google_consent.py). google-auth also arrives with
+# google-genai through pydantic-ai, and is declared because this code imports
+# it itself; so are httplib2 and google-auth-httplib2, below.
+google = [
+    "google-api-python-client>=2.200,<3",
+    "google-auth>=2.40,<3",
+    "google-auth-oauthlib>=1.5,<2",
+    # Imported by name too: integrations/google.py builds its own
+    # `httplib2.Http` per call (timeout and trust settings) and wraps it with
+    # google_auth_httplib2.AuthorizedHttp. Both arrive with the client; the
+    # floors are the client's own.
+    "httplib2>=0.19,<1",
+    "google-auth-httplib2>=0.2,<1",
 ]
 dev = [
     "pytest>=8,<10",

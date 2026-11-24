@@ -37,6 +37,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, ValidationError, field_validator
 
 from central_command import __version__
 from central_command.api import attachments
@@ -485,6 +486,20 @@ async def _patch_session_thinking(key: str, level) -> dict:
 SESSION_TITLE_MAX = 120
 
 
+class SessionLabelIn(BaseModel):
+    """`sessions.patch {label}`: a string, or null (or empty) to clear the name.
+    Any run of whitespace, a pasted newline included, is one space."""
+    label: str | None = None
+
+    @field_validator("label")
+    @classmethod
+    def _one_short_line(cls, value: str | None) -> str | None:
+        value = " ".join((value or "").split()) or None
+        if value and len(value) > SESSION_TITLE_MAX:
+            raise ValueError(f"name too long ({SESSION_TITLE_MAX} characters max)")
+        return value
+
+
 async def _patch_session_label(key: str, label) -> dict:
     """Rename a conversation (or clear its name, with an empty or null label).
 
@@ -511,14 +526,12 @@ async def _patch_session_label(key: str, label) -> dict:
             "this session is a triage/task run — a run is named by its task; "
             "only a conversation can be renamed",
         )
-    if label is not None and not isinstance(label, str):
-        raise HTTPException(422, "label must be a string (or null to clear it)")
-    # One line: any run of whitespace (a pasted newline included) is one space.
-    new = " ".join((label or "").split()) or None
-    if new and len(new) > SESSION_TITLE_MAX:
-        raise HTTPException(
-            422, f"name too long ({SESSION_TITLE_MAX} characters max)"
-        )
+    try:
+        new = SessionLabelIn(label=label).label
+    except ValidationError as e:
+        from central_command.api.routes import validation_sentence
+
+        raise HTTPException(422, validation_sentence(e)) from e
     old = session.get("operator_title")
     if new == old:
         return {"key": key, "sessionId": lane, "label": new}
@@ -1564,10 +1577,7 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
     if method == "skills.release_flag_resolve":
         return await rest.resolve_skill_release_flag_route(
             params["skill_id"], params["doc_key"],
-            rest.SkillFlagResolveIn(
-                decision=params["decision"], content=params.get("content"),
-                ours_hash=params.get("ours_hash"),
-            ),
+            rest.SkillFlagResolveIn.from_params(params),
         )
     if method == "gaps.list":
         return await rest.list_gaps_route(params.get("limit", 100))

@@ -166,7 +166,7 @@ Dev checkout:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,runtime]"
+pip install -e ".[dev,runtime,exchange,google]"   # the provider extras: Exchange and native Google clients
 cp .env.example .env                 # fill CC_LLM_BASE_URL + CC_LLM_API_KEY for live mode
 
 pytest -q                            # the full suite; needs the dev Postgres below, makes no live model calls

@@ -114,6 +114,12 @@ def run(env_file: Path, port: int, *, out=None, err=None,
               "client in Google Cloud and put its id and secret there (see --help)", file=err)
         return 2
 
+    from central_command.integrations import provider_extras
+
+    refusal = provider_extras.refusal("google")
+    if refusal:
+        print(f"error: {refusal}", file=err)
+        return 2
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     for name in _QUIET:

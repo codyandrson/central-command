@@ -637,6 +637,7 @@ async def test_each_dependencys_reader_answers_a_no_with_honest_text(monkeypatch
 
     patch(monkeypatch, no("the service said no") if no is ValueError else no())
     out = await fn(_park_ctx(), *args)
+    out = getattr(out, "return_value", out)  # the mail tools answer a ToolReturn
 
     assert isinstance(out, str) and out
     assert "failed" in out or "unavailable" in out

@@ -77,16 +77,20 @@ storage for a rollback; remove it by hand once you no longer need one.
   `127.0.0.1:${CC_PGWEB_PORT:-8092}`. It runs the image's own entrypoint with
   no further flags, exactly as on k3s — so it is **not** read-only, and sets no
   session or bookmark options — and auto-connects to the spine at boot from
-  `PGWEB_DATABASE_URL`, an environment variable carrying the spine's in-tree
-  default credential (never an argument, so it is in no process listing), so
+  `PGWEB_DATABASE_URL`, an environment variable carrying the in-tree default
+  credential of `cc_pgweb`, the read-only role `schema.sql` creates (never an
+  argument, so it is in no process listing), so
   there is no login form. The `app` phase writes `CC_DB_UI_URL` as that
   loopback URL, which is the Systems page's "pgweb (DB UI)" link; with the
   switch off it stays empty. `CC_ENABLE_PGWEB=0` is for a registry mirror
   that does not carry the image: the `check` and `fetch` lines for
   `image-sosedoff_pgweb` name both the mirror seam and this switch.
-  It runs read-only (`--readonly --lock-session --no-ssh`): with no login, a
-  loopback bind alone does not stop a page open in the operator's browser from
-  sending it a query, so it is a window into the database and cannot change it.
+  It is read-only because of the ROLE it logs in as (DL-235): `cc_pgweb` holds
+  nothing but `pg_read_all_data`, so Postgres refuses every write, DDL
+  statement, grant, DO block and procedure call; it also runs
+  `--lock-session --no-ssh`. With no login, a loopback bind alone does not
+  stop a page open in the operator's browser from sending it a query, so it is
+  a window into the database and cannot change it.
 
 The **sandbox** has no service: sandbox containers are created on demand by the
 runner, and on this profile the runner's backend is rootless podman rather than

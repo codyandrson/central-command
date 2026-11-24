@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from central_command.api import nerve_gateway, routes
 from central_command.config import settings
@@ -506,14 +506,22 @@ async def test_a_doc_with_no_open_flag_is_a_404_and_a_bad_shape_a_422(clean_skil
             ALPHA, "two", routes.SkillFlagResolveIn(decision="keep_mine", ours_hash=None),
         )
     assert e.value.status_code == 404
-    for body in (
-        routes.SkillFlagResolveIn(decision="merge", ours_hash=None),
-        routes.SkillFlagResolveIn(decision="edit", ours_hash=None),
-        routes.SkillFlagResolveIn(decision="keep_mine", content="x", ours_hash=None),
+    # A bad shape never reaches the handler: the request model refuses it (over
+    # HTTP that is FastAPI's 422; the RPC path's `from_params` answers 422 too).
+    for params in (
+        {"decision": "merge", "ours_hash": None},
+        {"decision": "edit", "ours_hash": None},
+        {"decision": "keep_mine", "content": "x", "ours_hash": None},
+        {"ours_hash": None},
     ):
+        with pytest.raises(ValidationError):
+            routes.SkillFlagResolveIn(**params)
         with pytest.raises(HTTPException) as e:
-            await routes.resolve_skill_release_flag_route(ALPHA, "one", body)
+            routes.SkillFlagResolveIn.from_params(params)
         assert e.value.status_code == 422
+    assert "only with an edit" in str(
+        pytest.raises(HTTPException, routes.SkillFlagResolveIn.from_params,
+                      {"decision": "edit", "ours_hash": None}).value.detail)
 
 
 @needs_pg

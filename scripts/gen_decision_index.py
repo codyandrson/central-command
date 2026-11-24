@@ -24,6 +24,7 @@ Stdlib only: the test suite imports it (`tests/test_decision_log.py`).
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from dataclasses import dataclass, field
@@ -177,7 +178,12 @@ def splice(readme: str, table: str) -> str:
 
 
 def main(argv: list[str]) -> int:
-    check = "--check" in argv
+    parser = argparse.ArgumentParser(
+        prog="gen_decision_index.py",
+        description="Rebuild the index table in docs/decisions/README.md from the area files.")
+    parser.add_argument("--check", action="store_true",
+                        help="write nothing; exit 1 if the committed table is stale")
+    check = parser.parse_args(argv).check
     try:
         entries = load_entries()
         current = README_PATH.read_text(encoding="utf-8")

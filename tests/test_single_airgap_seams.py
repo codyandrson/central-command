@@ -235,9 +235,29 @@ def _compose_refs() -> set[tuple[str, str]]:
 
 
 def _img_var(path: str) -> str:
-    """resolve-images.sh's name derivation, mirrored (its `img_var`)."""
+    """deploy/env-lib.sh's `cc_img_var` (the resolver's `img_var`), mirrored."""
     name = path.upper().replace("/", "_").replace("-", "_")
     return "CC_IMG_" + name.removeprefix("LIBRARY_")
+
+
+def test_the_one_shell_derivation_names_every_row_as_the_mirror_does(tmp_path):
+    """`cc_images_rows` reads the rows and `cc_img_var` names them — the one
+    pair the resolver and fetch.sh's two readers share; CRLF and comments
+    change nothing."""
+    images = ROOT / "deploy" / "single" / "images.txt"
+    text = images.read_text(encoding="utf-8")
+    rows = [ln.split("#", 1)[0].split() for ln in text.splitlines()]
+    expected = [f"{_img_var(r[1])} {r[5]}" for r in rows if len(r) == 6]
+    assert len(expected) > 5
+    script = ('. "$1/deploy/env-lib.sh"; cc_images_rows "$2" | '
+              'while read -r p c; do printf "%s %s\\n" "$(cc_img_var "$p")" "$c"; done')
+    for name, body in (("lf.txt", text), ("crlf.txt", text.replace("\n", "\r\n"))):
+        copy = tmp_path / name
+        copy.write_bytes(body.encode())
+        out = subprocess.run(["bash", "-c", script, "_", str(ROOT), str(copy)],
+                             capture_output=True, text=True, timeout=60, check=False)
+        assert out.returncode == 0, out.stderr
+        assert out.stdout.splitlines() == expected
 
 
 def _dockerfile_bases() -> set[tuple[str, str, str]]:

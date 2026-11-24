@@ -174,9 +174,7 @@ def record_density(model: str | None, messages, usage) -> None:
     tokens = int(getattr(usage, "input_tokens", 0) or 0)
     if tokens <= 0 or not messages:
         return
-    from pydantic_ai.messages import ModelMessagesTypeAdapter
-
-    chars = len(ModelMessagesTypeAdapter.dump_json(messages))
+    chars = _sent_chars(messages)
     lo, hi = DENSITY_BOUNDS
     _density[_model_key(model)] = min(hi, max(lo, chars / tokens))
 
@@ -210,6 +208,32 @@ def tool_result_ceiling() -> int:
     return int(window * TOOL_RESULT_SHARE * density)
 
 
+def _wire_messages(messages) -> list:
+    """The messages as stored JSON dicts, with each tool return's `metadata`
+    left out, because pydantic-ai never sends it to the model (the mail tools
+    keep the mail they showed there, `tools._mail_return`; counting it would
+    make a mail-heavy session look fuller than it is). Takes message objects
+    or their stored dicts."""
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+
+    dumped = (list(messages) if all(isinstance(m, dict) for m in messages)
+              else ModelMessagesTypeAdapter.dump_python(list(messages), mode="json"))
+    return [
+        {**m, "parts": [{**p, "metadata": None} if isinstance(p, dict)
+                        and p.get("part_kind") == "tool-return"
+                        and p.get("metadata") is not None else p
+                        for p in m["parts"]]}
+        if isinstance(m, dict) and isinstance(m.get("parts"), list) else m
+        for m in dumped
+    ]
+
+
+def _sent_chars(messages) -> int:
+    """`len(ModelMessagesTypeAdapter.dump_json(messages))` of what is SENT —
+    the same compact UTF-8 bytes, metadata left out (`_wire_messages`)."""
+    return len(json.dumps(_wire_messages(messages), ensure_ascii=False, separators=(",", ":")).encode())
+
+
 def estimate_tokens(run_state: dict) -> int:
     """Rough input-token size of the LIVE WINDOW (`messages`), never the archive
     — the archive is not sent, so it exerts no pressure.
@@ -222,8 +246,8 @@ def estimate_tokens(run_state: dict) -> int:
     if not messages:
         return 0
     try:
-        return len(json.dumps(messages)) // CHARS_PER_TOKEN
-    except (TypeError, ValueError):
+        return len(json.dumps(_wire_messages(messages))) // CHARS_PER_TOKEN
+    except (TypeError, ValueError, AttributeError):
         return 0
 
 
@@ -377,9 +401,7 @@ async def load_settings() -> dict:
 def estimate_messages(messages, model: str | None = None) -> int:
     """`estimate_tokens` for pydantic-ai message objects, at the measured
     density of `model` when one is known."""
-    from pydantic_ai.messages import ModelMessagesTypeAdapter
-
-    return int(len(ModelMessagesTypeAdapter.dump_json(messages)) / density_for(model))
+    return int(_sent_chars(messages) / density_for(model))
 
 
 def drop_thinking(messages):

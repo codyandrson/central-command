@@ -362,7 +362,7 @@ by re-running the script, never by editing the file.
 ```bash
 cd <checkout>
 python3 -m venv .venv && source .venv/bin/activate   # uv-managed CPython 3.12
-pip install -e ".[dev,runtime]"
+pip install -e ".[dev,runtime]"   # add ,exchange or ,google when the root .env selects that provider (DL-235)
 python scripts/apply_graphiti_patches.py             # AFTER every install
 (cd web && npm install --no-package-lock && npm run build)   # npm >= 11; resolves package.json, leaves the lockfile alone
 ```

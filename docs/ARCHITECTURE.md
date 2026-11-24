@@ -857,10 +857,15 @@ stateDiagram-v2
   ellipsis or run together; framing words, paraphrase, reordering and shorter
   pieces fail. Each source is tried on its own. The sources: the claimed mail's
   stored text and read attachments, its surveyed siblings (first draft), and
-  every mail the run's OWN record shows `mail_read` returned (the text after
-  `tools.MAIL_TEXT_MARKER` in a `tool-return` part, never the agent's
-  `source_ref`) or a `mail_search` snippet of a mail outside the queue
-  (`proposals.read_mail_sources`); for an operator quote, every word
+  every mail the run's OWN record shows `mail_read` returned or a `mail_search`
+  snippet of a mail outside the queue, read from the `tool-return` part's
+  METADATA (`tools.MAIL_TEXT_METADATA_KEY`: the tool returns a pydantic-ai
+  `ToolReturn` whose metadata is exactly the mail text it showed; the model is
+  never sent it and cannot write it, the record keeps it through a resume and
+  the working window's clearing, and the window's size estimate leaves it out),
+  never the agent's `source_ref` (`proposals.read_mail_sources`; a session
+  recorded before the metadata is read by its old text marker, a labelled
+  legacy fallback); for an operator quote, every word
   `repo.operator_words_for_session` attributes to the operator in the session
   (the current rejection first), and a match repoints the entry at the event it
   matched. The first draft checks in `run.ingest_and_propose`; every later leg —
@@ -1502,7 +1507,18 @@ draft step, no separate invitation step and no mail trash.
   trust knobs) in `asyncio.to_thread`; google-auth holds and refreshes the
   token, a 401 refreshes once and re-sends, as n8n's credential did; the
   consent is google-auth-oauthlib's `InstalledAppFlow` with a loopback
-  redirect.
+  redirect. A part's charset label selects a codec only when it is a WHATWG
+  label (`google._WHATWG`, what n8n's `TextDecoder` accepted); any other label
+  decodes as UTF-8, as the workflow's fall-through did.
+- **The provider clients' packages are extras the `.env` selects** (DL-235).
+  `exchangelib` is the `exchange` extra and the Google libraries the `google`
+  extra; each is imported only inside its provider's modules. The installers
+  add the extra the root `.env` selects (`cc_python_extras` in `deploy/env-lib.sh`:
+  Exchange configured, or `CC_GOOGLE_PROVIDER=native`), and the API refuses to
+  start, naming the extra, when a selected provider's packages are missing
+  (`integrations/provider_extras.py`, `api/app.py`). A development install
+  takes both (`.[dev,runtime,exchange,google]`); the provider test files skip
+  when their package is absent.
   `tests/test_google_parity.py` runs the shipped workflow JavaScript and the
   native path against one Google stub and asserts the callers see the same
   thing. n8n stays installed and remains the default until the operator
@@ -2147,7 +2163,7 @@ still present are in [`web/VENDORED.md`](../web/VENDORED.md) (DL-224).
 
 | Surface | What it is | Entry points | Read first |
 |---|---|---|---|
-| `deploy/single/` | Single-node profile on Compose (`compose.yaml`). Unconditional services: postgres, litellm with its db, neo4j; behind profiles: n8n (with its db), the crawler, speech and pgweb (the database UI over the spine, on by default with `CC_ENABLE_PGWEB` and loopback-only like the k3s profile's `85-pgweb`, DL-228). Deterministic driver: its phases and steps are declared once, in `steps.tsv` (run order), and recorded in a ledger as each completes; the operator's procedure is the generated [`CHECKLIST.md`](../deploy/single/CHECKLIST.md); exit codes 0/1/2/3 (3 = stopped for the operator) | `setup.sh`, `update.sh` (`init` · `import` · `stage` · `plan` · `apply` · `rollback`), `resolve-images.sh` + `images.txt` (constraint / locked tag / locked digest) | [`deploy/single/README.md`](../deploy/single/README.md), [deploy-single rules](../.claude/rules/deploy-single.md) |
+| `deploy/single/` | Single-node profile on Compose (`compose.yaml`). Unconditional services: postgres, litellm with its db, neo4j; behind profiles: n8n (with its db), the crawler, speech and pgweb (the database UI over the spine, on by default with `CC_ENABLE_PGWEB` and loopback-only like the k3s profile's `85-pgweb`, DL-228; on both profiles it logs in as `cc_pgweb`, the role `schema.sql` creates holding only `pg_read_all_data`, so Postgres refuses its writes, DL-235). Deterministic driver: its phases and steps are declared once, in `steps.tsv` (run order), and recorded in a ledger as each completes; the operator's procedure is the generated [`CHECKLIST.md`](../deploy/single/CHECKLIST.md); exit codes 0/1/2/3 (3 = stopped for the operator) | `setup.sh`, `update.sh` (`init` · `import` · `stage` · `plan` · `apply` · `rollback`), `resolve-images.sh` + `images.txt` (constraint / locked tag / locked digest) | [`deploy/single/README.md`](../deploy/single/README.md), [deploy-single rules](../.claude/rules/deploy-single.md) |
 | `deploy/k3s/` | Multi-node profile: numbered manifests `00-namespace`, `20-postgres`, `30-litellm`, `31-litellm-rbac`, `40-graph`, `50-n8n`, `60-sandbox`, `61-mcp`, `70-crawler`, `80-vlogs`, `85-pgweb`, `90-speech`; placement split by state (stateful pinned, stateless floats), pinned services exposed on a loopback-only `hostPort` and floating ones (LiteLLM, the crawler, speech, VictoriaLogs) through a `LoadBalancer` Service that k3s's ServiceLB binds on every node (the `CC_*` endpoints the application uses still resolve to loopback), the API / cockpit / sandbox-runner as systemd units outside the cluster. Same driver contract, six phases: validate · preflight · llm · stack · app · verify | `setup.sh`, `verify.sh` (sections A-E under the admin key, then F, the application self-check, on every run), `cc-update.sh`, `backup.sh` (besides the databases and the keys file it copies the containers' env file, the application's root env file and the cockpit's env file byte for byte, 0600, as `env_`, `env-app_` and `env-web_` copies; one that is missing or empty fails loudly by store name), `make-secrets.sh`, `mint-keys.sh`, `build-*-image.sh` | [`deploy/k3s/README.md`](../deploy/k3s/README.md), [deploy-k3s rules](../.claude/rules/deploy-k3s.md) |
 | `deploy/shared/` | Assets both deployment substrates read: `litellm/` — `register-models.py` (run by both installers), `checks.sh` (run by hand) and the k3s profile's proxy config and role-alias declaration (`config.yaml`, `model-preferences.yaml`; the single profile's equivalents are `deploy/single/litellm-config.yaml` and `deploy/single/models.json`). `runtime/tools.py` names these files by path (`litellm_read_config`, read-only) | — | [`deploy/shared/README.md`](../deploy/shared/README.md) |
 | `deploy/n8n/` | The mail and calendar façade workflows as code; applied by both updaters | `apply-workflows.sh` | [`deploy/n8n/README.md`](../deploy/n8n/README.md) |

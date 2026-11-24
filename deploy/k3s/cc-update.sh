@@ -153,9 +153,22 @@ healthy() { # poll the API up to 2 minutes; it is the load-bearing process
   return 1
 }
 
+# The extras the root .env selects (the mail/calendar provider's packages,
+# DL-235), read by the MERGED tree's deploy/env-lib.sh — the one reader both
+# profiles share. Keyed on the tree, never a version: a tree whose env-lib.sh
+# has no cc_python_extras (a rollback onto an older release) still carries
+# those packages as core dependencies, so `dev,runtime` is its whole answer.
+python_extras() {
+  "${RUNAS[@]}" bash -c '[[ -f "$1/deploy/env-lib.sh" ]] && . "$1/deploy/env-lib.sh" >/dev/null 2>&1
+    if declare -F cc_python_extras >/dev/null; then cc_python_extras "$1/.env"; else printf dev,runtime; fi' _ "$REPO"
+}
+
 rebuild() { # as the checkout's owner, never root
+  local extras
+  extras="$(python_extras)" || return 1
+  note "installing central_command with [$extras]"
   "${RUNAS[@]}" env VIRTUAL_ENV="$REPO/.venv" PATH="$OWNER_HOME/.local/bin:$PATH" \
-    bash -c "cd '$REPO' && uv pip install -e '.[dev,runtime]'" || return 1
+    bash -c 'cd "$1" && uv pip install -e ".[$2]"' _ "$REPO" "$extras" || return 1
   patch_graphiti
   # The cockpit's dependencies resolve from web/package.json's ranges, never
   # from the lockfile: `--no-package-lock` neither reads nor writes

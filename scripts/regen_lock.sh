@@ -22,16 +22,18 @@ cons="$(mktemp)"; out=""; trap 'rm -f "$cons" "$out"' EXIT
 grep -E '^[A-Za-z0-9_.-]+==' requirements.lock >"$cons"
 [[ -s "$cons" ]] || { echo "requirements.lock has no pins to constrain — refusing" >&2; exit 1; }
 out="$(mktemp)"
-uv pip compile pyproject.toml --extra dev --extra runtime --universal \
+uv pip compile pyproject.toml --extra dev --extra runtime --extra exchange --extra google --universal \
   --python-version 3.12 -c "$cons" --no-header --no-annotate -q -o "$out"
 [[ -s "$out" ]] || { echo "uv pip compile produced nothing — lock left untouched" >&2; exit 1; }
 {
   cat <<'HDR'
 # requirements.lock — the RECORD of the exact set the test gate ran against.
 # No install, update or check reads it: every install resolves from the ranges
-# in pyproject.toml (`uv pip install -e ".[dev,runtime]"`), so a mirror needs a
+# in pyproject.toml (`uv pip install -e ".[dev,runtime]"`, plus the `exchange`
+# or `google` extra where the .env selects that provider), so a mirror needs a
 # version inside each range, not these pins. This file is what a release was
-# tested on, for comparing a deployment's installed versions with it.
+# tested on (both provider extras included), for comparing a deployment's
+# installed versions with it.
 #
 # UNIVERSAL since v2.46.0 (2026-09-25): `uv pip compile --universal`, so a
 # pin that only applies on one platform carries its marker (uvloop is not

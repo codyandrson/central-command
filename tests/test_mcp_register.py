@@ -512,3 +512,30 @@ async def test_register_stands_when_key_grant_fails_but_says_so_loudly(monkeypat
         assert "EMPTY" in outcome.result_text
     finally:
         await _delete_mcp_server(server_id)
+
+
+@needs_pg
+async def test_a_registration_the_proxy_answers_without_an_id_fails_and_records_nothing(monkeypatch):
+    """With no id the row could never be taken off the proxy again, so the
+    execution fails loudly before the row is marked registered."""
+    server_id = "register-noid"
+    await _insert_mcp_server(server_id, "deployed", namespace="cc-mcp")
+    try:
+        async def fake_register(server_name, alias, url, transport="http", description=None):
+            return {"ok": True, "server": {}}
+
+        granted = []
+
+        async def fake_grant(key, litellm_server_id):
+            granted.append(litellm_server_id)
+            return {"ok": True, "changed": True}
+
+        monkeypatch.setattr(litellm_client, "register_mcp_server", fake_register)
+        monkeypatch.setattr(litellm_client, "add_mcp_server_to_key", fake_grant)
+        with pytest.raises(executor.ExecutionFailed, match="answered no server id"):
+            await executor.execute([_action(server_id)], approver="human:lee", source_refs=[])
+        row = await repo.get_mcp_server(server_id)
+        assert row["status"] == "deployed" and not row.get("litellm_alias")
+        assert granted == []
+    finally:
+        await _delete_mcp_server(server_id)
