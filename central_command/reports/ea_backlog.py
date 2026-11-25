@@ -208,7 +208,7 @@ def rank(issues: list[dict], today: date, hours_per_day: float,
         row = _row(issue, today, float(hours_per_day), float(padding))
         tiers[row["tier"]].append(row)
 
-    key = lambda r: str(r["issue_key"] or "")  # noqa: E731
+    key = lambda r: str(r["issue_key"] or "")
     tiers["past_hard"].sort(key=lambda r: (r["due_date"], key(r)))
     tiers["must_start"].sort(key=lambda r: (-r["score"], *_due_key(r), key(r)))
     tiers["standard"].sort(key=lambda r: (-r["score"], *_due_key(r), key(r)))

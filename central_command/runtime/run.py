@@ -13,9 +13,8 @@ from central_command.runtime.agent import build_agent, load_charter
 from central_command.runtime.deps import ThreadContext, TriageDeps
 from central_command.runtime.durable import (
     classify_deferred,
-    dump_run_state,
-    extract_deferred,
     deferred_proposal,
+    extract_deferred,
     proposal_from_call,
 )
 from central_command.runtime.proposals import park_proposal
@@ -26,7 +25,7 @@ AGENT_ID = "inbox-triage"
 # rows (D24: the DB is the roster), where each exclusion carries its recorded
 # reason. The API and the Task Board's agent picker both read this; the UI's
 # choices come from the roster's truth, never a hardcoded list.
-from central_command.runtime.roster import taskable_agent_ids  # noqa: F401 — re-exported
+from central_command.runtime.roster import taskable_agent_ids  # noqa: E402 — re-exported
 
 
 class RunWindowExhausted(Exception):
@@ -256,7 +255,7 @@ async def _run_live(
         if run_ref is not None:
             try:
                 await snapshot(run_ref.ctx.state.message_history)
-            except Exception:  # noqa: BLE001 — never mask the real failure
+            except Exception:  # noqa: BLE001, S110 — never mask the real failure
                 pass
         if isinstance(exc, RunStopped):
             # Park STOPPED through the same seam and with the same marker shape
@@ -362,9 +361,8 @@ async def ingest_and_propose(
     # means the built-in code charter ("v0"). The tool surface and the generated
     # capability list both come from the agent's pack grants (D25).
     from central_command.runtime import skills as skills_mod
-    from central_command.runtime.packs import granted_packs
-
     from central_command.runtime.notes import standing_sections
+    from central_command.runtime.packs import granted_packs
 
     caps, catalog = await skills_mod.loadout(AGENT_ID)
     agent = await build_agent(
@@ -575,7 +573,7 @@ async def gather_coaching_signals(agent_id: str) -> list[dict]:
     try:
         signals += await _record_signals(agent_id)
         signals += await _reflection_signals(agent_id)
-    except Exception:  # noqa: BLE001 — one missing source must not blank the picker
+    except Exception:  # noqa: BLE001, S110 — one missing source must not blank the picker
         pass
     signals.sort(key=lambda s: s["event_id"], reverse=True)
     return signals[:COACHING_SIGNAL_LIMIT]
@@ -820,13 +818,11 @@ async def coach_loadout() -> dict:
     governed charter (falling back to its built-in v0), its pack grants and its
     skills. Loaded in one place so the run path and the tests build the same
     agent."""
-    from central_command.runtime.agent import builtin_charter, load_charter
-    from central_command.runtime import skills as skills_mod
-    from central_command.runtime.packs import granted_packs
-
     from central_command.runtime import packs as packs_mod
-
+    from central_command.runtime import skills as skills_mod
+    from central_command.runtime.agent import builtin_charter, load_charter
     from central_command.runtime.notes import standing_sections
+    from central_command.runtime.packs import granted_packs
 
     charter = await load_charter(COACH_ID) or builtin_charter(COACH_ID)
     packs = await granted_packs(COACH_ID)
@@ -1015,12 +1011,11 @@ async def run_task(
     if agent_id not in await taskable_agent_ids():
         raise ValueError(f"agent {agent_id!r} is not directly taskable")
 
-    from central_command.runtime.agent import build_hired_agent, load_charter
-    from central_command.runtime import skills as skills_mod
     from central_command.runtime import packs as packs_mod
-    from central_command.runtime.packs import granted_packs
-
+    from central_command.runtime import skills as skills_mod
+    from central_command.runtime.agent import build_hired_agent, load_charter
     from central_command.runtime.notes import standing_sections as team_section_fn
+    from central_command.runtime.packs import granted_packs
 
     packs = await granted_packs(agent_id)
     caps, catalog = await skills_mod.loadout(agent_id)
@@ -1037,7 +1032,10 @@ async def run_task(
             extra_toolsets=mcp_toolsets, mcp_section=mcp_section, team_section=team,
         )
     elif agent_id == "confluence-expert":
-        from central_command.runtime.confluence_expert import build_confluence_expert, ensure_registered
+        from central_command.runtime.confluence_expert import (
+            build_confluence_expert,
+            ensure_registered,
+        )
 
         await ensure_registered()
         agent = await build_confluence_expert(

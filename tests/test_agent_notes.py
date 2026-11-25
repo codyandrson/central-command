@@ -1434,7 +1434,9 @@ async def _drive_chat_send(monkeypatch, target: dict, message: str) -> list[dict
     monkeypatch.setattr(nerve_gateway, "_send_target", _target)
     monkeypatch.setattr(nerve_gateway.events, "emit", _emit)
     monkeypatch.setattr(attachments, "session_model_id", _model_id)
-    monkeypatch.setattr(nerve_gateway.asyncio, "create_task", lambda coro: coro.close())
+    # The fake hands back a never-finished future: the caller holds what create_task returns.
+    monkeypatch.setattr(nerve_gateway.asyncio, "create_task",
+                        lambda coro: (coro.close(), nerve_gateway.asyncio.get_running_loop().create_future())[1])
     ack = await nerve_gateway._chat_send({"sessionKey": "agent:x:main", "message": message},
                                          _noop)
     assert ack["status"] == "started"

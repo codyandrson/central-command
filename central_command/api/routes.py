@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from central_command import events
+from central_command.background import keep
 from central_command.contract import EmbedderDown, EmbedderMismatch, is_transient
 from central_command.contract.dependencies import waited_on
 from central_command.db import repo
@@ -189,7 +190,7 @@ async def hire_agent(body: HireIn) -> dict:
             conversational=tpl.conversational,
         )
     except ValueError as e:
-        raise HTTPException(409, str(e))
+        raise HTTPException(409, str(e)) from e
     await events.emit(
         "agent.hired",
         ref_id=agent_id,
@@ -252,7 +253,7 @@ async def grant_pack(agent_id: str, body: GrantIn) -> dict:
     try:
         await repo.grant_pack(agent_id, body.pack)
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     await events.emit(
         "agent.pack_granted", ref_id=agent_id,
         payload={"pack": body.pack}, actor="operator",
@@ -524,7 +525,7 @@ async def get_charter(agent_id: str) -> dict:
         try:
             content = builtin_charter(agent_id)
         except ValueError:
-            raise HTTPException(404, f"unknown agent {agent_id!r}")
+            raise HTTPException(404, f"unknown agent {agent_id!r}") from None
         current = {"version": 0, "content": content, "created_by": "built-in",
                    "rationale": "hardcoded default", "created_at": None}
     return {"current": current, "versions": await repo.list_charter_versions(agent_id)}
@@ -663,15 +664,15 @@ async def _run_assigned_task(task: dict, actor: str = "operator", *,
             task, actor=actor, model_name=model_name, thinking=thinking)
     except RunHeld:
         raise  # nothing ran and nothing failed: the task stays ASSIGNED
-    except Exception as e:  # noqa: BLE001 — any run error must reach the record
+    except Exception as e:  # any run error must reach the record
         await _land_run_failure(task, e)
         raise
 
 
-_task_queue_locks: dict[tuple, "asyncio.Lock"] = {}
+_task_queue_locks: dict[tuple, asyncio.Lock] = {}  # noqa: F821 — annotation only (postponed); asyncio is imported locally
 
 
-def _agent_task_lock(agent_id: str) -> "asyncio.Lock":
+def _agent_task_lock(agent_id: str) -> asyncio.Lock:  # noqa: F821 — annotation only (postponed); asyncio is imported locally
     """One asyncio.Lock per (running loop, agent_id) — the per-agent task-run
     queue (operator decision, 2026-08-21): a large backlog on the board drains
     incrementally per agent, never all at once. Scope is ASSIGNED-TASK RUNS
@@ -951,7 +952,7 @@ async def _run_assigned_task_detached(task: dict, actor: str, *,
                                  thinking=thinking)
     except RunHeld as e:
         log.info("%s", e)
-    except Exception:  # noqa: BLE001 — already on the record; nobody to raise to
+    except Exception:  # already on the record; nobody to raise to
         log.exception("task %s: run failed", task["id"])
 
 
@@ -1000,7 +1001,7 @@ async def startup_task_sweep() -> None:
     for task in await repo.tasks_orphaned_at_startup():
         import asyncio
 
-        asyncio.create_task(_run_assigned_task_detached(task, "system"))
+        keep(asyncio.create_task(_run_assigned_task_detached(task, "system")))
 
 
 async def create_and_run_task(
@@ -1125,7 +1126,7 @@ async def create_and_run_task(
         from central_command.runtime import orchestrator
 
         task_row = await repo.get_task(task_id)
-        asyncio.create_task(orchestrator.recommend(task_row))
+        keep(asyncio.create_task(orchestrator.recommend(task_row)))
         return {"deferred": False, "task_id": task_id, "status": "NEW"}
     task_row = await repo.get_task(task_id)
     if background:
@@ -1134,8 +1135,8 @@ async def create_and_run_task(
         # the same paths as a synchronous run.
         import asyncio
 
-        asyncio.create_task(_run_assigned_task_detached(
-            task_row, actor, model_name=model_name, thinking=thinking))
+        keep(asyncio.create_task(_run_assigned_task_detached(
+            task_row, actor, model_name=model_name, thinking=thinking)))
         return {
             "deferred": None, "task_id": task_id,
             "status": task_row["status"], "background": True,
@@ -1503,7 +1504,7 @@ async def coach_agent(agent_id: str, body: CoachIn, *, background: bool = True) 
         actor="operator",
     )
     await repo.start_task(task_id, None)  # IN_PROGRESS while the coach works
-    asyncio.create_task(_run_coach_detached(task_id, agent_id, kwargs))
+    keep(asyncio.create_task(_run_coach_detached(task_id, agent_id, kwargs)))
     return {
         "deferred": None, "background": True, "task_id": task_id,
         "target": agent_id, "status": "IN_PROGRESS",
@@ -1690,7 +1691,7 @@ async def enroll_backlog(body: BacklogIn) -> dict:
     try:
         result = await ledger.enroll_fixture_dir(body.dir)
     except FileNotFoundError as e:
-        raise HTTPException(404, str(e))
+        raise HTTPException(404, str(e)) from e
     await events.emit("work.enrolled.bulk", ref_id=body.dir, payload=result, actor="operator")
     return result
 
@@ -1713,7 +1714,7 @@ async def backlog_start(body: BacklogSweepIn) -> dict:
     try:
         return await sweeper.start(cutoff_date=body.cutoff_date)
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
 
 
 class ReopenIn(BaseModel):
@@ -1839,7 +1840,7 @@ async def bulk_dismiss_preview(body: BulkDismissQueryIn) -> dict:
     try:
         out = await bulk_dismiss.preview(query)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     # the digest stands in for the full set — no need to ship 2,500 ids to the UI
     out.pop("message_ids", None)
     return out
@@ -1854,7 +1855,7 @@ async def bulk_dismiss_commit(body: BulkDismissExecuteIn) -> dict:
     try:
         return await bulk_dismiss.execute(query, body.match_digest)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
 
 
 @router.post("/work/{item_id}/requeue")
@@ -1946,7 +1947,7 @@ async def preview_mail_rule(body: MailRuleCriteriaIn) -> dict:
     try:
         criteria, exceptions = mail_rules.validate(body.criteria, body.exceptions or {})
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     out = await repo.mail_rule_matches(criteria, exceptions)
     out["description"] = mail_rules.describe(criteria, exceptions)
     out["criteria"], out["exceptions"] = criteria, exceptions
@@ -1960,7 +1961,7 @@ async def create_mail_rule(body: MailRuleIn) -> dict:
     try:
         criteria, exceptions = mail_rules.validate(body.criteria, body.exceptions or {})
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise HTTPException(400, str(e)) from e
     reason = (body.reason or "").strip()
     if not reason:
         raise HTTPException(422, "reason must not be empty")
@@ -2216,12 +2217,12 @@ async def _heartbeat_schedule_view(row: dict) -> dict:
     """A schedule row + what the crons UI needs: the next due time (computed
     statically, engine running or not) and the last run's outcome from the
     event log (run history has no second table)."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from central_command.heartbeat.engine import compute_next_due
 
     due = compute_next_due(
-        row["schedule_kind"], row["schedule"], datetime.now(timezone.utc)
+        row["schedule_kind"], row["schedule"], datetime.now(UTC)
     )
     last = await repo.list_events(
         ref_id=row["id"], kind="heartbeat", newest_first=True, limit=10
@@ -2618,7 +2619,6 @@ async def get_proposal(proposal_id: str) -> dict:
     # and history must not flag amber for it.
     if row["status"] in ("AWAITING_HUMAN", "PROPOSED"):
         from central_command.gateway import policy
-
         from central_command.gateway.gateway import source_time_for_session
 
         row["policy_flags"] = policy.check_actions(
@@ -2842,7 +2842,7 @@ async def approve(proposal_id: str) -> dict:
             detach=True,  # recorded + armed, then return; the closing turn runs behind
         )
     except gateway.GatewayError as e:
-        raise HTTPException(409, str(e))
+        raise HTTPException(409, str(e)) from e
     # The decision/execution events are emitted by the gateway itself — it is the
     # trust chokepoint, and recording them here would order them after the fact.
     return out
@@ -2860,7 +2860,7 @@ async def reject(proposal_id: str, body: RejectIn) -> dict:
             detach=True,  # recorded + armed, then return; the redraft runs behind
         )
     except gateway.GatewayError as e:
-        raise HTTPException(409, str(e))
+        raise HTTPException(409, str(e)) from e
     return out  # gateway emits proposal.decided (see approve)
 
 
@@ -2874,7 +2874,7 @@ async def dismiss(proposal_id: str, body: DismissIn) -> dict:
     try:
         return await gateway.dismiss_proposal(row["session_id"], proposal_id, body.reason)
     except gateway.GatewayError as e:
-        raise HTTPException(409, str(e))
+        raise HTTPException(409, str(e)) from e
 
 
 @router.get("/models")
@@ -2894,13 +2894,11 @@ async def list_model_catalog(session_id: str | None = None) -> dict:
     "nobody said", never "any level works", so the dropdown offers nothing
     rather than a lever that silently does nothing.
     """
-    from central_command.config import settings
     from central_command.integrations.litellm import (
         LiteLLMError,
         exposed_model_ids,
         thinking_levels_by_model,
     )
-
     from central_command.runtime.models import configured_model_name
 
     default = configured_model_name(None)
@@ -3031,7 +3029,7 @@ async def usage() -> dict:
     try:
         return await litellm.usage_snapshot()
     except litellm.LiteLLMError as e:
-        raise HTTPException(502, str(e))
+        raise HTTPException(502, str(e)) from e
 
 
 @router.get("/graph/episodes")
@@ -3454,7 +3452,7 @@ async def add_skill_doc_route(skill_id: str, body: SkillDocIn) -> dict:
     doc = await repo.add_skill_doc(
         skill_id, body.doc_key, body.kind, body.title, body.content,
         source_url=body.source_url, describes=body.describes,
-        captured_at=datetime.now(timezone.utc),
+        captured_at=datetime.now(UTC),
     )
     await events.emit(
         "skill.doc_added", ref_id=skill_id,
@@ -3599,7 +3597,7 @@ async def import_skill_doc_route(body: SkillDocImportIn) -> dict:
     doc = await repo.add_skill_doc(
         body.skill_id, body.doc_key, kind, title, content,
         source_url=source_url, describes=body.describes,
-        captured_at=datetime.now(timezone.utc), added_by="operator",
+        captured_at=datetime.now(UTC), added_by="operator",
     )
     await events.emit(
         "skill.doc_added", ref_id=body.skill_id,
@@ -3622,7 +3620,7 @@ async def import_skill_file_route(
     doc_key: str = Form(...),
     title: str | None = Form(None),
     describes: str | None = Form(None),
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008 — FastAPI's own parameter idiom
 ) -> dict:
     """Add one document to an EXISTING skill from an uploaded file (PDF,
     docx, pptx, xlsx, …) — `import-doc`'s URL/paste pair, plus a third
@@ -3656,7 +3654,7 @@ async def import_skill_file_route(
     doc = await repo.add_skill_doc(
         skill_id, doc_key, kind, title, content,
         source_url=None, describes=describes,
-        captured_at=datetime.now(timezone.utc), added_by="operator",
+        captured_at=datetime.now(UTC), added_by="operator",
     )
     await events.emit(
         "skill.doc_added", ref_id=skill_id,
@@ -3794,7 +3792,7 @@ async def _graphistry_state(settings_row: dict) -> str:
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(url)
         return "live" if resp.status_code < 400 else "unreachable"
-    except Exception:
+    except Exception:  # noqa: BLE001 — any failure reads as unreachable
         # Includes httpx.InvalidURL — a garbage URL typed into settings is
         # just another way of being unreachable, never a 500 on status.
         return "unreachable"
@@ -4339,7 +4337,7 @@ async def walk_source_route(source_id: str) -> dict:
     try:
         summary = await walk_source(source)
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     return {"ok": True, "summary": summary, "enrollment": await enroll_pending(source)}
 
 

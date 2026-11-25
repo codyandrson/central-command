@@ -93,6 +93,6 @@ state = {
     "messages": ModelMessagesTypeAdapter.dump_python(result.all_messages(), mode="json"),
     "tool_call_id": call.tool_call_id,
 }
-json.dump(state, open(sys.argv[1], "w"), indent=1, sort_keys=True)
+json.dump(state, open(sys.argv[1], "w"), indent=1, sort_keys=True)  # noqa: SIM115 — a one-shot generator script
 for m in state["messages"]:
     print(m["kind"], [(p["part_kind"], p.get("tool_name"), p.get("tool_kind")) for p in m["parts"]])

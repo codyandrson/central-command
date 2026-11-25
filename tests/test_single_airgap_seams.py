@@ -38,8 +38,9 @@ import pytest
 # that differs from the declared handle type") — 26 tests failed that way on
 # the 2026-09-25 testbed run, all of them in files that shelled out with the
 # bare name. `update._bash()` resolves Git Bash from git's own install.
-from central_command.api.update import _bash as _resolve_bash  # noqa: E402
-from tests.installer_source import env_path, installer_source, phase_files, single_scripts  # noqa: E402
+from central_command.api.update import _bash as _resolve_bash
+from tests.installer_source import env_path, installer_source, phase_files, single_scripts
+
 BASH = _resolve_bash() or "bash"
 
 
@@ -212,7 +213,7 @@ def _compose_refs() -> set[tuple[str, str]]:
     """
     rows = _manifest()
     refs = set()
-    for m in re.finditer(r"^\s*image:\s*(\S+)\s*$", COMPOSE.read_text(encoding="utf-8"), flags=re.M):
+    for m in re.finditer(r"^\s*image:\s*(\S+)\s*$", COMPOSE.read_text(encoding="utf-8"), flags=re.MULTILINE):
         ref = m.group(1)
         if ref.startswith("localhost/"):
             continue  # the three locally-built images: exact, never resolved
@@ -277,7 +278,7 @@ def _dockerfile_bases() -> set[tuple[str, str, str]]:
     bases = set()
     for df in DOCKERFILES:
         text = df.read_text(encoding="utf-8")
-        froms = re.findall(r"^FROM\s+(\S+)", text, flags=re.M)
+        froms = re.findall(r"^FROM\s+(\S+)", text, flags=re.MULTILINE)
         assert froms, f"{df}: no FROM"
         for ref in froms:
             m = re.fullmatch(r"\$\{(CC_IMG_[A-Z0-9_]+)\}", ref)
@@ -286,7 +287,7 @@ def _dockerfile_bases() -> set[tuple[str, str, str]]:
                 "from images.txt through resolve-images.sh (design record 2026-09-23, D2)"
             )
             var = m.group(1)
-            dm = re.search(rf"^ARG\s+{var}=(\S+)\s*$", text, flags=re.M)
+            dm = re.search(rf"^ARG\s+{var}=(\S+)\s*$", text, flags=re.MULTILINE)
             assert dm, f"{df}: ARG {var} must be declared, with a default, before FROM"
             dflt = dm.group(1)
             rm = re.fullmatch(r"\$\{(CC_REGISTRY_[A-Z]+)\}/(.+)", dflt)
@@ -294,7 +295,7 @@ def _dockerfile_bases() -> set[tuple[str, str, str]]:
                 f"{df}: ARG {var}'s default {dflt!r} must be "
                 "${CC_REGISTRY_*}/<path>:<locked-tag> so the registry host stays a seam"
             )
-            assert re.search(rf"^ARG\s+{rm.group(1)}=", text, flags=re.M), (
+            assert re.search(rf"^ARG\s+{rm.group(1)}=", text, flags=re.MULTILINE), (
                 f"{df}: ARG {rm.group(1)} must be declared before {var} uses it"
             )
             path, _, tag = rm.group(2).rpartition(":")
@@ -344,7 +345,7 @@ SEAM_RE = re.compile(r"\bCC_(?:REGISTRY_[A-Z]+|APT_(?:SECURITY_)?MIRROR|PYPI_IND
 
 
 def _declared() -> set[str]:
-    return set(re.findall(r"^#?\s*(CC_[A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.M))
+    return set(re.findall(r"^#?\s*(CC_[A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.MULTILINE))
 
 
 def test_every_seam_the_scripts_read_is_declared_in_env_example():
@@ -535,7 +536,7 @@ def test_fetch_phase_runs_before_anything_deploys():
     assert m, (
         "setup.sh's full run must go check -> machine -> fetch -> llm -> ..."
     )
-    assert re.search(r"^\s*run_phase check; local crc=", text, flags=re.M), (
+    assert re.search(r"^\s*run_phase check; local crc=", text, flags=re.MULTILINE), (
         "the full run must start with the check gate, before any mutating phase"
     )
     assert "build_if_missing" not in text, "stack must ASSERT images (need_image), never build them mid-deploy"
@@ -544,7 +545,7 @@ def test_fetch_phase_runs_before_anything_deploys():
 def test_airgap_env_example_teaches_the_live_uv_variable():
     text = (ROOT / "deploy" / "airgap.env.example").read_text(encoding="utf-8")
     assert "UV_DEFAULT_INDEX=" in text
-    assert not re.search(r"^#?\s*UV_INDEX_URL=", text, flags=re.M), "UV_INDEX_URL is deprecated — only UV_DEFAULT_INDEX may be offered as a seam"
+    assert not re.search(r"^#?\s*UV_INDEX_URL=", text, flags=re.MULTILINE), "UV_INDEX_URL is deprecated — only UV_DEFAULT_INDEX may be offered as a seam"
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
@@ -606,9 +607,9 @@ def test_the_host_curl_gets_the_ca_as_an_OPTION_not_only_an_env_var(tmp_path):
         state = tmp_path / ("-".join(sorted(env)) or "none")
         r = subprocess.run(
             [BASH, "-c",
-             f'. "{ENV_LIB.as_posix()}"; cc_export_tls_env "{state.as_posix()}"; '
+             (f'. "{ENV_LIB.as_posix()}"; cc_export_tls_env "{state.as_posix()}"; '
              'printf "CURL_HOME=%s\n" "${CURL_HOME:-unset}"; '
-             f'cat "{(state / "curl" / ".curlrc").as_posix()}" 2>/dev/null'],
+             f'cat "{(state / "curl" / ".curlrc").as_posix()}" 2>/dev/null')],
             capture_output=True, text=True,
             env={"PATH": "/usr/bin:/bin:/usr/local/bin", **env},
         )
@@ -833,8 +834,8 @@ def test_the_resolved_build_command_uses_the_staged_context(script, dockerfile, 
     # dry run. What the dry run must not do is ADD or CHANGE anything there.
     image = script.replace("build-", "cc-").replace("-image.sh", "")
     state = subprocess.run(
-        [BASH, "-c", f'. "{(ROOT / "deploy" / "env-lib.sh").as_posix()}"; '
-                     f'cc_state_dir "{(ROOT / ".env").as_posix()}" "{ROOT.as_posix()}"'],
+        [BASH, "-c", (f'. "{(ROOT / "deploy" / "env-lib.sh").as_posix()}"; '
+                     f'cc_state_dir "{(ROOT / ".env").as_posix()}" "{ROOT.as_posix()}"')],
         capture_output=True, text=True).stdout.strip()
     staged = pathlib.Path(state) / "build" / image if state else None
 
@@ -895,8 +896,8 @@ def test_staging_replaces_the_context_and_never_keeps_a_stale_ca(tmp_path):
     def run(with_ca: bool):
         r = subprocess.run(
             [BASH, "-c",
-             f'. "{lib}"; cc_stage_build_context "{staged}" '
-             f'"{ca if with_ca else ""}" "{src}"'],
+             (f'. "{lib}"; cc_stage_build_context "{staged}" '
+             f'"{ca if with_ca else ""}" "{src}"')],
             capture_output=True, text=True)
         assert r.returncode == 0, r.stdout + r.stderr
 
@@ -955,7 +956,7 @@ def test_the_machine_phase_is_in_the_order_and_the_docs():
 # The COPY plus the whole RUN block it guards — the RUN ends at its unindented
 # `fi`, which is why the pattern names that rather than "the next instruction".
 TRUST_STEP = re.compile(
-    r"^COPY cc-ca\.cr\[t\][^\n]*\nRUN set -e;.*?\n    fi\n", re.S | re.M)
+    r"^COPY cc-ca\.cr\[t\][^\n]*\nRUN set -e;.*?\n    fi\n", re.DOTALL | re.MULTILINE)
 BUILD_BASE = "python:3.12-slim-trixie"   # ships ca-certificates + openssl
 
 
@@ -1060,8 +1061,8 @@ def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path, built_images)
          "/CN=Central Command Test CA"], capture_output=True, text=True)
     if gen.returncode != 0:
         pytest.skip("no usable openssl to mint a test CA: " + gen.stderr[-200:])
-    body = [l for l in pem.read_text().splitlines()
-            if l and "CERTIFICATE" not in l][0]
+    body = next(l for l in pem.read_text().splitlines()
+            if l and "CERTIFICATE" not in l)
     (ctx / "cc-ca.crt").write_text(pem.read_text(), encoding="utf-8")
 
     r = build(withca)
@@ -1223,9 +1224,9 @@ def test_tls_insecure_warn_once_prints_exactly_one_line_per_run():
     one gate: exactly one WARN per run, never zero when the knob is on."""
     r = subprocess.run(
         [BASH, "-c",
-         f'. "{ENV_LIB.as_posix()}"; '
+         (f'. "{ENV_LIB.as_posix()}"; '
          'cc_tls_insecure_warn_once x; '
-         'cc_tls_insecure_warn_once y || true'],
+         'cc_tls_insecure_warn_once y || true')],
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stdout + r.stderr

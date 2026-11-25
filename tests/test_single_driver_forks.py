@@ -446,9 +446,9 @@ def test_installed_version_reads_version_as_the_sed_pipeline_did(tmp_path, text,
     fns = functions_in(SETUP.read_text(encoding="utf-8"))
     body = "".join(f"{n}() {{{fns[n]}\n}}\n" for n in ("installed_version_load", "installed_version"))
     r = subprocess.run(
-        [bash(), "-c", f"REPO_ROOT='{tmp_path.as_posix()}'\nINSTALLED_VERSION=''\n{body}"
+        [bash(), "-c", (f"REPO_ROOT='{tmp_path.as_posix()}'\nINSTALLED_VERSION=''\n{body}"
          "old=\"$(sed -n 's/^version=//p' \"$REPO_ROOT/VERSION\" 2>/dev/null | head -1 | tr -d ' \\r')\"\n"
-         "printf '%s|%s' \"${old:-unknown}\" \"$(installed_version)\""],
+         "printf '%s|%s' \"${old:-unknown}\" \"$(installed_version)\"")],
         capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stderr
@@ -465,7 +465,7 @@ def test_the_utc_calendar_is_arithmetic_and_right_across_leap_days_and_centuries
     epochs below (2026-10-02 testbed run, second pass)."""
     import datetime
 
-    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+    epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
 
     epochs = [0, 1, 59, 86399, 86400, 951_782_399, 951_782_400, 951_868_800,
               1_709_164_800, 1_740_787_199, 4_102_444_799, 4_107_542_400,

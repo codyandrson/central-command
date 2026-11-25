@@ -60,8 +60,8 @@ def test_eligibility_is_decided_from_the_headers():
      "DKIM did not pass"),
     ({"dkim_signatures": ["v=1; d=shop.example; h=from:subject:date; b=AbCdEfGh"]}, "covers"),
     # A covering signature that is NOT the one Gmail verified (b= mismatch).
-    ({"dkim_signatures": ["v=1; d=attacker.example; "
-                          "h=list-unsubscribe:list-unsubscribe-post:from; b=ZZZZ"]}, "covers"),
+    ({"dkim_signatures": [("v=1; d=attacker.example; "
+                          "h=list-unsubscribe:list-unsubscribe-post:from; b=ZZZZ")]}, "covers"),
     ({"list_unsubscribe": "<https://127.0.0.1/u/abc>"}, "not a public hostname"),
     ({"list_unsubscribe": "<https://localhost/u/abc>"}, "not a public hostname"),
     ({"list_unsubscribe": "<https://[::1]/u/abc>"}, "not a public hostname"),

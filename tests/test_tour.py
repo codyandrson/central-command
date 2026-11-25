@@ -159,7 +159,8 @@ async def test_an_intro_task_opens_the_lane_and_parks_its_episode(monkeypatch):
     from central_command.runtime import converse
     from central_command.runtime import models as models_mod
     from central_command.runtime.spike_model import (
-        make_ea_conclude_model, make_intro_model,
+        make_ea_conclude_model,
+        make_intro_model,
     )
 
     intro = aresolve(lambda *a, **k: make_intro_model())

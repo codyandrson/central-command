@@ -150,7 +150,7 @@ async def retry_outage(name: str, include_interrupted: bool = False,
             from central_command.integrations import graphiti_ingest
 
             graphiti_ingest.worker.wake()
-        except Exception:  # noqa: BLE001 — the worker's own poll takes them anyway
+        except Exception:  # noqa: BLE001, S110 — the worker's own poll takes them anyway
             pass
     return {
         "probe": "up",

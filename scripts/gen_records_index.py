@@ -147,7 +147,7 @@ def load_records() -> dict[str, list[Record]]:
     return by_dir
 
 
-def extract_asbuilt_paths(record: "Record") -> list[str]:
+def extract_asbuilt_paths(record: Record) -> list[str]:
     """Pull every backticked path out of an As-built line, in order."""
     return re.findall(r"`([^`]+)`", record.asbuilt)
 

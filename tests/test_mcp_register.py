@@ -366,7 +366,7 @@ def test_runtime_mcp_url_uses_the_same_proxy_name_as_registration(monkeypatch, s
     toolset = packs._mcp_live_toolset("mcp-tester", server_id, ["t"])
 
     assert toolset.wrapped.client.transport.url == f"http://proxy.example:4000/{registered}/mcp"
-    admits = lambda name: toolset.filter_func(None, ToolDefinition(name=name))  # noqa: E731
+    admits = lambda name: toolset.filter_func(None, ToolDefinition(name=name))
     assert admits(f"{registered}-t")
     assert admits("t")
     assert not admits(f"{registered}-other")

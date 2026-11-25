@@ -178,7 +178,7 @@ async def test_executor_stamps_trust_and_approver_into_the_episode(monkeypatch):
     outcome = await executor.execute([_GRAPH_ACTION], approver="human:lee", source_refs=["x"])
 
     assert "graph episode 'DEMO-1 deadline slip' queued for extraction" in outcome.result_text
-    (name, body, source) = calls[0]
+    (_name, body, source) = calls[0]
     assert body == "DEMO-1's deadline moved to 2026-08-03."
     assert "trust=human-approved" in source
     assert "approver=human:lee" in source

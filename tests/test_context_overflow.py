@@ -13,8 +13,9 @@ anywhere in `_prepare_window` sends the clip, never the raw record."""
 
 from __future__ import annotations
 
-import pytest
 import uuid
+
+import pytest
 from pydantic_ai.messages import ModelRequest, ToolReturnPart
 
 from central_command.config import settings

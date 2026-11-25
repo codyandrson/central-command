@@ -70,8 +70,8 @@ def _run(tmp_path: Path, env_lines: dict[str, str], *, unfilled: str = "",
         ('catalog_unfilled() { return 1; }' if catalog_down else
          'catalog_unfilled() { [[ -n "${STUB_UNFILLED:-}" ]] && printf "%s\\n" "$STUB_UNFILLED"; return 0; }'),
         "rerank_probe_kind() {" + fns["rerank_probe_kind"] + "\n}",
-        'rerank_shape() { printf "shape %s %s\\n" "$1" "$2" >> "$STUB_LOG"; '
-        'if [[ "$1" == rerank ]]; then return "$STUB_SHAPE_RERANK"; fi; return "$STUB_SHAPE_CHAT"; }',
+        ('rerank_shape() { printf "shape %s %s\\n" "$1" "$2" >> "$STUB_LOG"; '
+        'if [[ "$1" == rerank ]]; then return "$STUB_SHAPE_RERANK"; fi; return "$STUB_SHAPE_CHAT"; }'),
         "rerank_decide() {" + fns["rerank_decide"] + "\n}",
         "p_rerank_decided() {" + fns["p_rerank_decided"] + "\n}",
         'rerank_decide; rc=$?',
@@ -126,7 +126,7 @@ def test_a_mapped_alias_is_probed_rerank_first_and_the_kind_written(tmp_path, re
 
 
 def test_mapped_but_answering_neither_is_a_warn_and_stays_unused(tmp_path):
-    r, env, probes = _run(tmp_path, {})
+    r, env, _probes = _run(tmp_path, {})
     line = _line(r)
     assert _rc(r) == 0 and line.startswith("WARN probe-rerank:")
     assert "NOT used" in line and "logprobs" in line and "thinking" in line
@@ -223,7 +223,7 @@ def test_a_row_filled_by_hand_is_probed_as_it_is_both_ways(tmp_path):
 
 
 def test_a_pinned_kind_registers_and_probes_only_its_shape(tmp_path):
-    r, env, _ = _run(tmp_path, {"CC_GRAPH_RERANK_ALIAS": "cc-rerank", "CC_GRAPH_RERANK_KIND": "chat"},
+    r, _env, _ = _run(tmp_path, {"CC_GRAPH_RERANK_ALIAS": "cc-rerank", "CC_GRAPH_RERANK_KIND": "chat"},
                      rerank="ok", chat="ok", shape_rerank=0, shape_chat=0)
     assert _rc(r) == 0
     assert _run.steps == ["shape chat cc-rerank", "rerank-chat cc-rerank"]

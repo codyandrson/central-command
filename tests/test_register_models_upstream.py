@@ -537,7 +537,7 @@ def test_a_fresh_k3s_catalog_requires_exactly_the_role_aliases(rm, monkeypatch, 
 def test_mode_is_written_to_model_info_on_create(rm, monkeypatch, capsys):
     """/health probes by model_info.mode; litellm_params.mode alone left cc-tts
     and cc-stt "unhealthy" for weeks (2026-10-17)."""
-    rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={})
+    _rc, _out, proxy = _run(rm, monkeypatch, capsys, live=[], env={})
     created = {b["model_name"]: b for p, b in proxy.calls if p.endswith("/model/new")}
     assert created["cc-tts"]["model_info"]["mode"] == "audio_speech"
     assert created["cc-stt"]["model_info"]["mode"] == "audio_transcription"
@@ -548,7 +548,7 @@ def test_mode_is_written_to_model_info_on_create(rm, monkeypatch, capsys):
 def test_mode_is_patched_into_model_info_on_update(rm, monkeypatch, capsys):
     """POST /model/update drops model_info.mode; PATCH /model/{id}/update keeps it."""
     skel = [_live("cc-tts", model="openai/PLACEHOLDER", api_base="PLACEHOLDER", mode="audio_speech")]
-    rc, out, proxy = _run(rm, monkeypatch, capsys, live=skel, env={**BASE, **IDS})
+    _rc, _out, proxy = _run(rm, monkeypatch, capsys, live=skel, env={**BASE, **IDS})
     patches = [(p, b) for p, b in proxy.calls if "/update" in p and p.startswith("/model/id-")]
     assert ("/model/id-cc-tts/update", {"model_info": {"mode": "audio_speech"}}) in patches
 
@@ -581,7 +581,7 @@ SPEECH_PARAMS = {"max_parallel_requests": 1, "num_retries": 0}
 @pytest.mark.parametrize("declaration", [SINGLE / "models.json", K3S_DECLARATION], ids=["single", "k3s"])
 def test_a_created_speech_skeleton_carries_the_policy_params_and_no_other_alias_does(
         rm, monkeypatch, capsys, declaration):
-    rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={}, argv=("--policy", str(declaration)))
+    _rc, _out, proxy = _run(rm, monkeypatch, capsys, live=[], env={}, argv=("--policy", str(declaration)))
     created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
     for alias in ("cc-tts", "cc-stt"):
         assert {k: created[alias][k] for k in SPEECH_PARAMS} == SPEECH_PARAMS

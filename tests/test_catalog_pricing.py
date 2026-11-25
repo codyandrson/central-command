@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import pytest
 
-from central_command.config import settings
 from central_command.contract import Action, validate_action_args
 from central_command.gateway import executor
 from central_command.heartbeat import actions as hb_actions

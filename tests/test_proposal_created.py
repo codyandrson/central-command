@@ -137,7 +137,7 @@ def _park_sites(sources: dict[str, str]) -> list[str]:
                     f = child.func
                     name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
                     if name == "park_proposal":
-                        found.append(f"{rel}:{fn}")
+                        found.append(f"{rel}:{fn}")  # noqa: B023 — visit() runs inside the same iteration
                 visit(child, fn)
 
         visit(tree, None)

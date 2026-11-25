@@ -193,7 +193,7 @@ async def main() -> int:
                     continue
                 print(f"{table}: {len(diff)} rows to set")
                 for d in diff[:40]:
-                    label = " ".join(str(d[k]) for k in ("dim", "date", "model", "custom_llm_provider") if k in d.keys())
+                    label = " ".join(str(d[k]) for k in ("dim", "date", "model", "custom_llm_provider") if k in d)
                     print(f"  {label:70.70} {float(d['old']):14.4f} -> {float(d['new']):12.6f}")
                 if len(diff) > 40:
                     print(f"  … {len(diff) - 40} more")

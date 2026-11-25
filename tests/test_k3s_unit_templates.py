@@ -42,7 +42,7 @@ TEMPLATES = ("cc-backup.service.in", "cc-nerve.service.in", "cc-sandbox-runner.s
 PLAIN = ("cc-backup.timer", "cc-graph-bolt.service", "cc-update-stage.path", "cc-update.path")
 TOKENS = ("@CC_CHECKOUT@", "@CC_OWNER@", "@CC_OWNER_GROUP@", "@CC_OWNER_HOME@")
 
-_PATH_KEY = re.compile(r"^(?:WorkingDirectory|ExecStart|ExecStartPre|EnvironmentFile)=(.*)$", re.M)
+_PATH_KEY = re.compile(r"^(?:WorkingDirectory|ExecStart|ExecStartPre|EnvironmentFile)=(.*)$", re.MULTILINE)
 _ABS_NOT_SYSTEM = re.compile(r"(?<![\w.])-?(/(?!bin/|usr/|run/|dev/|var/|tcp/)[\w./-]+)")
 
 SETUP_SH = (K3S / "setup.sh").read_text(encoding="utf-8")
@@ -71,7 +71,7 @@ def test_seven_templates_and_four_plain_units_and_no_unit_in_both_forms():
 def test_a_plain_unit_holds_no_instance_value(name):
     text = (K3S / name).read_text(encoding="utf-8")
     assert "/home/" not in text, name
-    for value in re.findall(r"^(?:User|Group)=(.*)$", text, flags=re.M):
+    for value in re.findall(r"^(?:User|Group)=(.*)$", text, flags=re.MULTILINE):
         assert value == "root", name
 
 
@@ -307,7 +307,7 @@ def test_cc_k3s_group_is_for_the_chown_and_never_reaches_a_render():
 
 def test_setup_installs_the_fixed_list_and_not_the_stage_pair():
     app = _fn(SETUP_SH, "phase_app")
-    loop = re.search(r"for u in (.*?); do", app, re.S)
+    loop = re.search(r"for u in (.*?); do", app, re.DOTALL)
     assert loop
     assert loop.group(1).split() == ["cc-uvicorn.service", "cc-sandbox-runner.service", "cc-graph-bolt.service",
                                      "\\", "cc-backup.service", "cc-backup.timer", "cc-update.service", "cc-update.path"]

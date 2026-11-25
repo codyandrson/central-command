@@ -237,7 +237,7 @@ def _date(value: str, op: str, key: str) -> str:
     try:
         date(y, m, d)
     except ValueError:
-        raise JiraError(f"{op} for {key} — due_date {value!r} is not a real calendar date")
+        raise JiraError(f"{op} for {key} — due_date {value!r} is not a real calendar date") from None
     return value
 
 

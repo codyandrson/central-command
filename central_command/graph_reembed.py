@@ -64,7 +64,7 @@ import stat
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -177,7 +177,7 @@ _sleep = asyncio.sleep
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _localnow() -> datetime:
@@ -302,7 +302,7 @@ async def _token_count(text: str) -> tuple[int, bool]:
     """(tokens, measured). The proxy's counter when it answers, else a stated
     estimate; nothing refuses on the figure."""
     base = settings.llm_base_url.rstrip("/")
-    base = base[:-3] if base.endswith("/v1") else base
+    base = base.removesuffix("/v1")
     try:
         async with neo4j_writer._embedding_client(30.0) as client:
             res = await client.post(
@@ -456,7 +456,7 @@ def _gzip_state(path: Path) -> str:
 def _unreadable_text(path: Path) -> str:
     try:
         user = getpass.getuser()
-    except Exception:
+    except Exception:  # noqa: BLE001 — a name for a message, never fatal
         user = str(os.getuid())
     try:
         st = path.stat()
@@ -482,7 +482,7 @@ async def _check_backup(directory: Path) -> Finding:
     if not stamps:
         return Finding(ACTION, f"no neo4j_<stamp>.dump.gz in {directory}: {BACKUP_COMMANDS}")
     stamp, path = max(stamps)
-    taken = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    taken = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
     age = (_utcnow() - taken).total_seconds()
     if age > limit:
         return Finding(ACTION, (
@@ -505,7 +505,7 @@ async def _check_backup(directory: Path) -> Finding:
 def _timer_time() -> tuple[int, int]:
     """The nightly backup's hour and minute, from the timer when it is there."""
     if TIMER_FILE.is_file():
-        m = re.search(r"^OnCalendar=\S+\s+(\d\d):(\d\d)", TIMER_FILE.read_text(), re.M)
+        m = re.search(r"^OnCalendar=\S+\s+(\d\d):(\d\d)", TIMER_FILE.read_text(), re.MULTILINE)
         if m:
             return int(m.group(1)), int(m.group(2))
     return 3, 0
@@ -895,8 +895,8 @@ async def _run_pass(args: argparse.Namespace) -> int:
         f"epoch: {previous['epoch']} -> {epoch}",
         f"before: {_census_line(before)}",
         f"after: {_census_line(after)}",
-        f"rewritten: {rewritten} vectors in {time.monotonic() - started:.1f} s "
-        f"({time.monotonic() - begun:.1f} s with the wait)",
+        (f"rewritten: {rewritten} vectors in {time.monotonic() - started:.1f} s "
+        f"({time.monotonic() - begun:.1f} s with the wait)"),
     ]
     for text in lines:
         print(text)
@@ -975,7 +975,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
     try:
         return asyncio.run(_run(args))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — CLI boundary: printed, exit 2
         print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -35,8 +35,13 @@ from central_command.runtime import tools as tools_mod
 from central_command.runtime.proposals import _keep_only_server_skill_base
 from central_command.runtime.skill_corrections import SpanMismatch, apply_exact_span
 from central_command.runtime.templates import (
-    ACCOUNTABILITY_TEMPLATE, EA_TEMPLATE, EDITOR_TEMPLATE,
-    GRAPH_CURATOR_TEMPLATE, MCP_MANAGER_TEMPLATE, STEWARD_TEMPLATE, TEMPLATES,
+    ACCOUNTABILITY_TEMPLATE,
+    EA_TEMPLATE,
+    EDITOR_TEMPLATE,
+    GRAPH_CURATOR_TEMPLATE,
+    MCP_MANAGER_TEMPLATE,
+    STEWARD_TEMPLATE,
+    TEMPLATES,
 )
 from tests.conftest import needs_pg
 
@@ -46,7 +51,7 @@ EXCLUDED = ("auditor", "graph-auditor", "editor")
 _SCHEMA = Path(repo.__file__).with_name("schema.sql")
 _MARKER = "-- skill-propose for every roster agent but the auditors and the editor"
 
-CAPTURED = datetime(2025, 3, 1, tzinfo=timezone.utc)
+CAPTURED = datetime(2025, 3, 1, tzinfo=UTC)
 
 GUIDANCE = (
     "# Expense reports\n"
@@ -72,7 +77,10 @@ def _load_messages(skill_ids) -> list:
     """A live run's `ctx.messages` in which each skill's guidance was loaded:
     the `load_capability` call AND its return."""
     from pydantic_ai.messages import (
-        ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart,
+        ModelRequest,
+        ModelResponse,
+        ToolCallPart,
+        ToolReturnPart,
     )
 
     out = []
@@ -160,7 +168,7 @@ async def test_the_orchestrator_deviation_no_longer_claims_no_propose_tools():
 def test_the_widening_never_names_an_excluded_agent_as_a_target():
     block = _SCHEMA.read_text()[_SCHEMA.read_text().index(_MARKER):]
     assert "a.id not in ('auditor', 'graph-auditor', 'editor')" in block
-    assert not re.search(r"\bdelete\s+from\s+agent_grant", block, re.I)
+    assert not re.search(r"\bdelete\s+from\s+agent_grant", block, re.IGNORECASE)
 
 
 @needs_pg
@@ -300,7 +308,7 @@ async def test_the_executor_writes_exactly_the_captured_bytes(skill):
     await executor.WORLD_CHECKS["skill.doc_add"](args)  # the base still holds
     out = await executor._skill_doc_add(args, "operator", "jira-expert")
     assert "v2" in out
-    current = [d for d in await repo.list_skill_docs(skill) if d["doc_key"] == "guidance"][0]
+    current = next(d for d in await repo.list_skill_docs(skill) if d["doc_key"] == "guidance")
     assert current["version"] == 2 and current["content"] == args["content"]
     assert current["added_by"] == "agent:jira-expert"
 
@@ -548,7 +556,7 @@ async def test_a_correction_keeps_the_source_and_capture_time_of_its_base(skill)
     assert args["source_url"] == "https://example.com/expenses"
     assert datetime.fromisoformat(args["captured_at"]) == CAPTURED
     await executor._skill_doc_add(args, "operator", "jira-expert")
-    current = [d for d in await repo.list_skill_docs(skill) if d["doc_key"] == "guidance"][0]
+    current = next(d for d in await repo.list_skill_docs(skill) if d["doc_key"] == "guidance")
     assert current["version"] == 2
     assert current["source_url"] == "https://example.com/expenses"
     assert current["captured_at"] == CAPTURED

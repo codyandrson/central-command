@@ -38,7 +38,6 @@ message names the `.env` key, or `./setup.sh report` for a finding.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from tests.installer_source import ROOT, SINGLE, single_scripts
 
@@ -175,7 +174,7 @@ def test_the_scan_covers_the_installer_and_the_n8n_script():
 
 
 def test_the_guard_catches_a_planted_violation():
-    planted = "\n".join([
+    planted = "\n".join([  # noqa: FLY002 — one script line per item, with comments
         'phase_x() {',
         '  fail "venv" ".venv missing — run: ./setup.sh app"',
         '  useraction "llm-models" "fill the catalog, then re-run: ./setup.sh llm"',
@@ -198,7 +197,7 @@ def test_the_guard_catches_a_planted_violation():
 
 
 def test_the_guard_leaves_commands_comments_and_usage_alone():
-    clean = "\n".join([
+    clean = "\n".join([  # noqa: FLY002 — one script line per item, with comments
         '# a comment may say: run ./setup.sh app',
         'usage() {',
         '  cat >&2 <<USAGE',
@@ -252,16 +251,16 @@ _EDIT_FILE = re.compile(
     r"\b" + _EDIT_VERBS + r"\b[^.;\n]{0,80}?(?<![\w.-])(?:[\w./-]*/)?("
     + "|".join(sorted((re.escape(n) for n in _tracked_content_names()), key=len, reverse=True))
     + r")(?![\w.-])",
-    re.I,
+    re.IGNORECASE,
 )
 # ...and the shapes that name no file at all but mean one: a compose SERVICE
 # or a container's definition, or anything to be done "by hand" to one.
 _EDIT_SERVICE = re.compile(
     r"\b(?:add|edit|patch|modify|change|append|insert)\b[^.;\n]{0,80}\bto the [\w-]+ (?:service|container)\b",
-    re.I,
+    re.IGNORECASE,
 )
 _EDIT_BY_HAND = re.compile(
-    r"\b(?:add|edit|patch|modify|change|append|insert)\b[^.;\n]{0,80}\bby hand\b", re.I,
+    r"\b(?:add|edit|patch|modify|change|append|insert)\b[^.;\n]{0,80}\bby hand\b", re.IGNORECASE,
 )
 
 
@@ -287,7 +286,7 @@ def test_no_message_tells_the_reader_to_edit_a_tracked_file():
 
 
 def test_the_tree_edit_guard_catches_a_planted_violation():
-    planted = "\n".join([
+    planted = "\n".join([  # noqa: FLY002 — one script line per item, with comments
         'f() {',
         # The llm pause's own lines, as the first laptop run read them (F14).
         '  note "  item in the design record: add HTTP(S)_PROXY to the litellm service"',
@@ -303,7 +302,7 @@ def test_the_tree_edit_guard_catches_a_planted_violation():
 
 
 def test_the_tree_edit_guard_leaves_env_keys_commands_and_findings_alone():
-    clean = "\n".join([
+    clean = "\n".join([  # noqa: FLY002 — one script line per item, with comments
         'f() {',
         '  fail "x" "fix or unset CC_IMG_NEO4J in .env, then re-run: ./setup.sh"',
         '  note "  Do not add one to a tracked file: the install refuses a tree that differs"',

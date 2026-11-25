@@ -39,7 +39,8 @@ from central_command.runtime.spike_model import (
     make_redraft_model,
     make_spike_model,
 )
-from tests.conftest import event_kinds as _kinds, needs_pg
+from tests.conftest import event_kinds as _kinds
+from tests.conftest import needs_pg
 from tests.fake_world import fake_world
 
 pytestmark = needs_pg
@@ -135,8 +136,8 @@ async def test_a_transient_resume_failure_parks_the_session(monkeypatch):
     assert "session.resume_failed" not in kinds
     assert (await repo.get_task(task_id))["status"] == "IN_PROGRESS"
 
-    parked = [e for e in await repo.list_events(ref_id=run["session_id"])
-              if e["kind"] == "session.resume_parked"][0]
+    parked = next(e for e in await repo.list_events(ref_id=run["session_id"])
+              if e["kind"] == "session.resume_parked")
     assert parked["payload"]["transient"] is True
     assert parked["payload"]["after"] == "approved"
 
@@ -171,8 +172,8 @@ async def test_a_semantic_resume_failure_keeps_todays_behaviour(monkeypatch):
     assert "session.resume_parked" not in kinds
     assert (await repo.get_task(task_id))["status"] == "DONE"
 
-    failed = [e for e in await repo.list_events(ref_id=run["session_id"])
-              if e["kind"] == "session.resume_failed"][0]
+    failed = next(e for e in await repo.list_events(ref_id=run["session_id"])
+              if e["kind"] == "session.resume_failed")
     assert failed["payload"]["transient"] is False
 
 

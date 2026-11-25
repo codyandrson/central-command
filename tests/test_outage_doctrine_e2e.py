@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.encoders import jsonable_encoder
@@ -53,16 +53,33 @@ from central_command.runtime.spike_model import make_deferred_tool_model
 from tests.conftest import aresolve, event_kinds, make_parks_due, needs_pg
 from tests.test_execution_retry import OUTAGE_TEXT, _graph_spy, _jira_spy, _parked_run
 from tests.test_outage_doctrine import (  # noqa: F401 — builders and the graph double
-    DEGRADED, FACT, _Graph, _graph_return, _model, _parked_task_run, _task, graph,
+    DEGRADED,
+    FACT,
+    _Graph,
+    _graph_return,
+    _model,
+    _parked_task_run,
+    _task,
+    graph,
 )
 from tests.test_outage_requeue import _boom_handler
 from tests.test_outage_wire import _parked
 from tests.test_restart_landing import (  # noqa: F401 — the startup landing's builders
-    _claimed_resume, _executing_with_cursor, _lifespan_sweeps, _running_task_run,
+    _claimed_resume,
+    _executing_with_cursor,
+    _lifespan_sweeps,
+    _running_task_run,
     settle_leftovers,
 )
-from tests.test_turn_parking import (  # noqa: F401
-    DOWN, _lane, _messages, _route_models, _Script, _send, _text, _user_prompts,
+from tests.test_turn_parking import (
+    DOWN,
+    _lane,
+    _messages,
+    _route_models,
+    _Script,
+    _send,
+    _text,
+    _user_prompts,
 )
 
 pytestmark = needs_pg
@@ -408,7 +425,7 @@ def test_retry_not_before_conventions_and_the_first_failure_waits_a_minute():
     """The five prior-failures conventions in `retry_not_before`'s docstring: each
     surface hands in the failures BEFORE the one it records, so every first
     failure waits 60 s and each later one doubles."""
-    now = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 27, 12, 0, tzinfo=UTC)
     surfaces = {
         "session resume (pending_resume.attempts)": lambda recorded: recorded,
         "proposal (attempts - 1)": lambda attempts: attempts - 1,

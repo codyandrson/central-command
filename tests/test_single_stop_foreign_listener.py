@@ -59,6 +59,6 @@ def test_a_listener_with_no_record_is_not_killed(tmp_path: Path):
 
 
 def test_a_listener_this_install_started_is_still_killed_when_the_signal_did_not_land(tmp_path: Path):
-    rc, out, kills = _halt(tmp_path, pid_file=True)
+    _rc, out, kills = _halt(tmp_path, pid_file=True)
     assert "4242" in kills, f"the recorded process's listener was not killed: {kills!r} / {out}"
     assert "taskkill /T of the listener" in out

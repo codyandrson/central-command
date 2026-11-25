@@ -160,7 +160,7 @@ def item_fields(item: dict) -> dict:
     # The body alone: once attachments are read, `text` also holds their
     # extracted text, which a body rule was never written against (DL-216).
     text = payload.get("text_body") or payload.get("text") or ""
-    head, sep, body = text.partition("\n\n")
+    _head, sep, body = text.partition("\n\n")
     body = body if sep else text
     return {
         "address": sender_address(payload.get("from")),
@@ -180,9 +180,7 @@ def _fields_match(spec: dict, fields: dict) -> bool:
             return False
     if "subject_contains" in spec and spec["subject_contains"] not in fields["subject"]:
         return False
-    if "body_contains" in spec and spec["body_contains"] not in fields["body"]:
-        return False
-    return True
+    return not ("body_contains" in spec and spec["body_contains"] not in fields["body"])
 
 
 def matches(rule: dict, item: dict) -> bool:

@@ -53,7 +53,7 @@ import re
 import statistics
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -245,7 +245,7 @@ def paired(base: list[int | None], other: list[int | None], *, seed: int = 1,
     questions each one ranked better."""
     if len(base) != len(other):
         raise ValueError("paired comparison needs the same questions")
-    rr = lambda r: 1 / r if r else 0.0  # noqa: E731
+    rr = lambda r: 1 / r if r else 0.0
     diffs = [rr(o) - rr(b) for b, o in zip(base, other)]
     if not diffs:
         return {"n": 0, "mrr_diff": 0.0, "ci95": [0.0, 0.0], "better": 0, "worse": 0}
@@ -358,7 +358,7 @@ async def _ingest(g, corpus: list[dict], group: str) -> None:
         await g.add_episode(
             name=e["name"], episode_body=e["body"],
             source_description="rerank benchmark corpus (scratch group)",
-            reference_time=datetime.fromisoformat(e["reference_time"].replace("Z", "+00:00")).astimezone(timezone.utc),
+            reference_time=datetime.fromisoformat(e["reference_time"]).astimezone(UTC),
             source=source, group_id=group, entity_types=graph_ontology.ENTITY_TYPES,
         )
         print(f"  ingested {i}/{len(corpus)} in {time.monotonic() - t0:.1f} s: {e['name']}", flush=True)

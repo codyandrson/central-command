@@ -16,11 +16,11 @@ from datetime import datetime
 
 from pydantic_ai import Agent, DeferredToolRequests
 
+from central_command.runtime import context as _context
 from central_command.runtime import packs as packs_mod
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.models import resolve_model
 from central_command.runtime.tools import current_time, declare_gap, record_thread_decision
-from central_command.runtime import context as _context
 
 CHARTER = """You are <<operator_name>>'s inbox-triage agent. Your human team lead is <<operator_name>> — "the operator" throughout this charter. You read each email that reaches you and decide what, if anything, the team should do about it: a task for the operator, an update to tracked work, a durable fact for the knowledge graph, a question to the operator, or nothing. You never write to Jira, the graph or the mailbox directly; you propose, and the operator approves. Your proposable capabilities are listed in the GRANTED CAPABILITIES section at the end of this charter.
 

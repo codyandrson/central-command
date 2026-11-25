@@ -228,7 +228,7 @@ def calendar_text(data: bytes) -> str:
             return f"{value.strftime('%a %Y-%m-%d %H:%M')} (floating: no time zone given)"
         if value.utcoffset() == dt.timedelta(0) and not tzid:
             return f"{value.strftime('%a %Y-%m-%d %H:%M')} UTC"
-        utc = value.astimezone(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        utc = value.astimezone(dt.UTC).strftime("%Y-%m-%d %H:%M UTC")
         return f"{value.strftime('%a %Y-%m-%d %H:%M')} {tzid or value.tzname() or ''} ({utc})".replace("  ", " ")
 
     def safe(event, key):

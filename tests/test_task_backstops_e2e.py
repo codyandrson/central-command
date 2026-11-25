@@ -34,7 +34,7 @@ from central_command.config import settings
 from central_command.db import repo
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.tools import create_task
-from tests.conftest import aresolve, needs_pg
+from tests.conftest import needs_pg
 from tests.test_orchestration import _assigning_model
 
 pytestmark = needs_pg

@@ -757,7 +757,7 @@ async def test_filter_name_resolves_to_the_real_id_before_the_dashboard(monkeypa
     out = await jira.create_dashboard("my dashboard", gadgets=[
         {"uri": "g", "config": {"filterName": "Example Off-Road Tasks", "num": "10"}},
     ])
-    method, path, body = calls[4]
+    _method, path, body = calls[4]
     assert path.endswith("/items/10013/properties/config")
     assert body == {"num": "10", "filterId": "filter-10067", "isConfigured": "true"}
     assert out["dashboard"]["gadgets"][0]["ok"] is True

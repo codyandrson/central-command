@@ -217,8 +217,8 @@ def _stub_tail(calls: Path, flags: Path) -> str:
         '  eval "$__f() { return 0; }"',
         'done',
         'eval "$(declare -f phase_fetch | sed \'1s/^phase_fetch/__real_phase_fetch/\')"',
-        'phase_fetch() { if (( STAGED )); then echo staged-fetch; else echo fetch; fi >>"$__CALLS"; '
-        '__real_phase_fetch "$@"; }',
+        ('phase_fetch() { if (( STAGED )); then echo staged-fetch; else echo fetch; fi >>"$__CALLS"; '
+        '__real_phase_fetch "$@"; }'),
     ]
     for p in phases:
         out.append(
@@ -919,7 +919,7 @@ def test_acquire_is_refused_on_an_install_and_a_staged_run_refuses_everything_el
 
 
 class _Health(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802 — the stdlib's name
+    def do_GET(self):  # the stdlib's name
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b'{"status":"ok"}')

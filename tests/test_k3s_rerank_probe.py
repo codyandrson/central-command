@@ -46,10 +46,10 @@ def _run(tmp_path: Path, app_env: str, *, state: str = "filled", rerank: str = "
         'fail() { echo "FAIL $1: $2"; }',
         'llm_gate() { echo "USERACTION llm-models: $1"; }',
         # $PY register-models.py --row-state <alias>
-        'PY=__py; __py() { printf "row-state %s\\n" "$3" >> "$STUB_LOG"; '
-        '[[ "$STUB_STATE" == down ]] && return 1; printf "%s\\n" "$STUB_STATE"; }',
-        'probe_alias() { printf "%s %s\\n" "$1" "$2" >> "$STUB_LOG"; '
-        'case "$1" in rerank) [[ "$STUB_RERANK" == ok ]];; rerank-chat) [[ "$STUB_CHAT" == ok ]];; esac; }',
+        ('PY=__py; __py() { printf "row-state %s\\n" "$3" >> "$STUB_LOG"; '
+        '[[ "$STUB_STATE" == down ]] && return 1; printf "%s\\n" "$STUB_STATE"; }'),
+        ('probe_alias() { printf "%s %s\\n" "$1" "$2" >> "$STUB_LOG"; '
+        'case "$1" in rerank) [[ "$STUB_RERANK" == ok ]];; rerank-chat) [[ "$STUB_CHAT" == ok ]];; esac; }'),
         "get_kv() {" + fns["get_kv"] + "\n}",
         "set_kv() {" + fns["set_kv"] + "\n}",
         "rerank_decide_k3s() {" + fns["rerank_decide_k3s"] + "\n}",

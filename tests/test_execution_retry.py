@@ -21,7 +21,6 @@ from __future__ import annotations
 import asyncio
 
 import httpx
-
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 
@@ -32,7 +31,8 @@ from central_command.gateway import executor, gateway
 from central_command.integrations import graphiti_ingest
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model, make_spike_model
-from tests.conftest import event_kinds as _kinds, needs_pg
+from tests.conftest import event_kinds as _kinds
+from tests.conftest import needs_pg
 
 pytestmark = needs_pg
 
@@ -80,7 +80,7 @@ def _graph_spy(monkeypatch, *, fail: str | None = None) -> list[tuple]:
 
 
 async def _event(ref_id: str, kind: str) -> dict:
-    return [e for e in await repo.list_events(ref_id=ref_id) if e["kind"] == kind][0]
+    return next(e for e in await repo.list_events(ref_id=ref_id) if e["kind"] == kind)
 
 
 async def _parked_run(monkeypatch, *, fail: str = OUTAGE_TEXT) -> dict:
@@ -426,7 +426,7 @@ async def test_the_cockpit_notice_tells_the_truth_about_a_parked_execution(monke
 class _Up:
     """A ProbeCache double: every dependency answers."""
 
-    asked: list = []
+    asked: list = []  # noqa: RUF012 — a test double's class-level record
 
     async def warm(self, dependencies):
         pass

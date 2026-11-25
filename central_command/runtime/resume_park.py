@@ -23,7 +23,7 @@ operator-initiated pause must not appear in the Decisions Inbox.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from central_command import events
 from central_command.contract import classify_failure, retry_not_before
@@ -236,7 +236,7 @@ async def park_resume(
         pending.get("dependencies")
         or failed_dependencies(error if isinstance(error, BaseException) else None)
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     episode_at = await _episode_of(session_id, pending, now)
     if due_now:
         backoff, not_before = 0, now
@@ -320,7 +320,7 @@ async def park_continuation(
         "requests": requests,
         "task_id": task_id,
         "state": state,
-        "parked_at": datetime.now(timezone.utc).isoformat(),
+        "parked_at": datetime.now(UTC).isoformat(),
     }
     await repo.park_session_awaiting_continue(session_id, marker)
     body = continue_body(agent_id, requests, windows)
@@ -374,7 +374,7 @@ async def park_stopped(
         "task_id": task_id,
         "state": state,
         "reason": reason,
-        "stopped_at": datetime.now(timezone.utc).isoformat(),
+        "stopped_at": datetime.now(UTC).isoformat(),
     }
     await repo.park_session_stopped(session_id, marker)
     await events.emit(

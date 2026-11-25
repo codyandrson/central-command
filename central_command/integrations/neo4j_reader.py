@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from neo4j import READ_ACCESS, AsyncGraphDatabase
 from neo4j.time import DateTime as Neo4jDateTime
@@ -101,7 +101,7 @@ async def ping() -> bool:
     try:
         await _read("RETURN 1")
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 — a probe: any failure reads as down
         return False
 
 
@@ -237,7 +237,7 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
             "phone": row["phone"],
         }
     edges = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for row in edge_rows:
         nodes.setdefault(row["neighbor_uuid"], {
             "uuid": row["neighbor_uuid"], "name": row["neighbor_name"],
@@ -307,7 +307,7 @@ async def everything(group_id: str | None, limit: int, at: str | None = None) ->
         """,
         group_id=group_id, limit=limit, at=at,
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     edges = []
     for row in edge_rows:
         invalid_at_native = row["invalid_at"].to_native() if isinstance(
@@ -414,7 +414,7 @@ async def episode_subgraph(uuid: str) -> dict | None:
         """,
         uuid=uuid,
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     edges = []
     for row in edge_rows:
         invalid_at_native = row["invalid_at"].to_native() if isinstance(

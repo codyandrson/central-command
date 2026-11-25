@@ -16,10 +16,9 @@ Either way it never writes: the Executor performs approved changes.
 
 from __future__ import annotations
 
-from central_command.runtime import context as _context
-
 from pydantic_ai import Agent, DeferredToolRequests
 
+from central_command.runtime import context as _context
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.models import resolve_model
 from central_command.runtime.templates import render_v0

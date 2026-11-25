@@ -18,20 +18,26 @@ import shlex
 import socket
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 import httpx
 
 from central_command.config import settings
-from central_command.contract import ARG_SPECS, TRANSIENT, Action, Provenance, classify_failure, validate_action_args
+from central_command.contract import (
+    ARG_SPECS,
+    TRANSIENT,
+    Action,
+    Provenance,
+    classify_failure,
+    validate_action_args,
+)
+from central_command.contract.args import COST_FIELDS, mcp_server_id_ok
 from central_command.contract.dependencies import dependencies_for_capability, stamped_dependencies
 from central_command.contract.failures import WorldMoved, is_world_moved
-from central_command.contract.args import COST_FIELDS, mcp_server_id_ok
+from central_command.gateway.overrides import OverrideRefused  # noqa: F401 — the backstop's typed refusal
 from central_command.integrations import calendar_facade, confluence, email_facade, graphiti, jira
 from central_command.integrations import litellm as litellm_client
-from central_command.gateway.overrides import OverrideRefused  # noqa: F401 — the backstop's typed refusal
-
 
 log = logging.getLogger(__name__)
 
@@ -226,7 +232,7 @@ def google_event_id(key: str) -> str:
     proposals drew the same 48 bits AND share an action index; the namespace
     keeps it apart from any other hash of the same key. Nothing secret goes
     in, and nothing an agent wrote."""
-    return hashlib.sha256(f"cc-event:{key}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"cc-event:{key}".encode()).hexdigest()
 
 
 async def _calendar_create_event(args: dict, approver: str, proposer: str | None) -> str:
@@ -365,7 +371,7 @@ async def _move_plan_date(event_id: str, calendar_id: str, start: str) -> str:
     if row is None or row["kind"] != "work_block":
         return ""
     try:
-        moved = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        moved = datetime.fromisoformat(str(start))
     except ValueError:
         return f" — ledger: the new start {start!r} did not parse; plan date left {row['plan_date']}"
     local = (moved.astimezone(ZoneInfo(settings.ea_timezone)).date()
@@ -390,10 +396,9 @@ async def _calendar_release_event(args: dict, approver: str, proposer: str | Non
         event_id, calendar_id, proposal_id=_current_proposal_id.get())
     if retired is None:
         pid = _current_proposal_id.get()
-        if pid:
-            if await repo.calendar_plan_event_retired_by(event_id, calendar_id, pid):
-                return (f"calendar event {event_id} already released from the plan ledger "
-                        "by this proposal — calendar unchanged")
+        if pid and await repo.calendar_plan_event_retired_by(event_id, calendar_id, pid):
+            return (f"calendar event {event_id} already released from the plan ledger "
+                    "by this proposal — calendar unchanged")
         raise ExecutorError(
             f"calendar.release_event: event {event_id} has no active row in the plan "
             "ledger (it is not a work block or placeholder of the assistant's); nothing "
@@ -827,8 +832,8 @@ def _episode_reference_time(raw) -> str:
             "(e.g. 2026-05-12T09:30:00Z or 2026-05-12)"
         ) from None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 # --- graph curation (the remediation loop, 2026-08-20) --------------------------
@@ -1000,7 +1005,7 @@ def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, 
         try:
             result = await getattr(neo4j_writer, fn_name)(**kwargs)
         except neo4j_writer.WriteError as e:
-            raise ExecutorError(f"{fn_name}: {e}")
+            raise ExecutorError(f"{fn_name}: {e}") from None
         await _reverify_after_curation(args)
         if isinstance(result, dict) and result.get("already_existed"):
             shown = {k: v for k, v in result.items() if k != "already_existed"}
@@ -1382,7 +1387,7 @@ def _captured_at(value) -> datetime:
             return datetime.fromisoformat(value)
         except ValueError:
             pass
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def _skill_doc_added(skill_id: str, doc: dict, describes, approver: str,
@@ -1438,7 +1443,7 @@ async def _skill_create(args: dict, approver: str, proposer: str | None) -> str:
     doc = await repo.add_skill_doc(
         skill_id, "guidance", "guidance", title, guidance,
         describes=args.get("describes"),
-        captured_at=datetime.now(timezone.utc),
+        captured_at=datetime.now(UTC),
         added_by=f"agent:{proposer}" if proposer else approver,
     )
     await _skill_doc_added(skill_id, doc, args.get("describes"), approver)
@@ -1674,7 +1679,7 @@ async def _check_jira_transition_issue(args: dict) -> None:
         await _judge_transition(e)
 
 
-async def _judge_transition(e: "jira.TransitionUnavailable") -> None:
+async def _judge_transition(e: jira.TransitionUnavailable) -> None:
     """Re-raise an unavailable transition with this tier's verdict. The
     integration reports the facts and knows no proposal; deciding whether the
     WORLD moved is this tier's job. A name that was never available is a
@@ -1685,7 +1690,7 @@ async def _judge_transition(e: "jira.TransitionUnavailable") -> None:
     raise e
 
 
-async def _issue_moved_since_draft(e: "jira.TransitionUnavailable") -> bool:
+async def _issue_moved_since_draft(e: jira.TransitionUnavailable) -> bool:
     """True when the issue's `updated` is later than the proposal row's
     `created_at` AND nothing in this proposal touched the issue itself.
 
@@ -2266,10 +2271,10 @@ async def _run(
             proc.communicate(input=stdin.encode() if stdin is not None else None),
             timeout=timeout,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.communicate()
-        raise ExecutorError(f"command timed out after {timeout}s")
+        raise ExecutorError(f"command timed out after {timeout}s") from None
     return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
 
 
@@ -3002,7 +3007,7 @@ async def _recheck_world(actions: list[Action]) -> None:
         if check is not None and targets and not targets & seen:
             try:
                 await check(a.arguments)
-            except Exception as e:  # noqa: BLE001 — wrapped by the caller
+            except Exception as e:  # wrapped by the caller
                 raise _PreCheckFailed(a, e) from e
         seen |= targets
 
@@ -3039,7 +3044,7 @@ async def _cursor_started(proposal_id: str, index: int, capability: str) -> None
 
     try:
         written = await repo.record_action_started(proposal_id, index, capability)
-    except Exception as e:  # noqa: BLE001 — raised as the cursor's own error
+    except Exception as e:  # raised as the cursor's own error
         raise ExecutionCursorError(
             f"could not record that action {index + 1} ({capability}) is starting, "
             f"so it was not started: {e}", index=index, landed=False,
@@ -3060,7 +3065,7 @@ async def _cursor_completed(proposal_id: str, index: int, capability: str,
 
     try:
         written = await repo.record_action_completed(proposal_id, index, result)
-    except Exception as e:  # noqa: BLE001 — raised as the cursor's own error
+    except Exception as e:  # raised as the cursor's own error
         raise ExecutionCursorError(
             f"action {index + 1} ({capability}) returned ({result[:200]}) but its "
             f"completion could not be recorded: {e}", index=index, landed=True,
@@ -3202,7 +3207,7 @@ async def execute(
                 result = await _execute_action(
                     a, covering.get(index, approver), proposer)
                 touched |= _jira_keys_of(a)
-            except Exception as e:  # noqa: BLE001 — every failure becomes the honest record
+            except Exception as e:  # every failure becomes the honest record
                 raise _execution_failed(a, e, results) from e
             finally:
                 _current_action_index.reset(index_token)
@@ -3215,7 +3220,7 @@ async def execute(
     provenance = Provenance(
         approver=approver,
         source_refs=source_refs,
-        executed_at=datetime.now(timezone.utc),
+        executed_at=datetime.now(UTC),
         action_approvers={str(i): v for i, v in sorted(covering.items())},
     )
     return ExecutionOutcome(

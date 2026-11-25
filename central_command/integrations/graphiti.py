@@ -73,7 +73,7 @@ async def steward_map() -> dict[str, str]:
 
 async def _read_groups() -> list[str]:
     groups = [g.strip() for g in settings.graph_read_groups.split(",") if g.strip()]
-    for group_id in (await steward_map()).keys():
+    for group_id in (await steward_map()):
         if group_id not in groups:
             groups.append(group_id)
     return groups
@@ -203,6 +203,8 @@ def fact_filters(*, as_of=None, after=None, before=None):
     _client()._prepare_environment()
     from graphiti_core.search.search_filters import (
         ComparisonOperator as Op,
+    )
+    from graphiti_core.search.search_filters import (
         DateFilter,
         SearchFilters,
     )

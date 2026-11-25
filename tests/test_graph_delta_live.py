@@ -16,10 +16,9 @@ import asyncio
 import os
 import time
 import uuid as _uuid
+from datetime import datetime
 
 import pytest
-
-from datetime import datetime
 
 from central_command.integrations import (
     graph_ontology,

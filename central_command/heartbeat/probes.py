@@ -227,7 +227,7 @@ async def probe_graph() -> bool:
         _reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port), timeout=PROBE_TIMEOUT_SECONDS
         )
-    except (OSError, asyncio.TimeoutError):
+    except (TimeoutError, OSError):
         return False
     writer.close()
     try:

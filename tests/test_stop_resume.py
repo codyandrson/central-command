@@ -379,7 +379,7 @@ async def test_cancel_releases_the_folded_siblings():
     now never execute, so its siblings go back in the queue. Same seam the
     rejection path uses — a second copy is a second chance to forget it, and
     forgetting it silently drops mail."""
-    task_id, session_id, _item_id, proposal_id = await _task_with_open_work()
+    task_id, _session_id, _item_id, proposal_id = await _task_with_open_work()
     suffix = uuid.uuid4().hex[:8]
     item_id, message_id = f"work_{suffix}", f"<fold-{suffix}@example.test>"
     await repo.enroll_work_item(
@@ -401,7 +401,7 @@ async def test_cancel_never_withdraws_an_approved_proposal():
     """An approval the operator already gave EXECUTES. Its landing finds a
     terminal task and no-ops — `resolve_task`'s already-terminal guard is what
     makes that true, so this asserts both halves."""
-    task_id, session_id, _item_id, proposal_id = await _task_with_open_work()
+    task_id, _session_id, _item_id, proposal_id = await _task_with_open_work()
     await repo.set_proposal_status(proposal_id, "APPROVED")
 
     out = await routes.cancel_task(task_id)

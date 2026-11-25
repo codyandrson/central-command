@@ -1,8 +1,8 @@
 """The control-plane API. Serves the JSON API (central_command.api.routes), an SSE
 stream for live updates, and — when built — the React dashboard from web/dist."""
 
-import logging
 import contextlib
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from central_command import __version__
 from central_command.api.routes import router
+from central_command.background import keep
 from central_command.config import settings
 from central_command.db import repo
 from central_command.events import bridge as event_bridge
@@ -62,7 +63,7 @@ def _release_followers_on_signal() -> list:
 
             signal.signal(sig, handler)
             installed.append((sig, previous))
-        except (ValueError, OSError):  # noqa: PERF203 — not fatal, the backstop remains
+        except (ValueError, OSError):  # not fatal, the backstop remains
             pass
     return installed
 
@@ -142,7 +143,7 @@ async def lifespan(app: FastAPI):
         stored = await _repo.get_app_setting("operator_name", {})
         if isinstance(stored, dict) and str(stored.get("name") or "").strip():
             settings.operator_name = str(stored["name"]).strip()
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+    except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
         pass
     # The roster reflects the whole team from startup — an agent must be
     # visible (and its charter editable) BEFORE its first run, not after.
@@ -150,7 +151,7 @@ async def lifespan(app: FastAPI):
         from central_command.runtime.jira_expert import ensure_registered
 
         await ensure_registered()
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+    except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
         pass
     try:
         # Same seam: the Confluence founders are reached by task/consult/
@@ -162,7 +163,7 @@ async def lifespan(app: FastAPI):
 
         await ensure_confluence_expert()
         await ensure_wiki_agent()
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+    except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
         pass
     try:
         # The MCP manager has no ledger/heartbeat trigger of its own (unlike
@@ -171,7 +172,7 @@ async def lifespan(app: FastAPI):
         from central_command.runtime.mcp_manager import ensure_registered as ensure_mcp_manager
 
         await ensure_mcp_manager()
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+    except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
         pass
     try:
         # The editor has no ledger/heartbeat trigger of its own either — it's
@@ -180,7 +181,7 @@ async def lifespan(app: FastAPI):
         from central_command.runtime.editor import ensure_registered as ensure_editor
 
         await ensure_editor()
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+    except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
         pass
     try:
         # Same seam as the editor's: the accountability agent is reached only
@@ -191,7 +192,7 @@ async def lifespan(app: FastAPI):
         )
 
         await ensure_accountability()
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+    except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
         pass
     try:
         # Runs and executions are in-process and nothing has run in THIS
@@ -206,7 +207,7 @@ async def lifespan(app: FastAPI):
         from central_command.api import orchestration as _orch
 
         await _orch.land_orphans_at_startup()
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+    except Exception:  # a down DB shows up loudly elsewhere
         logging.getLogger(__name__).exception("startup: landing orphaned work failed")
     try:
         # Startup-only re-launch of tasks queued but never started before the
@@ -218,7 +219,7 @@ async def lifespan(app: FastAPI):
         from central_command.api.routes import startup_task_sweep
 
         await startup_task_sweep()
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+    except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
         pass
     try:
         # A CLAIMED work_item is also a same-process orphan by construction —
@@ -231,7 +232,7 @@ async def lifespan(app: FastAPI):
         from central_command.db import repo as _repo
 
         await _repo.reclaim_stale_work_items(0)
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+    except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
         pass
     # The durable graph ingest worker (design record 2026-10-04, D5). ON by
     # default, unlike the loops below: it is the only thing that lands an
@@ -247,7 +248,7 @@ async def lifespan(app: FastAPI):
             from central_command.integrations import graphiti_ingest
 
             await graphiti_ingest.worker.start(cutover=graph_auditor.enqueue_cutover)
-        except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+        except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
             pass
     # Opt-in (CC_DISPATCH_ENABLED / CC_FEED_ENABLED / CC_HEARTBEAT_ENABLED):
     # background loops never start by surprise.
@@ -265,12 +266,12 @@ async def lifespan(app: FastAPI):
 
         from central_command.api import orchestration
 
-        asyncio.create_task(orchestration.resume_sweep())
+        keep(asyncio.create_task(orchestration.resume_sweep()))
         # Sessions the previous process parked for an update hold resume
         # here — the operator never pressed stop on them (api/hold.py).
         from central_command.api import hold as update_hold
 
-        asyncio.create_task(update_hold.resume_held_sessions())
+        keep(asyncio.create_task(update_hold.resume_held_sessions()))
         # Same guarantee for audits: the inline hooks a restart's
         # CancelledError killed (or a transient 5xx degraded) re-run here,
         # so a parked dismissal never waits on the human gate by accident.
@@ -285,8 +286,8 @@ async def lifespan(app: FastAPI):
             finally:
                 await overrides.override_sweep()
 
-        asyncio.create_task(_audit_then_overrides())
-    except Exception:  # noqa: BLE001 — a down DB shows up loudly elsewhere
+        keep(asyncio.create_task(_audit_then_overrides()))
+    except Exception:  # noqa: BLE001, S110 — a down DB shows up loudly elsewhere
         pass
     # The application self-check (central_command/selfcheck.py): one READINESS
     # run in the background so the Systems page has a result. It spends one

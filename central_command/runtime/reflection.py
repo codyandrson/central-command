@@ -54,6 +54,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import UTC
 from typing import Literal
 
 from pydantic import BaseModel
@@ -65,8 +66,8 @@ from central_command.db import repo
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.durable import (
     classify_deferred,
-    extract_deferred,
     deferred_proposal,
+    extract_deferred,
     full_messages,
     retry_text,
     simplify_messages,
@@ -229,9 +230,9 @@ async def _charter_context(agent_id: str) -> str:
 
 
 def _session_close_time() -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _correction_section(skill_texts: dict[str, str]) -> str:

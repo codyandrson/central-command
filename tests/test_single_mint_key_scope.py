@@ -218,7 +218,7 @@ def _assert_no_secret_in_argv(repo: Path) -> None:
 
 def _cfg_data(cfg: str) -> dict:
     """The JSON body out of a curl config's `data = "..."` line."""
-    m = re.search(r'^data = "(.*)"$', cfg, flags=re.M)
+    m = re.search(r'^data = "(.*)"$', cfg, flags=re.MULTILINE)
     assert m, cfg
     raw = m.group(1).replace('\\"', '"').replace("\\\\", "\\")
     return json.loads(raw)

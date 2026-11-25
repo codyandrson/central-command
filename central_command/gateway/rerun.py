@@ -96,7 +96,7 @@ async def _start_conversation(run: _Run, new_session_id: str, actor: str) -> Non
                 rerun_of=session["id"], model_override=session.get("model_override"),
                 thinking_override=session.get("thinking_override"),
             )
-        except Exception:  # noqa: BLE001 — the run's own landing holds the record
+        except Exception:  # the run's own landing holds the record
             log.exception("re-run of conversation %s failed", session["id"])
 
     _detach(opening_turn())
@@ -112,7 +112,7 @@ async def _start_email(run: _Run, new_session_id: str, actor: str) -> None:
             # the thread lock. If the thread is busy the item stays queued for the
             # dispatcher, and the owed id is on the record either way.
             await dispatcher.dispatch_item(run.item["id"])
-        except Exception:  # noqa: BLE001 — process_claimed keeps its own record
+        except Exception:  # process_claimed keeps its own record
             log.exception("re-run of work item %s failed", run.item["id"])
 
     _detach(dispatch())

@@ -18,10 +18,9 @@ Two build modes:
 
 from __future__ import annotations
 
-from central_command.runtime import context as _context
-
 from pydantic_ai import Agent, DeferredToolRequests
 
+from central_command.runtime import context as _context
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.litellm_manager_profile import CHARTER
 from central_command.runtime.models import resolve_model

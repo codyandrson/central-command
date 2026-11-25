@@ -19,9 +19,11 @@ import asyncio
 import bisect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC
 
 # The thinking levels a schedule may pin. Imported from the model seam so the
 # registry and the resolver can never disagree about what is valid.
+from central_command.background import keep
 from central_command.runtime.models import THINKING_LEVELS
 
 
@@ -99,7 +101,7 @@ async def _dispatch_window(schedule_id: str, params: dict) -> dict:
     # If the process dies mid-window the closer dies with it — and so does the
     # dispatcher and its lease, so a restart comes up with the drain OFF
     # (unless CC_DISPATCH_ENABLED says otherwise). Fails toward closed.
-    asyncio.create_task(_close())
+    keep(asyncio.create_task(_close()))
     return {"opened": True, "minutes": minutes}
 
 
@@ -166,7 +168,7 @@ async def _sandbox_run_script(schedule_id: str, params: dict) -> dict:
     try:
         read = await sandbox_client.read_file(sandbox_id, "result.json")
         result_json = json.loads(read["content"])
-    except Exception:  # noqa: BLE001 — result.json is optional, not every script writes one
+    except Exception:  # noqa: BLE001, S110 — result.json is optional, not every script writes one
         pass
 
     out = {
@@ -241,9 +243,8 @@ async def _report_audit_agreement(schedule_id: str, params: dict) -> dict:
     to visit the URL. Read-only."""
     # THE one allowed gateway import (see module docstring): a pure read over
     # the event log. The guard test pins this exact line.
-    from central_command.gateway.auditor import agreement_report
-
     from central_command import events
+    from central_command.gateway.auditor import agreement_report
 
     report = await agreement_report()
     await events.emit(
@@ -313,14 +314,14 @@ async def _discussion_sweep(schedule_id: str, params: dict) -> dict:
     without a database; this action does the reading, the emitting and the
     stamping.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from central_command import events
     from central_command.config import settings
     from central_command.db import repo
     from central_command.runtime.discussions import classify_discussion_stall
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows = await repo.list_open_discussions()
     stalled: list[str] = []
     nudged: list[str] = []
@@ -832,7 +833,7 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     (free) snapshot, so a deferred contact spends no tokens at all.
     """
     import json
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from central_command import events
     from central_command.config import settings
@@ -860,7 +861,7 @@ async def _ea_contact(schedule_id: str, params: dict) -> dict:
     if kind == "onboarding_tour":
         return await _ea_tour(schedule_id)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     delivered = [
         r for r in await repo.list_events_of_kinds([EA_DELIVERED_EVENT])
         if (r.get("payload") or {}).get("kind") == kind
@@ -1656,7 +1657,7 @@ def _parse_positive_int(params: dict, name: str, default: int) -> int:
     try:
         value = int(str(raw))
     except (TypeError, ValueError):
-        raise ValueError(f"litellm.discovery param {name!r} must be a positive integer (got {raw!r})")
+        raise ValueError(f"litellm.discovery param {name!r} must be a positive integer (got {raw!r})") from None
     if value <= 0:
         raise ValueError(f"litellm.discovery param {name!r} must be a positive integer (got {raw!r})")
     return value

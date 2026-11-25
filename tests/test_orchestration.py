@@ -175,8 +175,8 @@ async def test_gated_child_parks_proposal_and_resumes_after_approval(monkeypatch
         return bool(waiting) and await repo.session_status(sid) == "AWAITING_AGENTS"
     await _settle(child_in_review)
 
-    child = [t for t in await repo.list_tasks()
-             if t.get("parent_session_id") == sid][0]
+    child = next(t for t in await repo.list_tasks()
+             if t.get("parent_session_id") == sid)
     props = [p for p in await repo.list_proposals()
              if p["session_id"] == child["session_id"]
              and p["status"] == "AWAITING_HUMAN"]

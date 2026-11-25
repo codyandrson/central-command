@@ -112,7 +112,7 @@ def extract_text(name: str, data: bytes) -> tuple[str, str, str | None]:
     """
     try:
         text = _convert_raw(name, data)
-    except Exception as exc:  # a malformed file must not abort the walk
+    except Exception as exc:  # noqa: BLE001 — a malformed file must not abort the walk
         return "", "failed", str(exc)
     return (text, "ok", None) if text else ("", "empty", None)
 

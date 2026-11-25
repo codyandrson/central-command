@@ -124,11 +124,10 @@ async def run_document(
     document itself does not); `source_text` is the stored document, and is the
     ONLY thing a citation is checked against.
     """
-    from central_command.db import repo
+    from central_command.runtime import packs as packs_mod
     from central_command.runtime import skills as skills_mod
     from central_command.runtime.agent import build_hired_agent, load_charter
     from central_command.runtime.deps import TriageDeps
-    from central_command.runtime import packs as packs_mod
     from central_command.runtime.packs import granted_packs
     from central_command.runtime.run import _run_live, _total_tokens
 

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -44,7 +44,6 @@ from icalendar import Calendar
 from central_command.config import settings
 from central_command.contract.failures import SEMANTIC, classify_failure_text
 from central_command.integrations import exchange
-
 
 # --- the fake mailbox ---------------------------------------------------------
 
@@ -76,7 +75,7 @@ class FakeMessage:
         self.subject = subject
         self.sender = FakeMailbox(sender, "Dana Rivers")
         self.conversation_id = FakeId(conversation)
-        self.datetime_received = received or datetime(2026, 9, 25, 14, 30, tzinfo=timezone.utc)
+        self.datetime_received = received or datetime(2026, 9, 25, 14, 30, tzinfo=UTC)
         self.datetime_sent = self.datetime_received
         self.text_body = text
         self.body = html
@@ -137,8 +136,8 @@ class MeetingRequest(FakeMessage):
     def __init__(self, start=None, end=None, location="Room 4", organizer=None,
                  required=(), optional=(), is_all_day=False, **kwargs):
         super().__init__(**kwargs)
-        self.start = start if start is not None else datetime(2026, 11, 20, 15, 0, tzinfo=timezone.utc)
-        self.end = end if end is not None else datetime(2026, 11, 20, 16, 0, tzinfo=timezone.utc)
+        self.start = start if start is not None else datetime(2026, 11, 20, 15, 0, tzinfo=UTC)
+        self.end = end if end is not None else datetime(2026, 11, 20, 16, 0, tzinfo=UTC)
         self.location = location
         self.organizer = organizer if organizer is not None else FakeMailbox(
             "jane.doe@example.com", "Jane Doe")
@@ -289,8 +288,8 @@ def test_translate_query_reads_every_token_it_teaches():
     assert filters["sender"] == "dana@example.com"
     assert filters["to_recipients"] == "ops@example.com"
     assert filters["subject__icontains"] == "Budget"
-    assert filters["datetime_received__gt"] == datetime(2026, 9, 1, tzinfo=timezone.utc)
-    assert filters["datetime_received__lt"] == datetime(2026, 9, 30, tzinfo=timezone.utc)
+    assert filters["datetime_received__gt"] == datetime(2026, 9, 1, tzinfo=UTC)
+    assert filters["datetime_received__lt"] == datetime(2026, 9, 30, tzinfo=UTC)
 
 
 def test_translate_query_handles_the_default_feed_query():
@@ -300,7 +299,7 @@ def test_translate_query_handles_the_default_feed_query():
     assert folder == "inbox"
     assert aqs is None
     cut = filters["datetime_received__gt"]
-    assert timedelta(hours=23) < datetime.now(timezone.utc) - cut < timedelta(hours=25)
+    assert timedelta(hours=23) < datetime.now(UTC) - cut < timedelta(hours=25)
 
 
 def test_translate_query_reads_older_than_as_the_other_bound():
@@ -313,9 +312,9 @@ def test_translate_query_accepts_the_backlog_sweepers_epoch_dates():
     YYYY/MM/DD — both spellings are live, so both must parse."""
     filters, _, _ = exchange.translate_query("after:1700000000 before:1700086400")
     assert filters["datetime_received__gt"] == datetime(2023, 11, 14, 22, 13, 20,
-                                                       tzinfo=timezone.utc)
+                                                       tzinfo=UTC)
     assert filters["datetime_received__lt"] == datetime(2023, 11, 15, 22, 13, 20,
-                                                        tzinfo=timezone.utc)
+                                                        tzinfo=UTC)
 
 
 def test_translate_query_quotes_survive_a_phrase():
@@ -528,8 +527,8 @@ async def test_a_meeting_request_gets_a_parseable_invite(mailbox):
     assert str(cal["PRODID"]) == "-//Central Command//Exchange meeting//EN"
     event = _event(text)
     assert str(event["SUMMARY"]) == "Quarterly review"
-    assert event["DTSTART"].dt == datetime(2026, 11, 20, 15, 0, tzinfo=timezone.utc)
-    assert event["DTEND"].dt == datetime(2026, 11, 20, 16, 0, tzinfo=timezone.utc)
+    assert event["DTSTART"].dt == datetime(2026, 11, 20, 15, 0, tzinfo=UTC)
+    assert event["DTEND"].dt == datetime(2026, 11, 20, 16, 0, tzinfo=UTC)
     assert "DTSTART:20261120T150000Z" in text
     assert str(event["LOCATION"]) == "Room 4"
     assert str(event["ORGANIZER"]) == "mailto:jane.doe@example.com"
@@ -566,7 +565,7 @@ async def test_a_meeting_without_a_start_yields_no_invite_and_missing_values_are
 async def test_an_all_day_meeting_uses_the_date_form(mailbox):
     mailbox.inbox.items = [MeetingRequest(
         item_id="M3=", is_all_day=True,
-        start=datetime(2026, 12, 1, tzinfo=timezone.utc), end=datetime(2026, 12, 2, tzinfo=timezone.utc))]
+        start=datetime(2026, 12, 1, tzinfo=UTC), end=datetime(2026, 12, 2, tzinfo=UTC))]
     text = _invite(await exchange.get_message("M3="))["inline_text"]
     assert "DTSTART;VALUE=DATE:20261201\r\n" in text and "DTEND;VALUE=DATE:20261202\r\n" in text
     event = _event(text)
@@ -724,8 +723,8 @@ class FakeEvent:
                  all_day=False, item_id="EV1="):
         self.id = FakeId(item_id)
         self.subject = subject
-        self.start = start or datetime(2026, 9, 25, 9, 0, tzinfo=timezone.utc)
-        self.end = end or datetime(2026, 9, 25, 9, 15, tzinfo=timezone.utc)
+        self.start = start or datetime(2026, 9, 25, 9, 0, tzinfo=UTC)
+        self.end = end or datetime(2026, 9, 25, 9, 15, tzinfo=UTC)
         self.is_all_day = all_day
         self.location = location
         self.organizer = FakeMailbox(organizer)

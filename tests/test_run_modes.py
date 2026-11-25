@@ -98,7 +98,7 @@ def test_the_module_loads_by_path_with_no_central_command_module():
 
 def test_the_module_imports_nothing_from_the_package():
     src = MODULE.read_text()
-    assert not re.search(r"^\s*(from|import)\s+central_command", src, re.M)
+    assert not re.search(r"^\s*(from|import)\s+central_command", src, re.MULTILINE)
 
 
 # ── the CLI ─────────────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ async def test_the_lifespan_refuses_before_anything_opens(monkeypatch, caplog, k
     monkeypatch.setenv(key, value)
     opened = []
     monkeypatch.setattr(app_module.event_log, "opened", lambda: opened.append(1))
-    with caplog.at_level(logging.CRITICAL, logger=app_module.__name__):
+    with caplog.at_level(logging.CRITICAL, logger=app_module.__name__):  # noqa: SIM117 — merging re-indents the block; formatting is a later release
         with pytest.raises(RuntimeError, match=key):
             async with app_module.app.router.lifespan_context(app_module.app):
                 pytest.fail("the API served with a run-mode key present")
@@ -215,7 +215,7 @@ VERIFY = ROOT / "deploy" / "k3s" / "verify.sh"
 
 def _verify_function() -> str:
     text = VERIFY.read_text()
-    m = re.search(r"^run_modes_check\(\) \{\n.*?^\}\n", text, re.M | re.S)
+    m = re.search(r"^run_modes_check\(\) \{\n.*?^\}\n", text, re.MULTILINE | re.DOTALL)
     assert m, "verify.sh has no run_modes_check function"
     return m.group(0)
 

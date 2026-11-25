@@ -63,8 +63,8 @@ def _text_pdf(*lines: str) -> bytes:
     objs = [
         b"<</Type/Catalog/Pages 2 0 R>>",
         b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
-        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources"
-        b"<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>",
+        (b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources"
+        b"<</Font<</F1 4 0 R>>>>/Contents 5 0 R>>"),
         b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
         b"<</Length %d>>stream\n" % len(content) + content + b"\nendstream",
     ]
@@ -78,8 +78,8 @@ def _scanned_pdf() -> bytes:
     objs = [
         b"<</Type/Catalog/Pages 2 0 R>>",
         b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
-        b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Resources"
-        b"<</XObject<</I0 4 0 R>>>>/Contents 5 0 R>>",
+        (b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Resources"
+        b"<</XObject<</I0 4 0 R>>>>/Contents 5 0 R>>"),
         b"<</Type/XObject/Subtype/Image/Width 10/Height 10/ColorSpace/DeviceRGB"
         b"/BitsPerComponent 8/Filter/DCTDecode/Length %d>>stream\n" % len(img) + img + b"\nendstream",
         b"<</Length %d>>stream\n" % len(content) + content + b"\nendstream",

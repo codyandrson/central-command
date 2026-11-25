@@ -416,7 +416,7 @@ def test_the_report_carries_the_selfcheck_lines(tree: Path):
     assert "FAIL selfcheck-proxy-as-app: CC_LLM_API_KEY is empty" in section, section
     assert "(exit 1" in section
     # A report is about the install as it stands: the full mode, short timeout.
-    cwd, args = _calls(tree)[-1]
+    _cwd, args = _calls(tree)[-1]
     assert "--pre-boot" not in args.split()
     assert "--timeout" in args.split()
     # Ledger, then the self-check, then the log (D8's order).

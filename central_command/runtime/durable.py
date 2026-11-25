@@ -516,9 +516,7 @@ def simplify_messages(run_state: dict, max_chars: int = 6000) -> list[dict]:
             kind = part.get("part_kind", "unknown")
             if is_bookkeeping(part):
                 continue  # the framework's own state, no one's turn
-            if kind == "system-prompt":
-                content = str(part.get("content", ""))
-            elif kind in ("user-prompt", "text", "thinking"):
+            if kind == "system-prompt" or kind in ("user-prompt", "text", "thinking"):
                 content = str(part.get("content", ""))
             elif kind == "tool-call":
                 content = str(part.get("args", ""))

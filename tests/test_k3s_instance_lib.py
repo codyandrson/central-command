@@ -433,10 +433,10 @@ def test_the_npm_gate_runs_before_anything_is_checkpointed_built_or_stopped():
 
 
 def test_a_build_worktree_can_never_become_repo():
-    assert len(re.findall(r"^\s*REPO=", UPDATER, re.M)) == 1
+    assert len(re.findall(r"^\s*REPO=", UPDATER, re.MULTILINE)) == 1
     assert 'REPO="$(cc_k3s_checkout "$SELF")"' in UPDATER
     assert 'SELF="${BASH_SOURCE[0]}"' in UPDATER
-    worktrees = re.findall(r'^\s*WT="([^"]*)"', UPDATER, re.M)
+    worktrees = re.findall(r'^\s*WT="([^"]*)"', UPDATER, re.MULTILINE)
     assert sorted(w.split("/.")[0] for w in worktrees if w) == ["$OWNER_HOME", "$OWNER_HOME"]
     # The target's OWN build script runs from the worktree, with its own REPO_ROOT.
     assert UPDATER.count('bash "$WT/deploy/k3s/$script"') == 2

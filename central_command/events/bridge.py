@@ -58,7 +58,7 @@ class _EventLogHandler(logging.Handler):
         super().__init__(level=logging.WARNING)
         self._loop = loop
 
-    def emit(self, record: logging.LogRecord) -> None:  # noqa: A003 — logging API
+    def emit(self, record: logging.LogRecord) -> None:  # logging API
         if _bridging.get() or record.name.startswith(_SKIP_PREFIXES):
             return
         try:

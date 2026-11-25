@@ -286,7 +286,7 @@ def test_the_evening_review_asks_what_finished_work_left():
 
 
 def test_the_sweep_reports_what_it_finds_and_never_comments_it():
-    m = re.search(r"\('jira-hygiene'.*?\"instructions\": \"(.*?)\"\}',", SCHEMA, re.S)
+    m = re.search(r"\('jira-hygiene'.*?\"instructions\": \"(.*?)\"\}',", SCHEMA, re.DOTALL)
     text = m.group(1).replace("''", "'")
     assert "Never propose a comment that only records what the sweep found" in text
     assert "REPORT everything else in your closing text" in text

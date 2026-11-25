@@ -234,7 +234,7 @@ async def test_executor_writes_exactly_the_captured_bytes(monkeypatch, tmp_path)
     for f in files:
         assert (tmp_path / "servers" / "exec-server" / f["path"]).read_text(encoding="utf-8") == f["content"]
     assert "commit" in outcome.result_text
-    log = subprocess.run(
+    log = subprocess.run(  # noqa: ASYNC221 — a test reads git's log; blocking is fine
         ["git", "log", "-1", "--format=%B"], cwd=tmp_path, check=True, capture_output=True, text=True
     ).stdout
     assert "prop_test0001" in log

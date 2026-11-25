@@ -15,13 +15,12 @@ NEW for the operator, `task.route_error` on the log.
 
 from __future__ import annotations
 
-from central_command.runtime import context as _context
-
 import uuid
 
 from pydantic import BaseModel
 
 from central_command.db import repo
+from central_command.runtime import context as _context
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.orchestrator_profile import CHARTER
 from central_command.runtime.roster import roster

@@ -139,7 +139,7 @@ def test_this_release_does_not_declare_the_rerank_key_unless_it_reads_it():
     """The gate is real on THIS tree: a release ships the row before (or with)
     the code that reads it, and the key is appended only by an update INTO a
     release whose .env.example declares it."""
-    declared = re.search(r"^#? ?CC_GRAPH_RERANK_ALIAS=", (ROOT / ".env.example").read_text(), re.M)
+    declared = re.search(r"^#? ?CC_GRAPH_RERANK_ALIAS=", (ROOT / ".env.example").read_text(), re.MULTILINE)
     reads = "graph_rerank_alias" in (ROOT / "central_command" / "config.py").read_text()
     assert bool(declared) == reads
 

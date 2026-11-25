@@ -16,7 +16,7 @@ import asyncio
 import contextvars
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncpg
@@ -73,7 +73,7 @@ PARKED = "PARKED_FOR_TEST"
 # per-DATABASE, not per-row. A deleted worktree leaves its database behind;
 # `_sweep_idle_test_databases` below drops them: once per pytest session, in
 # the main process only.
-import hashlib
+import hashlib  # noqa: E402 — placed under the comment that explains it
 
 _CHECKOUT = hashlib.sha1(str(Path(__file__).resolve().parents[1]).encode()).hexdigest()[:8]
 _WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
@@ -141,16 +141,16 @@ def _sweep_idle_test_databases() -> None:
                         except Exception:  # noqa: BLE001 — unreadable: left alone
                             created = None
                     found.append((r["datname"], r["n"], created))
-                for name in sweepable_test_databases(found, now=datetime.now(timezone.utc)):
+                for name in sweepable_test_databases(found, now=datetime.now(UTC)):
                     try:
-                        await conn.execute('drop database "%s"' % name.replace('"', '""'))
-                    except Exception:  # noqa: BLE001 — connected since: refused, fine
+                        await conn.execute('drop database "{}"'.format(name.replace('"', '""')))
+                    except Exception:  # noqa: BLE001, S110 — connected since: refused, fine
                         pass
             finally:
                 await conn.close()
 
         asyncio.run(asyncio.wait_for(sweep(), 20))
-    except Exception:  # noqa: BLE001 — a sweep never fails or blocks a run
+    except Exception:  # noqa: BLE001, S110 — a sweep never fails or blocks a run
         pass
 
 
@@ -575,7 +575,7 @@ def _graph_read_ok() -> bool:
         return False
 
 
-def pytest_collection_modifyitems(config, items):  # noqa: ARG001
+def pytest_collection_modifyitems(config, items):
     """Probe the live graph read path once, and only if something needs it."""
     live = [item for item in items if item.get_closest_marker("graph_live")]
     if not live or _graph_read_ok():

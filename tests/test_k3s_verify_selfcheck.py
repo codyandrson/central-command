@@ -49,7 +49,7 @@ exit "$(cat "$here/rc")"
 
 
 def _function() -> str:
-    m = re.search(r"^selfcheck_check\(\) \{\n.*?^\}\n", VERIFY.read_text(), re.M | re.S)
+    m = re.search(r"^selfcheck_check\(\) \{\n.*?^\}\n", VERIFY.read_text(), re.MULTILINE | re.DOTALL)
     assert m, "verify.sh has no selfcheck_check function"
     return m.group(0)
 
@@ -143,7 +143,7 @@ def test_clean_install_skips_with_a_line_and_never_starts_the_module(tmp_path):
 
 
 def test_the_module_runs_from_the_repo_root_without_pre_boot_or_sourced_cc_variables(tmp_path):
-    r, args, tree = _run(tmp_path, "PASS selfcheck-a: fine\\n")
+    _r, args, tree = _run(tmp_path, "PASS selfcheck-a: fine\\n")
     argv, cwd, cc_vars = args.read_text().splitlines()
     assert argv == "-m central_command.selfcheck"
     assert "--pre-boot" not in argv

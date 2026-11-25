@@ -58,7 +58,7 @@ _HOSTNAME_VALUE = re.compile(
     _HOSTNAME_KEY + r"""["']?\s*[:=]\s*["']?[A-Za-z0-9]"""
     r"""|""" + _HOSTNAME_KEY + r"""(?:[^\n]*\n){0,4}?[^\n]*values["']?\s*:\s*(?:\[\s*["']?|\n\s*-\s*["']?)[A-Za-z0-9]"""
 )
-_UNIT_KEY = re.compile(r"^(User|Group|WorkingDirectory|ExecStart|EnvironmentFile|Environment)=(.*)$", re.M)
+_UNIT_KEY = re.compile(r"^(User|Group|WorkingDirectory|ExecStart|EnvironmentFile|Environment)=(.*)$", re.MULTILINE)
 _TOKEN = re.compile(r"@[A-Za-z_][A-Za-z0-9_]*@|\$\{[^}]+\}|\{\{[^}]+\}\}|<[^>]+>")
 
 _WEB_OURS = re.compile(
@@ -169,7 +169,7 @@ def _repo(tmp_path: Path, files: dict[str, str]) -> Path:
 
 def _planted(shape: str) -> tuple[str, str]:
     """(path, text) planting `shape`, its values built at runtime."""
-    ip = ".".join(["100", "64", "1", "9"])                      # in 100.64.0.0/10, outside the /24
+    ip = ".".join(["100", "64", "1", "9"])  # noqa: FLY002 — no literal address in the source; in 100.64.0.0/10, outside the /24
     name = "zq" + "7acct"                                       # not in the example set
     if shape == "a":
         return "deploy/x.sh", f"ssh {ip}\n"
@@ -220,7 +220,7 @@ def test_a_yaml_hostname_selector_with_a_literal_value_is_shape_d(tmp_path):
 
 
 def test_scope_skips_vendor_and_upstream_web_and_keeps_our_web(tmp_path):
-    path, text = _planted("b")
+    _path, text = _planted("b")
     files = {
         "docs/vendor/x.md": text,
         "web/docs/x.md": text,

@@ -21,9 +21,9 @@ source walk pins that no literal `exit <digit>` survives outside a comment.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
-import os
 import subprocess
 from pathlib import Path
 
@@ -118,7 +118,7 @@ def _lines(calls: Path) -> list[str]:
 
 
 def test_success_path_stops_applies_restarts(rig):
-    single, run, calls, health_flag, _, upd, _flag = rig
+    _single, run, calls, health_flag, _, upd, _flag = rig
     health_flag.touch()  # the API is up when the runner starts
     proc, status = run()
     assert proc.returncode == 0, proc.stderr
@@ -131,7 +131,7 @@ def test_success_path_stops_applies_restarts(rig):
 
 
 def test_apply_failure_rolls_back(rig):
-    single, run, calls, health_flag, script, _upd, _flag = rig
+    _single, run, calls, _health_flag, script, _upd, _flag = rig
     script("update.sh", '[[ "$1" == apply ]] && { echo "FAIL merge: conflicts" ; exit 1; }\nexit 0')
     proc, status = run()
     assert proc.returncode == 1
@@ -141,7 +141,7 @@ def test_apply_failure_rolls_back(rig):
 
 
 def test_operator_pause_restarts_and_reports(rig):
-    single, run, calls, _hf, script, _upd, _flag = rig
+    _single, run, calls, _hf, script, _upd, _flag = rig
     script("update.sh", 'echo "USERACTION llm: the model catalog needs your attention"\nexit 3')
     proc, status = run()
     assert proc.returncode == 3
@@ -152,7 +152,7 @@ def test_operator_pause_restarts_and_reports(rig):
 
 
 def test_unhealthy_restart_is_a_loud_failure(rig, tmp_path):
-    single, run, calls, _hf, script, upd, flag = rig
+    _single, run, _calls, _hf, script, upd, flag = rig
     # boot "succeeds" but health never comes up.
     script("setup.sh", f"[[ \"$1\" == stop ]] && rm -f '{flag}'\nexit 0")
     # Patch the runner's health wait down so the test doesn't sit 90s.
@@ -187,7 +187,7 @@ def test_the_runner_spells_no_literal_exit_and_uses_the_one_helper():
     assert not literal, f"a literal exit status outside a comment: {literal}"
     body = "\n".join(code)
     assert "cc_exit_code" in body
-    assert re.search(r'^\s*\.\s+"\$REPO_ROOT/deploy/env-lib\.sh"', body, flags=re.M), (
+    assert re.search(r'^\s*\.\s+"\$REPO_ROOT/deploy/env-lib\.sh"', body, flags=re.MULTILINE), (
         "env-lib.sh must be sourced at the top level, not inside a conditional"
     )
 

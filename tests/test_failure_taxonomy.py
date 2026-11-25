@@ -13,7 +13,6 @@ Two properties, and only two, because slice 1 changes no behaviour:
 
 from __future__ import annotations
 
-import asyncio
 import errno
 import socket
 import uuid
@@ -61,7 +60,7 @@ TRANSIENT_CASES = [
     ("httpx write timeout", httpx.WriteTimeout("write timed out")),
     ("httpx pool timeout", httpx.PoolTimeout("pool exhausted")),
     ("httpx remote protocol error", httpx.RemoteProtocolError("server disconnected")),
-    ("asyncio timeout", asyncio.TimeoutError()),
+    ("asyncio timeout", TimeoutError()),
     ("python ConnectionError", ConnectionResetError("reset by peer")),
     ("dns failure", socket.gaierror("name resolution failed")),
     ("network OSError", OSError(errno.ECONNREFUSED, "Connection refused")),

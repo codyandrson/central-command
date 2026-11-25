@@ -82,7 +82,7 @@ def test_each_env_file_is_copied_byte_for_byte_at_0600_in_a_0700_directory(tree:
     r, out = _run(tree)
     assert r.returncode != 0  # the k3s stub fails every store
     assert stat.S_IMODE(out.stat().st_mode) == 0o700
-    for label in CONTENT:
+    for label in CONTENT:  # noqa: PLC0206
         (copy,) = _copies(out, label)
         assert copy.read_bytes() == CONTENT[label], f"{label}: copy differs from its source"
         assert stat.S_IMODE(copy.stat().st_mode) == 0o600, f"{label}: copy is not 0600"

@@ -132,5 +132,13 @@ while read -r _lref lsha rref rsha; do
     echo "pre-push: WARNING $LIST missing — only secret shapes were checked" >&2
   fi
 done
+
+# Code quality (package 1.12): after the scan above, never instead of it, run
+# the pushing checkout's own scripts/check when it has one. It can only add a
+# refusal. A repo with no scripts/check (the guard's own test repos) skips it.
+top="$(git rev-parse --show-toplevel </dev/null 2>/dev/null)" || top=""
+if [[ -n "$top" && -x "$top/scripts/check" ]]; then
+  "$top/scripts/check" </dev/null >&2 || { echo "pre-push: scripts/check failed" >&2; rc=1; }
+fi
 [[ $rc -ne 0 ]] && echo "pre-push: REFUSED (scripts/prepush-scan.sh)" >&2
 exit $rc

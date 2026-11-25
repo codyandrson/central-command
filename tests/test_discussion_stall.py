@@ -11,7 +11,7 @@ setting-varied cases below move the setting and leave the quiet time alone.
 """
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -20,7 +20,7 @@ from central_command.db import repo
 from central_command.runtime.discussions import classify_discussion_stall
 from tests.conftest import needs_pg
 
-NOW = datetime(2026, 7, 27, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
 
 
 def _case(*, quiet_hours=48, last_turn_by="agent", stalled_at=None, nudged_at=None):

@@ -37,11 +37,7 @@ pytestmark = [
 ]
 
 TARGET = "2.99.0"
-LIFTED = (
-    "logline pass warn fail note G branch_kv merged_already "
-    "skills_refresh_module skills_python skills_refresh_cli "
-    "refresh_bundled_skills"
-).split()
+LIFTED = ["logline", "pass", "warn", "fail", "note", "G", "branch_kv", "merged_already", "skills_refresh_module", "skills_python", "skills_refresh_cli", "refresh_bundled_skills"]
 
 
 def _bash() -> str:
@@ -190,7 +186,7 @@ def _calls_of(name: str) -> list[str]:
 
 
 def test_the_step_is_defined_once_and_called_once():
-    assert len(re.findall(r"^refresh_bundled_skills\(\)", TEXT, re.M)) == 1
+    assert len(re.findall(r"^refresh_bundled_skills\(\)", TEXT, re.MULTILINE)) == 1
     assert len(_calls_of("refresh_bundled_skills")) == 1
 
 

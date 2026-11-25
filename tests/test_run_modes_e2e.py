@@ -90,7 +90,7 @@ def test_a_run_mode_key_in_the_env_file_stops_startup_naming_the_key(
     load_dotenv(env)  # how config.py loads the root .env into the process
     try:
         assert os.environ[key] == value
-        with pytest.raises(RuntimeError, match=f"refusing to start: {key}="):
+        with pytest.raises(RuntimeError, match=f"refusing to start: {key}="):  # noqa: SIM117 — merging re-indents the block; formatting is a later release
             with TestClient(app_module.app):
                 pytest.fail("the API served with a run-mode key present")
     finally:
@@ -307,8 +307,8 @@ ANY = None  # every token
 ALLOWLIST: dict[str, tuple[frozenset | None, str]] = {
     "central_command/run_modes.py": (KEY_NAMES, "the rule itself: KEYS names the refused keys"),
     "central_command/db/repo.py": (frozenset({"[dry-run]"}),
-        "the history read: a proposal.executed whose result_text starts '[dry-run]' "
-        "reads simulated forever (history is never rewritten)"),
+        ("the history read: a proposal.executed whose result_text starts '[dry-run]' "
+        "reads simulated forever (history is never rewritten)")),
     "web/src/features/decisions/types.ts": (frozenset({"[dry-run]"}),
         "the simulated badge's type comment: the mark is read off that history"),
     "deploy/single/phases/check.sh": (KEY_NAMES,

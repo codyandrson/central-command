@@ -11,7 +11,7 @@ name the surface that goes blank if one vanishes.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -21,7 +21,7 @@ from central_command.config import settings
 from central_command.db import repo
 from tests.conftest import needs_pg
 
-NOW = datetime(2026, 8, 30, 9, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 30, 9, 0, tzinfo=UTC)
 
 # Every key the panel's `Source` interface declares. One set for both kinds
 # on purpose: the email row is synthesized, and a divergence here is what

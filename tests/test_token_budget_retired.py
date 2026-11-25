@@ -20,7 +20,7 @@ KEY = "CC_DISPATCH" + "_TOKEN_BUDGET"
 
 
 def test_no_token_budget_setting_remains_under_central_command():
-    pattern = re.compile(r"dispatch_token_budget|token_budget|tokens_spent|" + KEY, re.I)
+    pattern = re.compile(r"dispatch_token_budget|token_budget|tokens_spent|" + KEY, re.IGNORECASE)
     hits = []
     for p in (ROOT / "central_command").rglob("*.py"):
         for i, line in enumerate(p.read_text(errors="ignore").splitlines(), 1):

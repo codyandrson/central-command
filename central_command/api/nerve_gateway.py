@@ -41,6 +41,7 @@ from pydantic import BaseModel, ValidationError, field_validator
 
 from central_command import __version__
 from central_command.api import attachments
+from central_command.background import keep
 from central_command.config import settings
 from central_command.contract.dependencies import waited_on
 from central_command.db import repo
@@ -238,9 +239,8 @@ async def _sessions_list(params: dict) -> dict:
     # their root (history stays reachable) but are labeled as retired and
     # carry a terminal status, so the sidebar's history filter hides them by
     # default — the roster page, not the chat panel, is where retirees show.
-    from central_command.runtime.roster import roster
-
     from central_command.runtime.models import configured_model_name
+    from central_command.runtime.roster import roster
 
     agents = await roster(include_retired=True)
     names = {a.id: a.name for a in agents}
@@ -308,7 +308,11 @@ def _transcript_to_chat_messages(run_state: dict) -> list[dict]:
     compaction has moved older turns out of what the model sees.
     """
     from central_command.runtime.durable import (
-        full_messages, load_call_ids, load_return_text, retry_text)
+        full_messages,
+        load_call_ids,
+        load_return_text,
+        retry_text,
+    )
 
     out: list[dict] = []
     messages = full_messages(run_state)
@@ -428,7 +432,7 @@ async def _patch_session_model(key: str, model) -> dict:
         try:
             catalog = await exposed_model_ids()
         except LiteLLMError as exc:
-            raise HTTPException(502, f"cannot verify the model right now — {exc}")
+            raise HTTPException(502, f"cannot verify the model right now — {exc}") from exc
         if new not in catalog:
             raise HTTPException(
                 422,
@@ -591,9 +595,9 @@ async def _send_target(key: str) -> dict:
         return {"session": row, "session_id": row["id"]}
 
     return {"blocked": (409, "no_lane",
-                        "no Central Command session behind this key — select a session "
+                        ("no Central Command session behind this key — select a session "
                         "from the panel, or start a conversation with an active "
-                        f"roster agent ({', '.join(conversational)})")}
+                        f"roster agent ({', '.join(conversational)})"))}
 
 
 # A send blocked by these codes is a state the operator can DO something about,
@@ -960,7 +964,7 @@ async def _chat_send(params: dict, notify) -> dict:
                     opener_agent, message=text, session_id=target_session)
             else:
                 out = await conversation_turn(target_session, text)
-        except Exception as exc:  # surfaced to this cockpit, never swallowed
+        except Exception as exc:  # noqa: BLE001 — surfaced to this cockpit, never swallowed
             await notify(
                 {
                     "type": "event",
@@ -980,7 +984,7 @@ async def _chat_send(params: dict, notify) -> dict:
 
             await overrides.decide_landed(out)
 
-    asyncio.create_task(_run())
+    keep(asyncio.create_task(_run()))
     return {"runId": f"new:{opener_agent}" if opener_agent else target_session,
             "status": "started"}
 
@@ -1076,14 +1080,14 @@ async def _session_resume(params: dict, notify) -> dict:
         await lifecycle("start")
         try:
             await rest.resume_session(session_id)
-        except Exception as exc:  # surfaced to this cockpit, never swallowed
+        except Exception as exc:  # noqa: BLE001 — surfaced to this cockpit, never swallowed
             await notify({"type": "event", "event": "cc.chat.error",
                           "payload": {"sessionKey": key, "message": str(exc)}})
             await lifecycle("error")
         else:
             await lifecycle("end")
 
-    asyncio.create_task(_run())
+    keep(asyncio.create_task(_run()))
     return {"sessionId": session_id, "status": "resuming"}
 
 
@@ -1647,7 +1651,7 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
             limit = int(params.get("limit") or 50)
             offset = int(params.get("offset") or 0)
         except (TypeError, ValueError):
-            raise HTTPException(422, "limit/offset must be integers")
+            raise HTTPException(422, "limit/offset must be integers") from None
         return await _decisions_history(limit, offset)
     if method == "proposals.get":
         return await rest.get_proposal(str(params["id"]))
@@ -1847,7 +1851,7 @@ async def nerve_gateway(ws: WebSocket) -> None:
         try:
             async with send_lock:
                 await ws.send_text(json.dumps(jsonable_encoder(frame)))
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 — client gone
             pass  # client gone — the durable log still has the truth
 
     # Dispatch CONCURRENTLY, replies serialized through send_lock. The receive
@@ -1872,7 +1876,7 @@ async def nerve_gateway(ws: WebSocket) -> None:
                 reply = {"type": "res", "id": rid, "ok": False, "error": {"message": str(exc)}}
             except HTTPException as exc:
                 reply = {"type": "res", "id": rid, "ok": False, "error": {"message": str(exc.detail)}}
-            except Exception as exc:  # DB down etc. — fail the RPC, keep the socket
+            except Exception as exc:  # noqa: BLE001 — DB down etc. — fail the RPC, keep the socket
                 reply = {"type": "res", "id": rid, "ok": False, "error": {"message": f"{method} failed: {exc}"}}
             _log.info(
                 "rpc done %s %.0fms ok=%s", method,
@@ -1881,7 +1885,7 @@ async def nerve_gateway(ws: WebSocket) -> None:
             try:
                 async with send_lock:
                     await ws.send_text(json.dumps(reply))
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — client gone
                 pass  # client gone — nothing to reply to
 
     try:

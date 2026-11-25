@@ -87,7 +87,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -214,7 +214,7 @@ def rerank_base(base: str, provider: str = "cohere") -> str:
         b = b[: -len("/rerank")]
     if provider == "cohere":
         return (b if b.endswith("/v1") else b + "/v1") + "/rerank"
-    return b[: -len("/v1")] if b.endswith("/v1") else b
+    return b.removesuffix("/v1")
 
 
 def explicit_provider(answer: str) -> str | None:
@@ -638,7 +638,7 @@ def main() -> int:
             row_params = {**want[alias], **pp.get(alias, {})}
             print(f"  CREATE   {alias}  {kind} {json.dumps(redacted(row_params), sort_keys=True)}")
             if not args.dry_run:
-                stamp = datetime.now(timezone.utc).isoformat()
+                stamp = datetime.now(UTC).isoformat()
                 _request("POST", "/model/new",
                          {"model_name": alias, "litellm_params": row_params,
                           "model_info": {**mode_info(row_params),
@@ -658,7 +658,7 @@ def main() -> int:
                   f"now {json.dumps(redacted(row_params), sort_keys=True)}")
             if not args.dry_run:
                 live_row = next(m for m in live if m.get("model_name") == alias)
-                stamp = datetime.now(timezone.utc).isoformat()
+                stamp = datetime.now(UTC).isoformat()
                 _request("POST", "/model/update",
                          {"model_name": alias, "litellm_params": row_params,
                           "model_info": {"id": (live_row.get("model_info") or {}).get("id"),
@@ -716,7 +716,7 @@ def shape_main(spec: str, policy: dict, *, dry_run: bool = False) -> int:
     print(f"  {verdict.upper():8} {alias}  {kind} shape "
           f"{json.dumps(redacted(body['litellm_params']), sort_keys=True)}")
     if not dry_run:
-        stamp = datetime.now(timezone.utc).isoformat()
+        stamp = datetime.now(UTC).isoformat()
         info = {**(body.get("model_info") or {}), "updated_by": "register-models.py",
                 "updated_at": stamp}
         if verdict == "create":

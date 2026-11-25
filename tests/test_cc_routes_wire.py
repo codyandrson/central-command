@@ -15,7 +15,7 @@ per SQL-computed field (`work_subject`, the task/session join) pins the QUERY.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -24,7 +24,7 @@ from central_command.config import settings
 from central_command.db import repo
 from tests.conftest import needs_pg
 
-NOW = datetime(2026, 8, 20, 9, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 20, 9, 0, tzinfo=UTC)
 
 
 async def _async(value):

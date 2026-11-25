@@ -444,7 +444,7 @@ async def test_gateway_emits_are_not_silent(clean_skills):
     this test created."""
     from central_command.api import nerve_gateway
 
-    noop = lambda *a, **k: None  # noqa: E731
+    noop = lambda *a, **k: None
 
     # The event log is append-only and never cleaned by `clean_skills` — a
     # prior run against this same dev database can leave rows with the same
@@ -598,7 +598,7 @@ async def test_reactivate_emits_and_is_reachable_through_the_gateway(clean_skill
     the log boundary, because the dev database is shared."""
     from central_command.api import nerve_gateway
 
-    noop = lambda *a, **k: None  # noqa: E731
+    noop = lambda *a, **k: None
 
     await repo.create_skill("cc-test-emitback", "Emit Back", "checking emits")
     await repo.retire_skill("cc-test-emitback", "temporarily")

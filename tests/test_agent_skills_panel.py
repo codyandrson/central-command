@@ -228,7 +228,7 @@ async def test_grant_from_the_agent_page_is_the_same_write_the_skills_page_makes
     from central_command.api import nerve_gateway
     from central_command.api import routes as rest
 
-    noop = lambda *a, **k: None  # noqa: E731
+    noop = lambda *a, **k: None
 
     await repo.create_skill("cc-test-panel-full", "Full", "Has guidance")
     await repo.add_skill_doc(

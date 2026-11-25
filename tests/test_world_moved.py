@@ -16,7 +16,7 @@ world-moved keeps today's resume, and its redraft carries cause `failed`.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -24,21 +24,22 @@ import pytest
 from central_command.config import settings
 from central_command.contract import classify_failure
 from central_command.contract.failures import WorldMoved, is_world_moved
+from central_command.contract.models import Action
 from central_command.db import repo
 from central_command.gateway import executor, gateway
-from central_command.contract.models import Action
 from central_command.integrations import confluence, jira
+from tests.fake_world import fake_world
 from tests.test_jira_client import FakeResponse
 from tests.world_moved_helpers import (  # noqa: F401 — pinned, confluence_grant and graph_world are fixtures
     AGENT,
-    _confluence_answers,
     _Coach,
     _coached_target,
+    _confluence_answers,
     _confluence_down,
     _counting_confluence,
     _delete_action,
-    _Drafter,
     _draft,
+    _Drafter,
     _drafting_model,
     _event,
     _page_update,
@@ -47,7 +48,6 @@ from tests.world_moved_helpers import (  # noqa: F401 — pinned, confluence_gra
     graph_world,
     pinned,
 )
-from tests.fake_world import fake_world
 
 # --- the type --------------------------------------------------------------------
 
@@ -319,7 +319,7 @@ def test_the_redraft_column_is_additive():
 
 def _stamp(delta_hours: float) -> str:
     """Jira's own `updated` spelling, relative to now."""
-    at = datetime.now(timezone.utc) + timedelta(hours=delta_hours)
+    at = datetime.now(UTC) + timedelta(hours=delta_hours)
     return at.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
 
 

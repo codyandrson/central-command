@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 if TYPE_CHECKING:
@@ -105,9 +106,9 @@ def _mcp_server_id_problems(capability: str, args: dict) -> list[str]:
         return []  # `required` already reports it
     if not mcp_server_id_ok(server_id):
         return [
-            f"{capability}: server_id={server_id!r} must be a lowercase slug "
+            (f"{capability}: server_id={server_id!r} must be a lowercase slug "
             "(letters, digits and hyphens, 2 to 40 characters, starting and ending "
-            "with a letter or digit) and must not start with 'cc-'"
+            "with a letter or digit) and must not start with 'cc-'")
         ]
     return []
 
@@ -129,8 +130,8 @@ def _mcp_url_problems(capability: str, args: dict) -> list[str]:
         return [f"{capability}: url={url!r} must be an http:// or https:// URL with a host"]
     if parsed.username or parsed.password:
         return [
-            f"{capability}: url carries credentials — a secret never rides a "
-            "proposal; register a server that needs none"
+            (f"{capability}: url carries credentials — a secret never rides a "
+            "proposal; register a server that needs none")
         ]
     return []
 
@@ -202,8 +203,8 @@ def _plan_items(capability: str, args: dict, *, list_key: str, allowed: set[str]
     if list_key not in args or items in (None, []):
         return problems     # the required-argument check names it
     if not isinstance(items, list):
-        return problems + [f"{capability}: {list_key} must be a list, got "
-                           f"{type(items).__name__}"]
+        return problems + [(f"{capability}: {list_key} must be a list, got "
+                           f"{type(items).__name__}")]
     if len(items) > limit:
         problems.append(f"{capability}: {list_key} holds {len(items)} entries; at most "
                         f"{limit}")
@@ -604,9 +605,9 @@ def validate_proposal_shape(proposal: Proposal) -> list[str]:
     confidence = getattr(proposal, "confidence", None)
     if confidence is None:
         return [
-            "confidence: missing — state how sure you are of this proposal, as "
+            ("confidence: missing — state how sure you are of this proposal, as "
             "confidence.level (high | medium | low) plus confidence.rationale, one "
-            "sentence on WHY that level"
+            "sentence on WHY that level")
         ]
     problems: list[str] = []
     if not getattr(confidence, "level", None):

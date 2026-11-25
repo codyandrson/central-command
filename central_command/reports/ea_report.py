@@ -25,7 +25,7 @@ and the block labels which is which.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # THE fixed activity vocabulary. Both readers of "what happened" use this one
 # tuple — the snapshot below and the agent's `read_team_activity` tool — so a
@@ -120,7 +120,7 @@ async def snapshot(since: datetime) -> dict:
 
     return {
         "window": {"since": _iso(since),
-                   "until": _iso(datetime.now(timezone.utc))},
+                   "until": _iso(datetime.now(UTC))},
         # CURRENT STATE (not windowed) — the depths that matter right now.
         "queues": {
             "proposals_awaiting_decision": await repo.count_awaiting_human(),

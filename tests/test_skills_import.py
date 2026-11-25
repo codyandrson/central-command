@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -183,7 +183,7 @@ async def test_import_records_captured_at_on_every_document(clean_skills, tmp_pa
     document in the live library — carried NULL, and both `_guidance_text` and
     `format_hits` omit the `Captured:` line when it is None. The freshness
     argument the design rests on therefore reached no agent at all."""
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     folder = tmp_path / "my-skill"
     (folder / "references").mkdir(parents=True)
     (folder / "SKILL.md").write_text("# Doing it\nsteps")
@@ -228,8 +228,8 @@ async def test_a_derived_id_that_already_exists_is_refused(clean_skills, tmp_pat
 
     # Naming the target explicitly is still allowed — that is the refresh path.
     await import_skill_folder(second, skill_id="cc-test-thing")
-    guidance = [d for d in await repo.list_skill_docs("cc-test-thing")
-                if d["doc_key"] == "guidance"][0]
+    guidance = next(d for d in await repo.list_skill_docs("cc-test-thing")
+                if d["doc_key"] == "guidance")
     assert "vendor two" in guidance["content"]
 
 

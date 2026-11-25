@@ -63,7 +63,7 @@ import logging
 import re
 import shlex
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from central_command.config import settings
 from central_command.integrations import http as http_client
@@ -140,12 +140,12 @@ def _adapter_cls():
     import requests.adapters
 
     class _CCTrustAdapter(requests.adapters.HTTPAdapter):
-        def cert_verify(self, conn, url, verify, cert):  # noqa: D102
+        def cert_verify(self, conn, url, verify, cert):
             our_cert, our_verify = _trust()
             super().cert_verify(conn=conn, url=url, verify=our_verify,
                                 cert=our_cert if our_cert is not None else cert)
 
-        def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):  # noqa: D102
+        def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
             our_cert, our_verify = _trust()
             return super().get_connection_with_tls_context(
                 request=request, verify=our_verify, proxies=proxies,
@@ -254,7 +254,7 @@ async def _thread(fn, *args, **kwargs):
             return fn(*args, **kwargs)
         except ExchangeError:
             raise
-        except Exception as e:  # noqa: BLE001 — one error type crosses this seam
+        except Exception as e:  # one error type crosses this seam
             raise ExchangeError(f"exchange: {type(e).__name__}: {e}") from e
 
     return await asyncio.to_thread(run)
@@ -280,12 +280,12 @@ def _as_datetime(value: str, *, end_of_day: bool = False) -> datetime:
     """
     raw = value.strip()
     if raw.isdigit() and len(raw) >= 9:
-        return datetime.fromtimestamp(int(raw), tz=timezone.utc)
+        return datetime.fromtimestamp(int(raw), tz=UTC)
     parts = re.split(r"[/-]", raw)
     if len(parts) != 3:
         raise ExchangeError(f"date {value!r} is neither YYYY/MM/DD nor epoch seconds")
     try:
-        day = datetime(int(parts[0]), int(parts[1]), int(parts[2]), tzinfo=timezone.utc)
+        day = datetime(int(parts[0]), int(parts[1]), int(parts[2]), tzinfo=UTC)
     except ValueError as e:
         raise ExchangeError(f"date {value!r} is not a real calendar date ({e})") from e
     return day + timedelta(days=1) if end_of_day else day
@@ -318,7 +318,7 @@ def translate_query(query: str) -> tuple[dict, str | None, str | None]:
     filters: dict = {}
     free: list[str] = []
     folder: str | None = None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     try:
         words = shlex.split(query or "", posix=True)
@@ -380,9 +380,8 @@ def _matches(item, filters: dict) -> bool:
         elif lookup == "gt":
             if got is None or got <= want:
                 return False
-        elif lookup == "lt":
-            if got is None or got >= want:
-                return False
+        elif lookup == "lt" and (got is None or got >= want):
+            return False
     return True
 
 
@@ -419,7 +418,7 @@ def _resolve_folder(acct, name: str):
     normalized = wanted.lower().lstrip("/")
     for candidates in (by_path, by_name):
         for candidate_key, folder in candidates.items():
-            if candidate_key.lstrip("/").lstrip("root").lstrip("/") == normalized \
+            if candidate_key.lstrip("/").removeprefix("root").lstrip("/") == normalized \
                or candidate_key == wanted.lower():
                 return folder
     raise ExchangeError(
@@ -457,7 +456,7 @@ def _iso(value) -> str | None:
     if value is None:
         return None
     try:
-        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
     except (AttributeError, ValueError, TypeError):
         return str(value)
 
@@ -561,8 +560,8 @@ def _ics_when(value, all_day: bool) -> tuple[str, str] | None:
         except (AttributeError, ValueError):
             return None
     try:
-        aware = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-        return "", aware.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return "", aware.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
     except (AttributeError, ValueError, TypeError):
         return None
 
@@ -932,7 +931,7 @@ def _ews_datetime(value: str, field: str):
     from exchangelib import EWSDateTime
 
     try:
-        parsed = datetime.fromisoformat((value or "").replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value or "")
     except ValueError as e:
         raise ExchangeError(
             f"{field} {value!r} must be RFC3339 with an explicit offset or Z"
@@ -942,7 +941,7 @@ def _ews_datetime(value: str, field: str):
             f"{field} {value!r} has no offset — instants cross this seam, never "
             "local wall-clock times"
         )
-    return EWSDateTime.from_datetime(parsed.astimezone(timezone.utc))
+    return EWSDateTime.from_datetime(parsed.astimezone(UTC))
 
 
 async def list_events(time_min: str, time_max: str, calendar_id: str = "primary") -> dict:

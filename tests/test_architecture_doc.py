@@ -214,7 +214,7 @@ def event_types() -> set[str]:
 
 def heartbeat_kinds() -> list[str]:
     src = (PKG / "heartbeat" / "actions.py").read_text(encoding="utf-8")
-    return re.findall(r'^\s+kind="([\w.]+)",', src, flags=re.M)
+    return re.findall(r'^\s+kind="([\w.]+)",', src, flags=re.MULTILINE)
 
 
 def _comment_states(sql: str, anchor: str, stop: str) -> list[str]:

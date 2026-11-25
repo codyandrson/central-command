@@ -37,6 +37,7 @@ and an unknown day stays unknown.
 
 from __future__ import annotations
 
+import itertools
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -50,7 +51,7 @@ TRUNCATED_REASON = "truncated: more events than the window shows"
 def _dt(value) -> datetime | None:
     """Parse an RFC3339 stamp; all-day dates parse too (naive midnight)."""
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
 
@@ -69,7 +70,7 @@ def _conflicts(events: list[dict]) -> list[dict]:
     real.sort(key=lambda e: _dt(e["start"]))
 
     out: list[dict] = []
-    for current, following in zip(real, real[1:]):
+    for current, following in itertools.pairwise(real):
         if _dt(following["start"]) < _dt(current["end"]):
             out.append({
                 "between": [current.get("summary"), following.get("summary")],

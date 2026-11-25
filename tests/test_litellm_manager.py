@@ -1564,7 +1564,8 @@ async def test_probe_model_thinking_template_skipped_when_mechanism_declared(mon
 
 
 def test_litellm_read_pack_carries_the_probe_tool_and_the_manager_may_propose_skills():
-    from central_command.runtime import packs, tools as runtime_tools
+    from central_command.runtime import packs
+    from central_command.runtime import tools as runtime_tools
 
     assert "litellm_probe_model" in packs.PACKS["litellm-read"].tool_names
     assert hasattr(runtime_tools, "litellm_probe_model")

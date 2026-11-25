@@ -39,9 +39,10 @@ import json
 import logging
 import uuid
 import weakref
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from central_command import events
+from central_command.background import keep
 from central_command.config import settings
 from central_command.contract import (
     TRANSIENT,
@@ -74,8 +75,8 @@ async def _resolve_project_model(model=None):
 
 
 async def _build_agent(model=None):
-    from central_command.runtime.orchestrator import build_project_orchestrator
     from central_command.runtime import skills as skills_mod
+    from central_command.runtime.orchestrator import build_project_orchestrator
     from central_command.runtime.packs import granted_packs
 
     packs = await granted_packs(AGENT_ID)
@@ -193,7 +194,7 @@ def _orch_parked(e, state: dict) -> dict:
             "kind": "turn", "dependencies": list(e.stored.get("dependencies") or [])}
 
 
-def _orch_window_parked(e: RunWindowExhausted, state: dict) -> dict:
+def _orch_window_parked(e: RunWindowExhausted, state: dict) -> dict:  # noqa: F821 — annotation only (postponed); imported where it is raised
     """A ROUND spent its request window. The loop is parked on the operator's
     continue item, exactly like a stall park — and like a stall park the project
     task row is NOT touched: it is IN_PROGRESS and still is, waiting on a human.
@@ -668,7 +669,7 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
     except RunParked as e:
         # Same reason: a DOWN dependency mid-round is a wait, never a failure.
         return _orch_parked(e, state)
-    except Exception as e:  # noqa: BLE001 — a resume error must reach the record
+    except Exception as e:  # a resume error must reach the record
         log.exception("orchestration resume failed for %s", session_id)
         return await _fail(state["task_id"], session_id,
                            f"orchestration resume failed: {e}")
@@ -697,20 +698,20 @@ async def child_resolved(task: dict) -> None:
             await resume_task_wait(parent)
         else:
             await maybe_resume(parent)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("orchestration resume hook failed for %s", parent)
 
 
 def spawn_child_resolved(task: dict) -> None:
     if task.get("parent_session_id"):
-        asyncio.create_task(child_resolved(task))
+        keep(asyncio.create_task(child_resolved(task)))
 
 
 # The instant this process started. A resume dies only with its process, so a
 # resume marker armed BEFORE this instant belongs to a process that is gone and
 # one armed after it is in flight here — the orphan test, no clock involved.
 # Tests that stand in for a restart set it past the markers they armed.
-PROCESS_STARTED_AT = datetime.now(timezone.utc)
+PROCESS_STARTED_AT = datetime.now(UTC)
 
 
 async def park_orphaned_resumes(armed_before: datetime | None = None) -> list[str]:
@@ -874,7 +875,7 @@ async def resume_sweep() -> dict:
         this, as it must. Returns `(ran, result)`."""
         try:
             return True, await driver()
-        except Exception as e:  # noqa: BLE001 — one bad unit must not end the sweep
+        except Exception as e:  # one bad unit must not end the sweep
             log.exception("resume sweep: %s %s failed", unit, unit_id)
             errors.append({"unit": unit, "id": unit_id, "error": str(e)[:300]})
             if unit == "session":
@@ -885,7 +886,7 @@ async def resume_sweep() -> dict:
                                  "transient": classify_failure(e) == TRANSIENT},
                         actor="system",
                     )
-                except Exception:  # noqa: BLE001 — the record failing is not the sweep's end
+                except Exception:  # the record failing is not the sweep's end
                     log.exception("resume sweep: recording %s %s failed", unit, unit_id)
             return False, None
 
@@ -980,7 +981,7 @@ def _spawn_detached(unit: str, unit_id: str, driver) -> None:
     async def _run():
         try:
             await driver()
-        except Exception:  # noqa: BLE001 — the driver already landed the record
+        except Exception:  # the driver already landed the record
             log.exception("retry sweep: detached %s %s failed", unit, unit_id)
 
     t = asyncio.create_task(_run())
@@ -1019,7 +1020,7 @@ async def _record_probe_changes(cache, states: dict[str, dict]) -> list[dict]:
         if up:
             seconds = None
             if down_since is not None:
-                seconds = round((datetime.now(timezone.utc) - down_since).total_seconds())
+                seconds = round((datetime.now(UTC) - down_since).total_seconds())
             payload = {"dependency": name,
                        "down_since": down_since.isoformat() if down_since else None,
                        "down_seconds": seconds}
@@ -1041,7 +1042,7 @@ def _as_utc(value) -> datetime | None:
             return None
     if not isinstance(value, datetime):
         return None
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
 async def _already_reported(unit: dict) -> bool:
@@ -1106,7 +1107,8 @@ def _proposal_dependencies(state: dict) -> tuple[str, ...]:
     failed capability's own (a park written before the record), else the model
     (a row with none reads as `llm`)."""
     from central_command.contract.dependencies import (
-        dependencies_for_capability, recorded_dependencies,
+        dependencies_for_capability,
+        recorded_dependencies,
     )
 
     recorded = state.get("dependencies")
@@ -1286,7 +1288,7 @@ async def retry_sweep(cache=None, *, only: str | None = None,
             return
         try:
             out = await driver()
-        except Exception as e:  # noqa: BLE001 — one bad unit must not end the sweep
+        except Exception as e:  # one bad unit must not end the sweep
             log.exception("retry sweep: %s %s failed", unit, unit_id)
             errors.append({"unit": unit, "id": unit_id, "error": str(e)[:300],
                            "transient": classify_failure(e) == TRANSIENT})
@@ -1582,13 +1584,15 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
     record that an outage happened, like every resume park's. None means the
     session is not parked on a read, or someone else won the claim.
     """
-    from central_command.runtime import resume_park
-    from central_command.runtime import tools as tools_mod
-    from central_command.runtime import converse as converse_mod
     from pydantic_ai import CallDeferred, ModelRetry
 
+    from central_command.runtime import converse as converse_mod
+    from central_command.runtime import resume_park
+    from central_command.runtime import tools as tools_mod
     from central_command.runtime.durable import (
-        deferred_results, load_messages, unanswered_calls,
+        deferred_results,
+        load_messages,
+        unanswered_calls,
     )
 
     session = await repo.get_session(session_id)
@@ -1632,8 +1636,9 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
         # over and the tool did its work, which was to defer. The run waits on
         # that exactly as it would have with no outage, from the history it
         # was paused with (a shim of the run's CallDeferred).
-        from pydantic_ai import DeferredToolRequests
         from types import SimpleNamespace
+
+        from pydantic_ai import DeferredToolRequests
 
         from central_command.runtime import consult as consult_mod
         from central_command.runtime.durable import PROPOSE_TOOLS
@@ -1685,7 +1690,7 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
                     payload={"error": reason[:300], "transient": False, "after": after},
                     actor="system",
                 )
-            raise RuntimeError(reason)
+            raise RuntimeError(reason) from None
         out = await _land_tail(
             session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
             state=pending.get("state") or {}, result=shim, deps=deps, model=model,
@@ -1703,7 +1708,7 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
         )
         return {"parked": True, "session_id": session_id, "attempts": attempts,
                 "dependencies": stored.get("dependencies")}
-    except Exception as e:  # noqa: BLE001 — a record the tool no longer accepts
+    except Exception as e:  # a record the tool no longer accepts
         # Not an outage: the stored call cannot be re-run at all (its
         # arguments no longer fit the tool). Loud, with the reason, and the
         # task lands like any resumed run that died semantically.
@@ -2376,7 +2381,7 @@ async def park_task_retry(
     """
     if classify_failure(exc) != TRANSIENT:
         return None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     backoff, not_before = retry_not_before(attempts - 1, now=now)
     from central_command.contract.dependencies import failed_dependencies
 
@@ -2875,17 +2880,17 @@ async def answer_item(item_id: str, answer: str, verdict: str | None = None) -> 
     if item.get("discussion_session_id"):
         try:
             await _close_answered_discussion(item, answer.strip())
-        except Exception:  # noqa: BLE001 — the answer record outranks the close
+        except Exception:  # the answer record outranks the close
             log.exception(
                 "closing the discussion lane of %s failed", item_id
             )
     if item["kind"] == "continue":
         # The verdict is already recorded above — emit before the run it
         # authorises, like every other decision here.
-        asyncio.create_task(
+        keep(asyncio.create_task(
             continue_session(item_id) if verdict == "approved"
             else _decline_continue(item_id)
-        )
+        ))
     elif item["kind"] == "question" and not await _belongs_to_a_project(item):
         # Only a question an AGENT asked has a run paused on it (its
         # `tool_call_id`). A notice the SYSTEM raised (the retired exhaustion
@@ -2893,9 +2898,9 @@ async def answer_item(item_id: str, answer: str, verdict: str | None = None) -> 
         # report, so the answer is the acknowledgement — resuming it raised
         # "not paused on a question" and failed the task.
         if item.get("tool_call_id"):
-            asyncio.create_task(_resume_task_question(item_id, answer.strip()))
+            keep(asyncio.create_task(_resume_task_question(item_id, answer.strip())))
     else:
-        asyncio.create_task(child_resolved({"parent_session_id": item["session_id"]}))
+        keep(asyncio.create_task(child_resolved({"parent_session_id": item["session_id"]})))
     return {"item_id": item_id, "kind": item["kind"], "verdict": verdict,
             "event_id": event["id"]}
 
@@ -2921,7 +2926,9 @@ async def _close_answered_discussion(item: dict, answer: str) -> None:
     would leave the lane WRITABLE, i.e. reopenable — the undead row again.
     """
     from pydantic_ai.messages import (
-        ModelMessagesTypeAdapter, ModelRequest, UserPromptPart,
+        ModelMessagesTypeAdapter,
+        ModelRequest,
+        UserPromptPart,
     )
 
     from central_command.runtime import converse
@@ -2955,9 +2962,8 @@ async def _belongs_to_a_project(item: dict) -> bool:
 async def _resume_task_question(item_id: str, answer: str) -> None:
     """Resume an assigned task that was blocked on a question, and land its
     outcome on the task row the same way a first run would."""
-    from central_command.runtime.questions import resume_with_answer
-
     from central_command.contract import is_transient
+    from central_command.runtime.questions import resume_with_answer
 
     item = await repo.get_operator_item(item_id)
     task_id = (item or {}).get("task_id")

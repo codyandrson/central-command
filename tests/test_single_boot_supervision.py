@@ -41,7 +41,13 @@ from pathlib import Path
 
 import pytest
 
-from tests.installer_source import DRIVER_RUN_TIMEOUT, drives_installer, env_path, run_driver, write_lf
+from tests.installer_source import (
+    DRIVER_RUN_TIMEOUT,
+    drives_installer,
+    env_path,
+    run_driver,
+    write_lf,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SINGLE = ROOT / "deploy" / "single"
@@ -495,7 +501,7 @@ def test_boot_writes_three_units_and_starts_them_through_systemd_then_stop_and_b
     for step in ("boot/boot-api", "boot/boot-sandbox", "boot/boot-roster",
                  "boot/skills-imported", "boot/boot-cockpit"):
         assert rows[step][1] == "done", rows[step]
-    assert int((inst.state / "uvicorn.pid").read_text()) == dict((r, p) for r, p in inst.starts())["api"]
+    assert int((inst.state / "uvicorn.pid").read_text()) == {r: p for r, p in inst.starts()}["api"]
     assert "PASS boot-supervisor: systemd --user units" in r.stdout
 
     # STOP goes through the manager (or Restart= would revive what it killed)
@@ -752,8 +758,8 @@ def test_the_unit_renders_exactly(tmp_path: Path):
         'Environment="PYTHONUTF8=1"',
         f'Environment="SSL_CERT_FILE={tmp_path}/ca 50%%.pem"',
         # a word with a space is quoted; `$` is doubled, or systemd expands it
-        'ExecStart=/opt/venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 '
-        '--port 18080 "a b" $$HOME',
+        ('ExecStart=/opt/venv/bin/uvicorn central_command.api.app:app --host 127.0.0.1 '
+        '--port 18080 "a b" $$HOME'),
         "Restart=on-failure",
         "RestartSec=5",
         "KillMode=process",
@@ -814,8 +820,8 @@ def test_unit_names_are_per_install_and_safe():
 @drives_installer
 def test_the_windows_wrapper_is_tiny_and_hands_one_path_to_bash():
     out = subprocess.run(
-        [_bash_exe(), "-c", ". ./supervise-lib.sh; cc_render_logon_cmd 'C:\\Program Files\\Git\\bin\\bash.exe' "
-                            "'C:/Users/jdoe/AppData/Local/central-command/repo-1a2b3c4d/boot-at-logon.sh'"],
+        [_bash_exe(), "-c", (". ./supervise-lib.sh; cc_render_logon_cmd 'C:\\Program Files\\Git\\bin\\bash.exe' "
+                            "'C:/Users/jdoe/AppData/Local/central-command/repo-1a2b3c4d/boot-at-logon.sh'")],
         cwd=SINGLE, capture_output=True,
     ).stdout
     assert out == (b'@echo off\r\n'
@@ -854,8 +860,8 @@ def test_exactly_one_logon_entry_whatever_ran_before(task, startup, created, pla
 @drives_installer
 def test_the_startup_entry_is_one_call_into_the_state_dirs_wrapper():
     out = subprocess.run(
-        [_bash_exe(), "-c", ". ./supervise-lib.sh; cc_render_logon_startup "
-                            "'C:\\Users\\jdoe\\AppData\\Local\\central-command\\r-1%x\\cc-boot.cmd'"],
+        [_bash_exe(), "-c", (". ./supervise-lib.sh; cc_render_logon_startup "
+                            "'C:\\Users\\jdoe\\AppData\\Local\\central-command\\r-1%x\\cc-boot.cmd'")],
         cwd=SINGLE, capture_output=True, check=False,
     ).stdout
     assert out == b'@echo off\r\ncall "C:\\Users\\jdoe\\AppData\\Local\\central-command\\r-1%%x\\cc-boot.cmd"\r\n'

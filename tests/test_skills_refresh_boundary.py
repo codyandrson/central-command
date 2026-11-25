@@ -105,7 +105,7 @@ def test_nothing_refuses_an_update_over_the_bundled_docs(path: str):
 def test_both_updaters_run_the_comparison_after_the_merge(updater: str):
     text = _text(updater)
     assert "\nrefresh_bundled_skills() {" in text
-    assert re.search(r"^\s+refresh_bundled_skills\b", text, re.M)
+    assert re.search(r"^\s+refresh_bundled_skills\b", text, re.MULTILINE)
     assert re.search(r"skills_refresh_cli sync\b", text)
 
 
@@ -227,7 +227,7 @@ def test_the_verify_row_passes_only_on_all_five(tmp_path: Path, answer: str, pas
 def test_the_verify_row_fails_when_the_query_cannot_run(tmp_path: Path):
     if os.name == "nt" or not shutil.which("bash"):
         pytest.skip("POSIX bash needed")
-    script = "\n".join(["K=(false)", _verify_fn(), "skill_review_store"])
+    script = f"K=(false)\n{_verify_fn()}\nskill_review_store"
     assert subprocess.run(["bash", "-c", script], capture_output=True, timeout=30).returncode != 0
 
 
@@ -236,7 +236,7 @@ def test_the_verify_row_fails_when_the_query_cannot_run(tmp_path: Path):
 async def test_the_verify_rows_query_answers_five_on_the_shipped_schema():
     """Its own SQL against a database `schema.sql` loaded: a typo in a name would
     otherwise fail every real run and no test."""
-    query = re.search(r'-c "(select .*?)" 2>/dev/null', _verify_fn(), re.S).group(1)
+    query = re.search(r'-c "(select .*?)" 2>/dev/null', _verify_fn(), re.DOTALL).group(1)
     conn = await repo._conn()
     try:
         assert await conn.fetchval(query) == 5

@@ -41,7 +41,7 @@ class ForgeError(ProviderStatusError):
 
 
 class Instance:
-    __slots__ = ("name", "kind", "base_url")
+    __slots__ = ("base_url", "kind", "name")
 
     def __init__(self, name: str, kind: str, base_url: str):
         self.name = name

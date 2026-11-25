@@ -144,7 +144,7 @@ async def _llm_reachable() -> bool:
                 headers={"authorization": f"Bearer {_LLM_API_KEY}"},
             )
         return r.status_code < 400
-    except Exception:
+    except Exception:  # noqa: BLE001 — a probe: any failure reads as not answering
         return False
 
 
@@ -165,13 +165,13 @@ async def _llm_post_filter(mode: str) -> tuple[Any | None, list[str]]:
         return None, []
     if not _LLM_API_KEY:
         return None, [
-            "filter='llm' requested but LLM_API_KEY is unset "
-            "(Secret cc-crawler-llm not applied) — used pruning instead"
+            ("filter='llm' requested but LLM_API_KEY is unset "
+            "(Secret cc-crawler-llm not applied) — used pruning instead")
         ]
     if not await _llm_reachable():
         return None, [
-            f"filter='llm' requested but the LiteLLM proxy at {_LLM_BASE_URL} "
-            "did not answer — used pruning instead"
+            (f"filter='llm' requested but the LiteLLM proxy at {_LLM_BASE_URL} "
+            "did not answer — used pruning instead")
         ]
     return (
         LLMContentFilter(
@@ -277,24 +277,23 @@ async def crawl(req: CrawlRequest) -> CrawlResponse:
     errors: list[dict] = []
     truncated = False
 
-    async with _lock:
-        async with AsyncWebCrawler(config=_BROWSER) as crawler:
-            async for result in await crawler.arun(req.url, config=config):
-                if getattr(result, "success", False):
-                    md = _markdown(result)
-                    if llm_filter is not None and time.monotonic() < deadline:
-                        md, warn = await asyncio.to_thread(_llm_markdown, llm_filter, result, md)
-                        if warn:
-                            warnings.append(warn)
-                    pages.append(Page(url=result.url, title=_title(result), markdown=md))
-                else:
-                    errors.append(
-                        {"url": getattr(result, "url", req.url),
-                         "error": getattr(result, "error_message", "") or "crawl failed"}
-                    )
-                if len(pages) >= max_pages or time.monotonic() >= deadline:
-                    truncated = True
-                    break
+    async with _lock, AsyncWebCrawler(config=_BROWSER) as crawler:
+        async for result in await crawler.arun(req.url, config=config):
+            if getattr(result, "success", False):
+                md = _markdown(result)
+                if llm_filter is not None and time.monotonic() < deadline:
+                    md, warn = await asyncio.to_thread(_llm_markdown, llm_filter, result, md)
+                    if warn:
+                        warnings.append(warn)
+                pages.append(Page(url=result.url, title=_title(result), markdown=md))
+            else:
+                errors.append(
+                    {"url": getattr(result, "url", req.url),
+                     "error": getattr(result, "error_message", "") or "crawl failed"}
+                )
+            if len(pages) >= max_pages or time.monotonic() >= deadline:
+                truncated = True
+                break
 
     return CrawlResponse(pages=pages, truncated=truncated, errors=errors, warnings=warnings)
 
@@ -302,9 +301,8 @@ async def crawl(req: CrawlRequest) -> CrawlResponse:
 @app.post("/fetch", response_model=Page)
 async def fetch(req: FetchRequest) -> Page:
     llm_filter, warnings = await _llm_post_filter(req.filter)
-    async with _lock:
-        async with AsyncWebCrawler(config=_BROWSER) as crawler:
-            result = _first(await crawler.arun(req.url, config=_run_config(_pruning())))
+    async with _lock, AsyncWebCrawler(config=_BROWSER) as crawler:
+        result = _first(await crawler.arun(req.url, config=_run_config(_pruning())))
     if not getattr(result, "success", False):
         return Page(
             url=req.url,

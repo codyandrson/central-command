@@ -11,7 +11,7 @@ reasoning is needed to know a past due date is wrong.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from central_command.gateway.capabilities import gated_write_names
 
@@ -51,7 +51,7 @@ SOURCE_AGE_FLAG_DAYS = 30
 
 def _today() -> date:
     # Module-level seam so tests can pin the clock.
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()
 
 
 def _as_date(value) -> date | None:

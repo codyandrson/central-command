@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -33,7 +33,8 @@ from central_command.gateway import gateway
 from central_command.ingest import ledger
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model, make_spike_model
-from tests.conftest import event_kinds as _kinds, needs_pg
+from tests.conftest import event_kinds as _kinds
+from tests.conftest import needs_pg
 from tests.test_execution_retry import _graph_spy, _jira_spy, _parked_run
 from tests.test_outage_requeue import OUTAGE
 from tests.test_resume_parking import _pending
@@ -162,7 +163,7 @@ async def test_a_restart_lands_nothing_failed(monkeypatch):
     assert item is not None
 
     await _lifespan_sweeps(monkeypatch)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Nothing FAILED.
     for tid in (task_run, sessionless):
@@ -248,7 +249,7 @@ async def test_a_stale_pending_resume_is_not_owed():
     """`pending_resume` is never cleared after a successful retry. A later run
     of the same session that dies must not be mistaken for the old resume:
     the owed call is no longer the record's unanswered tail."""
-    task_id, session_id = await _running_task_run()
+    _task_id, session_id = await _running_task_run()
     await repo.update_session_run_state(session_id, {
         "pending_resume": {"kind": "result", "tool_call_id": "call_old",
                            "after": "approved", "attempts": 1},
@@ -294,7 +295,7 @@ async def test_a_chat_lane_killed_at_an_unsent_request_parks_its_turn_due_now():
     assert await repo.session_status(sid) == "AWAITING_RESUME"
     pending = (await repo.get_session_run_state(sid))["pending_resume"]
     assert pending["kind"] == "turn" and pending["after"] == "converse"
-    assert datetime.fromisoformat(pending["not_before"]) <= datetime.now(timezone.utc)
+    assert datetime.fromisoformat(pending["not_before"]) <= datetime.now(UTC)
     assert sid in await repo.sessions_awaiting_resume(due_only=True)
 
 

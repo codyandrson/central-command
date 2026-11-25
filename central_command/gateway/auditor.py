@@ -76,8 +76,9 @@ class AuditVerdict(BaseModel):
 # (runtime/auditor_profile.py) so the coaching loop can fall back to it, and
 # the CURRENT governed version (M11) wins at audit time — the operator edits
 # and coaches the auditor exactly like any other agent.
-from central_command.runtime.auditor_profile import AGENT_ID, CHARTER as AUDITOR_CHARTER
-from central_command.runtime.templates import render_v0
+from central_command.runtime.auditor_profile import AGENT_ID  # noqa: E402 — placed under the comment that explains it
+from central_command.runtime.auditor_profile import CHARTER as AUDITOR_CHARTER  # noqa: E402
+from central_command.runtime.templates import render_v0  # noqa: E402
 
 
 async def ensure_registered() -> None:
@@ -124,8 +125,8 @@ async def time_context(item_id: str, kind_label: str = "EMAIL") -> str:
         f"- Reference time: today is {today.isoformat()} ({today.strftime('%A')}).",
         f"- {age}" if age else
         f"- The {kind_label.lower()}'s received date is not recorded.",
-        f"- The {kind_label.lower()}'s own dates are in the PAST relative to the "
-        "reference time; never read them as today.",
+        (f"- The {kind_label.lower()}'s own dates are in the PAST relative to the "
+        "reference time; never read them as today."),
     ]
     return "\n".join(lines)
 
@@ -226,7 +227,7 @@ async def audit_dismissal(
         actor="auditor",
     )
 
-    if mode == "active" and verdict.concur and allow_auto_confirm:
+    if mode == "active" and verdict.concur and allow_auto_confirm:  # noqa: SIM102 — merging re-indents the block; formatting is a later release
         if await repo.confirm_dismissal(item_id):
             record["auto_confirmed"] = True
             await events.emit(

@@ -8,7 +8,7 @@ reviewer and, if approved anyway, the flag rides the decision record.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -247,7 +247,7 @@ def test_an_episode_from_old_mail_dated_to_the_proposal_is_flagged():
     proposal's own date as reference_time while the mail was months old —
     "registration was completed as of 2026-11-05" from a December mail."""
     flags = policy.check_actions(_episode("2026-07-19T09:00:00Z"), today=TODAY,
-                                 source_time=datetime(2026, 1, 20, tzinfo=timezone.utc))
+                                 source_time=datetime(2026, 1, 20, tzinfo=UTC))
     assert [f["policy"] for f in flags] == ["reference-time-is-the-source-time"]
     assert flags[0]["argument"] == "reference_time"
     assert "source is from 2026-01-20, 180 days earlier" in flags[0]["problem"]
@@ -258,7 +258,7 @@ def test_an_episode_from_old_mail_dated_to_the_proposal_is_flagged():
 
 def test_an_episode_dated_to_its_source_is_clean():
     assert policy.check_actions(_episode("2026-01-20T23:05:26Z"), today=TODAY,
-                                source_time=datetime(2026, 1, 20, tzinfo=timezone.utc)) == []
+                                source_time=datetime(2026, 1, 20, tzinfo=UTC)) == []
 
 
 def test_recent_mail_and_an_unknown_source_time_do_not_flag():

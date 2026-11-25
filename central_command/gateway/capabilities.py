@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-
 # The closed vocabulary of a capability's default gate (FR-4). `human`: the
 # operator decides. `auditor`: the capability's action class is one a graduated
 # auditor MAY confirm, when its own CC_AUDITOR_* switch is active — it records
@@ -1391,7 +1390,7 @@ REGISTRY: list[Capability] = [
         route=(
             "integrations/email_facade.py → n8n cc-email-facade webhook, mode "
             "report_spam → Gmail messages.modify (+SPAM −INBOX); the OAuth stays "
-            f"in n8n or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set, where it is a move to the Junk folder"
+            "in n8n or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set, where it is a move to the Junk folder"
         ),
         arguments=["provider_uuid", "sender?", "subject?"],
         description=(
@@ -1980,7 +1979,7 @@ REGISTRY: list[Capability] = [
         default_gate="none",
         risk="none to the world — read-only by construction",
         holder="feed poller / backlog sweeper",
-        route=f"n8n façade cc-email-facade → lib-email-provider or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set",
+        route="n8n façade cc-email-facade → lib-email-provider or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set",
         arguments=["scope_query"],
         description=(
             "List message references matching a Gmail query (ids only, no "
@@ -2019,7 +2018,7 @@ REGISTRY: list[Capability] = [
         default_gate="none",
         risk="none to the world — a read; the record lists attachments by name, type and size",
         holder="dispatcher (hydrate at claim)",
-        route=f"n8n façade cc-email-facade → lib-email-provider or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set",
+        route="n8n façade cc-email-facade → lib-email-provider or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set",
         arguments=["uuid"],
         description="Fetch one email's content, at claim time, inside the retry machinery.",
     ),
@@ -2035,7 +2034,7 @@ REGISTRY: list[Capability] = [
             "flag stays refused"
         ),
         holder="dispatcher (hydrate_attachments at claim)",
-        route=f"n8n façade cc-email-facade → lib-email-provider (mode attachment) or integrations/exchange.py when CC_EXCHANGE_* is set",
+        route="n8n façade cc-email-facade → lib-email-provider (mode attachment) or integrations/exchange.py when CC_EXCHANGE_* is set",
         arguments=["uuid", "attachment_id"],
         description="Fetch one attachment's bytes by the id a message record lists, at claim time, inside the retry machinery.",
     ),

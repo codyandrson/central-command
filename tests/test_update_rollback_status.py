@@ -26,7 +26,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "deploy/single/update.sh"
 def test_rollback_rewrites_a_success_record(tmp_path):
     body = SCRIPT.read_text(encoding="utf-8")
     rollback = body[body.index("cmd_rollback()"):]
-    m = re.search(r"^\s*(sed -i .*) \"\$STATE_DIR/update/status\.json\"$", rollback, re.M)
+    m = re.search(r"^\s*(sed -i .*) \"\$STATE_DIR/update/status\.json\"$", rollback, re.MULTILINE)
     assert m, "cmd_rollback no longer rewrites <state>/update/status.json"
     record = tmp_path / "status.json"
     record.write_text(json.dumps({"state": "success", "phase": "done", "target": "9.9.9"},

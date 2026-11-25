@@ -9,7 +9,6 @@ so Neo4j (which shares the compute node) must request at least twice what the
 speech pod does, and the requests of everything the manifests place on the
 compute node must still fit a 2-CPU node with room for kube-system.
 """
-import re
 from pathlib import Path
 
 import yaml

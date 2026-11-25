@@ -16,7 +16,7 @@ def _read_version_file() -> str:
         text = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8")
     except OSError:
         return "0.0.0"
-    m = re.search(r"^version=(.+)$", text, re.M)
+    m = re.search(r"^version=(.+)$", text, re.MULTILINE)
     return m.group(1).strip() if m else "0.0.0"
 
 

@@ -543,7 +543,7 @@ def test_the_pack_notes_carry_the_enrichment_rules():
 
 
 def test_the_ea_is_still_not_seeded_with_a_planning_grant():
-    seed = re.findall(r"insert into agent_grant[^;]*;", SCHEMA, re.S)
+    seed = re.findall(r"insert into agent_grant[^;]*;", SCHEMA, re.DOTALL)
     assert not any("'ea'" in s and "plan-propose" in s for s in seed)
 
 
@@ -551,7 +551,7 @@ def test_the_ea_is_still_not_seeded_with_a_planning_grant():
 
 
 def _seeded_hygiene() -> str:
-    m = re.search(r"\('jira-hygiene'.*?\"instructions\": \"(.*?)\"\}',", SCHEMA, re.S)
+    m = re.search(r"\('jira-hygiene'.*?\"instructions\": \"(.*?)\"\}',", SCHEMA, re.DOTALL)
     assert m, "the jira-hygiene seed row"
     return m.group(1).replace("''", "'")
 
@@ -568,7 +568,7 @@ def test_the_seeded_hygiene_sweep_carries_the_enrichment_checklist():
         assert phrase in text, phrase
     # The params are JSON and still parse with the instructions intact.
     m = re.search(r"\('jira-hygiene'.*?'task\.create',\s*'(\{.*?\})',\s*'seed:heartbeat'\)",
-                  SCHEMA, re.S)
+                  SCHEMA, re.DOTALL)
     params = json.loads(m.group(1).replace("''", "'"))
     assert params["instructions"] == text and params["agent_id"] == "jira-expert"
 
@@ -576,7 +576,7 @@ def test_the_seeded_hygiene_sweep_carries_the_enrichment_checklist():
 def test_the_operator_copy_is_the_seeded_text():
     queue = (ROOT / "docs" / "QUEUE.md").read_text(encoding="utf-8")
     section = queue.split("## The nightly Jira hygiene sweep", 1)[1]
-    block = re.search(r"```text\n(.*?)\n```", section, re.S).group(1)
+    block = re.search(r"```text\n(.*?)\n```", section, re.DOTALL).group(1)
     assert block == _seeded_hygiene()
 
 
@@ -584,7 +584,7 @@ def test_the_seed_never_rewrites_an_existing_row():
     seed_start = SCHEMA.index("insert into heartbeat_schedule")
     seed_end = SCHEMA.index("on conflict (id) do nothing", seed_start)
     assert "jira-hygiene" in SCHEMA[seed_start:seed_end]
-    assert not re.search(r"update\s+heartbeat_schedule", SCHEMA, re.I)
+    assert not re.search(r"update\s+heartbeat_schedule", SCHEMA, re.IGNORECASE)
 
 
 @needs_pg
@@ -623,8 +623,8 @@ async def test_a_fresh_database_gets_the_checklist_and_an_existing_row_is_kept()
 
 def test_the_evening_framing_enriches_unscored_issues():
     text = hb_actions._EA_FRAMING["digest"]
-    for phrase in ("propose its value and lateness loss from the stakes the conversation "
-                   "gives you", "ASK the operator for them", "never invent stakes or numbers",
+    for phrase in (("propose its value and lateness loss from the stakes the conversation "
+                   "gives you"), "ASK the operator for them", "never invent stakes or numbers",
                    "A due date the operator settles may be set the same way",
                    "ONE `jira.set_planning_fields` proposal",
                    "one action per issue, separate from the `plan.record_review` proposal",
@@ -637,8 +637,8 @@ def test_the_charter_makes_the_planning_fields_a_tracker_exception():
     # ONE exception until 2026-11-20; a comment on an issue is the second
     # (DL-222, `tests/test_tracker_vs_graph.py`).
     charter = ea_profile.CHARTER
-    for phrase in ("Every other change to the tracker goes to that teammate as a task too, "
-                   "with TWO exceptions: an issue's PLANNING FIELDS",
+    for phrase in (("Every other change to the tracker goes to that teammate as a task too, "
+                   "with TWO exceptions: an issue's PLANNING FIELDS"),
                    "jira.set_planning_fields",
                    "AN UNSCORED ISSUE IS SCORED FROM ITS STAKES",
                    "ask for the stakes where there are none: never invent them",

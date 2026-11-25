@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from central_command import events
 from central_command.db import repo
@@ -44,7 +44,7 @@ def _stamp(entry: dict, heads: dict[str, dict]) -> dict:
         head = heads.get(entry.get("source_ref")) or {}
         stamped["version"] = head.get("head_version")
     elif kind in ("jira", "confluence"):
-        stamped["stamped_at"] = datetime.now(timezone.utc).isoformat()
+        stamped["stamped_at"] = datetime.now(UTC).isoformat()
     # 'graph' and 'operator' keep their source_ref as-is: a graph edge uuid and
     # an append-only record pointer do not version-drift (Decision 9).
     return stamped

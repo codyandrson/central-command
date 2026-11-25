@@ -32,7 +32,7 @@ LONG_RUNNING = ["cc-uvicorn.service", "cc-sandbox-runner.service", "cc-graph-bol
 def directives(unit: str) -> dict[str, list[str]]:
     """Uncommented `Key=value` lines of a unit file, values split on spaces."""
     out: dict[str, list[str]] = {}
-    for key, value in re.findall(r"^([A-Za-z]+)=(.*)$", shipped_text(f"deploy/k3s/{unit}"), flags=re.M):
+    for key, value in re.findall(r"^([A-Za-z]+)=(.*)$", shipped_text(f"deploy/k3s/{unit}"), flags=re.MULTILINE):
         out.setdefault(key, []).extend(value.split() if key != "ExecStart" else [value])
     return out
 

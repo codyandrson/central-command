@@ -88,7 +88,10 @@ def _consulting_model(target: str, prefix: str, question: str = "what do you kno
     Quoting is what makes the assertions honest: it proves the outcome text
     actually reached the model, not merely that a run completed."""
     from pydantic_ai.messages import (
-        ModelResponse, TextPart, ToolCallPart, ToolReturnPart,
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
     )
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 
@@ -128,7 +131,10 @@ def _cycling_model(target: str):
     the very thing being fed in — a return-shaped check would answer
     immediately and never make the second call at all."""
     from pydantic_ai.messages import (
-        ModelResponse, TextPart, ToolCallPart, ToolReturnPart,
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
     )
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 

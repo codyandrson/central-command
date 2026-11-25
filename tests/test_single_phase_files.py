@@ -88,7 +88,7 @@ def test_each_phase_file_defines_its_phase_function():
 
 def test_every_probe_lives_with_a_row_that_uses_it_or_in_setup_sh():
     defs = _defs()
-    setup_defs = defs[SETUP]
+    defs[SETUP]
     users: dict[str, set[str]] = {}
     for row in _rows():
         users.setdefault(row[6], set()).add(row[0])
@@ -122,7 +122,7 @@ def test_no_function_is_defined_in_two_files():
 def test_setup_sh_sources_the_phase_files_in_manifest_order():
     src = SETUP.read_text(encoding="utf-8")
     m = re.search(r"^for (\w+) in ((?:\w+ )+\w+); do\n(?:\s*#[^\n]*\n)*\s*\. \"\$HERE/phases/\$\1\.sh\"",
-                  src, flags=re.M)
+                  src, flags=re.MULTILINE)
     assert m, 'setup.sh no longer sources the phases with a quoted `. "$HERE/phases/$<var>.sh"` loop'
     assert m.group(2).split() == _manifest_phases(), (
         f"setup.sh sources {m.group(2).split()}, steps.tsv declares {_manifest_phases()}"

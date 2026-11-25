@@ -32,9 +32,10 @@ from central_command.api import orchestration
 from central_command.config import settings
 from central_command.db import repo
 from central_command.gateway import executor, gateway
-from tests.conftest import event_kinds as _kinds, needs_pg
+from tests.conftest import event_kinds as _kinds
+from tests.conftest import needs_pg
 from tests.fake_world import fake_world
-from tests.world_moved_helpers import _Drafter, _draft
+from tests.world_moved_helpers import _draft, _Drafter
 
 pytestmark = needs_pg
 

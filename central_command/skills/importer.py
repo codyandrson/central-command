@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from central_command.config import settings
@@ -144,7 +144,7 @@ def checkout_release(root: Path) -> str:
         text = version_file.read_text(encoding="utf-8")
     except OSError as e:
         raise ValueError(f"{version_file} is unreadable: {e.strerror or e}") from e
-    m = re.search(r"^version=(\S+)\s*$", text, re.M)
+    m = re.search(r"^version=(\S+)\s*$", text, re.MULTILINE)
     if not m:
         raise ValueError(f"{version_file} has no version= line")
     return m.group(1)
@@ -297,7 +297,7 @@ async def import_skill_folder(
     # freshness metadata nobody has — and this path recorded none until
     # 2026-07-26, so every imported document (i.e. every document) reached the
     # agent with the `Captured:` line omitted by `_guidance_text`/`format_hits`.
-    captured_at = datetime.now(timezone.utc)
+    captured_at = datetime.now(UTC)
 
     await repo.create_skill(sid, title, summary)
     await repo.add_skill_doc(

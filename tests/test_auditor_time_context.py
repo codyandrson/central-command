@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from datetime import date
 
-import pytest
 from pydantic_ai import capture_run_messages
 
 from central_command.config import settings

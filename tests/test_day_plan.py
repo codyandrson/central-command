@@ -27,7 +27,13 @@ import pytest
 from pydantic_ai import CallDeferred, ModelRetry
 
 from central_command.config import settings
-from central_command.contract import ARG_SPECS, Action, Proposal, Reversibility, validate_action_args
+from central_command.contract import (
+    ARG_SPECS,
+    Action,
+    Proposal,
+    Reversibility,
+    validate_action_args,
+)
 from central_command.contract.dependencies import CAPABILITY_DEPENDENCY
 from central_command.db import repo
 from central_command.gateway import capabilities, executor
@@ -615,8 +621,8 @@ async def test_unplanned_completions_come_from_one_search(monkeypatch, tracker, 
                         "assignee = currentUser() AND statusCategory != Done")
     out = await ea_plan.review(day)
     assert tracker.searches == [
-        f'(assignee = currentUser() AND statusCategory = Done) AND resolved >= "{day}" '
-        f'AND resolved < "{after}"']
+        (f'(assignee = currentUser() AND statusCategory = Done) AND resolved >= "{day}" '
+        f'AND resolved < "{after}"')]
     assert out["unplanned_done"]["asked"] == tracker.searches[0]
     assert [i["issue_key"] for i in out["unplanned_done"]["issues"]] == ["DOE-47"]
 
@@ -729,7 +735,7 @@ def test_only_the_executor_writes_the_plan_tables():
         for name in ("record_day_plan", "record_day_plan_outcomes"):
             if re.search(rf"\b{name}\(", src):
                 offenders.append((rel, name))
-        if re.search(r"(insert into|update)\s+day_plan", src, re.I):
+        if re.search(r"(insert into|update)\s+day_plan", src, re.IGNORECASE):
             offenders.append((rel, "sql"))
     assert offenders == []
 
@@ -1071,8 +1077,8 @@ def test_the_evening_framing_is_the_review():
                    "as ONE `plan.record_review` proposal",
                    "conclude-before-you-propose rule",
                    "Never mark work done on your own word",
-                   "If `plan_review` says no plan is stored, say so, and review the day "
-                   "from the tracker and the calendar alone",
+                   ("If `plan_review` says no plan is stored, say so, and review the day "
+                   "from the tracker and the calendar alone"),
                    "never restate or re-ask one", "Decisions Inbox", "whose they are"):
         assert phrase in text, phrase
 

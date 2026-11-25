@@ -266,7 +266,7 @@ async def _ocr_scanned_pdf(
         import pypdfium2
 
         pdf = pypdfium2.PdfDocument(data)
-    except Exception:
+    except Exception:  # noqa: BLE001 — any open failure means not a readable PDF
         return None  # not a PDF pypdfium2 can open — the refusal stands
 
     try:
@@ -278,7 +278,7 @@ async def _ocr_scanned_pdf(
             bitmap.to_pil().save(buf, format="PNG")
             try:
                 text = await _transcribe_page(model_id, buf.getvalue())
-            except Exception:
+            except Exception:  # noqa: BLE001 — a page that fails to transcribe ends the attempt
                 return None
             if text:
                 pages.append(f"--- page {i + 1} of {total} ---\n{text}")

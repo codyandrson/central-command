@@ -6,7 +6,6 @@ so the suite never touches the real network.
 from __future__ import annotations
 
 import httpx
-import pytest
 
 from central_command.config import settings
 from central_command.integrations import webfetch

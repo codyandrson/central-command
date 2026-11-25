@@ -52,7 +52,7 @@ def litellm_decrypt(stored_value: str, salt_key: str) -> str:
 
     try:
         decoded = base64.urlsafe_b64decode(stored_value)
-    except Exception:
+    except Exception:  # noqa: BLE001 — not url-safe base64: try standard
         decoded = base64.b64decode(stored_value)
     if len(decoded) == 0:
         return ""
@@ -100,7 +100,7 @@ async def list_provider_credentials() -> list[dict]:
             str_field_count += 1
             try:
                 decrypted[field] = litellm_decrypt(value, settings.litellm_salt_key)
-            except Exception:
+            except Exception:  # noqa: BLE001 — an undecryptable field is read as plaintext
                 fail_count += 1
                 decrypted[field] = value  # treat as plaintext
         if str_field_count and fail_count == str_field_count:

@@ -11,7 +11,6 @@ the agent's paused state entirely from Postgres. That is the durability proof.
 import argparse
 import asyncio
 
-from central_command.contract import Proposal
 from central_command.db import repo
 from central_command.runtime.agent import build_agent
 from central_command.runtime.durable import (

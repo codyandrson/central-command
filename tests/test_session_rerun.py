@@ -884,7 +884,7 @@ async def test_a_landing_proposal_refuses_a_conversation_too():
 
 async def test_a_rerun_carries_the_current_version_and_the_old_keeps_its_own():
     before = await repo.save_charter_version(AGENT, "The charter before.", "test")
-    task_id, old = await _finished_task()
+    _task_id, old = await _finished_task()
     after = await repo.save_charter_version(AGENT, "The charter after.", "test")
 
     stale = await repo.get_session(old)

@@ -365,7 +365,7 @@ async def test_the_patched_entity_embedding_input_is_embedding_text(tmp_path):
 
 
 def test_the_third_patch_has_one_hunk_at_the_one_seam_and_names_the_left_alone_one():
-    (name, files), = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == ENTITY_PATCH]
+    (_name, files), = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == ENTITY_PATCH]
     assert [(f.path, len(f.hunks)) for f in files] == [("graphiti_core/nodes.py", 1)]
     header = " ".join(ln.lstrip("# ") for ln in (gp.PATCH_DIR / ENTITY_PATCH).read_text().splitlines()
                       if ln.startswith("#"))
@@ -615,7 +615,7 @@ async def test_the_alias_lane_offers_an_entity_known_by_another_name(tmp_path):
     assert [e.uuid for e in got[0]] == ["u-jane", "u-vec"]
     assert [e.uuid for e in got[1]] == ["u-jane", "u-vec"]
     assert [e.uuid for e in got[2]] == ["u-vec"]
-    query, params = _Clients.driver.queries[0]
+    query, _params = _Clients.driver.queries[0]
     assert "coalesce(n.aliases, [])" in query and "toLower(alias) CONTAINS token" in query
     assert all(p["routing_"] == "r" for _, p in _Clients.driver.queries), "the lane only reads"
 

@@ -36,7 +36,7 @@ that is not in the tracker is invisible here, and every result says so.
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from central_command.config import settings
@@ -197,11 +197,11 @@ def _updated_day(raw, tz: ZoneInfo) -> date | None:
     if not isinstance(raw, str) or not raw.strip():
         return None
     try:
-        when = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        when = datetime.fromisoformat(raw.strip())
     except ValueError:
         return None
     if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
+        when = when.replace(tzinfo=UTC)
     return when.astimezone(tz).date()
 
 

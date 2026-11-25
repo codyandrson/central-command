@@ -60,7 +60,7 @@ def canonical_phases() -> list[str]:
     all), so the canonical list is the two halves joined.
     """
     src = (ROOT / "deploy/single/setup.sh").read_text()
-    assert re.search(r"^\s*run_phase check; local crc=", src, flags=re.M), (
+    assert re.search(r"^\s*run_phase check; local crc=", src, flags=re.MULTILINE), (
         "the full run must start with the check gate"
     )
     for m in re.finditer(r"for p in ((?:\w+\s+)+\w+);", src):
@@ -129,7 +129,7 @@ def test_the_readmes_and_the_skill_link_to_the_checklist_instead_of_listing():
 
 
 def test_the_checklist_phase_order_is_the_manifest():
-    headings = re.findall(r"^### `(\w+)`$", _read(CHECKLIST), flags=re.M)
+    headings = re.findall(r"^### `(\w+)`$", _read(CHECKLIST), flags=re.MULTILINE)
     assert headings == manifest_phases()
 
 

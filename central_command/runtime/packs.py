@@ -2594,11 +2594,11 @@ def charter_section(pack_names) -> str:
     can (and did)."""
     packs = _packs(pack_names)
     lines = [
-        "YOUR GRANTED CAPABILITIES — GENERATED from the control plane's "
+        ("YOUR GRANTED CAPABILITIES — GENERATED from the control plane's "
         "capability-pack grants. This list is the authority on what you may "
         "propose: it SUPERSEDES any capability list written elsewhere in this "
         "charter. If a task calls for a capability not listed here, say so in "
-        "plain text instead of proposing it.",
+        "plain text instead of proposing it."),
     ]
     if any(t in AGENT_AUTHORED_PROPOSE_TOOLS for pack in packs for t in _offered(pack)[0]):
         lines.append("")
@@ -2771,11 +2771,11 @@ async def mcp_charter_section(agent_id: str, pack_names) -> str:
 
     gates = await repo.effective_mcp_gates(agent_id)
     lines = [
-        "YOUR MCP SERVER ACCESS — GENERATED from your mcp: grants. A GATED "
+        ("YOUR MCP SERVER ACCESS — GENERATED from your mcp: grants. A GATED "
         "tool is reachable ONLY via propose_mcp_tool_call(server_id, "
         "tool_name, arguments, rationale) — reviewed and, once approved, "
         "invoked for you. An UNGATED tool is a DIRECT callable, named after "
-        "the tool itself — call it yourself, do not propose it.",
+        "the tool itself — call it yourself, do not propose it."),
     ]
     for server_id in server_ids:
         tools = await repo.list_mcp_tools(server_id)

@@ -9,7 +9,7 @@ for the agent to weigh, no directive.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from central_command.db import repo
 from central_command.ingest import dispatcher, ledger
@@ -20,7 +20,7 @@ TODAY = date(2026, 11, 6)
 
 
 def test_a_months_old_email_is_dated_and_aged():
-    item = {"received_at": datetime(2026, 1, 20, 23, 5, 26, tzinfo=timezone.utc)}
+    item = {"received_at": datetime(2026, 1, 20, 23, 5, 26, tzinfo=UTC)}
     out = dispatcher._with_age_context("From: x\n\nbody", item, today=TODAY)
     assert out.startswith("From: x\n\nbody\n\n[queue context] This email was received on 2026-01-20, ")
     assert "days before today (2026-11-06)." in out
@@ -31,12 +31,12 @@ def test_a_months_old_email_is_dated_and_aged():
 
 
 def test_today_yesterday_and_a_future_date_read_honestly():
-    one = {"received_at": datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)}
+    one = {"received_at": datetime(2026, 11, 6, 12, 0, tzinfo=UTC)}
     assert "received on 2026-11-06, today (2026-11-06)." in dispatcher._with_age_context(
         "p", one, today=TODAY)
-    yesterday = {"received_at": datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)}
+    yesterday = {"received_at": datetime(2026, 11, 5, 12, 0, tzinfo=UTC)}
     assert "1 day before today" in dispatcher._with_age_context("p", yesterday, today=TODAY)
-    future = {"received_at": datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)}
+    future = {"received_at": datetime(2026, 11, 9, 12, 0, tzinfo=UTC)}
     assert "3 days AFTER today (a clock disagrees)" in dispatcher._with_age_context(
         "p", future, today=TODAY)
 
@@ -112,7 +112,7 @@ async def test_a_refs_only_row_hydrated_after_the_claim_gets_the_age_line(monkey
     assert "days before today (2026-11-06)." in framed
 
     # An enrollment-time date is never overwritten by the provider's.
-    kept = {"id": "wi_dated", "received_at": datetime(2026, 1, 20, tzinfo=timezone.utc),
+    kept = {"id": "wi_dated", "received_at": datetime(2026, 1, 20, tzinfo=UTC),
             "subject": "s", "payload": {"provider_uuid": "provider-uuid-1"}}
     await ledger.hydrate_work_item(kept)
     assert kept["received_at"].date() == date(2026, 1, 20)

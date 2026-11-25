@@ -1,11 +1,10 @@
 """Contract-model tests. The M1 proof starts here: a Proposal round-trips cleanly
 through serialization (the same path used to persist it as jsonb)."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from central_command.contract import (
     Action,
-    Decision,
     Evidence,
     Proposal,
     ProposalRecord,
@@ -59,7 +58,7 @@ def test_proposal_record_wraps_core_with_lifecycle():
         agent_id="inbox-triage",
         proposal=_sample_proposal(),
         idempotency_key="prop_7f3a:act_1",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     assert rec.status is ProposalStatus.proposed
     assert rec.decision is None

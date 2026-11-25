@@ -14,13 +14,13 @@ gateway never sends is invisible to `tsc` AND to every frontend test — the
 chip and the toast would simply never appear. Assert the exact camelCase keys
 here, on the backend, where it can actually fail.
 """
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from central_command.api import nerve_gateway
 from central_command.db import repo
 from central_command.runtime import roster as roster_mod
 
-NOW = datetime(2026, 7, 29, 9, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 29, 9, 0, tzinfo=UTC)
 
 
 def _session(sess_id: str, agent_id: str = "jira-expert", status: str = "AWAITING_OPERATOR"):

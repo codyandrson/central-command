@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
@@ -40,7 +40,7 @@ from central_command.db import repo
 from central_command.heartbeat import actions as hb_actions
 from central_command.heartbeat import probes
 from central_command.heartbeat.engine import HeartbeatEngine, fire
-from tests.conftest import aresolve, needs_pg, make_parks_due
+from tests.conftest import aresolve, make_parks_due, needs_pg
 from tests.fake_world import fake_world
 
 OUTAGE = ModelHTTPError(429, "cc-default", body="No deployments available")
@@ -118,7 +118,7 @@ def _empty_worklists(monkeypatch, *, sessions=(), proposals=(), tasks=(),
     async def _record(name, up, error=None):
         before = table.get(name)
         table[name] = {"name": name, "state": "up" if up else "down",
-                       "error": error, "down_since": datetime.now(timezone.utc)}
+                       "error": error, "down_since": datetime.now(UTC)}
         return before
 
     async def _failing(n):
@@ -218,7 +218,7 @@ async def test_a_gated_skip_leaves_the_attempt_count_on_the_row(monkeypatch):
                 "update task set retry_state = jsonb_set(retry_state, "
                 "'{not_before}', to_jsonb($2::text)) where id = $1",
                 task_id,
-                (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+                (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
             )
         finally:
             await conn.close()
@@ -290,7 +290,10 @@ def test_the_capability_gating_map_is_by_capability():
     """A retry's gate is the systems the FAILED capability talks to — a TUPLE
     (story 3: a graph write embeds, so it needs the graph AND the embedder)."""
     from central_command.contract.dependencies import (
-        PROBED, dependencies_for_capability as deps_of,
+        PROBED,
+    )
+    from central_command.contract.dependencies import (
+        dependencies_for_capability as deps_of,
     )
 
     assert deps_of("jira.set_due_date") == (probes.JIRA,)
@@ -377,7 +380,7 @@ async def test_the_engine_fires_the_sweep_like_any_action(monkeypatch):
 
     monkeypatch.setattr(orchestration, "retry_sweep", _sweep)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     schedule = {"id": "retry-sweep", "name": "Retry sweep", "schedule_kind": "every",
                 "schedule": {"every_seconds": 300}, "action_kind": "retry.sweep",
                 "action_params": {}, "enabled": True, "updated_at": now}
@@ -395,7 +398,7 @@ async def test_the_engine_fires_the_sweep_like_any_action(monkeypatch):
 
     assert ran == [True]
     assert rec.kinds == ["touch:last_fired", "heartbeat.completed"]
-    assert engine._next_due["retry-sweep"] > datetime.now(timezone.utc)
+    assert engine._next_due["retry-sweep"] > datetime.now(UTC)
 
 
 # --- 2: the whole loop, on real parked units -----------------------------------
@@ -470,7 +473,7 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
         await conn.execute(
             "update task set retry_state = jsonb_set(retry_state, '{not_before}', "
             "to_jsonb($2::text)) where id = $1",
-            task_id, (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+            task_id, (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
         )
     finally:
         await conn.close()
@@ -601,7 +604,7 @@ async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch, wor
     resweep_log = fake_world(monkeypatch)
     monkeypatch.setattr(settings, "test_model", True)
     monkeypatch.setattr(orchestration, "PROCESS_STARTED_AT",
-                        datetime.now(timezone.utc) + timedelta(days=1))  # "we restarted after it was armed"
+                        datetime.now(UTC) + timedelta(days=1))  # "we restarted after it was armed"
     _no_probes(monkeypatch, llm=True)
     _no_touch(monkeypatch)
 
@@ -638,7 +641,7 @@ async def test_the_sweep_returns_while_an_agent_lane_is_busy(monkeypatch):
         await conn.execute(
             "update task set retry_state = jsonb_set(retry_state, '{not_before}', "
             "to_jsonb($2::text)) where id = $1",
-            task_id, (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+            task_id, (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
         )
     finally:
         await conn.close()

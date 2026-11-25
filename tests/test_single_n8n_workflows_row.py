@@ -48,8 +48,8 @@ from tests.test_single_driver_ledger import (  # noqa: F401  (tree is a fixture)
     tree,
 )
 from tests.test_single_human_rows import (
-    CRED_ANSWER,
     _STACK_STUBS,
+    CRED_ANSWER,
     _append_stubs,
     _ledger,
     _lines,
@@ -61,7 +61,7 @@ SCRIPT = ROOT / "deploy" / "n8n" / "apply-workflows.sh"
 STACK = ROOT / "deploy" / "single" / "phases" / "stack.sh"
 
 # The ids the files ship, by the pattern the script reads them with.
-_ID = re.compile(r'^  "id": "([A-Za-z0-9]*)",$', re.M)
+_ID = re.compile(r'^  "id": "([A-Za-z0-9]*)",$', re.MULTILINE)
 SHIPPED = {p.name: _ID.search(p.read_text(encoding="utf-8")).group(1)
            for p in sorted(WORKFLOWS.glob("*.json"))}
 CALENDAR = ("cc-calendar-facade.json", "lib-google-calendar.json")
@@ -175,10 +175,10 @@ def test_the_probe_and_the_script_agree_on_the_optional_calendar_pair():
     """The probe derives its ids from the files with the script's own rule;
     the rule's file list lives in both, and must not drift apart."""
     script = SCRIPT.read_text(encoding="utf-8")
-    m = re.search(r"^\s*([\w.|-]+\.json)\)\s*\[\[ -n \"\$CAL_TOKEN\" \]\]", script, re.M)
+    m = re.search(r"^\s*([\w.|-]+\.json)\)\s*\[\[ -n \"\$CAL_TOKEN\" \]\]", script, re.MULTILINE)
     assert m, "apply-workflows.sh's calendar `case` arm moved — re-point this test"
     in_script = set(m.group(1).split("|"))
-    m = re.search(r'^N8N_CALENDAR_WORKFLOWS="([^"]+)"', STACK.read_text(encoding="utf-8"), re.M)
+    m = re.search(r'^N8N_CALENDAR_WORKFLOWS="([^"]+)"', STACK.read_text(encoding="utf-8"), re.MULTILINE)
     assert m, "N8N_CALENDAR_WORKFLOWS is gone from phases/stack.sh"
     assert set(m.group(1).split()) == in_script == set(CALENDAR)
     assert all((WORKFLOWS / f).is_file() for f in CALENDAR)

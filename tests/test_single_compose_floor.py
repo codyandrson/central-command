@@ -32,7 +32,8 @@ import pytest
 # that differs from the declared handle type") — 26 tests failed that way on
 # the 2026-09-25 testbed run, all of them in files that shelled out with the
 # bare name. `update._bash()` resolves Git Bash from git's own install.
-from central_command.api.update import _bash as _resolve_bash  # noqa: E402
+from central_command.api.update import _bash as _resolve_bash
+
 BASH = _resolve_bash() or "bash"
 
 
@@ -100,7 +101,7 @@ def test_docker_compose_has_no_floor():
 
 
 def test_garbage_is_unparseable_and_never_a_silent_pass():
-    rc, flavour, version = floor("podman", "podman: 'compose' is not a podman command\n")
+    rc, _flavour, version = floor("podman", "podman: 'compose' is not a podman command\n")
     assert rc == 2 and version == ""
 
 

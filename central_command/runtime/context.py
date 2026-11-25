@@ -298,7 +298,7 @@ async def check_pressure(
             },
             actor=f"agent:{agent_id}" if agent_id else "system",
         )
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 — telemetry, never fatal to the turn
         pass
 
 
@@ -393,7 +393,7 @@ async def load_settings() -> dict:
         from central_command.db import repo
 
         stored = await repo.get_app_setting(SETTINGS_KEY, {})
-    except Exception:
+    except Exception:  # noqa: BLE001 — an unreadable setting falls back to the defaults
         stored = {}
     return {**DEFAULTS, **(stored if isinstance(stored, dict) else {})}
 
@@ -713,7 +713,7 @@ async def window_messages(ctx: RunContext[Any], messages: list) -> list:
     CLIPPED history is sent (R3), never the raw one and never a dead run."""
     try:
         working = await _prepare_window(ctx, messages)
-    except Exception:
+    except Exception:  # noqa: BLE001 — a failed step sends the clipped history, never a dead run
         import logging
 
         log = logging.getLogger(__name__)
@@ -832,11 +832,11 @@ async def _unwindowed(messages: list, model_name: str | None, run_context=None) 
                      "messages": len(messages)},
             actor="system",
         )
-    except Exception:  # noqa: BLE001 — the record of a fault never becomes a dead turn
+    except Exception:  # the record of a fault never becomes a dead turn
         logging.getLogger(__name__).exception("context: could not record the unapplied window")
     try:
         return _static_clip(messages, model_name)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logging.getLogger(__name__).exception("context: the clip failed too; sending the request as is")
         return messages
 
@@ -909,7 +909,7 @@ class WindowedModel(WrapperModel):
         response = await self.wrapped.request(sent, model_settings, model_request_parameters)
         try:
             record_density(self.wrapped.model_name, sent, getattr(response, "usage", None))
-        except Exception:  # noqa: BLE001 — a calibration miss is never a failed turn
+        except Exception:  # noqa: BLE001, S110 — a calibration miss is never a failed turn
             pass
         return response
 

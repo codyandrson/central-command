@@ -49,7 +49,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -82,14 +82,14 @@ def _write_trigger(force: bool) -> None:
     path = _trigger_path()
     tmp = f"{path}.tmp"
     body = {"target": hold.target, "force": force,
-            "requested_at": datetime.now(timezone.utc).isoformat()}
+            "requested_at": datetime.now(UTC).isoformat()}
     if hold.kind == "restart":
         body["action"] = "restart"  # an update's trigger never carries the key
     try:
         with open(tmp, "w") as f:
             json.dump(body, f)
         os.replace(tmp, path)  # atomic: the path unit never sees a half-written file
-        _triggered_at, _trigger_error = datetime.now(timezone.utc), None
+        _triggered_at, _trigger_error = datetime.now(UTC), None
     except OSError as e:
         _trigger_error = f"could not write {path}: {e}"
         log.warning("update hold: %s", _trigger_error)
@@ -107,7 +107,7 @@ async def _stop_loops() -> None:
     for loop in _loops():
         try:
             await loop.stop()
-        except Exception:  # noqa: BLE001 — one loop must not keep the others running
+        except Exception:  # one loop must not keep the others running
             log.exception("update hold: stopping %s failed", type(loop).__name__)
 
 
@@ -131,11 +131,11 @@ async def _poll() -> None:
             running = await repo.running_sessions_for_hold()
             if not running and not os.path.exists(_trigger_path()) and (
                 _triggered_at is None
-                or (datetime.now(timezone.utc) - _triggered_at).total_seconds() > _RETRIGGER_S
+                or (datetime.now(UTC) - _triggered_at).total_seconds() > _RETRIGGER_S
             ):
                 _write_trigger(force=False)
                 await events.emit(f"{hold.kind}.triggered", payload=_payload(), actor="system")
-        except Exception:  # noqa: BLE001 — the hold outlives one bad tick
+        except Exception:  # the hold outlives one bad tick
             log.exception("update hold: tick failed")
         await asyncio.sleep(_TICK_S)
 
@@ -175,7 +175,7 @@ async def engage(target: str, kind: str = "update") -> dict:
             # trigger nothing consumes would pause the team for nothing.
             raise HTTPException(501, "restart is only available where the root updater is installed")
         hold.active, hold.kind = True, kind
-        hold.target, hold.since = target, datetime.now(timezone.utc)
+        hold.target, hold.since = target, datetime.now(UTC)
         _triggered_at = _trigger_error = None
         await events.emit(f"{kind}.hold", payload=_payload(), actor="operator")
         _poller = asyncio.create_task(_poll())

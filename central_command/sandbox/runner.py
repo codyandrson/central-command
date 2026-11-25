@@ -37,15 +37,16 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import shlex
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-
-import re
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
+
+from central_command.background import keep
 
 NAMESPACE = "cc-sandbox"
 # The image REFS are configuration, not code (2026-09-23 design record, D2):
@@ -168,7 +169,7 @@ async def _run(
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(input_data), timeout=timeout
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return 124, "", f"{cmd[0]} timed out after {timeout}s"
@@ -426,7 +427,7 @@ async def read_file(sandbox_id: str, path: str) -> dict:
         raise HTTPException(502, f"read failed: {err.strip()}")
     try:
         raw = base64.b64decode(out, validate=False)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise HTTPException(502, "read failed: sandbox output was not valid base64") from e
     truncated = len(raw) > _READ_CAP
     return {"content": raw[:_READ_CAP].decode(errors="replace"), "truncated": truncated}
@@ -503,14 +504,14 @@ async def _reap_once() -> None:
     except json.JSONDecodeError:
         return
     ttl = _ttl_seconds()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for item in items:
         created = (item.get("metadata") or {}).get("creationTimestamp")
         name = (item.get("metadata") or {}).get("name")
         if not created or not name:
             continue
         try:
-            created_at = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            created_at = datetime.fromisoformat(created)
         except ValueError:
             continue
         if (now - created_at).total_seconds() > ttl:
@@ -542,7 +543,7 @@ async def _reap_once_podman() -> None:
     except json.JSONDecodeError:
         return
     ttl = _ttl_seconds()
-    now = datetime.now(timezone.utc).timestamp()
+    now = datetime.now(UTC).timestamp()
     for item in items:
         names = item.get("Names") or []
         created = item.get("Created")
@@ -557,10 +558,10 @@ async def _reap_loop() -> None:
         await asyncio.sleep(60)
         try:
             await _reap_once()
-        except Exception:  # noqa: BLE001 — the reaper must never die
+        except Exception:  # noqa: BLE001, S110 — the reaper must never die
             pass
 
 
 @app.on_event("startup")
 async def _start_reaper() -> None:
-    asyncio.create_task(_reap_loop())
+    keep(asyncio.create_task(_reap_loop()))

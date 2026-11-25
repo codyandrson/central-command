@@ -38,11 +38,11 @@ from tests.fake_world import fake_world
 
 
 def _row(**kw) -> Capability:
-    base = dict(
-        name="x.write", kind="write", gate="human approval", default_gate="human",
-        risk="r", holder="Executor", route="r", arguments=[], description="d",
-        reversibility="reversible",
-    )
+    base = {
+        "name": "x.write", "kind": "write", "gate": "human approval", "default_gate": "human",
+        "risk": "r", "holder": "Executor", "route": "r", "arguments": [], "description": "d",
+        "reversibility": "reversible",
+    }
     return Capability(**{**base, **kw})
 
 

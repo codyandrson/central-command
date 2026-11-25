@@ -10,7 +10,6 @@ with the built-in code charter as the v0 fallback.
 from __future__ import annotations
 
 import json
-
 import uuid
 
 import pytest

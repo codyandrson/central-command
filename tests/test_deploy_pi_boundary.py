@@ -157,7 +157,7 @@ def test_operator_tooling_resolves_the_env_like_the_resolver():
         src = path.read_text(encoding="utf-8")
         name = str(path.relative_to(ROOT))
         # `new` IS the k3s path — not merely "the k3s literal appears first"
-        assert re.search(r'^\s+new = \w+ / "deploy" / "k3s" / "\.env"$', src, re.M), name
+        assert re.search(r'^\s+new = \w+ / "deploy" / "k3s" / "\.env"$', src, re.MULTILINE), name
         assert '"deploy" / "pi" / ".env"' in src, f"{name}: {fallback_kept}"
         assert src.index('"deploy" / "k3s" / ".env"') < src.index('"deploy" / "pi" / ".env"'), name
         assert "if new.exists() or new.is_symlink():" in src, name
@@ -190,7 +190,7 @@ def test_the_floor_is_release_a():
     review and refresh them. A lower one would merge them with neither, and they
     would read as `modified` at the next update."""
     text = (ROOT / "VERSION").read_text(encoding="utf-8")
-    assert re.search(r"^min_upgrade_from=2\.77\.0$", text, re.M), text
+    assert re.search(r"^min_upgrade_from=2\.77\.0$", text, re.MULTILINE), text
 
 
 # ── nothing in the tree names deploy/pi outside history and the kept seam ───
@@ -251,9 +251,9 @@ ALLOWED = {
     "deploy/k3s/cc-update.sh": ("operator-facing fallback message", _message),
     "deploy/k3s/init-env.sh": ("operator-facing fallback message", _message),
     "deploy/k3s/setup.sh": ("operator-facing fallback message", _message),
-    "deploy/k3s/README.md": ("sections 0a/0b are the dated history of the two boundary updates; "
+    "deploy/k3s/README.md": (("sections 0a/0b are the dated history of the two boundary updates; "
                              "section 10 reaches the retired stack through git and says which "
-                             "env to copy to the old path before the Compose fallback can start",
+                             "env to copy to the old path before the Compose fallback can start"),
                              lambda lines, i: _heading_range("## 0a.", "## 1.")(lines, i)
                              or (_heading_range("## 10.")(lines, i)
                                  and (_contains("git show v2.65.3:deploy/pi/")(lines, i)

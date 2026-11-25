@@ -44,11 +44,11 @@ _HIDDEN_STYLE = re.compile(
     r"display\s*:\s*none"
     r"|visibility\s*:\s*hidden"
     r"|(?:font-size|max-height|opacity)\s*:\s*0(?![.\d])",
-    re.I,
+    re.IGNORECASE,
 )
 _URL = re.compile(r"(https?://[^/\s<>()\[\]\"']+)[^\s<>()\[\]\"']*")
 _LONG_URL = 80
-_XML_DECL = re.compile(r"^\s*<\?xml[^>]*\?>", re.I)
+_XML_DECL = re.compile(r"^\s*<\?xml[^>]*\?>", re.IGNORECASE)
 
 
 def normalize(text: str) -> str:
@@ -84,7 +84,7 @@ def html_to_text(html: str) -> str:
         text = Inscriptis(
             tree, ParserConfig(display_links=False, display_images=False)
         ).get_text()
-    except Exception:  # noqa: BLE001 — degrade, never a dead ingest
+    except Exception:  # degrade, never a dead ingest
         log.exception("mailtext: html conversion failed; falling back to tag strip")
         text = _TAG_RE.sub(" ", re.sub(r"(?is)<(style|script|head)\b.*?</\1>", " ", html))
     return normalize(text)

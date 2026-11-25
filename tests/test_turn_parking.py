@@ -29,7 +29,8 @@ from central_command.config import settings
 from central_command.db import repo
 from central_command.runtime import converse
 from central_command.runtime import models as models_mod
-from tests.conftest import event_kinds as _kinds, make_parks_due, needs_pg
+from tests.conftest import event_kinds as _kinds
+from tests.conftest import make_parks_due, needs_pg
 from tests.fake_world import fake_world
 
 pytestmark = needs_pg
@@ -244,7 +245,7 @@ async def test_a_task_run_whose_second_turn_is_down_parks_and_resumes_to_done(mo
     # chat lane a neighbouring test left parked was driven by this sweep and
     # consumed a call. `conftest.isolated_queue` settles leftover parks now, so
     # the count is exact.)
-    responses = lambda ms: sum(1 for m in ms if m["kind"] == "response")  # noqa: E731
+    responses = lambda ms: sum(1 for m in ms if m["kind"] == "response")
     assert responses(after) == responses(before) + 1
     assert script.calls == calls_before + 1
     assert "session.failed" not in await _kinds(sid)
@@ -275,7 +276,7 @@ async def test_a_semantic_model_error_in_a_task_run_still_fails_with_a_reason(mo
     script = _Script(ModelHTTPError(400, "cc-default", body="bad request"))
     _route_models(monkeypatch, script)
     task = await _task()
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 — kept as written; the assertions below are the test
         await routes._run_assigned_task(task, actor="operator")
     row = await repo.get_task(task["id"])
     assert row["status"] == "FAILED"
@@ -310,7 +311,7 @@ async def test_an_orchestrator_round_whose_model_is_down_parks_with_its_loop_sta
 async def test_a_semantic_model_error_in_an_orchestrator_round_still_fails(monkeypatch):
     script = _Script(ModelHTTPError(400, "cc-default", body="bad request"))
     project = await _project()
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 — kept as written; the assertions below are the test
         await orchestration.run_project(project, model=script.model())
     sid = (await repo.get_task(project["id"]))["session_id"]
     assert await repo.session_status(sid) == "FAILED"
@@ -363,7 +364,7 @@ def test_the_no_tail_table_matches_the_runs_that_cannot_park():
     run)."""
     no_tail = _walk("_run_live") - _PARKING_CALLERS - {"run._run_live"}
     section = _section()
-    rows = set(re.findall(r"^ {0,2}\| [^|]+ \| `([a-z_]+\.[A-Za-z_]+)` \|", section, re.M))
+    rows = set(re.findall(r"^ {0,2}\| [^|]+ \| `([a-z_]+\.[A-Za-z_]+)` \|", section, re.MULTILINE))
     assert rows - {"tools.consult_agent"} == no_tail
 
 

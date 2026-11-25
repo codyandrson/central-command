@@ -178,7 +178,7 @@ def parse_document(title: str, text: str, doc_id: str | None = None) -> dict:
         key, synthetic = doc_id.strip(), False
     else:
         digest = hashlib.sha256(
-            f"{title}\x00{text}".encode("utf-8")
+            f"{title}\x00{text}".encode()
         ).hexdigest()[:24]
         key, synthetic = digest, True
     message_id = f"<cc-doc-{key}@central_command.local>"
@@ -347,7 +347,7 @@ def _provider_parsed(msg: dict) -> dict:
     }
     if msg.get("date"):
         try:
-            parsed["received_at"] = datetime.fromisoformat(msg["date"].replace("Z", "+00:00"))
+            parsed["received_at"] = datetime.fromisoformat(msg["date"])
         except ValueError:
             pass
     return parsed

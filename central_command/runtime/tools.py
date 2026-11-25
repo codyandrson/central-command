@@ -10,7 +10,7 @@ import functools
 import inspect
 import json
 import re
-from datetime import date
+from datetime import UTC, date
 from pathlib import Path, PurePosixPath
 from typing import Annotated
 
@@ -19,8 +19,13 @@ from pydantic_ai import CallDeferred, ModelRetry, RunContext, ToolReturn
 
 from central_command.config import settings as _settings
 from central_command.contract import (
-    Action, DependencyDown, Evidence, Proposal, Reversibility,
-    validate_action_args, validate_proposal_shape,
+    Action,
+    DependencyDown,
+    Evidence,
+    Proposal,
+    Reversibility,
+    validate_action_args,
+    validate_proposal_shape,
 )
 from central_command.contract import dependencies as _dependencies
 from central_command.contract.args import MCP_SERVER_ID_RE, mcp_server_id_ok
@@ -29,7 +34,6 @@ from central_command.contract.failures import is_down as _is_down
 from central_command.integrations import confluence, forge, graphiti, jira, litellm_credstore
 from central_command.integrations import litellm as litellm_client
 from central_command.runtime.deps import ThreadDecision, TriageDeps
-
 
 # The tool whose body is running, as (its dependency tuple, its name) — set by
 # `@parkable_read` so a body's `_read_with_retry` / `_read_failed` know what
@@ -92,12 +96,12 @@ def current_time() -> str:
     relative date, judging how stale a record is. The date stamped in your
     charter was written when this session started and goes stale in a
     long-lived session; this tool never does."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     now = datetime.now().astimezone()
     return (
         f"{now.strftime('%A')} {now.isoformat(timespec='seconds')} "
-        f"(UTC: {now.astimezone(timezone.utc).isoformat(timespec='seconds')})"
+        f"(UTC: {now.astimezone(UTC).isoformat(timespec='seconds')})"
     )
 
 
@@ -152,7 +156,7 @@ def _instant(name: str, value: str | None):
     A date alone is midnight UTC; a naive time is read as UTC (what Graphiti
     does). Words ("today", "last year") are refused — resolve them with
     current_time first."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     text = (value or "").strip()
     if not text:
@@ -165,7 +169,7 @@ def _instant(name: str, value: str | None):
             "e.g. 2025-06-01 or 2025-06-01T09:30:00Z (call current_time to resolve "
             "'today' or 'last month' first)"
         ) from None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _window(as_of: str | None, after: str | None, before: str | None) -> dict:
@@ -702,7 +706,7 @@ async def read_team_activity(ctx: RunContext, since_hours: int = 24) -> str:
     a summary is not a citation. A window with nothing in it means nothing
     happened, which is a complete answer.
     """
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from central_command.reports import ea_report
 
@@ -710,7 +714,7 @@ async def read_team_activity(ctx: RunContext, since_hours: int = 24) -> str:
         hours = max(1, int(since_hours))
     except (TypeError, ValueError):
         return "since_hours must be a whole number of hours (e.g. 24)"
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    since = datetime.now(UTC) - timedelta(hours=hours)
     try:
         data = await ea_report.snapshot(since)
     except Exception as e:  # noqa: BLE001 — a read degrades the run, never wedges it
@@ -1767,7 +1771,7 @@ async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
             # path (each hop would see depth 1 forever).
             chain=chain,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         # An OUTAGE inside the specialist's run (its model, or a read it made
         # that re-raised a DependencyDown) is a DOWN read in the ASKER's run
         # (FR-40): it parks the asker like any read, on what the sub-run was
@@ -1799,7 +1803,7 @@ async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
             },
             actor=f"agent:{caller_id}" if caller_id else "agent",
         )
-    except Exception:  # noqa: BLE001 — telemetry, never fatal to the run
+    except Exception:  # noqa: BLE001, S110 — telemetry, never fatal to the run
         pass
 
     # Pure advice: the specialist answered in text and is done. Return inline —
@@ -2282,7 +2286,7 @@ async def _run_log_kubectl(args: list[str], timeout: float = 20.0) -> tuple[int,
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         return 124, "", f"kubectl timed out after {timeout}s"
@@ -2393,7 +2397,6 @@ async def declare_gap(
     # (`events` is already imported lazily this same way at tools.py:168 and
     # :480) and keeping runtime/ free of an import-time dependency on the db
     # and event tiers.
-    from central_command.db import repo
     from central_command import events
 
     if kind not in GAP_KINDS:
@@ -2746,8 +2749,8 @@ async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int
     audit = row.get("audit") or {}
     parts = [
         _mail_line(row),
-        f"message_id={row['message_id']} provider_uuid={row.get('provider_uuid')} "
-        f"terminal_at={row.get('terminal_at')}",
+        (f"message_id={row['message_id']} provider_uuid={row.get('provider_uuid')} "
+        f"terminal_at={row.get('terminal_at')}"),
     ]
     if row.get("dismissal_rationale"):
         parts.append(f"dismissal rationale: {row['dismissal_rationale']}")
@@ -4311,7 +4314,7 @@ async def propose_skill_doc(
 
     captured_at = None
     if source_url.strip():
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from central_command.integrations import webfetch
 
@@ -4325,7 +4328,7 @@ async def propose_skill_doc(
                 "was proposed. Try another URL, or paste the text as `content`."
             )
         content = result["text"]
-        captured_at = datetime.now(timezone.utc).isoformat()
+        captured_at = datetime.now(UTC).isoformat()
 
     agent_id = getattr(ctx.deps, "agent_id", "unknown")
     arguments = {
@@ -4389,7 +4392,9 @@ async def propose_skill_correction(
     from central_command.db import repo
     from central_command.runtime.reflection import loaded_skills
     from central_command.runtime.skill_corrections import (
-        access_refusal, build_correction, loaded_from_messages,
+        access_refusal,
+        build_correction,
+        loaded_from_messages,
     )
 
     agent_id = getattr(ctx.deps, "agent_id", None) or "unknown"
@@ -4442,9 +4447,7 @@ async def propose_note(
     retired in the same approval — use it when the
     scope is at its budget or the new note supersedes an old one.
     """
-    from central_command.runtime.notes import build_note_proposal
-
-    from central_command.runtime.notes import resolve_grounding
+    from central_command.runtime.notes import build_note_proposal, resolve_grounding
 
     deps = getattr(ctx, "deps", None)
     # The current run is not persisted until it lands, so its messages are

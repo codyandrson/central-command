@@ -67,7 +67,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from central_command import events
 from central_command.contract import TRANSIENT, EmbedderMismatch, classify_failure
@@ -141,14 +141,14 @@ def classify(exc: BaseException) -> str:
         errors = sys.modules.get("graphiti_core.errors")
         if errors is not None and isinstance(exc, errors.GraphitiError):
             return SEMANTIC
-    except Exception:  # noqa: BLE001 — pragma: no cover
+    except Exception:  # noqa: BLE001, S110 — pragma: no cover
         pass
     return classify_failure(exc)
 
 
 def _reference_time(raw: str) -> datetime:
     parsed = datetime.fromisoformat(str(raw))
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 # --- the Executor's side --------------------------------------------------------
@@ -485,12 +485,12 @@ class IngestWorker:
             return
         try:
             await self._lease_conn.execute("select pg_advisory_unlock($1)", INGEST_LEASE_KEY)
-        except Exception:  # noqa: BLE001 — a dead connection releases it anyway
+        except Exception:  # noqa: BLE001, S110 — a dead connection releases it anyway
             pass
         finally:
             try:
                 await self._lease_conn.close()
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110
                 pass
             self._lease_conn = None
 
@@ -581,7 +581,7 @@ class IngestWorker:
                 self._report(f"tick failed: {_error_text(exc)}", "error (see logs)")
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=POLL_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             self._wake.clear()
 
@@ -657,7 +657,7 @@ class IngestWorker:
             await run_job(job)
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 — run_job lands every failure; this is its own crash
+        except Exception:  # run_job lands every failure; this is its own crash
             # Recording the outcome failed (the spine blinked): the job is
             # still RUNNING. Re-run recovery next tick — the marker decides it,
             # exactly as after a crash, instead of the group stalling.

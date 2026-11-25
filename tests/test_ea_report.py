@@ -10,10 +10,9 @@ is shared, so a global count assertion would be a coin flip.
 from __future__ import annotations
 
 import ast
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
 import uuid
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from central_command import events
 from central_command.db import repo
@@ -60,7 +59,7 @@ def test_one_activity_vocabulary_for_both_readers():
 
 @needs_pg
 async def test_the_snapshot_windows_activity_and_reports_current_state():
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     mine = await events.emit(
         "gap.declared", ref_id="eareport_1",
         payload={"kind": "missing_tool", "subject": "eareport",
@@ -93,7 +92,7 @@ async def test_an_empty_window_is_a_complete_answer():
     """A window starting in the future contains nothing, and the block says so
     with zeroes rather than by omitting keys — 'nothing happened' has to be
     narratable."""
-    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    future = datetime.now(UTC) + timedelta(hours=1)
     snap = await ea_report.snapshot(future)
     assert all(entry["count"] == 0 for entry in snap["activity"].values())
     assert all(entry["examples"] == [] for entry in snap["activity"].values())
@@ -122,7 +121,7 @@ async def test_the_snapshot_is_json_serialisable():
     only `str()`s would land in the agent's prompt as a Python repr."""
     import json
 
-    snap = await ea_report.snapshot(datetime.now(timezone.utc) - timedelta(hours=1))
+    snap = await ea_report.snapshot(datetime.now(UTC) - timedelta(hours=1))
     text = json.dumps(snap)  # no default= — nothing exotic may survive to here
     assert "datetime.datetime" not in text
 
@@ -183,7 +182,7 @@ async def test_an_asked_question_carries_its_items_current_state(monkeypatch):
     ids = await _seed_asked_items()
     await _mine_only(monkeypatch, set(ids.values()))
 
-    snap = await ea_report.snapshot(datetime.now(timezone.utc) - timedelta(hours=1))
+    snap = await ea_report.snapshot(datetime.now(UTC) - timedelta(hours=1))
 
     state = {e["ref_id"]: e["state"]
              for e in snap["activity"]["agent.asked"]["examples"]}
@@ -216,7 +215,7 @@ async def test_still_open_counts_only_open_questions_over_the_whole_window(monke
         extra.add(item_id)
     await _mine_only(monkeypatch, set(ids.values()) | extra)
 
-    snap = await ea_report.snapshot(datetime.now(timezone.utc) - timedelta(hours=1))
+    snap = await ea_report.snapshot(datetime.now(UTC) - timedelta(hours=1))
 
     entry = snap["activity"]["agent.asked"]
     assert entry["count"] == 4 + len(extra)
@@ -234,7 +233,7 @@ async def test_an_answered_question_is_not_still_open(monkeypatch):
     assert await repo.answer_operator_item(ids["open"], "yes")
     await _mine_only(monkeypatch, set(ids.values()))
 
-    snap = await ea_report.snapshot(datetime.now(timezone.utc) - timedelta(hours=1))
+    snap = await ea_report.snapshot(datetime.now(UTC) - timedelta(hours=1))
 
     assert snap["activity"]["agent.asked"]["still_open"] == 0
 

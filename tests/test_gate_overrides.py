@@ -14,7 +14,7 @@ import dataclasses
 import json
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -24,8 +24,14 @@ from central_command.config import settings
 from central_command.db import repo
 from central_command.gateway import overrides
 from central_command.gateway.capabilities import (
-    DEFAULT_GATES, EXEMPT_WRITES, REGISTRY, REVERSIBILITIES, effective_shadow_runs,
-    gated_write_names, registry_as_dict, requires_acknowledgement,
+    DEFAULT_GATES,
+    EXEMPT_WRITES,
+    REGISTRY,
+    REVERSIBILITIES,
+    effective_shadow_runs,
+    gated_write_names,
+    registry_as_dict,
+    requires_acknowledgement,
 )
 from central_command.gateway.steward_agreement import pair_confidence
 from central_command.runtime import packs as packs_mod
@@ -75,7 +81,7 @@ def test_task_creation_has_no_row_and_no_exemption():
 def test_the_exemptions_are_a_closed_named_list_and_not_rows():
     assert EXEMPT_WRITES == ("operator graph curation", "wiki annotation (auto)")
     for c in REGISTRY:
-        text = " ".join([c.name, c.description]).lower()
+        text = f"{c.name} {c.description}".lower()
         assert "operator graph curation" not in text and "wiki annotation" not in text, c.name
         assert not c.name.startswith(("wiki.annotat", "operator."))
 
@@ -161,9 +167,9 @@ def test_every_write_row_has_a_mark_and_no_read_does():
 
 def test_the_marks_follow_the_risk_text():
     for c in _writes():
-        if re.search("irreversible", c.risk, re.I):
+        if re.search("irreversible", c.risk, re.IGNORECASE):
             assert c.reversibility == "irreversible", c.name
-        if re.search(r"\bLIVE\b|blast radius", c.risk, re.I):
+        if re.search(r"\bLIVE\b|blast radius", c.risk, re.IGNORECASE):
             assert c.acknowledge, c.name
     irreversible = {c.name for c in _writes() if c.reversibility == "irreversible"}
     assert irreversible == _TEN | {"mcp.tool_call", "plan.remove_finished_block"}
@@ -510,7 +516,7 @@ async def test_an_operator_approval_carries_no_override_id(demo, monkeypatch):
 def _row(agent_id: str, cap: str, *, claimed: str = "reversible") -> dict:
     return {
         "agent_id": agent_id, "status": "AWAITING_HUMAN",
-        "created_at": datetime.now(timezone.utc) + timedelta(seconds=5),
+        "created_at": datetime.now(UTC) + timedelta(seconds=5),
         "actions": [{"capability": cap, "reversibility": claimed,
                      "arguments": _VALID_ARGS.get(cap, {})}],
     }
@@ -625,7 +631,7 @@ def _act(cap, **args):
 
 def _ovr(cap, scope, **kw):
     return {"capability": cap, "scope": scope, "gate": "none", "shadow_runs": 0,
-            "acknowledged_irreversible_at": None, "granted_at": datetime(2020, 1, 1, tzinfo=timezone.utc),
+            "acknowledged_irreversible_at": None, "granted_at": datetime(2020, 1, 1, tzinfo=UTC),
             "id": "govr_x", **kw}
 
 
@@ -650,18 +656,18 @@ def test_every_gated_write_declares_target_args_or_is_named_as_having_none():
 
 @pytest.mark.parametrize("scope,args,expect", [
     ({"argument": {"name": "link_type", "values": ["Relates"]}},
-     dict(from_key="DOE-1", to_key="DOE-2", link_type="Relates"), True),
+     {"from_key": "DOE-1", "to_key": "DOE-2", "link_type": "Relates"}, True),
     ({"argument": {"name": "link_type", "values": ["Relates"]}},
-     dict(from_key="DOE-1", to_key="DOE-2", link_type="Blocks"), False),
+     {"from_key": "DOE-1", "to_key": "DOE-2", "link_type": "Blocks"}, False),
     ({"argument": {"name": "link_type", "values": ["Relates"]}},
-     dict(from_key="DOE-1", to_key="DOE-2"), False),
-    ({"target": ["DOE"]}, dict(from_key="DOE-1", to_key="DOE-2", link_type="Relates"), True),
-    ({"target": ["DOE"]}, dict(from_key="DOE-1", to_key="RIV-1", link_type="Relates"), False),
-    ({"target": ["DOE", "RIV"]}, dict(from_key="DOE-1", to_key="RIV-1", link_type="Relates"), True),
+     {"from_key": "DOE-1", "to_key": "DOE-2"}, False),
+    ({"target": ["DOE"]}, {"from_key": "DOE-1", "to_key": "DOE-2", "link_type": "Relates"}, True),
+    ({"target": ["DOE"]}, {"from_key": "DOE-1", "to_key": "RIV-1", "link_type": "Relates"}, False),
+    ({"target": ["DOE", "RIV"]}, {"from_key": "DOE-1", "to_key": "RIV-1", "link_type": "Relates"}, True),
     ({"target": ["DOE"], "argument": {"name": "link_type", "values": ["Blocks"]}},
-     dict(from_key="DOE-1", to_key="DOE-2", link_type="Relates"), False),
-    ({}, dict(from_key="RIV-1", to_key="RIV-2", link_type="Relates"), True),
-    ({"regex": ".*"}, dict(from_key="DOE-1", to_key="DOE-2", link_type="Relates"), False),
+     {"from_key": "DOE-1", "to_key": "DOE-2", "link_type": "Relates"}, False),
+    ({}, {"from_key": "RIV-1", "to_key": "RIV-2", "link_type": "Relates"}, True),
+    ({"regex": ".*"}, {"from_key": "DOE-1", "to_key": "DOE-2", "link_type": "Relates"}, False),
 ])
 def test_scope_covers_table(scope, args, expect):
     assert overrides.scope_covers(_ovr("jira.link_issues", scope), _act("jira.link_issues", **args), {}) is expect
@@ -682,7 +688,7 @@ def test_a_forged_target_ref_does_not_widen_a_target_scope():
 
 def test_graph_create_edge_with_an_endpoint_outside_the_scope_parks():
     o = _ovr("graph.create_edge", {"target": ["n1", "n2"]})
-    base = dict(name="r", fact="f", valid_at="unbounded")
+    base = {"name": "r", "fact": "f", "valid_at": "unbounded"}
     assert overrides.scope_covers(o, _act("graph.create_edge", source_uuid="n1", target_uuid="n2", **base), {})
     assert not overrides.scope_covers(o, _act("graph.create_edge", source_uuid="n1", target_uuid="n9", **base), {})
 
@@ -727,7 +733,7 @@ def test_scope_text_renders_each_form_in_words():
 
 def _prow(agent, actions):
     return {"agent_id": agent, "status": "AWAITING_HUMAN", "session_id": None,
-            "created_at": datetime.now(timezone.utc) + timedelta(seconds=5), "actions": actions}
+            "created_at": datetime.now(UTC) + timedelta(seconds=5), "actions": actions}
 
 
 @needs_pg
@@ -769,7 +775,7 @@ def test_graph_update_edge_target_scope_also_requires_the_edge_being_edited():
 
 def _drow(agent, actions, evidence=None, session_id=None):
     return {"agent_id": agent, "status": "AWAITING_HUMAN", "session_id": session_id,
-            "created_at": datetime.now(timezone.utc) + timedelta(seconds=5),
+            "created_at": datetime.now(UTC) + timedelta(seconds=5),
             "actions": actions, "evidence": evidence or []}
 
 
@@ -1174,9 +1180,9 @@ async def test_a_hook_error_leaves_the_proposal_for_the_operator_loudly(
 
 # --- story 5: the gateway pre-check, the Executor backstop, several overrides --
 
+from central_command.contract import Action  # noqa: E402
 from central_command.gateway import executor as executor_mod  # noqa: E402
 from central_command.gateway import gateway as gateway_mod  # noqa: E402
-from central_command.contract import Action  # noqa: E402
 
 
 def _action_spy(monkeypatch, *, fail_at: int | None = None,
@@ -1521,7 +1527,7 @@ def test_a_provenance_without_per_action_approvers_serialises_as_before():
     from central_command.contract import Provenance
 
     p = Provenance(approver="human:operator", source_refs=[],
-                   executed_at=datetime.now(timezone.utc))
+                   executed_at=datetime.now(UTC))
     assert "action_approvers" not in p.model_dump(mode="json")
 
 
@@ -1980,10 +1986,8 @@ def _callers(attr: str, owner: str | None = None, root: Path = _PKG) -> set[tupl
                 if isinstance(child, ast.Call):
                     f = child.func
                     if isinstance(f, ast.Attribute) and f.attr == attr and (
-                            owner is None or (isinstance(f.value, ast.Name) and f.value.id == owner)):
-                        found.add((rel, fn))
-                    elif isinstance(f, ast.Name) and f.id == attr:
-                        found.add((rel, fn))
+                            owner is None or (isinstance(f.value, ast.Name) and f.value.id == owner)) or isinstance(f, ast.Name) and f.id == attr:
+                        found.add((rel, fn))  # noqa: B023 — walk() runs inside the same iteration
                 walk(child, fn)
 
         walk(tree, "<module>")

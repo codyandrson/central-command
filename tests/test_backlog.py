@@ -9,6 +9,9 @@ dispatcher **hydrates at claim time**; and the pick order is **newest-first**
 
 from __future__ import annotations
 
+import itertools
+from datetime import UTC
+
 import pytest
 
 from central_command.config import settings
@@ -54,9 +57,9 @@ def _sweeper() -> feed.BacklogSweeper:
 def _cutoff_days_back(days: int) -> str:
     """An ISO cutoff just under `days` back, so window math stays exact
     regardless of the moment the sweeper stamps 'now'."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    return (datetime.now(timezone.utc) - timedelta(days=days) + timedelta(hours=1)).isoformat()
+    return (datetime.now(UTC) - timedelta(days=days) + timedelta(hours=1)).isoformat()
 
 
 async def test_sweep_walks_backwards_and_persists_a_resumable_cursor(monkeypatch):
@@ -88,7 +91,7 @@ async def test_sweep_walks_backwards_and_persists_a_resumable_cursor(monkeypatch
 
     bounds = [tuple(map(int, re.search(r"after:(\d+) before:(\d+)", q).groups()))
               for q in queries]
-    assert all(b1[1] > b2[1] for b1, b2 in zip(bounds, bounds[1:]))
+    assert all(b1[1] > b2[1] for b1, b2 in itertools.pairwise(bounds))
 
 
 async def test_sweep_resumes_from_the_cursor_after_an_error(monkeypatch):

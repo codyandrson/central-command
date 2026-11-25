@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from central_command import events
 from central_command.config import settings
@@ -118,7 +118,7 @@ class FeedPoller:
                 await asyncio.wait_for(
                     self._stopping.wait(), timeout=settings.feed_poll_seconds
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
 
@@ -169,7 +169,7 @@ class BacklogSweeper:
             )
         parsed = datetime.fromisoformat(cutoff)
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         horizon = int(parsed.timestamp())
 
         state = await repo.get_feed_state(_SWEEP_KEY)

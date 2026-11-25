@@ -55,7 +55,7 @@ from central_command.contract import TRANSIENT, DependencyDown, classify_failure
 from central_command.db import repo
 from central_command.integrations import graphiti
 from central_command.runtime import durable, models, tools
-from tests.conftest import aresolve, needs_pg, make_parks_due
+from tests.conftest import aresolve, make_parks_due, needs_pg
 from tests.fake_world import fake_world
 
 FACT = "Renewal of the example.com contract is due 2026-11-01"
@@ -249,7 +249,7 @@ async def test_run_read_by_name_re_validates_the_stored_arguments(graph):
     out = await tools.run_read_by_name(
         "search_knowledge_graph", {"query": "contract renewal"}, deps)
     assert FACT in out
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 — kept as written; any refusal of the bad argument
         await tools.run_read_by_name("search_knowledge_graph", {"querry": "x"}, deps)
     with pytest.raises(ValueError):
         await tools.run_read_by_name("propose_action", {}, deps)
@@ -633,7 +633,7 @@ async def test_each_dependencys_reader_parks_on_down(monkeypatch, dep):
 
 @pytest.mark.parametrize("dep", sorted(_CASES))
 async def test_each_dependencys_reader_answers_a_no_with_honest_text(monkeypatch, dep):
-    fn, args, patch, _outage_, no, _expected = _CASES[dep]
+    fn, args, patch, _outage, no, _expected = _CASES[dep]
 
     patch(monkeypatch, no("the service said no") if no is ValueError else no())
     out = await fn(_park_ctx(), *args)
@@ -742,7 +742,7 @@ def test_no_outage_path_says_proceed_without_it():
     for rel in ("central_command/runtime/tools.py", "central_command/runtime/consult.py"):
         tree = ast.parse((REPO / rel).read_text())
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):  # noqa: SIM102 — merging re-indents the block; formatting is a later release
                 if re.search(r"proceed without (it|them)", node.value):
                     # Docstrings are prose; a string that is returned is a text.
                     if len(node.value) > 120 and "\n" in node.value:
@@ -753,7 +753,7 @@ def test_no_outage_path_says_proceed_without_it():
 
 def _owner(tree, target) -> str:
     for fn in ast.walk(tree):
-        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):  # noqa: SIM102 — merging re-indents the block; formatting is a later release
             if any(n is target for n in ast.walk(fn)):
                 return f"def {fn.name}" if fn.name == "_read_failed" else fn.name
     return "<module>"

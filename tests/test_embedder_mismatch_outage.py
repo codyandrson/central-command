@@ -12,7 +12,7 @@ nothing parked, never clears it, spends no attempt on parked work, and says
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -53,9 +53,9 @@ def _table(monkeypatch):
     async def record(name, up, error=None):
         before = table.get(name)
         table[name] = {"name": name, "state": "up" if up else "down", "error": error,
-                       "checked_at": datetime.now(timezone.utc),
+                       "checked_at": datetime.now(UTC),
                        "down_since": (before or {}).get("down_since") if not up and before
-                       and before["state"] == "down" else (None if up else datetime.now(timezone.utc))}
+                       and before["state"] == "down" else (None if up else datetime.now(UTC))}
         return dict(before) if before else None
 
     monkeypatch.setattr(repo, "dependency_probe_states", states)
@@ -315,7 +315,7 @@ async def test_retry_now_runs_the_same_path_and_stays_down_on_a_mismatch(monkeyp
 
 
 async def test_the_outages_list_carries_the_error_only_while_down(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     async def states():
         return {
@@ -357,7 +357,7 @@ async def test_an_unanswerable_check_records_its_kind_never_its_text(monkeypatch
 
 
 async def test_the_outages_list_scrubs_userinfo_and_key_shapes_from_a_probe_error(monkeypatch):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     dirty = ("connect to http://op:hunter2@10.0.0.9:4000/x failed; "
              "Authorization key=sk-abcdef123456 token: abc123")
 

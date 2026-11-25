@@ -85,8 +85,8 @@ def _fresh_group() -> str:
 
 
 async def _row(**kwargs):
-    defaults = dict(proposal_id="p-test", episode_name="probe",
-                    group_id="central_command", scope="shared", marker="proposal=p-test")
+    defaults = {"proposal_id": "p-test", "episode_name": "probe",
+                    "group_id": "central_command", "scope": "shared", "marker": "proposal=p-test"}
     defaults.update(kwargs)
     return await repo.create_graph_verification(**defaults)
 

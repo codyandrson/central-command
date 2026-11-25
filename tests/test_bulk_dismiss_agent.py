@@ -30,7 +30,6 @@ from central_command.ingest.ledger import provider_message_id
 from central_command.integrations import email_facade
 from central_command.runtime import tools as tools_mod
 from central_command.runtime.deps import TriageDeps
-from central_command.runtime.spike_model import make_spike_model
 from tests.conftest import needs_pg
 
 pytestmark = needs_pg
@@ -265,7 +264,7 @@ async def test_a_non_specific_query_is_refused_in_run(monkeypatch):
 
     # A sender or an exact phrase is enough to get past the check.
     for ok in ("from:news@shop.example", 'subject:"Your weekly digest"'):
-        with pytest.raises(Exception) as exc:  # noqa: PT011 — see the assert
+        with pytest.raises(Exception) as exc:  # see the assert
             await tools_mod.propose_bulk_dismiss(_ctx(), ok, "junk")
         assert "not specific enough" not in str(exc.value)
 

@@ -15,7 +15,7 @@ import json
 import pathlib
 import re
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -460,7 +460,7 @@ async def test_the_ledger_read_gives_each_block_the_date_its_proposal_gave_it():
                                               plan_date="2031-03-03", proposal_id=prop)
     await repo.move_calendar_plan_event_date(moved, "primary", plan_date="2031-03-05")
     await repo.retire_calendar_plan_event(stay, "primary", proposal_id="prop_gone")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     rows = {r["event_id"]: r for r in await repo.list_work_blocks_created_between(
         now - timedelta(minutes=5), now + timedelta(minutes=5))}
     assert rows[stay]["created_for"] == "2031-03-03" and rows[stay]["retired_at"] is not None

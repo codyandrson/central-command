@@ -284,7 +284,7 @@ def _openai_503():
 
 
 @pytest.mark.parametrize("make", [_openai_connection_error, _neo4j_down, _openai_503,
-                                  lambda: asyncio.TimeoutError()])
+                                  lambda: TimeoutError()])
 async def test_a_transient_failure_requeues_with_backoff(fake, make):
     group = _group()
     out = await _enqueue("tr", group)

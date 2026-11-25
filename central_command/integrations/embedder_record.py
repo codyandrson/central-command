@@ -30,7 +30,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -159,7 +159,7 @@ async def update_record(**fields) -> dict:
     unknown = sorted(set(fields) - FIELDS)
     if unknown:
         raise ValueError(f"not embedder record fields: {', '.join(unknown)}")
-    fields.setdefault("updated_at", datetime.now(timezone.utc).isoformat())
+    fields.setdefault("updated_at", datetime.now(UTC).isoformat())
     await ensure_constraint()
     rows = await _write(_UPDATE_RECORD, fields=_encoded(fields))
     clear_cache()
@@ -239,7 +239,7 @@ async def bootstrap_if_empty() -> bool:
         "state": STABLE,
         "canary_texts": list(CANARY_TEXTS),
         "canary_vectors": vectors,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }))
     clear_cache()
     return bool(rows)

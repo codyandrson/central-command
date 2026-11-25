@@ -13,6 +13,7 @@ never see it.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 
 import asyncpg
 
@@ -104,11 +105,11 @@ async def test_the_suite_holds_the_embedder_check_open():
 def test_the_sweep_selects_only_idle_aged_databases_of_other_checkouts():
     """The predicate behind `_sweep_idle_test_databases`, pure: no database is
     created and nothing waits for it to age."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from .conftest import sweepable_test_databases
 
-    now = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
     old, fresh = now - timedelta(hours=7), now - timedelta(hours=5)
     own = "central_command_test_aaaaaaaa"
     rows = [
@@ -133,11 +134,11 @@ def test_the_sweep_selects_only_idle_aged_databases_of_other_checkouts():
 def test_the_sweep_drops_only_names_the_harness_builds():
     """A database somebody named `central_command_test_staging` is not a
     throwaway: the prefix alone must never select it."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from .conftest import TEST_DB, sweepable_test_databases
 
-    now = datetime(2026, 11, 15, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
     old = now - timedelta(days=30)
     for name in ("central_command_test_staging", "central_command_test_",
                  "central_command_test_ABCDEF01", "central_command_test_abcdef0",
@@ -176,11 +177,11 @@ def test_the_sweep_does_not_connect_at_all_in_a_worker_and_never_raises(monkeypa
 def test_one_unreadable_database_does_not_end_the_sweep(monkeypatch):
     """`pg_stat_file` failing for one database (it is looked up per database)
     leaves that one alone and still sweeps the others."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from . import conftest
 
-    old = datetime.now(timezone.utc) - timedelta(days=2)
+    old = datetime.now(UTC) - timedelta(days=2)
     dropped, looked_up = [], []
 
     class FakeConn:

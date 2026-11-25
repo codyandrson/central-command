@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -808,7 +808,7 @@ async def test_the_snapshot_carries_lines_of_effort_and_their_last_check_in():
     try:
         await repo.record_loe_checkin(active, "yellow", 60, "old")
         await repo.record_loe_checkin(active, "green", 80, "Ran three times " + "x" * 400)
-        snap = await ea_report.snapshot(datetime.now(timezone.utc) - timedelta(hours=1))
+        snap = await ea_report.snapshot(datetime.now(UTC) - timedelta(hours=1))
         rows = {r["loe_id"]: r for r in snap["lines_of_effort"]}
         assert rows[quiet] == {"loe_id": quiet, "name": "Quiet line",
                                "cadence": "weekly", "last_check_in": None}
@@ -819,7 +819,7 @@ async def test_the_snapshot_carries_lines_of_effort_and_their_last_check_in():
     finally:
         await repo.retire_loe(quiet, "test")
         await repo.retire_loe(active, "test")
-    snap = await ea_report.snapshot(datetime.now(timezone.utc) - timedelta(hours=1))
+    snap = await ea_report.snapshot(datetime.now(UTC) - timedelta(hours=1))
     assert quiet not in {r["loe_id"] for r in snap["lines_of_effort"]}
 
 

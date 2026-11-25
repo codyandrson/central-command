@@ -85,7 +85,7 @@ class FifoGate:
                     try:
                         await asyncio.wait_for(asyncio.shield(waiter), self._poll)
                         break
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         if await gone():
                             raise Disconnected() from None
         except BaseException:

@@ -97,7 +97,7 @@ _version_cache: dict | None = None  # {"latest": str, "source": str, "checked_at
 
 def read_product_version() -> str:
     try:
-        m = re.search(r"^version=(.+)$", (REPO_ROOT / "VERSION").read_text(), re.M)
+        m = re.search(r"^version=(.+)$", (REPO_ROOT / "VERSION").read_text(), re.MULTILINE)
         return m.group(1).strip() if m else "0.0.0"
     except OSError:
         return "0.0.0"
@@ -118,7 +118,7 @@ def compare_semver(a: str, b: str) -> int:
 
 def _git(*args: str) -> str | None:
     try:
-        out = subprocess.run(
+        out = subprocess.run(  # noqa: PLW1510 — the return code is read below
             ["git", "-C", str(REPO_ROOT), *args],
             capture_output=True, text=True, timeout=30,
         )
@@ -222,7 +222,7 @@ def _staged_target() -> str | None:
     """The version sitting on the `upstream` branch, if update.sh staged one."""
     text = _git("show", "upstream:VERSION")
     if text:
-        m = re.search(r"^version=(.+)$", text, re.M)
+        m = re.search(r"^version=(.+)$", text, re.MULTILINE)
         if m:
             return m.group(1).strip()
     return None
@@ -244,7 +244,7 @@ async def update_status() -> JSONResponse:
 # ── upload + stage ──────────────────────────────────────────────────────────
 
 def _run_update_sh(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
+    return subprocess.run(  # noqa: PLW1510 — the return code is read by the caller
         [_bash() or "bash", str(SINGLE_DIR / "update.sh"), *args],
         # 600 s killed a stage mid-plan on a Windows box where import alone was
         # ~13 min (2026-09-18), and over 1.5 h on the 2026-09-24 run — all of it
@@ -339,7 +339,7 @@ async def _download_and_stage(target: str) -> str | None:
     upd.mkdir(parents=True, exist_ok=True)
     dest = upd / "upload.zip"
     try:
-        async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:  # noqa: SIM117 — merging re-indents the block; formatting is a later release
             async with client.stream("GET", url) as resp:
                 if resp.status_code != 200:
                     return f"HTTP {resp.status_code} downloading {url} — use Update from file with a downloaded zip"

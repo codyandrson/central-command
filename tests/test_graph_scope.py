@@ -51,8 +51,8 @@ def captured(monkeypatch):
         calls.append((kind, {"group_ids": group_ids, "limit": limit}))
 
         class _Results:
-            edges: list = []
-            nodes: list = []
+            edges: list = []  # noqa: RUF012 — a test double's class-level record
+            nodes: list = []  # noqa: RUF012
 
         return _Results()
 

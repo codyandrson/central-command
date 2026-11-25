@@ -132,7 +132,7 @@ def test_the_cockpit_defaults_to_loopback_and_refuses_every_interface_without_au
     config = (ROOT / "web/server/lib/config.ts").read_text()
     assert re.search(r"host:\s*process\.env\.HOST\s*\|\|\s*DEFAULT_HOST", config)
     refusal = re.search(r"if \(config\.host === '0\.0\.0\.0' && !config\.auth\) \{.*?process\.exit\(1\)",
-                        config, re.S)
+                        config, re.DOTALL)
     assert refusal, "the cockpit no longer refuses HOST=0.0.0.0 without auth"
     assert "NERVE_ALLOW_INSECURE" in refusal.group(0)  # the one explicit override
 
@@ -169,7 +169,7 @@ def test_the_runner_job_manifest_gives_the_pod_no_host_reach_no_token_no_env_no_
     assert manifest["metadata"]["namespace"] == "cc-sandbox" == runner.NAMESPACE
     spec = manifest["spec"]["template"]["spec"]
     for flag in ("hostNetwork", "hostPID", "hostIPC"):
-        assert not list(v for v in _walk(manifest, flag) if v), flag
+        assert not [v for v in _walk(manifest, flag) if v], flag
     assert spec["automountServiceAccountToken"] is False
     assert spec["runtimeClassName"] == "gvisor"
     assert "serviceAccountName" not in spec
@@ -226,7 +226,7 @@ def test_no_manifest_exposes_the_apis_port():
 
 def _drill() -> str:
     readme = (K3S / "README.md").read_text()
-    m = re.search(r"^### Sandbox reach drill\b.*?(?=^#{1,3} )", readme, re.M | re.S)
+    m = re.search(r"^### Sandbox reach drill\b.*?(?=^#{1,3} )", readme, re.MULTILINE | re.DOTALL)
     assert m, "deploy/k3s/README.md has no 'Sandbox reach drill' section"
     return m.group(0)
 

@@ -14,7 +14,6 @@ import pytest
 from central_command.api import hold as api_hold
 from central_command.runtime import hold
 
-
 emitted: list[tuple] = []
 
 

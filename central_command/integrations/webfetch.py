@@ -116,7 +116,7 @@ async def fetch(url: str) -> dict:
             "text": f"unsupported URL scheme {parsed.scheme!r} — only http/https are fetchable",
         }
     max_bytes = max(1, int(settings.fetch_max_bytes))
-    async with httpx.AsyncClient(**_client_kwargs(parsed.host)) as client:
+    async with httpx.AsyncClient(**_client_kwargs(parsed.host)) as client:  # noqa: SIM117 — merging re-indents the block; formatting is a later release
         async with client.stream("GET", url) as response:
             if response.status_code < 200 or response.status_code >= 300:
                 return {

@@ -14,7 +14,7 @@ from __future__ import annotations
 import pathlib
 import re
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -150,7 +150,7 @@ def test_an_empty_or_inverted_window_has_no_free_time():
 
 
 def test_a_different_offset_on_an_event_is_compared_as_an_instant():
-    utc = timezone.utc
+    utc = UTC
     ev = {"start": datetime(2026, 11, 20, 17, 0, tzinfo=utc).isoformat(),  # 10:00 Denver
           "end": datetime(2026, 11, 20, 18, 0, tzinfo=utc).isoformat().replace("+00:00", "Z"),
           "all_day": False, "declined": False}
@@ -505,7 +505,7 @@ def test_only_the_executor_writes_the_ledger():
         if rel != "heartbeat/actions.py" and re.search(
                 r"\badvance_calendar_plan_event_snapshots\(", src):
             offenders.append((rel, "advance_calendar_plan_event_snapshots"))
-        if re.search(r"(insert into|update)\s+calendar_plan_event", src, re.I):
+        if re.search(r"(insert into|update)\s+calendar_plan_event", src, re.IGNORECASE):
             offenders.append((rel, "sql"))
     assert offenders == []
 

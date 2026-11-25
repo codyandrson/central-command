@@ -15,8 +15,8 @@ import pytest
 from pydantic_ai import CallDeferred
 
 from central_command.config import settings
-from central_command.contract import validate_action_args
 from central_command.contract import dependencies as deps
+from central_command.contract import validate_action_args
 from central_command.contract.models import Action, Reversibility
 from central_command.db import repo
 from central_command.gateway import executor

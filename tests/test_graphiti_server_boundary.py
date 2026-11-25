@@ -46,7 +46,7 @@ def test_nothing_creates_the_tombstoned_configmap_or_secret():
         assert not re.search(r"apply_secret\s+cc-graphiti\b", code), rel
     for manifest in (ROOT / "deploy" / "k3s").glob("*.yaml"):
         assert not re.search(r"^\s*name:\s*(cc-graphiti-config|cc-graphiti)\s*$",
-                             manifest.read_text(encoding="utf-8"), re.M), manifest.name
+                             manifest.read_text(encoding="utf-8"), re.MULTILINE), manifest.name
 
 
 def test_this_updater_has_no_graphiti_image_or_configmap_row():
@@ -94,7 +94,7 @@ def test_no_install_can_jump_across_the_server_removal():
     floor is v2.60.0, whose own updater has neither row — refused at resolve,
     before anything changes."""
     text = (ROOT / "VERSION").read_text(encoding="utf-8")
-    m = re.search(r"^min_upgrade_from=(\d+)\.(\d+)\.(\d+)$", text, re.M)
+    m = re.search(r"^min_upgrade_from=(\d+)\.(\d+)\.(\d+)$", text, re.MULTILINE)
     assert m, text
     assert tuple(int(x) for x in m.groups()) >= (2, 60, 0), text
 
@@ -110,4 +110,4 @@ def test_this_updater_keeps_the_bridges_steps():
     assert "grep -q -- '--scope-only'" in upd
     mint = (ROOT / "deploy" / "k3s" / "mint-keys.sh").read_text(encoding="utf-8")
     assert "--scope-only)" in mint
-    assert re.search(r"^#CC_GRAPH_RERANK_ALIAS=", (ROOT / ".env.example").read_text(), re.M)
+    assert re.search(r"^#CC_GRAPH_RERANK_ALIAS=", (ROOT / ".env.example").read_text(), re.MULTILINE)

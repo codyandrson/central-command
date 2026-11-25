@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# The repo's code-quality check: one command, run before a push (the pre-push
+# hook, scripts/prepush-scan.sh, calls it) and by hand. Exits non-zero on any
+# finding. The ruff version and rule set live in pyproject.toml.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+# The checkout's own virtualenv first, so a hook run from a plain shell gets
+# the pinned ruff (pyproject's required-version refuses any other).
+if [[ -x .venv/bin/ruff ]]; then PATH="$PWD/.venv/bin:$PATH"; fi
+
+ruff check .
+
+# Later releases of package 1.12 add, here and in this order:
+#   ruff format --check .   (after the one-time reformat release)
+#   the type checker        (mypy over central_command/)

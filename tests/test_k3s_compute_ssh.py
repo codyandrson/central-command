@@ -215,7 +215,7 @@ def test_set_each_uses_the_value_verbatim(tree: Path, stubs: Path, tmp_path: Pat
         env = _env(stubs, tmp_path, CC_BUILD_ONLY="1", CC_COMPUTE_SSH=TARGET)
     r = _run(tree, script, env)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert re.search(rf"^ssh .*{re.escape(TARGET)}", _log(tmp_path), re.M), _log(tmp_path)
+    assert re.search(rf"^ssh .*{re.escape(TARGET)}", _log(tmp_path), re.MULTILINE), _log(tmp_path)
 
 
 @pytest.mark.parametrize("script", BUILD_SCRIPTS)

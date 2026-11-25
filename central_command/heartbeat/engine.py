@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from croniter import croniter
@@ -77,13 +77,13 @@ def compute_next_due(
     if schedule_kind == "cron":
         tz = ZoneInfo(str(schedule.get("tz") or "UTC"))
         nxt = croniter(str(schedule["expr"]), after.astimezone(tz)).get_next(datetime)
-        return nxt.astimezone(timezone.utc)
+        return nxt.astimezone(UTC)
     if schedule_kind == "every":
         return after + timedelta(seconds=float(schedule["every_seconds"]))
     if schedule_kind == "at":
         at = datetime.fromisoformat(str(schedule["at"]))
         if at.tzinfo is None:
-            at = at.replace(tzinfo=timezone.utc)
+            at = at.replace(tzinfo=UTC)
         return at if at > after else None
     raise ValueError(f"unknown schedule kind {schedule_kind!r}")
 
@@ -133,7 +133,7 @@ async def _fire(schedule: dict, spec, trigger: str) -> dict:
     await repo.touch_heartbeat_fired(schedule["id"])
     try:
         result = await spec.run(schedule["id"], params)
-    except Exception as e:  # noqa: BLE001 — one bad action must not kill the loop
+    except Exception as e:  # one bad action must not kill the loop
         log.exception("heartbeat: %s (%s) failed", schedule["id"], schedule["action_kind"])
         # Failure is ALWAYS material, for every action.
         await events.emit(
@@ -245,19 +245,19 @@ class HeartbeatEngine:
         while not self._stopping.is_set():
             try:
                 await self._tick()
-            except Exception:  # noqa: BLE001 — the loop outlives any single error
+            except Exception:  # the loop outlives any single error
                 log.exception("heartbeat: tick failed")
                 self.last_reason = "error (see logs)"
             try:
                 await asyncio.wait_for(
                     self._stopping.wait(), timeout=settings.heartbeat_tick_seconds
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
         log.info("heartbeat: tick loop stopped")
 
     async def _tick(self) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         schedules = await repo.list_heartbeat_schedules(enabled_only=True)
         live = set()
         for s in schedules:
@@ -287,7 +287,7 @@ class HeartbeatEngine:
                 )
             await fire(s)
             nxt = compute_next_due(
-                s["schedule_kind"], s["schedule"], datetime.now(timezone.utc)
+                s["schedule_kind"], s["schedule"], datetime.now(UTC)
             )
             self._next_due[sid] = nxt
             if nxt is None:

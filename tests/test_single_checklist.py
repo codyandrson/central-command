@@ -40,7 +40,7 @@ TEXT = CHECKLIST.read_bytes().decode("utf-8")
 
 
 def _steps_section() -> str:
-    m = re.search(r"^## The steps\n(.*?)^## ", TEXT, flags=re.S | re.M)
+    m = re.search(r"^## The steps\n(.*?)^## ", TEXT, flags=re.DOTALL | re.MULTILINE)
     assert m, "CHECKLIST.md has no '## The steps' section followed by another section"
     return m.group(1)
 
@@ -69,7 +69,7 @@ def test_every_row_appears_in_manifest_order():
 
 
 def test_phase_headings_are_the_manifest_phases_in_order():
-    headings = re.findall(r"^### `(\w+)`$", _steps_section(), flags=re.M)
+    headings = re.findall(r"^### `(\w+)`$", _steps_section(), flags=re.MULTILINE)
     assert headings == R.phases_in_order(ROWS)
 
 
@@ -110,8 +110,8 @@ def test_the_checklist_says_it_is_generated():
 def test_an_unmapped_operator_row_still_renders_without_a_where():
     """A new human row the renderer cannot place renders with its sentence (the
     test above is what fails), rather than crashing the render."""
-    row = dict(phase="boot", step="zz-new", kind="human", requires="", reads="",
-               writes="", probe="p_always", doc="Do a thing nobody located.")
+    row = {"phase": "boot", "step": "zz-new", "kind": "human", "requires": "", "reads": "",
+               "writes": "", "probe": "p_always", "doc": "Do a thing nobody located."}
     out = R.render_steps([row], R.question_defaults())
     assert "**`boot/zz-new` (yours): Do a thing nobody located.**" in out
     assert "Where:" not in out
@@ -122,10 +122,10 @@ def test_where_is_derived_for_the_rows_the_record_names():
     """D1's operator rows that P4 adds (the CA on disk, the n8n credential)
     derive their place from what they read, so their names need no mapping."""
     d = R.question_defaults()
-    ca = dict(phase="machine", step="ca-on-disk", kind="human", requires="",
-              reads="CC_CA_BUNDLE", writes="", probe="p_always", doc="Place the CA.")
-    n8n = dict(phase="boot", step="n8n-credential", kind="human", requires="",
-               reads="CC_ENABLE_N8N", writes="", probe="p_always",
-               doc="Create the Gmail account credential in n8n, when CC_ENABLE_N8N=1.")
+    ca = {"phase": "machine", "step": "ca-on-disk", "kind": "human", "requires": "",
+              "reads": "CC_CA_BUNDLE", "writes": "", "probe": "p_always", "doc": "Place the CA."}
+    n8n = {"phase": "boot", "step": "n8n-credential", "kind": "human", "requires": "",
+               "reads": "CC_ENABLE_N8N", "writes": "", "probe": "p_always",
+               "doc": "Create the Gmail account credential in n8n, when CC_ENABLE_N8N=1."}
     assert "CC_CA_BUNDLE" in R.where_for(ca, d)
     assert "n8n UI" in R.where_for(n8n, d)

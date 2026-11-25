@@ -667,7 +667,7 @@ async def test_a_deletion_job_runs_and_records_what_it_removed(isolated_jobs, de
     assert uuid == "EP1" and dead == ["f1"]
     assert [f["uuid"] for f in expected["facts"]] == ["f1"]
     assert expected["digest"] == "d"   # carried for a typed refusal's `expected` (R26)
-    (kind, kw), = [e for e in seen if e[0] == "graph.episode.deleted"]
+    (_kind, kw), = [e for e in seen if e[0] == "graph.episode.deleted"]
     assert kw["ref_id"] == "EP1" and kw["payload"]["requested_by"] == "operator"
     assert (await repo.episode_deletion_job("EP1"))["id"] == job["id"]
     assert "EP1" in await repo.deleted_episode_uuids(["EP1", "other"])
@@ -690,7 +690,7 @@ async def test_a_refused_deletion_fails_loudly(isolated_jobs, deleter, monkeypat
     (claimed,) = await repo.claim_ingest_jobs()
     assert await graphiti_ingest.run_job(claimed) == "failed"
     assert (await repo.get_ingest_job(job["id"]))["status"] == "FAILED"
-    (kind, kw), = [e for e in seen if e[0] == "graph.ingest.failed"]
+    (_kind, kw), = [e for e in seen if e[0] == "graph.ingest.failed"]
     assert kw["payload"]["kind"] == "remove_episode" and kw["payload"]["episode_uuid"] == "EP2"
     # R26: the typed payload, as `proposal.failed` carries it; no redraft (the
     # proposal was EXECUTED when the job was queued).

@@ -16,6 +16,7 @@ from __future__ import annotations
 import pathlib
 import re
 import uuid
+from datetime import UTC
 
 import pytest
 from fastapi import HTTPException
@@ -78,8 +79,8 @@ def test_there_is_no_embedding_fallback():
     for rel in ("central_command/integrations/neo4j_writer.py",
                 "central_command/integrations/graphiti_client.py"):
         for line in (ROOT / rel).read_text().splitlines():
-            if re.search(r"fallback", line, re.I):
-                assert re.search(r"\bno fallback\b|Never a fallback", line, re.I), (rel, line)
+            if re.search(r"fallback", line, re.IGNORECASE):
+                assert re.search(r"\bno fallback\b|Never a fallback", line, re.IGNORECASE), (rel, line)
 
 
 def test_the_dispatcher_no_longer_fails_open():
@@ -256,10 +257,10 @@ async def test_the_sweep_probes_what_a_released_item_waits_on(embedder_down, mon
            "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n")
     await ledger.enroll_email(raw)
     item = await repo.claim_next_work_item("sess_emb2")
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     await repo.release_work_item(item["id"], error="embedder down", count_attempt=False,
-                                 not_before=datetime.now(timezone.utc) + timedelta(minutes=1),
+                                 not_before=datetime.now(UTC) + timedelta(minutes=1),
                                  dependencies=("embedder",))
     try:
         await orchestration.retry_sweep()

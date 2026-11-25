@@ -75,7 +75,7 @@ PLANNED_NUMBERS = ("value", "lateness_loss", "due_date", "estimate_hours", "tier
 # How many tracker rows the unplanned-completions search returns at most.
 UNPLANNED_LIMIT = 50
 
-_OPEN_CLAUSE = re.compile(r"statusCategory\s*!=\s*Done", re.I)
+_OPEN_CLAUSE = re.compile(r"statusCategory\s*!=\s*Done", re.IGNORECASE)
 
 
 def _local_today() -> date:
@@ -174,7 +174,7 @@ async def planning_numbers(issue_keys: list[str]) -> dict[str, dict]:
             issue = (await jira.get_issue(key))["issue"]
         except Exception as e:  # noqa: BLE001 — a NO is recorded, an outage raises
             if is_down(e):
-                raise _down_on_jira(e)
+                raise _down_on_jira(e)  # no `from`: the same exception, stamped; `from` would overwrite its own cause
             out[key] = {"readable": False, "unreadable_reason": _reason(e), "summary": None,
                         **nulls}
             continue
@@ -202,9 +202,9 @@ async def _tracker_call(call):
     that asked parks on the tracker, and a NO propagates as the client raised it."""
     try:
         return await call
-    except Exception as e:  # noqa: BLE001 — a NO propagates as it is, an outage is stamped
+    except Exception as e:  # a NO propagates as it is, an outage is stamped
         if is_down(e):
-            raise _down_on_jira(e)
+            raise _down_on_jira(e)  # no `from`: the same exception, stamped; `from` would overwrite its own cause
         raise
 
 
@@ -360,7 +360,7 @@ async def brief(plan_date=None) -> dict:
 async def _tracker_status(key: str) -> dict:
     try:
         issue = (await jira.get_issue(key))["issue"]
-    except Exception as e:  # noqa: BLE001 — a NO is said, an outage raises
+    except Exception as e:  # a NO is said, an outage raises
         if is_down(e):
             raise
         return {"readable": False, "reason": _reason(e), "done": None}
@@ -380,13 +380,13 @@ async def _block_now(row: dict, plan_date: date) -> dict:
     try:
         ev = await calendar_facade.get_event(row["event_id"],
                                              calendar_id=row.get("calendar_id") or "primary")
-    except Exception as e:  # noqa: BLE001 — a NO is said, an outage raises
+    except Exception as e:  # a NO is said, an outage raises
         if is_down(e):
             raise
         return {**out, "calendar": "not found", "reason": _reason(e)}
     out.update({"start": ev.get("start"), "end": ev.get("end")})
     try:
-        start = datetime.fromisoformat(str(ev.get("start")).replace("Z", "+00:00"))
+        start = datetime.fromisoformat(str(ev.get("start")))
         local = (start.astimezone(ZoneInfo(settings.ea_timezone)).date()
                  if start.tzinfo else start.date())
         if local != plan_date:
@@ -398,7 +398,7 @@ async def _block_now(row: dict, plan_date: date) -> dict:
 
 def _done_jql(plan_date: date) -> tuple[str | None, str | None]:
     base = settings.plan_backlog_jql or ""
-    if re.search(r"\border\s+by\b", base, re.I):
+    if re.search(r"\border\s+by\b", base, re.IGNORECASE):
         return None, "the backlog JQL has an ORDER BY, so it cannot be narrowed safely"
     if len(_OPEN_CLAUSE.findall(base)) != 1:
         return None, ("the backlog JQL has no single `statusCategory != Done` clause to "
@@ -414,7 +414,7 @@ async def _unplanned_done(plan_date: date, planned: set[str]) -> dict:
         return {"unplanned_done_omitted": why}
     try:
         out = await jira.search_issues(jql, limit=UNPLANNED_LIMIT)
-    except Exception as e:  # noqa: BLE001 — a NO is said, an outage raises
+    except Exception as e:  # a NO is said, an outage raises
         if is_down(e):
             raise
         return {"unplanned_done_omitted": f"the tracker refused the search: {_reason(e)}"}
@@ -556,13 +556,13 @@ async def _block_minutes(row: dict) -> dict:
     try:
         ev = await calendar_facade.get_event(row["event_id"],
                                              calendar_id=row.get("calendar_id") or "primary")
-    except Exception as e:  # noqa: BLE001 — a NO is said, an outage raises
+    except Exception as e:  # a NO is said, an outage raises
         if is_down(e):
             raise
         return {**out, "minutes": None, "unread": f"not found: {_reason(e)}"}
     try:
-        start = datetime.fromisoformat(str(ev.get("start")).replace("Z", "+00:00"))
-        end = datetime.fromisoformat(str(ev.get("end")).replace("Z", "+00:00"))
+        start = datetime.fromisoformat(str(ev.get("start")))
+        end = datetime.fromisoformat(str(ev.get("end")))
         minutes = int((end - start).total_seconds() // 60)
     except (TypeError, ValueError):
         return {**out, "minutes": None, "unread": "the event's times did not parse"}
@@ -663,7 +663,7 @@ def blocks_to_review(blocks: list[dict], current: dict, today: date) -> dict:
         if fresh != old:
             advance.append({"event_id": b["event_id"], "calendar_id": row["calendar_id"],
                             "from": old, "to": fresh})
-    order = lambda r: (r["plan_date"], str(r["issue_key"]), str(r["event_id"]))  # noqa: E731
+    order = lambda r: (r["plan_date"], str(r["issue_key"]), str(r["event_id"]))
     finished.sort(key=order)
     changed.sort(key=order)
     advance.sort(key=lambda a: str(a["event_id"]))
@@ -702,7 +702,7 @@ async def _read_issues_by_key(keys: list[str]) -> tuple[dict, list[dict]]:
         out = await jira.search_issues(jql, limit=len(keys))
     except Exception as e:  # noqa: BLE001 — a NO falls back to per-key reads, an outage raises
         if is_down(e):
-            raise _down_on_jira(e)
+            raise _down_on_jira(e)  # no `from`: the same exception, stamped; `from` would overwrite its own cause
         rows = []
     else:
         rows = out.get("issues") or []
@@ -713,7 +713,7 @@ async def _read_issues_by_key(keys: list[str]) -> tuple[dict, list[dict]]:
             continue
         try:
             found[key] = (await _tracker_call(jira.get_issue(key)))["issue"]
-        except Exception as e:  # noqa: BLE001 — a NO is said, an outage raises
+        except Exception as e:  # a NO is said, an outage raises
             if is_down(e):
                 raise
             if getattr(e, "status_code", None) == 404:
@@ -785,7 +785,7 @@ async def block_review(today: date | None = None) -> dict:
                     names = await _tracker_call(ea_backlog.tracker_field_names())
                 full = (await _tracker_call(jira.get_issue(key)))["issue"]
                 page = await _tracker_call(jira.list_comments(key, limit=CHANGE_COMMENTS))
-            except Exception as e:  # noqa: BLE001 — a NO is said, an outage raises
+            except Exception as e:  # a NO is said, an outage raises
                 if is_down(e):
                     raise
                 if getattr(e, "status_code", None) == 404:

@@ -71,7 +71,7 @@ def _upstream() -> dict[str, set[str]]:
     fn_src = ast.get_source_segment(bulk, fn)
 
     episode_q = get_episode_node_save_bulk_query(GraphProvider.NEO4J)
-    episode = set(re.findall(r"(\w+):\s*episode\.\w+", re.search(r"SET n = \{(.*?)\}", episode_q, re.S).group(1)))
+    episode = set(re.findall(r"(\w+):\s*episode\.\w+", re.search(r"SET n = \{(.*?)\}", episode_q, re.DOTALL).group(1)))
     mentions_q = get_episodic_edge_save_bulk_query(GraphProvider.NEO4J)
     mentions = set(re.findall(r"e\.(\w+)\s*=\s*edge\.", mentions_q))
     if "MENTIONS {uuid: edge.uuid}" in mentions_q:

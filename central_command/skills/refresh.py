@@ -48,7 +48,7 @@ import argparse
 import asyncio
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -174,7 +174,7 @@ def _release_post(key: tuple, doc: BundledDoc, disk: dict, release: str, actor: 
         "kind": doc.kind,
         "title": skill["title"] if is_guidance else Path(doc.path).stem,
         "content": doc.text, "added_by": actor,
-        "captured_at": datetime.now(timezone.utc),
+        "captured_at": datetime.now(UTC),
         **importer.provenance(release, doc.path, doc.text),
         "bundled_text": doc.text,
     }
@@ -236,7 +236,7 @@ async def _write(key, act, disk, library, release, actor="updater") -> None:
         if act["act"] == "keep":
             post = {
                 "kind": doc.kind, "title": None, "content": None, "added_by": actor,
-                "captured_at": datetime.now(timezone.utc),
+                "captured_at": datetime.now(UTC),
                 **importer.provenance(release, doc.path, doc.text),
                 "bundled_text": doc.text,
             }
@@ -281,7 +281,7 @@ async def sync() -> dict:
         label = f"{key[0]}/{key[1]}"
         try:
             await _write(key, act, disk, library, release)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — one failed doc is counted, the rest still run
             counts["failed"] += 1
             failed.append({"doc": label, "error": str(e) or type(e).__name__})
             continue
@@ -407,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         return asyncio.run(_run_sync())
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — CLI boundary: printed, exit 2
         print(f"error: {e}", file=sys.stderr)
         return 2
 

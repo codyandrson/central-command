@@ -33,7 +33,6 @@ import pathlib
 
 import pytest
 
-from central_command.config import settings
 from central_command.contract.models import Action, Reversibility
 from central_command.gateway import executor
 

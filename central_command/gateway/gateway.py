@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from pydantic_ai import DeferredToolRequests
+from pydantic_ai import DeferredToolRequests, ToolDenied
+from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from central_command import events
 from central_command.contract import (
@@ -41,8 +42,6 @@ from central_command.runtime.durable import (
     resume,
 )
 from central_command.runtime.proposals import park_proposal
-from pydantic_ai import ToolDenied
-from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 log = logging.getLogger(__name__)
 
@@ -291,7 +290,7 @@ async def _concluded_a_discussion(session_id: str, final) -> bool:
                 {"messages": ModelMessagesTypeAdapter.dump_python(
                     final.all_messages(), mode="json")},
             )
-        except Exception:  # noqa: BLE001 — a transcript write must not block the close
+        except Exception:  # noqa: BLE001, S110 — a transcript write must not block the close
             pass
         await questions.conclude_discussion(session_id, summary, item["agent_id"])
     except Exception as e:  # noqa: BLE001 — the decision record outranks the resume
@@ -542,9 +541,8 @@ async def finish_decision_resume(
 
     if after == "approved":
         out["final_output"] = final.output if final is not None else None
-    elif after == "failed":
-        if driven:
-            out["final_output"] = note if note is not None else final.output
+    elif after == "failed" and driven:
+        out["final_output"] = note if note is not None else final.output
     closing = note if note is not None else (
         str(final.output) if final is not None else None
     )
@@ -587,7 +585,7 @@ async def finish_decision_resume(
                         {"messages": ModelMessagesTypeAdapter.dump_python(
                             final.all_messages(), mode="json")},
                     )
-                except Exception:  # noqa: BLE001 — a transcript write must not block the close
+                except Exception:  # noqa: BLE001, S110 — a transcript write must not block the close
                     pass
             await land_session(
                 session_id, agent_id=agent_id,
@@ -1239,7 +1237,7 @@ async def _park_execution_retry(
     - **`proposal.decided` is not re-emitted.** The operator decided once.
     """
     completed = list(failure.completed)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     backoff, not_before = retry_not_before(attempts - 1, now=now)
     state = {
         # The Executor's completed list IS the cursor: actions run in order, so
@@ -1364,7 +1362,7 @@ async def _settle_stopped_execution(session_id: str, proposal_id: str,
         # one, this one propagates instead of it.
         if not isinstance(stopped, asyncio.CancelledError):
             raise
-    except Exception:  # noqa: BLE001 — the caller re-raises the original
+    except Exception:  # the caller re-raises the original
         log.exception(
             "could not land the stopped execution of proposal %s (session %s); "
             "it stays EXECUTING with its cursor and the next startup parks it "

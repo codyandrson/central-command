@@ -405,7 +405,7 @@ async def test_a_refused_curation_write_emits_nothing(monkeypatch):
     monkeypatch.setattr(events, "emit", fake_emit)
     monkeypatch.setattr(neo4j_writer, "delete_node", refuse)
 
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 — kept as written; any refusal fails the delete
         await routes.graph_node_delete("nope")
     assert emitted == [], "a write that never landed must not go on the record"
 

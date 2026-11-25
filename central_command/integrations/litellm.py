@@ -24,7 +24,6 @@ import httpx
 
 from central_command.config import settings
 from central_command.contract.failures import ProviderStatusError
-from central_command.contract.args import COST_FIELDS
 from central_command.integrations import http as http_client
 from central_command.integrations import speech_gate
 

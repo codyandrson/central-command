@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -27,9 +27,22 @@ from central_command.gateway.steward_agreement import pair_confidence
 from central_command.runtime.spike_model import make_deferred_tool_model
 from tests.conftest import needs_pg
 from tests.test_gate_overrides import (  # noqa: F401 — fixtures and builders
-    DRAFTER, OTHER, TRIAGE, _action_spy, _actions_of, _approve, _comment_proposal,
-    _events_for, _run, _run_unhooked, _tag_proposal, _two_action_proposal,
-    authored, demo, exchange_mailbox, granted,
+    DRAFTER,
+    OTHER,
+    TRIAGE,
+    _action_spy,
+    _actions_of,
+    _approve,
+    _comment_proposal,
+    _events_for,
+    _run,
+    _run_unhooked,
+    _tag_proposal,
+    _two_action_proposal,
+    authored,
+    demo,
+    exchange_mailbox,
+    granted,
 )
 
 DRAFT_ONLY = {"argument": {"name": "tags", "values": ["draft"]}}
@@ -306,8 +319,8 @@ async def test_revoking_the_pack_grant_suspends_the_override(demo, authored, mon
     first = await _run(monkeypatch, DRAFTER, _tag_proposal("Decided while granted"))
     assert (await repo.load_proposal(first["proposal_id"]))["status"] == "EXECUTED"
     await repo.revoke_pack(DRAFTER, _pack_for("catalog.tag"), reason="e2e")
-    state = [o for o in (await _rpc("overrides.list", {"agentId": DRAFTER}))["overrides"]
-             if o["id"] == oid][0]["state"]
+    state = next(o for o in (await _rpc("overrides.list", {"agentId": DRAFTER}))["overrides"]
+             if o["id"] == oid)["state"]
     assert state == "suspended"
     second = await _run(monkeypatch, DRAFTER, _tag_proposal("Suspended"))
     row = await _assert_parked(second)
@@ -350,7 +363,7 @@ async def test_a_hand_inserted_auditor_row_is_never_honoured_and_the_executor_re
     prop = _tag_proposal("Auditor row")
     resolved = await overrides.resolve({
         "agent_id": "auditor", "status": "AWAITING_HUMAN", "session_id": None,
-        "created_at": datetime.now(timezone.utc) + timedelta(seconds=5),
+        "created_at": datetime.now(UTC) + timedelta(seconds=5),
         "actions": prop["actions"], "evidence": prop["evidence"]})
     assert resolved.gate == "human" and not resolved.considered
 

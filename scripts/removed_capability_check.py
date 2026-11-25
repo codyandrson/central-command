@@ -69,7 +69,7 @@ def main(argv: list[str]) -> int:
         print(__doc__.split("\n")[0], file=sys.stderr)
         return 2
     try:
-        text = sys.stdin.read() if argv[1] == "-" else open(argv[1], encoding="utf-8").read()
+        text = sys.stdin.read() if argv[1] == "-" else open(argv[1], encoding="utf-8").read()  # noqa: SIM115 — a one-shot CLI read
         blocked = asyncio.run(find_blocked(parse_list(text)))
     except Exception as e:  # noqa: BLE001 — fail closed: a check that cannot run refuses
         print(f"removed-capability check could not run: {type(e).__name__}: {e}", file=sys.stderr)

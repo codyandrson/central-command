@@ -537,8 +537,8 @@ async def test_create_space_server_posts_v1_space(monkeypatch):
 
 
 def test_confluence_propose_pack_capabilities_are_all_registered():
-    from central_command.gateway.capabilities import gated_write_names
     from central_command.gateway import executor as executor_mod
+    from central_command.gateway.capabilities import gated_write_names
 
     names = {c.name for c in packs.PACKS["confluence-propose"].capabilities}
     assert names == {

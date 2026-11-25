@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -50,10 +50,14 @@ from central_command.gateway import gateway
 from central_command.ingest import dispatcher, ledger
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_spike_model
-from tests.conftest import aresolve, event_kinds as _kinds, needs_pg
+from tests.conftest import aresolve, needs_pg
+from tests.conftest import event_kinds as _kinds
 from tests.test_execution_retry import OUTAGE_TEXT, _graph_spy, _jira_spy, _parked_run
 from tests.test_outage_requeue import (
-    OUTAGE, _boom_handler, _model_that_raises, _resolver_raising,
+    OUTAGE,
+    _boom_handler,
+    _model_that_raises,
+    _resolver_raising,
 )
 from tests.test_resume_parking import _boom_on_build, _pending
 
@@ -238,7 +242,7 @@ async def test_a_probe_gated_sweep_leaves_attempts_and_not_before(monkeypatch):
         await conn.execute(
             "update proposal set retry_state = jsonb_set(retry_state, '{not_before}', "
             "to_jsonb($2::text)) where id = $1",
-            pid, (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat())
+            pid, (datetime.now(UTC) - timedelta(seconds=1)).isoformat())
     finally:
         await conn.close()
     before = (await repo.load_proposal(pid))["retry_state"]
@@ -456,7 +460,6 @@ def test_the_retired_limits_are_gone_from_the_tree():
 
 def test_a_retired_key_in_the_environment_is_warned_about_once(monkeypatch, caplog):
     from central_command.api import app as app_module
-
     from central_command.config import RETIRED_ENV_KEYS
 
     # Hermetic (story 11.5): the live .env and every worktree copy carry retired

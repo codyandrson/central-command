@@ -71,7 +71,7 @@ def main(argv: list[str]) -> int:
         out.update(status="ok" if text else "empty", text=text, reader=reader)
     except MemoryError:
         out["error"] = "the file needed more memory than the reader is allowed"
-    except Exception as exc:  # the parent reports it; nothing is raised across the pipe
+    except Exception as exc:  # noqa: BLE001 — the parent reports it; nothing is raised across the pipe
         out["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
     sys.stdout.write(json.dumps(out))
     sys.stdout.flush()

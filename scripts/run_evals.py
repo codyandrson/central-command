@@ -37,7 +37,7 @@ import json
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic_evals.evaluators import Evaluator
@@ -276,7 +276,7 @@ def build_results_json(dataset_path: Path, model_timings: dict) -> dict:
     """
     return {
         "dataset": dataset_path.as_posix(),
-        "run_at": datetime.now(timezone.utc).isoformat(),
+        "run_at": datetime.now(UTC).isoformat(),
         "models": {
             alias: {**_score_report(report), "seconds": seconds}
             for alias, (report, seconds) in model_timings.items()

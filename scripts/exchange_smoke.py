@@ -39,16 +39,16 @@ import pathlib
 import socket
 import ssl
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
 # Run from a checkout without installing it, and prefer THIS checkout over an
 # editable install that points somewhere else (worktrees).
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from central_command.config import settings  # noqa: E402
-from central_command.integrations import exchange  # noqa: E402
-from central_command.integrations import http as http_client  # noqa: E402
+from central_command.config import settings
+from central_command.integrations import exchange
+from central_command.integrations import http as http_client
 
 _failures = 0
 _checks = 0
@@ -113,7 +113,7 @@ def check_tls() -> None:
     if settings.client_cert:
         context.load_cert_chain(settings.client_cert, settings.client_key or None)
     try:
-        with socket.create_connection((host, port), timeout=20) as raw:
+        with socket.create_connection((host, port), timeout=20) as raw:  # noqa: SIM117 — merging re-indents the block; formatting is a later release
             with context.wrap_socket(raw, server_hostname=host) as tls:
                 peer = tls.getpeercert() or {}
                 issuer = ", ".join(
@@ -168,7 +168,7 @@ def check_search(account) -> None:
 def check_calendar(account) -> None:
     from exchangelib import EWSDateTime
 
-    start = datetime.now(timezone.utc)
+    start = datetime.now(UTC)
     end = start + timedelta(days=7)
     try:
         events = list(account.calendar.view(

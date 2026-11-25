@@ -179,8 +179,8 @@ def test_importing_the_app_does_not_import_graphiti_core():
 
     out = subprocess.run(
         [sys.executable, "-c",
-         "import sys, central_command.api.app; "
-         "print(any(m == 'graphiti_core' or m.startswith('graphiti_core.') for m in sys.modules))"],
+         ("import sys, central_command.api.app; "
+         "print(any(m == 'graphiti_core' or m.startswith('graphiti_core.') for m in sys.modules))")],
         capture_output=True, text=True, timeout=110,
         cwd=Path(executor.__file__).parents[2],
     )

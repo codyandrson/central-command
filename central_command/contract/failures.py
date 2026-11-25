@@ -32,7 +32,7 @@ import asyncio
 import errno
 import re
 import socket
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 TRANSIENT = "transient"
 SEMANTIC = "semantic"
@@ -342,7 +342,7 @@ def classify_failure(exc: BaseException | None) -> str:
             # TransportError covers ConnectError/ReadError/WriteError/
             # RemoteProtocolError/PoolTimeout and every timeout subclass.
             return TRANSIENT
-    except Exception:  # noqa: BLE001 — pragma: no cover (httpx always present)
+    except Exception:  # noqa: BLE001, S110 — pragma: no cover (httpx always present)
         pass
     if isinstance(exc, OSError) and exc.errno in _NETWORK_ERRNOS:
         return TRANSIENT
@@ -359,7 +359,7 @@ def classify_failure(exc: BaseException | None) -> str:
 
     # `ModelAPIError` that is not an HTTP error is pydantic-ai's wrapper for a
     # provider APIConnectionError — the cause carries the truth.
-    if ModelAPIError and isinstance(exc, ModelAPIError) and exc.__cause__ is not None:
+    if ModelAPIError and isinstance(exc, ModelAPIError) and exc.__cause__ is not None:  # noqa: SIM102 — merging re-indents the block; formatting is a later release
         if classify_failure(exc.__cause__) == TRANSIENT:
             return TRANSIENT
 
@@ -428,7 +428,7 @@ def retry_not_before(
     `transient_releases`, and an ingest job passes `attempts - 1`
     (`graphiti_ingest` hands the seconds to SQL, which adds them to `now()`)."""
     seconds = retry_backoff_seconds(prior_failures, cap)
-    base = now or datetime.now(timezone.utc)
+    base = now or datetime.now(UTC)
     return seconds, base + timedelta(seconds=seconds)
 
 

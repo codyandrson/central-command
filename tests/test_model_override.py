@@ -256,7 +256,7 @@ def test_session_rows_carry_the_thinking_level_the_dropdown_reads():
 
     row = {
         "id": "sess_x", "agent_id": "inbox-triage", "status": "RUNNING",
-        "mode": "task", "created_at": dt.datetime.now(dt.timezone.utc),
+        "mode": "task", "created_at": dt.datetime.now(dt.UTC),
         "updated_at": None, "parent_session_id": None, "parent_agent_id": None,
         "thinking_override": "medium",
     }

@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import os
 import tomllib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -250,7 +250,7 @@ class _FakeGraphiti:
 def _edge(i: int):
     EntityEdge, _, _ = _lib()
     return EntityEdge(uuid=f"e{i}", group_id="central_command", source_node_uuid="a",
-                      target_node_uuid="b", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                      target_node_uuid="b", created_at=datetime(2026, 1, 1, tzinfo=UTC),
                       name="LEADS", fact=f"fact {i}", episodes=["ep"], fact_embedding=[0.1, 0.2])
 
 
@@ -258,7 +258,7 @@ def _node(i: int):
     _, EntityNode, _ = _lib()
     return EntityNode(uuid=f"n{i}", name=f"Ada {i}", group_id="central_command",
                       labels=["Entity", "Person"], summary="leads the probe team",
-                      created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                      created_at=datetime(2026, 1, 1, tzinfo=UTC),
                       name_embedding=[0.1], attributes={"role": "lead", "name_embedding": [1.0]})
 
 
@@ -325,7 +325,7 @@ async def test_a_persons_values_reach_the_agent_as_attributes(monkeypatch):
     _, EntityNode, _ = _lib()
     node = EntityNode(uuid="p", name="Jane Rivers Doe", group_id="central_command",
                       labels=["Entity", "Person"], summary="s",
-                      created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                      created_at=datetime(2026, 1, 1, tzinfo=UTC),
                       attributes={"aliases": ["Jane", "JRD"], "birth_date": "1980-02-29",
                                   "phone": "+1 555 0100", "cc_action_key": "k"})
     assert graphiti.node_result(node)["attributes"] == {
@@ -367,7 +367,7 @@ async def test_the_exact_lane_matches_name_or_alias_in_the_groups(monkeypatch):
         from neo4j.time import DateTime
         return [{"uuid": "p", "name": "Jane Rivers Doe",
                  "labels": ["Entity", "Person", "Entity_centralcommand"],
-                 "created_at": DateTime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+                 "created_at": DateTime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
                  "summary": "s", "group_id": "central_command",
                  "attributes": [["aliases", ["JRD"]], ["phone", "555"]]}]
 
@@ -392,7 +392,7 @@ async def test_episode_listing_keeps_the_servers_keys_and_orders_by_time(monkeyp
         from neo4j.time import DateTime
 
         return [{"uuid": "ep2", "name": "two", "content": "b",
-                 "created_at": DateTime(2026, 2, 1, 0, 0, 0, tzinfo=timezone.utc),
+                 "created_at": DateTime(2026, 2, 1, 0, 0, 0, tzinfo=UTC),
                  "source": "text", "source_description": "s", "group_id": "central_command"}]
 
     monkeypatch.setattr(neo4j_reader, "_read", fake_read)

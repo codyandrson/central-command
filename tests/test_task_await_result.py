@@ -20,12 +20,12 @@ Mirrors `tests/test_consult_wait.py` (the sibling feature).
 
 from __future__ import annotations
 
+import uuid
+from types import SimpleNamespace
+
 import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
-
-import uuid
-from types import SimpleNamespace
 
 from central_command.api import orchestration, routes
 from central_command.config import settings

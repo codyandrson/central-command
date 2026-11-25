@@ -44,17 +44,17 @@ import asyncio
 import pathlib
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # Run from a checkout without installing it, and prefer THIS checkout over an
 # editable install that points somewhere else (worktrees).
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import httpx
+import httpx  # noqa: E402 — after the sys.path line above
 
-from central_command.config import settings
-from central_command.integrations import confluence
+from central_command.config import settings  # noqa: E402
+from central_command.integrations import confluence  # noqa: E402
 
 DEFAULT_SAMPLER_TITLE = "Central Command Macro Sampler"
 USAGE_LIMIT = 500          # five pages of 100 — the client's bounded crawl
@@ -248,8 +248,8 @@ def render(data: dict, *, harvested: str, flavor: str) -> str:
         "is copied here. A macro absent from this list is a capability gap.",
     ]
     if data.get("skipped_names"):
-        out += ["", f"note: {data['skipped_names']} macro name(s) were skipped "
-                    "because they are not a plain ac:name."]
+        out += ["", (f"note: {data['skipped_names']} macro name(s) were skipped "
+                    "because they are not a plain ac:name.")]
     for m in data["macros"]:
         usage = f"{m['count']}{'+' if m['truncated'] else ''}"
         out += ["", f"## {m['name']}", "",
@@ -260,8 +260,8 @@ def render(data: dict, *, harvested: str, flavor: str) -> str:
                 f"- on the sampler page: {'yes' if m['in_sampler'] else 'no'}"]
         hit = m["first_hit"]
         if hit:
-            out += [f"- first page found: id {hit['id']}, space {hit['space_key'] or 'unknown'}, "
-                    f'title (quoted data): "{hit["title"] or "untitled"}"']
+            out += [(f"- first page found: id {hit['id']}, space {hit['space_key'] or 'unknown'}, "
+                    f'title (quoted data): "{hit["title"] or "untitled"}"')]
         if m["example"] is not None:
             ex = m["example"]
             # A fence longer than any backtick run in the block (the sampler is
@@ -299,7 +299,7 @@ async def run(args, client=confluence) -> int:
     data = await gather(client, sampler_title=args.sampler_title,
                         extra=list(args.macro or []), table=table,
                         sampler_id=args.sampler_id, sampler_space=args.sampler_space)
-    text = render(data, harvested=datetime.now(timezone.utc).date().isoformat(), flavor=flavor)
+    text = render(data, harvested=datetime.now(UTC).date().isoformat(), flavor=flavor)
     n = len(data["macros"])
     if args.dry_run:
         print(text, end="")

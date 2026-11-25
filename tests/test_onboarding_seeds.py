@@ -40,7 +40,7 @@ def test_inbox_triage_working_set_is_seeded_and_defaulted():
 def test_the_k3s_app_phase_generates_both_facade_tokens_and_applies_the_workflows():
     for var in ("CC_EMAIL_FACADE_TOKEN", "CC_CALENDAR_FACADE_TOKEN"):
         assert var in K3S_SETUP, var
-    gen = re.search(r"for tokvar in CC_EMAIL_FACADE_TOKEN CC_CALENDAR_FACADE_TOKEN; do(.*?)done", K3S_SETUP, re.S)
+    gen = re.search(r"for tokvar in CC_EMAIL_FACADE_TOKEN CC_CALENDAR_FACADE_TOKEN; do(.*?)done", K3S_SETUP, re.DOTALL)
     assert gen and "openssl rand -hex" in gen.group(1)
     assert "is_placeholder" in gen.group(1), "an existing token must never be overwritten"
     assert 'apply-workflows.sh" --k3s' in K3S_SETUP

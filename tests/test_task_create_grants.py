@@ -13,13 +13,16 @@ import re
 import uuid
 from pathlib import Path
 
-import pytest
-
 from central_command.db import repo
 from central_command.runtime import packs
 from central_command.runtime.templates import (
-    ACCOUNTABILITY_TEMPLATE, EA_TEMPLATE, EDITOR_TEMPLATE,
-    GRAPH_CURATOR_TEMPLATE, MCP_MANAGER_TEMPLATE, STEWARD_TEMPLATE, TEMPLATES,
+    ACCOUNTABILITY_TEMPLATE,
+    EA_TEMPLATE,
+    EDITOR_TEMPLATE,
+    GRAPH_CURATOR_TEMPLATE,
+    MCP_MANAGER_TEMPLATE,
+    STEWARD_TEMPLATE,
+    TEMPLATES,
 )
 from tests.conftest import needs_pg
 
@@ -110,7 +113,7 @@ def test_the_trailing_migration_never_names_the_auditor_as_a_target():
     sql = _SCHEMA.read_text()
     block = sql[sql.index(_MARKER):]
     assert "a.id <> 'auditor'" in block
-    assert not re.search(r"\bdelete\s+from\s+agent_grant", sql, re.I), (
+    assert not re.search(r"\bdelete\s+from\s+agent_grant", sql, re.IGNORECASE), (
         "grants are history: a revocation is a timestamp, never a delete")
 
 

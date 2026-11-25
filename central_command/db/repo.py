@@ -15,7 +15,7 @@ import contextlib
 import json
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import asyncpg
 
@@ -1205,7 +1205,7 @@ async def park_orphaned_sessions() -> list[dict]:
 
     Returns one `{session_id, agent_id, outcome, task_id, reason}` per session
     for the caller to announce (this tier emits nothing)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     out: list[dict] = []
     conn = await _conn()
     try:
@@ -1316,7 +1316,7 @@ async def _stop_for_restart(conn, session_id: str, reason: str, *, after: str | 
     task's fresh re-run."""
     marker = {"reason": "restart", "restart_reason": reason, "after": after,
               "task_id": task_id, "resumable": resumable,
-              "stopped_at": datetime.now(timezone.utc).isoformat()}
+              "stopped_at": datetime.now(UTC).isoformat()}
     await conn.execute(
         """
         update session set status = 'STOPPED', stop_requested = false,
@@ -1999,7 +1999,7 @@ async def park_interrupted_execution(proposal_id: str, last_error: str) -> dict 
     record `park_interrupted_executions` writes at startup; guarded, so a row no
     longer EXECUTING is left alone (None). Returns `{id, session_id, agent_id,
     retry_state}`."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     conn = await _conn()
     try:
         async with conn.transaction():
@@ -3364,7 +3364,7 @@ async def hire_agent(
         raise ValueError(
             f"agent id {agent_id!r} already exists (retired ids stay reserved — "
             "history is keyed by agent_id forever)"
-        )
+        ) from None
     finally:
         await conn.close()
     return (await get_agent(agent_id)) or {}
@@ -5051,7 +5051,7 @@ async def park_sessionless_in_progress_tasks() -> list[dict]:
 
     Re-run, never FAILED (epic-outage-doctrine story 5): the same `restart`
     retry park a killed task run gets (`park_orphaned_sessions` (b)), due now."""
-    state = _restart_task_retry_state(datetime.now(timezone.utc))
+    state = _restart_task_retry_state(datetime.now(UTC))
     conn = await _conn()
     try:
         rows = await conn.fetch(
@@ -5096,7 +5096,7 @@ async def park_interrupted_executions() -> list[dict]:
     or re-run it with no operator click. Not built here (deferred work).
 
     Returns `{id, session_id, agent_id, retry_state}` per proposal."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     out: list[dict] = []
     conn = await _conn()
     try:

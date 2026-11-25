@@ -40,7 +40,8 @@ from central_command.integrations import graphiti_ingest
 from central_command.runtime import packs
 from central_command.runtime.run import ingest_and_propose
 from central_command.runtime.spike_model import make_sc1_model
-from tests.conftest import event_kinds as _kinds, make_parks_due, needs_pg
+from tests.conftest import event_kinds as _kinds
+from tests.conftest import make_parks_due, needs_pg
 
 OUTAGE_TEXT = "Connection refused talking to the n8n façade"
 
@@ -394,8 +395,8 @@ async def test_a_bare_neo4j_outage_parks_the_proposal_with_graph_and_embedder(
     row = await repo.load_proposal(run["proposal_id"])
     assert row["status"] == "RETRY_PENDING"
     assert row["retry_state"]["dependencies"] == ["graph", "embedder"]
-    ev = [e for e in await repo.list_events(ref_id=run["proposal_id"])
-          if e["kind"] == "proposal.execution_parked"][0]
+    ev = next(e for e in await repo.list_events(ref_id=run["proposal_id"])
+          if e["kind"] == "proposal.execution_parked")
     assert ev["payload"]["dependencies"] == ["graph", "embedder"]
 
 
@@ -406,9 +407,7 @@ async def test_execution_failed_carries_the_flag_and_the_dependencies(monkeypatc
         raise ServiceUnavailable("boom")
 
     monkeypatch.setitem(executor.HANDLERS, "graph.create_node", boom)
-    from central_command.contract import Action
-
-    from central_command.contract import Reversibility
+    from central_command.contract import Action, Reversibility
 
     action = Action(capability="graph.create_node",
                     arguments={"name": "n", "group_id": "g", "summary": "s"},

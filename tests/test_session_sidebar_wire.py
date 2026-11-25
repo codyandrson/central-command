@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -24,7 +24,7 @@ from central_command.db import repo
 from central_command.runtime import roster as roster_mod
 from tests.conftest import needs_pg
 
-NOW = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)

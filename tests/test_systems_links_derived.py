@@ -43,7 +43,7 @@ def link_settings() -> set[str]:
 def test_every_link_setting_has_an_env_example_line():
     example = ENV_EXAMPLE.read_text()
     for key in sorted(link_settings()):
-        assert re.search(rf"^{key}=", example, flags=re.M), f"{key} missing from .env.example"
+        assert re.search(rf"^{key}=", example, flags=re.MULTILINE), f"{key} missing from .env.example"
 
 
 def test_k3s_driver_derives_every_link():
@@ -64,7 +64,7 @@ def test_single_driver_derives_every_link_it_deploys():
 def test_links_never_overwrite_an_operator_value():
     """Every link write goes through set_kv_if_unset — a URL the operator typed
     (a reverse proxy, a different tailnet name) survives every app re-run."""
-    pattern = re.compile(r'^\s*set_kv\s+"\$(?:APP_ENV|ENV_FILE)"\s+(CC_\w+_(?:UI|DOCS|BROWSER)_URL)\b', re.M)
+    pattern = re.compile(r'^\s*set_kv\s+"\$(?:APP_ENV|ENV_FILE)"\s+(CC_\w+_(?:UI|DOCS|BROWSER)_URL)\b', re.MULTILINE)
     for path, src in ((K3S, K3S.read_text()), (SINGLE, installer_source())):
         hits = pattern.findall(src)
         assert not hits, f"{path.relative_to(ROOT)} overwrites {hits} with a bare set_kv"
@@ -89,7 +89,7 @@ def _k3s_link_rows() -> tuple[dict[str, int], dict[str, int]]:
     """(plain-http ServiceLB rows, tailscale-serve-fronted rows) of
     derive_systems_links, each as {key: port}."""
     body = K3S.read_text().split("derive_systems_links() {", 1)[1].split("\n}\n", 1)[0]
-    loops = re.findall(r"for row in(.*?); do", body, flags=re.S)
+    loops = re.findall(r"for row in(.*?); do", body, flags=re.DOTALL)
     assert len(loops) == 2, "derive_systems_links no longer has its two row tables"
     tables = [{k: int(p) for k, p in re.findall(r'"(CC_\w+) (\d+) ', rows)} for rows in loops]
     assert all(tables), "a link row table parsed empty"

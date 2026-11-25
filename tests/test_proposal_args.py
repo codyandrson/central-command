@@ -21,9 +21,14 @@ from types import SimpleNamespace
 import pytest
 from pydantic_ai import ModelRetry
 
-from central_command import events
-from central_command.contract import ARG_SPECS, Action, Proposal, Reversibility, validate_action_args
-from central_command.contract import validate_proposal_shape
+from central_command.contract import (
+    ARG_SPECS,
+    Action,
+    Proposal,
+    Reversibility,
+    validate_action_args,
+    validate_proposal_shape,
+)
 from central_command.db import repo
 from central_command.gateway import executor
 from central_command.gateway.capabilities import gated_write_names

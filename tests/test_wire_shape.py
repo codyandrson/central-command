@@ -356,7 +356,7 @@ async def test_the_production_builder_summarises_again_and_loses_nothing(monkeyp
                 return _call(tool, {"query": f"q{n}"}, f"c-skill-{n}")
             return {"role": "assistant", "content": "Nothing else to do."}
 
-        bodies, store = install_stub_seam(monkeypatch, script, window=12_000, cfg={
+        bodies, _store = install_stub_seam(monkeypatch, script, window=12_000, cfg={
             "pressure_warning": False, "clear_tool_results": False, "drop_thinking": False,
             "output_headroom": False, "summarize_threshold": 0.5})
         summarised: set = set()

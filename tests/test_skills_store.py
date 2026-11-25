@@ -32,7 +32,7 @@ async def test_only_one_current_version_per_doc_key(clean_skills):
             """insert into skill_doc (id, skill_id, doc_key, kind, title, content, version)
                values ('cc-test-d1', 'cc-test-jira', 'guidance', 'guidance', 'G', 'body', 1)"""
         )
-        with pytest.raises(Exception):  # unique violation
+        with pytest.raises(Exception):  # noqa: B017 — unique violation
             await conn.execute(
                 """insert into skill_doc (id, skill_id, doc_key, kind, title, content, version)
                    values ('cc-test-d2', 'cc-test-jira', 'guidance', 'guidance', 'G', 'body2', 2)"""
@@ -309,7 +309,7 @@ async def test_reactivating_restores_every_previous_holder(clean_skills):
     await repo.add_skill_doc("cc-test-back", "guidance", "guidance", "G", "body")
     await repo.grant_skill("inbox-triage", "cc-test-back")
 
-    held = lambda: repo.list_agent_skills("inbox-triage")  # noqa: E731
+    held = lambda: repo.list_agent_skills("inbox-triage")
     assert "cc-test-back" in [g["skill_id"] for g in await held()]
 
     async def holder_count() -> int:
@@ -483,7 +483,7 @@ async def test_the_provenance_columns_and_the_text_table_exist_and_are_nullable(
 @pytest.mark.asyncio
 async def test_a_version_posted_with_provenance_stores_it_and_its_text(clean_skills):
     await _make_skill()
-    hash_ = hashlib.sha256("# Body\ntext".encode()).hexdigest()
+    hash_ = hashlib.sha256(b"# Body\ntext").hexdigest()
     doc = await repo.add_skill_doc(
         "cc-test-prov", "guidance", "guidance", "G", "# Body\ntext",
         added_by="installer", bundled_release="2.77.0",

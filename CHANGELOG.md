@@ -4,6 +4,31 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-25 — v2.134.0: The linter is clean and in the gate
+
+- **Why.** System-review package 1.12, first of three releases. Ruff was a dev dependency nothing
+  enforced (about 1,040 findings). The tools and practice follow what FastAPI, httpx, Pydantic and
+  Pydantic AI do: ruff for lint and format, a pinned version range, one check command.
+- **What is in the gate now.** `scripts/check` runs `ruff check` (ruff `>=0.17.6,<0.18`, its default
+  rule set plus `E402` and `RUF006`; `docs/vendor`, `servers/`, `docs/experiments/` and Markdown are
+  excluded). The pre-push hook runs it after the sensitivity scan and refuses the push when it
+  fails; the scan itself is unchanged. `AGENTS.md` names it beside the pytest line.
+- **Fixed as bugs, not style.**
+  - Sixteen `asyncio.create_task` calls dropped the task reference, so the task could be collected
+    before it finished. `central_command/background.py` (`keep()`, the asyncio docs' remedy: a set
+    and a done callback) now holds each one. Start time and error behaviour are unchanged.
+  - `integrations/exchange.py` matched folders with `.lstrip("root")`, which strips characters, not
+    a prefix; it is `removeprefix` now. The exact-name match beside it hid the fault.
+- **`raise ... from`.** API routes chain the cause (`from e`); everywhere a reader walks
+  `__cause__` to tell an outage from a refusal, the raise is `from None`, which keeps the cause
+  empty exactly as before.
+- **Everything else is mechanical**: about 840 auto-fixes (import order, `datetime.UTC`,
+  `TimeoutError`, merged conditions), each unsafe one read; seven were reverted and marked. What
+  remains carries a `noqa` with its reason.
+- **Not in this release.** No reformat (the next release, alone) and no type checker (the one
+  after).
+- **Operator action.** None. A checkout that pushes needs ruff from the dev extra.
+
 ## 2026-11-24 — v2.133.0: The cockpit's relay dials one gateway; a client cannot name another
 
 - **Removed.** The relay's `?target=` parameter, the `WS_ALLOWED_HOSTS` list that guarded it, and

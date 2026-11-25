@@ -647,5 +647,5 @@ def test_update_deploys_the_stack_between_llm_and_app():
     src = (SINGLE / "update.sh").read_text(encoding="utf-8")
     start = src.index("\ndeploy_current_tree() {")
     body = src[start: src.index("\n}\n", start)]
-    phases = re.findall(r"^\s*deploy_phase (\w+) ", body, flags=re.M)
+    phases = re.findall(r"^\s*deploy_phase (\w+) ", body, flags=re.MULTILINE)
     assert phases == ["fetch", "llm", "stack", "app", "verify"], phases

@@ -507,7 +507,7 @@ async def test_the_route_and_the_executor_forward_the_person_values(monkeypatch)
 
     async def fake_update_node(uuid, name=None, summary=None, labels=None, aliases=None,
                                birth_date=None, phone=None):
-        seen.append(dict(uuid=uuid, aliases=aliases, birth_date=birth_date, phone=phone))
+        seen.append({"uuid": uuid, "aliases": aliases, "birth_date": birth_date, "phone": phone})
         return {"uuid": uuid}
 
     async def no_emit(*a, **k):
@@ -520,8 +520,8 @@ async def test_the_route_and_the_executor_forward_the_person_values(monkeypatch)
         uuid="p", aliases=["Jane"], birth_date="1980-02-29", phone=""))
     handler = ex._GRAPH_CURATION_HANDLERS["graph.update_node"]
     await handler({"uuid": "p", "aliases": ["JRD"], "phone": "555"}, "op", None)
-    assert seen == [dict(uuid="p", aliases=["Jane"], birth_date="1980-02-29", phone=""),
-                    dict(uuid="p", aliases=["JRD"], birth_date=None, phone="555")]
+    assert seen == [{"uuid": "p", "aliases": ["Jane"], "birth_date": "1980-02-29", "phone": ""},
+                    {"uuid": "p", "aliases": ["JRD"], "birth_date": None, "phone": "555"}]
 
 
 # --- the same, against a real Neo4j (CC_LIVE_GRAPH_TESTS=1) ----------------------------

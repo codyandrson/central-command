@@ -89,7 +89,7 @@ def pair_confidence(proposals: list[dict], decided: list[dict]) -> dict:
         }
         for lvl in LEVELS
     }
-    for lvl, counts in by_level.items():
+    for counts in by_level.values():
         total = counts["approved"] + counts["rejected"]
         counts["total"] = total
         counts["approval_rate"] = (

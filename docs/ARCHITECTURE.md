@@ -162,6 +162,9 @@ only): any of `CC_TEST_MODEL`, `CC_DEMO_MODE`, `CC_EXECUTOR_MODE` present, whate
 its value, refuses — the API's lifespan applies it to its own environment
 before anything opens, and `deploy/k3s/verify.sh` runs it over the running
 process's environ.
+`background.py` (stdlib only) holds a strong reference to each fire-and-forget
+`asyncio` task until it finishes, the asyncio docs' remedy for a task collected
+mid-run; any tier may import it.
 
 ### The parts `DESIGN.md` does not describe
 

@@ -20,7 +20,7 @@ shape (and that it is NOT the pending list), and the dismiss rule:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -71,7 +71,7 @@ async def _parked(*, state: dict | None = None, actions: int = 2,
         "completed_results": ["DEMO-1 commented"], "next_action_index": 1,
         "approver": "human:lee", "attempts": 2, "failed_capability": "graph.add_episode",
         "dependencies": ["graph", "embedder"], "last_error": "Connection refused",
-        "not_before": (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(),
+        "not_before": (datetime.now(UTC) + timedelta(minutes=2)).isoformat(),
         **(state or {}),
     }
     await repo.park_proposal_retry(pid, retry_state)
@@ -335,7 +335,7 @@ async def _park_item(dep: str) -> str:
     item = await repo.claim_next_work_item("sess_out")
     await repo.release_work_item(
         item["id"], error=f"{dep} down", count_attempt=False,
-        not_before=datetime.now(timezone.utc) + timedelta(minutes=30),
+        not_before=datetime.now(UTC) + timedelta(minutes=30),
         dependencies=(dep,))
     return item["id"]
 

@@ -72,6 +72,8 @@ class GraphAuditVerdict(BaseModel):
 # off the taskable/consultable roster for gate independence).
 from central_command.runtime.graph_auditor_profile import (  # noqa: E402
     AGENT_ID,
+)
+from central_command.runtime.graph_auditor_profile import (  # noqa: E402
     CHARTER as GRAPH_AUDITOR_CHARTER,
 )
 from central_command.runtime.templates import render_v0  # noqa: E402
@@ -545,7 +547,7 @@ async def verify_sweep(settle_minutes: int = 10, model=None) -> dict:
         try:
             outcome = await verify_one(row, model=model)
             summary[outcome] += 1
-        except Exception as e:  # noqa: BLE001 — one bad row must not starve the rest
+        except Exception as e:  # one bad row must not starve the rest
             log.exception("graph verification failed for %s", row["id"])
             summary["errors"].append({"id": row["id"], "error": str(e)})
     return summary

@@ -23,8 +23,8 @@ from central_command.gateway import auditor
 from central_command.ingest import dispatcher, ledger
 from central_command.runtime.spike_model import make_no_action_model
 from tests.conftest import needs_pg
-from tests.test_bulk_dismiss_audit import _propose  # noqa: F401 — reuses its facade patch
 from tests.fake_world import fake_world
+from tests.test_bulk_dismiss_audit import _propose  # reuses its facade patch
 
 pytestmark = needs_pg
 

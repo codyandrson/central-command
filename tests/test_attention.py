@@ -18,7 +18,7 @@ render.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -58,10 +58,10 @@ def test_the_budget_is_a_dial(monkeypatch):
 def test_the_day_starts_at_LOCAL_midnight():
     """Not UTC's. A budget rolling over at 17:00 local would hand the EA a
     second morning report every evening."""
-    midnight = attention.local_midnight(datetime(2026, 7, 30, 15, 4, tzinfo=timezone.utc))
+    midnight = attention.local_midnight(datetime(2026, 7, 30, 15, 4, tzinfo=UTC))
     assert (midnight.hour, midnight.minute, midnight.second) == (0, 0, 0)
     assert midnight.tzinfo is not None
-    assert midnight <= datetime(2026, 7, 30, 15, 4, tzinfo=timezone.utc)
+    assert midnight <= datetime(2026, 7, 30, 15, 4, tzinfo=UTC)
 
 
 @needs_pg
@@ -103,7 +103,7 @@ async def test_count_events_since_scopes_by_kind_actor_and_time():
     read would under-count exactly when the budget is spent, failing toward
     MORE unsolicited contact. Asserted on rows this test created only."""
     actor = "agent:attentiontest"
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     await events.emit(attention.CONTACT_EVENT, ref_id="i1", payload={}, actor=actor)
     await events.emit(attention.CONTACT_EVENT, ref_id="i2", payload={}, actor=actor)
     await events.emit(attention.CONTACT_EVENT, ref_id="i3", payload={},
@@ -112,7 +112,7 @@ async def test_count_events_since_scopes_by_kind_actor_and_time():
 
     assert await repo.count_events_since(attention.CONTACT_EVENT, actor, before) == 2
     # A window that starts after them sees none — the time bound is real.
-    later = datetime.now(timezone.utc) + timedelta(seconds=1)
+    later = datetime.now(UTC) + timedelta(seconds=1)
     assert await repo.count_events_since(attention.CONTACT_EVENT, actor, later) == 0
 
 

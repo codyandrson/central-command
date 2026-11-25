@@ -195,11 +195,11 @@ async def catalog_line(agent_id: str) -> str:
     others = [s for s in await repo.list_skills() if s["id"] not in granted_ids]
 
     lines = [
-        "YOUR SKILLS — subject knowledge held by the team, GENERATED from your "
+        ("YOUR SKILLS — subject knowledge held by the team, GENERATED from your "
         "grants. Load a skill with `load_capability(<id>)` BEFORE working in its "
         "subject; its guidance and reference search become available then. "
         "Loading costs little; guessing in a subject you hold a skill for is a "
-        "mistake.",
+        "mistake."),
     ]
     if granted:
         for g in granted:

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
@@ -38,7 +38,8 @@ from central_command.config import settings
 from central_command.db import repo
 from central_command.ingest import dispatcher, ledger
 from central_command.runtime.spike_model import make_jira_task_model
-from tests.conftest import aresolve, event_kinds as _kinds, needs_pg
+from tests.conftest import aresolve, needs_pg
+from tests.conftest import event_kinds as _kinds
 from tests.fake_world import fake_world
 
 pytestmark = needs_pg
@@ -142,7 +143,7 @@ async def test_a_transient_dispatch_failure_releases_without_spending_an_attempt
     assert row["state"] == "UNPROCESSED"       # back in the queue, not FAILED
     assert row["attempts"] == 0, "a transient release hands the attempt back"
     assert row["transient_releases"] == 1
-    assert row["not_before"] > datetime.now(timezone.utc)
+    assert row["not_before"] > datetime.now(UTC)
 
     released = await _event(item["id"], "work.released")
     assert released["payload"]["transient"] is True
@@ -156,7 +157,7 @@ async def test_a_transient_dispatch_failure_releases_without_spending_an_attempt
     assert again is None or again["id"] != item["id"]
 
     # No sleeping: due-ness is a timestamp, so move the timestamp.
-    await _set_not_before(item["id"], datetime.now(timezone.utc) - timedelta(seconds=1))
+    await _set_not_before(item["id"], datetime.now(UTC) - timedelta(seconds=1))
     due = await repo.claim_next_work_item("sess_outage_c")
     assert due is not None and due["id"] == item["id"]
     assert due["transient_releases"] == 1, "the backoff exponent survives the claim"
@@ -351,7 +352,7 @@ async def test_a_transient_task_run_parks_the_task_and_keeps_the_dead_session(
     # …and on the REAL payload the cockpit fetches (`/api/tasks` → the board's
     # `result` field), because a hint the wire never carries is invisible to
     # `tsc` and to every frontend test alike.
-    wire = [t for t in (await routes.list_tasks())["tasks"] if t["id"] == task["id"]][0]
+    wire = next(t for t in (await routes.list_tasks())["tasks"] if t["id"] == task["id"])
     assert wire["status"] == "ASSIGNED"
     assert wire["outcome"].startswith(orchestration.RETRY_HINT)
 
@@ -469,7 +470,7 @@ async def test_the_sweep_drives_due_retry_parked_tasks_and_skips_the_rest(monkey
         await conn.execute(
             "update task set retry_state = jsonb_set(retry_state, '{not_before}', "
             "to_jsonb($2::text)) where id = $1",
-            due["id"], (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+            due["id"], (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
         )
     finally:
         await conn.close()

@@ -494,9 +494,8 @@ async def test_operator_session_answers_ok_only_inside_the_block(graph):
 
 async def test_operator_session_ends_on_an_exception_and_leaves_no_open_verdict(graph):
     graph.widths["entity"] = {DIMS: 1}
-    with pytest.raises(RuntimeError):
-        with embedder_record.operator_session():
-            raise RuntimeError("the verification failed")
+    with pytest.raises(RuntimeError), embedder_record.operator_session():
+        raise RuntimeError("the verification failed")
     assert embedder_record._cached is None
     assert (await embedder_record.check()).code == "i"
 

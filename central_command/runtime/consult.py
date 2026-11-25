@@ -277,7 +277,7 @@ async def _park_mid_chain(
             session_id=mid_session, agent_id=agent_id, result=result, call=call,
             chain=chain,
         )
-    except Exception:  # noqa: BLE001 — no durable record, so no wait to keep
+    except Exception:  # no durable record, so no wait to keep
         log.exception("could not park the mid-chain consult for %s", agent_id)
         return None
 

@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from central_command import events
 from central_command.config import settings
@@ -142,7 +142,7 @@ def email_age_line(item: dict, today: date | None = None) -> str | None:
     if not isinstance(received, datetime):
         return None
     if received.tzinfo is None:
-        received = received.replace(tzinfo=timezone.utc)
+        received = received.replace(tzinfo=UTC)
     today = today or _today_local()
     sent = received.astimezone().date()
     days = (today - sent).days
@@ -215,7 +215,7 @@ async def _item_vector(item: dict) -> list[float] | None:
         item["embedding"] = vector
         try:
             await repo.set_work_item_embedding(item["id"], vector)
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("storing item embedding failed — proceeding")
     return vector
 
@@ -384,7 +384,7 @@ async def _handle_wiki_repair(item, siblings, siblings_capped, note, model) -> d
 class _KindHandler:
     """What to run for one work-item kind, and who the record says did it."""
 
-    __slots__ = ("run", "actor", "audits_dismissals", "audits_bulk_dismissals")
+    __slots__ = ("actor", "audits_bulk_dismissals", "audits_dismissals", "run")
 
     def __init__(
         self, run, actor: str, audits_dismissals: bool,
@@ -428,7 +428,7 @@ async def _match_mail_rule(item: dict) -> dict | None:
 
     try:
         rules = await repo.active_mail_rules()
-    except Exception:  # noqa: BLE001 — best-effort, the run is the fallback
+    except Exception:  # best-effort, the run is the fallback
         log.exception("mail rules read failed — dispatching without rules")
         return None
     return mail_rules.first_match(rules, item)
@@ -720,7 +720,7 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             actor="dispatcher",
         )
         raise
-    except Exception as e:  # noqa: BLE001 — one bad email must not kill the loop
+    except Exception as e:  # one bad email must not kill the loop
         log.exception("dispatch: item %s failed", item["id"])
         transient = classify_failure(e) == TRANSIENT
         if transient:
@@ -1009,7 +1009,7 @@ class Dispatcher:
             await process_claimed(item, actor="dispatcher")
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 — one bad item must not go unlogged
+        except Exception:  # one bad item must not go unlogged
             log.exception("dispatch: item %s failed outside its handler", item["id"])
 
     async def _loop(self) -> None:
@@ -1063,14 +1063,14 @@ class Dispatcher:
                         await events.emit(
                             "dispatch.held", payload=held, actor="dispatcher"
                         )
-            except Exception:  # noqa: BLE001 — the loop outlives any single error
+            except Exception:  # the loop outlives any single error
                 log.exception("dispatch: loop iteration failed")
                 self.last_reason = "error (see logs)"
             try:
                 await asyncio.wait_for(
                     self._stopping.wait(), timeout=settings.dispatch_poll_seconds
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
         log.info("dispatch: loop stopped")
 

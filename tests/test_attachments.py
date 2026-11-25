@@ -634,7 +634,9 @@ async def test_a_file_with_no_message_is_a_valid_send(monkeypatch):
     monkeypatch.setattr(nerve_gateway, "_send_target", _target)
     monkeypatch.setattr(nerve_gateway.events, "emit", _emit)
     monkeypatch.setattr(attachments, "session_model_id", _model_id)
-    monkeypatch.setattr(nerve_gateway.asyncio, "create_task", lambda coro: (coro.close(), sent.append(True))[1])
+    # The fake hands back a never-finished future: the caller holds what create_task returns.
+    monkeypatch.setattr(nerve_gateway.asyncio, "create_task", lambda coro: (
+        coro.close(), sent.append(True), nerve_gateway.asyncio.get_running_loop().create_future())[2])
 
     ack = await nerve_gateway._chat_send(
         {

@@ -45,7 +45,6 @@ def test_consult_agent_is_classified_as_its_own_kind() -> None:
 async def test_pure_advice_consult_returns_inline_and_never_parks(monkeypatch) -> None:
     """Only a consult that PARKED A PROPOSAL is worth waiting for. Deferring a
     pure-advice answer would park a run for an answer it already holds."""
-    from pydantic_ai import CallDeferred
 
     from central_command.runtime import tools
 
@@ -301,7 +300,12 @@ async def test_a_consult_waiting_task_run_holds_in_review_not_failed(monkeypatch
     from central_command.db import repo
     from central_command.gateway import overrides
     from tests.test_consult_chain import (
-        A_ID, C_ID, _consulting_model, _drafting_model, _fire_trio, _hire_trio,
+        A_ID,
+        C_ID,
+        _consulting_model,
+        _drafting_model,
+        _fire_trio,
+        _hire_trio,
     )
 
     monkeypatch.setattr(settings, "test_model", True)
@@ -309,7 +313,6 @@ async def test_a_consult_waiting_task_run_holds_in_review_not_failed(monkeypatch
 
     async def _decide(result, **kw):
         decided.append(result)
-        return None
 
     monkeypatch.setattr(overrides, "decide_landed", _decide)
     monkeypatch.setattr(

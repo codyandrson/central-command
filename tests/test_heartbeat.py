@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -149,7 +149,7 @@ def test_enum_params_are_enforced_mechanically():
 
 
 def test_schedule_math_and_validation():
-    now = datetime(2026, 7, 23, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
 
     assert compute_next_due("every", {"every_seconds": 300}, now) == now + timedelta(
         seconds=300
@@ -159,7 +159,7 @@ def test_schedule_math_and_validation():
     nxt = compute_next_due(
         "cron", {"expr": "0 2 * * *", "tz": "America/Denver"}, now
     )
-    assert nxt == datetime(2026, 7, 24, 8, 0, tzinfo=timezone.utc)
+    assert nxt == datetime(2026, 7, 24, 8, 0, tzinfo=UTC)
     # A future one-shot is due at its moment; a passed one is NEVER due again —
     # this None is the skip-missed policy for one-shots.
     assert compute_next_due("at", {"at": "2026-07-23T13:00:00+00:00"}, now) is not None
@@ -448,7 +448,7 @@ async def test_a_quiet_recovery_clears_a_recorded_error_in_the_crons_view(monkey
     from central_command.api import routes
     from central_command.db import repo
 
-    failed_at = datetime(2026, 7, 25, 10, 0, tzinfo=timezone.utc)
+    failed_at = datetime(2026, 7, 25, 10, 0, tzinfo=UTC)
 
     async def _events(**kwargs):
         return [{
@@ -483,8 +483,8 @@ async def test_missed_fires_are_skipped_never_replayed(monkeypatch):
         "id": "mail-poll", "schedule_kind": "every",
         "schedule": {"every_seconds": 300}, "action_kind": "feed.poll",
         "action_params": {}, "enabled": True,
-        "updated_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
-        "last_fired_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        "updated_at": datetime(2026, 1, 1, tzinfo=UTC),
+        "last_fired_at": datetime(2026, 1, 1, tzinfo=UTC),
     }
     from central_command.db import repo
 
@@ -497,7 +497,7 @@ async def test_missed_fires_are_skipped_never_replayed(monkeypatch):
     await engine._tick()
     assert "heartbeat.fired" not in rec.kinds, "a missed occurrence was replayed"
     due = engine._next_due["mail-poll"]
-    assert due is not None and due > datetime.now(timezone.utc)
+    assert due is not None and due > datetime.now(UTC)
 
 
 async def test_a_schedule_fires_once_at_a_time(monkeypatch):

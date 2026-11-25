@@ -579,8 +579,8 @@ def test_the_weekly_framing_sends_assignment_to_the_staffing_agent():
         "carry its recommendation, with its evidence, into the conversation",
         "Never recommend an assignee from your own judgment",
         "it proposes the assignments; you propose none",
-        "If the brief carries no `staffing_agent`, say there is no staffing agent on the "
-        "roster and leave the assignment to the operator",
+        ("If the brief carries no `staffing_agent`, say there is no staffing agent on the "
+        "roster and leave the assignment to the operator"),
     ):
         assert phrase in text, phrase
     # What step 5 built is still there.
@@ -673,8 +673,8 @@ def _queue_section() -> str:
 
 def test_the_documented_schedule_is_well_formed():
     section = _queue_section()
-    params = json.loads(re.search(r"```json\n(.*?)\n```", section, re.S).group(1))
-    text = re.search(r"```text\n(.*?)\n```", section, re.S).group(1)
+    params = json.loads(re.search(r"```json\n(.*?)\n```", section, re.DOTALL).group(1))
+    text = re.search(r"```text\n(.*?)\n```", section, re.DOTALL).group(1)
     assert set(params) == {"agent_id", "title", "instructions"}
     assert params["agent_id"] == "<staffing-agent-id>"
     assert params["instructions"] == text, "the two copies agree"

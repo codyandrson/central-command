@@ -34,13 +34,16 @@ import asyncio
 import json
 import weakref
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from central_command import events
-from central_command.db import repo
 from central_command.contract import ARG_SPECS, validate_action_args
+from central_command.db import repo
 from central_command.gateway.capabilities import (
-    REGISTRY, SCOPE_FORMS, effective_shadow_runs, requires_acknowledgement,
+    REGISTRY,
+    SCOPE_FORMS,
+    effective_shadow_runs,
+    requires_acknowledgement,
     target_args_of,
 )
 
@@ -148,7 +151,7 @@ SCHEDULE_CREATOR_PREFIX = "heartbeat:"
 
 
 def _scalar(v) -> str | None:
-    if isinstance(v, bool) or isinstance(v, (int, float)):
+    if isinstance(v, (bool, int, float)):
         return json.dumps(v)
     return v if isinstance(v, str) else None
 
@@ -546,7 +549,7 @@ async def operator_hold_reason(proposal_row: dict) -> str:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # The parks that are never evaluated (the operator's ruling, 2026-10-25): a REDRAFT — after a
@@ -565,7 +568,7 @@ async def record_unevaluated_park(proposal_id: str, kind: str) -> bool:
     })
 
 
-_live_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
+_live_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
     weakref.WeakKeyDictionary())
 
 
@@ -856,7 +859,7 @@ class AuthoringRefused(Exception):
 _WRITE_ROWS = {c.name: c for c in REGISTRY if c.kind == "write"}
 _ALL_ROWS = {c.name: c for c in REGISTRY}
 
-_author_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
+_author_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
     weakref.WeakKeyDictionary())
 
 
@@ -902,8 +905,8 @@ async def author(agent_id: str, capability: str, scope: dict | None = None,
         if any(_same_scope(o["scope"], scope)
                for o in await repo.live_gate_overrides(agent_id, capability)):
             raise AuthoringRefused(409, [
-                f"{agent_id} already holds a live override on {capability} with this "
-                "scope; revoke it first (a scope change is a revoke plus a new override)"])
+                (f"{agent_id} already holds a live override on {capability} with this "
+                "scope; revoke it first (a scope change is a revoke plus a new override)")])
         row = await repo.create_gate_override(
             agent_id, capability, scope=scope, granted_by=by, shadow_runs=None,
             acknowledged_irreversible=bool(ack_required and acknowledge_irreversible),
@@ -1020,51 +1023,51 @@ SWEEP_ONLY = "sweep only"
 
 PARK_SITES: dict[str, tuple[str, str]] = {
     "runtime/run.py:ingest_and_propose": (HOOK,
-        "ingest/dispatcher.process_claimed, at function scope after the fold "
-        "reservation and the auditor's bulk hook, before work.processed"),
+        ("ingest/dispatcher.process_claimed, at function scope after the fold "
+        "reservation and the auditor's bulk hook, before work.processed")),
     "runtime/steward.py:run_document": (HOOK,
         "ingest/dispatcher.process_claimed (the document handler), same place"),
     "runtime/wiki_agent.py:run_repair": (HOOK,
         "ingest/dispatcher.process_claimed (the wiki-repair handler), same place"),
     "runtime/run.py:_land": (HOOK,
-        "api/routes._run_one_assigned_task (run_task, after task.review); "
+        ("api/routes._run_one_assigned_task (run_task, after task.review); "
         "api/orchestration._land_task_question_outcome for continue_session, "
         "resume_stopped_session and resume_parked_read (a parked propose read "
-        "that drafted on re-execution, through _land_tail)"),
+        "that drafted on re-execution, through _land_tail)")),
     "runtime/run.py:run_coach": (HOOK,
-        "api/routes.coach_agent (synchronous) and routes._run_coach_detached "
-        "(after task.review)"),
+        ("api/routes.coach_agent (synchronous) and routes._run_coach_detached "
+        "(after task.review)")),
     "runtime/converse.py:_land_turn": (HOOK,
-        "the chat lane api/nerve_gateway._chat_send; the heartbeat discussion "
+        ("the chat lane api/nerve_gateway._chat_send; the heartbeat discussion "
         "nudge heartbeat/actions._nudge_discussion; the converse branches of "
         "api/orchestration.continue_session and resume_stopped_session; "
-        "api/orchestration._land_tail for a resumed read or turn"),
+        "api/orchestration._land_tail for a resumed read or turn")),
     "runtime/questions.py:_settle": (HOOK,
-        "api/orchestration._land_task_question_outcome (every answered-question "
+        ("api/orchestration._land_task_question_outcome (every answered-question "
         "resume: _resume_task_question, _retry_answered_question, "
-        "_finish_answered_resume)"),
+        "_finish_answered_resume)")),
     "runtime/consult.py:consult": (HOOK,
-        "the asker's own landing: the consult wait result carries the "
+        ("the asker's own landing: the consult wait result carries the "
         "specialist's proposal_id, so whichever caller lands the asker's run "
-        "(rows above) decides it once the asker is parked AWAITING_AGENTS"),
+        "(rows above) decides it once the asker is parked AWAITING_AGENTS")),
     "api/orchestration.py:_settle_consult_resume": (HOOK,
-        "api/orchestration.resume_consult_wait and resume_parked_session "
-        "(after=consulted), after the settle returns"),
+        ("api/orchestration.resume_consult_wait and resume_parked_session "
+        "(after=consulted), after the settle returns")),
     "runtime/reflection.py:_propose_episode": (SWEEP_ONLY,
-        "a reflection runs as a background task off runtime's close_session "
+        ("a reflection runs as a background task off runtime's close_session "
         "with no API-tier landing; its proposal is evaluated by the startup "
-        "override_sweep"),
+        "override_sweep")),
     "runtime/reflection.py:_propose_skill_correction": (SWEEP_ONLY,
-        "the episode's case: the skill correction is parked by the same "
+        ("the episode's case: the skill correction is parked by the same "
         "background reflection off close_session, with no API-tier landing; "
-        "its proposal is evaluated by the startup override_sweep"),
+        "its proposal is evaluated by the startup override_sweep")),
     "runtime/reflection.py:_propose_note": (SWEEP_ONLY,
-        "the episode's case: a standing note is parked by the same background "
+        ("the episode's case: a standing note is parked by the same background "
         "reflection off close_session, with no API-tier landing; its proposal "
-        "is evaluated by the startup override_sweep"),
+        "is evaluated by the startup override_sweep")),
     "gateway/gateway.py:_park_redraft": (EXEMPT,
         "a redraft is recorded unevaluated at the park (story 16)"),
     "gateway/gateway.py:finish_decision_resume": (EXEMPT,
-        "a follow-on on the approved leg is recorded unevaluated at the park "
-        "(story 16)"),
+        ("a follow-on on the approved leg is recorded unevaluated at the park "
+        "(story 16)")),
 }

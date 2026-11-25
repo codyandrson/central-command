@@ -35,6 +35,7 @@ import uuid
 from pydantic_ai import ToolDenied
 
 from central_command import events
+from central_command.background import keep
 from central_command.db import repo
 from central_command.runtime import resume_park
 from central_command.runtime.durable import call_args, dump_run_state
@@ -225,6 +226,7 @@ async def conclude_discussion(
     keeps that auditable afterwards.
     """
     from central_command.contract import claim_supported
+
     # Late, like every other cross-module import here: `converse` reaches back
     # into this module for the same tool, and a module-level edge would be a
     # cycle.
@@ -281,7 +283,7 @@ async def conclude_discussion(
 
         from central_command.api.orchestration import _resume_task_question
 
-        asyncio.create_task(_resume_task_question(item["id"], summary))
+        keep(asyncio.create_task(_resume_task_question(item["id"], summary)))
     return {
         "item_id": item["id"],
         "summary": summary,
@@ -419,7 +421,7 @@ async def resume_with_answer(item_id: str, answer: str, model=None) -> dict:
             agent, load_messages(run_state), run_state["tool_call_id"], answer,
             model=model, agent_id=agent_id, session_id=session_id,
         )
-    except Exception as e:  # noqa: BLE001 — classified, not swallowed
+    except Exception as e:  # classified, not swallowed
         # Outage equivalence: the answer is already recorded (answer_item ran
         # before this), so a provider that was DOWN must cost the resume a
         # DELAY, not the task. Park here rather than in `_resume_task_question`

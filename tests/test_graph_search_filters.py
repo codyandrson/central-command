@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic_ai import ModelRetry
@@ -24,8 +24,8 @@ from central_command.config import settings
 from central_command.integrations import graph_ontology, graphiti, graphiti_client, neo4j_reader
 from central_command.runtime import tools
 
-T = datetime(2025, 3, 1, tzinfo=timezone.utc)
-U = datetime(2025, 9, 1, tzinfo=timezone.utc)
+T = datetime(2025, 3, 1, tzinfo=UTC)
+U = datetime(2025, 9, 1, tzinfo=UTC)
 
 
 def _lib():
@@ -50,8 +50,8 @@ class _Fake:
         self.calls.append(kw)
 
         class R:
-            edges: list = []
-            nodes: list = []
+            edges: list = []  # noqa: RUF012 — a test double's class-level record
+            nodes: list = []  # noqa: RUF012
 
         return R()
 

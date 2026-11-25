@@ -799,7 +799,7 @@ def test_the_llm_catalog_pause_is_a_gate_and_the_rows_after_it_are_pending(tree:
     stub_py.chmod(0o755)
     info = tree.parent / "model-info.json"
     info.write_text(_model_info(("cc-embedding",)), encoding="utf-8")
-    models = ",".join('{"id":"%s"}' % a for a in _LLM_ALIASES)
+    models = ",".join(f'{{"id":"{a}"}}' for a in _LLM_ALIASES)
     _append_tail(tree, f'''
 PY="{stub_py.as_posix()}"
 compose() {{ return 0; }}

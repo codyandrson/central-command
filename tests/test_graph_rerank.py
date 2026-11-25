@@ -83,7 +83,7 @@ def test_the_chat_question_is_upstreams_verbatim():
     code = compile(ast.Expression(user), "<upstream prompt>", "eval")
     for query, passage in [("Who leads Atlas?", "Jane Doe leads Atlas."),
                            ("q {braces}", "p with {braces} and\nnewline")]:
-        rendered = eval(code, {"passage": passage, "query": query})  # noqa: S307 — upstream's literal
+        rendered = eval(code, {"passage": passage, "query": query})  # upstream's literal
         assert graphiti_client.chat_rerank_user_prompt(query, passage) == rendered
 
 

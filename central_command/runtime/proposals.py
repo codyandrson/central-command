@@ -24,8 +24,8 @@ from __future__ import annotations
 import uuid
 
 from central_command import events
-from central_command.db import repo
 from central_command.contract import quote_supported
+from central_command.db import repo
 from central_command.runtime.durable import dump_run_state, proposal_from_call
 
 

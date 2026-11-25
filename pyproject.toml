@@ -206,7 +206,7 @@ dev = [
     # fresh install (the Windows testbed, F35) answered "unrecognized arguments:
     # --timeout". A test that hangs on a live service must fail, not stall.
     "pytest-timeout>=2.3,<3",
-    "ruff>=0.5,<1",
+    "ruff>=0.17.6,<0.18",
 ]
 
 [build-system]
@@ -255,3 +255,35 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Pinned with the dev dependency above: the default rule set grew sharply in
+# 0.16, so an unpinned ruff changes what `scripts/check` reports.
+required-version = ">=0.17.6,<0.18"
+# Required, not tidiness: since 0.16 ruff also lints and formats the Python
+# blocks inside Markdown, and the vendored docs must never be touched.
+#
+# Also excluded, for the same reason (files nobody edits by hand): `servers/`
+# arrives only through an approved mcp.sync_source (AGENTS.md), and
+# `docs/experiments/` holds dated scripts kept exactly as they were run.
+extend-exclude = ["*.md", "docs/vendor", "servers", "docs/experiments"]
+
+[tool.ruff.lint]
+# Ruff's default rule set, plus a module-level import below code (E402) and a
+# dropped asyncio task reference (RUF006, the task can be collected mid-run).
+extend-select = ["E402", "RUF006"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test idioms: a fixture imported into a module and then named as a test
+# parameter reads as a redefinition (F811); a test runs a script to assert on
+# its exit status and output, so it never wants `check=True` (PLW1510).
+"tests/**" = ["F811", "PLW1510"]
+# Health probes: any failure of a probe means the system reads down/unknown.
+"central_command/api/systems.py" = ["BLE001", "S110"]
+# Third-party file parsers raise anything; a part that cannot be read is
+# skipped or noted in the text, never fatal to the file.
+"central_command/ingest/readers.py" = ["BLE001"]
+# Scripts run as `python <script>`, so a shebang without the executable bit
+# is documentation, not a broken entry point.
+"scripts/*.py" = ["EXE001"]
+"deploy/single/release-zip.py" = ["EXE001"]
+# Executes upstream source it has parsed and patched, which is the test.
+"tests/test_graphiti_patches.py" = ["S102"]

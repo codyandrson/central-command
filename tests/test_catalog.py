@@ -324,7 +324,6 @@ def test_catalog_tag_arg_spec_reports_every_shape_problem_at_once():
 
 
 async def test_the_executor_refuses_a_malformed_catalog_tag_before_it_runs(monkeypatch):
-    from central_command.config import settings
     from central_command.contract import Action, Reversibility
     from central_command.gateway import executor
 

@@ -39,8 +39,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from tests.test_setup_phase_docs import canonical_phases
 from tests.installer_source import installer_functions, single_scripts
+from tests.test_setup_phase_docs import canonical_phases
 from tests.test_single_check_is_dry import FORBIDDEN, _code
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -163,7 +163,7 @@ def test_requires_is_backward_only_and_acyclic():
 
 def _declared_keys() -> set[str]:
     text = ENV_EXAMPLE.read_text(encoding="utf-8")
-    return set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]*)=", text, flags=re.M))
+    return set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]*)=", text, flags=re.MULTILINE))
 
 
 def test_every_reads_and_writes_key_is_declared_in_env_example():
@@ -194,7 +194,7 @@ def test_every_reads_and_writes_key_is_declared_in_env_example():
 # below because a glob is what the manifest can honestly declare.
 SET_KV = re.compile(
     r"""(?:^|[;&|(]|&&|\|\|)\s*(?:cc_)?set_kv(?:_if_unset)?\s+"[^"]+"\s+([A-Z][A-Z0-9_]*)""",
-    re.M,
+    re.MULTILINE,
 )
 
 

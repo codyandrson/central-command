@@ -16,7 +16,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import httpx
@@ -222,7 +222,7 @@ class _Client:
     async def __aexit__(self, *exc):
         return False
 
-    async def post(self, url, headers=None, json=None):  # noqa: A002
+    async def post(self, url, headers=None, json=None):
         world = self.world
         if url.endswith("/utils/token_counter"):
             assert not url.endswith("/v1/utils/token_counter")
@@ -313,7 +313,7 @@ def world(monkeypatch, tmp_path):
         w.sleeps.append(seconds)
 
     monkeypatch.setattr(graph_reembed, "_sleep", _sleep)
-    noon = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
+    noon = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
     monkeypatch.setattr(graph_reembed, "_localnow", lambda: noon)
     w.backup_dir = tmp_path / "cc-backups"
     w.backup_dir.mkdir()
@@ -322,7 +322,7 @@ def world(monkeypatch, tmp_path):
 
 
 def _dump(directory, age_seconds: float, name: str | None = None, data: bytes | None = None):
-    stamp = (datetime.now(timezone.utc) - timedelta(seconds=age_seconds)).strftime("%Y%m%dT%H%M%SZ")
+    stamp = (datetime.now(UTC) - timedelta(seconds=age_seconds)).strftime("%Y%m%dT%H%M%SZ")
     path = directory / (name or f"neo4j_{stamp}.dump.gz")
     with gzip.open(path, "wb") as f:
         f.write(os.urandom(4096) if data is None else data)
@@ -558,7 +558,7 @@ def test_a_backup_dir_that_is_not_there_refuses(world, capsys, tmp_path):
 def test_a_pre_update_dump_is_not_the_backup(world, capsys):
     for path in world.backup_dir.glob("*.gz"):
         path.unlink()
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     _dump(world.backup_dir, 0, name=f"neo4j_pre-update_{stamp}.dump.gz")
     assert _main(world, "check") == 3
     assert "no neo4j_<stamp>.dump.gz in" in capsys.readouterr().out
@@ -627,7 +627,7 @@ def test_the_backup_dir_defaults_to_the_setting_then_the_home(monkeypatch, tmp_p
 def test_the_backup_window_is_fifteen_minutes_either_side(
     world, capsys, monkeypatch, hour, minute, inside,
 ):
-    now = datetime(2026, 11, 1, hour, minute, tzinfo=timezone.utc)
+    now = datetime(2026, 11, 1, hour, minute, tzinfo=UTC)
     monkeypatch.setattr(graph_reembed, "_localnow", lambda: now)
     assert _main(world, "check") == (3 if inside else 0)
     if inside:
@@ -640,7 +640,7 @@ def test_the_window_comes_from_the_timer_and_wraps_midnight(monkeypatch, tmp_pat
     timer.write_text("[Timer]\nOnCalendar=*-*-* 00:05:00\n")
     monkeypatch.setattr(graph_reembed, "TIMER_FILE", timer)
     monkeypatch.setattr(graph_reembed, "_localnow",
-                        lambda: datetime(2026, 11, 1, 23, 55, tzinfo=timezone.utc))
+                        lambda: datetime(2026, 11, 1, 23, 55, tzinfo=UTC))
     assert graph_reembed._check_window(False).level == graph_reembed.ACTION
     timer.unlink()
     assert graph_reembed._timer_time() == (3, 0)

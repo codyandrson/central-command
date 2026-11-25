@@ -14,9 +14,7 @@ second deferral kind reaches the call site.
 
 from __future__ import annotations
 
-import pytest
-
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
 from central_command.db import repo

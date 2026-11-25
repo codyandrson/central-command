@@ -29,7 +29,7 @@ UNGRANTED = "litellm-manager"
 
 
 @needs_pg
-async def test_an_override_row_carries_every_field_in_every_state(authored):  # noqa: F811
+async def test_an_override_row_carries_every_field_in_every_state(authored):
     from central_command.runtime import packs
 
     assert "catalog.tag" not in packs.granted_capability_names(
@@ -66,7 +66,7 @@ async def test_an_override_row_carries_every_field_in_every_state(authored):  # 
 
 
 @needs_pg
-async def test_an_acknowledgement_class_row_says_so(authored):  # noqa: F811
+async def test_an_acknowledgement_class_row_says_so(authored):
     row = (await authored(DRAFTER, "mail.send", ack=True, pack=False))["override"]
     row = jsonable_encoder(row)
     assert set(row) == OVERRIDE_FIELDS
@@ -128,14 +128,20 @@ async def test_every_capability_row_carries_the_override_facts():
 # proposal detail (GET /proposals/{id}, the proposals.get RPC), the pending list
 # (decisions.list) and the history (decisions.history).
 
-import json  # noqa: E402
 
 from central_command.api import nerve_gateway  # noqa: E402
 from central_command.config import settings  # noqa: E402
 from central_command.db import repo  # noqa: E402
 from tests.test_gate_overrides import (  # noqa: E402,F401 — fixtures
-    TRIAGE, _approve, _comment_proposal, _run, _tag_proposal, _two_action_proposal,
-    demo, granted, ledger_rows,
+    TRIAGE,
+    _approve,
+    _comment_proposal,
+    _run,
+    _tag_proposal,
+    _two_action_proposal,
+    demo,
+    granted,
+    ledger_rows,
 )
 
 DECIDED_FIELDS = {"kind", "overrides"}
@@ -164,7 +170,7 @@ async def _rpc_history_row(pid: str) -> dict:
 
 @needs_pg
 async def test_an_override_decided_proposal_names_the_override_and_its_scope_text(
-    demo, granted, monkeypatch,  # noqa: F811
+    demo, granted, monkeypatch,
 ):
     ovr = await granted(DRAFTER, "jira.add_comment", scope={"target": ["TASKS"]})
     out = await _run(monkeypatch, DRAFTER, _comment_proposal("Override decides"))
@@ -179,7 +185,7 @@ async def test_an_override_decided_proposal_names_the_override_and_its_scope_tex
 
 
 @needs_pg
-async def test_an_operator_decided_proposal_says_so(demo, granted, monkeypatch):  # noqa: F811
+async def test_an_operator_decided_proposal_says_so(demo, granted, monkeypatch):
     await granted(DRAFTER, shadow_runs=3)
     out = await _run(monkeypatch, DRAFTER, _tag_proposal("Operator decides"))
     pending = await _rpc_list_row(out["proposal_id"])
@@ -190,7 +196,7 @@ async def test_an_operator_decided_proposal_says_so(demo, granted, monkeypatch):
 
 
 @needs_pg
-async def test_an_auditor_decided_proposal_says_so(ledger_rows, granted, monkeypatch):  # noqa: F811
+async def test_an_auditor_decided_proposal_says_so(ledger_rows, granted, monkeypatch):
     monkeypatch.setattr(settings, "auditor_enabled", True)
     monkeypatch.setattr(settings, "auditor_mode", "active")
     await granted(TRIAGE, "work.bulk_dismiss")
@@ -201,7 +207,7 @@ async def test_an_auditor_decided_proposal_says_so(ledger_rows, granted, monkeyp
 
 @needs_pg
 async def test_a_pending_shadowed_proposal_names_the_override_it_is_shadowing(
-    demo, granted, monkeypatch,  # noqa: F811
+    demo, granted, monkeypatch,
 ):
     ovr = await granted(DRAFTER, shadow_runs=3)
     first = await _run(monkeypatch, DRAFTER, _tag_proposal("Shadowed 0"))
@@ -220,7 +226,7 @@ async def test_a_pending_shadowed_proposal_names_the_override_it_is_shadowing(
 
 @needs_pg
 async def test_a_proposal_decided_by_two_overrides_lists_both(
-    demo, granted, monkeypatch,  # noqa: F811
+    demo, granted, monkeypatch,
 ):
     tag = await granted(DRAFTER, "catalog.tag")
     comment = await granted(DRAFTER, "jira.add_comment", scope={"target": ["TASKS"]})
@@ -236,7 +242,7 @@ async def test_a_proposal_decided_by_two_overrides_lists_both(
 
 @needs_pg
 async def test_a_pending_proposal_shadowed_by_two_overrides_lists_each(
-    demo, granted, monkeypatch,  # noqa: F811
+    demo, granted, monkeypatch,
 ):
     a = await granted(DRAFTER, "catalog.tag", shadow_runs=2)
     b = await granted(DRAFTER, "jira.add_comment", shadow_runs=4)
@@ -247,7 +253,7 @@ async def test_a_pending_proposal_shadowed_by_two_overrides_lists_each(
 
 
 @needs_pg
-async def test_get_events_returns_the_override_live_event(demo, granted, monkeypatch):  # noqa: F811
+async def test_get_events_returns_the_override_live_event(demo, granted, monkeypatch):
     ovr = await granted(DRAFTER, shadow_runs=1)
     await _approve(await _run(monkeypatch, DRAFTER, _tag_proposal("Shadow")))
     await _run(monkeypatch, DRAFTER, _tag_proposal("Live now"))

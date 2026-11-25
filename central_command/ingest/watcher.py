@@ -9,7 +9,7 @@ module does not know raises loudly rather than silently doing nothing.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from central_command import events
@@ -242,7 +242,7 @@ async def walk_source(source: dict) -> dict:
         )
         raise
 
-    cursor = {"last_walk_at": datetime.now(timezone.utc).isoformat(), **summary}
+    cursor = {"last_walk_at": datetime.now(UTC).isoformat(), **summary}
     await repo.save_source_cursor(source["id"], cursor)
 
     if summary["new_lineages"] or summary["new_versions"] or summary["marked_missing"]:

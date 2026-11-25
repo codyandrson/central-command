@@ -269,9 +269,8 @@ async def _skill_session() -> dict:
 
 
 async def test_no_reader_turns_bookkeeping_into_a_row_and_the_guidance_shows_with_its_load():
-    from tests.test_context_window_agent import GUIDANCE
-
     from central_command.runtime import reflection
+    from tests.test_context_window_agent import GUIDANCE
 
     rs = await _skill_session()
     stored = [p["part_kind"] for m in rs["messages"] for p in m["parts"]]

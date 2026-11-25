@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -76,7 +76,7 @@ async def _get_raw(url: str, max_bytes: int) -> tuple[bool, str]:
     contract as `webfetch.fetch`."""
     try:
         parsed = httpx.URL(url)
-        async with httpx.AsyncClient(**webfetch._client_kwargs(parsed.host)) as client:
+        async with httpx.AsyncClient(**webfetch._client_kwargs(parsed.host)) as client:  # noqa: SIM117 — merging re-indents the block; formatting is a later release
             # Streamed so the cap bounds what is DOWNLOADED, not just what is
             # kept — a typo'd URL to a huge file must not balloon the anchor node's
             # memory before a post-hoc slice.
@@ -133,7 +133,7 @@ async def _import_llms_full(
         return None
 
     sections = _split_llms_full(text)
-    captured_at = datetime.now(timezone.utc)
+    captured_at = datetime.now(UTC)
     seen: dict[str, int] = {}
     imported = []
     for title, body in sections:
@@ -197,7 +197,7 @@ async def _import_sitemap(
     truncated = len(candidates) > max_pages
     candidates = candidates[:max_pages]
 
-    captured_at = datetime.now(timezone.utc)
+    captured_at = datetime.now(UTC)
     seen: dict[str, int] = {}
     imported: list[dict] = []
     skipped: list[dict] = []
@@ -241,7 +241,7 @@ async def _import_via_crawler(
     if not pages:
         return _degraded("crawler", ["cc-crawler returned no pages", *crawl_notes])
 
-    captured_at = datetime.now(timezone.utc)
+    captured_at = datetime.now(UTC)
     seen: dict[str, int] = {}
     imported: list[dict] = []
     skipped: list[dict] = []

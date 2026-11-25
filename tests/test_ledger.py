@@ -12,6 +12,7 @@ probe because of an old transient record.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -521,7 +522,7 @@ async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(
     and from the outages 'failing' list, while `transient_releases` and
     `not_before` keep growing. A later real failure opens a NEW streak counted
     from zero, never from the freezes."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from central_command.api import outages
     from central_command.config import settings
@@ -560,7 +561,7 @@ async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(
         # What the dispatcher's except-branch does for a transient failure.
         await repo.release_work_item(
             item_id, error="embedder timeout", count_attempt=False,
-            not_before=datetime.now(timezone.utc) + timedelta(seconds=60),
+            not_before=datetime.now(UTC) + timedelta(seconds=60),
             dependencies=("embedder",))
 
     item = await claim()
@@ -590,7 +591,7 @@ async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(
                      for e in d["failing"]]
     assert item["id"] not in listed_by_dep
     assert after["transient_releases"] == before["transient_releases"] + 2
-    assert after["not_before"] > datetime.now(timezone.utc)
+    assert after["not_before"] > datetime.now(UTC)
     assert after["dependencies"] is None and after["failing_since"] is None
 
     # A new real failure is a new streak: counted from one, a later episode.

@@ -65,7 +65,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid as _uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import httpx
 
@@ -78,8 +78,8 @@ from central_command.contract.failures import (
     WorldMoved,
     classify_failure,
 )
-from central_command.integrations import http as http_client
 from central_command.integrations import embedder_record, neo4j_reader
+from central_command.integrations import http as http_client
 from central_command.integrations.neo4j_reader import _get_driver
 
 log = logging.getLogger(__name__)
@@ -239,7 +239,7 @@ def _validated_labels(labels: list[str] | None) -> list[str]:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # --- a Person's single-person values (graph_ontology.Person's three Optional
@@ -507,10 +507,9 @@ async def update_node(
     else:
         is_person = PERSON_LABEL in (current[0].get("labels") or [])
     person_sets: dict = {}
-    if aliases is not None or birth_date is not None or phone is not None:
-        if not is_person:
-            raise WriteError(
-                "aliases, birth_date and phone belong to a Person; this entity is not one")
+    if (aliases is not None or birth_date is not None or phone is not None) and not is_person:
+        raise WriteError(
+            "aliases, birth_date and phone belong to a Person; this entity is not one")
     if aliases is not None:
         person_sets["aliases"] = normalise_aliases(aliases, new_name) or None
     elif is_person and new_name != old_name:

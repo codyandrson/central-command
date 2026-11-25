@@ -191,7 +191,7 @@ def find_site_packages() -> Path:
     spec = importlib.util.find_spec("graphiti_core")
     if spec is None or not spec.submodule_search_locations:
         raise PatchError("graphiti_core is not installed in this interpreter")
-    return Path(list(spec.submodule_search_locations)[0]).resolve().parent
+    return Path(list(spec.submodule_search_locations)[0]).resolve().parent  # noqa: RUF015 — keeps IndexError, not StopIteration, on an empty path
 
 
 def _load_patches(patch_dir: Path) -> list[tuple[str, list[FilePatch]]]:

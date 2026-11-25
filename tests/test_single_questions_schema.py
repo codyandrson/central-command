@@ -46,8 +46,9 @@ import pytest
 # that differs from the declared handle type") — 26 tests failed that way on
 # the 2026-09-25 testbed run, all of them in files that shelled out with the
 # bare name. `update._bash()` resolves Git Bash from git's own install.
-from central_command.api.update import _bash as _resolve_bash  # noqa: E402
-from tests.installer_source import drives_installer, installer_source, run_driver, write_lf  # noqa: E402
+from central_command.api.update import _bash as _resolve_bash
+from tests.installer_source import drives_installer, installer_source, run_driver, write_lf
+
 BASH = _resolve_bash() or "bash"
 
 
@@ -99,7 +100,7 @@ def test_every_key_is_declared_in_env_example(row):
     again. Commented (`#CC_X=`) counts: that is how an optional seam is shipped.
     """
     declared = set(
-        re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.M)
+        re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.MULTILINE)
     )
     assert row["key"] in declared, (
         f"questions.tsv:{row['_line']} asks for {row['key']}, which .env.example "
@@ -112,7 +113,7 @@ def test_every_validator_named_exists_in_questions_lib(row):
     if row["validator"] == "-":
         return
     lib = QUESTIONS_LIB.read_text(encoding="utf-8")
-    assert re.search(rf"^{re.escape(row['validator'])}\(\)", lib, flags=re.M), (
+    assert re.search(rf"^{re.escape(row['validator'])}\(\)", lib, flags=re.MULTILINE), (
         f"questions.tsv:{row['_line']} names validator {row['validator']}(), which "
         f"{QUESTIONS_LIB.relative_to(ROOT)} does not define"
     )

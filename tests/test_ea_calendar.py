@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+from datetime import UTC
 
 import httpx
 import pytest
@@ -275,7 +276,7 @@ async def test_tomorrow_is_a_full_local_day_and_today_starts_now(monkeypatch):
     monkeypatch.setattr(calendar_facade, "list_events", facade)
     await ea_calendar.day(1)
     time_min, time_max = facade.calls[0]
-    assert time_min.endswith("T00:00:00-06:00") or time_min.endswith("T00:00:00-07:00")
+    assert time_min.endswith(("T00:00:00-06:00", "T00:00:00-07:00"))
     assert time_min[:10] != time_max[:10], "a day window must cross midnight"
 
 
@@ -337,11 +338,11 @@ async def test_the_postgres_snapshot_stays_pure_postgres():
     """`ea_report.snapshot()` must not grow an HTTP dependency: its contract is
     'a property of the record'. The calendar rides beside it, added by the
     heartbeat, so a Google outage degrades one key instead of the whole block."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from central_command.reports import ea_report
 
-    snap = await ea_report.snapshot(datetime.now(timezone.utc) - timedelta(hours=1))
+    snap = await ea_report.snapshot(datetime.now(UTC) - timedelta(hours=1))
     assert "calendar" not in snap
 
 

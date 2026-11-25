@@ -13,10 +13,9 @@ approved writes.
 
 from __future__ import annotations
 
-from central_command.runtime import context as _context
-
 from pydantic_ai import Agent, DeferredToolRequests
 
+from central_command.runtime import context as _context
 from central_command.runtime.deps import TriageDeps
 from central_command.runtime.models import resolve_model
 from central_command.runtime.templates import render_v0
@@ -147,12 +146,12 @@ async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dic
     from central_command.runtime.agent import load_charter
     from central_command.runtime.durable import (
         classify_deferred,
-        extract_deferred,
         deferred_proposal,
+        extract_deferred,
     )
+    from central_command.runtime.notes import standing_sections
     from central_command.runtime.packs import granted_packs
     from central_command.runtime.proposals import park_proposal
-    from central_command.runtime.notes import standing_sections
     from central_command.runtime.run import _run_live, _total_tokens
 
     await ensure_registered()
