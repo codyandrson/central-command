@@ -109,7 +109,7 @@ def test_the_guard_catches_a_planted_stop_under_a_name_that_is_no_row():
     rows = _rows()
     llm = (SINGLE / "phases" / "llm.sh").read_text(encoding="utf-8")
     # The very line P5 found, planted back, plus the other two shapes.
-    planted = llm + "\n".join([  # noqa: FLY002 — one script line per item
+    planted = llm + "\n".join([
         "",
         'x() {',
         '  useraction "llm-models" "the catalog needs you — re-run: ./setup.sh"',

@@ -285,5 +285,9 @@ extend-select = ["E402", "RUF006"]
 # is documentation, not a broken entry point.
 "scripts/*.py" = ["EXE001"]
 "deploy/single/release-zip.py" = ["EXE001"]
+# Shell scripts written as one list item per line, each with its own comment;
+# joined on purpose, an f-string would lose the comments.
+"tests/test_single_no_phase_hints.py" = ["FLY002"]
+"tests/test_single_reporter_rows.py" = ["FLY002"]
 # Executes upstream source it has parsed and patched, which is the test.
 "tests/test_graphiti_patches.py" = ["S102"]
