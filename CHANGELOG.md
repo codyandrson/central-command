@@ -4,6 +4,30 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-25 — v2.137.0: The sandbox reaches the internet and no private address range (DL-236)
+
+- **What changed.** On the multi-node profile a sandbox pod's egress is now the internet only. The
+  `cc-sandbox` namespace's `internet-egress` policy excludes RFC 1918, the RFC 6598 shared range
+  and link-local, and allows the cluster's DNS pods on port 53. The previous `allow-all-egress`
+  policy is tombstoned in `deploy/k3s/removed.txt`, because NetworkPolicies add up and a leftover
+  one would re-open everything.
+- **Why.** A reach test from a sandbox pod opened a connection to the cluster's Postgres. The
+  sandbox holds no credential, but that store's password is a literal in a public manifest, so the
+  missing credential did not protect it. The operator ruled that the sandbox exists so an agent can
+  work freely without breaking things, and asked for an established posture, not our own design. A
+  survey of sandbox projects found none that fits both profiles better than the existing runner;
+  the network default of kubernetes-sigs/agent-sandbox was borrowed. This reverses the 2026-08-04
+  ruling that a sandbox may reach the operator's internal services (DL-005, amended).
+- **What an agent loses.** Reading the deployment's own services, or anything on a private address,
+  from inside its sandbox. No shipped tool did that. The sandbox tools' descriptions now say so.
+- **A site with a package mirror on a private address** adds an egress rule naming it; the manifest
+  says where.
+- **Not changed.** The single-node profile: its sandbox containers run under rootless Podman, where
+  no NetworkPolicy exists. What a sandbox container can reach there was not measured in this release.
+- **Not proven by the suite.** That the cluster enforces the policy, and that names still resolve.
+  The runbook's sandbox reach drill now checks both (a public address must answer, Postgres must
+  not); run it once after applying. A rollback restores the previous reach.
+
 ## 2026-11-25 — v2.136.0: A type checker in the gate, and the quality tools leave the `dev` extra
 
 - **Type check.** `scripts/check` now runs mypy (`>=2.4,<3`, with pydantic's own plugin) over

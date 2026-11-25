@@ -36,3 +36,8 @@ central-command serviceaccount cc-litellm-operator
 central-command deployment cc-litellm-redis
 central-command service litellm-redis
 central-command persistentvolumeclaim cc-litellm-redisdata
+# DL-236: the sandbox's egress no longer reaches private ranges. Policies add
+# up, so the old allow-everything policy has to be deleted, not only replaced
+# by 60-sandbox.yaml's `internet-egress`. A rollback's re-apply of the previous
+# manifests recreates it, which restores the previous reach.
+cc-sandbox networkpolicy allow-all-egress

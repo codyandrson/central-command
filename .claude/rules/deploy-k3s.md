@@ -159,8 +159,11 @@ Moved from the root instructions; loads when a matching file is read. How a rule
   app copies until the installer recreates them: that is the loud failure
   asked for. The sandbox's reach to the API is a drill, not a test:
   `tests/test_sandbox_isolation.py` pins what the suite can prove (loopback
-  binds, the Job manifest, ingress deny, no 8080 Service) and never asserts an
-  egress deny; README §9 "Sandbox reach drill" is the live run. Guarded by
+  binds, the Job manifest, ingress deny, no 8080 Service, and the egress
+  policy's text: internet allowed, every private range excluded, DNS by label,
+  the old allow-everything policy tombstoned because policies add up, DL-236);
+  README §9 "Sandbox reach drill" is the live run, and the only proof that
+  the cluster enforces the policy. Guarded by
   `tests/test_k3s_verify_selfcheck.py`, `tests/test_k3s_backup_env.py` and
   `tests/test_k3s_reset_phase.py`.
 - **A long-running host unit `Wants=k3s.service`, never `Requires=` it.**

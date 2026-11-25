@@ -125,7 +125,9 @@ with the operator, who decides.
   style: the updater re-runs the whole file against the live database.
 - **The agent sandbox is CONTAINMENT, not restriction.** It exists so an
   agent can work freely without risking the host — NOT to limit what it can
-  reach. Egress is open (link-local addresses excepted); the gate is the CAPABILITY, never reachability —
+  reach on the internet. Egress to the internet is open; private address ranges (the deployment's own
+  services among them) are closed, because the purpose is that agent code cannot break the
+  deployment (DL-236). The gate on a service is the CAPABILITY, never reachability —
   every tool that CHANGES a service is a `propose_*`, gated by default (Policy lists the exemptions). What constrains a
   sandbox is that it holds NO credentials; provisioning one converts reach
   into ungated writes, so that is an explicit operator decision.

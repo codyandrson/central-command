@@ -2279,7 +2279,8 @@ PACKS: dict[str, Pack] = {
         ),
         guidance=(
             "SANDBOX: you have your own ephemeral Linux container "
-            "(gVisor-isolated, no credentials, open network egress) with a "
+            "(gVisor-isolated, no credentials, open internet access; private "
+            "addresses and this deployment's own services are not reachable) with a "
             "persistent `/workspace` for the life of your session — write a "
             "file, run it, read the result back. `sandbox_exec` runs a shell command; "
             "`sandbox_write_file`/`sandbox_read_file` touch files under "

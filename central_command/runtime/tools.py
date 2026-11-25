@@ -3709,7 +3709,8 @@ async def _sandbox_id_for(ctx: RunContext) -> str:
 @parkable_read
 async def sandbox_exec(ctx: RunContext, command: str) -> str:
     """Run a shell command inside YOUR OWN ephemeral sandbox (a real Linux
-    container, gVisor-isolated, no credentials, open network egress) and get
+    container, gVisor-isolated, no credentials, open internet access but no
+    reach to private addresses or this deployment's own services) and get
     back its exit code, stdout and stderr. The workspace at `/workspace`
     persists across calls within your session — write a file, then run it,
     then read it back.

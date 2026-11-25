@@ -2174,7 +2174,8 @@ REGISTRY: list[Capability] = [
         reversibility="reversible",
         risk=(
             "none outside the agent's own ephemeral pod — gVisor-isolated, "
-            "open egress but no credentials (ingress-deny NetworkPolicy; the "
+            "internet egress only and no credentials (ingress-deny NetworkPolicy, "
+            "private ranges closed; the "
             "sandbox-runner holds no Central Command credentials), deleted "
             "on session close or TTL"
         ),

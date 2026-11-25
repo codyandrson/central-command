@@ -859,12 +859,12 @@ logs: `http://<tailnet-name>:9428/select/vmui/` (plain http — a ServiceLB port
 
 ### Sandbox reach drill
 
-The sandbox is containment, not restriction: its egress is open on purpose
-(`60-sandbox.yaml`), so what keeps an agent's code off the control plane is
-that the API and the cockpit listen on loopback only and nothing publishes
-them. `tests/test_sandbox_isolation.py` pins the shipped text that makes that
-true (every bind is `127.0.0.1`, the Job manifest holds no credential and no
-host network, no manifest exposes port 8080). It cannot prove the live
+The sandbox is containment, not restriction: its egress is open to the
+internet and closed to private address ranges (`60-sandbox.yaml`, DL-236), and
+the API and the cockpit listen on loopback only with nothing publishing them.
+`tests/test_sandbox_isolation.py` pins the shipped text that makes that
+true (the egress policy's ranges, every bind is `127.0.0.1`, the Job manifest
+holds no credential and no host network, no manifest exposes port 8080). It cannot prove the live
 network, so this drill does. It is **never run by pytest**: the release story
 runs it once after an apply, with the operator's OK, and the cc-test-sweep
 skill points here. It changes nothing and leaves nothing behind.
@@ -882,17 +882,35 @@ sudo k3s kubectl -n cc-sandbox run reach-drill --image=<curl-image> \
 sudo k3s kubectl -n cc-sandbox wait --for=condition=Ready pod/reach-drill --timeout=180s
 ```
 
-Then try each of the three targets from inside the pod, one command each:
+First the two things that must WORK, or agents cannot install anything: a
+name resolves and the internet answers. `<public-url>` is any public https
+address the site can reach.
+
+```bash
+sudo k3s kubectl -n cc-sandbox exec reach-drill -- curl -sS -m 15 -o /dev/null -w '%{http_code}\n' <public-url>
+```
+
+**Expected: an HTTP status.** `Could not resolve host` means the DNS rule in
+`60-sandbox.yaml` does not match this cluster's DNS pods (check their labels
+with `kubectl -n kube-system get pods --show-labels`); a timeout with the
+name resolved means the internet rule does not apply.
+
+Then try each target that must NOT answer from inside the pod, one command
+each. The fourth is the cluster's Postgres by its pod address
+(`<postgres-pod-address>`, from `kubectl -n central-command get pods -o wide`):
 
 ```bash
 sudo k3s kubectl -n cc-sandbox exec reach-drill -- curl -sS -m 10 -o /dev/null -w '%{http_code}\n' http://<anchor-address>:8080/health
 sudo k3s kubectl -n cc-sandbox exec reach-drill -- curl -sS -m 10 -o /dev/null -w '%{http_code}\n' http://<anchor-address>:3080/health
 sudo k3s kubectl -n cc-sandbox exec reach-drill -- curl -sS -m 10 -o /dev/null -w '%{http_code}\n' <cockpit-tailnet-url>/api/heartbeat
+sudo k3s kubectl -n cc-sandbox exec reach-drill -- curl -sS -m 10 -o /dev/null telnet://<postgres-pod-address>:5432
 ```
 
-**Expected: all three fail to connect** — `Connection refused`, a timeout, or
+**Expected: all four fail to connect** — `Connection refused`, a timeout, or
 `Could not resolve host` (curl exits non-zero and prints no status). An HTTP
-status from any of them is a finding: stop, leave the pod for inspection, and
+status from any of the first three, or a connection to the fourth, is a
+finding (a fourth that connects usually means the old `allow-all-egress`
+policy is still in the namespace: `kubectl -n cc-sandbox get networkpolicy`): stop, leave the pod for inspection, and
 report which target answered. Whatever the outcome, delete the pod:
 
 ```bash

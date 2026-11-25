@@ -98,8 +98,11 @@ for the entry format and how to add one.
   Executor and approval. (An earlier version of this entry told of an agent
   that, denied egress, wrote stale-API code that crashed; that incident is
   unrecorded in the tree.)
-- **Enforced:** discipline only — no test asserts egress stays open or that a sandbox tool never becomes credentialed
-- **Source:** `deploy/k3s/60-sandbox.yaml` (header comment and the `allow-all-egress` policy); code comment `central_command/sandbox/runner.py` ("CREDENTIAL-FREE BY DESIGN"); `docs/PRD.md` FR-14; `docs/ARCHITECTURE.md` credentials table (`sandbox/` holds "Nothing, by design"); DL-007
+- **Note (2026-11-25):** Amended by DL-236: egress stays open to the internet
+  and is closed to private address ranges, the deployment's own services among
+  them.
+- **Enforced:** discipline only — no test asserts internet egress stays open or that a sandbox tool never becomes credentialed
+- **Source:** `deploy/k3s/60-sandbox.yaml` (header comment and the `internet-egress` policy); code comment `central_command/sandbox/runner.py` ("CREDENTIAL-FREE BY DESIGN"); `docs/PRD.md` FR-14; `docs/ARCHITECTURE.md` credentials table (`sandbox/` holds "Nothing, by design"); DL-007
 - **Supersedes:** DL-007
 
 ### DL-006 — The sandbox's only exit is mcp.sync_source, and content is captured at propose time

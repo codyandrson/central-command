@@ -17,9 +17,9 @@
 #        kubelet's own control channel, not the pod network, so exec keeps
 #        working even though every packet sent TO the sandbox over the CNI is
 #        dropped — this is what lets the runner drive the sandbox at all.
-#        EGRESS is open (see the allow-all-egress policy below): the sandbox
-#        is containment, not restriction, and its constraint is that it holds
-#        no credentials.
+#        EGRESS is open to the internet and closed to private address
+#        ranges (see the internet-egress policy below): the sandbox is
+#        containment, not restriction, and it holds no credentials.
 #
 #   The sandbox-runner (central_command/sandbox/runner.py, deployed OUTSIDE this
 #   cluster as an anchor-node systemd unit) is the only actor with any access to this
@@ -44,36 +44,36 @@ metadata:
   name: gvisor
 handler: runsc
 ---
-# THE SANDBOX IS CONTAINMENT, NOT RESTRICTION (The operator, 2026-08-04 — this
-# reverses the closed egress this file shipped with on 2026-08-03).
+# THE SANDBOX IS CONTAINMENT, NOT RESTRICTION (the operator, 2026-08-04).
 #
 # The sandbox exists so an agent can work FREELY and unsupervised without any
-# risk of damaging the operator's system — not to limit what the agent can reach. An
-# agent must be able to pip/npm install, fetch docs, clone, and actually TEST
-# what it builds; an agent that cannot verify its code against real
-# dependencies writes from stale training data and ships broken work (proved
-# live 2026-08-04: echo-demo was written against mcp 1.x's FastMCP path, could
-# not be tested in-sandbox, and crashed on the deployed pod). The review gate
-# is on what LEAVES the sandbox (mcp.sync_source), never on what it reads.
+# risk of damaging the operator's system. An agent must be able to pip/npm
+# install, fetch docs, clone, and actually TEST what it builds; an agent that
+# cannot verify its code against real dependencies writes from stale training
+# data and ships broken work. The review gate is on what LEAVES the sandbox
+# (mcp.sync_source), never on what it reads.
 #
-# So: EGRESS IS OPEN — the internet AND the operator's own internal services
-# (The operator, 2026-08-04, clarifying the same day: "the agent should be able to
-# read All of my internal services, since I may of course be asking it to do
-# something that involves modifying or integrating with those services. tools
-# that would allow making changes to those services however need to be gated
-# by default"). Reachability is NOT the gate: an agent asked to integrate with
-# n8n / LiteLLM / the graph has to be able to reach and read them. The gate
-# lives where it always lives in this system — on the CAPABILITY. Every tool
-# that changes a service is a gated propose_* going through the Executor.
+# So: EGRESS TO THE INTERNET IS OPEN, AND EGRESS TO PRIVATE RANGES IS CLOSED
+# (the operator, 2026-11-25, DL-236; this reverses the 2026-08-04 ruling that
+# the sandbox may also reach the operator's internal services). "Without
+# breaking things" is the purpose, and the deployment's own stores are the
+# things: a 2026-11-25 reach test from a sandbox pod opened a connection to
+# the cluster's Postgres, whose password is a literal in a public manifest, so
+# "it holds no credentials" did not protect that store. The posture is the
+# default of kubernetes-sigs/agent-sandbox (public internet allowed, private
+# ranges and the metadata address blocked), borrowed rather than invented.
 #
-# WHAT ACTUALLY CONSTRAINS A SANDBOX, then, is that it holds NO CREDENTIALS:
-# the runner injects none, `automountServiceAccountToken: false`, and every
-# credentialed store (Postgres, LiteLLM admin, Neo4j, the Jira/Gmail façades)
-# demands auth the sandbox does not have. NOTE THE COROLLARY, because it is
-# the real decision point: handing a sandbox a service credential would make
-# network reach into ungated write access to that service. Credential
-# provisioning into a sandbox is therefore an explicit operator decision, not
-# a default — see the design doc's governance doctrine.
+# What an agent loses is reading the deployment's own services from inside its
+# sandbox. Nothing shipped depends on that: every tool that reads or changes a
+# service runs in the control plane, not in the sandbox.
+#
+# The sandbox still holds NO CREDENTIALS: the runner injects none and
+# `automountServiceAccountToken: false`. Provisioning one into a sandbox stays
+# an explicit operator decision, never a default.
+#
+# A SITE WHOSE PACKAGE MIRROR IS ON A PRIVATE ADDRESS adds one more egress rule
+# below naming that address and port; it does not remove a range from the
+# `except` list.
 #
 # INGRESS stays deny-all: nothing has any business reaching INTO a sandbox
 # (the runner drives it over the kubelet's exec channel, not the pod network).
@@ -87,28 +87,46 @@ spec:
   policyTypes: [Ingress]
   ingress: []
 ---
+# The name is new on purpose: NetworkPolicies ADD UP, so the previous
+# `allow-all-egress` policy must be gone for this one to mean anything. It is
+# tombstoned in removed.txt (plain `kubectl apply` never deletes).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-all-egress
+  name: internet-egress
   namespace: cc-sandbox
 spec:
   podSelector: {}
   policyTypes: [Egress]
   egress:
-    # Everything — internet and internal services alike — EXCEPT link-local.
-    # 169.254.0.0/16 is excluded not because anything here serves it (this is
-    # bare metal; there is no cloud metadata endpoint on an anchor or a compute node)
-    # but because it costs nothing, conflicts with no stated need — every
-    # internal service is on 10.43.x or the 100.x tailnet — and the work
-    # deployment may not be bare metal. 169.254.169.254 is the single most
-    # attacked address in the SSRF literature; leaving it reachable from a
-    # sandbox that runs unreviewed agent code has no upside.
+    # The internet, and nothing private: RFC 1918, the RFC 6598 shared range
+    # (carrier-grade NAT and overlay networks use it) and link-local, which
+    # holds the cloud metadata address. The cluster's own pod and service
+    # ranges and the nodes' addresses all fall inside these.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
             except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
               - 169.254.0.0/16
+    # Name resolution. The cluster's DNS pods sit inside a blocked range, so
+    # they are allowed by label, on the DNS port only. Without this rule no
+    # name resolves and `pip install` fails.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
 ---
 apiVersion: v1
 kind: ServiceAccount

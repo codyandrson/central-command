@@ -1,12 +1,12 @@
 """What the suite can prove about the sandbox's reach to the API (R17, G-07;
 ruled 2026-10-29, Decision 12, epic-small-fixes story 11.13).
 
-The sandbox is CONTAINMENT, not restriction: its egress is open on purpose
-(deploy/k3s/60-sandbox.yaml), so NOTHING here asserts an egress deny — the
-gate is the capability, never reachability. What stops a sandbox reaching the
-API's or the cockpit's port is that those listeners are loopback-only on the
-anchor node and nothing publishes them. This file pins the SHIPPED text that
-makes that true:
+The sandbox is CONTAINMENT, not restriction: its egress to the internet is
+open on purpose (deploy/k3s/60-sandbox.yaml) and its egress to private address
+ranges is closed (DL-236), so agent code cannot reach the deployment's own
+stores. What stops a sandbox reaching the API's or the cockpit's port is, as
+well, that those listeners are loopback-only on the anchor node and nothing
+publishes them. This file pins the SHIPPED text that makes both true:
 
   * every API, sandbox-runner and cockpit command binds loopback, and no unit
     or driver binds from `settings.api_host` (display only, `api/systems.py`);
@@ -14,6 +14,8 @@ makes that true:
     account token, no environment and no secret volume, under gVisor, in
     `cc-sandbox`;
   * 60-sandbox.yaml denies ingress and carries no hostNetwork or hostPort;
+  * its one egress policy allows the internet, excludes every private range,
+    and lets only the cluster's DNS through, on port 53;
   * no manifest under deploy/k3s exposes the API's port 8080.
 
 What a static test cannot prove — that a pod in `cc-sandbox` really cannot
@@ -237,6 +239,56 @@ def test_the_sandbox_manifest_denies_ingress_and_publishes_nothing():
     for d in docs:
         if d["kind"] == "NetworkPolicy" and "Ingress" in d["spec"].get("policyTypes", []):
             assert not d["spec"].get("ingress"), d["metadata"]["name"]
+
+
+_PRIVATE = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16")
+
+
+def test_the_sandbox_reaches_the_internet_and_no_private_range():
+    """DL-236. NetworkPolicies ADD UP, so the pin is on every egress rule of
+    every policy in the file, and on the old allow-everything policy being
+    tombstoned: left in the cluster it would re-open what this one closes."""
+    import ipaddress
+
+    docs = _docs(K3S / "60-sandbox.yaml")
+    egress = [
+        d
+        for d in docs
+        if d["kind"] == "NetworkPolicy" and "Egress" in d["spec"].get("policyTypes", [])
+    ]
+    assert [d["metadata"]["name"] for d in egress] == ["internet-egress"]
+    (policy,) = egress
+    assert policy["metadata"]["namespace"] == "cc-sandbox"
+    assert policy["spec"]["podSelector"] == {}
+
+    private = [ipaddress.ip_network(c) for c in _PRIVATE]
+    blocks, others = [], []
+    for rule in policy["spec"]["egress"]:
+        assert rule.get("to"), "a rule with no `to` allows every destination"
+        for peer in rule["to"]:
+            (blocks if "ipBlock" in peer else others).append((rule, peer))
+
+    assert blocks, "no rule allows the internet"
+    for _rule, peer in blocks:
+        net = ipaddress.ip_network(peer["ipBlock"]["cidr"])
+        excluded = [ipaddress.ip_network(c) for c in peer["ipBlock"].get("except", [])]
+        for p in private:
+            if net.overlaps(p):
+                assert any(p.subnet_of(e) for e in excluded), (
+                    f"{peer['ipBlock']['cidr']} reaches {p} and does not exclude it"
+                )
+
+    # The only other peer is the cluster's DNS, by label, on the DNS port.
+    assert len(others) == 1
+    rule, peer = others[0]
+    assert peer == {
+        "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+        "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}},
+    }
+    assert {(p["protocol"], p["port"]) for p in rule["ports"]} == {("UDP", 53), ("TCP", 53)}
+
+    tombstones = (K3S / "removed.txt").read_text().splitlines()
+    assert "cc-sandbox networkpolicy allow-all-egress" in tombstones
 
 
 def test_no_manifest_exposes_the_apis_port():

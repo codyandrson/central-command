@@ -49,10 +49,13 @@ what an agent can reach. Concretely (per the ratified design doc,
 `docs/superpowers/research/2026-08-03-mcp-sandbox-creation-design.md` §11.2,
 and `deploy/k3s/60-sandbox.yaml`):
 
-- **Egress is OPEN to the internet and internal services alike** (only
-  link-local `169.254.0.0/16` is excluded) — an agent must be able to `pip`/`npm`
+- **Egress is OPEN to the internet and CLOSED to private address ranges**
+  (RFC 1918, the RFC 6598 shared range and link-local; the deployment's own
+  services sit inside them, and only the cluster's DNS is allowed through) —
+  an agent must be able to `pip`/`npm`
   install, fetch real docs, and actually run what it writes, or it ships
-  code written against stale training data. This was proved the hard way:
+  code written against stale training data. It cannot read or reach the
+  deployment's own stores from its sandbox (DL-236). This was proved the hard way:
   `echo-demo`'s first draft was authored against `mcp.server.fastmcp` from
   memory and crashed on deploy; the fix was introspecting the real installed
   `mcp==2.0.0` package live in the sandbox.
@@ -72,7 +75,7 @@ and `deploy/k3s/60-sandbox.yaml`):
   proxy meant to run as defense-in-depth) cannot actually run under gVisor —
   its netns removal trips gVisor's netstack, no off switch — so it ships
   dormant in the sandbox image. The layers actually live are gVisor itself
-  and the namespace NetworkPolicy, which denies INGRESS only (egress is open,
+  and the namespace NetworkPolicy, which deny ingress and private-range egress (the internet is open,
   above); decision-log DL-005 records this (containment, not restriction).
 
 ## Gate resolution happens outside the sandbox pack entirely
