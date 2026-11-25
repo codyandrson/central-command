@@ -34,7 +34,7 @@ A human-supervised agentic-team framework: a control plane where the operator ta
 
 - Python `>=3.12`, Node `>=22` (`web/.nvmrc`). Install with `pip install -e ".[dev,runtime,exchange,google]"` (the two provider extras carry the mail/calendar clients; the suite skips what is absent); build the cockpit with `(cd web && npm install && npm run build)`; serve with `uvicorn central_command.api.app:app --port 8080`.
 - There is no CI — run the suite yourself before pushing. `pytest -q`, sequential, is the gate (about 11 min for ~6,500 tests on a Pi 5, so give it a timeout to match): it is the run that catches a test leaking state into its neighbour, which xdist workers hide. `-n 4` (about half the wall time when last measured, one database per worker) is only the quick pass. Cockpit tests are separate: `(cd web && npm test)`.
-- `scripts/check` is the lint gate (ruff, version and rules pinned in `pyproject.toml`); run it before pushing — the pre-push hook runs it too and refuses the push when it fails.
+- `scripts/check` is the lint and format gate (`ruff check`, `ruff format --check`; version and rules pinned in `pyproject.toml`; run `ruff format` on what you touch); run it before pushing — the pre-push hook runs it too and refuses the push when it fails.
 - Dev database: `docker compose up -d postgres` → `cc-postgres` on 127.0.0.1:5442 with the schema auto-loaded. 5442, never 5432 — the port is baked into `.env`, `.env.example`, the compose files, the k3s manifests and the `config.py` default.
 - A fresh git worktree has no `.env`; copy it in before running the suite.
 - `python scripts/m5_acceptance.py` is the live acceptance run: it needs a key, a Postgres and Jira credentials, spends money, and performs a real Jira write on its throwaway issue.

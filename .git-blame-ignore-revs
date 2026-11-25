@@ -1,0 +1,5 @@
+# Commits `git blame` should skip: format-only changes.
+# Use: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# v2.135.0: the one-time `ruff format` of the whole tree
+fa0b827c04af89e4f0f1bc8f32faaa7af058fc4d

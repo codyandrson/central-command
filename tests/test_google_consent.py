@@ -289,4 +289,5 @@ def test_the_flow_is_the_librarys_loopback_flow_never_out_of_band():
     src = Path(consent.__file__).read_text(encoding="utf-8")
     assert "urn:ietf:wg:oauth:2.0:oob" not in src
     assert "InstalledAppFlow" in src and "run_local_server(" in src
-    assert 'host="127.0.0.1", bind_addr="127.0.0.1"' in src and "open_browser=False" in src
+    flat = "".join(src.split())  # layout-independent: the formatter owns the line breaks
+    assert 'host="127.0.0.1",bind_addr="127.0.0.1"' in flat and "open_browser=False" in src

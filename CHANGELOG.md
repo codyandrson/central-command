@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-25 — v2.135.0: The one-time reformat
+
+- **What.** `ruff format .` over the whole tree (470 Python files), in one commit that holds
+  nothing else, listed in `.git-blame-ignore-revs` (`git config blame.ignoreRevsFile
+  .git-blame-ignore-revs` makes `git blame` skip it). Package 1.12, second of three releases.
+- **In the gate.** `scripts/check` now also runs `ruff format --check`, so the pre-push hook
+  refuses an unformatted file.
+- **Around it, in separate commits.** Two test files that build shell scripts line by line exempt
+  the join rule in the config instead of per line (the formatter moves a trailing `noqa`); one
+  test that matched a source line by its exact layout now ignores whitespace.
+- **Operator action.** None. No behaviour change.
+
 ## 2026-11-25 — v2.134.0: The linter is clean and in the gate
 
 - **Why.** System-review package 1.12, first of three releases. Ruff was a dev dependency nothing

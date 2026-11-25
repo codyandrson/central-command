@@ -10,6 +10,7 @@ if [[ -x .venv/bin/ruff ]]; then PATH="$PWD/.venv/bin:$PATH"; fi
 
 ruff check .
 
-# Later releases of package 1.12 add, here and in this order:
-#   ruff format --check .   (after the one-time reformat release)
-#   the type checker        (mypy over central_command/)
+ruff format --check .
+
+# The last release of package 1.12 adds the type checker here (mypy over
+# central_command/).
