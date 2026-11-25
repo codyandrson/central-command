@@ -206,7 +206,21 @@ dev = [
     # fresh install (the Windows testbed, F35) answered "unrecognized arguments:
     # --timeout". A test that hangs on a live service must fail, not stall.
     "pytest-timeout>=2.3,<3",
+]
+
+# The code-quality tools `scripts/check` runs (ruff, mypy and the stubs mypy
+# asks for: asyncpg, croniter, httplib2 and lxml ship none of their own; the
+# pydantic plugin comes with pydantic itself). Its OWN extra, not `dev`: the
+# installers put `dev` on every deployment (the suite is the install's own
+# check), and a site's package mirror should not have to carry a linter and a
+# type checker. Only a checkout that pushes installs this one.
+check = [
     "ruff>=0.17.6,<0.18",
+    "mypy>=2.4,<3",
+    "asyncpg-stubs>=0.32,<1",
+    "types-croniter>=6,<7",
+    "types-httplib2>=0.32,<1",
+    "lxml-stubs>=0.5,<1",
 ]
 
 [build-system]
@@ -291,3 +305,88 @@ extend-select = ["E402", "RUF006"]
 "tests/test_single_reporter_rows.py" = ["FLY002"]
 # Executes upstream source it has parsed and patched, which is the test.
 "tests/test_graphiti_patches.py" = ["S102"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["central_command"]
+plugins = ["pydantic.mypy"]
+
+# RATCHET. Each module below fails the type check today and has its errors
+# suppressed so the gate is green now. The list only shrinks: remove a module
+# when mypy reports nothing for it, never add one (a new or changed module is
+# typed clean). No blanket ignore_errors and no follow_imports = skip.
+[[tool.mypy.overrides]]
+module = [
+    "central_command.api.nerve_gateway",
+    "central_command.api.orchestration",
+    "central_command.api.routes",
+    "central_command.contract.args",
+    "central_command.contract.dependencies",
+    "central_command.contract.failures",
+    "central_command.contract.mail",
+    "central_command.contract.models",
+    "central_command.db.repo",
+    "central_command.gateway.auditor",
+    "central_command.gateway.executor",
+    "central_command.gateway.gateway",
+    "central_command.gateway.graph_auditor",
+    "central_command.gateway.overrides",
+    "central_command.gateway.rerun",
+    "central_command.gateway.steward_agreement",
+    "central_command.gateway.wiki_claims",
+    "central_command.graph_reembed",
+    "central_command.heartbeat.actions",
+    "central_command.heartbeat.engine",
+    "central_command.ingest.dispatcher",
+    "central_command.ingest.feed",
+    "central_command.ingest.ledger",
+    "central_command.ingest.mail_attachments",
+    "central_command.integrations.calendar_facade",
+    "central_command.integrations.confluence",
+    "central_command.integrations.embedder_record",
+    "central_command.integrations.google",
+    "central_command.integrations.graphiti_client",
+    "central_command.integrations.graphiti_ingest",
+    "central_command.integrations.http",
+    "central_command.integrations.jira",
+    "central_command.integrations.litellm",
+    "central_command.integrations.neo4j_reader",
+    "central_command.integrations.neo4j_writer",
+    "central_command.reports.ea_backlog",
+    "central_command.reports.ea_calendar",
+    "central_command.reports.ea_plan",
+    "central_command.reports.ea_team",
+    "central_command.runtime.context",
+    "central_command.runtime.durable",
+    "central_command.runtime.models",
+    "central_command.runtime.notes",
+    "central_command.runtime.orchestrator",
+    "central_command.runtime.packs",
+    "central_command.runtime.questions",
+    "central_command.runtime.reflection",
+    "central_command.runtime.spike_model",
+    "central_command.runtime.tools",
+    "central_command.selfcheck",
+    "central_command.skills.importer",
+    "central_command.skills.refresh",
+]
+ignore_errors = true
+
+# Third-party packages with no type information (no py.typed, no stub package
+# that mypy asks for). Each is named; none is a blanket.
+[[tool.mypy.overrides]]
+module = [
+    "crawl4ai",
+    "crawl4ai.*",
+    "exchangelib",
+    "exchangelib.*",
+    "google_auth_httplib2",
+    "google_auth_oauthlib",
+    "google_auth_oauthlib.*",
+    "googleapiclient",
+    "googleapiclient.*",
+    "inscriptis",
+    "inscriptis.*",
+    "pypdfium2",
+]
+ignore_missing_imports = true

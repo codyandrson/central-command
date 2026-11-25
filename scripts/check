@@ -4,13 +4,18 @@
 # finding. The ruff version and rule set live in pyproject.toml.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# The checkout's own virtualenv first, so a hook run from a plain shell gets
-# the pinned ruff (pyproject's required-version refuses any other).
-if [[ -x .venv/bin/ruff ]]; then PATH="$PWD/.venv/bin:$PATH"; fi
+# The checkout's own virtualenv: the tools come from the `check` extra, pinned
+# in pyproject.toml, never from whatever is on PATH.
+for tool in ruff mypy; do
+  if [[ ! -x ".venv/bin/$tool" ]]; then
+    echo "scripts/check: $tool is not installed in $PWD/.venv; run: uv pip install -e \".[dev,runtime,exchange,google,check]\"" >&2
+    exit 1
+  fi
+done
+PATH="$PWD/.venv/bin:$PATH"
 
 ruff check .
-
 ruff format --check .
-
-# The last release of package 1.12 adds the type checker here (mypy over
-# central_command/).
+# The type check: mypy over central_command/ (config and the ratchet list of
+# modules still ignored: [tool.mypy] in pyproject.toml).
+mypy

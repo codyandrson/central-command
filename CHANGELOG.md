@@ -4,6 +4,23 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-25 — v2.136.0: A type checker in the gate, and the quality tools leave the `dev` extra
+
+- **Type check.** `scripts/check` now runs mypy (`>=2.4,<3`, with pydantic's own plugin) over
+  `central_command/`, non-strict. 52 of 153 modules fail today (298 errors) and are listed under
+  one `ignore_errors` override in `pyproject.toml`: a ratchet, a module leaves the list when it is
+  clean and none is added. Each listed module was checked to fail without its entry. Third-party
+  packages without type information are named one by one. Package 1.12, last of three releases.
+- **A new `check` extra holds ruff, mypy and four stub packages.** The installers put `dev` on
+  every deployment, so v2.134.0 and v2.135.0, which pinned `ruff>=0.17.6` in `dev`, made a site's
+  package mirror need that ruff. From this release a deployment installs no linter at all; only a
+  development checkout adds `check` (`pip install -e ".[dev,runtime,exchange,google,check]"`).
+  `scripts/check` uses the checkout's own `.venv` and says what to install when a tool is missing.
+- **Not changed.** No code. `requirements.lock` still records ruff 0.16.4 from the last
+  regeneration; regenerating it stays a deliberate act.
+- **Operator action.** A mirrored site should update straight to this release rather than stop at
+  v2.134.0 or v2.135.0. A checkout that pushes installs the `check` extra once.
+
 ## 2026-11-25 — v2.135.0: The one-time reformat
 
 - **What.** `ruff format .` over the whole tree (470 Python files), in one commit that holds
