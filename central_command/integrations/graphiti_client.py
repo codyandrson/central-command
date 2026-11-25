@@ -265,7 +265,8 @@ class RerankClient:
                 body = res.text[:300]
             raise RerankHTTPError(
                 f"/rerank via {self.model!r} answered HTTP {res.status_code}: {str(body)[:300]}",
-                response=res, body=body,
+                response=res,
+                body=body,
             )
         try:
             results = res.json()["results"]
@@ -420,8 +421,9 @@ def build_reranker(kind: str | None = None, alias: str | None = None):
     if kind == "rerank":
         return RerankClient(_proxy_root(), settings.llm_api_key, alias)
     if kind == "chat":
-        return ChatRerankClient(_openai_client(settings.llm_api_key, _proxy_v1()), alias,
-                                settings.graph_semaphore_limit)
+        return ChatRerankClient(
+            _openai_client(settings.llm_api_key, _proxy_v1()), alias, settings.graph_semaphore_limit
+        )
     raise GraphitiNotConfigured(f"unknown reranker kind {kind!r} (CC_GRAPH_RERANK_KIND)")
 
 
@@ -481,7 +483,8 @@ def _give_bolt_liveness_check(driver) -> None:
 
     unused = driver.client
     driver.client = AsyncGraphDatabase.driver(
-        settings.neo4j_url, auth=(NEO4J_USER, settings.neo4j_password),
+        settings.neo4j_url,
+        auth=(NEO4J_USER, settings.neo4j_password),
         **neo4j_reader.bolt_driver_kwargs(),
     )
     try:
@@ -504,7 +507,8 @@ def _build():
         log.warning(
             "graphiti_core SEMAPHORE_LIMIT is %s, not CC_GRAPH_SEMAPHORE_LIMIT=%s — "
             "something imported graphiti_core before integrations.graphiti_client",
-            helpers.SEMAPHORE_LIMIT, settings.graph_semaphore_limit,
+            helpers.SEMAPHORE_LIMIT,
+            settings.graph_semaphore_limit,
         )
 
     base_v1 = _proxy_v1()
@@ -512,7 +516,9 @@ def _build():
 
     llm = _llm_client_class()(
         config=LLMConfig(
-            api_key=key, model=settings.graph_llm_alias, base_url=base_v1,
+            api_key=key,
+            model=settings.graph_llm_alias,
+            base_url=base_v1,
             temperature=settings.graph_llm_temperature,
         ),
         client=_openai_client(key, base_v1),
@@ -522,7 +528,9 @@ def _build():
     )
     embedder = OpenAIEmbedder(
         OpenAIEmbedderConfig(
-            embedding_model=settings.embed_alias, api_key=key, base_url=base_v1,
+            embedding_model=settings.embed_alias,
+            api_key=key,
+            base_url=base_v1,
             embedding_dim=int(settings.embed_dim),
         ),
         client=_openai_client(key, base_v1),

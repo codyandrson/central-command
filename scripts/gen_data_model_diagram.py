@@ -56,8 +56,7 @@ AREAS: dict[str, str] = {
         "drive outage recovery."
     ),
     "Schedules and settings": (
-        "Recurring team work held as data, and the small key/value store for operator "
-        "settings."
+        "Recurring team work held as data, and the small key/value store for operator settings."
     ),
     "MCP servers and sandbox": (
         "MCP servers the system knows about, their discoverable tools, per-agent gate "
@@ -177,9 +176,22 @@ TABLE_PURPOSE: dict[str, str] = {
 # Columns that carry state, in priority order; at most MAX_STATE_COLUMNS are shown
 # per table in addition to its primary-key and foreign-key columns.
 STATE_COLUMNS = (
-    "status", "state", "kind", "mode", "scope", "enabled", "verdict", "gate",
-    "light", "revoked_at", "retired_at", "rescinded_at", "terminal_at",
-    "closed_at", "decided_at", "last_fired_at",
+    "status",
+    "state",
+    "kind",
+    "mode",
+    "scope",
+    "enabled",
+    "verdict",
+    "gate",
+    "light",
+    "revoked_at",
+    "retired_at",
+    "rescinded_at",
+    "terminal_at",
+    "closed_at",
+    "decided_at",
+    "last_fired_at",
 )
 MAX_STATE_COLUMNS = 5
 
@@ -410,7 +422,11 @@ def parse_schema(sql: str) -> dict[str, Table]:
             if cm:
                 parse_column(cm.group(1), tables[name])
                 continue
-            km = re.match(r"add (constraint .*|primary key .*|unique .*|foreign key .*)$", clause, re.IGNORECASE)
+            km = re.match(
+                r"add (constraint .*|primary key .*|unique .*|foreign key .*)$",
+                clause,
+                re.IGNORECASE,
+            )
             if km:
                 apply_table_constraint(km.group(1), tables[name])
     return tables
@@ -519,7 +535,16 @@ def render(tables: dict[str, Table]) -> str:
         "",
     ]
     for area, description in AREAS.items():
-        out += [f"## {area}", "", description, "", "```mermaid", area_diagram(area, tables), "```", ""]
+        out += [
+            f"## {area}",
+            "",
+            description,
+            "",
+            "```mermaid",
+            area_diagram(area, tables),
+            "```",
+            "",
+        ]
     out += ["## All tables", "", "| Table | Area | Purpose |", "| --- | --- | --- |"]
     area_rank = {a: i for i, a in enumerate(AREAS)}
     for name in sorted(tables, key=lambda n: (area_rank[TABLE_AREA[n]], n)):

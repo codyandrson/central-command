@@ -44,7 +44,9 @@ async def _conversation(agent_id: str = "inbox-triage") -> str:
 
 async def _rename(key: str, label):
     return await nerve_gateway._dispatch(
-        "sessions.patch", {"key": key, "label": label}, _noop,
+        "sessions.patch",
+        {"key": key, "label": label},
+        _noop,
     )
 
 
@@ -72,20 +74,30 @@ def _wire(monkeypatch, rows: list[dict]) -> None:
 
 def _row(sess_id: str, **over) -> dict:
     row = {
-        "id": sess_id, "agent_id": "inbox-triage", "status": "AWAITING_OPERATOR",
-        "mode": "conversation", "created_at": None, "updated_at": None,
-        "parent_session_id": None, "parent_agent_id": None, "task_title": None,
-        "token_estimate": 0, "proposal_count": 0,
+        "id": sess_id,
+        "agent_id": "inbox-triage",
+        "status": "AWAITING_OPERATOR",
+        "mode": "conversation",
+        "created_at": None,
+        "updated_at": None,
+        "parent_session_id": None,
+        "parent_agent_id": None,
+        "task_title": None,
+        "token_estimate": 0,
+        "proposal_count": 0,
     }
     row.update(over)
     return row
 
 
 async def test_a_renamed_conversation_is_labelled_with_the_operators_name(monkeypatch):
-    _wire(monkeypatch, [
-        _row("sess_named", operator_title="Budget questions", task_title="Some task"),
-        _row("sess_plain"),
-    ])
+    _wire(
+        monkeypatch,
+        [
+            _row("sess_named", operator_title="Budget questions", task_title="Some task"),
+            _row("sess_plain"),
+        ],
+    )
 
     rows = {r["sessionKey"]: r for r in (await nerve_gateway._sessions_list({}))["sessions"]}
     named = rows["agent:inbox-triage:sess_named"]
@@ -117,15 +129,20 @@ async def test_renaming_a_conversation_stores_the_name_and_records_it():
     assert after["updated_at"] == before["updated_at"], "a rename is not activity"
     assert after["status"] == before["status"]
 
-    events = [e for e in await repo.list_events_of_kinds(["session.renamed"])
-              if e["ref_id"] == session_id]
+    events = [
+        e for e in await repo.list_events_of_kinds(["session.renamed"]) if e["ref_id"] == session_id
+    ]
     assert len(events) == 1
     payload = events[0]["payload"]
     if isinstance(payload, str):
         payload = json.loads(payload)
     assert events[0]["actor"] == "operator"
-    assert payload == {"session_id": session_id, "agent_id": "inbox-triage",
-                       "old": None, "new": "Budget questions"}
+    assert payload == {
+        "session_id": session_id,
+        "agent_id": "inbox-triage",
+        "old": None,
+        "new": "Budget questions",
+    }
 
 
 @needs_pg
@@ -135,9 +152,12 @@ async def test_a_rename_leaves_the_transcript_untouched():
     try:
         await conn.execute(
             "update session set run_state = $2::jsonb where id = $1",
-            session_id, json.dumps({"messages": [{"kind": "request", "text": "hello"}]}),
+            session_id,
+            json.dumps({"messages": [{"kind": "request", "text": "hello"}]}),
         )
-        before = await conn.fetchval("select run_state::text from session where id = $1", session_id)
+        before = await conn.fetchval(
+            "select run_state::text from session where id = $1", session_id
+        )
         await _rename(f"agent:inbox-triage:{session_id}", "Hello thread")
         after = await conn.fetchval("select run_state::text from session where id = $1", session_id)
     finally:
@@ -155,8 +175,9 @@ async def test_an_empty_name_clears_it_and_the_same_name_records_nothing():
 
     assert out["label"] is None
     assert (await repo.get_session(session_id))["operator_title"] is None
-    kinds = [e for e in await repo.list_events_of_kinds(["session.renamed"])
-             if e["ref_id"] == session_id]
+    kinds = [
+        e for e in await repo.list_events_of_kinds(["session.renamed"]) if e["ref_id"] == session_id
+    ]
     assert len(kinds) == 2, "set, then clear; the unchanged repeat is not recorded"
 
 

@@ -29,7 +29,7 @@ STEP = "refresh_bundled_skills"
 
 def _fn(name: str) -> str:
     start = UPDATER.index(f"\n{name}() {{") + 1
-    return UPDATER[start:UPDATER.index("\n}\n", start) + 3]
+    return UPDATER[start : UPDATER.index("\n}\n", start) + 3]
 
 
 @pytest.fixture
@@ -60,21 +60,23 @@ def _module(tree: Path) -> None:
 def _run(tree: Path, *, exit_code: int | None = None):
     if exit_code is not None:
         (tree / "exit").write_text(str(exit_code))
-    script = "\n".join([
-        "set -uo pipefail",
-        'note() { printf "NOTE %s\\n" "$*"; }',
-        'die() { printf "DIE [%s] %s\\n" "$1" "$2"; exit 1; }',
-        "RUNAS=()",
-        f"REPO='{tree}'",
-        f"OWNER_HOME='{tree}/home'",
-        "TARGET_VERSION=9.9.9",
-        # What the updater's own shell holds after sourcing deploy/k3s/.env.
-        "export CC_DATABASE_URL=from-the-containers-env",
-        _fn("skills_refresh_cli"),
-        _fn(STEP),
-        STEP,
-        "echo CONTINUED",
-    ])
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            'note() { printf "NOTE %s\\n" "$*"; }',
+            'die() { printf "DIE [%s] %s\\n" "$1" "$2"; exit 1; }',
+            "RUNAS=()",
+            f"REPO='{tree}'",
+            f"OWNER_HOME='{tree}/home'",
+            "TARGET_VERSION=9.9.9",
+            # What the updater's own shell holds after sourcing deploy/k3s/.env.
+            "export CC_DATABASE_URL=from-the-containers-env",
+            _fn("skills_refresh_cli"),
+            _fn(STEP),
+            STEP,
+            "echo CONTINUED",
+        ]
+    )
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
 
 
@@ -102,7 +104,7 @@ def test_a_failed_comparison_is_a_warning_never_a_die_on_a_merged_tree(tree: Pat
     r = _run(tree, exit_code=code)
     assert "DIE" not in r.stdout
     assert "NOTE WARNING: bundled skill docs not all compared" in r.stdout
-    assert "refresh sync" in r.stdout          # says how to re-run it
+    assert "refresh sync" in r.stdout  # says how to re-run it
     assert "CONTINUED" in r.stdout
 
 
@@ -115,7 +117,9 @@ def test_the_module_runs_from_the_checkout_under_a_clean_environment(tree: Path)
     _module(tree)
     _run(tree)
     assert (tree / "cwd").read_text().strip() == str(tree)
-    env = dict(line.split("=", 1) for line in (tree / "env").read_text().splitlines() if "=" in line)
+    env = dict(
+        line.split("=", 1) for line in (tree / "env").read_text().splitlines() if "=" in line
+    )
     assert "CC_DATABASE_URL" not in env
     assert "TARGET_VERSION" not in env
     assert env["HOME"] == f"{tree}/home"
@@ -124,7 +128,9 @@ def test_the_module_runs_from_the_checkout_under_a_clean_environment(tree: Path)
 
 def test_the_helper_goes_through_runas():
     assert '"${RUNAS[@]}" env -i -C "$REPO"' in _fn("skills_refresh_cli")
-    assert '"$REPO/.venv/bin/python" -m central_command.skills.refresh "$@"' in _fn("skills_refresh_cli")
+    assert '"$REPO/.venv/bin/python" -m central_command.skills.refresh "$@"' in _fn(
+        "skills_refresh_cli"
+    )
 
 
 # ── where the step sits, and what is gone ──────────────────────────────────

@@ -82,11 +82,23 @@ class RunParked(Exception):
 
 
 async def _run_live(
-    agent, prompt: str | None, *, model, deps, agent_id: str, session_id: str,
-    message_history=None, deferred_tool_results=None, parent_session_id=None,
-    task_id: str | None = None, continuable: bool = False, window: int = 1,
-    after: str = "task", continue_state: dict | None = None,
-    park_attempts: int = 0, rerun_of: str | None = None,
+    agent,
+    prompt: str | None,
+    *,
+    model,
+    deps,
+    agent_id: str,
+    session_id: str,
+    message_history=None,
+    deferred_tool_results=None,
+    parent_session_id=None,
+    task_id: str | None = None,
+    continuable: bool = False,
+    window: int = 1,
+    after: str = "task",
+    continue_state: dict | None = None,
+    park_attempts: int = 0,
+    rerun_of: str | None = None,
 ):
     """Run an agent while persisting the growing transcript — the live half of
     M15. The session row exists from run START (status RUNNING); after every
@@ -147,7 +159,10 @@ async def _run_live(
     from central_command.runtime import context
 
     await repo.create_running_session(
-        session_id, agent_id, parent_session_id=parent_session_id, rerun_of=rerun_of,
+        session_id,
+        agent_id,
+        parent_session_id=parent_session_id,
+        rerun_of=rerun_of,
     )
     if task_id:
         await repo.start_task(task_id, session_id)
@@ -155,8 +170,7 @@ async def _run_live(
     stop_requested = False
     # Whether the record as PERSISTED ends in an unsent request — the one
     # shape a parked turn can re-enter (see the docstring).
-    tail_is_request = bool(message_history) and isinstance(
-        list(message_history)[-1], ModelRequest)
+    tail_is_request = bool(message_history) and isinstance(list(message_history)[-1], ModelRequest)
 
     async def snapshot(messages) -> None:
         nonlocal persisted, stop_requested, tail_is_request
@@ -167,9 +181,7 @@ async def _run_live(
         dumped = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
         # The operator's stop flag rides back on the snapshot's own UPDATE, so
         # checking it at every node boundary costs no extra query.
-        stop_requested = await repo.update_session_run_state(
-            session_id, {"messages": dumped}
-        )
+        stop_requested = await repo.update_session_run_state(session_id, {"messages": dumped})
         # Context-pressure measurement rides HERE rather than at run start/end
         # because the snapshot has already paid the cost of dumping the history:
         # the check is one json.dumps + a division over data that is in hand, and
@@ -177,7 +189,9 @@ async def _run_live(
         # blows the window does it between turns, not at its edges. Never
         # raises (see `context.check_pressure`), no-op under the test model.
         await context.check_pressure(
-            session_id, {"messages": dumped}, agent_id=agent_id,
+            session_id,
+            {"messages": dumped},
+            agent_id=agent_id,
             model=getattr(model, "model_name", None),
         )
         await events.emit(
@@ -190,7 +204,10 @@ async def _run_live(
     run_ref = None
     try:
         async with agent.iter(
-            prompt, model=model, deps=deps, message_history=message_history,
+            prompt,
+            model=model,
+            deps=deps,
+            message_history=message_history,
             deferred_tool_results=deferred_tool_results,
             usage_limits=UsageLimits(request_limit=settings.run_request_limit),
         ) as agent_run:
@@ -268,7 +285,9 @@ async def _run_live(
             from central_command.runtime.resume_park import park_stopped
 
             await park_stopped(
-                session_id=session_id, agent_id=agent_id, after=after,
+                session_id=session_id,
+                agent_id=agent_id,
+                after=after,
                 task_id=task_id or (continue_state or {}).get("task_id"),
                 state=continue_state,
                 reason=hold.REASON if hold.active else "operator",
@@ -278,34 +297,43 @@ async def _run_live(
             from central_command.runtime.resume_park import park_continuation
 
             parked = await park_continuation(
-                session_id=session_id, agent_id=agent_id,
-                requests=settings.run_request_limit, windows=window,
-                after=after, state=continue_state,
+                session_id=session_id,
+                agent_id=agent_id,
+                requests=settings.run_request_limit,
+                windows=window,
+                after=after,
+                state=continue_state,
                 # The orchestrator's project task is in the loop STATE, not in
                 # `task_id` — `_reject_batch` and `maybe_resume` deliberately
                 # pass no `task_id` (the task is already IN_PROGRESS from the
                 # first round). The Inbox item still belongs to that task.
                 task_id=task_id or (continue_state or {}).get("task_id"),
             )
-            raise RunWindowExhausted(
-                session_id, parked["item_id"], parked["body"]
-            ) from exc
-        if (getattr(deps, "park_reads", False) and tail_is_request
-                and classify_failure(exc) == TRANSIENT):
+            raise RunWindowExhausted(session_id, parked["item_id"], parked["body"]) from exc
+        if (
+            getattr(deps, "park_reads", False)
+            and tail_is_request
+            and classify_failure(exc) == TRANSIENT
+        ):
             from central_command.contract.dependencies import failed_dependencies
             from central_command.runtime.resume_park import park_turn
 
             stored = await park_turn(
-                session_id=session_id, after=after, error=exc,
+                session_id=session_id,
+                after=after,
+                error=exc,
                 task_id=task_id or (continue_state or {}).get("task_id"),
-                state=continue_state, window=window, attempts=park_attempts,
+                state=continue_state,
+                window=window,
+                attempts=park_attempts,
                 dependencies=list(failed_dependencies(exc)),
             )
             raise RunParked(session_id, stored) from exc
         from central_command.runtime.converse import land_session
 
-        await land_session(session_id, failed=True, agent_id=agent_id,
-                           reason=f"{type(exc).__name__}: {exc}")
+        await land_session(
+            session_id, failed=True, agent_id=agent_id, reason=f"{type(exc).__name__}: {exc}"
+        )
         raise
 
 
@@ -330,9 +358,13 @@ def _total_tokens(result) -> int:
 
 
 async def ingest_and_propose(
-    email_text: str, model=None, thread: ThreadContext | None = None,
-    context: dict | None = None, session_id: str | None = None,
-    rerun_of: str | None = None, source_texts: list[str] | None = None,
+    email_text: str,
+    model=None,
+    thread: ThreadContext | None = None,
+    context: dict | None = None,
+    session_id: str | None = None,
+    rerun_of: str | None = None,
+    source_texts: list[str] | None = None,
 ) -> dict:
     """Run inbox-triage over one email (or a thread bundle) and park what it
     proposes.
@@ -345,16 +377,16 @@ async def ingest_and_propose(
     pass nothing and are checked against `email_text` itself, which on those
     paths IS the mail.
     """
-    await repo.upsert_agent(
-        AGENT_ID, "Inbox Triage", "", "triage email into Jira proposals"
-    )
+    await repo.upsert_agent(AGENT_ID, "Inbox Triage", "", "triage email into Jira proposals")
     # The session id is minted BEFORE the deps, not just before the run: a
     # `declare_gap` call on this run records itself with `ref_id=deps.session_id`,
     # and a gap the operator cannot trace back to a transcript is a gap they
     # cannot act on. A re-run brings the id its old session already names.
     session_id = session_id or "sess_" + uuid.uuid4().hex[:12]
     deps = TriageDeps(
-        thread=thread or ThreadContext(), agent_id=AGENT_ID, session_id=session_id,
+        thread=thread or ThreadContext(),
+        agent_id=AGENT_ID,
+        session_id=session_id,
         item_id=(context or {}).get("item_id"),
     )
     # The governed charter (M11): the DB's CURRENT version wins; no version rows
@@ -366,13 +398,20 @@ async def ingest_and_propose(
 
     caps, catalog = await skills_mod.loadout(AGENT_ID)
     agent = await build_agent(
-        model=model, charter=await load_charter(AGENT_ID),
+        model=model,
+        charter=await load_charter(AGENT_ID),
         packs=await granted_packs(AGENT_ID),
-        capabilities=caps, skills_catalog=catalog,
+        capabilities=caps,
+        skills_catalog=catalog,
         team_section=await standing_sections(AGENT_ID),
     )
     result = await _run_live(
-        agent, email_text, model=model, deps=deps, agent_id=AGENT_ID, session_id=session_id,
+        agent,
+        email_text,
+        model=model,
+        deps=deps,
+        agent_id=AGENT_ID,
+        session_id=session_id,
         rerun_of=rerun_of,
     )
 
@@ -386,8 +425,12 @@ async def ingest_and_propose(
         from central_command.runtime.converse import land_session
 
         await land_session(session_id, agent_id=AGENT_ID)
-        return {"deferred": False, "output": str(result.output), "tokens": tokens,
-                "session_id": session_id}
+        return {
+            "deferred": False,
+            "output": str(result.output),
+            "tokens": tokens,
+            "session_id": session_id,
+        }
 
     # Classify before parking — "deferred = proposal" is the assumption that
     # broke `run_task` and the coach before this path, each when a second kind
@@ -401,7 +444,10 @@ async def ingest_and_propose(
         from central_command.runtime.questions import park_question
 
         asked = await park_question(
-            session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+            session_id=session_id,
+            agent_id=AGENT_ID,
+            result=result,
+            call=call,
         )
         return {**asked, "tokens": tokens}
     # Triage consults the specialists (jira-expert for project/convention
@@ -411,14 +457,20 @@ async def ingest_and_propose(
         from central_command.runtime.consult import park_consult_wait
 
         waited = await park_consult_wait(
-            session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+            session_id=session_id,
+            agent_id=AGENT_ID,
+            result=result,
+            call=call,
         )
         return {**waited, "tokens": tokens}
     if kind == "task_wait":
         from central_command.runtime.consult import park_task_wait_deferred
 
         waited = await park_task_wait_deferred(
-            session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+            session_id=session_id,
+            agent_id=AGENT_ID,
+            result=result,
+            call=call,
         )
         return {**waited, "tokens": tokens}
     if kind != "proposal":
@@ -429,7 +481,9 @@ async def ingest_and_propose(
 
         await land_session(session_id, agent_id=AGENT_ID)
         return {
-            "deferred": False, "tokens": tokens, "session_id": session_id,
+            "deferred": False,
+            "tokens": tokens,
+            "session_id": session_id,
             "output": (
                 f"(reached for `{getattr(call, 'tool_name', '?')}`, which the "
                 "email path cannot drive)"
@@ -453,18 +507,22 @@ async def ingest_and_propose(
     # quote, and the record — never the agent's `source_ref` — says which.
     judged = verified_email_evidence(
         proposal_from_call(call, metadata=_meta).evidence,
-        [*(source_texts if source_texts is not None else [email_text]),
-         *read_mail_sources(result.all_messages())],
+        [
+            *(source_texts if source_texts is not None else [email_text]),
+            *read_mail_sources(result.all_messages()),
+        ],
     )
     # Hand the seam a list only when a verdict was recorded: `park_proposal`
     # runs its own `charter.update` citation check when it is given None, and
     # a list that judged nothing would silently bypass it on this door.
-    evidence = (
-        judged if any(e.get("claim_matches_source") is not None for e in judged) else None
-    )
+    evidence = judged if any(e.get("claim_matches_source") is not None for e in judged) else None
     parked = await park_proposal(
-        session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
-        context=context, evidence=evidence,
+        session_id=session_id,
+        agent_id=AGENT_ID,
+        result=result,
+        call=call,
+        context=context,
+        evidence=evidence,
     )
     proposal, proposal_id = parked["proposal"], parked["proposal_id"]
     return {
@@ -480,8 +538,7 @@ async def ingest_and_propose(
     }
 
 
-RECORD_SIGNAL_KINDS = ["task.completed", "task.failed", "gap.declared",
-                       "agent.contact_deferred"]
+RECORD_SIGNAL_KINDS = ["task.completed", "task.failed", "gap.declared", "agent.contact_deferred"]
 RECORD_SIGNAL_LIMIT = 20
 COACHING_SIGNAL_LIMIT = 50
 
@@ -513,19 +570,33 @@ async def _record_signals(agent_id: str) -> list[dict]:
             text = (p.get("outcome") or "").strip()
             if task is None or not text:
                 continue
-            out.append({"kind": "task-outcome", "event_id": e["id"], "author": "agent",
-                        "intent": f"{task['id']} — {task['title']}", "feedback": text,
-                        **_at(e)})
+            out.append(
+                {
+                    "kind": "task-outcome",
+                    "event_id": e["id"],
+                    "author": "agent",
+                    "intent": f"{task['id']} — {task['title']}",
+                    "feedback": text,
+                    **_at(e),
+                }
+            )
             continue
         if p.get("agent_id") != agent_id:
             continue
-        text = ((p.get("need") if e["kind"] == "gap.declared" else p.get("question"))
-                or "").strip()
+        text = ((p.get("need") if e["kind"] == "gap.declared" else p.get("question")) or "").strip()
         if not text:
             continue
         kind = "gap" if e["kind"] == "gap.declared" else "contact-deferred"
-        out.append({"kind": kind, "event_id": e["id"], "author": "agent",
-                    "intent": p.get("subject") or None, "feedback": text, **_at(e)})
+        out.append(
+            {
+                "kind": kind,
+                "event_id": e["id"],
+                "author": "agent",
+                "intent": p.get("subject") or None,
+                "feedback": text,
+                **_at(e),
+            }
+        )
     return out[-RECORD_SIGNAL_LIMIT:]  # ponytail: newest N; paginate if the picker outgrows it
 
 
@@ -541,9 +612,16 @@ async def _reflection_signals(agent_id: str) -> list[dict]:
         p = e.get("payload") or {}
         if p.get("agent_id") != agent_id or not (p.get("observation") or "").strip():
             continue
-        out.append({"kind": "self_reflection", "event_id": e["id"], "author": "agent",
-                    "intent": p.get("source_session_id"), "feedback": p["observation"],
-                    **_at(e)})
+        out.append(
+            {
+                "kind": "self_reflection",
+                "event_id": e["id"],
+                "author": "agent",
+                "intent": p.get("source_session_id"),
+                "feedback": p["observation"],
+                **_at(e),
+            }
+        )
     return out
 
 
@@ -561,15 +639,20 @@ async def gather_coaching_signals(agent_id: str) -> list[dict]:
         if payload.get("verdict") != "rejected" or e["ref_id"] not in props:
             continue
         if payload.get("feedback"):
-            signals.append({"kind": "rejection", "event_id": e["id"],
-                            "intent": props[e["ref_id"]]["intent"],
-                            "feedback": payload["feedback"], **_at(e)})
+            signals.append(
+                {
+                    "kind": "rejection",
+                    "event_id": e["id"],
+                    "intent": props[e["ref_id"]]["intent"],
+                    "feedback": payload["feedback"],
+                    **_at(e),
+                }
+            )
     if agent_id == "inbox-triage":
         for e in await repo.list_events_of_kinds(["work.reopened"]):
             note = (e.get("payload") or {}).get("note")
             if note:
-                signals.append({"kind": "reopen", "event_id": e["id"], "feedback": note,
-                                **_at(e)})
+                signals.append({"kind": "reopen", "event_id": e["id"], "feedback": note, **_at(e)})
     try:
         signals += await _record_signals(agent_id)
         signals += await _reflection_signals(agent_id)
@@ -615,8 +698,11 @@ def _signal_line(i: int, s: dict) -> str:
         "contact-deferred": "you had a question but the contact was deferred",
         "self_reflection": "you nominated yourself for coaching when a session closed",
     }[s["kind"]]
-    label = ("THE OPERATOR'S EXACT WORDS" if s.get("author", "operator") == "operator"
-             else "YOUR OWN EXACT WORDS, from the record")
+    label = (
+        "THE OPERATOR'S EXACT WORDS"
+        if s.get("author", "operator") == "operator"
+        else "YOUR OWN EXACT WORDS, from the record"
+    )
     return (
         f"[{i + 1}] (event:{s['event_id']}) context — {context}.\n"
         f"    {label} (quote from this line and no other):\n"
@@ -703,9 +789,7 @@ async def _verified_evidence(evidence, signals: list[dict]) -> list[dict]:
             if cited is None:
                 d["claim_matches_source"] = False
                 d["citation"] = "unresolved"
-                d["locator"] = (
-                    f"UNVERIFIABLE — {d.get('source_ref')!r} does not name an event"
-                )
+                d["locator"] = f"UNVERIFIABLE — {d.get('source_ref')!r} does not name an event"
             elif signal is not None:
                 author = signal.get("author", "operator")
                 if d.get("kind") == "operator" and author != "operator":
@@ -736,9 +820,7 @@ async def _verified_evidence(evidence, signals: list[dict]) -> list[dict]:
                 if row is None:
                     d["claim_matches_source"] = False
                     d["citation"] = "unresolved"
-                    d["locator"] = (
-                        f"UNVERIFIABLE — event:{cited} does not exist in the record"
-                    )
+                    d["locator"] = f"UNVERIFIABLE — event:{cited} does not exist in the record"
                 else:
                     # `kind='operator'` claims operator provenance — the check
                     # must actually gate on WHO wrote the cited event, not just
@@ -776,7 +858,8 @@ def _coach_prompt(agent_id: str, charter: str, version: int, signals: list[dict]
         f"COACHING SESSION for the agent '{agent_id}'.\n\n"
         f"{agent_id}'s CURRENT CHARTER (v{version}):\n---\n{charter}\n---\n\n"
         "THE OPERATOR'S CURATED FEEDBACK (their selection — the foreground):\n"
-        + "\n".join(lines) + "\n\n"
+        + "\n".join(lines)
+        + "\n\n"
         "If this feedback implies a durable rule the charter is missing (or one "
         "it states badly), call propose_action with ONE action:\n"
         f"  capability = 'charter.update'\n"
@@ -827,11 +910,15 @@ async def coach_loadout() -> dict:
     charter = await load_charter(COACH_ID) or builtin_charter(COACH_ID)
     packs = await granted_packs(COACH_ID)
     caps, catalog = await skills_mod.loadout(COACH_ID)
-    return {"charter": charter, "packs": packs, "capabilities": caps,
-            "skills_catalog": catalog,
-            "mcp_toolsets": await packs_mod.mcp_toolsets_for(COACH_ID, packs),
-            "mcp_section": await packs_mod.mcp_charter_section(COACH_ID, packs),
-            "team_section": await standing_sections(COACH_ID)}
+    return {
+        "charter": charter,
+        "packs": packs,
+        "capabilities": caps,
+        "skills_catalog": catalog,
+        "mcp_toolsets": await packs_mod.mcp_toolsets_for(COACH_ID, packs),
+        "mcp_section": await packs_mod.mcp_charter_section(COACH_ID, packs),
+        "team_section": await standing_sections(COACH_ID),
+    }
 
 
 async def build_coach_agent(loadout: dict, model=None):
@@ -846,8 +933,12 @@ async def build_coach_agent(loadout: dict, model=None):
     from central_command.runtime.agent import build_hired_agent
 
     return await build_hired_agent(
-        COACH_ID, model=model, charter=loadout["charter"], packs=loadout["packs"],
-        capabilities=loadout["capabilities"], skills_catalog=loadout["skills_catalog"],
+        COACH_ID,
+        model=model,
+        charter=loadout["charter"],
+        packs=loadout["packs"],
+        capabilities=loadout["capabilities"],
+        skills_catalog=loadout["skills_catalog"],
         extra_toolsets=loadout.get("mcp_toolsets", ()),
         mcp_section=loadout.get("mcp_section", ""),
         team_section=loadout.get("team_section", ""),
@@ -890,11 +981,14 @@ async def run_coach(
         wanted = set(signal_ids)
         signals = [s for s in signals if s["event_id"] in wanted]
     if note and note.strip():
-        signals.append({"kind": "note", "event_id": note_event_id or 0,
-                        "feedback": note.strip()})
+        signals.append({"kind": "note", "event_id": note_event_id or 0, "feedback": note.strip()})
     if not signals:
-        return {"deferred": False, "output": "no coaching signals selected",
-                "signals": 0, "target": agent_id}
+        return {
+            "deferred": False,
+            "output": "no coaching signals selected",
+            "signals": 0,
+            "target": agent_id,
+        }
 
     current = await repo.current_charter(agent_id)
     if current is None:
@@ -928,8 +1022,14 @@ async def run_coach(
         from central_command.runtime.converse import land_session
 
         await land_session(session_id, agent_id=COACH_ID)
-        return {"deferred": False, "output": str(result.output), "target": agent_id,
-                "signals": len(signals), "tokens": tokens, "session_id": session_id}
+        return {
+            "deferred": False,
+            "output": str(result.output),
+            "target": agent_id,
+            "signals": len(signals),
+            "tokens": tokens,
+            "session_id": session_id,
+        }
 
     # Classify before parking. The coach holds the ask-operator grant and its
     # charter invites it to hesitate when a request is too vague — the same
@@ -942,7 +1042,10 @@ async def run_coach(
         from central_command.runtime.questions import park_question
 
         asked = await park_question(
-            session_id=session_id, agent_id=COACH_ID, result=result, call=call,
+            session_id=session_id,
+            agent_id=COACH_ID,
+            result=result,
+            call=call,
             task_id=task_id,
         )
         return {**asked, "tokens": tokens, "target": agent_id, "signals": len(signals)}
@@ -950,46 +1053,66 @@ async def run_coach(
         from central_command.runtime.consult import park_consult_wait
 
         waited = await park_consult_wait(
-            session_id=session_id, agent_id=COACH_ID, result=result, call=call,
+            session_id=session_id,
+            agent_id=COACH_ID,
+            result=result,
+            call=call,
             task_id=task_id,
         )
-        return {**waited, "tokens": tokens, "target": agent_id,
-                "signals": len(signals)}
+        return {**waited, "tokens": tokens, "target": agent_id, "signals": len(signals)}
     if kind == "task_wait":
         from central_command.runtime.consult import park_task_wait_deferred
 
         waited = await park_task_wait_deferred(
-            session_id=session_id, agent_id=COACH_ID, result=result, call=call,
+            session_id=session_id,
+            agent_id=COACH_ID,
+            result=result,
+            call=call,
         )
-        return {**waited, "tokens": tokens, "target": agent_id,
-                "signals": len(signals)}
+        return {**waited, "tokens": tokens, "target": agent_id, "signals": len(signals)}
     if kind != "proposal":
         from central_command.runtime.converse import land_session
 
         await land_session(session_id, agent_id=COACH_ID)
         return {
-            "deferred": False, "tokens": tokens, "session_id": session_id,
-            "target": agent_id, "signals": len(signals),
+            "deferred": False,
+            "tokens": tokens,
+            "session_id": session_id,
+            "target": agent_id,
+            "signals": len(signals),
             "output": (
-                f"(reached for `{getattr(call, 'tool_name', '?')}`, which the "
-                "coach cannot drive)"
+                f"(reached for `{getattr(call, 'tool_name', '?')}`, which the coach cannot drive)"
             ),
         }
 
     parked = await park_proposal(
-        session_id=session_id, agent_id=COACH_ID, result=result, call=call,
+        session_id=session_id,
+        agent_id=COACH_ID,
+        result=result,
+        call=call,
         evidence=await _verified_evidence(deferred_proposal(result, call).evidence, signals),
         context={"coached": True, "signals": len(signals), "target": agent_id},
     )
-    return {"deferred": True, "session_id": session_id, "target": agent_id,
-            "proposal_id": parked["proposal_id"], "intent": parked["proposal"].intent,
-            "signals": len(signals), "tokens": tokens}
+    return {
+        "deferred": True,
+        "session_id": session_id,
+        "target": agent_id,
+        "proposal_id": parked["proposal_id"],
+        "intent": parked["proposal"].intent,
+        "signals": len(signals),
+        "tokens": tokens,
+    }
 
 
 async def run_task(
-    agent_id: str, instruction: str, model=None, parent_session_id: str | None = None,
-    task_id: str | None = None, park_reads: bool = False,
-    session_id: str | None = None, rerun_of: str | None = None,
+    agent_id: str,
+    instruction: str,
+    model=None,
+    parent_session_id: str | None = None,
+    task_id: str | None = None,
+    park_reads: bool = False,
+    session_id: str | None = None,
+    rerun_of: str | None = None,
 ) -> dict:
     """An operator-tasked run (Phase 4): the operator's instruction is trusted
     input, and any proposal the agent makes goes through the SAME gate as
@@ -1027,9 +1150,14 @@ async def run_task(
 
         await ensure_registered()
         agent = await build_jira_expert(
-            model=model, charter=await load_charter(agent_id), packs=packs,
-            capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section, team_section=team,
+            model=model,
+            charter=await load_charter(agent_id),
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
+            team_section=team,
         )
     elif agent_id == "confluence-expert":
         from central_command.runtime.confluence_expert import (
@@ -1039,33 +1167,54 @@ async def run_task(
 
         await ensure_registered()
         agent = await build_confluence_expert(
-            model=model, charter=await load_charter(agent_id), packs=packs,
-            capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section, team_section=team,
+            model=model,
+            charter=await load_charter(agent_id),
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
+            team_section=team,
         )
     elif agent_id == "wiki-agent":
         from central_command.runtime.wiki_agent import build_wiki_agent, ensure_registered
 
         await ensure_registered()
         agent = await build_wiki_agent(
-            model=model, charter=await load_charter(agent_id), packs=packs,
-            capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section, team_section=team,
+            model=model,
+            charter=await load_charter(agent_id),
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
+            team_section=team,
         )
     elif agent_id == "litellm-manager":
         from central_command.runtime.litellm_manager import build_litellm_manager, ensure_registered
 
         await ensure_registered()
         agent = await build_litellm_manager(
-            model=model, charter=await load_charter(agent_id), packs=packs,
-            capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section, team_section=team,
+            model=model,
+            charter=await load_charter(agent_id),
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
+            team_section=team,
         )
     else:  # a hired, taskable roster agent — the generic pack-built runner
         agent = await build_hired_agent(
-            agent_id, model=model, charter=await load_charter(agent_id), packs=packs,
-            capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section, team_section=team,
+            agent_id,
+            model=model,
+            charter=await load_charter(agent_id),
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
+            team_section=team,
         )
     # A task assigned BY the orchestrator (D7 phase 2) is framed honestly as
     # such; its instructions were authored by an agent, not the operator —
@@ -1084,18 +1233,21 @@ async def run_task(
         )
     else:
         prompt = (
-            "OPERATOR TASK (from your team lead — trusted, needs no corroboration): "
-            f"{instruction}"
+            f"OPERATOR TASK (from your team lead — trusted, needs no corroboration): {instruction}"
         )
     session_id = session_id or "sess_" + uuid.uuid4().hex[:12]
     try:
         result = await _run_live(
-            agent, prompt, model=model,
-            deps=TriageDeps(session_id=session_id, agent_id=agent_id,
-                            park_reads=park_reads),
-            agent_id=agent_id, session_id=session_id,
-            parent_session_id=parent_session_id, task_id=task_id,
-            continuable=True, rerun_of=rerun_of,
+            agent,
+            prompt,
+            model=model,
+            deps=TriageDeps(session_id=session_id, agent_id=agent_id, park_reads=park_reads),
+            agent_id=agent_id,
+            session_id=session_id,
+            parent_session_id=parent_session_id,
+            task_id=task_id,
+            continuable=True,
+            rerun_of=rerun_of,
         )
     except RunWindowExhausted as e:
         return window_outcome(e)
@@ -1104,7 +1256,10 @@ async def run_task(
     except RunParked as e:
         return parked_turn_outcome(e)
     return await _land(
-        result, session_id=session_id, agent_id=agent_id, task_id=task_id,
+        result,
+        session_id=session_id,
+        agent_id=agent_id,
+        task_id=task_id,
         tokens=_total_tokens(result),
     )
 
@@ -1117,9 +1272,16 @@ def window_outcome(e: RunWindowExhausted, tokens: int = 0) -> dict:
     already knows how to put a task into REVIEW behind one. `tier` says which
     wait it is. One copy, because the first window and every later one land
     identically."""
-    return {"deferred": True, "asked": True, "window_exhausted": True,
-            "item_id": e.item_id, "session_id": e.session_id,
-            "question": e.body, "tier": "continue", "tokens": tokens}
+    return {
+        "deferred": True,
+        "asked": True,
+        "window_exhausted": True,
+        "item_id": e.item_id,
+        "session_id": e.session_id,
+        "question": e.body,
+        "tier": "continue",
+        "tokens": tokens,
+    }
 
 
 def stopped_outcome(e: RunStopped, tokens: int = 0) -> dict:
@@ -1130,8 +1292,13 @@ def stopped_outcome(e: RunStopped, tokens: int = 0) -> dict:
     `deferred` fall through to their "nothing to park" leg, and the ones that
     care check `stopped`. The task simply stays IN_PROGRESS: the work is paused,
     not finished, and resuming continues it in the same session."""
-    return {"deferred": False, "stopped": True, "session_id": e.session_id,
-            "output": "stopped by the operator", "tokens": tokens}
+    return {
+        "deferred": False,
+        "stopped": True,
+        "session_id": e.session_id,
+        "output": "stopped by the operator",
+        "tokens": tokens,
+    }
 
 
 def parked_outcome(stored: dict, *, session_id: str, tokens: int = 0) -> dict:
@@ -1141,11 +1308,16 @@ def parked_outcome(stored: dict, *, session_id: str, tokens: int = 0) -> dict:
     `asked` (nothing is in the Inbox), so no caller resolves the task DONE or
     moves it to REVIEW. The task stays IN_PROGRESS on this session; the retry
     sweep resumes it when every dependency in `dependencies` probes up."""
-    return {"deferred": False, "parked": True, "session_id": session_id,
-            "kind": stored.get("kind") or "read",
-            "tool": stored.get("tool"),
-            "dependencies": list(stored.get("dependencies") or []),
-            "output": "waiting on a dependency outage", "tokens": tokens}
+    return {
+        "deferred": False,
+        "parked": True,
+        "session_id": session_id,
+        "kind": stored.get("kind") or "read",
+        "tool": stored.get("tool"),
+        "dependencies": list(stored.get("dependencies") or []),
+        "output": "waiting on a dependency outage",
+        "tokens": tokens,
+    }
 
 
 def parked_turn_outcome(e: RunParked, tokens: int = 0) -> dict:
@@ -1172,21 +1344,27 @@ async def _land(
         from central_command.runtime.converse import land_session
 
         await land_session(session_id, agent_id=agent_id)
-        return {"deferred": False, "output": str(result.output), "tokens": tokens,
-                "session_id": session_id}
+        return {
+            "deferred": False,
+            "output": str(result.output),
+            "tokens": tokens,
+            "session_id": session_id,
+        }
 
     # Classify before parking. This path assumed every deferral was a proposal,
     # which held only while the orchestrator was the sole agent that could
     # `ask_operator`; the moment every agent could, a question here would have
     # been handed to the Proposal validator — the same break the operator hit in chat.
-    metadata = (getattr(result.output, "metadata", None) or {}).get(
-        call.tool_call_id) or {}
+    metadata = (getattr(result.output, "metadata", None) or {}).get(call.tool_call_id) or {}
     kind = classify_deferred(call, metadata)
     if kind == "ask":
         from central_command.runtime.questions import park_question
 
         asked = await park_question(
-            session_id=session_id, agent_id=agent_id, result=result, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=result,
+            call=call,
             task_id=task_id,
         )
         return {**asked, "tokens": tokens}
@@ -1194,7 +1372,10 @@ async def _land(
         from central_command.runtime.consult import park_consult_wait
 
         waited = await park_consult_wait(
-            session_id=session_id, agent_id=agent_id, result=result, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=result,
+            call=call,
             task_id=task_id,
         )
         return {**waited, "tokens": tokens}
@@ -1203,7 +1384,10 @@ async def _land(
         from central_command.runtime.consult import park_task_wait_deferred
 
         waited = await park_task_wait_deferred(
-            session_id=session_id, agent_id=agent_id, result=result, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=result,
+            call=call,
         )
         return {**waited, "tokens": tokens}
     if kind == "read":
@@ -1212,8 +1396,12 @@ async def _land(
         from central_command.runtime.resume_park import park_read
 
         stored = await park_read(
-            session_id=session_id, result=result, call=call, metadata=metadata,
-            after="task", task_id=task_id,
+            session_id=session_id,
+            result=result,
+            call=call,
+            metadata=metadata,
+            after="task",
+            task_id=task_id,
         )
         return parked_outcome(stored, session_id=session_id, tokens=tokens)
     if kind != "proposal":
@@ -1229,7 +1417,9 @@ async def _land(
 
         await land_session(session_id, agent_id=agent_id)
         return {
-            "deferred": False, "tokens": tokens, "session_id": session_id,
+            "deferred": False,
+            "tokens": tokens,
+            "session_id": session_id,
             "output": (
                 f"(reached for `{getattr(call, 'tool_name', '?')}`, which only "
                 "works while running a project — not on an assigned task)"
@@ -1237,7 +1427,10 @@ async def _land(
         }
 
     parked = await park_proposal(
-        session_id=session_id, agent_id=agent_id, result=result, call=call,
+        session_id=session_id,
+        agent_id=agent_id,
+        result=result,
+        call=call,
         context={"tasked": True},
     )
     return {

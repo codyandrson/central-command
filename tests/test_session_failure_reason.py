@@ -49,8 +49,7 @@ def test_every_failed_session_records_why():
     offenders = _failed_landings_without_reason()
     assert not offenders, (
         "land_session(failed=True) must pass `reason=` — a failure that records no "
-        "reason leaves the operator nothing to diagnose from:\n  "
-        + "\n  ".join(offenders)
+        "reason leaves the operator nothing to diagnose from:\n  " + "\n  ".join(offenders)
     )
 
 

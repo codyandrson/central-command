@@ -37,8 +37,8 @@ class SpanMismatch(ValueError):
         self.count = count
         super().__init__(
             "the span was not found in the document's current text"
-            if count == 0 else
-            f"the span occurs {count} times in the document's current text"
+            if count == 0
+            else f"the span occurs {count} times in the document's current text"
         )
 
 
@@ -66,8 +66,10 @@ def apply_exact_span(text: str, find: str, replace: str) -> str:
     if count != 1:
         err = SpanMismatch(count)
         if "\r" in text and "\r" not in find and "\n" in find:
-            err.args = (str(err) + " (the document mixes CRLF and LF line "
-                        "endings, so a multi-line span must match them exactly)",)
+            err.args = (
+                str(err) + " (the document mixes CRLF and LF line "
+                "endings, so a multi-line span must match them exactly)",
+            )
         raise err
     return text.replace(find, replace, 1)
 
@@ -87,13 +89,13 @@ def loaded_from_messages(messages) -> list[str]:
 # read boundary, and a refusal that differed (or a span check that ran) would
 # let an agent probe a skill it was never granted.
 NOT_GRANTED = (
-    "refused: a correction can be proposed only for a skill granted to you; "
-    "nothing was proposed"
+    "refused: a correction can be proposed only for a skill granted to you; nothing was proposed"
 )
 
 
-async def access_refusal(agent_id: str, skill_id: str, doc_key: str,
-                         loaded: list[str]) -> str | None:
+async def access_refusal(
+    agent_id: str, skill_id: str, doc_key: str, loaded: list[str]
+) -> str | None:
     """The grant and read check, in that order, before any span is matched:
     the agent holds an active grant for `skill_id`, and this session loaded
     that skill's guidance (`loaded`, from the run's own record). For a
@@ -113,10 +115,15 @@ async def access_refusal(agent_id: str, skill_id: str, doc_key: str,
 
 
 def unified_diff(old: str, new: str, label: str) -> str:
-    return "\n".join(difflib.unified_diff(
-        old.splitlines(), new.splitlines(),
-        fromfile=f"{label} (current)", tofile=f"{label} (corrected)", lineterm="",
-    ))
+    return "\n".join(
+        difflib.unified_diff(
+            old.splitlines(),
+            new.splitlines(),
+            fromfile=f"{label} (current)",
+            tofile=f"{label} (corrected)",
+            lineterm="",
+        )
+    )
 
 
 async def current_doc(skill_id: str, doc_key: str) -> tuple[dict | None, dict | None]:
@@ -138,7 +145,13 @@ def _retry_text(skill_id: str, doc_key: str, detail: str) -> str:
 
 
 async def build_correction(
-    *, agent_id: str, skill_id: str, doc_key: str, find: str, replace: str, why: str,
+    *,
+    agent_id: str,
+    skill_id: str,
+    doc_key: str,
+    find: str,
+    replace: str,
+    why: str,
 ) -> Proposal | str:
     """The correction proposal, or the refusal text to hand back to the drafter.
 
@@ -150,8 +163,10 @@ async def build_correction(
     if not skill_id:
         return "refused: skill_id is required"
     if not (why or "").strip():
-        return ("refused: `why` is required — state the rule or pitfall the "
-                "correction teaches, in a sentence or two")
+        return (
+            "refused: `why` is required — state the rule or pitfall the "
+            "correction teaches, in a sentence or two"
+        )
     if find == replace:
         return "refused: `replace` is identical to `find`; there is nothing to correct"
     skill, doc = await current_doc(skill_id, doc_key)
@@ -160,9 +175,11 @@ async def build_correction(
     if skill.get("status") == "RETIRED":
         return f"refused: the skill '{skill_id}' is retired"
     if doc is None:
-        return (f"refused: skill '{skill_id}' has no current document '{doc_key}'. "
-                "A correction changes a document you have read; to add a new "
-                "reference document use propose_skill_doc instead.")
+        return (
+            f"refused: skill '{skill_id}' has no current document '{doc_key}'. "
+            "A correction changes a document you have read; to add a new "
+            "reference document use propose_skill_doc instead."
+        )
     try:
         content = apply_exact_span(doc["content"], find, replace)
     except SpanMismatch as e:
@@ -173,7 +190,9 @@ async def build_correction(
     label = f"{skill_id}/{doc_key} v{doc['version']}"
     diff = unified_diff(doc["content"], content, label)
     arguments = {
-        "skill_id": skill_id, "doc_key": doc_key, "title": doc["title"],
+        "skill_id": skill_id,
+        "doc_key": doc_key,
+        "title": doc["title"],
         "content": content,
         # The version the span was applied to: stamped by THIS code, never the
         # model (`park_proposal` strips one an agent wrote itself).
@@ -184,23 +203,30 @@ async def build_correction(
         # captured, no source" (`skills._guidance_text` shows both to agents).
         **({"describes": doc["describes"]} if doc.get("describes") else {}),
         **({"source_url": doc["source_url"]} if doc.get("source_url") else {}),
-        **({"captured_at": doc["captured_at"].isoformat()}
-           if doc.get("captured_at") is not None else {}),
+        **(
+            {"captured_at": doc["captured_at"].isoformat()}
+            if doc.get("captured_at") is not None
+            else {}
+        ),
     }
     return Proposal(
         intent=f"Correct the '{doc_key}' document of the skill '{skill_id}': {why.strip()}",
-        actions=[Action(
-            capability="skill.doc_add@v1",
-            arguments=arguments,
-            target_ref={"system": "central_command", "id": skill_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="authored",
-            source_ref=f"agent:{agent_id}",
-            locator=f"skill_doc {skill_id}/{doc_key} v{doc['version']} (the span quoted in `correction.find`)",
-            claim=why.strip(),
-        )],
+        actions=[
+            Action(
+                capability="skill.doc_add@v1",
+                arguments=arguments,
+                target_ref={"system": "central_command", "id": skill_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="authored",
+                source_ref=f"agent:{agent_id}",
+                locator=f"skill_doc {skill_id}/{doc_key} v{doc['version']} (the span quoted in `correction.find`)",
+                claim=why.strip(),
+            )
+        ],
         expected_effect=(
             f"skill {skill_id} carries '{doc_key}' v{doc['version'] + 1}: v{doc['version']} "
             "with exactly this change, refused at execution if the document has "

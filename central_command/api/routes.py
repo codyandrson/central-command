@@ -72,20 +72,22 @@ async def list_agents() -> dict:
     agents = []
     for a in await repo.list_agents():
         grants = await repo.list_grants(a["id"])
-        agents.append({
-            **a,
-            # '' is the UNSET sentinel in the column; the wire says null, so the
-            # cockpit renders "default" rather than an agent pinned to "".
-            "model": a["model"] or None,
-            "thinking": a["thinking"] or None,
-            "packs": [g["pack"] for g in grants if g["revoked_at"] is None],
-        })
+        agents.append(
+            {
+                **a,
+                # '' is the UNSET sentinel in the column; the wire says null, so the
+                # cockpit renders "default" rather than an agent pinned to "".
+                "model": a["model"] or None,
+                "thinking": a["thinking"] or None,
+                "packs": [g["pack"] for g in grants if g["revoked_at"] is None],
+            }
+        )
     return {"agents": agents}
 
 
 class AgentModelIn(BaseModel):
-    model: str | None = None      # '' / null clears back to the default
-    thinking: str | None = None   # a THINKING_LEVELS value; '' / null clears
+    model: str | None = None  # '' / null clears back to the default
+    thinking: str | None = None  # a THINKING_LEVELS value; '' / null clears
 
 
 @router.post("/agents/{agent_id}/model")
@@ -104,19 +106,21 @@ async def set_agent_model(agent_id: str, body: AgentModelIn) -> dict:
 
     thinking = (body.thinking or "").strip()
     if thinking and thinking not in THINKING_LEVELS:
-        raise HTTPException(
-            422, f"thinking must be one of {THINKING_LEVELS} (got {thinking!r})")
+        raise HTTPException(422, f"thinking must be one of {THINKING_LEVELS} (got {thinking!r})")
     model = (body.model or "").strip()
     row = await repo.set_agent_model(agent_id, model, thinking)
     if row is None:
         raise HTTPException(404, f"agent {agent_id!r} does not exist")
     await events.emit(
-        "agent.model_set", ref_id=agent_id,
+        "agent.model_set",
+        ref_id=agent_id,
         payload={"model": model or None, "thinking": thinking or None},
         actor="operator",
     )
-    return {"ok": True, "agent": {**row, "model": row["model"] or None,
-                                  "thinking": row["thinking"] or None}}
+    return {
+        "ok": True,
+        "agent": {**row, "model": row["model"] or None, "thinking": row["thinking"] or None},
+    }
 
 
 @router.get("/packs")
@@ -125,20 +129,22 @@ async def list_packs() -> dict:
     the gated capabilities each pack lets an agent propose."""
     from central_command.runtime.packs import PACKS
 
-    return {"packs": [
-        {
-            "name": p.name,
-            "description": p.description,
-            "tools": list(p.tool_names),
-            "capabilities": [c.name for c in p.capabilities],
-        }
-        for p in PACKS.values()
-    ]}
+    return {
+        "packs": [
+            {
+                "name": p.name,
+                "description": p.description,
+                "tools": list(p.tool_names),
+                "capabilities": [c.name for c in p.capabilities],
+            }
+            for p in PACKS.values()
+        ]
+    }
 
 
 class HireIn(BaseModel):
-    name: str                      # display name; the id is derived from it
-    mission: str                   # what this agent exists to do (fills the template)
+    name: str  # display name; the id is derived from it
+    mission: str  # what this agent exists to do (fills the template)
     template: str = "general"
     packs: list[str] | None = None  # override the template's default grants
 
@@ -156,8 +162,9 @@ async def hire_agent(body: HireIn) -> dict:
 
     tpl = TEMPLATES.get(body.template)
     if tpl is None:
-        raise HTTPException(422, f"unknown template {body.template!r} "
-                                 f"(have: {', '.join(TEMPLATES)})")
+        raise HTTPException(
+            422, f"unknown template {body.template!r} (have: {', '.join(TEMPLATES)})"
+        )
     if not body.name.strip():
         raise HTTPException(422, "the agent needs a name")
     if not body.mission.strip():
@@ -173,20 +180,29 @@ async def hire_agent(body: HireIn) -> dict:
         # One staffing agent per team (the EA planning design, D10): a second
         # would be a second voice on who takes the same work. A RETIRED one
         # does not count; reactivating it is the way back to the old one.
-        held = [a["id"] for a in await repo.list_agents(include_retired=False)
-                if a.get("template") == tpl.id]
+        held = [
+            a["id"]
+            for a in await repo.list_agents(include_retired=False)
+            if a.get("template") == tpl.id
+        ]
         if held:
-            raise HTTPException(409, f"the team already has an active agent hired "
-                                     f"from {tpl.id!r}: {', '.join(held)}")
+            raise HTTPException(
+                409,
+                f"the team already has an active agent hired from {tpl.id!r}: {', '.join(held)}",
+            )
 
     agent_id = agent_id_for(body.name)
-    charter = tpl.render(name=body.name.strip(), mission=body.mission.strip(),
-                         packs=packs)
+    charter = tpl.render(name=body.name.strip(), mission=body.mission.strip(), packs=packs)
     try:
         row = await repo.hire_agent(
-            agent_id, body.name.strip(), tpl.role_for(body.mission.strip()),
-            charter, packs, template=tpl.id,
-            taskable=tpl.taskable, consultable=tpl.consultable,
+            agent_id,
+            body.name.strip(),
+            tpl.role_for(body.mission.strip()),
+            charter,
+            packs,
+            template=tpl.id,
+            taskable=tpl.taskable,
+            consultable=tpl.consultable,
             conversational=tpl.conversational,
         )
     except ValueError as e:
@@ -194,8 +210,12 @@ async def hire_agent(body: HireIn) -> dict:
     await events.emit(
         "agent.hired",
         ref_id=agent_id,
-        payload={"name": body.name.strip(), "template": tpl.id,
-                 "mission": body.mission.strip()[:300], "packs": packs},
+        payload={
+            "name": body.name.strip(),
+            "template": tpl.id,
+            "mission": body.mission.strip()[:300],
+            "packs": packs,
+        },
         actor="operator",
     )
     return {"ok": True, "agent": row}
@@ -214,8 +234,10 @@ async def retire_agent(agent_id: str, body: RetireIn) -> dict:
     if not await repo.retire_agent(agent_id, body.reason.strip()):
         raise HTTPException(409, f"agent {agent_id!r} is not ACTIVE (or does not exist)")
     await events.emit(
-        "agent.retired", ref_id=agent_id,
-        payload={"reason": body.reason.strip()}, actor="operator",
+        "agent.retired",
+        ref_id=agent_id,
+        payload={"reason": body.reason.strip()},
+        actor="operator",
     )
     return {"ok": True}
 
@@ -255,8 +277,10 @@ async def grant_pack(agent_id: str, body: GrantIn) -> dict:
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     await events.emit(
-        "agent.pack_granted", ref_id=agent_id,
-        payload={"pack": body.pack}, actor="operator",
+        "agent.pack_granted",
+        ref_id=agent_id,
+        payload={"pack": body.pack},
+        actor="operator",
     )
     return {"grants": await repo.list_grants(agent_id)}
 
@@ -272,7 +296,8 @@ async def revoke_pack(agent_id: str, pack: str, body: RevokeIn) -> dict:
     if not await repo.revoke_pack(agent_id, pack, (body.reason or "").strip() or None):
         raise HTTPException(409, f"{agent_id!r} holds no active grant for {pack!r}")
     await events.emit(
-        "agent.pack_revoked", ref_id=agent_id,
+        "agent.pack_revoked",
+        ref_id=agent_id,
         payload={"pack": pack, "reason": (body.reason or "").strip() or None},
         actor="operator",
     )
@@ -309,10 +334,12 @@ async def list_mcp_servers_and_tools() -> dict:
             {**t, "overrides": active.get((t["server_id"], t["tool_name"]), [])}
         )
     holders = await repo.list_mcp_server_holders()
-    return {"servers": [
-        {**row, "tools": by_server.get(row["id"], []), "holders": holders.get(row["id"], [])}
-        for row in await repo.list_mcp_servers()
-    ]}
+    return {
+        "servers": [
+            {**row, "tools": by_server.get(row["id"], []), "holders": holders.get(row["id"], [])}
+            for row in await repo.list_mcp_servers()
+        ]
+    }
 
 
 class MCPToolGateIn(BaseModel):
@@ -328,9 +355,9 @@ async def set_mcp_tool_gate(server_id: str, tool_name: str, body: MCPToolGateIn)
     if not await repo.set_mcp_tool_default_gate(server_id, tool_name, body.default_gate):
         raise HTTPException(404, f"no mcp_tool {server_id!r}/{tool_name!r}")
     await events.emit(
-        "mcp.gate_changed", ref_id=server_id,
-        payload={"server_id": server_id, "tool_name": tool_name,
-                 "default_gate": body.default_gate},
+        "mcp.gate_changed",
+        ref_id=server_id,
+        payload={"server_id": server_id, "tool_name": tool_name, "default_gate": body.default_gate},
         actor="operator",
     )
     return {"server_id": server_id, "tool_name": tool_name, "default_gate": body.default_gate}
@@ -359,8 +386,9 @@ async def get_agent_mcp_overrides(agent_id: str) -> dict:
 
     if await repo.get_agent(agent_id) is None:
         raise HTTPException(404, f"unknown agent {agent_id!r}")
-    defaults = {(t["server_id"], t["tool_name"]): t["default_gate"]
-                for t in await repo.list_mcp_tools()}
+    defaults = {
+        (t["server_id"], t["tool_name"]): t["default_gate"] for t in await repo.list_mcp_tools()
+    }
     overrides = [
         {**o, "default_gate": defaults.get((o["server_id"], o["tool_name"]))}
         for o in await repo.list_agent_mcp_overrides(agent_id)
@@ -373,21 +401,25 @@ async def get_agent_mcp_overrides(agent_id: str) -> dict:
         server = await repo.get_mcp_server(server_id)
         if server is None:
             continue
-        servers.append({
-            "server_id": server_id,
-            "status": server["status"],
-            "retired_at": server["retired_at"],
-            "tools": [
-                {
-                    "tool_name": t["tool_name"],
-                    "description": t["description"],
-                    "default_gate": t["default_gate"],
-                    "effective_gate": gates.get((server_id, t["tool_name"]), t["default_gate"]),
-                    "source": "override" if (server_id, t["tool_name"]) in decided else "default",
-                }
-                for t in await repo.list_mcp_tools(server_id)
-            ],
-        })
+        servers.append(
+            {
+                "server_id": server_id,
+                "status": server["status"],
+                "retired_at": server["retired_at"],
+                "tools": [
+                    {
+                        "tool_name": t["tool_name"],
+                        "description": t["description"],
+                        "default_gate": t["default_gate"],
+                        "effective_gate": gates.get((server_id, t["tool_name"]), t["default_gate"]),
+                        "source": "override"
+                        if (server_id, t["tool_name"]) in decided
+                        else "default",
+                    }
+                    for t in await repo.list_mcp_tools(server_id)
+                ],
+            }
+        )
     return {
         "agent_id": agent_id,
         "mcp_grants": [f"mcp:{s}" for s in held],
@@ -408,9 +440,14 @@ async def set_mcp_override(agent_id: str, body: MCPOverrideIn) -> dict:
         raise HTTPException(404, f"unknown mcp_server {body.server_id!r}")
     await repo.set_agent_mcp_gate_override(agent_id, body.server_id, body.tool_name, body.gate)
     await events.emit(
-        "mcp.override_set", ref_id=agent_id,
-        payload={"agent_id": agent_id, "server_id": body.server_id,
-                 "tool_name": body.tool_name, "gate": body.gate},
+        "mcp.override_set",
+        ref_id=agent_id,
+        payload={
+            "agent_id": agent_id,
+            "server_id": body.server_id,
+            "tool_name": body.tool_name,
+            "gate": body.gate,
+        },
         actor="operator",
     )
     return {"overrides": await repo.list_agent_mcp_overrides(agent_id)}
@@ -423,7 +460,8 @@ async def revoke_mcp_override(agent_id: str, server_id: str, tool_name: str) -> 
             409, f"{agent_id!r} holds no active override for {server_id!r}/{tool_name!r}"
         )
     await events.emit(
-        "mcp.override_revoked", ref_id=agent_id,
+        "mcp.override_revoked",
+        ref_id=agent_id,
         payload={"agent_id": agent_id, "server_id": server_id, "tool_name": tool_name},
         actor="operator",
     )
@@ -451,15 +489,17 @@ async def list_agent_notes(agent_id: str) -> dict:
         "private": private,
         "operator": operator,
         "budgets": limits,
-        "usage": {"private": notes_mod.usage(private),
-                  "operator": notes_mod.usage(operator)},
+        "usage": {"private": notes_mod.usage(private), "operator": notes_mod.usage(operator)},
     }
 
 
 # The capabilities whose pending proposals the cockpit's Memory tab lists for
 # one agent: what the agent is trying to learn, awaiting the operator.
 _LEARNED_CAPABILITIES = (
-    "memory.note_add", "memory.note_retire", "skill.create", "skill.doc_add",
+    "memory.note_add",
+    "memory.note_retire",
+    "skill.create",
+    "skill.doc_add",
     "graph.add_episode",
 )
 
@@ -468,6 +508,7 @@ def _learned_label(base: str, args: dict) -> str:
     """One short line naming what a pending learned-thing proposal would write,
     from the action's own arguments (the operator reads the full text in the
     Inbox)."""
+
     def clip(v: object, n: int = 140) -> str:
         t = " ".join(str(v or "").split())
         return t if len(t) <= n else t[: n - 1] + "…"
@@ -505,11 +546,19 @@ async def list_agent_learned(agent_id: str) -> dict:
         for a in p["actions"] or []:
             base = str(a.get("capability", "")).split("@", 1)[0]
             if base in _LEARNED_CAPABILITIES:
-                matching.append({"capability": base,
-                                 "label": _learned_label(base, a.get("arguments") or {})})
-        pending.append({"id": p["id"], "session_id": p["session_id"], "intent": p["intent"],
-                        "status": p["status"], "created_at": p["created_at"],
-                        "actions": matching})
+                matching.append(
+                    {"capability": base, "label": _learned_label(base, a.get("arguments") or {})}
+                )
+        pending.append(
+            {
+                "id": p["id"],
+                "session_id": p["session_id"],
+                "intent": p["intent"],
+                "status": p["status"],
+                "created_at": p["created_at"],
+                "actions": matching,
+            }
+        )
     return {"agent_id": agent_id, "skill_docs": docs, "pending": pending}
 
 
@@ -526,8 +575,13 @@ async def get_charter(agent_id: str) -> dict:
             content = builtin_charter(agent_id)
         except ValueError:
             raise HTTPException(404, f"unknown agent {agent_id!r}") from None
-        current = {"version": 0, "content": content, "created_by": "built-in",
-                   "rationale": "hardcoded default", "created_at": None}
+        current = {
+            "version": 0,
+            "content": content,
+            "created_by": "built-in",
+            "rationale": "hardcoded default",
+            "created_at": None,
+        }
     return {"current": current, "versions": await repo.list_charter_versions(agent_id)}
 
 
@@ -547,8 +601,11 @@ async def save_charter(agent_id: str, body: CharterIn) -> dict:
     await events.emit(
         "charter.updated",
         ref_id=agent_id,
-        payload={"version": row["version"], "rationale": body.rationale,
-                 **({"policy_flags": warnings} if warnings else {})},
+        payload={
+            "version": row["version"],
+            "rationale": body.rationale,
+            **({"policy_flags": warnings} if warnings else {}),
+        },
         actor="operator",
     )
     return {"ok": True, "version": row["version"], "warnings": warnings}
@@ -561,9 +618,7 @@ async def revert_charter(agent_id: str, version: int) -> dict:
     old = await repo.get_charter_version(agent_id, version)
     if old is None:
         raise HTTPException(404, "no such charter version")
-    row = await repo.save_charter_version(
-        agent_id, old["content"], f"revert to v{version}"
-    )
+    row = await repo.save_charter_version(agent_id, old["content"], f"revert to v{version}")
     await events.emit(
         "charter.reverted",
         ref_id=agent_id,
@@ -646,9 +701,13 @@ async def _land_run_failure(task: dict, exc: BaseException) -> bool:
     return False
 
 
-async def _run_assigned_task(task: dict, actor: str = "operator", *,
-                             model_name: str | None = None,
-                             thinking: str | None = None) -> dict:
+async def _run_assigned_task(
+    task: dict,
+    actor: str = "operator",
+    *,
+    model_name: str | None = None,
+    thinking: str | None = None,
+) -> dict:
     """Run an ASSIGNED task now, landing any run failure on the task record.
 
     THE fresh-run entry. The guard is here rather than at the three call sites
@@ -661,7 +720,8 @@ async def _run_assigned_task(task: dict, actor: str = "operator", *,
 
     try:
         return await _run_assigned_task_inner(
-            task, actor=actor, model_name=model_name, thinking=thinking)
+            task, actor=actor, model_name=model_name, thinking=thinking
+        )
     except RunHeld:
         raise  # nothing ran and nothing failed: the task stays ASSIGNED
     except Exception as e:  # any run error must reach the record
@@ -710,9 +770,13 @@ def _agent_task_lock(agent_id: str) -> asyncio.Lock:  # noqa: F821 — annotatio
     return lock
 
 
-async def _run_assigned_task_inner(task: dict, actor: str = "operator", *,
-                                   model_name: str | None = None,
-                                   thinking: str | None = None) -> dict:
+async def _run_assigned_task_inner(
+    task: dict,
+    actor: str = "operator",
+    *,
+    model_name: str | None = None,
+    thinking: str | None = None,
+) -> dict:
     """Run an ASSIGNED task now. `task.started` goes on the log BEFORE the run
     (emit before the thing it authorises); the run rides `run_task`, so a
     proposal parks behind the same gate as everything else.
@@ -729,13 +793,18 @@ async def _run_assigned_task_inner(task: dict, actor: str = "operator", *,
     not just its start.
     """
     async with _agent_task_lock(task["agent_id"]):
-        return await _run_one_assigned_task(task, actor=actor,
-                                            model_name=model_name, thinking=thinking)
+        return await _run_one_assigned_task(
+            task, actor=actor, model_name=model_name, thinking=thinking
+        )
 
 
-async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
-                                 model_name: str | None = None,
-                                 thinking: str | None = None) -> dict:
+async def _run_one_assigned_task(
+    task: dict,
+    actor: str = "operator",
+    *,
+    model_name: str | None = None,
+    thinking: str | None = None,
+) -> dict:
     """The actual run body, moved out of `_run_assigned_task_inner` so the
     queue lock in that function wraps it without nesting the lock's own
     `async with` around a huge block. Not a new entry point — call
@@ -751,15 +820,15 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
     if hold.active:
         raise hold.RunHeld(
             f"task {task_id} not started: {hold.waiting_for()} is waiting for the agents "
-            "to finish — it starts after the restart")
+            "to finish — it starts after the restart"
+        )
     # The row this starter was handed is as old as its wait on the lane. If the
     # task has moved since (cancelled, re-run, or started by the other starter),
     # the decision that moved it stands and this start is void. A cancelled task
     # once ran anyway here and flipped back to IN_PROGRESS.
     current = await repo.get_task(task_id)
     if current and task.get("status") and current["status"] != task["status"]:
-        log.info("task %s: start void, it moved to %s while queued",
-                 task_id, current["status"])
+        log.info("task %s: start void, it moved to %s while queued", task_id, current["status"])
         return {"task_id": task_id, "deferred": False, "superseded": current["status"]}
     await events.emit(
         "task.started",
@@ -773,8 +842,7 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
     # IN_PROGRESS while the agent works. A re-run keeps its old session linked
     # until the new one exists, or a restart here would lose the chain.
     await repo.start_task(task_id, rerun["rerun_of"] if rerun else None)
-    rerun_ids = ({"session_id": rerun["session_id"], "rerun_of": rerun["rerun_of"]}
-                 if rerun else {})
+    rerun_ids = {"session_id": rerun["session_id"], "rerun_of": rerun["rerun_of"]} if rerun else {}
     if agent_id == "orchestrator":
         # D7 phase 2: a task assigned to the orchestrator is a PROJECT — it
         # runs the orchestration loop (plan review → assign → receive →
@@ -783,8 +851,7 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
         from central_command.runtime.run import RunStopped
 
         try:
-            return {**(await orchestration.run_project(task, **rerun_ids)),
-                    "task_id": task_id}
+            return {**(await orchestration.run_project(task, **rerun_ids)), "task_id": task_id}
         except RunStopped as e:
             # The orchestrator loop has no stopped-outcome shape of its own —
             # the session is already parked STOPPED by `_run_live` and the
@@ -793,12 +860,11 @@ async def _run_one_assigned_task(task: dict, actor: str = "operator", *,
             # `_run_live` call sites, because this is the one place both the
             # synchronous and the detached run come through, and letting it
             # escape would have `_run_assigned_task_detached` fail the project.
-            return {"task_id": task_id, "stopped": True,
-                    "session_id": e.session_id}
-    model = await resolve_model(agent_id=agent_id, model_name=model_name,
-                                thinking=thinking)
+            return {"task_id": task_id, "stopped": True, "session_id": e.session_id}
+    model = await resolve_model(agent_id=agent_id, model_name=model_name, thinking=thinking)
     result = await run_task(
-        agent_id, task["instructions"],
+        agent_id,
+        task["instructions"],
         model=model,
         parent_session_id=task.get("parent_session_id"),
         task_id=task_id,
@@ -935,9 +1001,9 @@ async def list_tasks(agent_id: str | None = None) -> dict:
     }
 
 
-async def _run_assigned_task_detached(task: dict, actor: str, *,
-                                      model_name: str | None = None,
-                                      thinking: str | None = None) -> None:
+async def _run_assigned_task_detached(
+    task: dict, actor: str, *, model_name: str | None = None, thinking: str | None = None
+) -> None:
     """Background wrapper for `_run_assigned_task`: nobody is holding an open
     request, so the exception the guard re-raises has nowhere to go but the log.
     The record is already carried by `_land_run_failure` — FAILED, or ASSIGNED
@@ -948,8 +1014,7 @@ async def _run_assigned_task_detached(task: dict, actor: str, *,
     from central_command.runtime.hold import RunHeld
 
     try:
-        await _run_assigned_task(task, actor=actor, model_name=model_name,
-                                 thinking=thinking)
+        await _run_assigned_task(task, actor=actor, model_name=model_name, thinking=thinking)
     except RunHeld as e:
         log.info("%s", e)
     except Exception:  # already on the record; nobody to raise to
@@ -991,11 +1056,16 @@ async def startup_task_sweep() -> None:
         await events.emit(
             "task.run_parked",
             ref_id=task["id"],
-            payload={"restart": True, "kind": "restart", "attempts": 0,
-                     "transient": False, "session_id": None,
-                     "dependencies": state.get("dependencies"),
-                     "not_before": state.get("not_before"),
-                     "error": "run died with its process before its session existed"},
+            payload={
+                "restart": True,
+                "kind": "restart",
+                "attempts": 0,
+                "transient": False,
+                "session_id": None,
+                "dependencies": state.get("dependencies"),
+                "not_before": state.get("not_before"),
+                "error": "run died with its process before its session existed",
+            },
             actor="system",
         )
     for task in await repo.tasks_orphaned_at_startup():
@@ -1005,8 +1075,11 @@ async def startup_task_sweep() -> None:
 
 
 async def create_and_run_task(
-    instructions: str, title: str | None, agent_id: str | None,
-    actor: str = "operator", background: bool = False,
+    instructions: str,
+    title: str | None,
+    agent_id: str | None,
+    actor: str = "operator",
+    background: bool = False,
     parent_session_id: str | None = None,
     attachments: list[dict] | None = None,
     model_name: str | None = None,
@@ -1040,7 +1113,8 @@ async def create_and_run_task(
 
         if thinking not in THINKING_LEVELS:
             raise HTTPException(
-                422, f"thinking must be one of {THINKING_LEVELS} (got {thinking!r})")
+                422, f"thinking must be one of {THINKING_LEVELS} (got {thinking!r})"
+            )
     try:
         prov = await backstops.derive_provenance(actor, parent_session_id)
     except LookupError as exc:
@@ -1050,8 +1124,7 @@ async def create_and_run_task(
     # insert. The lock is transaction-scoped on a dedicated connection, keyed on
     # the fan-out reference (the parent task, else the creating session) — see
     # `repo.fanout_lock`. Only agent creations are bounded, so only they pay.
-    async with (repo.fanout_lock(prov.ref_id) if prov.agent_created
-                else contextlib.nullcontext()):
+    async with repo.fanout_lock(prov.ref_id) if prov.agent_created else contextlib.nullcontext():
         refusal = await backstops.check(prov, agent_id)
         if refusal:
             # Loud, and no task row: the event is written before anything runs.
@@ -1069,15 +1142,21 @@ async def create_and_run_task(
         attachment_manifest: list[dict] | None = None
         if attachments:
             if agent_id is None:
-                raise HTTPException(422, "attachments require an assignee — an "
-                                         "unassigned task has no model to deliver them to")
+                raise HTTPException(
+                    422,
+                    "attachments require an assignee — an "
+                    "unassigned task has no model to deliver them to",
+                )
             from central_command.api import attachments as attachments_mod
 
             for att in attachments:
-                media_type = str((att or {}).get("mimeType") or (att or {}).get("media_type") or "").lower()
+                media_type = str(
+                    (att or {}).get("mimeType") or (att or {}).get("media_type") or ""
+                ).lower()
                 if media_type.startswith(attachments_mod.IMAGE_PREFIX):
-                    raise HTTPException(422, "task attachments must be documents — "
-                                             "images are not supported here")
+                    raise HTTPException(
+                        422, "task attachments must be documents — images are not supported here"
+                    )
             try:
                 block, attachment_manifest = await attachments_mod.prepare(
                     attachments,
@@ -1090,11 +1169,16 @@ async def create_and_run_task(
 
         task_id = "task_" + uuid.uuid4().hex[:12]
         title = (title or "").strip() or instructions[:80]
-        await repo.create_task(task_id, title, instructions, agent_id,
-                               parent_session_id=parent_session_id,
-                               created_by=prov.created_by,
-                               parent_task_id=prov.parent_task_id,
-                               creator_chain=list(prov.chain))
+        await repo.create_task(
+            task_id,
+            title,
+            instructions,
+            agent_id,
+            parent_session_id=parent_session_id,
+            created_by=prov.created_by,
+            parent_task_id=prov.parent_task_id,
+            creator_chain=list(prov.chain),
+        )
     await events.emit(
         "task.created",
         ref_id=task_id,
@@ -1102,8 +1186,7 @@ async def create_and_run_task(
             "title": title,
             "agent_id": agent_id,
             "instructions": instructions[:500],
-            **({"parent_session_id": parent_session_id}
-               if parent_session_id else {}),
+            **({"parent_session_id": parent_session_id} if parent_session_id else {}),
         },
         actor=actor,
     )
@@ -1135,20 +1218,29 @@ async def create_and_run_task(
         # the same paths as a synchronous run.
         import asyncio
 
-        keep(asyncio.create_task(_run_assigned_task_detached(
-            task_row, actor, model_name=model_name, thinking=thinking)))
+        keep(
+            asyncio.create_task(
+                _run_assigned_task_detached(
+                    task_row, actor, model_name=model_name, thinking=thinking
+                )
+            )
+        )
         return {
-            "deferred": None, "task_id": task_id,
-            "status": task_row["status"], "background": True,
+            "deferred": None,
+            "task_id": task_id,
+            "status": task_row["status"],
+            "background": True,
         }
-    return await _run_assigned_task(task_row, actor=actor,
-                                    model_name=model_name, thinking=thinking)
+    return await _run_assigned_task(task_row, actor=actor, model_name=model_name, thinking=thinking)
 
 
 @router.post("/tasks")
 async def create_task(body: TaskCreateIn) -> dict:
     return await create_and_run_task(
-        body.instructions, body.title, body.agent_id, background=body.background,
+        body.instructions,
+        body.title,
+        body.agent_id,
+        background=body.background,
         attachments=body.attachments,
     )
 
@@ -1192,7 +1284,9 @@ async def assign_task(task_id: str, body: TaskAssignIn) -> dict:
     if not await repo.assign_task(task_id, body.agent_id):
         raise HTTPException(409, "task is not assignable (only NEW tasks are)")
     await events.emit(
-        "task.assigned", ref_id=task_id, payload={"agent_id": body.agent_id},
+        "task.assigned",
+        ref_id=task_id,
+        payload={"agent_id": body.agent_id},
         actor="operator",
     )
     return await _run_assigned_task(await repo.get_task(task_id))
@@ -1215,8 +1309,7 @@ async def stop_task(task_id: str) -> dict:
         raise HTTPException(404, "no such task")
     session_id = task.get("session_id")
     if not session_id:
-        raise HTTPException(409, f"task {task_id} has no run to stop "
-                                 f"(it is {task['status']})")
+        raise HTTPException(409, f"task {task_id} has no run to stop (it is {task['status']})")
     if not await orchestration.request_stop(session_id):
         status = await repo.session_status(session_id)
         raise HTTPException(
@@ -1225,8 +1318,7 @@ async def stop_task(task_id: str) -> dict:
             "run to stop. A parked run resolves through its Inbox item, or "
             "cancel the task for good.",
         )
-    return {"ok": True, "task_id": task_id, "session_id": session_id,
-            "stop_requested": True}
+    return {"ok": True, "task_id": task_id, "session_id": session_id, "stop_requested": True}
 
 
 @router.get("/sessions/{session_id}/rerun")
@@ -1271,8 +1363,12 @@ async def resume_session(session_id: str) -> dict:
             raise HTTPException(
                 409,
                 f"session {session_id} was closed by a process restart and cannot "
-                "be re-entered" + (f"; its task {stop['task_id']} is re-run as a new "
-                                   "session" if stop.get("task_id") else ""),
+                "be re-entered"
+                + (
+                    f"; its task {stop['task_id']} is re-run as a new session"
+                    if stop.get("task_id")
+                    else ""
+                ),
             )
         raise HTTPException(
             409 if status else 404,
@@ -1333,24 +1429,31 @@ async def cancel_task(task_id: str) -> dict:
         withdrawn_items, withdrawn_proposals = await withdraw_session_work(session_id)
         if await repo.session_status(session_id) not in ("DONE", "FAILED"):
             await close_session(
-                session_id, agent_id=task["agent_id"] or "operator",
-                reason="cancelled", actor="operator",
+                session_id,
+                agent_id=task["agent_id"] or "operator",
+                reason="cancelled",
+                actor="operator",
             )
 
-    if not await repo.resolve_task(
-        task_id, "CANCELLED", outcome="cancelled by operator"
-    ):
+    if not await repo.resolve_task(task_id, "CANCELLED", outcome="cancelled by operator"):
         raise HTTPException(409, f"task {task_id} is already terminal")
     await events.emit(
-        "task.cancelled", ref_id=task_id,
-        payload={"prior_status": prior, "session_id": session_id,
-                 "withdrawn_items": withdrawn_items,
-                 "withdrawn_proposals": withdrawn_proposals},
+        "task.cancelled",
+        ref_id=task_id,
+        payload={
+            "prior_status": prior,
+            "session_id": session_id,
+            "withdrawn_items": withdrawn_items,
+            "withdrawn_proposals": withdrawn_proposals,
+        },
         actor="operator",
     )
-    return {"ok": True, "prior_status": prior,
-            "withdrawn_items": withdrawn_items,
-            "withdrawn_proposals": withdrawn_proposals}
+    return {
+        "ok": True,
+        "prior_status": prior,
+        "withdrawn_items": withdrawn_items,
+        "withdrawn_proposals": withdrawn_proposals,
+    }
 
 
 @router.post("/agents/{agent_id}/task")
@@ -1493,8 +1596,12 @@ async def coach_agent(agent_id: str, body: CoachIn, *, background: bool = True) 
     await events.emit(
         "task.created",
         ref_id=task_id,
-        payload={"title": title, "agent_id": COACH_ID, "target": agent_id,
-                 "instructions": instructions[:500]},
+        payload={
+            "title": title,
+            "agent_id": COACH_ID,
+            "target": agent_id,
+            "instructions": instructions[:500],
+        },
         actor="operator",
     )
     await events.emit(
@@ -1506,8 +1613,11 @@ async def coach_agent(agent_id: str, body: CoachIn, *, background: bool = True) 
     await repo.start_task(task_id, None)  # IN_PROGRESS while the coach works
     keep(asyncio.create_task(_run_coach_detached(task_id, agent_id, kwargs)))
     return {
-        "deferred": None, "background": True, "task_id": task_id,
-        "target": agent_id, "status": "IN_PROGRESS",
+        "deferred": None,
+        "background": True,
+        "task_id": task_id,
+        "target": agent_id,
+        "status": "IN_PROGRESS",
     }
 
 
@@ -1543,8 +1653,11 @@ async def _run_coach_detached(task_id: str, agent_id: str, kwargs: dict) -> None
         await events.emit(
             "task.blocked",
             ref_id=task_id,
-            payload={"item_id": result.get("item_id"), "session_id": session_id,
-                     "question": str(result.get("question") or "")[:500]},
+            payload={
+                "item_id": result.get("item_id"),
+                "session_id": session_id,
+                "question": str(result.get("question") or "")[:500],
+            },
             actor=f"agent:{COACH_ID}",
         )
         return
@@ -1562,8 +1675,11 @@ async def _run_coach_detached(task_id: str, agent_id: str, kwargs: dict) -> None
         await events.emit(
             "task.review",
             ref_id=task_id,
-            payload={"proposal_id": result["proposal_id"],
-                     "session_id": session_id, "intent": result["intent"]},
+            payload={
+                "proposal_id": result["proposal_id"],
+                "session_id": session_id,
+                "intent": result["intent"],
+            },
             actor=f"agent:{COACH_ID}",
         )
         # The decide hook (FR-4), after the task landed in REVIEW.
@@ -1596,9 +1712,7 @@ async def feed_email(body: EmailIn) -> dict:
     is that it skips the backpressure valves, which is the operator's call to
     make; everything else is the shared path.
     """
-    enrolled = await ledger.enroll_email(
-        body.text, feed="live", source="api", allow_repeat=True
-    )
+    enrolled = await ledger.enroll_email(body.text, feed="live", source="api", allow_repeat=True)
     await events.emit(
         "work.enrolled",
         ref_id=enrolled["message_id"],
@@ -1609,7 +1723,9 @@ async def feed_email(body: EmailIn) -> dict:
         # Real Message-ID we have already seen — don't silently reprocess it.
         return {"deferred": False, "duplicate": True, "message_id": enrolled["message_id"]}
 
-    result = await dispatch_item(enrolled["item_id"], model=await resolve_model(agent_id="inbox-triage"))
+    result = await dispatch_item(
+        enrolled["item_id"], model=await resolve_model(agent_id="inbox-triage")
+    )
     if result is None:
         raise HTTPException(409, "thread is busy — another message on it is in flight")
     return result
@@ -1644,15 +1760,18 @@ async def feed_document(body: DocumentIn) -> dict:
     await events.emit(
         "work.enrolled",
         ref_id=enrolled["message_id"],
-        payload={"subject": enrolled.get("subject"), "feed": "live",
-                 "kind": "document", "hand_fed": True},
+        payload={
+            "subject": enrolled.get("subject"),
+            "feed": "live",
+            "kind": "document",
+            "hand_fed": True,
+        },
         actor="operator",
     )
     if not enrolled["enrolled"]:
         # Same words (or the same doc_id) already enrolled — extracting it
         # twice would propose the same facts twice.
-        return {"deferred": False, "duplicate": True,
-                "message_id": enrolled["message_id"]}
+        return {"deferred": False, "duplicate": True, "message_id": enrolled["message_id"]}
 
     result = await dispatch_item(enrolled["item_id"])
     if result is None:
@@ -1678,8 +1797,7 @@ async def enroll_document(body: DocumentIn) -> dict:
         await events.emit(
             "work.enrolled",
             ref_id=result["message_id"],
-            payload={"subject": result.get("subject"), "feed": "live",
-                     "kind": "document"},
+            payload={"subject": result.get("subject"), "feed": "live", "kind": "document"},
             actor="operator",
         )
     return result
@@ -1795,9 +1913,7 @@ async def audit_parked_dismissals() -> dict:
 async def confirm_dismissal(item_id: str) -> dict:
     if not await repo.confirm_dismissal(item_id):
         raise HTTPException(409, "item is not awaiting dismissal confirmation")
-    await events.emit(
-        "work.dismissal_confirmed", ref_id=item_id, payload={}, actor="operator"
-    )
+    await events.emit("work.dismissal_confirmed", ref_id=item_id, payload={}, actor="operator")
     return {"ok": True}
 
 
@@ -1874,13 +1990,18 @@ async def requeue_work_item(item_id: str) -> dict:
     raw = (item.get("payload") or {}).get("raw")
     if raw:
         parsed = ledger.parse_email(raw)
-        fresh = {**item["payload"], "text": parsed["body"],
-                 "from": parsed["from"] or item["payload"].get("from")}
+        fresh = {
+            **item["payload"],
+            "text": parsed["body"],
+            "from": parsed["from"] or item["payload"].get("from"),
+        }
     if not await repo.requeue_failed_work_item(item_id, payload=fresh):
         raise HTTPException(409, "item is not FAILED")
     await events.emit(
-        "work.requeued", ref_id=item_id,
-        payload={"reparsed": fresh is not None}, actor="operator",
+        "work.requeued",
+        ref_id=item_id,
+        payload={"reparsed": fresh is not None},
+        actor="operator",
     )
     return {"ok": True, "reparsed": fresh is not None}
 
@@ -1910,8 +2031,10 @@ async def reopen_work_item(item_id: str, body: ReopenIn) -> dict:
     if rule_id is None:
         raise HTTPException(409, "item is not awaiting dismissal confirmation")
     await events.emit(
-        "work.reopened", ref_id=item_id,
-        payload={"note": body.note, "rule_id": rule_id}, actor="operator",
+        "work.reopened",
+        ref_id=item_id,
+        payload={"note": body.note, "rule_id": rule_id},
+        actor="operator",
     )
     return {"ok": True, "rule_id": rule_id}
 
@@ -1971,7 +2094,8 @@ async def create_mail_rule(body: MailRuleIn) -> dict:
     if body.apply_to_queued:
         swept = await repo.sweep_mail_rule(rule, mail_rules.dismissal_rationale(rule))
     await events.emit(
-        "mail.rule_created", ref_id=rule["id"],
+        "mail.rule_created",
+        ref_id=rule["id"],
         payload={"description": description, "reason": reason, "swept": swept},
         actor="operator",
     )
@@ -2005,21 +2129,25 @@ async def coaching() -> dict:
         if payload.get("verdict") != "rejected":
             continue
         p = props.get(e["ref_id"]) or {}
-        rejections.append({
-            "proposal_id": e["ref_id"],
-            "feedback": payload.get("feedback"),
-            "at": e["created_at"],
-            "intent": p.get("intent"),
-            "agent_id": p.get("agent_id"),
-        })
+        rejections.append(
+            {
+                "proposal_id": e["ref_id"],
+                "feedback": payload.get("feedback"),
+                "at": e["created_at"],
+                "intent": p.get("intent"),
+                "agent_id": p.get("agent_id"),
+            }
+        )
 
     reopen_events = await repo.list_events_of_kinds(["work.reopened"])
-    subjects = await repo.work_item_subjects(
-        [e["ref_id"] for e in reopen_events if e["ref_id"]]
-    )
+    subjects = await repo.work_item_subjects([e["ref_id"] for e in reopen_events if e["ref_id"]])
     reopens = [
-        {"item_id": e["ref_id"], "note": (e.get("payload") or {}).get("note"),
-         "at": e["created_at"], "subject": subjects.get(e["ref_id"])}
+        {
+            "item_id": e["ref_id"],
+            "note": (e.get("payload") or {}).get("note"),
+            "at": e["created_at"],
+            "subject": subjects.get(e["ref_id"]),
+        }
         for e in reopen_events
     ]
 
@@ -2048,12 +2176,18 @@ async def activity_overview() -> dict:
     this list means "still wants a decision".
     """
     failures = [
-        item for item in await repo.list_work_items("FAILED", include_payload=True)
+        item
+        for item in await repo.list_work_items("FAILED", include_payload=True)
         if not (item.get("payload") or {}).get("failure_ack")
     ]
     schedules = [
-        {"id": s["id"], "name": s["name"], "enabled": s["enabled"],
-         "action_kind": s["action_kind"], "last_fired_at": s.get("last_fired_at")}
+        {
+            "id": s["id"],
+            "name": s["name"],
+            "enabled": s["enabled"],
+            "action_kind": s["action_kind"],
+            "last_fired_at": s.get("last_fired_at"),
+        }
         for s in await repo.list_heartbeat_schedules()
     ]
     return {
@@ -2104,16 +2238,19 @@ async def _loe_view(row: dict, history_limit: int = 12) -> dict:
     """
     history = await repo.list_loe_checkins(row["id"], limit=history_limit)
     trimmed = [
-        {"light": c["light"], "confidence": c["confidence"],
-         "summary": c["summary"], "created_at": c["created_at"],
-         "semantic_version": c["semantic_version"]}
+        {
+            "light": c["light"],
+            "confidence": c["confidence"],
+            "summary": c["summary"],
+            "created_at": c["created_at"],
+            "semantic_version": c["semantic_version"],
+        }
         for c in history
     ]
     # Full semantic version history for the detail panel: the current version
     # (superseded_at=None) followed by the archived ones, newest first.
     semantic_history = [
-        {"version": row["semantic_version"], "semantic": row["semantic"],
-         "superseded_at": None},
+        {"version": row["semantic_version"], "semantic": row["semantic"], "superseded_at": None},
         *await repo.list_loe_semantic_versions(row["id"]),
     ]
     return {
@@ -2147,16 +2284,19 @@ async def create_loe(body: LoeIn) -> dict:
         raise HTTPException(409, f"line of effort {loe_id!r} already exists")
     try:
         row = await repo.create_loe(
-            loe_id, body.name.strip(), body.cadence, body.agent_id,
-            body.semantic, body.presentation,
+            loe_id,
+            body.name.strip(),
+            body.cadence,
+            body.agent_id,
+            body.semantic,
+            body.presentation,
         )
     except Exception as e:  # duplicate id fails loud — ids are operator-facing
         raise HTTPException(409, f"line of effort {loe_id!r} already exists") from e
     await events.emit(
         "loe.created",
         ref_id=loe_id,
-        payload={"name": row["name"], "cadence": row["cadence"],
-                 "agent_id": row["agent_id"]},
+        payload={"name": row["name"], "cadence": row["cadence"], "agent_id": row["agent_id"]},
         actor="operator",
     )
     return await _loe_view(row)
@@ -2221,20 +2361,13 @@ async def _heartbeat_schedule_view(row: dict) -> dict:
 
     from central_command.heartbeat.engine import compute_next_due
 
-    due = compute_next_due(
-        row["schedule_kind"], row["schedule"], datetime.now(UTC)
-    )
-    last = await repo.list_events(
-        ref_id=row["id"], kind="heartbeat", newest_first=True, limit=10
-    )
+    due = compute_next_due(row["schedule_kind"], row["schedule"], datetime.now(UTC))
+    last = await repo.list_events(ref_id=row["id"], kind="heartbeat", newest_first=True, limit=10)
     outcome = next(
         (e for e in last if e["kind"] in ("heartbeat.completed", "heartbeat.error")),
         None,
     )
-    status = (
-        None if outcome is None
-        else "error" if outcome["kind"] == "heartbeat.error" else "ok"
-    )
+    status = None if outcome is None else "error" if outcome["kind"] == "heartbeat.error" else "ok"
     error = outcome["payload"].get("error") if outcome else None
 
     # A quiet firing (nothing to do) writes no outcome event on purpose, so a
@@ -2289,12 +2422,15 @@ async def list_heartbeat_schedules() -> dict:
         # dropped here is a section that silently never renders
         # (tests/test_cc_routes_wire.py pins the shape).
         "actions": {
-            k: {"description": s.description, "params": s.params,
+            k: {
+                "description": s.description,
+                "params": s.params,
                 "required": list(s.required),
                 "doc": inspect.getdoc(s.run) or "",
                 "levers": list(s.levers),
                 "choices": {p: list(v) for p, v in s.choices.items()},
-                "runs_as": s.runs_as}
+                "runs_as": s.runs_as,
+            }
             for k, s in ACTIONS.items()
         },
     }
@@ -2312,16 +2448,24 @@ async def create_heartbeat_schedule(body: HeartbeatScheduleIn) -> dict:
         raise HTTPException(422, "name must yield a non-empty id")
     try:
         await repo.create_heartbeat_schedule(
-            schedule_id, body.name.strip(), body.schedule_kind, body.schedule,
-            body.action_kind, body.action_params,
+            schedule_id,
+            body.name.strip(),
+            body.schedule_kind,
+            body.schedule,
+            body.action_kind,
+            body.action_params,
         )
     except Exception as e:  # duplicate id fails loud — ids are operator-facing
         raise HTTPException(409, f"schedule {schedule_id!r} already exists") from e
     await events.emit(
         "heartbeat.schedule.created",
         ref_id=schedule_id,
-        payload={"name": body.name, "schedule_kind": body.schedule_kind,
-                 "schedule": body.schedule, "action_kind": body.action_kind},
+        payload={
+            "name": body.name,
+            "schedule_kind": body.schedule_kind,
+            "schedule": body.schedule,
+            "action_kind": body.action_kind,
+        },
         actor="operator",
     )
     row = await repo.get_heartbeat_schedule(schedule_id)
@@ -2329,9 +2473,7 @@ async def create_heartbeat_schedule(body: HeartbeatScheduleIn) -> dict:
 
 
 @router.patch("/heartbeat/schedules/{schedule_id}")
-async def patch_heartbeat_schedule(
-    schedule_id: str, body: HeartbeatSchedulePatchIn
-) -> dict:
+async def patch_heartbeat_schedule(schedule_id: str, body: HeartbeatSchedulePatchIn) -> dict:
     row = await repo.get_heartbeat_schedule(schedule_id)
     if row is None:
         raise HTTPException(404, "no such schedule")
@@ -2340,8 +2482,10 @@ async def patch_heartbeat_schedule(
         raise HTTPException(422, "nothing to patch")
     merged = {**row, **fields}
     await _validate_heartbeat_schedule(
-        merged["schedule_kind"], merged["schedule"],
-        merged["action_kind"], merged["action_params"],
+        merged["schedule_kind"],
+        merged["schedule"],
+        merged["action_kind"],
+        merged["action_params"],
     )
     await repo.update_heartbeat_schedule(schedule_id, fields)
     await events.emit(
@@ -2397,8 +2541,10 @@ async def heartbeat_schedule_runs(schedule_id: str, limit: int = 50) -> dict:
     """Run history straight from the event log."""
     return {
         "events": await repo.list_events(
-            ref_id=schedule_id, kind="heartbeat",
-            newest_first=True, limit=max(1, min(limit, 200)),
+            ref_id=schedule_id,
+            kind="heartbeat",
+            newest_first=True,
+            limit=max(1, min(limit, 200)),
         )
     }
 
@@ -2440,9 +2586,21 @@ async def _jira_issues_for(actions: list[dict]) -> dict[str, dict]:
             issue = (await asyncio.wait_for(jira.get_issue(key), 15))["issue"]
         except Exception as e:  # noqa: BLE001 — every failure is display-only
             return {"error": str(e) or type(e).__name__}
-        return {k: issue.get(k) for k in (
-            "summary", "status", "issue_type", "priority", "assignee",
-            "due_date", "labels", "updated", "url", "description")}
+        return {
+            k: issue.get(k)
+            for k in (
+                "summary",
+                "status",
+                "issue_type",
+                "priority",
+                "assignee",
+                "due_date",
+                "labels",
+                "updated",
+                "url",
+                "description",
+            )
+        }
 
     return dict(zip(keys, await asyncio.gather(*(one(k) for k in keys))))
 
@@ -2467,7 +2625,8 @@ def waiting_facts(state: dict, probes: dict, failing: bool) -> dict:
       `failing_despite_probe` (the loud rule's verdict, passed in)."""
     deps = list(waited_on(state.get("dependencies")))
     downs = [
-        r["down_since"] for d in deps
+        r["down_since"]
+        for d in deps
         if (r := probes.get(d)) and r.get("state") == "down" and r.get("down_since")
     ]
     return {
@@ -2477,8 +2636,11 @@ def waiting_facts(state: dict, probes: dict, failing: bool) -> dict:
         "next_retry": state.get("not_before"),
         "interrupted": bool(state.get("interrupted")),
         "completed_actions": len(state.get("completed_results") or []),
-        "in_flight_capability": ((state.get("interrupted_action") or {}).get("capability")
-                                 if state.get("interrupted") else None),
+        "in_flight_capability": (
+            (state.get("interrupted_action") or {}).get("capability")
+            if state.get("interrupted")
+            else None
+        ),
         "failing_despite_probe": failing,
         "last_error": state.get("last_error"),
     }
@@ -2541,15 +2703,16 @@ async def annotate_gate_facts(rows: list[dict]) -> None:
     # RETRY_PENDING row is on the page (the common page has none).
     any_waiting = any(
         (r.get("status") or (facts.get(r["id"]) or {}).get("status")) == "RETRY_PENDING"
-        for r in rows)
+        for r in rows
+    )
     failing: set[str] = set()
     probes: dict = {}
     if any_waiting:
         from central_command.config import settings
 
         failing = {
-            u["id"] for u in await repo.units_failing_despite_probe(
-                settings.retry_loud_after_attempts)
+            u["id"]
+            for u in await repo.units_failing_despite_probe(settings.retry_loud_after_attempts)
             if u["unit"] == "proposal"
         }
         probes = await repo.dependency_probe_states()
@@ -2561,8 +2724,7 @@ async def annotate_gate_facts(rows: list[dict]) -> None:
         if f is None:
             continue
         if (row.get("status") or f["status"]) == "RETRY_PENDING":
-            row["waiting"] = waiting_facts(f.get("retry_state") or {}, probes,
-                                           row["id"] in failing)
+            row["waiting"] = waiting_facts(f.get("retry_state") or {}, probes, row["id"] in failing)
         status = row.get("status") or f["status"]
         if status in _PENDING_STATUSES:
             ev = f["override_eval"] or {}
@@ -2571,8 +2733,7 @@ async def annotate_gate_facts(rows: list[dict]) -> None:
                     o = await override_row(mark["override_id"])
                     if o is None or o.get("revoked_at"):
                         continue
-                    row["shadow"].append(
-                        (await overrides.shadow_state(o)).as_mark())
+                    row["shadow"].append((await overrides.shadow_state(o)).as_mark())
             continue
         actor = f["decided_actor"] or f["provenance_approver"]
         if not actor:
@@ -2582,8 +2743,7 @@ async def annotate_gate_facts(rows: list[dict]) -> None:
             ovs = []
             for oid in ids:
                 o = await override_row(oid)
-                ovs.append({"override_id": oid,
-                            "scope_text": overrides.scope_text(o) if o else ""})
+                ovs.append({"override_id": oid, "scope_text": overrides.scope_text(o) if o else ""})
             row["decided_by"] = {"kind": "override", "overrides": ovs}
         else:
             row["decided_by"] = {
@@ -2622,7 +2782,8 @@ async def get_proposal(proposal_id: str) -> dict:
         from central_command.gateway.gateway import source_time_for_session
 
         row["policy_flags"] = policy.check_actions(
-            row["actions"], source_time=await source_time_for_session(row.get("session_id")),
+            row["actions"],
+            source_time=await source_time_for_session(row.get("session_id")),
         )
         # D25: was the proposal within the agent's pack grants? Advisory —
         # surfaces grant/charter drift to the reviewer, never blocks.
@@ -2665,10 +2826,15 @@ async def get_proposal(proposal_id: str) -> dict:
                 old, label = builtin_charter(target), "built-in v0"
             else:
                 old, label = current["content"], f"v{current['version']}"
-            a["charter_diff"] = "\n".join(difflib.unified_diff(
-                old.splitlines(), str(args.get("content", "")).splitlines(),
-                fromfile=f"charter {label}", tofile="proposed", lineterm="",
-            ))
+            a["charter_diff"] = "\n".join(
+                difflib.unified_diff(
+                    old.splitlines(),
+                    str(args.get("content", "")).splitlines(),
+                    fromfile=f"charter {label}",
+                    tofile="proposed",
+                    lineterm="",
+                )
+            )
 
         # skill.doc_add is reviewed as a diff against the skill's CURRENT doc
         # version too — same rationale, same D5 spec. skill.create has no
@@ -2679,17 +2845,20 @@ async def get_proposal(proposal_id: str) -> dict:
             args = a.get("arguments") or {}
             skill_id, doc_key = args.get("skill_id", ""), args.get("doc_key", "")
             history = (
-                await repo.skill_doc_history(skill_id, doc_key)
-                if skill_id and doc_key else []
+                await repo.skill_doc_history(skill_id, doc_key) if skill_id and doc_key else []
             )
             if not history:
                 continue
             current = history[0]  # ordered version desc — the current one
-            a["skill_diff"] = "\n".join(difflib.unified_diff(
-                (current["content"] or "").splitlines(),
-                str(args.get("content", "")).splitlines(),
-                fromfile=f"{doc_key} v{current['version']}", tofile="proposed", lineterm="",
-            ))
+            a["skill_diff"] = "\n".join(
+                difflib.unified_diff(
+                    (current["content"] or "").splitlines(),
+                    str(args.get("content", "")).splitlines(),
+                    fromfile=f"{doc_key} v{current['version']}",
+                    tofile="proposed",
+                    lineterm="",
+                )
+            )
 
         # mcp.sync_source embeds file bytes captured at PROPOSE time (the
         # sandbox's only exit — CLAUDE.md's mcp.sync_source doctrine): diff
@@ -2716,13 +2885,20 @@ async def get_proposal(proposal_id: str) -> dict:
                             current = target.read_text(encoding="utf-8")
                     except OSError:
                         pass  # unreadable current file reviews as if new
-                diffs.append({
-                    "path": path,
-                    "diff": "\n".join(difflib.unified_diff(
-                        current.splitlines(), str(proposed).splitlines(),
-                        fromfile=f"{path} (current)", tofile="proposed", lineterm="",
-                    )),
-                })
+                diffs.append(
+                    {
+                        "path": path,
+                        "diff": "\n".join(
+                            difflib.unified_diff(
+                                current.splitlines(),
+                                str(proposed).splitlines(),
+                                fromfile=f"{path} (current)",
+                                tofile="proposed",
+                                lineterm="",
+                            )
+                        ),
+                    }
+                )
             a["mcp_diffs"] = diffs
 
     # Same re-derivation for operator evidence: pull the recorded feedback fresh
@@ -2748,10 +2924,12 @@ async def get_proposal(proposal_id: str) -> dict:
                 # An operator quote the check matched against an earlier answer
                 # or chat turn is repointed at THAT event (DL-230); its words
                 # ride `answer` / `text`, shown only when the operator wrote it.
-                spoken = (payload.get("answer") or payload.get("text")
-                          if ev.get("actor") == "operator" else None)
-                e["source_feedback"] = (payload.get("feedback") or payload.get("note")
-                                        or spoken)
+                spoken = (
+                    payload.get("answer") or payload.get("text")
+                    if ev.get("actor") == "operator"
+                    else None
+                )
+                e["source_feedback"] = payload.get("feedback") or payload.get("note") or spoken
 
     # The auditor's verdict on this proposal (bulk dismissals, graduated
     # 2026-08-17). It lives on the event log — the reviewer sees the same
@@ -2810,23 +2988,27 @@ async def get_proposal_graph_known(proposal_id: str) -> dict:
             # Sequential: the embedder is one FIFO slot, so two reads at once
             # only queue behind each other.
             facts = await graphiti.search_facts(
-                query, max_facts=_GRAPH_KNOWN_FACTS, agent_id=agent_id)
+                query, max_facts=_GRAPH_KNOWN_FACTS, agent_id=agent_id
+            )
             entities = await graphiti.search_nodes(
-                name, max_nodes=_GRAPH_KNOWN_NODES, agent_id=agent_id)
+                name, max_nodes=_GRAPH_KNOWN_NODES, agent_id=agent_id
+            )
         except Exception as e:
-            raise HTTPException(
-                503, f"graph unavailable: {str(e) or type(e).__name__}") from e
-        episodes.append({
-            "action_index": index,
-            "name": name,
-            "facts": [
-                {k: f.get(k) for k in ("uuid", "fact", "name", "valid_at", "invalid_at", "group_id")}
-                for f in facts
-            ],
-            "entities": [
-                {k: n.get(k) for k in ("uuid", "name", "summary")} for n in entities
-            ],
-        })
+            raise HTTPException(503, f"graph unavailable: {str(e) or type(e).__name__}") from e
+        episodes.append(
+            {
+                "action_index": index,
+                "name": name,
+                "facts": [
+                    {
+                        k: f.get(k)
+                        for k in ("uuid", "fact", "name", "valid_at", "invalid_at", "group_id")
+                    }
+                    for f in facts
+                ],
+                "entities": [{k: n.get(k) for k in ("uuid", "name", "summary")} for n in entities],
+            }
+        )
     return {"proposal_id": proposal_id, "episodes": episodes}
 
 
@@ -2837,7 +3019,8 @@ async def approve(proposal_id: str) -> dict:
         raise HTTPException(404, "proposal not found")
     try:
         out = await gateway.approve_and_execute(
-            row["session_id"], proposal_id,
+            row["session_id"],
+            proposal_id,
             model=await resolve_session_model(row["session_id"], row["agent_id"]),
             detach=True,  # recorded + armed, then return; the closing turn runs behind
         )
@@ -2855,7 +3038,9 @@ async def reject(proposal_id: str, body: RejectIn) -> dict:
         raise HTTPException(404, "proposal not found")
     try:
         out = await gateway.reject_with_feedback(
-            row["session_id"], proposal_id, body.feedback,
+            row["session_id"],
+            proposal_id,
+            body.feedback,
             model=await resolve_session_model(row["session_id"], row["agent_id"]),
             detach=True,  # recorded + armed, then return; the redraft runs behind
         )
@@ -2917,7 +3102,9 @@ async def list_model_catalog(session_id: str | None = None) -> dict:
         return {"models": [], "default": default, "override": override, "error": str(exc)}
     return {
         "models": [{"id": m, "thinking_levels": levels.get(m, [])} for m in ids],
-        "default": default, "override": override, "error": None,
+        "default": default,
+        "override": override,
+        "error": None,
     }
 
 
@@ -2943,14 +3130,16 @@ async def gateway_model_catalog() -> dict:
         mid = m["id"]
         # The id IS the label: a LiteLLM alias like `kilo-auto/free` is one
         # name, not a provider prefix to strip (it rendered as "free").
-        models.append({
-            "id": mid,
-            "label": mid,
-            "provider": "litellm",
-            "configured": True,
-            "role": "primary" if mid == primary else "allowed",
-            "thinkingLevels": m.get("thinking_levels") or [],
-        })
+        models.append(
+            {
+                "id": mid,
+                "label": mid,
+                "provider": "litellm",
+                "configured": True,
+                "role": "primary" if mid == primary else "allowed",
+                "thinkingLevels": m.get("thinking_levels") or [],
+            }
+        )
     if not models:
         return {"models": [], "error": "LiteLLM served no models.", "source": "litellm"}
     return {"models": models, "error": None, "source": "litellm"}
@@ -2977,8 +3166,12 @@ async def list_sessions(
     """
     return {
         "sessions": await repo.list_sessions(
-            max(1, min(limit, 200)), status=status, mode=mode, agent_id=agent_id,
-            before=before, before_id=before_id,
+            max(1, min(limit, 200)),
+            status=status,
+            mode=mode,
+            agent_id=agent_id,
+            before=before,
+            before_id=before_id,
         ),
         "agents": await repo.session_agent_ids(),
     }
@@ -3033,7 +3226,9 @@ async def usage() -> dict:
 
 
 @router.get("/graph/episodes")
-async def graph_episodes(limit: int = 50, agent_id: str | None = None, scope: str = "private") -> dict:
+async def graph_episodes(
+    limit: int = 50, agent_id: str | None = None, scope: str = "private"
+) -> dict:
     """Recent memory episodes (read-only; reads are ungated by design).
     Newest first (`graphiti.get_episodes` orders by created_at; the sort
     below also orders the scope-tagged page).
@@ -3046,9 +3241,13 @@ async def graph_episodes(limit: int = 50, agent_id: str | None = None, scope: st
     silently truncates a fixed-size page."""
     from central_command.integrations import graphiti, neo4j_reader
 
-    limit = max(1, min(limit, 2000))  # the panel doubles on "Load more"; keep the ceiling above where it stalls
+    limit = max(
+        1, min(limit, 2000)
+    )  # the panel doubles on "Load more"; keep the ceiling above where it stalls
     private_only = bool(agent_id) and scope == "private"
-    episodes = await graphiti.get_episodes(last_n=limit + 1, agent_id=agent_id, private_only=private_only)
+    episodes = await graphiti.get_episodes(
+        last_n=limit + 1, agent_id=agent_id, private_only=private_only
+    )
     has_more = len(episodes) > limit
     episodes = episodes[:limit]
     private_group = graphiti.private_group(agent_id) if agent_id else None
@@ -3086,7 +3285,8 @@ async def graph_verifications() -> dict:
     for row in awaiting:
         row["approved_text"] = await graph_auditor._approved_episode_body(row)
     recent = [
-        r for r in await repo.list_graph_verifications(limit=50)
+        r
+        for r in await repo.list_graph_verifications(limit=50)
         if r["status"] in ("VERIFIED", "PROBLEM")
     ]
     # A row whose episode was later DELETED on purpose stays as it is (it is
@@ -3113,8 +3313,10 @@ async def confirm_graph_verification(verification_id: str) -> dict:
     ):
         raise HTTPException(409, "verification is not awaiting the operator")
     await events.emit(
-        "graph.verification.confirmed", ref_id=verification_id,
-        payload={"by": "operator"}, actor="operator",
+        "graph.verification.confirmed",
+        ref_id=verification_id,
+        payload={"by": "operator"},
+        actor="operator",
     )
     return {"ok": True}
 
@@ -3133,8 +3335,10 @@ async def problem_graph_verification(verification_id: str, body: GraphProblemIn)
     ):
         raise HTTPException(409, "verification is not awaiting the operator")
     await events.emit(
-        "graph.verification.problem", ref_id=verification_id,
-        payload={"note": note, "remediate": body.remediate}, actor="operator",
+        "graph.verification.problem",
+        ref_id=verification_id,
+        payload={"note": note, "remediate": body.remediate},
+        actor="operator",
     )
     if not body.remediate:
         return {"ok": True}
@@ -3148,9 +3352,14 @@ async def problem_graph_verification(verification_id: str, body: GraphProblemIn)
     from central_command.runtime.templates import GRAPH_CURATOR_TEMPLATE
 
     await ensure_hired(
-        agent_id=gc.AGENT_ID, name=gc.NAME, role=gc.ROLE, charter=gc.CHARTER,
-        template=GRAPH_CURATOR_TEMPLATE, consultable=True,
-        deviations=gc.DEVIATIONS, hired_by="system:graph-remediation",
+        agent_id=gc.AGENT_ID,
+        name=gc.NAME,
+        role=gc.ROLE,
+        charter=gc.CHARTER,
+        template=GRAPH_CURATOR_TEMPLATE,
+        consultable=True,
+        deviations=gc.DEVIATIONS,
+        hired_by="system:graph-remediation",
     )
     result = await create_and_run_task(
         await graph_auditor.remediation_instructions(row, note),
@@ -3214,8 +3423,11 @@ async def author_gate_override(agent_id: str, body: GateOverrideIn) -> dict:
 
     try:
         out = await overrides.author(
-            agent_id, body.capability, body.scope,
-            acknowledge_irreversible=body.acknowledge_irreversible, by="operator",
+            agent_id,
+            body.capability,
+            body.scope,
+            acknowledge_irreversible=body.acknowledge_irreversible,
+            by="operator",
         )
     except overrides.AuthoringRefused as e:
         raise _refused(e) from e
@@ -3223,8 +3435,9 @@ async def author_gate_override(agent_id: str, body: GateOverrideIn) -> dict:
 
 
 @router.delete("/agents/{agent_id}/gate-overrides")
-async def revoke_agent_gate_override(agent_id: str, override_id: str,
-                                     reason: str | None = None) -> dict:
+async def revoke_agent_gate_override(
+    agent_id: str, override_id: str, reason: str | None = None
+) -> dict:
     from central_command.gateway import overrides
 
     row = await repo.get_gate_override(override_id)
@@ -3286,11 +3499,11 @@ class SkillIn(BaseModel):
 
 class SkillDocIn(BaseModel):
     doc_key: str
-    kind: str                      # 'guidance' | 'reference'
+    kind: str  # 'guidance' | 'reference'
     title: str
     content: str
     source_url: str | None = None
-    describes: str | None = None   # what this documents: 'Jira Cloud REST v3'
+    describes: str | None = None  # what this documents: 'Jira Cloud REST v3'
 
 
 class SkillGrantIn(BaseModel):
@@ -3327,14 +3540,19 @@ async def list_skill_release_flags_route() -> dict:
 
     items = []
     for f in await repo.list_open_skill_doc_flags():
-        items.append({
-            "skill_id": f["skill_id"], "doc_key": f["doc_key"], "release": f["release"],
-            "change": f["change"], "bundled_path": f["bundled_path"],
-            "flagged_at": f["flagged_at"],
-            "ours": f["ours"],
-            "ours_hash": bundled_text_hash(f["ours"]) if f["ours"] is not None else None,
-            "theirs": f["release_text"],
-        })
+        items.append(
+            {
+                "skill_id": f["skill_id"],
+                "doc_key": f["doc_key"],
+                "release": f["release"],
+                "change": f["change"],
+                "bundled_path": f["bundled_path"],
+                "flagged_at": f["flagged_at"],
+                "ours": f["ours"],
+                "ours_hash": bundled_text_hash(f["ours"]) if f["ours"] is not None else None,
+                "theirs": f["release_text"],
+            }
+        )
     return {"items": items}
 
 
@@ -3342,8 +3560,9 @@ class SkillFlagResolveIn(BaseModel):
     """The operator's decision on one flagged doc. A wrong shape is FastAPI's
     422 over HTTP; the RPC path builds it through `from_params`, which answers
     the same 422 with the validator's sentence."""
+
     decision: Decision
-    content: str | None = None     # the text to post, for 'edit' only
+    content: str | None = None  # the text to post, for 'edit' only
     # The library text the operator was shown; null when the doc is retired here.
     ours_hash: str | None
 
@@ -3356,7 +3575,9 @@ class SkillFlagResolveIn(BaseModel):
     @classmethod
     def from_params(cls, params: dict) -> SkillFlagResolveIn:
         try:
-            return cls.model_validate({k: params.get(k) for k in ("decision", "content", "ours_hash")})
+            return cls.model_validate(
+                {k: params.get(k) for k in ("decision", "content", "ours_hash")}
+            )
         except ValidationError as e:
             raise HTTPException(422, validation_sentence(e)) from e
 
@@ -3373,7 +3594,9 @@ def validation_sentence(e: ValidationError) -> str:
 
 @router.post("/skills/release-flags/{skill_id}/{doc_key}/resolve")
 async def resolve_skill_release_flag_route(
-    skill_id: str, doc_key: str, body: SkillFlagResolveIn,
+    skill_id: str,
+    doc_key: str,
+    body: SkillFlagResolveIn,
 ) -> dict:
     """The operator's decision on one flagged doc. 404 when nothing is open for
     it, 409 when the library or the release text moved since it was shown."""
@@ -3381,7 +3604,11 @@ async def resolve_skill_release_flag_route(
 
     try:
         return await refresh.resolve_flag(
-            skill_id, doc_key, body.decision, ours_hash=body.ours_hash, content=body.content,
+            skill_id,
+            doc_key,
+            body.decision,
+            ours_hash=body.ours_hash,
+            content=body.content,
         )
     except repo.SkillDocFlagClosed as e:
         raise HTTPException(404, str(e)) from e
@@ -3419,8 +3646,10 @@ async def create_skill_route(body: SkillIn) -> dict:
         raise HTTPException(409, f"skill {body.id!r} already exists")
     await repo.create_skill(body.id, body.title, body.summary)
     await events.emit(
-        "skill.created", ref_id=body.id,
-        payload={"title": body.title, "summary": body.summary}, actor="operator",
+        "skill.created",
+        ref_id=body.id,
+        payload={"title": body.title, "summary": body.summary},
+        actor="operator",
     )
     return {"ok": True}
 
@@ -3450,14 +3679,24 @@ async def add_skill_doc_route(skill_id: str, body: SkillDocIn) -> dict:
             "document, and any other doc_key with kind='reference'",
         )
     doc = await repo.add_skill_doc(
-        skill_id, body.doc_key, body.kind, body.title, body.content,
-        source_url=body.source_url, describes=body.describes,
+        skill_id,
+        body.doc_key,
+        body.kind,
+        body.title,
+        body.content,
+        source_url=body.source_url,
+        describes=body.describes,
         captured_at=datetime.now(UTC),
     )
     await events.emit(
-        "skill.doc_added", ref_id=skill_id,
-        payload={"doc_key": body.doc_key, "kind": body.kind,
-                 "version": doc["version"], "describes": body.describes},
+        "skill.doc_added",
+        ref_id=skill_id,
+        payload={
+            "doc_key": body.doc_key,
+            "kind": body.kind,
+            "version": doc["version"],
+            "describes": body.describes,
+        },
         actor="operator",
     )
     return doc
@@ -3487,10 +3726,12 @@ async def retire_skill_doc_route(skill_id: str, doc_key: str, body: RetireIn) ->
     row = await repo.retire_skill_doc(skill_id, doc_key, body.reason)
     if row is None:
         raise HTTPException(
-            409, f"doc {doc_key!r} on skill {skill_id!r} is unknown or already retired",
+            409,
+            f"doc {doc_key!r} on skill {skill_id!r} is unknown or already retired",
         )
     await events.emit(
-        "skill.doc_retired", ref_id=skill_id,
+        "skill.doc_retired",
+        ref_id=skill_id,
         payload={"doc_key": doc_key, "version": row["version"], "reason": body.reason},
         actor="operator",
     )
@@ -3502,8 +3743,10 @@ async def retire_skill_route(skill_id: str, body: RetireIn) -> dict:
     if not await repo.retire_skill(skill_id, body.reason):
         raise HTTPException(409, f"skill {skill_id!r} is unknown or already retired")
     await events.emit(
-        "skill.retired", ref_id=skill_id,
-        payload={"reason": body.reason}, actor="operator",
+        "skill.retired",
+        ref_id=skill_id,
+        payload={"reason": body.reason},
+        actor="operator",
     )
     return {"ok": True}
 
@@ -3516,7 +3759,10 @@ async def reactivate_skill_route(skill_id: str) -> dict:
     if not await repo.reactivate_skill(skill_id):
         raise HTTPException(409, f"skill {skill_id!r} is unknown or is not retired")
     await events.emit(
-        "skill.reactivated", ref_id=skill_id, payload={}, actor="operator",
+        "skill.reactivated",
+        ref_id=skill_id,
+        payload={},
+        actor="operator",
     )
     return {"ok": True}
 
@@ -3536,8 +3782,10 @@ async def grant_skill_route(agent_id: str, body: SkillGrantIn) -> dict:
         raise HTTPException(409, f"skill {body.skill_id!r} is retired")
     await repo.grant_skill(agent_id, body.skill_id)
     await events.emit(
-        "skill.granted", ref_id=agent_id,
-        payload={"skill_id": body.skill_id}, actor="operator",
+        "skill.granted",
+        ref_id=agent_id,
+        payload={"skill_id": body.skill_id},
+        actor="operator",
     )
     return {"ok": True}
 
@@ -3547,8 +3795,10 @@ async def revoke_skill_route(agent_id: str, skill_id: str, body: RetireIn) -> di
     if not await repo.revoke_skill(agent_id, skill_id, body.reason):
         raise HTTPException(409, "no active grant to revoke")
     await events.emit(
-        "skill.revoked", ref_id=agent_id,
-        payload={"skill_id": skill_id, "reason": body.reason}, actor="operator",
+        "skill.revoked",
+        ref_id=agent_id,
+        payload={"skill_id": skill_id, "reason": body.reason},
+        actor="operator",
     )
     return {"ok": True}
 
@@ -3595,15 +3845,26 @@ async def import_skill_doc_route(body: SkillDocImportIn) -> dict:
     kind = "guidance" if body.doc_key == "guidance" else "reference"
     title = body.title or body.doc_key
     doc = await repo.add_skill_doc(
-        body.skill_id, body.doc_key, kind, title, content,
-        source_url=source_url, describes=body.describes,
-        captured_at=datetime.now(UTC), added_by="operator",
+        body.skill_id,
+        body.doc_key,
+        kind,
+        title,
+        content,
+        source_url=source_url,
+        describes=body.describes,
+        captured_at=datetime.now(UTC),
+        added_by="operator",
     )
     await events.emit(
-        "skill.doc_added", ref_id=body.skill_id,
-        payload={"doc_key": body.doc_key, "kind": kind,
-                 "version": doc["version"], "describes": body.describes,
-                 "source_url": source_url},
+        "skill.doc_added",
+        ref_id=body.skill_id,
+        payload={
+            "doc_key": body.doc_key,
+            "kind": kind,
+            "version": doc["version"],
+            "describes": body.describes,
+            "source_url": source_url,
+        },
         actor="operator",
     )
     return doc
@@ -3652,15 +3913,27 @@ async def import_skill_file_route(
     kind = "guidance" if doc_key == "guidance" else "reference"
     title = title or Path(filename).stem
     doc = await repo.add_skill_doc(
-        skill_id, doc_key, kind, title, content,
-        source_url=None, describes=describes,
-        captured_at=datetime.now(UTC), added_by="operator",
+        skill_id,
+        doc_key,
+        kind,
+        title,
+        content,
+        source_url=None,
+        describes=describes,
+        captured_at=datetime.now(UTC),
+        added_by="operator",
     )
     await events.emit(
-        "skill.doc_added", ref_id=skill_id,
-        payload={"doc_key": doc_key, "kind": kind,
-                 "version": doc["version"], "describes": describes,
-                 "source_url": None, "filename": filename},
+        "skill.doc_added",
+        ref_id=skill_id,
+        payload={
+            "doc_key": doc_key,
+            "kind": kind,
+            "version": doc["version"],
+            "describes": describes,
+            "source_url": None,
+            "filename": filename,
+        },
         actor="operator",
     )
     return doc
@@ -3701,13 +3974,18 @@ async def import_skill_site_route(body: SkillSiteImportIn) -> dict:
     from central_command.skills.site_import import import_site
 
     result = await import_site(
-        body.skill_id, body.url,
-        doc_key_prefix=body.doc_key_prefix, max_pages=body.max_pages,
-        path_prefix=body.path_prefix, describes=body.describes, render=body.render,
+        body.skill_id,
+        body.url,
+        doc_key_prefix=body.doc_key_prefix,
+        max_pages=body.max_pages,
+        path_prefix=body.path_prefix,
+        describes=body.describes,
+        render=body.render,
         filter_mode=body.filter_mode,
     )
     await events.emit(
-        "skill.site_imported", ref_id=body.skill_id,
+        "skill.site_imported",
+        ref_id=body.skill_id,
         payload={"url": body.url, "rung": result["rung"], "count": len(result["imported"])},
         actor="operator",
     )
@@ -3715,7 +3993,7 @@ async def import_skill_site_route(body: SkillSiteImportIn) -> dict:
 
 
 class SkillImportIn(BaseModel):
-    path: str                      # a SKILL.md + references/ folder on this host
+    path: str  # a SKILL.md + references/ folder on this host
     skill_id: str | None = None
     source_url: str | None = None
     describes: str | None = None
@@ -3731,16 +4009,20 @@ async def import_skill_route(body: SkillImportIn) -> dict:
 
     try:
         result = await import_skill_folder(
-            body.path, skill_id=body.skill_id,
-            source_url=body.source_url, describes=body.describes,
+            body.path,
+            skill_id=body.skill_id,
+            source_url=body.source_url,
+            describes=body.describes,
             apply_default_grants=body.apply_default_grants,
         )
     except (FileNotFoundError, ValueError) as e:
         raise HTTPException(422, str(e)) from e
     await events.emit(
-        "skill.imported", ref_id=result["skill_id"],
+        "skill.imported",
+        ref_id=result["skill_id"],
         payload={
-            "path": body.path, "references": len(result["references"]),
+            "path": body.path,
+            "references": len(result["references"]),
             # Field NAMES only: the overlay's text is the deployment's own and
             # never enters an event.
             "overlay": result["overlay"],
@@ -3752,8 +4034,10 @@ async def import_skill_route(body: SkillImportIn) -> dict:
     )
     for agent_id in result["default_grants"]["applied"]:
         await events.emit(
-            "skill.granted", ref_id=agent_id,
-            payload={"skill_id": result["skill_id"], "default": True}, actor="seed:skill",
+            "skill.granted",
+            ref_id=agent_id,
+            payload={"skill_id": result["skill_id"], "default": True},
+            actor="seed:skill",
         )
     return result
 
@@ -3883,9 +4167,7 @@ async def _classify_group_scopes(group_ids: list[str]) -> list[dict]:
     from central_command.integrations import graphiti
 
     public_ids = {settings.graph_write_group, *await graphiti._read_groups()}
-    private_by_group = {
-        graphiti.private_group(a["id"]): a["id"] for a in await repo.list_agents()
-    }
+    private_by_group = {graphiti.private_group(a["id"]): a["id"] for a in await repo.list_agents()}
 
     out = []
     for gid in group_ids:
@@ -3903,14 +4185,19 @@ async def graph_status() -> dict:
     available = await neo4j_reader.ping()
     if not available:
         return {
-            "available": False, "node_count": 0, "edge_count": 0, "group_ids": [], "groups": [],
+            "available": False,
+            "node_count": 0,
+            "edge_count": 0,
+            "group_ids": [],
+            "groups": [],
             "graphistry": graphistry,
             "graphistry_enabled": settings_row["graphistry_enabled"],
             "graphistry_url": settings_row["graphistry_url"],
         }
     counts = await neo4j_reader.counts()
     return {
-        "available": True, **counts,
+        "available": True,
+        **counts,
         "groups": await _classify_group_scopes(counts["group_ids"]),
         "graphistry": graphistry,
         "graphistry_enabled": settings_row["graphistry_enabled"],
@@ -4053,21 +4340,27 @@ async def _curate(coro, op: str, detail: dict):
         # without its vector. A refusal, not a park: the operator is right
         # here, and the cockpit keeps the form filled so the write is one
         # click once the embedder is back (the operator's ruling, 2026-10-27).
-        return JSONResponse(status_code=503, content={
-            "error": "embedder down",
-            "dependency": "embedder",
-            "detail": EMBEDDER_REFUSAL,
-            "cause": f"{type(e.original).__name__}: {e.original}"[:300],
-        })
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "embedder down",
+                "dependency": "embedder",
+                "detail": EMBEDDER_REFUSAL,
+                "cause": f"{type(e.original).__name__}: {e.original}"[:300],
+            },
+        )
     except EmbedderMismatch as e:
         # The graph's embedder record disagrees (epic-embedder-integrity): the
         # same refusal, but waiting will not clear it, so the panel shows the
         # reason, which ends with what to run.
-        return JSONResponse(status_code=503, content={
-            "error": "embedder mismatch",
-            "dependency": "embedder",
-            "detail": e.reason,
-        })
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "embedder mismatch",
+                "dependency": "embedder",
+                "detail": e.reason,
+            },
+        )
     except neo4j_writer.WriteError as e:
         raise HTTPException(422, str(e)) from e
     except Exception as e:
@@ -4090,17 +4383,28 @@ async def graph_entity_types() -> dict:
 
 @router.post("/graph/node")
 async def graph_node_create(body: GraphNodeIn) -> dict:
-    return await _curate(neo4j_writer.create_node(
-        body.name, body.labels, body.summary, body.group_id),
-        "node.create", body.model_dump(exclude_none=True))
+    return await _curate(
+        neo4j_writer.create_node(body.name, body.labels, body.summary, body.group_id),
+        "node.create",
+        body.model_dump(exclude_none=True),
+    )
 
 
 @router.patch("/graph/node")
 async def graph_node_update(body: GraphNodePatch) -> dict:
-    return await _curate(neo4j_writer.update_node(
-        body.uuid, body.name, body.summary, body.labels,
-        aliases=body.aliases, birth_date=body.birth_date, phone=body.phone),
-        "node.update", body.model_dump(exclude_none=True))
+    return await _curate(
+        neo4j_writer.update_node(
+            body.uuid,
+            body.name,
+            body.summary,
+            body.labels,
+            aliases=body.aliases,
+            birth_date=body.birth_date,
+            phone=body.phone,
+        ),
+        "node.update",
+        body.model_dump(exclude_none=True),
+    )
 
 
 @router.delete("/graph/node")
@@ -4110,17 +4414,32 @@ async def graph_node_delete(uuid: str) -> dict:
 
 @router.post("/graph/edge")
 async def graph_edge_create(body: GraphEdgeIn) -> dict:
-    return await _curate(neo4j_writer.create_edge(
-        body.source_uuid, body.target_uuid, body.name, body.fact, body.valid_at),
-        "edge.create", body.model_dump(exclude_none=True))
+    return await _curate(
+        neo4j_writer.create_edge(
+            body.source_uuid, body.target_uuid, body.name, body.fact, body.valid_at
+        ),
+        "edge.create",
+        body.model_dump(exclude_none=True),
+    )
 
 
 @router.patch("/graph/edge")
 async def graph_edge_update(body: GraphEdgePatch) -> dict:
-    return await _curate(neo4j_writer.update_edge(
-        body.uuid, body.name, body.fact, body.source_uuid, body.target_uuid,
-        body.valid_at, body.invalid_at, body.clear_invalid, body.clear_valid),
-        "edge.update", body.model_dump(exclude_none=True))
+    return await _curate(
+        neo4j_writer.update_edge(
+            body.uuid,
+            body.name,
+            body.fact,
+            body.source_uuid,
+            body.target_uuid,
+            body.valid_at,
+            body.invalid_at,
+            body.clear_invalid,
+            body.clear_valid,
+        ),
+        "edge.update",
+        body.model_dump(exclude_none=True),
+    )
 
 
 @router.delete("/graph/edge")
@@ -4130,8 +4449,9 @@ async def graph_edge_delete(uuid: str) -> dict:
 
 @router.post("/graph/merge")
 async def graph_merge(body: GraphMergeIn) -> dict:
-    return await _curate(neo4j_writer.merge_nodes(body.keep_uuid, body.drop_uuid),
-        "merge", body.model_dump())
+    return await _curate(
+        neo4j_writer.merge_nodes(body.keep_uuid, body.drop_uuid), "merge", body.model_dump()
+    )
 
 
 # Episode deletion, the operator's own hand (design record 2026-10-04, D9).
@@ -4173,20 +4493,28 @@ async def graph_episode_delete(uuid: str, digest: str):
         raise HTTPException(404, "no such episode")
     if preview["digest"] != digest:
         raise HTTPException(
-            409, "the graph changed since this preview was read — nothing was deleted; "
-                 "review the new preview and confirm again",
+            409,
+            "the graph changed since this preview was read — nothing was deleted; "
+            "review the new preview and confirm again",
         )
     # The operator's confirmation AUTHORISES the job, so it is on the record
     # before the job exists (the append-only log's emit-before rule) — with
     # the exact sets confirmed. Completion is `graph.episode.deleted`.
     await events.emit(
-        "graph.curated", ref_id=uuid,
-        payload={"op": "episode.delete", "detail": {"uuid": uuid, "digest": digest},
-                 "result": neo4j_reader.preview_sets(preview)},
+        "graph.curated",
+        ref_id=uuid,
+        payload={
+            "op": "episode.delete",
+            "detail": {"uuid": uuid, "digest": digest},
+            "result": neo4j_reader.preview_sets(preview),
+        },
         actor="operator",
     )
     job = await graphiti_ingest.enqueue_delete(
-        uuid, preview["episode"]["group_id"], preview=preview, requested_by="operator",
+        uuid,
+        preview["episode"]["group_id"],
+        preview=preview,
+        requested_by="operator",
     )
     final = await graphiti_ingest.wait_for_job(job["id"], EPISODE_DELETE_WAIT_SECONDS)
     status = (final or {}).get("status")
@@ -4196,8 +4524,11 @@ async def graph_episode_delete(uuid: str, digest: str):
         raise HTTPException(422, f"deletion failed: {final.get('last_error')}")
     return JSONResponse(
         status_code=202,
-        content={"status": "queued", "job_id": job["id"],
-                 "detail": "queued behind earlier work in this group; it runs in order"},
+        content={
+            "status": "queued",
+            "job_id": job["id"],
+            "detail": "queued behind earlier work in this group; it runs in order",
+        },
     )
 
 
@@ -4269,13 +4600,15 @@ async def list_sources() -> dict:
     sources = []
     for s in await repo.list_sources():
         cursor = s.get("cursor") or {}
-        sources.append({
-            **s,
-            "read_only": False,
-            "last_polled_at": cursor.get("last_walk_at"),
-            "overview": await repo.catalog_overview(s["id"]),
-            "feed_overview": None,
-        })
+        sources.append(
+            {
+                **s,
+                "read_only": False,
+                "last_polled_at": cursor.get("last_walk_at"),
+                "overview": await repo.catalog_overview(s["id"]),
+                "feed_overview": None,
+            }
+        )
     return {"sources": [await _email_feed_source(), *sources]}
 
 
@@ -4303,9 +4636,13 @@ async def upsert_source(body: SourceIn) -> dict:
         )
     # The email feed is synthesized at read time, never stored.
     if body.id == EMAIL_FEED_ID:
-        raise HTTPException(422, f"{EMAIL_FEED_ID!r} is the synthesized email row — pick another id")
+        raise HTTPException(
+            422, f"{EMAIL_FEED_ID!r} is the synthesized email row — pick another id"
+        )
     if body.kind not in ("filesystem", "confluence"):
-        raise HTTPException(422, f"unknown source kind {body.kind!r} (have: filesystem, confluence)")
+        raise HTTPException(
+            422, f"unknown source kind {body.kind!r} (have: filesystem, confluence)"
+        )
     if body.kind == "filesystem":
         root = (body.config or {}).get("root")
         if not root or not Path(root).is_absolute():
@@ -4314,7 +4651,8 @@ async def upsert_source(body: SourceIn) -> dict:
         config = body.config or {}
         if not config.get("cql") and not config.get("space_keys"):
             raise HTTPException(
-                422, "config.cql or a non-empty config.space_keys is required for a confluence source"
+                422,
+                "config.cql or a non-empty config.space_keys is required for a confluence source",
             )
     row = await repo.upsert_source(body.id, body.kind, body.name, body.config, body.enabled)
     return {"ok": True, "source": row}
@@ -4369,8 +4707,10 @@ async def rescind_catalog_document(document_id: str, body: RescindIn) -> dict:
     if not await repo.rescind_document(document_id, body.reason.strip(), "operator"):
         raise HTTPException(404, f"catalog document {document_id!r} does not exist")
     await events.emit(
-        "catalog.document.rescinded", ref_id=document_id,
-        payload={"reason": body.reason.strip()}, actor="operator",
+        "catalog.document.rescinded",
+        ref_id=document_id,
+        payload={"reason": body.reason.strip()},
+        actor="operator",
     )
     return {"ok": True}
 
@@ -4380,6 +4720,9 @@ async def reinstate_catalog_document(document_id: str) -> dict:
     if not await repo.reinstate_document(document_id):
         raise HTTPException(404, f"catalog document {document_id!r} does not exist")
     await events.emit(
-        "catalog.document.reinstated", ref_id=document_id, payload={}, actor="operator",
+        "catalog.document.reinstated",
+        ref_id=document_id,
+        payload={},
+        actor="operator",
     )
     return {"ok": True}

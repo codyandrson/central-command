@@ -40,7 +40,8 @@ UPDATER = (ROOT / "deploy" / "k3s" / "cc-update.sh").read_text(encoding="utf-8")
 LIST_FILE = ROOT / "deploy" / "k3s" / "removed-capabilities.txt"
 
 _spec = importlib.util.spec_from_file_location(
-    "_cc_removed_capability_check", ROOT / "scripts" / "removed_capability_check.py")
+    "_cc_removed_capability_check", ROOT / "scripts" / "removed_capability_check.py"
+)
 check = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = check
 _spec.loader.exec_module(check)
@@ -48,7 +49,7 @@ _spec.loader.exec_module(check)
 
 def _fn(name: str) -> str:
     start = UPDATER.index(f"\n{name}() {{") + 1
-    return UPDATER[start:UPDATER.index("\n}\n", start) + 3]
+    return UPDATER[start : UPDATER.index("\n}\n", start) + 3]
 
 
 # ── the shipped list and the status set ─────────────────────────────────────
@@ -58,7 +59,9 @@ def test_the_shipped_list_names_exactly_the_removed_capabilities():
     # Release B removes task.create; release A shipped the list empty. The
     # 2026-11-21 system review removes litellm.apply_config_change.
     assert check.parse_list(LIST_FILE.read_text(encoding="utf-8")) == [
-        "task.create", "litellm.apply_config_change"]
+        "task.create",
+        "litellm.apply_config_change",
+    ]
 
 
 def test_pending_means_before_a_verdict():
@@ -68,7 +71,10 @@ def test_pending_means_before_a_verdict():
 
 
 def test_parse_list_ignores_comments_blanks_and_repeats():
-    assert check.parse_list("# c\n\ntask.create  # why\n  task.create\njira.x\n") == ["task.create", "jira.x"]
+    assert check.parse_list("# c\n\ntask.create  # why\n  task.create\njira.x\n") == [
+        "task.create",
+        "jira.x",
+    ]
 
 
 # ── the query ───────────────────────────────────────────────────────────────
@@ -81,11 +87,22 @@ async def _plant(capability: str, status: str = "AWAITING_HUMAN") -> tuple[str, 
     await repo.upsert_agent(agent, agent, "demo", "test charter")
     await repo.save_paused_session(sid, agent, {})
     await repo.save_proposal(
-        proposal_id=pid, session_id=sid, agent_id=agent, intent="make a task",
-        actions=[{"capability": capability, "arguments": {"agent_id": agent, "instructions": "x"},
-                  "target_ref": {"system": "central_command", "id": agent, "read_version": "unknown"},
-                  "reversibility": "reversible"}],
-        evidence=[], expected_effect="", idempotency_key=f"{pid}:0", status=status,
+        proposal_id=pid,
+        session_id=sid,
+        agent_id=agent,
+        intent="make a task",
+        actions=[
+            {
+                "capability": capability,
+                "arguments": {"agent_id": agent, "instructions": "x"},
+                "target_ref": {"system": "central_command", "id": agent, "read_version": "unknown"},
+                "reversibility": "reversible",
+            }
+        ],
+        evidence=[],
+        expected_effect="",
+        idempotency_key=f"{pid}:0",
+        status=status,
     )
     return pid, sid
 
@@ -146,7 +163,8 @@ async def test_other_capabilities_do_not_block_a_listed_one(capsys):
 async def test_a_session_parked_on_task_wait_is_listed(capsys):
     _, sid = await _plant("task.create", status="EXECUTED")
     await repo.park_session_awaiting_agents(
-        sid, {"task_wait": {"tool_call_id": "t", "task_id": "task_x", "proposal_id": None}})
+        sid, {"task_wait": {"tool_call_id": "t", "task_id": "task_x", "proposal_id": None}}
+    )
     assert await _main_async("task.create\n") == 1
     out = capsys.readouterr().out
     assert sid in out
@@ -218,18 +236,20 @@ def _helper(tree: Path, body: str) -> None:
 
 
 def _run(tree: Path, force: int = 0) -> subprocess.CompletedProcess:
-    script = "\n".join([
-        "set -uo pipefail",
-        'note() { printf "%s\\n" "$*"; }',
-        'die() { note "FAILED at $1: $2"; exit 1; }',
-        "RUNAS=()",
-        f"REPO='{tree}'",
-        "TARGET_VERSION=9.9.9",
-        f"FORCE={force}",
-        _fn("refuse_if_capability_pending"),
-        "refuse_if_capability_pending capabilities",
-        'echo PASSED',
-    ])
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            'note() { printf "%s\\n" "$*"; }',
+            'die() { note "FAILED at $1: $2"; exit 1; }',
+            "RUNAS=()",
+            f"REPO='{tree}'",
+            "TARGET_VERSION=9.9.9",
+            f"FORCE={force}",
+            _fn("refuse_if_capability_pending"),
+            "refuse_if_capability_pending capabilities",
+            "echo PASSED",
+        ]
+    )
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
 
 
@@ -271,7 +291,9 @@ def test_an_empty_list_or_no_list_never_refuses_nor_runs_the_helper(tree: Path):
 def test_the_list_is_read_from_the_target_tag_not_the_checkout(tree: Path):
     _tag(tree, "# empty\n")
     _helper(tree, REFUSING)
-    (tree / "deploy" / "k3s" / "removed-capabilities.txt").write_text("task.create\n")  # worktree only
+    (tree / "deploy" / "k3s" / "removed-capabilities.txt").write_text(
+        "task.create\n"
+    )  # worktree only
     assert _run(tree).returncode == 0
 
 

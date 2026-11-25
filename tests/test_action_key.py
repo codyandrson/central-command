@@ -39,14 +39,19 @@ BASE32HEX = re.compile(r"[a-v0-9]{5,1024}")
 
 
 def _action(capability: str, arguments: dict) -> Action:
-    return Action(capability=capability, arguments=arguments,
-                  target_ref={"system": "test", "id": "x", "read_version": "unknown"},
-                  reversibility="reversible")
+    return Action(
+        capability=capability,
+        arguments=arguments,
+        target_ref={"system": "test", "id": "x", "read_version": "unknown"},
+        reversibility="reversible",
+    )
 
 
 def _event_action(title: str = "Budget review") -> Action:
-    return _action("calendar.create_event", {
-        "title": title, "start": "2026-11-20T10:00:00Z", "end": "2026-11-20T10:30:00Z"})
+    return _action(
+        "calendar.create_event",
+        {"title": title, "start": "2026-11-20T10:00:00Z", "end": "2026-11-20T10:30:00Z"},
+    )
 
 
 # --- 1. the key --------------------------------------------------------------------
@@ -90,8 +95,12 @@ async def test_the_key_is_reset_when_the_action_raises(monkeypatch):
 
     monkeypatch.setitem(executor.HANDLERS, "jira.add_comment", boom)
     with pytest.raises(executor.ExecutionFailed):
-        await executor.execute([_action("jira.add_comment", {"issue_key": "DEMO-1", "body": "x"})],
-                               "human:lee", [], proposal_id="prop_k2")
+        await executor.execute(
+            [_action("jira.add_comment", {"issue_key": "DEMO-1", "body": "x"})],
+            "human:lee",
+            [],
+            proposal_id="prop_k2",
+        )
     assert executor.action_key() is None
 
 
@@ -134,19 +143,33 @@ class _Google:
         if cid is not None and cid in self.events:
             ev = self.events[cid]
             if ev["status"] == "cancelled":
-                return httpx.Response(200, json={"ok": False, "message": (
-                    "create - this event was created by an earlier attempt of the same "
-                    "approved action and has since been cancelled on the calendar - it was "
-                    "not created again, the operator decides")})
-            return httpx.Response(200, json={"ok": True, "already_existed": True,
-                                             "event": {"event_id": cid, "summary": ev["summary"]}})
+                return httpx.Response(
+                    200,
+                    json={
+                        "ok": False,
+                        "message": (
+                            "create - this event was created by an earlier attempt of the same "
+                            "approved action and has since been cancelled on the calendar - it was "
+                            "not created again, the operator decides"
+                        ),
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "already_existed": True,
+                    "event": {"event_id": cid, "summary": ev["summary"]},
+                },
+            )
         event_id = cid or f"g{len(self.events)}"
         self.events[event_id] = {"summary": payload["title"], "status": "confirmed"}
         if self.timeout_after_insert:
             self.timeout_after_insert = False
             raise httpx.ReadTimeout("timed out")
-        return httpx.Response(200, json={"ok": True, "event": {"event_id": event_id,
-                                                               "summary": payload["title"]}})
+        return httpx.Response(
+            200, json={"ok": True, "event": {"event_id": event_id, "summary": payload["title"]}}
+        )
 
 
 @pytest.fixture
@@ -193,9 +216,15 @@ async def test_a_retry_of_the_same_action_sends_the_same_id(google):
 async def test_a_direct_call_sends_exactly_the_old_request(google):
     await executor.HANDLERS["calendar.create_event"](_event_action().arguments, "human:lee", None)
     (sent,) = google.payloads
-    assert sent == {"mode": "create_event", "title": "Budget review",
-                    "start": "2026-11-20T10:00:00Z", "end": "2026-11-20T10:30:00Z",
-                    "description": "", "attendees": [], "calendar_id": "primary"}
+    assert sent == {
+        "mode": "create_event",
+        "title": "Budget review",
+        "start": "2026-11-20T10:00:00Z",
+        "end": "2026-11-20T10:30:00Z",
+        "description": "",
+        "attendees": [],
+        "calendar_id": "primary",
+    }
 
 
 async def test_the_exchange_path_gets_no_client_id(monkeypatch):
@@ -219,8 +248,10 @@ async def test_the_exchange_path_gets_no_client_id(monkeypatch):
 
 
 async def test_an_id_google_already_holds_completes_and_says_so(google):
-    google.events[executor.google_event_id("prop_c5:0")] = {"summary": "Budget review",
-                                                           "status": "confirmed"}
+    google.events[executor.google_event_id("prop_c5:0")] = {
+        "summary": "Budget review",
+        "status": "confirmed",
+    }
     out = await executor.execute([_event_action()], "human:lee", [], proposal_id="prop_c5")
     assert out.result_text.endswith("(already created by an earlier attempt)")
     assert len(google.events) == 1, "no second event"
@@ -237,8 +268,9 @@ async def test_an_id_whose_event_was_cancelled_fails_and_is_not_transient(google
 
 async def test_a_malformed_client_id_never_leaves_the_process(google):
     with pytest.raises(calendar_facade.CalendarFacadeError, match="client_event_id"):
-        await calendar_facade.create_event("t", "2026-11-20T10:00:00Z", "2026-11-20T10:30:00Z",
-                                           client_event_id="NOT-BASE32")
+        await calendar_facade.create_event(
+            "t", "2026-11-20T10:00:00Z", "2026-11-20T10:30:00Z", client_event_id="NOT-BASE32"
+        )
     assert google.payloads == []
 
 
@@ -269,11 +301,17 @@ class _Graph:
                 hook()
             return []
         if "MATCH (n:Entity {cc_action_key: $key})" in query:
-            return [{"uuid": n["uuid"], "episode": n["episode"]}
-                    for n in self.nodes if n.get("key") == key][:1]
+            return [
+                {"uuid": n["uuid"], "episode": n["episode"]}
+                for n in self.nodes
+                if n.get("key") == key
+            ][:1]
         if "MATCH ()-[e:RELATES_TO {cc_action_key: $key}]->()" in query:
-            return [{"uuid": e["uuid"], "episode": e["episode"]}
-                    for e in self.edges if e.get("key") == key][:1]
+            return [
+                {"uuid": e["uuid"], "episode": e["episode"]}
+                for e in self.edges
+                if e.get("key") == key
+            ][:1]
         if "RETURN a.group_id AS group_id" in query:
             return [{"group_id": "g"}]
         if "CREATE (ep:Episodic)" in query:
@@ -283,12 +321,24 @@ class _Graph:
                     n["episode"] = params["uuid"]
             return []
         if "CREATE (n:Entity" in query:
-            self.nodes.append({"uuid": params["uuid"], "key": params.get("action_key"),
-                               "episode": None, "query": query})
+            self.nodes.append(
+                {
+                    "uuid": params["uuid"],
+                    "key": params.get("action_key"),
+                    "episode": None,
+                    "query": query,
+                }
+            )
             return []
         if "CREATE (a)-[e:RELATES_TO]->(b)" in query:
-            self.edges.append({"uuid": params["uuid"], "key": params.get("action_key"),
-                               "episode": params["episode"], "query": query})
+            self.edges.append(
+                {
+                    "uuid": params["uuid"],
+                    "key": params.get("action_key"),
+                    "episode": params["episode"],
+                    "query": query,
+                }
+            )
             return []
         raise AssertionError(f"unexpected statement: {query}")
 
@@ -315,8 +365,12 @@ def graph(monkeypatch) -> _Graph:
 
 
 async def test_a_keyed_node_is_created_once_and_the_repeat_returns_it(graph):
-    first = await neo4j_writer.create_node("Jane Doe", ["Person"], "a person", "g", action_key="p:0")
-    second = await neo4j_writer.create_node("Jane Doe", ["Person"], "a person", "g", action_key="p:0")
+    first = await neo4j_writer.create_node(
+        "Jane Doe", ["Person"], "a person", "g", action_key="p:0"
+    )
+    second = await neo4j_writer.create_node(
+        "Jane Doe", ["Person"], "a person", "g", action_key="p:0"
+    )
     assert len(graph.nodes) == 1 and graph.nodes[0]["key"] == "p:0"
     assert "n.cc_action_key = $action_key" in graph.nodes[0]["query"]
     assert second == {"uuid": first["uuid"], "episode": first["episode"], "already_existed": True}
@@ -342,6 +396,7 @@ async def test_the_look_up_runs_again_under_the_lock_and_a_racing_create_wins(gr
     """While this attempt waited for the lock another attempt of the same
     action committed its node. The look-up INSIDE the transaction, after the
     lock, sees it: nothing is created twice."""
+
     def concurrent_attempt():
         graph.nodes.append({"uuid": "other", "key": "p:1", "episode": "ep-other", "query": ""})
 
@@ -349,16 +404,19 @@ async def test_the_look_up_runs_again_under_the_lock_and_a_racing_create_wins(gr
     out = await neo4j_writer.create_node("Jane Doe", None, "", "g", action_key="p:1")
     assert out == {"uuid": "other", "episode": "ep-other", "already_existed": True}
     assert len(graph.nodes) == 1 and graph.episodes == []
-    tx = graph.statements[graph.statements.index(next(
-        s for s in graph.statements if "MERGE (m:CCGraphMeta" in s)):]
+    tx = graph.statements[
+        graph.statements.index(next(s for s in graph.statements if "MERGE (m:CCGraphMeta" in s)) :
+    ]
     assert "cc_action_key: $key" in tx[1], "the look-up runs after the lock, in the transaction"
 
 
 async def test_a_keyed_edge_is_created_once_and_the_repeat_returns_it(graph):
-    first = await neo4j_writer.create_edge("a", "b", "WORKS_AT", "Jane works at Example Co",
-                                           valid_at=None, action_key="p:2")
-    again = await neo4j_writer.create_edge("a", "b", "WORKS_AT", "Jane works at Example Co",
-                                           valid_at=None, action_key="p:2")
+    first = await neo4j_writer.create_edge(
+        "a", "b", "WORKS_AT", "Jane works at Example Co", valid_at=None, action_key="p:2"
+    )
+    again = await neo4j_writer.create_edge(
+        "a", "b", "WORKS_AT", "Jane works at Example Co", valid_at=None, action_key="p:2"
+    )
     assert len(graph.edges) == 1 and "e.cc_action_key = $action_key" in graph.edges[0]["query"]
     assert again == {"uuid": first["uuid"], "episode": first["episode"], "already_existed": True}
     assert len(graph.episodes) == 1
@@ -373,7 +431,8 @@ async def test_an_unkeyed_edge_is_created_every_time_as_before(graph):
 
 
 async def test_the_executor_keys_only_the_two_creates_and_says_when_it_returned_one(
-    graph, monkeypatch,
+    graph,
+    monkeypatch,
 ):
     fake_world(monkeypatch, real=("graph.create_node", "graph.create_edge"))
     node = _action("graph.create_node", {"name": "Jane Doe", "group_id": "g", "summary": "s"})
@@ -403,9 +462,15 @@ def test_a_split_twin_never_carries_the_key():
 def test_agents_never_see_the_key_in_a_graph_result():
     assert neo4j_writer.ACTION_KEY_PROPERTY in graphiti.CONTROL_PLANE_PROPERTIES
     assert graphiti.CONTROL_PLANE_PROPERTIES == {neo4j_writer.ACTION_KEY_PROPERTY}
-    node = SimpleNamespace(uuid="u", name="Jane", labels=["Entity"], created_at=None,
-                           summary="", group_id="g",
-                           attributes={"cc_action_key": "prop_x:0", "employer": "Example Co"})
+    node = SimpleNamespace(
+        uuid="u",
+        name="Jane",
+        labels=["Entity"],
+        created_at=None,
+        summary="",
+        group_id="g",
+        attributes={"cc_action_key": "prop_x:0", "employer": "Example Co"},
+    )
     assert graphiti.node_result(node)["attributes"] == {"employer": "Example Co"}
 
 
@@ -416,8 +481,9 @@ async def _loe() -> str:
     from central_command.db import repo
 
     loe_id = f"loe-key-{uuid.uuid4().hex[:8]}"
-    await repo.create_loe(loe_id, "Key test", "weekly", "accountability",
-                          {"questions": ["q?"], "thresholds": "t"})
+    await repo.create_loe(
+        loe_id, "Key test", "weekly", "accountability", {"questions": ["q?"], "thresholds": "t"}
+    )
     return loe_id
 
 
@@ -426,10 +492,12 @@ async def test_the_same_action_key_writes_one_checkin():
     from central_command.db import repo
 
     loe_id = await _loe()
-    first = await repo.record_loe_checkin(loe_id, "green", 80, "fine", proposal_id="prop_l1",
-                                          action_key="prop_l1:0")
-    again = await repo.record_loe_checkin(loe_id, "red", 10, "different", proposal_id="prop_l1",
-                                          action_key="prop_l1:0")
+    first = await repo.record_loe_checkin(
+        loe_id, "green", 80, "fine", proposal_id="prop_l1", action_key="prop_l1:0"
+    )
+    again = await repo.record_loe_checkin(
+        loe_id, "red", 10, "different", proposal_id="prop_l1", action_key="prop_l1:0"
+    )
     assert first["already_existed"] is False and again["already_existed"] is True
     assert again["id"] == first["id"] and again["light"] == "green"
     rows = await repo.list_loe_checkins(loe_id)
@@ -451,8 +519,10 @@ async def test_a_checkin_with_no_key_appends_as_before():
 async def test_the_executor_keys_the_checkin_and_says_when_it_was_already_there(monkeypatch):
     fake_world(monkeypatch, real=("loe.record_checkin",))
     loe_id = await _loe()
-    checkin = _action("loe.record_checkin", {"loe_id": loe_id, "light": "yellow",
-                                             "confidence": 55, "summary": "mixed"})
+    checkin = _action(
+        "loe.record_checkin",
+        {"loe_id": loe_id, "light": "yellow", "confidence": 55, "summary": "mixed"},
+    )
     await executor.execute([checkin], "human:lee", [], proposal_id="prop_l2")
     again = await executor.execute([checkin], "human:lee", [], proposal_id="prop_l2")
     assert again.result_text.endswith("(already recorded by an earlier attempt)")
@@ -472,15 +542,20 @@ async def test_the_key_column_and_its_index_are_declared_idempotently():
 
     sql = (Path(repo.__file__).with_name("schema.sql")).read_text(encoding="utf-8")
     assert "alter table loe_checkin add column if not exists action_key text;" in sql
-    assert ("create unique index if not exists loe_checkin_action_key_uq\n"
-            "    on loe_checkin (action_key) where action_key is not null;") in sql
+    assert (
+        "create unique index if not exists loe_checkin_action_key_uq\n"
+        "    on loe_checkin (action_key) where action_key is not null;"
+    ) in sql
     conn = await repo._conn()
     try:
         await conn.execute("alter table loe_checkin add column if not exists action_key text")
-        await conn.execute("create unique index if not exists loe_checkin_action_key_uq "
-                           "on loe_checkin (action_key) where action_key is not null")
+        await conn.execute(
+            "create unique index if not exists loe_checkin_action_key_uq "
+            "on loe_checkin (action_key) where action_key is not null"
+        )
         indexdef = await conn.fetchval(
-            "select indexdef from pg_indexes where indexname = 'loe_checkin_action_key_uq'")
+            "select indexdef from pg_indexes where indexname = 'loe_checkin_action_key_uq'"
+        )
     finally:
         await conn.close()
     assert "UNIQUE" in indexdef and "WHERE (action_key IS NOT NULL)" in indexdef
@@ -502,8 +577,10 @@ async def settled():
     async def settle():
         conn = await repo._conn()
         try:
-            await conn.execute("update proposal set status = 'FAILED', retry_state = null "
-                               "where status in ('EXECUTING', 'RETRY_PENDING')")
+            await conn.execute(
+                "update proposal set status = 'FAILED', retry_state = null "
+                "where status in ('EXECUTING', 'RETRY_PENDING')"
+            )
         finally:
             await conn.close()
 
@@ -514,16 +591,24 @@ async def settled():
 
 def _three_with(middle: dict) -> dict:
     def comment(n):
-        return {"capability": "jira.add_comment",
-                "arguments": {"issue_key": f"DEMO-{n}", "body": f"note {n}"},
-                "target_ref": {"system": "jira", "id": f"DEMO-{n}", "read_version": "etag:1"},
-                "reversibility": "reversible"}
+        return {
+            "capability": "jira.add_comment",
+            "arguments": {"issue_key": f"DEMO-{n}", "body": f"note {n}"},
+            "target_ref": {"system": "jira", "id": f"DEMO-{n}", "read_version": "etag:1"},
+            "reversibility": "reversible",
+        }
 
     return {
         "intent": "Comment, create, comment",
         "actions": [comment(1), middle, comment(3)],
-        "evidence": [{"kind": "operator", "source_ref": "operator:task",
-                      "locator": "test task", "claim": "Operator tasked the three actions."}],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "test task",
+                "claim": "Operator tasked the three actions.",
+            }
+        ],
         "expected_effect": "two notes and one created item",
         "confidence": {"level": "high", "rationale": "The test states it."},
     }
@@ -567,8 +652,11 @@ async def _approve_parks_then_sweep_converges(monkeypatch, middle: dict) -> tupl
     results = final["retry_state"]["completed_results"]
     assert len(results) == 3 and results[0] == "commented on DEMO-1"
     assert results[2] == "commented on DEMO-3"
-    executed = [e for e in await repo.list_events(ref_id=row["id"], limit=1000)
-                if e["kind"] == "proposal.executed"]
+    executed = [
+        e
+        for e in await repo.list_events(ref_id=row["id"], limit=1000)
+        if e["kind"] == "proposal.executed"
+    ]
     assert len(executed) == 1
     assert executed[0]["payload"]["result_text"] == "; ".join(results)
     assert comments == ["DEMO-1", "DEMO-3"], "the completed action never re-ran"
@@ -577,14 +665,21 @@ async def _approve_parks_then_sweep_converges(monkeypatch, middle: dict) -> tupl
 
 @needs_pg
 async def test_a_calendar_create_that_landed_before_its_timeout_is_retried_into_one_event(
-    monkeypatch, settled, google,
+    monkeypatch,
+    settled,
+    google,
 ):
     google.timeout_after_insert = True
-    middle = {"capability": "calendar.create_event",
-              "arguments": {"title": "Budget review", "start": "2026-11-20T10:00:00Z",
-                            "end": "2026-11-20T10:30:00Z"},
-              "target_ref": {"system": "calendar", "id": "primary", "read_version": "unknown"},
-              "reversibility": "reversible"}
+    middle = {
+        "capability": "calendar.create_event",
+        "arguments": {
+            "title": "Budget review",
+            "start": "2026-11-20T10:00:00Z",
+            "end": "2026-11-20T10:30:00Z",
+        },
+        "target_ref": {"system": "calendar", "id": "primary", "read_version": "unknown"},
+        "reversibility": "reversible",
+    }
     final, results = await _approve_parks_then_sweep_converges(monkeypatch, middle)
     assert results[1].endswith("(already created by an earlier attempt)")
     assert len(google.events) == 1, "one event, not two"
@@ -594,7 +689,9 @@ async def test_a_calendar_create_that_landed_before_its_timeout_is_retried_into_
 
 @needs_pg
 async def test_a_graph_create_that_landed_before_its_failure_is_retried_into_one_node(
-    monkeypatch, settled, graph,
+    monkeypatch,
+    settled,
+    graph,
 ):
     fake_world(monkeypatch, real=("graph.create_node",))
     landed_then_lost = {"armed": True}
@@ -607,10 +704,12 @@ async def test_a_graph_create_that_landed_before_its_failure_is_retried_into_one
         return result
 
     monkeypatch.setattr(neo4j_writer, "_write_tx", commit_then_lose_the_answer)
-    middle = {"capability": "graph.create_node",
-              "arguments": {"name": "Jane Doe", "group_id": "g", "summary": "a person"},
-              "target_ref": {"system": "graph", "id": "g", "read_version": "unknown"},
-              "reversibility": "reversible"}
+    middle = {
+        "capability": "graph.create_node",
+        "arguments": {"name": "Jane Doe", "group_id": "g", "summary": "a person"},
+        "target_ref": {"system": "graph", "id": "g", "read_version": "unknown"},
+        "reversibility": "reversible",
+    }
     final, results = await _approve_parks_then_sweep_converges(monkeypatch, middle)
     assert results[1].endswith("(already created by an earlier attempt)")
     assert len(graph.nodes) == 1 and graph.nodes[0]["key"] == f"{final['id']}:1"

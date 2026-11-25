@@ -29,8 +29,7 @@ def test_pack_capabilities_match_the_registry():
     for pack in packs.PACKS.values():
         for cap in pack.capabilities:
             assert cap.name in known, (
-                f"pack {pack.name!r} offers {cap.name!r}, which is not a "
-                "registered gated write"
+                f"pack {pack.name!r} offers {cap.name!r}, which is not a registered gated write"
             )
             required = [a for a in by_name[cap.name].arguments if "?" not in a]
             for arg in required:
@@ -51,8 +50,7 @@ def test_pack_tools_are_only_propose_and_read():
         for tool_name in pack.tool_names:
             fn = getattr(tools_mod, tool_name, None)
             assert fn is not None, (
-                f"pack {pack.name!r} names {tool_name!r}, which does not exist "
-                "in runtime/tools.py"
+                f"pack {pack.name!r} names {tool_name!r}, which does not exist in runtime/tools.py"
             )
             assert fn.__module__ == "central_command.runtime.tools", (
                 f"pack tool {tool_name!r} lives outside the runtime tools "
@@ -83,17 +81,25 @@ def test_toolset_assembly_dedupes_and_fails_loud():
     # propose_action rides both propose packs — once. Its deprecated alias
     # propose_jira_update dropped from every toolset 2026-08-21 (durable.py
     # keeps a pre-drop paused session resumable without it being callable).
-    assert names == {"propose_action", "jira_get_issue",
-                     # An issue's comments, read on request (DL-222).
-                     "jira_get_comments",
-                     "jira_search_issues", "jira_get_transitions",
-                     "jira_list_projects", "jira_list_issue_types",
-                     "jira_list_fields", "jira_list_filters", "jira_list_dashboards",
-                     "jira_list_gadgets", "jira_find_users",
-                     # The backlog's planning gaps (DL-221 step 4b).
-                     "jira_planning_gaps",
-                     # The team's load (DL-221 step 6).
-                     "jira_team_load"}
+    assert names == {
+        "propose_action",
+        "jira_get_issue",
+        # An issue's comments, read on request (DL-222).
+        "jira_get_comments",
+        "jira_search_issues",
+        "jira_get_transitions",
+        "jira_list_projects",
+        "jira_list_issue_types",
+        "jira_list_fields",
+        "jira_list_filters",
+        "jira_list_dashboards",
+        "jira_list_gadgets",
+        "jira_find_users",
+        # The backlog's planning gaps (DL-221 step 4b).
+        "jira_planning_gaps",
+        # The team's load (DL-221 step 6).
+        "jira_team_load",
+    }
     with pytest.raises(ValueError, match="unknown capability pack"):
         packs.toolset_for(["jira-read", "no-such-pack"])
     with pytest.raises(ValueError, match="unknown capability pack"):
@@ -103,8 +109,7 @@ def test_toolset_assembly_dedupes_and_fails_loud():
 def test_charter_section_is_generated_from_grants():
     section = packs.charter_section(["jira-propose", "graph-propose"])
     assert "SUPERSEDES" in section
-    for cap in ("jira.set_due_date", "jira.add_comment", "jira.link_issues",
-                "graph.add_episode"):
+    for cap in ("jira.set_due_date", "jira.add_comment", "jira.link_issues", "graph.add_episode"):
         assert f"capability = '{cap}'" in section
     # A read-only grant set says so instead of listing nothing.
     read_only = packs.charter_section(["jira-read"])
@@ -152,11 +157,18 @@ async def test_invented_capability_is_rejected_in_run():
 
     def prop(capability):
         return Proposal(
-            intent="x", expected_effect="y", evidence=[],
+            intent="x",
+            expected_effect="y",
+            evidence=[],
             confidence={"level": "high", "rationale": "The test states it."},
-            actions=[Action(capability=capability, arguments={},
-                            target_ref={"system": "jira", "id": "T-1"},
-                            reversibility=Reversibility.reversible)],
+            actions=[
+                Action(
+                    capability=capability,
+                    arguments={},
+                    target_ref={"system": "jira", "id": "T-1"},
+                    reversibility=Reversibility.reversible,
+                )
+            ],
         )
 
     async def no_db(*a, **k):
@@ -208,8 +220,7 @@ async def test_grant_revoke_grant_keeps_history_and_truth():
     finally:
         conn = await repo._conn()
         try:
-            await conn.execute(
-                "delete from agent_grant where agent_id = 'packtest-agent'")
+            await conn.execute("delete from agent_grant where agent_id = 'packtest-agent'")
             await conn.execute("delete from agent where id = 'packtest-agent'")
         finally:
             await conn.close()
@@ -231,15 +242,17 @@ async def test_hire_enforces_the_creation_invariant():
     """D24: the agent row cannot land without charter v1 + grants — one
     transaction, and the failure modes are loud."""
     with pytest.raises(ValueError, match="without capability grants"):
-        await repo.hire_agent("hiretest-x", "X", "role", "charter", [],
-                              template="general")
+        await repo.hire_agent("hiretest-x", "X", "role", "charter", [], template="general")
     with pytest.raises(ValueError, match="without a charter"):
-        await repo.hire_agent("hiretest-x", "X", "role", "  ", ["jira-read"],
-                              template="general")
+        await repo.hire_agent("hiretest-x", "X", "role", "  ", ["jira-read"], template="general")
 
     try:
         row = await repo.hire_agent(
-            "hiretest-x", "X", "test things", "You are X.", ["jira-read"],
+            "hiretest-x",
+            "X",
+            "test things",
+            "You are X.",
+            ["jira-read"],
             template="general",
         )
         assert row["status"] == "ACTIVE" and row["taskable"]
@@ -248,8 +261,7 @@ async def test_hire_enforces_the_creation_invariant():
         assert await packs.granted_packs("hiretest-x") == ("jira-read",)
         # A duplicate id fails loud — retired ids stay reserved.
         with pytest.raises(ValueError, match="already exists"):
-            await repo.hire_agent("hiretest-x", "X", "r", "c", ["jira-read"],
-                                  template="general")
+            await repo.hire_agent("hiretest-x", "X", "r", "c", ["jira-read"], template="general")
 
         # Retire = status flip with a reason; taskability drops out.
         assert await repo.retire_agent("hiretest-x", "test over")
@@ -264,8 +276,7 @@ async def test_hire_enforces_the_creation_invariant():
         conn = await repo._conn()
         try:
             await conn.execute("delete from agent_grant where agent_id = 'hiretest-x'")
-            await conn.execute(
-                "delete from guidance_version where agent_id = 'hiretest-x'")
+            await conn.execute("delete from guidance_version where agent_id = 'hiretest-x'")
             await conn.execute("delete from agent where id = 'hiretest-x'")
         finally:
             await conn.close()
@@ -277,13 +288,18 @@ async def test_hire_rejects_a_role_too_long_to_be_a_routing_line():
     charter — a long one bloats all of them, not just this agent's own."""
     with pytest.raises(ValueError, match="one-line routing description"):
         await repo.hire_agent(
-            "hiretest-longrole", "X", "r" * 141, "You are X.", ["jira-read"],
+            "hiretest-longrole",
+            "X",
+            "r" * 141,
+            "You are X.",
+            ["jira-read"],
             template="general",
         )
 
 
-@pytest.mark.parametrize("pack_name", ["record-read", "activity-read",
-                                       "calendar-read", "web-read", "mail-read"])
+@pytest.mark.parametrize(
+    "pack_name", ["record-read", "activity-read", "calendar-read", "web-read", "mail-read"]
+)
 def test_the_record_packs_are_read_only(pack_name):
     """The reads over Central Command's own record — ungated, and holding no gated
     capability at all. A read pack that could propose would put a write behind
@@ -356,7 +372,8 @@ async def test_generated_team_section_names_teammates_not_self(monkeypatch):
 
     team = await team_section("jira-expert")
     agent = await build_jira_expert(
-        charter="You are the Jira expert.", packs=("jira-read",),
+        charter="You are the Jira expert.",
+        packs=("jira-read",),
         team_section=team,
     )
     prompt = "\n".join(agent._system_prompts)
@@ -377,7 +394,9 @@ async def test_a_consult_advisory_prompt_also_carries_the_team_section(monkeypat
     from central_command.runtime import consult as consult_mod
 
     agent = await consult_mod.build_advisory_agent(
-        "jira-expert", "You are the Jira expert.", packs=("jira-read",),
+        "jira-expert",
+        "You are the Jira expert.",
+        packs=("jira-read",),
     )
     prompt = "\n".join(agent._system_prompts)
     assert "YOUR TEAM" in prompt
@@ -416,8 +435,7 @@ def test_curator_pack_names_every_entity_type():
     from central_command.integrations.neo4j_writer import ENTITY_TYPES
 
     cap = next(
-        c for p in packs.PACKS.values() for c in p.capabilities
-        if c.name == "graph.create_node"
+        c for p in packs.PACKS.values() for c in p.capabilities if c.name == "graph.create_node"
     )
     for t in ENTITY_TYPES:
         assert t in cap.notes, f"pack notes omit entity type {t}"
@@ -425,8 +443,9 @@ def test_curator_pack_names_every_entity_type():
 
 
 def _episode_notes() -> str:
-    cap = next(c for c in packs.PACKS["graph-propose"].capabilities
-               if c.name == "graph.add_episode")
+    cap = next(
+        c for c in packs.PACKS["graph-propose"].capabilities if c.name == "graph.add_episode"
+    )
     return cap.notes
 
 
@@ -502,8 +521,13 @@ def test_an_episode_is_routed_before_it_is_shaped():
 def test_the_graphiti_skill_no_longer_mirrors_the_tracker():
     from pathlib import Path
 
-    belongs = (Path(__file__).resolve().parent.parent / "skills" / "graphiti"
-               / "references" / "what-belongs.md").read_text(encoding="utf-8")
+    belongs = (
+        Path(__file__).resolve().parent.parent
+        / "skills"
+        / "graphiti"
+        / "references"
+        / "what-belongs.md"
+    ).read_text(encoding="utf-8")
     assert "A due-date change **always** qualifies" not in belongs
     assert "Keeping the graph in sync is half the job" not in belongs
     assert "Route first: one home for each thing" in belongs

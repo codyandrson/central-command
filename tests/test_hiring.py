@@ -54,16 +54,22 @@ def test_the_steward_delegates_rather_than_keeping_a_second_copy():
 @needs_pg
 async def test_ensure_hired_creates_a_full_roster_member_and_is_idempotent():
     await hiring.ensure_hired(
-        agent_id=AGENT, name="Hiring Test", role="exercise the hire seam",
+        agent_id=AGENT,
+        name="Hiring Test",
+        role="exercise the hire seam",
         charter="A charter, because an agent cannot be hired without one.",
-        template=STEWARD_TEMPLATE, consultable=False,
+        template=STEWARD_TEMPLATE,
+        consultable=False,
         deviations="test fixture: neither taskable nor consultable",
     )
     first = await repo.get_agent(AGENT)
     await hiring.ensure_hired(
-        agent_id=AGENT, name="Hiring Test", role="exercise the hire seam",
+        agent_id=AGENT,
+        name="Hiring Test",
+        role="exercise the hire seam",
         charter="A charter, because an agent cannot be hired without one.",
-        template=STEWARD_TEMPLATE, consultable=False,
+        template=STEWARD_TEMPLATE,
+        consultable=False,
         deviations="test fixture: neither taskable nor consultable",
     )
     again = await repo.get_agent(AGENT)
@@ -91,13 +97,16 @@ async def test_losing_the_hire_race_is_the_outcome_asked_for(monkeypatch):
     real_hire = repo.hire_agent
 
     async def racing_hire(*args, **kwargs):
-        await real_hire(*args, **kwargs)          # the winner's row lands
+        await real_hire(*args, **kwargs)  # the winner's row lands
         raise ValueError("agent id already exists")  # ...then we lose
 
     monkeypatch.setattr(repo, "hire_agent", racing_hire)
     await hiring.ensure_hired(
-        agent_id=AGENT, name="Hiring Test", role="exercise the hire seam",
-        charter="A charter.", template=STEWARD_TEMPLATE,
+        agent_id=AGENT,
+        name="Hiring Test",
+        role="exercise the hire seam",
+        charter="A charter.",
+        template=STEWARD_TEMPLATE,
         deviations="test fixture",
     )
     assert await repo.get_agent(AGENT) is not None
@@ -108,14 +117,19 @@ async def test_a_ValueError_with_no_agent_behind_it_still_raises(monkeypatch):
     """The other half of the same branch: `hire_agent` also raises ValueError
     for an empty charter or no grants. Swallowing those would leave a caller
     believing an agent exists when nothing was created."""
+
     async def always_fails(*args, **kwargs):
         raise ValueError("an agent cannot be hired without capability grants")
 
     monkeypatch.setattr(repo, "hire_agent", always_fails)
     with pytest.raises(ValueError):
         await hiring.ensure_hired(
-            agent_id=AGENT, name="Hiring Test", role="r", charter="c",
-            template=STEWARD_TEMPLATE, deviations="test fixture",
+            agent_id=AGENT,
+            name="Hiring Test",
+            role="r",
+            charter="c",
+            template=STEWARD_TEMPLATE,
+            deviations="test fixture",
         )
     assert await repo.get_agent(AGENT) is None
 
@@ -129,10 +143,14 @@ async def test_hire_route_treats_an_empty_packs_list_like_omitted():
 
     agent_id = None
     try:
-        out = await routes.hire_agent(routes.HireIn(
-            name="Hiring Empty Packs Test", mission="exercise the empty-packs hire path",
-            template="general", packs=[],
-        ))
+        out = await routes.hire_agent(
+            routes.HireIn(
+                name="Hiring Empty Packs Test",
+                mission="exercise the empty-packs hire path",
+                template="general",
+                packs=[],
+            )
+        )
         agent_id = out["agent"]["id"]
         assert out["ok"] is True
         grants = {g["pack"] for g in await repo.list_grants(agent_id) if g["revoked_at"] is None}

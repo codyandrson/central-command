@@ -107,8 +107,14 @@ class FakeGraph:
         self.search_calls = 0
         self.curation: list[str] = []
         self.element = {
-            "uuid": "u-1", "group_id": "central_command", "name": "old", "summary": "old",
-            "fact": "old", "source": "a", "target": "b", "labels": ["Entity"],
+            "uuid": "u-1",
+            "group_id": "central_command",
+            "name": "old",
+            "summary": "old",
+            "fact": "old",
+            "source": "a",
+            "target": "b",
+            "labels": ["Entity"],
         }
 
     def session(self, **kw):
@@ -116,8 +122,12 @@ class FakeGraph:
 
     def declare(self, **fields):
         self.record = {
-            "key": "embedder", "alias": ALIAS, "dimensions": DIMS, "epoch": 1,
-            "text_recipe": TEXT_RECIPE, "state": "stable",
+            "key": "embedder",
+            "alias": ALIAS,
+            "dimensions": DIMS,
+            "epoch": 1,
+            "text_recipe": TEXT_RECIPE,
+            "state": "stable",
             "canary_texts": list(CANARY_TEXTS),
             "canary_vectors": json.dumps([_vector(t) for t in CANARY_TEXTS]),
             **fields,
@@ -131,7 +141,8 @@ class FakeGraph:
             return []
         if "WHERE m.alias IS NULL" in query:
             if (self.record or {}).get("alias") or (self.record or {}).get("state") in (
-                "migrating", "awaiting_config",
+                "migrating",
+                "awaiting_config",
             ):
                 return []
             return self._set(params["fields"])
@@ -206,8 +217,9 @@ def search(monkeypatch, graph):
     monkeypatch.setattr(graphiti, "_client", lambda: SimpleNamespace(get_graphiti=_Library))
     monkeypatch.setattr(graphiti, "_recipe", lambda *a, **k: None)
     monkeypatch.setattr(graphiti, "fact_filters", lambda **k: None)
-    monkeypatch.setattr(graphiti, "fact_result",
-                        lambda e: {"uuid": e.uuid, "fact": FACT, "name": "DUE_ON"})
+    monkeypatch.setattr(
+        graphiti, "fact_result", lambda e: {"uuid": e.uuid, "fact": FACT, "name": "DUE_ON"}
+    )
     monkeypatch.setattr(graphiti, "groups_for", _groups)
     monkeypatch.setattr(graphiti, "steward_map", _no_stewards)
 
@@ -260,10 +272,16 @@ async def test_an_empty_graph_with_no_record_is_open(graph):
     assert graph.writes() == [], "the check writes nothing"
 
 
-@pytest.mark.parametrize("fields,reason", [
-    ({"alias": "cc-embedding-v2"}, f"configured {ALIAS}/{DIMS}, graph holds cc-embedding-v2/{DIMS}"),
-    ({"dimensions": 8}, f"configured {ALIAS}/{DIMS}, graph holds {ALIAS}/8"),
-])
+@pytest.mark.parametrize(
+    "fields,reason",
+    [
+        (
+            {"alias": "cc-embedding-v2"},
+            f"configured {ALIAS}/{DIMS}, graph holds cc-embedding-v2/{DIMS}",
+        ),
+        ({"dimensions": 8}, f"configured {ALIAS}/{DIMS}, graph holds {ALIAS}/8"),
+    ],
+)
 async def test_a_record_the_configuration_disagrees_with_is_reason_ii(graph, fields, reason):
     graph.declare(**fields)
     verdict = await embedder_record.check()
@@ -313,13 +331,16 @@ async def test_the_threshold_is_the_setting(graph, monkeypatch):
     assert (await embedder_record.check()).status == embedder_record.OK
 
 
-@pytest.mark.parametrize("fields", [
-    {"canary_vectors": None},
-    {"canary_vectors": "not json"},
-    {"canary_vectors": json.dumps([[1.0, 0.0, 0.0, 0.0]])},
-    {"canary_vectors": json.dumps([[1.0, 0.0]] * 3)},
-    {"canary_texts": []},
-])
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"canary_vectors": None},
+        {"canary_vectors": "not json"},
+        {"canary_vectors": json.dumps([[1.0, 0.0, 0.0, 0.0]])},
+        {"canary_vectors": json.dumps([[1.0, 0.0]] * 3)},
+        {"canary_texts": []},
+    ],
+)
 async def test_a_record_whose_canaries_cannot_be_compared_closes(graph, fields):
     """Nothing can confirm the model, and an answer that lets it through would
     be the fail-open. A reason of its own, because 'has changed' would be a guess."""
@@ -402,14 +423,18 @@ async def test_a_mismatch_is_cached_too(graph):
     assert len(graph.queries) == reads
 
 
-@pytest.mark.parametrize("error", [
-    httpx.ConnectError("refused"),
-    EmbedderDown(httpx.ConnectError("refused")),
-    httpx.HTTPStatusError(
-        "503", request=httpx.Request("POST", "http://proxy.example.com"),
-        response=httpx.Response(503),
-    ),
-])
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.ConnectError("refused"),
+        EmbedderDown(httpx.ConnectError("refused")),
+        httpx.HTTPStatusError(
+            "503",
+            request=httpx.Request("POST", "http://proxy.example.com"),
+            response=httpx.Response(503),
+        ),
+    ],
+)
 async def test_an_embedder_that_cannot_answer_propagates_and_is_not_cached(graph, error):
     graph.declare()
     graph.embed_error = error
@@ -422,7 +447,8 @@ async def test_an_embedder_that_cannot_answer_propagates_and_is_not_cached(graph
 
 def _refused(status: int) -> httpx.HTTPStatusError:
     return httpx.HTTPStatusError(
-        str(status), request=httpx.Request("POST", "http://proxy.example.com"),
+        str(status),
+        request=httpx.Request("POST", "http://proxy.example.com"),
         response=httpx.Response(status),
     )
 
@@ -506,9 +532,12 @@ def test_nothing_in_the_environment_can_open_the_gate():
     assert not [f for f in Settings.model_fields if "operator" in f and "session" in f]
     # The two settings it does read tune the check; neither answers it.
     assert {"embedder_check_ttl_seconds", "embedder_canary_threshold"} <= set(Settings.model_fields)
-    assert not [f for f in Settings.model_fields
-                if f.startswith("embedder_") and f not in (
-                    "embedder_check_ttl_seconds", "embedder_canary_threshold")]
+    assert not [
+        f
+        for f in Settings.model_fields
+        if f.startswith("embedder_")
+        and f not in ("embedder_check_ttl_seconds", "embedder_canary_threshold")
+    ]
 
 
 def test_the_defaults_are_the_ones_the_epic_chose():
@@ -526,7 +555,10 @@ async def test_read_record_answers_none_on_no_record(graph):
 async def test_the_record_round_trips_what_neo4j_cannot_store_natively(graph):
     vectors = [[0.1, 0.2, 0.3, 0.4]] * 3
     written = await embedder_record.update_record(
-        canary_vectors=vectors, counters={"entity": 98}, history=["one"], epoch=2,
+        canary_vectors=vectors,
+        counters={"entity": 98},
+        history=["one"],
+        epoch=2,
     )
     stored = graph.record
     assert isinstance(stored["canary_vectors"], str) and isinstance(stored["counters"], str)
@@ -571,7 +603,9 @@ async def test_a_none_removes_the_field(graph):
 async def test_the_census_counts_by_kind_and_width(graph):
     graph.widths = {"entity": {DIMS: 98, 768: 2}, "edge": {DIMS: 111}, "community": {}}
     assert await embedder_record.census() == {
-        "entity": {DIMS: 98, 768: 2}, "edge": {DIMS: 111}, "community": {},
+        "entity": {DIMS: 98, 768: 2},
+        "edge": {DIMS: 111},
+        "community": {},
     }
 
 
@@ -675,14 +709,22 @@ def test_the_mismatch_is_a_dependency_down_on_graph_and_embedder():
 # ── the read gate ────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("arrange,code", [
-    (lambda g: g.widths["entity"].update({DIMS: 1}), "i"),
-    (lambda g: g.declare(alias="cc-embedding-v2"), "ii"),
-    (lambda g: (g.declare(), g.widths["edge"].update({768: 1})), "iii"),
-    (lambda g: (g.declare(canary_vectors=json.dumps([[1.0, 0.0, 0.0, 0.0]] * 3)),
-                setattr(g, "embed", _changed_model)), "iv"),
-    (lambda g: g.declare(state="migrating"), "v"),
-])
+@pytest.mark.parametrize(
+    "arrange,code",
+    [
+        (lambda g: g.widths["entity"].update({DIMS: 1}), "i"),
+        (lambda g: g.declare(alias="cc-embedding-v2"), "ii"),
+        (lambda g: (g.declare(), g.widths["edge"].update({768: 1})), "iii"),
+        (
+            lambda g: (
+                g.declare(canary_vectors=json.dumps([[1.0, 0.0, 0.0, 0.0]] * 3)),
+                setattr(g, "embed", _changed_model),
+            ),
+            "iv",
+        ),
+        (lambda g: g.declare(state="migrating"), "v"),
+    ],
+)
 async def test_each_code_closes_the_read_with_its_reason(search, arrange, code):
     arrange(search)
     expected = await embedder_record.check()
@@ -693,11 +735,14 @@ async def test_each_code_closes_the_read_with_its_reason(search, arrange, code):
     assert search.search_calls == 0, "the search never ran"
 
 
-@pytest.mark.parametrize("call", [
-    lambda: graphiti.search_facts("x"),
-    lambda: graphiti.search_nodes("x"),
-    lambda: graphiti.search_facts("x", group_ids=["main"]),
-])
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: graphiti.search_facts("x"),
+        lambda: graphiti.search_nodes("x"),
+        lambda: graphiti.search_facts("x", group_ids=["main"]),
+    ],
+)
 async def test_every_embedding_read_passes_the_gate(search, monkeypatch, call):
     """search_knowledge_graph, its entity form and search_graph_group all come
     through these two functions."""
@@ -732,15 +777,19 @@ def test_only_the_search_chokepoint_calls_the_check():
     source = (SRC / "integrations" / "graphiti.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     users = [
-        fn.name for fn in ast.walk(tree)
+        fn.name
+        for fn in ast.walk(tree)
         if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
         and any(isinstance(n, ast.Name) and n.id == "embedder_record" for n in ast.walk(fn))
     ]
     assert users == ["_search"]
     for name in ("operator_session", "update_record", "bootstrap_if_empty"):
         assert name not in source
-    assert not [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))
-                and "embedder_record" in ast.dump(n)], "the import is function-local"
+    assert not [
+        n
+        for n in tree.body
+        if isinstance(n, (ast.Import, ast.ImportFrom)) and "embedder_record" in ast.dump(n)
+    ], "the import is function-local"
 
 
 def test_the_record_module_loads_no_write_path_at_import():
@@ -755,7 +804,8 @@ def test_the_record_module_loads_no_write_path_at_import():
 def test_runtime_never_reaches_the_record_or_the_way_past_the_gate():
     pattern = re.compile(r"embedder_record|operator_session|graph_reembed")
     offenders = [
-        str(path) for path in (SRC / "runtime").rglob("*.py")
+        str(path)
+        for path in (SRC / "runtime").rglob("*.py")
         if pattern.search(path.read_text(encoding="utf-8"))
     ]
     assert offenders == []
@@ -819,7 +869,8 @@ def run_pinned(monkeypatch, search):
 
 @needs_pg
 async def test_a_task_run_parks_on_a_mismatch_and_resumes_when_the_record_agrees(
-    monkeypatch, run_pinned,
+    monkeypatch,
+    run_pinned,
 ):
     """The whole acceptance: the session parks with the reason, nothing tells the
     agent to go on without the graph, the sweep re-executes the read once the
@@ -844,8 +895,12 @@ async def test_a_task_run_parks_on_a_mismatch_and_resumes_when_the_record_agrees
 
     # The operator's `run`, as the record sees it.
     await embedder_record.update_record(
-        alias=ALIAS, dimensions=DIMS, epoch=1, state="stable",
-        canary_texts=list(CANARY_TEXTS), canary_vectors=[_vector(t) for t in CANARY_TEXTS],
+        alias=ALIAS,
+        dimensions=DIMS,
+        epoch=1,
+        state="stable",
+        canary_texts=list(CANARY_TEXTS),
+        canary_vectors=[_vector(t) for t in CANARY_TEXTS],
     )
     monkeypatch.setattr(models, "resolve_model", aresolve(lambda *a, **k: _model()))
     await make_parks_due()
@@ -855,9 +910,13 @@ async def test_a_task_run_parks_on_a_mismatch_and_resumes_when_the_record_agrees
 
     assert await repo.session_status(session_id) == "DONE"
     rs = await repo.get_session_run_state(session_id)
-    returned = [p for m in durable.load_messages(rs) if isinstance(m, ModelRequest)
-                for p in m.parts if isinstance(p, ToolReturnPart)
-                and p.tool_call_id == "call_graph"]
+    returned = [
+        p
+        for m in durable.load_messages(rs)
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart) and p.tool_call_id == "call_graph"
+    ]
     assert len(returned) == 1 and FACT in str(returned[0].content)
     assert DEGRADED not in json.dumps(rs["messages"])
     assert (await repo.get_task(task["id"]))["status"] == "DONE"
@@ -910,10 +969,13 @@ async def test_the_dispatchers_embedding_is_not_gated(graph):
     assert graph.queries == [], "embed() never asks the check"
 
 
-@pytest.mark.parametrize("call", [
-    lambda: neo4j_writer.update_node("u-1", labels=["Person"]),
-    lambda: neo4j_writer.update_edge("u-1", valid_at="2026-11-01T00:00:00Z"),
-])
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: neo4j_writer.update_node("u-1", labels=["Person"]),
+        lambda: neo4j_writer.update_edge("u-1", valid_at="2026-11-01T00:00:00Z"),
+    ],
+)
 async def test_an_edit_that_writes_no_vector_stays_open(graph, call):
     """It embeds nothing and stores nothing from any model, like the bolt-only
     reads and deletions (A1)."""
@@ -1041,7 +1103,9 @@ async def test_the_seam_skips_the_gate(graph, worker):
 
 
 async def test_nothing_asks_the_check_while_the_embedder_is_recorded_down(
-    graph, worker, monkeypatch,
+    graph,
+    worker,
+    monkeypatch,
 ):
     async def _embedder_down():
         return {"embedder"}
@@ -1063,28 +1127,43 @@ async def test_the_direct_write_is_refused_with_the_reason_and_the_remedy(graph,
 
     monkeypatch.setattr(routes.events, "emit", _emit)
     graph.widths["entity"] = {DIMS: 1}
-    res = await routes.graph_node_create(routes.GraphNodeIn(
-        name="Jane Doe", labels=[], summary="Works at Example Co", group_id="central_command"))
+    res = await routes.graph_node_create(
+        routes.GraphNodeIn(
+            name="Jane Doe", labels=[], summary="Works at Example Co", group_id="central_command"
+        )
+    )
     assert res.status_code == 503
     assert json.loads(res.body) == {
-        "error": "embedder mismatch", "dependency": "embedder",
+        "error": "embedder mismatch",
+        "dependency": "embedder",
         "detail": f"graph has vectors but no embedder record; {REMEDY}",
     }
     assert graph.curation_writes() == [] and emitted == []
 
 
 def _create_action():
-    return Action(capability="graph.create_node",
-                  arguments={"name": "Jane Doe", "group_id": "central_command",
-                             "summary": "Works at Example Co"},
-                  target_ref={"system": "graphiti"}, reversibility=Reversibility.reversible)
+    return Action(
+        capability="graph.create_node",
+        arguments={
+            "name": "Jane Doe",
+            "group_id": "central_command",
+            "summary": "Works at Example Co",
+        },
+        target_ref={"system": "graphiti"},
+        reversibility=Reversibility.reversible,
+    )
 
 
 async def test_the_executor_reads_a_mismatch_as_a_down_dependency(graph):
     graph.widths["entity"] = {DIMS: 1}
     with pytest.raises(executor.ExecutionFailed) as failed:
-        await executor.execute([_create_action()], approver="human:lee", source_refs=[],
-                               proposer="graph-steward", proposal_id=None)
+        await executor.execute(
+            [_create_action()],
+            approver="human:lee",
+            source_refs=[],
+            proposer="graph-steward",
+            proposal_id=None,
+        )
     assert failed.value.transient is True
     assert failed.value.dependencies == ("graph", "embedder")
     assert graph.curation_writes() == []
@@ -1098,14 +1177,32 @@ async def test_a_curation_proposal_under_a_mismatch_parks_retry_pending(graph, m
     graph.widths["entity"] = {DIMS: 1}
     await repo.create_running_session(sid, "jira-expert")
     await repo.save_proposal(
-        pid, sid, "jira-expert", "Record Jane Doe in the graph",
-        [{"capability": "graph.create_node",
-          "arguments": {"name": "Jane Doe", "group_id": "central_command",
-                        "summary": "Works at Example Co"},
-          "target_ref": {"system": "graphiti"}, "reversibility": "reversible"}],
-        [{"kind": "operator", "source_ref": "operator:test", "locator": "test",
-          "claim": "Jane Doe works at Example Co"}],
-        "the graph knows Jane Doe", pid,
+        pid,
+        sid,
+        "jira-expert",
+        "Record Jane Doe in the graph",
+        [
+            {
+                "capability": "graph.create_node",
+                "arguments": {
+                    "name": "Jane Doe",
+                    "group_id": "central_command",
+                    "summary": "Works at Example Co",
+                },
+                "target_ref": {"system": "graphiti"},
+                "reversibility": "reversible",
+            }
+        ],
+        [
+            {
+                "kind": "operator",
+                "source_ref": "operator:test",
+                "locator": "test",
+                "claim": "Jane Doe works at Example Co",
+            }
+        ],
+        "the graph knows Jane Doe",
+        pid,
     )
 
     out = await gateway.approve_and_execute(sid, pid)

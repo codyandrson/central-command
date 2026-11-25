@@ -72,8 +72,12 @@ def _defs() -> dict[Path, set[str]]:
 def test_every_manifest_phase_has_exactly_one_phase_file():
     files = {p.stem for p in phase_files()}
     manifest = set(_manifest_phases())
-    assert files - manifest == set(), f"phase files with no phase in steps.tsv: {sorted(files - manifest)}"
-    assert manifest - files == set(), f"phases in steps.tsv with no phases/<phase>.sh: {sorted(manifest - files)}"
+    assert files - manifest == set(), (
+        f"phase files with no phase in steps.tsv: {sorted(files - manifest)}"
+    )
+    assert manifest - files == set(), (
+        f"phases in steps.tsv with no phases/<phase>.sh: {sorted(manifest - files)}"
+    )
     # Nothing else in the directory: a helper library belongs beside setup.sh.
     stray = sorted(p.name for p in PHASES.iterdir() if p.suffix != ".sh")
     assert not stray, f"deploy/single/phases/ holds only phase files: {stray}"
@@ -116,14 +120,21 @@ def test_no_function_is_defined_in_two_files():
             if name in seen:
                 dupes.append(f"{name}(): {seen[name]} and {path.name}")
             seen[name] = path.name
-    assert not dupes, "defined twice — the later source would silently win:\n  " + "\n  ".join(dupes)
+    assert not dupes, "defined twice — the later source would silently win:\n  " + "\n  ".join(
+        dupes
+    )
 
 
 def test_setup_sh_sources_the_phase_files_in_manifest_order():
     src = SETUP.read_text(encoding="utf-8")
-    m = re.search(r"^for (\w+) in ((?:\w+ )+\w+); do\n(?:\s*#[^\n]*\n)*\s*\. \"\$HERE/phases/\$\1\.sh\"",
-                  src, flags=re.MULTILINE)
-    assert m, 'setup.sh no longer sources the phases with a quoted `. "$HERE/phases/$<var>.sh"` loop'
+    m = re.search(
+        r"^for (\w+) in ((?:\w+ )+\w+); do\n(?:\s*#[^\n]*\n)*\s*\. \"\$HERE/phases/\$\1\.sh\"",
+        src,
+        flags=re.MULTILINE,
+    )
+    assert m, (
+        'setup.sh no longer sources the phases with a quoted `. "$HERE/phases/$<var>.sh"` loop'
+    )
     assert m.group(2).split() == _manifest_phases(), (
         f"setup.sh sources {m.group(2).split()}, steps.tsv declares {_manifest_phases()}"
     )
@@ -147,9 +158,17 @@ def test_a_phase_file_is_sourced_never_executed(path: Path):
     first = path.read_text(encoding="utf-8").splitlines()[0]
     assert not first.startswith("#!"), f"{path.name} is sourced, never executed — drop the shebang"
     rel = path.relative_to(SINGLE).as_posix()
-    r = subprocess.run([BASH, "-c", f'set -uo pipefail; . "./{rel}" && . "./{rel}"'],
-                       cwd=SINGLE, capture_output=True, text=True)
-    assert r.returncode == 0 and r.stdout == "" and r.stderr == "", (r.returncode, r.stdout, r.stderr)
+    r = subprocess.run(
+        [BASH, "-c", f'set -uo pipefail; . "./{rel}" && . "./{rel}"'],
+        cwd=SINGLE,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0 and r.stdout == "" and r.stderr == "", (
+        r.returncode,
+        r.stdout,
+        r.stderr,
+    )
 
 
 def test_the_phase_files_check_out_lf():
@@ -157,8 +176,13 @@ def test_the_phase_files_check_out_lf():
     if git is None:
         pytest.skip("no git to ask .gitattributes")
     files = [p.relative_to(ROOT).as_posix() for p in phase_files()]
-    r = subprocess.run([git, "check-attr", "eol", "--", *files], cwd=ROOT,
-                       capture_output=True, text=True, check=True)
+    r = subprocess.run(
+        [git, "check-attr", "eol", "--", *files],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     lines = r.stdout.strip().splitlines()
     assert len(lines) == len(files)
     assert all(line.endswith(": eol: lf") for line in lines), r.stdout

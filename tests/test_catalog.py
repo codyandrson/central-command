@@ -31,9 +31,15 @@ async def cleanup():
             docs = await conn.fetch("select id from catalog_document where source_id = $1", sid)
             doc_ids = [d["id"] for d in docs]
             if doc_ids:
-                await conn.execute("delete from catalog_version where document_id = any($1::text[])", doc_ids)
-                await conn.execute("delete from catalog_location where document_id = any($1::text[])", doc_ids)
-                await conn.execute("delete from catalog_document where id = any($1::text[])", doc_ids)
+                await conn.execute(
+                    "delete from catalog_version where document_id = any($1::text[])", doc_ids
+                )
+                await conn.execute(
+                    "delete from catalog_location where document_id = any($1::text[])", doc_ids
+                )
+                await conn.execute(
+                    "delete from catalog_document where id = any($1::text[])", doc_ids
+                )
             await conn.execute("delete from source where id = $1", sid)
     finally:
         await conn.close()
@@ -68,6 +74,7 @@ async def test_walk_catalogs_files_with_correct_hashes(tmp_path, cleanup):
     finally:
         await conn.close()
     import hashlib
+
     assert ver["content_hash"] == hashlib.sha256(b"hello world").hexdigest()
     assert ver["extracted_text"] == "hello world"
 
@@ -83,7 +90,9 @@ async def test_rewalk_with_no_changes_writes_nothing_new_and_emits_no_event(tmp_
     assert summary["new_versions"] == 0
     assert summary["marked_missing"] == 0
 
-    events = await repo.list_events(since_id=before_id, kind="catalog.walk.completed", ref_id=source["id"])
+    events = await repo.list_events(
+        since_id=before_id, kind="catalog.walk.completed", ref_id=source["id"]
+    )
     assert events == []
 
 
@@ -138,6 +147,7 @@ async def test_empty_extraction_records_a_version_hashed_on_raw_bytes(tmp_path, 
         await conn.close()
     import hashlib
     import json as _json
+
     meta = ver["meta"] if isinstance(ver["meta"], dict) else _json.loads(ver["meta"])
     assert meta["extraction"] in ("empty", "failed")
     assert ver["content_hash"] == hashlib.sha256(junk).hexdigest()
@@ -191,10 +201,14 @@ async def test_source_id_must_be_a_url_safe_slug(tmp_path):
 
     for bad in ("", "  ", "Cayenne Docs", "a/b", "-leading", "UPPER"):
         with pytest.raises(HTTPException) as e:
-            await routes.upsert_source(routes.SourceIn(
-                id=bad, kind="filesystem", name="x",
-                config={"root": str(tmp_path)},
-            ))
+            await routes.upsert_source(
+                routes.SourceIn(
+                    id=bad,
+                    kind="filesystem",
+                    name="x",
+                    config={"root": str(tmp_path)},
+                )
+            )
         assert e.value.status_code == 422, bad
 
 
@@ -221,7 +235,9 @@ async def test_wiki_claim_table_accepts_a_row(cleanup):
             insert into wiki_claim (id, page_ref, statement, evidence)
             values ($1, $2, $3, $4::jsonb)
             """,
-            claim_id, None, "The library holds 40 documents.",
+            claim_id,
+            None,
+            "The library holds 40 documents.",
             '[{"kind": "catalog", "source_ref": "doc_x", "version": 1}]',
         )
         row = await conn.fetchrow("select * from wiki_claim where id = $1", claim_id)
@@ -258,17 +274,21 @@ async def test_catalog_tag_replaces_adds_and_removes(tmp_path, cleanup):
 
     await _tag(doc_id, ["current as of 2026-08-01", "draft"])
     assert (await repo.get_catalog_document(doc_id))["tags"] == [
-        "current as of 2026-08-01", "draft"
+        "current as of 2026-08-01",
+        "draft",
     ]
 
-    await _tag(doc_id, ["superseded", "draft"], "add")   # 'draft' must not double
+    await _tag(doc_id, ["superseded", "draft"], "add")  # 'draft' must not double
     assert (await repo.get_catalog_document(doc_id))["tags"] == [
-        "current as of 2026-08-01", "draft", "superseded"
+        "current as of 2026-08-01",
+        "draft",
+        "superseded",
     ]
 
     await _tag(doc_id, ["draft"], "remove")
     assert (await repo.get_catalog_document(doc_id))["tags"] == [
-        "current as of 2026-08-01", "superseded"
+        "current as of 2026-08-01",
+        "superseded",
     ]
 
     # The default is replace — the whole list is rewritten.
@@ -286,14 +306,14 @@ async def test_catalog_tag_emits_the_tagged_event(tmp_path, cleanup):
     mine = [e for e in rows if e["ref_id"] == doc_id]
     assert len(mine) == 1
     assert mine[0]["payload"] == {
-        "tags": ["superseded"], "mode": "add", "proposer": "agent:knowledge-steward"
+        "tags": ["superseded"],
+        "mode": "add",
+        "proposer": "agent:knowledge-steward",
     }
     assert mine[0]["actor"] == "human:lee"
 
 
-async def test_catalog_tag_refuses_an_unknown_document_and_bad_tag_shapes(
-    tmp_path, cleanup
-):
+async def test_catalog_tag_refuses_an_unknown_document_and_bad_tag_shapes(tmp_path, cleanup):
     """World-state and value checks are the Executor's — the argument SPEC can
     only see that `tags` is present, never what is inside it."""
     from central_command.gateway import executor
@@ -318,18 +338,19 @@ def test_catalog_tag_arg_spec_reports_every_shape_problem_at_once():
     assert "missing required argument(s) document_id, tags" in problems[0]
     assert "mode='append' is not one of replace, add, remove" in problems[1]
     # `mode` is optional: a well-formed tag edit without it passes.
-    assert validate_action_args(
-        "catalog.tag", {"document_id": "doc_1", "tags": ["draft"]}
-    ) == []
+    assert validate_action_args("catalog.tag", {"document_id": "doc_1", "tags": ["draft"]}) == []
 
 
 async def test_the_executor_refuses_a_malformed_catalog_tag_before_it_runs(monkeypatch):
     from central_command.contract import Action, Reversibility
     from central_command.gateway import executor
 
-    bad = Action(capability="catalog.tag", arguments={"document_id": "doc_1"},
-                 target_ref={"system": "catalog", "id": "doc_1"},
-                 reversibility=Reversibility.reversible)
+    bad = Action(
+        capability="catalog.tag",
+        arguments={"document_id": "doc_1"},
+        target_ref={"system": "catalog", "id": "doc_1"},
+        reversibility=Reversibility.reversible,
+    )
     with pytest.raises(executor.ExecutionFailed) as e:
         await executor.execute([bad], approver="human:lee", source_refs=[])
     assert e.value.completed == []

@@ -178,6 +178,7 @@ def record_density(model: str | None, messages, usage) -> None:
     lo, hi = DENSITY_BOUNDS
     _density[_model_key(model)] = min(hi, max(lo, chars / tokens))
 
+
 # One tool result may take this share of the model's input window
 # (`tool_result_ceiling`) — enough for a whole email thread, and four of them
 # in one turn still leave room for the charter and the model's own answer.
@@ -216,14 +217,25 @@ def _wire_messages(messages) -> list:
     or their stored dicts."""
     from pydantic_ai.messages import ModelMessagesTypeAdapter
 
-    dumped = (list(messages) if all(isinstance(m, dict) for m in messages)
-              else ModelMessagesTypeAdapter.dump_python(list(messages), mode="json"))
+    dumped = (
+        list(messages)
+        if all(isinstance(m, dict) for m in messages)
+        else ModelMessagesTypeAdapter.dump_python(list(messages), mode="json")
+    )
     return [
-        {**m, "parts": [{**p, "metadata": None} if isinstance(p, dict)
-                        and p.get("part_kind") == "tool-return"
-                        and p.get("metadata") is not None else p
-                        for p in m["parts"]]}
-        if isinstance(m, dict) and isinstance(m.get("parts"), list) else m
+        {
+            **m,
+            "parts": [
+                {**p, "metadata": None}
+                if isinstance(p, dict)
+                and p.get("part_kind") == "tool-return"
+                and p.get("metadata") is not None
+                else p
+                for p in m["parts"]
+            ],
+        }
+        if isinstance(m, dict) and isinstance(m.get("parts"), list)
+        else m
         for m in dumped
     ]
 
@@ -231,7 +243,9 @@ def _wire_messages(messages) -> list:
 def _sent_chars(messages) -> int:
     """`len(ModelMessagesTypeAdapter.dump_json(messages))` of what is SENT —
     the same compact UTF-8 bytes, metadata left out (`_wire_messages`)."""
-    return len(json.dumps(_wire_messages(messages), ensure_ascii=False, separators=(",", ":")).encode())
+    return len(
+        json.dumps(_wire_messages(messages), ensure_ascii=False, separators=(",", ":")).encode()
+    )
 
 
 def estimate_tokens(run_state: dict) -> int:
@@ -252,7 +266,9 @@ def estimate_tokens(run_state: dict) -> int:
 
 
 async def check_pressure(
-    session_id: str, run_state: dict, agent_id: str | None = None,
+    session_id: str,
+    run_state: dict,
+    agent_id: str | None = None,
     model: str | None = None,
 ) -> None:
     """Emit `session.context_pressure` when the live window crosses the
@@ -564,14 +580,22 @@ def _carried_state(region):
 
     responses = [msg for msg in region if isinstance(msg, m.ModelResponse)]
     requests = [msg for msg in region if isinstance(msg, m.ModelRequest)]
-    returns = {p.tool_call_id: p for msg in requests for p in msg.parts
-               if isinstance(p, m.ToolReturnPart) and getattr(p, "tool_kind", None)
-               and getattr(p, "outcome", None) != "retried"}
+    returns = {
+        p.tool_call_id: p
+        for msg in requests
+        for p in msg.parts
+        if isinstance(p, m.ToolReturnPart)
+        and getattr(p, "tool_kind", None)
+        and getattr(p, "outcome", None) != "retried"
+    }
     latest_call: dict = {}
     for msg in responses:
         for p in msg.parts:
-            if isinstance(p, m.ToolCallPart) and getattr(p, "tool_kind", None) \
-                    and p.tool_call_id in returns:
+            if (
+                isinstance(p, m.ToolCallPart)
+                and getattr(p, "tool_kind", None)
+                and p.tool_call_id in returns
+            ):
                 key = (p.tool_kind, _call_key(p))
                 latest_call.pop(key, None)  # re-insert: order of last occurrence
                 latest_call[key] = p
@@ -671,7 +695,8 @@ async def summarize(model, messages) -> str:
 
     agent = Agent(model, name="context-summarizer", system_prompt=SUMMARY_PROMPT, output_type=str)
     result = await agent.run(
-        render_for_summary(messages), usage_limits=UsageLimits(request_limit=1),
+        render_for_summary(messages),
+        usage_limits=UsageLimits(request_limit=1),
         model_settings=await _summary_settings(model),
     )
     return result.output
@@ -728,10 +753,12 @@ async def window_messages(ctx: RunContext[Any], messages: list) -> list:
         try:
             working = _static_clip(messages, getattr(ctx.model, "model_name", None))
             log.exception(
-                "context.window_messages failed; sending the clipped history, not the raw one")
+                "context.window_messages failed; sending the clipped history, not the raw one"
+            )
         except Exception:
             log.exception(
-                "context.window_messages failed AND the fallback clip failed; sending raw history")
+                "context.window_messages failed AND the fallback clip failed; sending raw history"
+            )
             working = messages
     return working
 
@@ -740,7 +767,8 @@ def _static_clip(messages: list, model_name: str | None) -> list:
     """The clip from inputs that need no I/O: the static window setting and
     the density table (the fallback of `window_messages`)."""
     return clip_tool_results(
-        messages, int(settings.context_window * OVERFLOW_CLIP_SHARE * density_for(model_name)))
+        messages, int(settings.context_window * OVERFLOW_CLIP_SHARE * density_for(model_name))
+    )
 
 
 class WorkingWindow(AbstractCapability[Any]):
@@ -761,8 +789,12 @@ class WorkingWindow(AbstractCapability[Any]):
 
     async def before_model_request(self, ctx, request_context):
         deps = getattr(ctx, "deps", None)
-        _record_step(ctx, applied=False, session_id=getattr(deps, "session_id", None),
-                     agent_id=getattr(deps, "agent_id", None))
+        _record_step(
+            ctx,
+            applied=False,
+            session_id=getattr(deps, "session_id", None),
+            agent_id=getattr(deps, "agent_id", None),
+        )
         return request_context
 
     async def prepare_model_request(self, ctx, request_context):
@@ -793,7 +825,8 @@ def _current_run_context_lookup():
             logging.getLogger(__name__).error(
                 "context: pydantic_ai._run_context.get_current_run_context is unavailable; "
                 "the check that a windowed agent's request got its working window "
-                "(session.context_window_unapplied) is OFF until it is restored")
+                "(session.context_window_unapplied) is OFF until it is restored"
+            )
             lookup = None
         _RUN_CONTEXT_LOOKUP.append(lookup)
     return _RUN_CONTEXT_LOOKUP[0]
@@ -822,14 +855,20 @@ async def _unwindowed(messages: list, model_name: str | None, run_context=None) 
 
     logging.getLogger(__name__).error(
         "context: a windowed agent's request reached the model without its working window "
-        "(session %s); sending the clipped history", owed.get("session_id"))
+        "(session %s); sending the clipped history",
+        owed.get("session_id"),
+    )
     try:
         from central_command import events
 
         await events.emit(
-            "session.context_window_unapplied", ref_id=owed.get("session_id"),
-            payload={"agent_id": owed.get("agent_id"), "model": model_name,
-                     "messages": len(messages)},
+            "session.context_window_unapplied",
+            ref_id=owed.get("session_id"),
+            payload={
+                "agent_id": owed.get("agent_id"),
+                "model": model_name,
+                "messages": len(messages),
+            },
             actor="system",
         )
     except Exception:  # the record of a fault never becomes a dead turn
@@ -837,7 +876,9 @@ async def _unwindowed(messages: list, model_name: str | None, run_context=None) 
     try:
         return _static_clip(messages, model_name)
     except Exception:
-        logging.getLogger(__name__).exception("context: the clip failed too; sending the request as is")
+        logging.getLogger(__name__).exception(
+            "context: the clip failed too; sending the request as is"
+        )
         return messages
 
 
@@ -914,11 +955,15 @@ class WindowedModel(WrapperModel):
         return response
 
     @asynccontextmanager
-    async def request_stream(self, messages, model_settings, model_request_parameters,
-                             run_context=None):
+    async def request_stream(
+        self, messages, model_settings, model_request_parameters, run_context=None
+    ):
         sent = await _unwindowed(messages, self.wrapped.model_name, run_context)
         async with self.wrapped.request_stream(
-            sent, model_settings, model_request_parameters, run_context,
+            sent,
+            model_settings,
+            model_request_parameters,
+            run_context,
         ) as stream:
             yield stream
 
@@ -970,7 +1015,7 @@ async def _prepare_window(ctx, messages):
     fraction = (est(working) + headroom) / window
 
     if cfg["summarize"] and session_id and fraction >= float(cfg["summarize_threshold"]):
-        base, prefix = with_summary(cached)   # what the model currently sees, raw
+        base, prefix = with_summary(cached)  # what the model currently sees, raw
         through = summary_boundary(base)
         # Indices in `base` map back to raw ones through the prefix the base was
         # built with: base[prefix:] is raw[cached.through:]. A boundary inside
@@ -993,7 +1038,8 @@ async def _prepare_window(ctx, messages):
                 import logging
 
                 logging.getLogger(__name__).exception(
-                    "context.summarize failed; continuing without a summary")
+                    "context.summarize failed; continuing without a summary"
+                )
                 text = None
         else:
             text = None
@@ -1006,10 +1052,15 @@ async def _prepare_window(ctx, messages):
             working = trimmed(with_summary(summary)[0])
             after = est(working)
             await events.emit(
-                "session.context_compacted", ref_id=session_id,
-                payload={"agent_id": getattr(ctx.deps, "agent_id", None),
-                         "through": raw_through, "before": int(fraction * window) - headroom,
-                         "after": after, "window": window},
+                "session.context_compacted",
+                ref_id=session_id,
+                payload={
+                    "agent_id": getattr(ctx.deps, "agent_id", None),
+                    "through": raw_through,
+                    "before": int(fraction * window) - headroom,
+                    "after": after,
+                    "window": window,
+                },
                 actor="system",
             )
             fraction = (after + headroom) / window
@@ -1020,7 +1071,8 @@ async def _prepare_window(ctx, messages):
         # same oversized read (2026-09-16, ten sessions, three items).
         before = est(working)
         clipped = clip_tool_results(
-            working, int(window * OVERFLOW_CLIP_SHARE * density_for(model_name)))
+            working, int(window * OVERFLOW_CLIP_SHARE * density_for(model_name))
+        )
         after = est(clipped)
         if after < before:
             from central_command import events
@@ -1028,9 +1080,14 @@ async def _prepare_window(ctx, messages):
             working = clipped
             fraction = (after + headroom) / window
             await events.emit(
-                "session.context_overflow_clipped", ref_id=session_id,
-                payload={"agent_id": getattr(ctx.deps, "agent_id", None),
-                         "before": before, "after": after, "window": window},
+                "session.context_overflow_clipped",
+                ref_id=session_id,
+                payload={
+                    "agent_id": getattr(ctx.deps, "agent_id", None),
+                    "before": before,
+                    "after": after,
+                    "window": window,
+                },
                 actor="system",
             )
 

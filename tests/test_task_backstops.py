@@ -28,8 +28,7 @@ pytestmark = needs_pg
 
 # Four taskable agents, then one that is not: the backstops are decided before
 # the assignee's taskability, so the refused hop may name any roster id.
-AGENTS = ["jira-expert", "litellm-manager", "confluence-expert", "wiki-agent",
-          "inbox-triage"]
+AGENTS = ["jira-expert", "litellm-manager", "confluence-expert", "wiki-agent", "inbox-triage"]
 
 
 @pytest.fixture(autouse=True)
@@ -71,9 +70,12 @@ async def _agent_creates(session_id: str, creator: str, assignee: str) -> str | 
     ctx = SimpleNamespace(deps=TriageDeps(agent_id=creator, session_id=session_id))
     out = await create_task(ctx, assignee, "do the thing")
     if out.startswith(_REFUSED):
-        raise Refused(out[len(_REFUSED):])
-    created = [e for e in await repo.list_events(since_id=since, kind="task")
-               if e["kind"] == "task.created"]
+        raise Refused(out[len(_REFUSED) :])
+    created = [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.created"
+    ]
     return created[-1]["ref_id"] if created else None
 
 
@@ -83,8 +85,11 @@ async def _operator_root(agent_id: str) -> str:
 
 
 async def _refusals(since: int) -> list[dict]:
-    return [e for e in await repo.list_events(since_id=since, kind="task")
-            if e["kind"] == "task.refused"]
+    return [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.refused"
+    ]
 
 
 async def test_operator_and_heartbeat_creations_are_roots_with_an_empty_chain():
@@ -93,8 +98,7 @@ async def test_operator_and_heartbeat_creations_are_roots_with_an_empty_chain():
     assert op["creator_chain"] == []
     assert op["parent_task_id"] is None and op["approved_by"] is None
 
-    out = await routes.create_and_run_task(
-        "tick work", None, AGENTS[0], actor="heartbeat:nightly")
+    out = await routes.create_and_run_task("tick work", None, AGENTS[0], actor="heartbeat:nightly")
     hb = await repo.get_task(out["task_id"])
     assert hb["created_by"] == "heartbeat:nightly"
     assert hb["creator_chain"] == []
@@ -122,8 +126,11 @@ async def test_the_event_actor_is_the_creating_agent():
     session = await _running(AGENTS[0])
     since = await repo.latest_event_id()
     child = await _agent_creates(session, AGENTS[0], AGENTS[1])
-    created = [e for e in await repo.list_events(since_id=since, kind="task")
-               if e["kind"] == "task.created" and e["ref_id"] == child]
+    created = [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.created" and e["ref_id"] == child
+    ]
     assert created[0]["actor"] == f"agent:{AGENTS[0]}"
 
 
@@ -144,7 +151,12 @@ async def test_provenance_is_never_taken_from_the_tool_call():
     import inspect
 
     assert set(inspect.signature(create_task).parameters) == {
-        "ctx", "agent_id", "instructions", "title", "await_result"}
+        "ctx",
+        "agent_id",
+        "instructions",
+        "title",
+        "await_result",
+    }
     seam = set(inspect.signature(routes.create_and_run_task).parameters)
     assert not seam & {"created_by", "creator_chain", "parent_task_id", "approved_by"}
 
@@ -183,8 +195,11 @@ async def test_a_chain_of_agent_created_tasks_stops_at_the_cap():
     assert refused["payload"]["creator"] == f"agent:{AGENTS[3]}"
     assert refused["payload"]["agent_id"] == AGENTS[4]
     # No task.created for the refused hop.
-    assert not [e for e in await repo.list_events(since_id=since, kind="task")
-                if e["kind"] == "task.created"]
+    assert not [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.created"
+    ]
 
 
 async def test_a_refusal_by_a_session_without_a_task_hangs_on_the_session(monkeypatch):
@@ -215,8 +230,13 @@ async def test_an_agent_created_task_with_no_assignee_is_refused():
 
     with pytest.raises(HTTPException) as exc:
         await routes.create_and_run_task(
-            "unrouted", None, None, actor=f"agent:{AGENTS[0]}", background=True,
-            parent_session_id=session)
+            "unrouted",
+            None,
+            None,
+            actor=f"agent:{AGENTS[0]}",
+            background=True,
+            parent_session_id=session,
+        )
 
     assert exc.value.status_code == 422 and "assignee" in exc.value.detail
     assert len(await repo.list_tasks()) == before
@@ -239,8 +259,7 @@ async def test_an_operator_task_with_no_assignee_is_still_allowed(monkeypatch):
 async def test_a_creating_session_that_does_not_exist_is_refused_without_a_row():
     before = len(await repo.list_tasks())
     with pytest.raises(HTTPException) as exc:
-        await routes.create_and_run_task(
-            "x", None, AGENTS[1], parent_session_id="sess_missing")
+        await routes.create_and_run_task("x", None, AGENTS[1], parent_session_id="sess_missing")
     assert exc.value.status_code == 422
     assert len(await repo.list_tasks()) == before
 
@@ -274,8 +293,11 @@ async def test_a_to_b_to_a_is_refused_as_a_cycle_naming_teammates():
     assert refused["payload"]["reason"] == "cycle"
     assert refused["payload"]["chain"] == [a, b]
     assert refused["payload"]["agent_id"] == a
-    assert not [e for e in await repo.list_events(since_id=since, kind="task")
-                if e["kind"] == "task.created"]
+    assert not [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.created"
+    ]
 
 
 async def test_a_to_a_is_refused_as_self_naming_teammates():
@@ -299,8 +321,7 @@ async def test_a_to_a_is_refused_as_self_naming_teammates():
 async def test_orchestrator_to_orchestrator_is_refused_as_self():
     since = await repo.latest_event_id()
     with pytest.raises(Refused) as exc:
-        await _agent_creates(await _running("orchestrator"),
-                                   "orchestrator", "orchestrator")
+        await _agent_creates(await _running("orchestrator"), "orchestrator", "orchestrator")
     assert exc.value.detail.startswith("task refused (self):")
     assert "orchestrator" not in _teammates(exc.value.detail)
     (refused,) = await _refusals(since)
@@ -348,7 +369,13 @@ async def test_a_consult_specialist_inherits_the_asking_tasks_chain():
     asker = await _running(b, t1)
     specialist = await _running(c)
     await repo.save_proposal(
-        _uid("prop"), specialist, c, "consulted", [], [], "",
+        _uid("prop"),
+        specialist,
+        c,
+        "consulted",
+        [],
+        [],
+        "",
         idempotency_key=_uid("key"),
         origin={"consulted_by": b, "caller_session_id": asker},
     )
@@ -360,7 +387,13 @@ async def test_a_consult_specialist_inherits_the_asking_tasks_chain():
     # ...and the inherited chain is what the cycle check reads.
     specialist2 = await _running(c)
     await repo.save_proposal(
-        _uid("prop"), specialist2, c, "consulted", [], [], "",
+        _uid("prop"),
+        specialist2,
+        c,
+        "consulted",
+        [],
+        [],
+        "",
         idempotency_key=_uid("key"),
         origin={"consulted_by": b, "caller_session_id": asker},
     )
@@ -377,7 +410,13 @@ async def test_a_specialist_inside_a_depth_two_chain_is_counted_at_depth_three()
     asker = await _running(c, t2)
     specialist = await _running(d)
     await repo.save_proposal(
-        _uid("prop"), specialist, d, "consulted", [], [], "",
+        _uid("prop"),
+        specialist,
+        d,
+        "consulted",
+        [],
+        [],
+        "",
         idempotency_key=_uid("key"),
         origin={"consulted_by": c, "caller_session_id": asker},
     )
@@ -420,8 +459,11 @@ async def test_the_limit_plus_one_creation_from_one_task_is_refused(monkeypatch)
     assert refused["payload"]["reason"] == "fan-out"
     assert refused["payload"]["chain"] == [a]
     assert refused["payload"]["limit"] == 3 and refused["payload"]["created"] == 3
-    assert not [e for e in await repo.list_events(since_id=since, kind="task")
-                if e["kind"] == "task.created"]
+    assert not [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.created"
+    ]
 
 
 async def test_concurrent_creations_from_one_creator_hit_the_limit_exactly(monkeypatch):
@@ -439,8 +481,7 @@ async def test_concurrent_creations_from_one_creator_hit_the_limit_exactly(monke
     since = await repo.latest_event_id()
 
     ctx = SimpleNamespace(deps=TriageDeps(agent_id=a, session_id=session))
-    outs = await asyncio.gather(*[
-        create_task(ctx, b, f"do thing {i}") for i in range(limit + 1)])
+    outs = await asyncio.gather(*[create_task(ctx, b, f"do thing {i}") for i in range(limit + 1)])
 
     created = [o for o in outs if not o.startswith(_REFUSED)]
     refused = [o for o in outs if o.startswith(_REFUSED)]
@@ -459,8 +500,7 @@ async def test_concurrent_creations_from_a_taskless_session_are_counted_exactly(
     a, b = AGENTS[:2]
     session = await _running(a)
     ctx = SimpleNamespace(deps=TriageDeps(agent_id=a, session_id=session))
-    outs = await asyncio.gather(*[
-        create_task(ctx, b, f"do thing {i}") for i in range(limit + 2)])
+    outs = await asyncio.gather(*[create_task(ctx, b, f"do thing {i}") for i in range(limit + 2)])
     assert sum(not o.startswith(_REFUSED) for o in outs) == limit
     assert await repo.count_child_tasks(parent_session_id=session) == limit
 
@@ -538,7 +578,13 @@ async def test_an_inherited_chain_counts_toward_the_ancestor_task(monkeypatch):
 
     specialist = await _running(c)
     await repo.save_proposal(
-        _uid("prop"), specialist, c, "consulted", [], [], "",
+        _uid("prop"),
+        specialist,
+        c,
+        "consulted",
+        [],
+        [],
+        "",
         idempotency_key=_uid("key"),
         origin={"consulted_by": b, "caller_session_id": asker},
     )
@@ -602,9 +648,16 @@ async def test_a_refusal_is_in_the_activity_feed_and_marks_the_board_card(monkey
 
     # A task approved while the gate was on keeps its approver on the board.
     gated = _uid("task")
-    await repo.create_task(gated, "approved before ungating", "x", AGENTS[1],
-                           created_by=f"agent:{AGENTS[0]}", approved_by="human:lee",
-                           parent_task_id=root, creator_chain=[AGENTS[0]])
+    await repo.create_task(
+        gated,
+        "approved before ungating",
+        "x",
+        AGENTS[1],
+        created_by=f"agent:{AGENTS[0]}",
+        approved_by="human:lee",
+        parent_task_id=root,
+        creator_chain=[AGENTS[0]],
+    )
     board = {t["id"]: t for t in (await routes.list_tasks())["tasks"]}
     assert board[gated]["approved_by"] == "human:lee"
 

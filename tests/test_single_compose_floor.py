@@ -73,8 +73,7 @@ set -uo pipefail
 compose_version_floor_ok "$1" "$2"; rc=$?
 printf '%s|%s|%s\\n' "$rc" "$COMPOSE_FLAVOUR" "$COMPOSE_VERSION"
 """
-    r = subprocess.run([BASH, "-c", script, "_", provider, output],
-                       capture_output=True, text=True)
+    r = subprocess.run([BASH, "-c", script, "_", provider, output], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     # PURE: the function itself prints nothing — only the harness's one line.
     assert len(r.stdout.strip().splitlines()) == 1, r.stdout
@@ -114,8 +113,14 @@ def test_the_real_three_line_podman_output_reads_the_provider_not_the_banner():
 
 @pytest.mark.parametrize(
     "a,b,expected",
-    [("1.6.0", "1.6.0", 0), ("1.10.2", "1.6.0", 0), ("1.5.0", "1.6.0", 1),
-     ("2.0", "1.6.0", 0), ("1.6", "1.6.0", 0), ("1.6.0rc1", "1.6.0", 0)],
+    [
+        ("1.6.0", "1.6.0", 0),
+        ("1.10.2", "1.6.0", 0),
+        ("1.5.0", "1.6.0", 1),
+        ("2.0", "1.6.0", 0),
+        ("1.6", "1.6.0", 0),
+        ("1.6.0rc1", "1.6.0", 0),
+    ],
 )
 def test_version_ge(a, b, expected):
     script = f"""

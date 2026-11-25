@@ -32,7 +32,9 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(os.name == "nt" or not shutil.which("bash"), reason="POSIX bash needed")
+pytestmark = pytest.mark.skipif(
+    os.name == "nt" or not shutil.which("bash"), reason="POSIX bash needed"
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 K3S = ROOT / "deploy" / "k3s"
@@ -41,13 +43,15 @@ UPDATER = (K3S / "cc-update.sh").read_text(encoding="utf-8")
 
 TARGET = "doe@100.64.0.42"
 ADDRESS = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
-MESSAGE = ("CC_COMPUTE_SSH is not set in deploy/k3s/.env — set it to <user>@<compute-address> "
-           "(the compute node's ssh target)")
+MESSAGE = (
+    "CC_COMPUTE_SSH is not set in deploy/k3s/.env — set it to <user>@<compute-address> "
+    "(the compute node's ssh target)"
+)
 
 BUILD_SCRIPTS = ["build-crawler-image.sh", "build-sandbox-image.sh"]
 NODE_SCRIPTS = [*BUILD_SCRIPTS, "install-gvisor.sh"]
 
-SSH = '''#!/usr/bin/env bash
+SSH = """#!/usr/bin/env bash
 printf 'ssh %s\\n' "$*" >> "$STUB_LOG"
 [[ -t 0 ]] || cat >/dev/null
 case "$*" in
@@ -55,16 +59,16 @@ case "$*" in
   *"images ls"*)   printf '%s\\n' docker.io/library/cc-sandbox:1 docker.io/library/cc-crawler:1 ;;
 esac
 exit 0
-'''
+"""
 
-SUDO = '''#!/usr/bin/env bash
+SUDO = """#!/usr/bin/env bash
 printf 'sudo %s\\n' "$*" >> "$STUB_LOG"
 exec "$@"
-'''
+"""
 
 # `get nodes -l` answers STUB_NODES; an apply fails, which ends setup's stack phase
 # right after the steps that use the key.
-K3S_STUB = '''#!/usr/bin/env bash
+K3S_STUB = """#!/usr/bin/env bash
 printf 'k3s %s\\n' "$*" >> "$STUB_LOG"
 args=" $* "
 case "$args" in
@@ -75,12 +79,12 @@ case "$args" in
   *" apply "*)            exit 1 ;;
 esac
 exit 0
-'''
+"""
 
-LOG_ONLY = '''#!/usr/bin/env bash
+LOG_ONLY = """#!/usr/bin/env bash
 printf '%s %s\\n' "$(basename "$0")" "$*" >> "$STUB_LOG"
 exit 0
-'''
+"""
 
 
 @pytest.fixture
@@ -90,7 +94,11 @@ def tree(tmp_path: Path) -> Path:
     k3s = t / "deploy" / "k3s"
     k3s.mkdir(parents=True)
     for f in K3S.iterdir():
-        if f.is_file() and f.name != ".env" and (f.suffix in (".sh", ".in", ".example", ".service", ".timer", ".path")):
+        if (
+            f.is_file()
+            and f.name != ".env"
+            and (f.suffix in (".sh", ".in", ".example", ".service", ".timer", ".path"))
+        ):
             shutil.copy(f, k3s / f.name)
     crawler = t / "central_command" / "crawler"
     crawler.mkdir(parents=True)
@@ -104,8 +112,16 @@ def tree(tmp_path: Path) -> Path:
 def stubs(tmp_path: Path) -> Path:
     d = tmp_path / "stubs"
     d.mkdir()
-    for name, body in (("ssh", SSH), ("sudo", SUDO), ("k3s", K3S_STUB), ("scp", LOG_ONLY), ("git", LOG_ONLY),
-                       ("runuser", LOG_ONLY), ("systemctl", LOG_ONLY), ("uv", LOG_ONLY)):
+    for name, body in (
+        ("ssh", SSH),
+        ("sudo", SUDO),
+        ("k3s", K3S_STUB),
+        ("scp", LOG_ONLY),
+        ("git", LOG_ONLY),
+        ("runuser", LOG_ONLY),
+        ("systemctl", LOG_ONLY),
+        ("uv", LOG_ONLY),
+    ):
         (d / name).write_text(body)
         (d / name).chmod(0o755)
     return d
@@ -125,12 +141,22 @@ def _log(tmp_path: Path) -> str:
 
 
 def _answer(tree: Path, value: str = TARGET) -> None:
-    (tree / "deploy" / "k3s" / ".env").write_text(f"OTHER_KEY=from-the-file\nCC_COMPUTE_SSH={value}\n")
+    (tree / "deploy" / "k3s" / ".env").write_text(
+        f"OTHER_KEY=from-the-file\nCC_COMPUTE_SSH={value}\n"
+    )
 
 
-def _run(tree: Path, script: str, env: dict[str, str], *args: str, cwd: str | Path = "/") -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(tree / "deploy" / "k3s" / script), *args], cwd=cwd, env=env,
-                          capture_output=True, text=True, timeout=60)
+def _run(
+    tree: Path, script: str, env: dict[str, str], *args: str, cwd: str | Path = "/"
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", str(tree / "deploy" / "k3s" / script), *args],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
 
 
 def _unset_failure(r: subprocess.CompletedProcess) -> None:
@@ -145,8 +171,13 @@ def _unset_failure(r: subprocess.CompletedProcess) -> None:
 
 def _resolve(tree: Path, env: dict[str, str], *shell_opts: str) -> subprocess.CompletedProcess:
     script = "\n".join([*shell_opts, '. "$1"', 'cc_k3s_compute_ssh "$2"'])
-    return subprocess.run(["bash", "-c", script, "_", str(LIB), str(tree / "deploy" / "k3s" / "x.sh")], env=env,
-                          capture_output=True, text=True, timeout=30)
+    return subprocess.run(
+        ["bash", "-c", script, "_", str(LIB), str(tree / "deploy" / "k3s" / "x.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
 
 
 def test_unset_fails_with_the_one_message_and_no_address(tree: Path, stubs: Path, tmp_path: Path):
@@ -155,21 +186,29 @@ def test_unset_fails_with_the_one_message_and_no_address(tree: Path, stubs: Path
     assert r.stderr.strip() == MESSAGE
 
 
-@pytest.mark.parametrize("line", ["", "CC_COMPUTE_SSH=\n", "#CC_COMPUTE_SSH=<user>@<compute-address>\n"])
-def test_an_empty_or_commented_answer_is_no_answer(tree: Path, stubs: Path, tmp_path: Path, line: str):
+@pytest.mark.parametrize(
+    "line", ["", "CC_COMPUTE_SSH=\n", "#CC_COMPUTE_SSH=<user>@<compute-address>\n"]
+)
+def test_an_empty_or_commented_answer_is_no_answer(
+    tree: Path, stubs: Path, tmp_path: Path, line: str
+):
     (tree / "deploy" / "k3s" / ".env").write_text("OTHER_KEY=1\n" + line)
     r = _resolve(tree, _env(stubs, tmp_path))
     assert r.returncode != 0 and r.stdout == ""
     assert r.stderr.strip() == MESSAGE
 
 
-def test_the_file_answers_verbatim_under_strict_shell_options(tree: Path, stubs: Path, tmp_path: Path):
+def test_the_file_answers_verbatim_under_strict_shell_options(
+    tree: Path, stubs: Path, tmp_path: Path
+):
     _answer(tree)
     r = _resolve(tree, _env(stubs, tmp_path), "set -euo pipefail")
     assert (r.returncode, r.stdout, r.stderr) == (0, f"{TARGET}\n", "")
 
 
-def test_the_environment_wins_over_the_file_and_needs_no_file(tree: Path, stubs: Path, tmp_path: Path):
+def test_the_environment_wins_over_the_file_and_needs_no_file(
+    tree: Path, stubs: Path, tmp_path: Path
+):
     other = "doe@100.64.0.43"
     assert _resolve(tree, _env(stubs, tmp_path, CC_COMPUTE_SSH=TARGET)).stdout == f"{TARGET}\n"
     _answer(tree, other)
@@ -185,10 +224,17 @@ def test_the_file_is_found_through_env_path(tree: Path, stubs: Path, tmp_path: P
 
 def test_nothing_from_the_file_reaches_the_caller(tree: Path, stubs: Path, tmp_path: Path):
     _answer(tree)
-    script = ('. "$1"; cc_k3s_compute_ssh "$2" >/dev/null; '
-              'printf "[%s][%s]" "${OTHER_KEY:-}" "${CC_COMPUTE_SSH:-}"; declare -F cc_k3s_env_file')
-    r = subprocess.run(["bash", "-c", script, "_", str(LIB), str(tree / "deploy" / "k3s" / "x.sh")],
-                       env=_env(stubs, tmp_path), capture_output=True, text=True, timeout=30)
+    script = (
+        '. "$1"; cc_k3s_compute_ssh "$2" >/dev/null; '
+        'printf "[%s][%s]" "${OTHER_KEY:-}" "${CC_COMPUTE_SSH:-}"; declare -F cc_k3s_env_file'
+    )
+    r = subprocess.run(
+        ["bash", "-c", script, "_", str(LIB), str(tree / "deploy" / "k3s" / "x.sh")],
+        env=_env(stubs, tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     assert r.stdout == "[][]"
 
 
@@ -196,7 +242,9 @@ def test_nothing_from_the_file_reaches_the_caller(tree: Path, stubs: Path, tmp_p
 
 
 @pytest.mark.parametrize("script", NODE_SCRIPTS)
-def test_unset_each_stops_before_reaching_a_node(tree: Path, stubs: Path, tmp_path: Path, script: str):
+def test_unset_each_stops_before_reaching_a_node(
+    tree: Path, stubs: Path, tmp_path: Path, script: str
+):
     r = _run(tree, script, _env(stubs, tmp_path, FORCE="1"))
     _unset_failure(r)
     assert MESSAGE in r.stderr
@@ -205,7 +253,9 @@ def test_unset_each_stops_before_reaching_a_node(tree: Path, stubs: Path, tmp_pa
 
 @pytest.mark.parametrize("from_file", [True, False])
 @pytest.mark.parametrize("script", NODE_SCRIPTS)
-def test_set_each_uses_the_value_verbatim(tree: Path, stubs: Path, tmp_path: Path, script: str, from_file: bool):
+def test_set_each_uses_the_value_verbatim(
+    tree: Path, stubs: Path, tmp_path: Path, script: str, from_file: bool
+):
     # From the environment is the updater's detached worktree, which has no .env;
     # from the file is the operator running the script by hand (README).
     if from_file:
@@ -219,7 +269,9 @@ def test_set_each_uses_the_value_verbatim(tree: Path, stubs: Path, tmp_path: Pat
 
 
 @pytest.mark.parametrize("script", BUILD_SCRIPTS)
-def test_the_build_scripts_say_the_compute_node(tree: Path, stubs: Path, tmp_path: Path, script: str):
+def test_the_build_scripts_say_the_compute_node(
+    tree: Path, stubs: Path, tmp_path: Path, script: str
+):
     r = _run(tree, script, _env(stubs, tmp_path, CC_COMPUTE_SSH=TARGET))
     assert r.returncode == 0, r.stdout + r.stderr
     assert "the compute node" in r.stdout
@@ -229,7 +281,11 @@ def test_the_build_scripts_say_the_compute_node(tree: Path, stubs: Path, tmp_pat
 
 
 def test_the_node_wait_uses_the_node_the_label_selects(tree: Path, stubs: Path, tmp_path: Path):
-    r = _run(tree, "install-gvisor.sh", _env(stubs, tmp_path, CC_COMPUTE_SSH=TARGET, FORCE="1", STUB_NODES="node-b"))
+    r = _run(
+        tree,
+        "install-gvisor.sh",
+        _env(stubs, tmp_path, CC_COMPUTE_SSH=TARGET, FORCE="1", STUB_NODES="node-b"),
+    )
     assert r.returncode == 0, r.stdout + r.stderr
     log = _log(tmp_path)
     assert "get nodes -l cc-role/compute=true" in log
@@ -238,8 +294,13 @@ def test_the_node_wait_uses_the_node_the_label_selects(tree: Path, stubs: Path, 
 
 @pytest.mark.parametrize(("nodes", "count"), [("", "0"), ("node-a node-b", "2")])
 def test_a_selector_that_is_not_exactly_one_stops_before_the_install(
-        tree: Path, stubs: Path, tmp_path: Path, nodes: str, count: str):
-    r = _run(tree, "install-gvisor.sh", _env(stubs, tmp_path, CC_COMPUTE_SSH=TARGET, FORCE="1", STUB_NODES=nodes))
+    tree: Path, stubs: Path, tmp_path: Path, nodes: str, count: str
+):
+    r = _run(
+        tree,
+        "install-gvisor.sh",
+        _env(stubs, tmp_path, CC_COMPUTE_SSH=TARGET, FORCE="1", STUB_NODES=nodes),
+    )
     assert r.returncode != 0
     assert f"matches {count} nodes" in r.stderr, r.stderr
     assert "ssh " not in _log(tmp_path)
@@ -258,7 +319,7 @@ def test_verify_stops_before_any_check_when_unset(tree: Path, stubs: Path, tmp_p
 def test_verify_reads_the_answer(tree: Path, stubs: Path, tmp_path: Path):
     # Its head only: the checks below it reach the local services for real.
     text = (K3S / "verify.sh").read_text(encoding="utf-8")
-    head = text[:text.index("\nPASS=0; FAIL=0; SKIP=0\n")]
+    head = text[: text.index("\nPASS=0; FAIL=0; SKIP=0\n")]
     (tree / "deploy" / "k3s" / "verify.sh").write_text(head + '\nprintf "%s\\n" "$COMPUTE_SSH"\n')
     _answer(tree)
     r = _run(tree, "verify.sh", _env(stubs, tmp_path))
@@ -270,7 +331,7 @@ def test_verify_reads_the_answer(tree: Path, stubs: Path, tmp_path: Path):
 
 def _body(name: str) -> list[str]:
     start = UPDATER.index(f"\n{name}() {{\n") + 1
-    return UPDATER[start:UPDATER.index("\n}\n", start)].splitlines()[1:]
+    return UPDATER[start : UPDATER.index("\n}\n", start)].splitlines()[1:]
 
 
 @pytest.mark.parametrize("fn", ["main", "stage_main"])
@@ -281,7 +342,9 @@ def test_the_updaters_check_is_the_first_statement_after_mkdir(fn: str):
 def test_the_updaters_module_level_holds_no_default_and_no_check():
     assert "\nCOMPUTE_SSH=" not in UPDATER  # only require_compute_ssh sets it, from the resolver
     assert 'answer="$(cc_k3s_compute_ssh "$SELF" 2>&1)" || die precondition "$answer"' in UPDATER
-    assert UPDATER.count("\n  require_compute_ssh\n") == 2  # main and stage_main, nowhere at module level
+    assert (
+        UPDATER.count("\n  require_compute_ssh\n") == 2
+    )  # main and stage_main, nowhere at module level
 
 
 def test_the_updater_still_passes_the_value_to_the_build_scripts():
@@ -292,28 +355,39 @@ def test_the_updater_still_passes_the_value_to_the_build_scripts():
 def _updater(tree: Path, statedir: Path) -> None:
     assert "STATEDIR=/var/lib/cc-update\n" in UPDATER
     (tree / "deploy" / "k3s" / "cc-update.sh").write_text(
-        UPDATER.replace("STATEDIR=/var/lib/cc-update\n", f"STATEDIR='{statedir}'\n"))
+        UPDATER.replace("STATEDIR=/var/lib/cc-update\n", f"STATEDIR='{statedir}'\n")
+    )
 
 
-@pytest.mark.parametrize(("args", "written", "untouched"), [
-    ((), "status.json", "stage.json"),
-    (("stage",), "stage.json", "status.json"),
-])
+@pytest.mark.parametrize(
+    ("args", "written", "untouched"),
+    [
+        ((), "status.json", "stage.json"),
+        (("stage",), "stage.json", "status.json"),
+    ],
+)
 def test_unset_the_updater_dies_at_precondition_in_its_own_channel(
-        tree: Path, stubs: Path, tmp_path: Path, args: tuple[str, ...], written: str, untouched: str):
+    tree: Path, stubs: Path, tmp_path: Path, args: tuple[str, ...], written: str, untouched: str
+):
     state = tmp_path / "state"
     _updater(tree, state)
     r = _run(tree, "cc-update.sh", _env(stubs, tmp_path), *args)
     _unset_failure(r)
     status = json.loads((state / written).read_text())
-    assert (status["state"], status["phase"], status["error"]) == ("failed", "precondition", MESSAGE)
+    assert (status["state"], status["phase"], status["error"]) == (
+        "failed",
+        "precondition",
+        MESSAGE,
+    )
     assert not (state / untouched).exists()
     # Nothing ran: no fetch, no build, no unit touched.
     assert _log(tmp_path) == ""
 
 
 @pytest.mark.parametrize(("args", "written"), [((), "status.json"), (("stage",), "stage.json")])
-def test_set_the_updater_passes_the_check(tree: Path, stubs: Path, tmp_path: Path, args: tuple[str, ...], written: str):
+def test_set_the_updater_passes_the_check(
+    tree: Path, stubs: Path, tmp_path: Path, args: tuple[str, ...], written: str
+):
     state = tmp_path / "state"
     _updater(tree, state)
     _answer(tree)
@@ -351,7 +425,9 @@ def test_setup_stack_uses_the_answer(tree: Path, stubs: Path, tmp_path: Path):
     assert "PASS image-sandbox" in r.stdout
 
 
-def test_setup_preflight_fails_the_answer_file_before_any_ssh(tree: Path, stubs: Path, tmp_path: Path):
+def test_setup_preflight_fails_the_answer_file_before_any_ssh(
+    tree: Path, stubs: Path, tmp_path: Path
+):
     _setup_tree(tree)
     r = _run(tree, "setup.sh", _env(stubs, tmp_path), "preflight")
     assert r.returncode == 1, r.stdout + r.stderr
@@ -412,11 +488,13 @@ def test_the_template_documents_the_key_as_required_and_commented():
     text = (K3S / ".env.example").read_text(encoding="utf-8")
     assert "#CC_COMPUTE_SSH=<user>@<compute-address>\n" in text
     assert re.search(r"CC_COMPUTE_SSH is REQUIRED", text)
-    assert "defaulted to" not in text[text.index("--- topology"):text.index("--- backups")]
+    assert "defaulted to" not in text[text.index("--- topology") : text.index("--- backups")]
 
 
 @pytest.mark.skipif(not shutil.which("openssl"), reason="openssl needed")
-def test_a_fresh_init_writes_it_commented_and_setup_names_it(tree: Path, stubs: Path, tmp_path: Path):
+def test_a_fresh_init_writes_it_commented_and_setup_names_it(
+    tree: Path, stubs: Path, tmp_path: Path
+):
     env = _env(stubs, tmp_path)
     r = _run(tree, "init-env.sh", env)
     assert r.returncode == 0, r.stderr

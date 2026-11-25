@@ -73,7 +73,7 @@ def unattributed(phase: str, file_name: str, text: str, rows: dict[str, set[str]
             verb, name = m.group(1), m.group(2) or m.group(3) or m.group(4)
             if name in rows.get(phase, set()) or (file_name, name) in ALLOWLIST:
                 continue
-            found.append(f"{file_name}:{n}: {verb} \"{name}\"")
+            found.append(f'{file_name}:{n}: {verb} "{name}"')
     return found
 
 
@@ -94,13 +94,15 @@ def test_the_allowlist_has_no_dead_entries():
     """An entry whose call is gone is a hole left open for the next one."""
     texts = {p.name: p.read_text(encoding="utf-8") for p in phase_files()}
     dead = []
-    for (file_name, name) in ALLOWLIST:
+    for file_name, name in ALLOWLIST:
         if name == "*":
             if file_name not in texts:
                 dead.append(file_name)
             continue
-        if not re.search(r"\b(?:fail|useraction|step)\s+[\"']?" + re.escape(name) + r"[\"']?\s",
-                         texts.get(file_name, "")):
+        if not re.search(
+            r"\b(?:fail|useraction|step)\s+[\"']?" + re.escape(name) + r"[\"']?\s",
+            texts.get(file_name, ""),
+        ):
             dead.append(f"{file_name}: {name}")
     assert not dead, f"allowlisted, but no such call any more: {dead}"
 
@@ -109,19 +111,24 @@ def test_the_guard_catches_a_planted_stop_under_a_name_that_is_no_row():
     rows = _rows()
     llm = (SINGLE / "phases" / "llm.sh").read_text(encoding="utf-8")
     # The very line P5 found, planted back, plus the other two shapes.
-    planted = llm + "\n".join([
-        "",
-        'x() {',
-        '  useraction "llm-models" "the catalog needs you — re-run: ./setup.sh"',
-        '  [[ -n "$y" ]] || fail not-a-row "unquoted"',
-        '  step "also-not-a-row" "ran" true || return 1',
-        '  fail "catalog-filled" "a row: fine"',
-        '  fail "$dynamic" "a variable: the caller\'s business"',
-        '}',
-    ])
+    planted = llm + "\n".join(
+        [
+            "",
+            "x() {",
+            '  useraction "llm-models" "the catalog needs you — re-run: ./setup.sh"',
+            '  [[ -n "$y" ]] || fail not-a-row "unquoted"',
+            '  step "also-not-a-row" "ran" true || return 1',
+            '  fail "catalog-filled" "a row: fine"',
+            '  fail "$dynamic" "a variable: the caller\'s business"',
+            "}",
+        ]
+    )
     found = unattributed("llm", "llm.sh", planted, rows)
     assert [f.split(": ", 1)[1] for f in found] == [
-        'useraction "llm-models"', 'fail "not-a-row"', 'step "also-not-a-row"'], found
+        'useraction "llm-models"',
+        'fail "not-a-row"',
+        'step "also-not-a-row"',
+    ], found
     # ...and the shipped file, alone, is clean: the pause is the row's now.
     assert unattributed("llm", "llm.sh", llm, rows) == []
     assert re.search(r'useraction "catalog-filled"', llm), "llm_gate no longer pauses under the row"

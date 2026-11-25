@@ -69,10 +69,18 @@ async def test_test_model_is_a_stub(monkeypatch):
     assert "test model" in out
 
 
-@pytest.mark.parametrize("server_id", [
-    "Central Command-Server", "-leading-hyphen", "trailing-hyphen-", "a", "cc-anything",
-    "has_underscore", "",
-])
+@pytest.mark.parametrize(
+    "server_id",
+    [
+        "Central Command-Server",
+        "-leading-hyphen",
+        "trailing-hyphen-",
+        "a",
+        "cc-anything",
+        "has_underscore",
+        "",
+    ],
+)
 async def test_bad_server_ids_are_refused(monkeypatch, server_id):
     monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_sync_source(_Ctx(), server_id, ["a.py"], "test")
@@ -197,8 +205,11 @@ def _scratch_git(monkeypatch, scratch_root):
         if args[:1] == ("push",):
             return 1, "", "fatal: no remote (the test's scratch repo)"
         proc = await asyncio.create_subprocess_exec(
-            "git", *args, cwd=str(here),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            "git",
+            *args,
+            cwd=str(here),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         out, err = await proc.communicate()
         return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
@@ -227,15 +238,23 @@ async def test_executor_writes_exactly_the_captured_bytes(monkeypatch, tmp_path)
     ]
     outcome = await executor.execute(
         [_action(server_id="exec-server", files=files)],
-        approver="human:lee", source_refs=[], proposer="mcp-tester",
+        approver="human:lee",
+        source_refs=[],
+        proposer="mcp-tester",
         proposal_id="prop_test0001",
     )
 
     for f in files:
-        assert (tmp_path / "servers" / "exec-server" / f["path"]).read_text(encoding="utf-8") == f["content"]
+        assert (tmp_path / "servers" / "exec-server" / f["path"]).read_text(encoding="utf-8") == f[
+            "content"
+        ]
     assert "commit" in outcome.result_text
     log = subprocess.run(  # noqa: ASYNC221 — a test reads git's log; blocking is fine
-        ["git", "log", "-1", "--format=%B"], cwd=tmp_path, check=True, capture_output=True, text=True
+        ["git", "log", "-1", "--format=%B"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
     assert "prop_test0001" in log
     assert "mcp-tester" in log
@@ -257,7 +276,9 @@ async def test_dirty_tree_refuses_to_mix_with_operator_work(monkeypatch, tmp_pat
     with pytest.raises(executor.ExecutionFailed) as exc:
         await executor.execute(
             [_action(server_id="exec-server")],
-            approver="human:lee", source_refs=[], proposer="mcp-tester",
+            approver="human:lee",
+            source_refs=[],
+            proposer="mcp-tester",
             proposal_id="prop_dirty",
         )
     assert "uncommitted" in str(exc.value) or "already has uncommitted" in str(exc.value)
@@ -272,13 +293,15 @@ async def test_bad_server_id_and_path_refused_mechanically_at_execute_time(monke
     with pytest.raises(executor.ExecutionFailed):
         await executor.execute(
             [_action(server_id="cc-should-not-be-allowed")],
-            approver="human:lee", source_refs=[],
+            approver="human:lee",
+            source_refs=[],
         )
 
     with pytest.raises(executor.ExecutionFailed):
         await executor.execute(
             [_action(server_id="exec-server", files=[{"path": "../escape.py", "content": "x"}])],
-            approver="human:lee", source_refs=[],
+            approver="human:lee",
+            source_refs=[],
         )
 
 
@@ -291,7 +314,9 @@ async def test_mcp_server_row_lands_synced_after_execution(monkeypatch, tmp_path
     try:
         await executor.execute(
             [_action(server_id=server_id)],
-            approver="human:lee", source_refs=[], proposer="mcp-tester",
+            approver="human:lee",
+            source_refs=[],
+            proposer="mcp-tester",
             proposal_id="prop_pgtest",
         )
         row = await repo.get_mcp_server(server_id)

@@ -73,7 +73,8 @@ def _get_driver():
     loop = asyncio.get_running_loop()
     if _driver is None or _driver_loop is not loop:
         _driver = AsyncGraphDatabase.driver(
-            settings.neo4j_url, auth=("neo4j", settings.neo4j_password),
+            settings.neo4j_url,
+            auth=("neo4j", settings.neo4j_password),
             **bolt_driver_kwargs(),
         )
         _driver_loop = loop
@@ -123,10 +124,14 @@ async def search_entities(q: str, group_id: str | None, limit: int) -> list[dict
           AND ($group_id IS NULL OR n.group_id = $group_id)
         RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
                n.summary AS summary, n.group_id AS group_id,
-               """ + _PERSON_VALUES + """
+               """
+        + _PERSON_VALUES
+        + """
         LIMIT $limit
         """,
-        q=q, group_id=group_id, limit=limit,
+        q=q,
+        group_id=group_id,
+        limit=limit,
     )
     return rows
 
@@ -137,7 +142,10 @@ _NODE_FIELDS = ["uuid", "name", "group_id", "labels", "created_at", "summary", "
 
 
 async def entities_by_exact_name(
-    name: str, group_ids: list[str], entity_types: list[str] | None, limit: int,
+    name: str,
+    group_ids: list[str],
+    entity_types: list[str] | None,
+    limit: int,
 ) -> list[dict]:
     """Entities of `group_ids` whose name OR one of whose aliases equals `name`,
     case-insensitively and whitespace-normalised — the exact lane the agents'
@@ -163,14 +171,19 @@ async def entities_by_exact_name(
         ORDER BY n.name, n.uuid
         LIMIT $limit
         """,
-        group_ids=list(group_ids), key=key, types=list(entity_types or []),
-        fields=_NODE_FIELDS, limit=limit,
+        group_ids=list(group_ids),
+        key=key,
+        types=list(entity_types or []),
+        fields=_NODE_FIELDS,
+        limit=limit,
     )
     return [
         {
-            "uuid": row["uuid"], "name": row["name"],
+            "uuid": row["uuid"],
+            "name": row["name"],
             "labels": [l for l in row["labels"] or [] if not l.startswith("Entity_")],
-            "created_at": _iso(row["created_at"]), "summary": row["summary"],
+            "created_at": _iso(row["created_at"]),
+            "summary": row["summary"],
             "group_id": row["group_id"],
             "attributes": {
                 k: (_iso(v) if isinstance(v, Neo4jDateTime) else v)
@@ -187,7 +200,9 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
         MATCH (n:Entity {uuid: $uuid})
         RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
                n.summary AS summary, n.group_id AS group_id,
-               """ + _PERSON_VALUES + """
+               """
+        + _PERSON_VALUES
+        + """
         """,
         uuid=uuid,
     )
@@ -208,7 +223,9 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
                    m.birth_date AS neighbor_birth_date, m.phone AS neighbor_phone
             LIMIT $limit
             """,
-            uuid=uuid, at=at, limit=limit,
+            uuid=uuid,
+            at=at,
+            limit=limit,
         )
     else:
         edge_rows = await _read(
@@ -225,37 +242,54 @@ async def neighborhood(uuid: str, at: str | None, limit: int) -> dict:
                    m.birth_date AS neighbor_birth_date, m.phone AS neighbor_phone
             LIMIT $limit
             """,
-            uuid=uuid, limit=limit,
+            uuid=uuid,
+            limit=limit,
         )
 
     nodes = {}
     for row in node_rows:
         nodes[row["uuid"]] = {
-            "uuid": row["uuid"], "name": row["name"], "labels": row["labels"],
-            "summary": row["summary"], "group_id": row["group_id"],
-            "aliases": row["aliases"], "birth_date": row["birth_date"],
+            "uuid": row["uuid"],
+            "name": row["name"],
+            "labels": row["labels"],
+            "summary": row["summary"],
+            "group_id": row["group_id"],
+            "aliases": row["aliases"],
+            "birth_date": row["birth_date"],
             "phone": row["phone"],
         }
     edges = []
     now = datetime.now(UTC)
     for row in edge_rows:
-        nodes.setdefault(row["neighbor_uuid"], {
-            "uuid": row["neighbor_uuid"], "name": row["neighbor_name"],
-            "labels": row["neighbor_labels"], "summary": row["neighbor_summary"],
-            "group_id": row["neighbor_group_id"],
-            "aliases": row["neighbor_aliases"], "birth_date": row["neighbor_birth_date"],
-            "phone": row["neighbor_phone"],
-        })
-        invalid_at_native = row["invalid_at"].to_native() if isinstance(
-            row["invalid_at"], Neo4jDateTime
-        ) else None
-        edges.append({
-            "uuid": row["uuid"], "source": row["source"], "target": row["target"],
-            "name": row["name"], "fact": row["fact"],
-            "valid_at": _iso(row["valid_at"]), "invalid_at": _iso(row["invalid_at"]),
-            "created_at": _iso(row["created_at"]),
-            "invalid": invalid_at_native is not None and invalid_at_native <= now,
-        })
+        nodes.setdefault(
+            row["neighbor_uuid"],
+            {
+                "uuid": row["neighbor_uuid"],
+                "name": row["neighbor_name"],
+                "labels": row["neighbor_labels"],
+                "summary": row["neighbor_summary"],
+                "group_id": row["neighbor_group_id"],
+                "aliases": row["neighbor_aliases"],
+                "birth_date": row["neighbor_birth_date"],
+                "phone": row["neighbor_phone"],
+            },
+        )
+        invalid_at_native = (
+            row["invalid_at"].to_native() if isinstance(row["invalid_at"], Neo4jDateTime) else None
+        )
+        edges.append(
+            {
+                "uuid": row["uuid"],
+                "source": row["source"],
+                "target": row["target"],
+                "name": row["name"],
+                "fact": row["fact"],
+                "valid_at": _iso(row["valid_at"]),
+                "invalid_at": _iso(row["invalid_at"]),
+                "created_at": _iso(row["created_at"]),
+                "invalid": invalid_at_native is not None and invalid_at_native <= now,
+            }
+        )
     return {"nodes": list(nodes.values()), "edges": edges}
 
 
@@ -287,11 +321,14 @@ async def everything(group_id: str | None, limit: int, at: str | None = None) ->
         WHERE $group_id IS NULL OR n.group_id = $group_id
         RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
                n.summary AS summary, n.group_id AS group_id,
-               """ + _PERSON_VALUES + """
+               """
+        + _PERSON_VALUES
+        + """
         ORDER BY n.name
         LIMIT $limit
         """,
-        group_id=group_id, limit=limit,
+        group_id=group_id,
+        limit=limit,
     )
     edge_rows = await _read(
         """
@@ -305,21 +342,29 @@ async def everything(group_id: str | None, limit: int, at: str | None = None) ->
                e.created_at AS created_at
         LIMIT $limit
         """,
-        group_id=group_id, limit=limit, at=at,
+        group_id=group_id,
+        limit=limit,
+        at=at,
     )
     now = datetime.now(UTC)
     edges = []
     for row in edge_rows:
-        invalid_at_native = row["invalid_at"].to_native() if isinstance(
-            row["invalid_at"], Neo4jDateTime
-        ) else None
-        edges.append({
-            "uuid": row["uuid"], "source": row["source"], "target": row["target"],
-            "name": row["name"], "fact": row["fact"],
-            "valid_at": _iso(row["valid_at"]), "invalid_at": _iso(row["invalid_at"]),
-            "created_at": _iso(row["created_at"]),
-            "invalid": invalid_at_native is not None and invalid_at_native <= now,
-        })
+        invalid_at_native = (
+            row["invalid_at"].to_native() if isinstance(row["invalid_at"], Neo4jDateTime) else None
+        )
+        edges.append(
+            {
+                "uuid": row["uuid"],
+                "source": row["source"],
+                "target": row["target"],
+                "name": row["name"],
+                "fact": row["fact"],
+                "valid_at": _iso(row["valid_at"]),
+                "invalid_at": _iso(row["invalid_at"]),
+                "created_at": _iso(row["created_at"]),
+                "invalid": invalid_at_native is not None and invalid_at_native <= now,
+            }
+        )
     return {
         "nodes": node_rows,
         "edges": edges,
@@ -343,12 +388,15 @@ async def provenance(uuid: str) -> list[dict]:
     episodes = []
     for row in rows:
         content = row["content"] or ""
-        episodes.append({
-            "uuid": row["uuid"], "name": row["name"],
-            "source_description": row["source_description"],
-            "valid_at": _iso(row["valid_at"]),
-            "content_preview": content[:280],
-        })
+        episodes.append(
+            {
+                "uuid": row["uuid"],
+                "name": row["name"],
+                "source_description": row["source_description"],
+                "valid_at": _iso(row["valid_at"]),
+                "content_preview": content[:280],
+            }
+        )
     return episodes
 
 
@@ -372,7 +420,8 @@ async def episode_index(group_id: str | None, limit: int) -> list[dict]:
             ORDER BY e.created_at DESC, e.uuid
             LIMIT $limit
             """,
-            group_id=group_id, limit=limit,
+            group_id=group_id,
+            limit=limit,
         )
     ]
 
@@ -399,7 +448,9 @@ async def episode_subgraph(uuid: str) -> dict | None:
         MATCH (:Episodic {uuid: $uuid})-[:MENTIONS]->(n:Entity)
         RETURN DISTINCT n.uuid AS uuid, n.name AS name, labels(n) AS labels,
                n.summary AS summary, n.group_id AS group_id,
-               """ + _PERSON_VALUES + """
+               """
+        + _PERSON_VALUES
+        + """
         ORDER BY n.name
         """,
         uuid=uuid,
@@ -417,20 +468,28 @@ async def episode_subgraph(uuid: str) -> dict | None:
     now = datetime.now(UTC)
     edges = []
     for row in edge_rows:
-        invalid_at_native = row["invalid_at"].to_native() if isinstance(
-            row["invalid_at"], Neo4jDateTime
-        ) else None
-        edges.append({
-            "uuid": row["uuid"], "source": row["source"], "target": row["target"],
-            "name": row["name"], "fact": row["fact"],
-            "valid_at": _iso(row["valid_at"]), "invalid_at": _iso(row["invalid_at"]),
-            "created_at": _iso(row["created_at"]),
-            "invalid": invalid_at_native is not None and invalid_at_native <= now,
-        })
+        invalid_at_native = (
+            row["invalid_at"].to_native() if isinstance(row["invalid_at"], Neo4jDateTime) else None
+        )
+        edges.append(
+            {
+                "uuid": row["uuid"],
+                "source": row["source"],
+                "target": row["target"],
+                "name": row["name"],
+                "fact": row["fact"],
+                "valid_at": _iso(row["valid_at"]),
+                "invalid_at": _iso(row["invalid_at"]),
+                "created_at": _iso(row["created_at"]),
+                "invalid": invalid_at_native is not None and invalid_at_native <= now,
+            }
+        )
     return {
         "episode": {
-            **dict(ep), "content": ep["content"] or "",
-            "created_at": _iso(ep["created_at"]), "valid_at": _iso(ep["valid_at"]),
+            **dict(ep),
+            "content": ep["content"] or "",
+            "created_at": _iso(ep["created_at"]),
+            "valid_at": _iso(ep["valid_at"]),
         },
         "nodes": node_rows,
         "edges": edges,
@@ -463,7 +522,8 @@ async def latest_episodes(group_ids: list[str], limit: int) -> list[dict]:
         ORDER BY e.created_at DESC, e.uuid
         LIMIT $limit
         """,
-        group_ids=group_ids, limit=limit,
+        group_ids=group_ids,
+        limit=limit,
     )
     return [{**row, "created_at": _iso(row["created_at"])} for row in rows]
 
@@ -485,14 +545,17 @@ async def episode_by_marker(marker: str, group_id: str) -> dict | None:
         ORDER BY e.created_at DESC
         LIMIT 1
         """,
-        marker=marker, group_id=group_id,
+        marker=marker,
+        group_id=group_id,
     )
     if not rows:
         return None
     row = rows[0]
     return {
-        "uuid": row["uuid"], "name": row["name"],
-        "created_at": _iso(row["created_at"]), "group_id": row["group_id"],
+        "uuid": row["uuid"],
+        "name": row["name"],
+        "created_at": _iso(row["created_at"]),
+        "group_id": row["group_id"],
         "source_description": row["source_description"],
     }
 
@@ -535,13 +598,13 @@ async def episode_delta(episode_uuid: str, window_minutes: int = 30) -> dict:
         RETURN n.uuid AS uuid, n.name AS name, labels(n) AS labels,
                n.summary AS summary, n.name_embedding IS NOT NULL AS has_embedding,
                n.created_at AS created_at, n.created_at >= e.created_at AS new,
-               """ + _PERSON_VALUES + """
+               """
+        + _PERSON_VALUES
+        + """
         """,
         uuid=episode_uuid,
     )
-    entities = [
-        {**dict(row), "created_at": _iso(row["created_at"])} for row in entity_rows
-    ]
+    entities = [{**dict(row), "created_at": _iso(row["created_at"])} for row in entity_rows]
 
     edge_rows = await _read(
         """
@@ -558,11 +621,16 @@ async def episode_delta(episode_uuid: str, window_minutes: int = 30) -> dict:
     )
     edges = [
         {
-            "uuid": row["uuid"], "name": row["name"], "fact": row["fact"],
-            "source": row["source"], "target": row["target"],
-            "valid_at": _iso(row["valid_at"]), "invalid_at": _iso(row["invalid_at"]),
+            "uuid": row["uuid"],
+            "name": row["name"],
+            "fact": row["fact"],
+            "source": row["source"],
+            "target": row["target"],
+            "valid_at": _iso(row["valid_at"]),
+            "invalid_at": _iso(row["invalid_at"]),
             "expired_at": _iso(row["expired_at"]),
-            "created_at": _iso(row["created_at"]), "new": row["new"],
+            "created_at": _iso(row["created_at"]),
+            "new": row["new"],
         }
         for row in edge_rows
     ]
@@ -575,10 +643,15 @@ async def episode_delta(episode_uuid: str, window_minutes: int = 30) -> dict:
 
     def _retired(row: dict, attributed_by: str) -> dict:
         return {
-            "uuid": row["uuid"], "name": row["name"], "fact": row["fact"],
-            "source": row["source"], "target": row["target"],
-            "valid_at": _iso(row["valid_at"]), "invalid_at": _iso(row["invalid_at"]),
-            "expired_at": _iso(row["expired_at"]), "created_at": _iso(row["created_at"]),
+            "uuid": row["uuid"],
+            "name": row["name"],
+            "fact": row["fact"],
+            "source": row["source"],
+            "target": row["target"],
+            "valid_at": _iso(row["valid_at"]),
+            "invalid_at": _iso(row["invalid_at"]),
+            "expired_at": _iso(row["expired_at"]),
+            "created_at": _iso(row["created_at"]),
             "attributed_by": attributed_by,
         }
 
@@ -615,7 +688,9 @@ async def episode_delta(episode_uuid: str, window_minutes: int = 30) -> dict:
                    r.valid_at AS valid_at, r.invalid_at AS invalid_at,
                    r.expired_at AS expired_at, r.created_at AS created_at
             """,
-            group_id=group_id, created_at=created_at, window_end=window_end,
+            group_id=group_id,
+            created_at=created_at,
+            window_end=window_end,
         )
         for row in via_window_rows:
             if row["uuid"] in invalidated:
@@ -637,7 +712,9 @@ async def invalidation_window_end(group_id: str, created_at: str, window_minutes
           AND n.created_at < datetime($created_at) + duration({minutes: $window})
         RETURN min(n.created_at) AS next_created_at
         """,
-        group_id=group_id, created_at=created_at, window=window_minutes,
+        group_id=group_id,
+        created_at=created_at,
+        window=window_minutes,
     )
     nxt = rows[0]["next_created_at"] if rows else None
     if nxt is not None:
@@ -677,7 +754,8 @@ async def audit(group_id: str | None, threshold: float) -> dict:
         ORDER BY similarity DESC
         LIMIT 100
         """,
-        group_id=group_id, threshold=threshold,
+        group_id=group_id,
+        threshold=threshold,
     )
     name_pairs = await _read(
         """
@@ -696,18 +774,25 @@ async def audit(group_id: str | None, threshold: float) -> dict:
 
     def _pair(row, basis):
         return {
-            "a": {"uuid": row["a_uuid"], "name": row["a_name"],
-                  "labels": row["a_labels"], "group_id": row["a_group_id"]},
-            "b": {"uuid": row["b_uuid"], "name": row["b_name"],
-                  "labels": row["b_labels"], "group_id": row["b_group_id"]},
+            "a": {
+                "uuid": row["a_uuid"],
+                "name": row["a_name"],
+                "labels": row["a_labels"],
+                "group_id": row["a_group_id"],
+            },
+            "b": {
+                "uuid": row["b_uuid"],
+                "name": row["b_name"],
+                "labels": row["b_labels"],
+                "group_id": row["b_group_id"],
+            },
             "similarity": row.get("similarity", 1.0),
             "basis": basis,
         }
 
-    duplicate_entities = (
-        [_pair(r, "embedding") for r in embedding_pairs]
-        + [_pair(r, "name") for r in name_pairs]
-    )
+    duplicate_entities = [_pair(r, "embedding") for r in embedding_pairs] + [
+        _pair(r, "name") for r in name_pairs
+    ]
     duplicate_entities.sort(key=lambda p: p["similarity"], reverse=True)
     duplicate_entities = duplicate_entities[:100]
 
@@ -734,8 +819,11 @@ async def audit(group_id: str | None, threshold: float) -> dict:
             "target": {"uuid": row["target_uuid"], "name": row["target_name"]},
             "edges": [
                 {
-                    "uuid": e["uuid"], "name": e["name"], "fact": e["fact"],
-                    "created_at": _iso(e["created_at"]), "valid_at": _iso(e["valid_at"]),
+                    "uuid": e["uuid"],
+                    "name": e["name"],
+                    "fact": e["fact"],
+                    "created_at": _iso(e["created_at"]),
+                    "valid_at": _iso(e["valid_at"]),
                 }
                 for e in row["edges"]
             ],
@@ -836,14 +924,16 @@ async def audit(group_id: str | None, threshold: float) -> dict:
         group_id=group_id,
     )
     broken_fact_count = await _read(
-        AUDIT_BROKEN_FACT_PROVENANCE + " RETURN count(e) AS c", group_id=group_id,
+        AUDIT_BROKEN_FACT_PROVENANCE + " RETURN count(e) AS c",
+        group_id=group_id,
     )
     stale_ref_rows = await _read(
         AUDIT_STALE_EPISODE_REFS + " RETURN " + AUDIT_STALE_EPISODE_FIELDS + " LIMIT 50",
         group_id=group_id,
     )
     stale_ref_count = await _read(
-        AUDIT_STALE_EPISODE_REFS + " RETURN count(ep) AS c", group_id=group_id,
+        AUDIT_STALE_EPISODE_REFS + " RETURN count(ep) AS c",
+        group_id=group_id,
     )
 
     return {
@@ -859,7 +949,9 @@ async def audit(group_id: str | None, threshold: float) -> dict:
             "counts": {
                 "isolated_nodes": isolated_count[0]["c"] if isolated_count else 0,
                 "untyped_nodes": untyped_count[0]["c"] if untyped_count else 0,
-                "missing_embedding_nodes": missing_embedding_count[0]["c"] if missing_embedding_count else 0,
+                "missing_embedding_nodes": missing_embedding_count[0]["c"]
+                if missing_embedding_count
+                else 0,
                 "dangling_edges": dangling_count[0]["c"] if dangling_count else 0,
                 "broken_fact_provenance": broken_fact_count[0]["c"] if broken_fact_count else 0,
                 "stale_episode_fact_refs": stale_ref_count[0]["c"] if stale_ref_count else 0,
@@ -908,7 +1000,8 @@ async def counts() -> dict:
         return {"node_count": 0, "edge_count": 0, "group_ids": []}
     row = rows[0]
     return {
-        "node_count": row["node_count"], "edge_count": row["edge_count"],
+        "node_count": row["node_count"],
+        "edge_count": row["edge_count"],
         "group_ids": row["group_ids"],
     }
 
@@ -979,14 +1072,20 @@ RETURN o.uuid AS uuid
 
 def _fact(row: dict) -> dict:
     return {
-        "uuid": row["uuid"], "name": row.get("name"), "fact": row.get("fact"),
-        "source": row.get("source"), "source_name": row.get("source_name"),
-        "target": row.get("target"), "target_name": row.get("target_name"),
+        "uuid": row["uuid"],
+        "name": row.get("name"),
+        "fact": row.get("fact"),
+        "source": row.get("source"),
+        "source_name": row.get("source_name"),
+        "target": row.get("target"),
+        "target_name": row.get("target_name"),
     }
 
 
 def deletion_set(
-    episode_uuid: str, entity_edge_rows: list[dict], mentioned_rows: list[dict],
+    episode_uuid: str,
+    entity_edge_rows: list[dict],
+    mentioned_rows: list[dict],
 ) -> tuple[list[dict], list[dict]]:
     """Upstream's rule, as data: (facts it deletes, entities it deletes).
 
@@ -1003,11 +1102,14 @@ def preview_digest(episode_uuid: str, fact_uuids, collateral_uuids, entity_uuids
     """A fingerprint of exactly what a deletion removes — the episode, every
     fact (first-created AND collateral) and every entity, order-free. Both
     the cockpit's confirm and the Executor's re-check compare this."""
-    canon = json.dumps({
-        "episode": episode_uuid,
-        "facts": sorted(set(fact_uuids) | set(collateral_uuids)),
-        "entities": sorted(set(entity_uuids)),
-    }, sort_keys=True)
+    canon = json.dumps(
+        {
+            "episode": episode_uuid,
+            "facts": sorted(set(fact_uuids) | set(collateral_uuids)),
+            "entities": sorted(set(entity_uuids)),
+        },
+        sort_keys=True,
+    )
     return hashlib.sha256(canon.encode()).hexdigest()
 
 
@@ -1033,9 +1135,13 @@ async def compute_delete_preview(run, episode_uuid: str) -> dict | None:
     others = await run(PREVIEW_OTHER_EPISODES, uuid=episode_uuid, dead=sorted(dead)) if dead else []
     return {
         "episode": {
-            "uuid": ep["uuid"], "name": ep["name"], "group_id": ep["group_id"],
-            "content": ep["content"] or "", "source_description": ep["source_description"],
-            "created_at": _iso(ep["created_at"]), "valid_at": _iso(ep["valid_at"]),
+            "uuid": ep["uuid"],
+            "name": ep["name"],
+            "group_id": ep["group_id"],
+            "content": ep["content"] or "",
+            "source_description": ep["source_description"],
+            "created_at": _iso(ep["created_at"]),
+            "valid_at": _iso(ep["valid_at"]),
         },
         "facts": [_fact(r) for r in facts],
         "entities": [
@@ -1046,7 +1152,10 @@ async def compute_delete_preview(run, episode_uuid: str) -> dict | None:
         "provenance_facts": [_fact(r) for r in provenance],
         "episodes_losing_fact_refs": sorted({r["uuid"] for r in others}),
         "digest": preview_digest(
-            ep["uuid"], fact_uuids, [r["uuid"] for r in collateral], entity_uuids,
+            ep["uuid"],
+            fact_uuids,
+            [r["uuid"] for r in collateral],
+            entity_uuids,
         ),
     }
 
@@ -1074,12 +1183,17 @@ def preview_changes(approved: dict, current: dict) -> list[str]:
     out: list[str] = []
     if a["episode"] != c["episode"]:
         out.append(f"episode {a['episode']!r} is now {c['episode']!r}")
-    for key, label in (("facts", "facts"), ("collateral_facts", "collateral facts"),
-                       ("entities", "entities")):
+    for key, label in (
+        ("facts", "facts"),
+        ("collateral_facts", "collateral facts"),
+        ("entities", "entities"),
+    ):
         added = sorted(set(c[key]) - set(a[key]))
         gone = sorted(set(a[key]) - set(c[key]))
         if added:
             out.append(f"{len(added)} more {label} would now be deleted: {', '.join(added)}")
         if gone:
-            out.append(f"{len(gone)} {label} approved for deletion no longer would be: {', '.join(gone)}")
+            out.append(
+                f"{len(gone)} {label} approved for deletion no longer would be: {', '.join(gone)}"
+            )
     return out

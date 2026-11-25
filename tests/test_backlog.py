@@ -42,9 +42,7 @@ async def clean(monkeypatch):
 async def _wipe():
     conn = await repo._conn()
     try:
-        await conn.execute(
-            "delete from work_item where message_id like '<gmail-msg-swp%'"
-        )
+        await conn.execute("delete from work_item where message_id like '<gmail-msg-swp%'")
         await conn.execute("delete from feed_state where key = 'backlog_sweep'")
     finally:
         await conn.close()
@@ -89,8 +87,7 @@ async def test_sweep_walks_backwards_and_persists_a_resumable_cursor(monkeypatch
     # Each query's window sits strictly before the previous one's.
     import re
 
-    bounds = [tuple(map(int, re.search(r"after:(\d+) before:(\d+)", q).groups()))
-              for q in queries]
+    bounds = [tuple(map(int, re.search(r"after:(\d+) before:(\d+)", q).groups())) for q in queries]
     assert all(b1[1] > b2[1] for b1, b2 in itertools.pairwise(bounds))
 
 
@@ -215,10 +212,14 @@ async def test_refs_enroll_without_content_and_hydrate_at_claim(monkeypatch):
     async def fake_get(uuid):
         fetched.append(uuid)
         return {
-            "uuid": uuid, "conversation_id": "swpthreadhy",
-            "from": "dana@example.com", "subject": "DEMO-1 slipped",
-            "date": "2026-07-01T09:00:00.000Z", "snippet": "s",
-            "body_text": "DEMO-1 moved to Aug 3.", "body_html": "",
+            "uuid": uuid,
+            "conversation_id": "swpthreadhy",
+            "from": "dana@example.com",
+            "subject": "DEMO-1 slipped",
+            "date": "2026-07-01T09:00:00.000Z",
+            "snippet": "s",
+            "body_text": "DEMO-1 moved to Aug 3.",
+            "body_html": "",
         }
 
     monkeypatch.setattr(email_facade, "get_message", fake_get)
@@ -233,8 +234,7 @@ async def test_refs_enroll_without_content_and_hydrate_at_claim(monkeypatch):
     conn = await repo._conn()
     try:
         row = await conn.fetchrow(
-            "select subject, payload, received_at, state from work_item"
-            " where message_id = $1",
+            "select subject, payload, received_at, state from work_item where message_id = $1",
             ledger.provider_message_id("swphydrate"),
         )
     finally:
@@ -243,7 +243,7 @@ async def test_refs_enroll_without_content_and_hydrate_at_claim(monkeypatch):
 
     payload = row["payload"] if isinstance(row["payload"], dict) else _json.loads(row["payload"])
     assert row["state"] == "PROCESSED"
-    assert row["subject"] == "DEMO-1 slipped"          # filled at hydrate
+    assert row["subject"] == "DEMO-1 slipped"  # filled at hydrate
     assert "DEMO-1 moved to Aug 3." in payload["text"]  # reviewer's source pane works
     assert row["received_at"] is not None
 
@@ -259,11 +259,18 @@ async def test_pick_order_is_live_first_then_newest(monkeypatch):
     await ledger.enroll_provider_ref({"uuid": "swpnew", "conversation_id": "swpt1"})
     await ledger.enroll_provider_ref({"uuid": "swpold", "conversation_id": "swpt2"})
     # … plus one live arrival.
-    await ledger.enroll_provider_message({
-        "uuid": "swplive", "conversation_id": "swpt3", "from": "x@example.com",
-        "subject": "live one", "date": "2026-07-19T00:00:00.000Z",
-        "snippet": "s", "body_text": "body", "body_html": "",
-    })
+    await ledger.enroll_provider_message(
+        {
+            "uuid": "swplive",
+            "conversation_id": "swpt3",
+            "from": "x@example.com",
+            "subject": "live one",
+            "date": "2026-07-19T00:00:00.000Z",
+            "snippet": "s",
+            "body_text": "body",
+            "body_html": "",
+        }
+    )
 
     order = []
     for _ in range(3):
@@ -273,6 +280,6 @@ async def test_pick_order_is_live_first_then_newest(monkeypatch):
 
     assert order == [
         ledger.provider_message_id("swplive"),  # live first
-        ledger.provider_message_id("swpnew"),   # then newest backlog (sweep order)
+        ledger.provider_message_id("swpnew"),  # then newest backlog (sweep order)
         ledger.provider_message_id("swpold"),
     ]

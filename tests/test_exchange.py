@@ -66,10 +66,19 @@ class FakeHeader:
 
 
 class FakeMessage:
-    def __init__(self, item_id="AAA=", message_id="<a@corp.example>", subject="Budget",
-                 sender="dana.rivers@example.com", conversation="conv-1",
-                 received=None, text="plain words", html="<p>plain words</p>",
-                 headers=None, references=""):
+    def __init__(
+        self,
+        item_id="AAA=",
+        message_id="<a@corp.example>",
+        subject="Budget",
+        sender="dana.rivers@example.com",
+        conversation="conv-1",
+        received=None,
+        text="plain words",
+        html="<p>plain words</p>",
+        headers=None,
+        references="",
+    ):
         self.id = FakeId(item_id)
         self.message_id = message_id
         self.subject = subject
@@ -98,12 +107,21 @@ class FakeAttachment(FileAttachment):
     """A REAL `FileAttachment` (so the attribute names are exchangelib's own),
     built the way the library builds one: an `AttachmentId` plus bytes."""
 
-    def __init__(self, attachment_id="ATT1", name="invoice.pdf",
-                 content_type="application/pdf", content=b"%PDF-1.7 fake",
-                 is_inline=False, size=None):
+    def __init__(
+        self,
+        attachment_id="ATT1",
+        name="invoice.pdf",
+        content_type="application/pdf",
+        content=b"%PDF-1.7 fake",
+        is_inline=False,
+        size=None,
+    ):
         super().__init__(
-            attachment_id=AttachmentId(id=attachment_id), name=name,
-            content_type=content_type, content=content, is_inline=is_inline,
+            attachment_id=AttachmentId(id=attachment_id),
+            name=name,
+            content_type=content_type,
+            content=content,
+            is_inline=is_inline,
             size=len(content) if size is None else size,
         )
 
@@ -118,8 +136,11 @@ class FakeItemAttachment(ItemAttachment):
     """A REAL `ItemAttachment` carrying a stand-in attached item."""
 
     def __init__(self, attachment_id="ATT9", name="Fwd: Budget", item=None):
-        super().__init__(attachment_id=AttachmentId(id=attachment_id), name=name,
-                         item=item if item is not None else FakeAttachedItem())
+        super().__init__(
+            attachment_id=AttachmentId(id=attachment_id),
+            name=name,
+            item=item if item is not None else FakeAttachedItem(),
+        )
 
 
 class FakeAttendee:
@@ -133,14 +154,24 @@ class MeetingRequest(FakeMessage):
     """Named like exchangelib's own class: the record keys the invite on
     `type(item).__name__`, which is what a real fetch returns."""
 
-    def __init__(self, start=None, end=None, location="Room 4", organizer=None,
-                 required=(), optional=(), is_all_day=False, **kwargs):
+    def __init__(
+        self,
+        start=None,
+        end=None,
+        location="Room 4",
+        organizer=None,
+        required=(),
+        optional=(),
+        is_all_day=False,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.start = start if start is not None else datetime(2026, 11, 20, 15, 0, tzinfo=UTC)
         self.end = end if end is not None else datetime(2026, 11, 20, 16, 0, tzinfo=UTC)
         self.location = location
-        self.organizer = organizer if organizer is not None else FakeMailbox(
-            "jane.doe@example.com", "Jane Doe")
+        self.organizer = (
+            organizer if organizer is not None else FakeMailbox("jane.doe@example.com", "Jane Doe")
+        )
         self.required_attendees = list(required)
         self.optional_attendees = list(optional)
         self.is_all_day = is_all_day
@@ -210,10 +241,10 @@ class FakeAccount:
         self.sent = FakeFolder("Sent Items", path="/root/Sent Items")
         self.archive_msg_folder_root = FakeFolder("Archive", path="/root/Archive")
         self.calendar = FakeFolder("Calendar", calendar_items, path="/root/Calendar")
-        extra = list(folders) or [FakeFolder("Invoices", path="/root/Invoices",
-                                             total=7, unread=1)]
+        extra = list(folders) or [FakeFolder("Invoices", path="/root/Invoices", total=7, unread=1)]
         self.msg_folder_root = FakeFolder(
-            "Top of Information Store", path="/root",
+            "Top of Information Store",
+            path="/root",
             children=[self.inbox, self.junk, self.sent, *extra],
         )
         self.fetched = []
@@ -232,8 +263,9 @@ class FakeAccount:
 def mailbox(monkeypatch):
     """A configured deployment with a fake `Account` — every public helper in
     the module goes through `exchange.account()`, so this is the one seam."""
-    monkeypatch.setattr(settings, "exchange_url",
-                        "https://mail.corp.example/ews/exchange.asmx", raising=False)
+    monkeypatch.setattr(
+        settings, "exchange_url", "https://mail.corp.example/ews/exchange.asmx", raising=False
+    )
     monkeypatch.setattr(settings, "exchange_username", "CORP\\operator", raising=False)
     monkeypatch.setattr(settings, "exchange_password", "secret", raising=False)
     monkeypatch.setattr(settings, "exchange_email", "operator@corp.example", raising=False)
@@ -252,8 +284,7 @@ def test_configured_needs_url_username_and_password(monkeypatch):
     monkeypatch.setattr(settings, "exchange_password", "", raising=False)
     assert exchange.configured() is False
 
-    monkeypatch.setattr(settings, "exchange_url", "https://mail/ews/exchange.asmx",
-                        raising=False)
+    monkeypatch.setattr(settings, "exchange_url", "https://mail/ews/exchange.asmx", raising=False)
     monkeypatch.setattr(settings, "exchange_username", "CORP\\operator", raising=False)
     # Two of three is NOT configured: a half-set mailbox must route to the n8n
     # path, not fail every mail call with an auth error.
@@ -264,8 +295,7 @@ def test_configured_needs_url_username_and_password(monkeypatch):
 
 def test_the_email_address_falls_back_to_a_upn_username(monkeypatch):
     monkeypatch.setattr(settings, "exchange_email", "", raising=False)
-    monkeypatch.setattr(settings, "exchange_username", "operator@corp.example",
-                        raising=False)
+    monkeypatch.setattr(settings, "exchange_username", "operator@corp.example", raising=False)
     assert exchange._email_address() == "operator@corp.example"
 
     # A DOMAIN\user username is not an address — say so here rather than
@@ -311,10 +341,8 @@ def test_translate_query_accepts_the_backlog_sweepers_epoch_dates():
     """`ingest/feed.py`'s sweeper emits `after:<epoch> before:<epoch>`, not
     YYYY/MM/DD — both spellings are live, so both must parse."""
     filters, _, _ = exchange.translate_query("after:1700000000 before:1700086400")
-    assert filters["datetime_received__gt"] == datetime(2023, 11, 14, 22, 13, 20,
-                                                       tzinfo=UTC)
-    assert filters["datetime_received__lt"] == datetime(2023, 11, 15, 22, 13, 20,
-                                                        tzinfo=UTC)
+    assert filters["datetime_received__gt"] == datetime(2023, 11, 14, 22, 13, 20, tzinfo=UTC)
+    assert filters["datetime_received__lt"] == datetime(2023, 11, 15, 22, 13, 20, tzinfo=UTC)
 
 
 def test_translate_query_quotes_survive_a_phrase():
@@ -354,10 +382,21 @@ def test_a_bad_date_is_refused_loudly():
 async def test_get_message_returns_the_gmail_facade_record_shape(mailbox):
     record = await exchange.get_message("AAA=")
     assert set(record) == {
-        "uuid", "message_id", "conversation_id", "from", "subject", "date",
-        "body_text", "body_html", "snippet", "list_unsubscribe",
-        "list_unsubscribe_post", "authentication_results", "dkim_signatures",
-        "attachments", "has_attachments",
+        "uuid",
+        "message_id",
+        "conversation_id",
+        "from",
+        "subject",
+        "date",
+        "body_text",
+        "body_html",
+        "snippet",
+        "list_unsubscribe",
+        "list_unsubscribe_post",
+        "authentication_results",
+        "dkim_signatures",
+        "attachments",
+        "has_attachments",
     }
     assert record["from"] == "Dana Rivers <dana.rivers@example.com>"
     assert record["subject"] == "Budget"
@@ -423,13 +462,15 @@ async def test_a_file_attachment_is_listed_with_all_five_keys(mailbox):
     mailbox.inbox.items[0].attachments = [FakeAttachment()]
     record = await exchange.get_message("AAA=")
     assert record["has_attachments"] is True
-    assert record["attachments"] == [{
-        "filename": "invoice.pdf",
-        "mime_type": "application/pdf",
-        "size": len(b"%PDF-1.7 fake"),
-        "attachment_id": "ATT1",
-        "is_inline": False,
-    }]
+    assert record["attachments"] == [
+        {
+            "filename": "invoice.pdf",
+            "mime_type": "application/pdf",
+            "size": len(b"%PDF-1.7 fake"),
+            "attachment_id": "ATT1",
+            "is_inline": False,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -492,7 +533,8 @@ async def test_an_attached_outlook_item_reads_as_its_mime_content(mailbox):
 @pytest.mark.asyncio
 async def test_an_attached_item_without_mime_content_cannot_be_read_as_a_file(mailbox):
     mailbox.inbox.items[0].attachments = [
-        FakeItemAttachment("ATT9", item=FakeAttachedItem(mime_content=None))]
+        FakeItemAttachment("ATT9", item=FakeAttachedItem(mime_content=None))
+    ]
     with pytest.raises(exchange.ExchangeError, match="cannot be read as a file"):
         await exchange.get_attachment("AAA=", "ATT9")
 
@@ -509,11 +551,14 @@ def _event(text):
 
 @pytest.mark.asyncio
 async def test_a_meeting_request_gets_a_parseable_invite(mailbox):
-    mailbox.inbox.items = [MeetingRequest(
-        item_id="MTG=", subject="Quarterly review",
-        required=[FakeAttendee("sam@example.com", "Sam Lee")],
-        optional=[FakeAttendee("ana@example.com")],
-    )]
+    mailbox.inbox.items = [
+        MeetingRequest(
+            item_id="MTG=",
+            subject="Quarterly review",
+            required=[FakeAttendee("sam@example.com", "Sam Lee")],
+            optional=[FakeAttendee("ana@example.com")],
+        )
+    ]
     record = await exchange.get_message("MTG=")
     entry = _invite(record)
     assert record["has_attachments"] is True
@@ -533,7 +578,10 @@ async def test_a_meeting_request_gets_a_parseable_invite(mailbox):
     assert str(event["LOCATION"]) == "Room 4"
     assert str(event["ORGANIZER"]) == "mailto:jane.doe@example.com"
     assert event["ORGANIZER"].params["CN"] == "Jane Doe"
-    assert [str(a) for a in event["ATTENDEE"]] == ["mailto:sam@example.com", "mailto:ana@example.com"]
+    assert [str(a) for a in event["ATTENDEE"]] == [
+        "mailto:sam@example.com",
+        "mailto:ana@example.com",
+    ]
     assert str(event["UID"]) == "<a@corp.example>"  # no `uid` on a MeetingRequest: the message id
 
 
@@ -563,9 +611,14 @@ async def test_a_meeting_without_a_start_yields_no_invite_and_missing_values_are
 
 @pytest.mark.asyncio
 async def test_an_all_day_meeting_uses_the_date_form(mailbox):
-    mailbox.inbox.items = [MeetingRequest(
-        item_id="M3=", is_all_day=True,
-        start=datetime(2026, 12, 1, tzinfo=UTC), end=datetime(2026, 12, 2, tzinfo=UTC))]
+    mailbox.inbox.items = [
+        MeetingRequest(
+            item_id="M3=",
+            is_all_day=True,
+            start=datetime(2026, 12, 1, tzinfo=UTC),
+            end=datetime(2026, 12, 2, tzinfo=UTC),
+        )
+    ]
     text = _invite(await exchange.get_message("M3="))["inline_text"]
     assert "DTSTART;VALUE=DATE:20261201\r\n" in text and "DTEND;VALUE=DATE:20261202\r\n" in text
     event = _event(text)
@@ -575,9 +628,14 @@ async def test_an_all_day_meeting_uses_the_date_form(mailbox):
 @pytest.mark.asyncio
 async def test_text_values_are_escaped_and_round_trip(mailbox):
     subject = "Plan, budget; and \\more\nsecond line"
-    mailbox.inbox.items = [MeetingRequest(
-        item_id="M4=", subject=subject, location="Hall A, floor 2; east\r\nwing",
-        organizer=FakeMailbox("jane.doe@example.com", 'Doe, Jane; "J"'))]
+    mailbox.inbox.items = [
+        MeetingRequest(
+            item_id="M4=",
+            subject=subject,
+            location="Hall A, floor 2; east\r\nwing",
+            organizer=FakeMailbox("jane.doe@example.com", 'Doe, Jane; "J"'),
+        )
+    ]
     text = _invite(await exchange.get_message("M4="))["inline_text"]
     assert "SUMMARY:Plan\\, budget\\; and \\\\more\\nsecond line\r\n" in text
     event = _event(text)
@@ -592,8 +650,7 @@ async def test_text_values_are_escaped_and_round_trip(mailbox):
 @pytest.mark.asyncio
 async def test_list_refs_carries_the_message_id_alongside_the_uuid(mailbox):
     refs = await exchange.list_refs("in:inbox newer_than:1d")
-    assert refs == [{"uuid": "AAA=", "conversation_id": "conv-1",
-                     "message_id": "<a@corp.example>"}]
+    assert refs == [{"uuid": "AAA=", "conversation_id": "conv-1", "message_id": "<a@corp.example>"}]
 
 
 @pytest.mark.asyncio
@@ -602,8 +659,9 @@ async def test_list_refs_applies_the_tokens_client_side_under_an_aqs_search(mail
     the server and the translated tokens are applied to what comes back."""
     mailbox.inbox.items = [
         FakeMessage(item_id="AAA=", sender="dana@example.com"),
-        FakeMessage(item_id="BBB=", message_id="<b@corp.example>",
-                    sender="someone-else@example.com"),
+        FakeMessage(
+            item_id="BBB=", message_id="<b@corp.example>", sender="someone-else@example.com"
+        ),
     ]
     refs = await exchange.list_refs("from:dana@example.com invoice")
     assert mailbox.inbox.last_filter[0] == ("invoice",)
@@ -671,13 +729,15 @@ async def test_send_threads_a_reply_from_the_referenced_messages_own_headers(mai
     """An id an agent could write into its own arguments is an agent-authored
     claim — the threading headers come from the FETCHED message, and only from
     there."""
-    mailbox.inbox.items = [FakeMessage(item_id="AAA=", message_id="<parent@corp.example>",
-                                       references="<older@corp.example>")]
+    mailbox.inbox.items = [
+        FakeMessage(
+            item_id="AAA=", message_id="<parent@corp.example>", references="<older@corp.example>"
+        )
+    ]
     built = {}
 
     def fake_message(**kwargs):
-        message = FakeMessage(**{k: v for k, v in kwargs.items()
-                                 if k in ("subject",)})
+        message = FakeMessage(**{k: v for k, v in kwargs.items() if k in ("subject",)})
         message.to_recipients = kwargs.get("to_recipients")
         message.cc_recipients = kwargs.get("cc_recipients")
         message.body = kwargs.get("body")
@@ -685,10 +745,12 @@ async def test_send_threads_a_reply_from_the_referenced_messages_own_headers(mai
         return message
 
     import exchangelib
+
     monkeypatch.setattr(exchangelib, "Message", fake_message)
 
-    out = await exchange.send(["ops@example.com"], "Re: Budget", "on it",
-                              cc=["dana@example.com"], reply_to_ref="AAA=")
+    out = await exchange.send(
+        ["ops@example.com"], "Re: Budget", "on it", cc=["dana@example.com"], reply_to_ref="AAA="
+    )
     sent = built["message"]
     assert sent.sent is True
     assert sent.in_reply_to == "<parent@corp.example>"
@@ -707,6 +769,7 @@ async def test_send_without_a_reply_ref_sets_no_threading_headers(mailbox, monke
         return message
 
     import exchangelib
+
     monkeypatch.setattr(exchangelib, "Message", fake_message)
 
     out = await exchange.send(["ops@example.com"], "Hello", "text")
@@ -718,9 +781,19 @@ async def test_send_without_a_reply_ref_sets_no_threading_headers(mailbox, monke
 
 
 class FakeEvent:
-    def __init__(self, subject="Standup", start=None, end=None, organizer="operator@corp.example",
-                 attendees=(), location="Room 1", body="agenda", declined=False,
-                 all_day=False, item_id="EV1="):
+    def __init__(
+        self,
+        subject="Standup",
+        start=None,
+        end=None,
+        organizer="operator@corp.example",
+        attendees=(),
+        location="Room 1",
+        body="agenda",
+        declined=False,
+        all_day=False,
+        item_id="EV1=",
+    ):
         self.id = FakeId(item_id)
         self.subject = subject
         self.start = start or datetime(2026, 9, 25, 9, 0, tzinfo=UTC)
@@ -801,7 +874,9 @@ def test_no_path_in_the_client_reaches_a_hard_delete_or_a_cancel():
 
 @pytest.mark.asyncio
 async def test_get_event_reads_the_item_by_id_with_its_organiser(mailbox):
-    mailbox.calendar.items = [FakeEvent(attendees=["a@x.example"], organizer="jane.doe@example.com")]
+    mailbox.calendar.items = [
+        FakeEvent(attendees=["a@x.example"], organizer="jane.doe@example.com")
+    ]
     event = await exchange.get_event("EV1=")
     assert event["event_id"] == "EV1=" and event["summary"] == "Standup"
     assert event["organizer"] == "jane.doe@example.com" and event["attendee_count"] == 1
@@ -814,8 +889,18 @@ async def test_list_events_returns_the_calendar_facade_event_shape(mailbox):
     out = await exchange.list_events("2026-09-25T00:00:00Z", "2026-09-26T00:00:00Z")
     assert out["truncated"] is False
     event = out["events"][0]
-    assert set(event) == {"event_id", "summary", "start", "end", "all_day", "location",
-                          "attendee_count", "organizer_is_self", "has_agenda", "declined"}
+    assert set(event) == {
+        "event_id",
+        "summary",
+        "start",
+        "end",
+        "all_day",
+        "location",
+        "attendee_count",
+        "organizer_is_self",
+        "has_agenda",
+        "declined",
+    }
     assert event["summary"] == "Standup"
     assert event["start"] == "2026-09-25T09:00:00Z"
     assert event["attendee_count"] == 2
@@ -859,8 +944,9 @@ def _capture_adapter(monkeypatch):
 
     monkeypatch.setattr(requests.adapters.HTTPAdapter, "cert_verify", fake_cert_verify)
     adapter = exchange._adapter_cls()()
-    adapter.cert_verify(conn=None, url="https://mail.corp.example/ews/exchange.asmx",
-                        verify=True, cert=None)
+    adapter.cert_verify(
+        conn=None, url="https://mail.corp.example/ews/exchange.asmx", verify=True, cert=None
+    )
     return seen
 
 

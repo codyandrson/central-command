@@ -91,10 +91,12 @@ async def test_provider_catalog_rejects_a_provider_with_no_fetcher_and_no_api_ba
 
 
 async def test_provider_catalog_paginates_and_uses_the_given_key(monkeypatch):
-    fake = _FakeAsyncClient([
-        {"data": [{"id": "claude-a"}], "has_more": True, "last_id": "claude-a"},
-        {"data": [{"id": "claude-b"}], "has_more": False},
-    ])
+    fake = _FakeAsyncClient(
+        [
+            {"data": [{"id": "claude-a"}], "has_more": True, "last_id": "claude-a"},
+            {"data": [{"id": "claude-b"}], "has_more": False},
+        ]
+    )
     monkeypatch.setattr(litellm_client.httpx, "AsyncClient", lambda *a, **kw: fake)
 
     out = await litellm_client.provider_catalog("anthropic", "sk-ant-test")
@@ -134,7 +136,9 @@ async def test_provider_catalog_does_not_double_the_v1_of_an_openai_style_api_ba
     fake = _FakeAsyncClient([{"data": [{"id": "vendor/model:free"}]}])
     monkeypatch.setattr(litellm_client.httpx, "AsyncClient", lambda *a, **kw: fake)
 
-    await litellm_client.provider_catalog("openai_compatible", "sk-k", "https://gw.example.com/api/v1/")
+    await litellm_client.provider_catalog(
+        "openai_compatible", "sk-k", "https://gw.example.com/api/v1/"
+    )
 
     assert fake.calls[0]["url"] == "https://gw.example.com/api/v1/models"
 
@@ -142,8 +146,12 @@ async def test_provider_catalog_does_not_double_the_v1_of_an_openai_style_api_ba
 def test_provider_model_accepts_a_vendor_path_in_the_model_half():
     # Gateways name models vendor/model[:tag]; the Responses bridge is
     # openai/chat_completions/<model>. Both are one provider prefix + a path.
-    for ok in ("openai/kilo-auto/free", "openai/nvidia/nemotron-3:free",
-               "openai/chat_completions/qwen3.8-27b", "anthropic/claude-sonnet-5"):
+    for ok in (
+        "openai/kilo-auto/free",
+        "openai/nvidia/nemotron-3:free",
+        "openai/chat_completions/qwen3.8-27b",
+        "anthropic/claude-sonnet-5",
+    ):
         assert litellm_client._provider_model(ok) == ok
     for bad in ("no-provider", "/leading/slash", "Upper/case", "openai/ space"):
         with pytest.raises(litellm_client.LiteLLMError, match="bad model"):
@@ -180,8 +188,13 @@ async def test_litellm_provider_catalog_tool_never_leaks_the_credential_value(mo
     from central_command.runtime import tools
 
     async def fake_creds():
-        return [{"credential_name": "anthropic-main", "provider": "anthropic",
-                 "values": {"api_key": "sk-ant-SECRET-VALUE"}}]
+        return [
+            {
+                "credential_name": "anthropic-main",
+                "provider": "anthropic",
+                "values": {"api_key": "sk-ant-SECRET-VALUE"},
+            }
+        ]
 
     async def fake_catalog(provider, api_key, api_base=None):
         assert api_key == "sk-ant-SECRET-VALUE"  # used, never returned
@@ -267,8 +280,10 @@ async def test_add_and_delete_handlers_call_the_client(monkeypatch):
 
     async def fake_add(model_name, model, api_key=None, model_info=None, extra=None):
         calls.append(("add", model_name, model, api_key, model_info))
-        return {"ok": True, "model": {"model_name": model_name,
-                                      "provider_model": model, "model_id": "id-123"}}
+        return {
+            "ok": True,
+            "model": {"model_name": model_name, "provider_model": model, "model_id": "id-123"},
+        }
 
     async def fake_delete(model_id):
         calls.append(("delete", model_id))
@@ -276,8 +291,11 @@ async def test_add_and_delete_handlers_call_the_client(monkeypatch):
 
     async def fake_probe(model, measure_context=False):
         calls.append(("probe", model))
-        return {"ok": True, "observed": {"chat": {"ok": True, "detail": "OK"}},
-                "suggested_model_info": {"supports_function_calling": True}}
+        return {
+            "ok": True,
+            "observed": {"chat": {"ok": True, "detail": "OK"}},
+            "suggested_model_info": {"supports_function_calling": True},
+        }
 
     monkeypatch.setattr(executor.litellm_client, "add_model", fake_add)
     monkeypatch.setattr(executor.litellm_client, "delete_model", fake_delete)
@@ -287,25 +305,37 @@ async def test_add_and_delete_handlers_call_the_client(monkeypatch):
         [
             # No api_key in the proposal (charter-correct); the Executor injects
             # it. Metadata rides model_info, where LiteLLM actually stores it.
-            Action(capability="litellm.add_model",
-                   arguments={"model_name": "cc-triage",
-                              "model": "anthropic/claude-haiku-4-5-20251001",
-                              "model_info": {"created_by": "litellm-manager"}},
-                   target_ref={"system": "litellm", "id": "cc-triage", "read_version": "unknown"},
-                   reversibility="reversible"),
-            Action(capability="litellm.delete_model",
-                   arguments={"model_id": "old-999"},
-                   target_ref={"system": "litellm", "id": "old-999", "read_version": "unknown"},
-                   reversibility="reversible"),
+            Action(
+                capability="litellm.add_model",
+                arguments={
+                    "model_name": "cc-triage",
+                    "model": "anthropic/claude-haiku-4-5-20251001",
+                    "model_info": {"created_by": "litellm-manager"},
+                },
+                target_ref={"system": "litellm", "id": "cc-triage", "read_version": "unknown"},
+                reversibility="reversible",
+            ),
+            Action(
+                capability="litellm.delete_model",
+                arguments={"model_id": "old-999"},
+                target_ref={"system": "litellm", "id": "old-999", "read_version": "unknown"},
+                reversibility="reversible",
+            ),
         ],
-        approver="human:lee", source_refs=["operator:task"],
+        approver="human:lee",
+        source_refs=["operator:task"],
     )
     assert calls == [
         # created_by is EXECUTOR-STAMPED (proposer, falling back to approver
         # when none — this call passes no proposer), overwriting the
         # agent-supplied claim in the action args.
-        ("add", "cc-triage", "anthropic/claude-haiku-4-5-20251001",
-         "sk-ant-test", {"created_by": "human:lee", "updated_by": "human:lee"}),
+        (
+            "add",
+            "cc-triage",
+            "anthropic/claude-haiku-4-5-20251001",
+            "sk-ant-test",
+            {"created_by": "human:lee", "updated_by": "human:lee"},
+        ),
         # Test-on-add: the FULL capability probe of the just-added alias
         # (v2.4.0, operator decision) — the result carries the declared→
         # observed diff the follow-up update_model proposal uses.
@@ -330,16 +360,21 @@ async def test_executor_stamps_model_provenance_over_agent_claims(monkeypatch):
 
     async def fake_add(model_name, model, api_key=None, model_info=None, extra=None):
         infos.append(model_info)
-        return {"ok": True, "model": {"model_name": model_name,
-                                      "provider_model": model, "model_id": "id-1"}}
+        return {
+            "ok": True,
+            "model": {"model_name": model_name, "provider_model": model, "model_id": "id-1"},
+        }
 
     async def fake_update(model_id, model_info=None, litellm_params=None, model_name=None):
         infos.append(model_info)
         return {"ok": True, "model": {"model_id": model_id, "updated": ["model_info"]}}
 
     async def fake_probe(model, measure_context=False):
-        return {"ok": False, "observed": {"chat": {"ok": False, "detail": "boom"}},
-                "suggested_model_info": {}}
+        return {
+            "ok": False,
+            "observed": {"chat": {"ok": False, "detail": "boom"}},
+            "suggested_model_info": {},
+        }
 
     monkeypatch.setattr(executor.litellm_client, "add_model", fake_add)
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
@@ -347,20 +382,27 @@ async def test_executor_stamps_model_provenance_over_agent_claims(monkeypatch):
 
     out = await executor.execute(
         [
-            Action(capability="litellm.add_model",
-                   arguments={"model_name": "cc-x", "model": "anthropic/claude-x",
-                              "extra": {"litellm_credential_name": "anthropic-main"},
-                              "model_info": {"created_by": "not-the-drafter",
-                                             "supports_vision": True}},
-                   target_ref={"system": "litellm", "id": "cc-x", "read_version": "unknown"},
-                   reversibility="reversible"),
+            Action(
+                capability="litellm.add_model",
+                arguments={
+                    "model_name": "cc-x",
+                    "model": "anthropic/claude-x",
+                    "extra": {"litellm_credential_name": "anthropic-main"},
+                    "model_info": {"created_by": "not-the-drafter", "supports_vision": True},
+                },
+                target_ref={"system": "litellm", "id": "cc-x", "read_version": "unknown"},
+                reversibility="reversible",
+            ),
             # An update carrying NO model_info still gets the stamp.
-            Action(capability="litellm.update_model",
-                   arguments={"model_id": "id-1"},
-                   target_ref={"system": "litellm", "id": "id-1", "read_version": "unknown"},
-                   reversibility="reversible"),
+            Action(
+                capability="litellm.update_model",
+                arguments={"model_id": "id-1"},
+                target_ref={"system": "litellm", "id": "id-1", "read_version": "unknown"},
+                reversibility="reversible",
+            ),
         ],
-        approver="human:lee", source_refs=["operator:task"],
+        approver="human:lee",
+        source_refs=["operator:task"],
         proposer="litellm-manager",
     )
     add_info, update_info = infos
@@ -388,19 +430,26 @@ async def test_update_handler_preserves_key_on_metadata_edit(monkeypatch):
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
 
     out = await executor.execute(
-        [Action(capability="litellm.update_model",
-                arguments={"model_id": "abc-123",
-                           "model_info": {"created_at": "2026-07-21T00:00:00Z"}},
+        [
+            Action(
+                capability="litellm.update_model",
+                arguments={
+                    "model_id": "abc-123",
+                    "model_info": {"created_at": "2026-07-21T00:00:00Z"},
+                },
                 target_ref={"system": "litellm", "id": "abc-123", "read_version": "abc-123"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=["operator:task"],
+                reversibility="reversible",
+            )
+        ],
+        approver="human:lee",
+        source_refs=["operator:task"],
     )
     # model_id and model_info pass through (plus the executor's updated_by
     # stamp — approver, since no proposer rode this call); NO litellm_params,
     # so NO key injected.
-    assert calls == [("abc-123",
-                      {"created_at": "2026-07-21T00:00:00Z", "updated_by": "human:lee"},
-                      None, None)]
+    assert calls == [
+        ("abc-123", {"created_at": "2026-07-21T00:00:00Z", "updated_by": "human:lee"}, None, None)
+    ]
     assert "abc-123" in out.result_text
 
 
@@ -421,12 +470,19 @@ async def test_update_handler_injects_key_when_repointing_to_anthropic(monkeypat
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
 
     await executor.execute(
-        [Action(capability="litellm.update_model",
-                arguments={"model_id": "abc-123",
-                           "litellm_params": {"model": "anthropic/claude-opus-4-8"}},
+        [
+            Action(
+                capability="litellm.update_model",
+                arguments={
+                    "model_id": "abc-123",
+                    "litellm_params": {"model": "anthropic/claude-opus-4-8"},
+                },
                 target_ref={"system": "litellm", "id": "abc-123", "read_version": "abc-123"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
+                reversibility="reversible",
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
     )
     assert calls == [("abc-123", {"model": "anthropic/claude-opus-4-8", "api_key": "sk-ant-test"})]
 
@@ -443,18 +499,28 @@ async def test_add_handler_does_not_inject_key_when_credential_named(monkeypatch
 
     async def fake_add(model_name, model, api_key=None, model_info=None, extra=None):
         calls.append(api_key)
-        return {"ok": True, "model": {"model_name": model_name,
-                                      "provider_model": model, "model_id": "id-1"}}
+        return {
+            "ok": True,
+            "model": {"model_name": model_name, "provider_model": model, "model_id": "id-1"},
+        }
 
     monkeypatch.setattr(executor.litellm_client, "add_model", fake_add)
 
     await executor.execute(
-        [Action(capability="litellm.add_model",
-                arguments={"model_name": "cc-x", "model": "anthropic/claude-haiku-4-5-20251001",
-                           "extra": {"litellm_credential_name": "anthropic-main"}},
+        [
+            Action(
+                capability="litellm.add_model",
+                arguments={
+                    "model_name": "cc-x",
+                    "model": "anthropic/claude-haiku-4-5-20251001",
+                    "extra": {"litellm_credential_name": "anthropic-main"},
+                },
                 target_ref={"system": "litellm", "id": "cc-x", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
+                reversibility="reversible",
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
     )
     assert calls == [None]  # no key injected — the named credential provides auth
 
@@ -473,16 +539,27 @@ async def test_update_handler_does_not_inject_key_when_credential_named(monkeypa
     monkeypatch.setattr(executor.litellm_client, "update_model", fake_update)
 
     await executor.execute(
-        [Action(capability="litellm.update_model",
-                arguments={"model_id": "abc-123",
-                           "litellm_params": {"model": "anthropic/claude-opus-4-8",
-                                              "litellm_credential_name": "anthropic-main"}},
+        [
+            Action(
+                capability="litellm.update_model",
+                arguments={
+                    "model_id": "abc-123",
+                    "litellm_params": {
+                        "model": "anthropic/claude-opus-4-8",
+                        "litellm_credential_name": "anthropic-main",
+                    },
+                },
                 target_ref={"system": "litellm", "id": "abc-123", "read_version": "abc-123"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
+                reversibility="reversible",
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
     )
     # params passed through unchanged — no api_key added
-    assert seen == [{"model": "anthropic/claude-opus-4-8", "litellm_credential_name": "anthropic-main"}]
+    assert seen == [
+        {"model": "anthropic/claude-opus-4-8", "litellm_credential_name": "anthropic-main"}
+    ]
 
 
 async def test_list_credentials_read(monkeypatch):
@@ -493,10 +570,16 @@ async def test_list_credentials_read(monkeypatch):
         status_code = 200
 
         def json(self):
-            return {"success": True, "credentials": [
-                {"credential_name": "anthropic-main",
-                 "credential_values": "<encrypted>",
-                 "credential_info": {"custom_llm_provider": "anthropic"}}]}
+            return {
+                "success": True,
+                "credentials": [
+                    {
+                        "credential_name": "anthropic-main",
+                        "credential_values": "<encrypted>",
+                        "credential_info": {"custom_llm_provider": "anthropic"},
+                    }
+                ],
+            }
 
     async def fake_call(method, path, json_body=None):
         assert method == "GET" and path == "/credentials"
@@ -525,8 +608,12 @@ async def test_create_key_validates_and_never_returns_plaintext(monkeypatch):
         status_code = 200
 
         def json(self):
-            return {"key": SECRET, "token_id": "hash-abc", "key_alias": "cc-triage-key",
-                    "models": ["claude-haiku-4-5"]}
+            return {
+                "key": SECRET,
+                "token_id": "hash-abc",
+                "key_alias": "cc-triage-key",
+                "models": ["claude-haiku-4-5"],
+            }
 
     async def fake_call(method, path, json_body=None):
         assert method == "POST" and path == "/key/generate"
@@ -556,17 +643,29 @@ async def test_create_key_handler_keeps_plaintext_out_of_result_text(monkeypatch
 
     async def fake_create(key_alias, models=None, metadata=None, tags=None, duration=None):
         # the client itself masks; simulate that contract (no plaintext returned)
-        return {"ok": True, "key": {"key_alias": key_alias, "token_id": "hash-9",
-                                    "models": models or [], "key_preview": "sk-DO…9999"}}
+        return {
+            "ok": True,
+            "key": {
+                "key_alias": key_alias,
+                "token_id": "hash-9",
+                "models": models or [],
+                "key_preview": "sk-DO…9999",
+            },
+        }
 
     monkeypatch.setattr(executor.litellm_client, "create_key", fake_create)
 
     out = await executor.execute(
-        [Action(capability="litellm.create_key",
+        [
+            Action(
+                capability="litellm.create_key",
                 arguments={"key_alias": "cc-triage-key", "models": ["claude-haiku-4-5"]},
                 target_ref={"system": "litellm", "id": "cc-triage-key", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
+                reversibility="reversible",
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
     )
     assert SECRET not in out.result_text
     assert "cc-triage-key" in out.result_text and "sk-DO…9999" in out.result_text
@@ -584,11 +683,16 @@ async def test_delete_key_handler_calls_client(monkeypatch):
 
     monkeypatch.setattr(executor.litellm_client, "delete_key", fake_delete)
     out = await executor.execute(
-        [Action(capability="litellm.delete_key",
+        [
+            Action(
+                capability="litellm.delete_key",
                 arguments={"key_alias": "cc-triage-key"},
                 target_ref={"system": "litellm", "id": "cc-triage-key", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
+                reversibility="reversible",
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
     )
     assert calls == [("cc-triage-key", None)]
     assert "cc-triage-key" in out.result_text
@@ -602,8 +706,17 @@ async def test_list_keys_read(monkeypatch):
         status_code = 200
 
         def json(self):
-            return {"keys": [{"key_alias": "central_command", "token": "hash-x",
-                              "models": [], "spend": 0.35, "created_at": "2026-07-22"}]}
+            return {
+                "keys": [
+                    {
+                        "key_alias": "central_command",
+                        "token": "hash-x",
+                        "models": [],
+                        "spend": 0.35,
+                        "created_at": "2026-07-22",
+                    }
+                ]
+            }
 
     async def fake_call(method, path, json_body=None):
         assert method == "GET" and path.startswith("/key/list")
@@ -626,7 +739,9 @@ async def test_set_fallbacks_validates(monkeypatch):
     with pytest.raises(litellm_client.LiteLLMError):
         await litellm_client.set_fallbacks("claude-sonnet-5", ["ok", "bad alias!"])
     with pytest.raises(litellm_client.LiteLLMError):
-        await litellm_client.set_fallbacks("claude-sonnet-5", ["claude-opus-4-8"], fallback_type="weird")
+        await litellm_client.set_fallbacks(
+            "claude-sonnet-5", ["claude-opus-4-8"], fallback_type="weird"
+        )
 
 
 async def test_set_fallbacks_posts_the_chain(monkeypatch):
@@ -638,8 +753,12 @@ async def test_set_fallbacks_posts_the_chain(monkeypatch):
         status_code = 200
 
         def json(self):
-            return {"model": "claude-sonnet-5", "fallback_models": ["claude-opus-4-8"],
-                    "fallback_type": "general", "message": "ok"}
+            return {
+                "model": "claude-sonnet-5",
+                "fallback_models": ["claude-opus-4-8"],
+                "fallback_type": "general",
+                "message": "ok",
+            }
 
     async def fake_call(method, path, json_body=None):
         seen.update(method=method, path=path, body=json_body)
@@ -648,8 +767,11 @@ async def test_set_fallbacks_posts_the_chain(monkeypatch):
     monkeypatch.setattr(litellm_client, "_call", fake_call)
     out = await litellm_client.set_fallbacks("claude-sonnet-5", ["claude-opus-4-8"])
     assert seen["method"] == "POST" and seen["path"] == "/fallback"
-    assert seen["body"] == {"model": "claude-sonnet-5",
-                            "fallback_models": ["claude-opus-4-8"], "fallback_type": "general"}
+    assert seen["body"] == {
+        "model": "claude-sonnet-5",
+        "fallback_models": ["claude-opus-4-8"],
+        "fallback_type": "general",
+    }
     assert out["model"] == "claude-sonnet-5"
 
 
@@ -692,18 +814,35 @@ async def test_fallback_handlers_call_the_client(monkeypatch):
     monkeypatch.setattr(executor.litellm_client, "delete_fallbacks", fake_del)
 
     out = await executor.execute(
-        [Action(capability="litellm.set_fallbacks",
+        [
+            Action(
+                capability="litellm.set_fallbacks",
                 arguments={"model": "claude-sonnet-5", "fallback_models": ["claude-opus-4-8"]},
-                target_ref={"system": "litellm", "id": "claude-sonnet-5", "read_version": "unknown"},
-                reversibility="reversible"),
-         Action(capability="litellm.delete_fallbacks",
+                target_ref={
+                    "system": "litellm",
+                    "id": "claude-sonnet-5",
+                    "read_version": "unknown",
+                },
+                reversibility="reversible",
+            ),
+            Action(
+                capability="litellm.delete_fallbacks",
                 arguments={"model": "claude-haiku-4-5", "fallback_type": "content_policy"},
-                target_ref={"system": "litellm", "id": "claude-haiku-4-5", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
+                target_ref={
+                    "system": "litellm",
+                    "id": "claude-haiku-4-5",
+                    "read_version": "unknown",
+                },
+                reversibility="reversible",
+            ),
+        ],
+        approver="human:lee",
+        source_refs=[],
     )
-    assert calls == [("set", "claude-sonnet-5", ["claude-opus-4-8"], "general"),
-                     ("del", "claude-haiku-4-5", "content_policy")]
+    assert calls == [
+        ("set", "claude-sonnet-5", ["claude-opus-4-8"], "general"),
+        ("del", "claude-haiku-4-5", "content_policy"),
+    ]
     assert "claude-sonnet-5" in out.result_text
 
 
@@ -715,8 +854,12 @@ async def test_get_routing_read(monkeypatch):
         status_code = 200
 
         def json(self):
-            return {"fields": [{"field_name": "routing_strategy", "field_value": "simple-shuffle"},
-                               {"field_name": "fallbacks", "field_value": None}]}
+            return {
+                "fields": [
+                    {"field_name": "routing_strategy", "field_value": "simple-shuffle"},
+                    {"field_name": "fallbacks", "field_value": None},
+                ]
+            }
 
     async def fake_call(method, path, json_body=None):
         assert path == "/router/settings"
@@ -739,9 +882,14 @@ async def test_get_health_read(monkeypatch):
         status_code = 200
 
         def json(self):
-            return {"status": "healthy", "db": "connected", "cache": "local",
-                    "litellm_version": "1.84.0", "log_level": "WARNING",
-                    "success_callbacks": ["a", "b", "c"]}
+            return {
+                "status": "healthy",
+                "db": "connected",
+                "cache": "local",
+                "litellm_version": "1.84.0",
+                "log_level": "WARNING",
+                "success_callbacks": ["a", "b", "c"],
+            }
 
     async def fake_call(method, path, json_body=None):
         assert path == "/health/readiness/details"
@@ -762,9 +910,12 @@ async def test_check_model_health_targets_one_model_and_reports_failures(monkeyp
         status_code = 200
 
         def json(self):
-            return {"healthy_endpoints": [{"model": "claude-opus-4-8"}],
-                    "unhealthy_endpoints": [{"model": "claude-sonnet-5",
-                                             "error": "x-api-key required"}]}
+            return {
+                "healthy_endpoints": [{"model": "claude-opus-4-8"}],
+                "unhealthy_endpoints": [
+                    {"model": "claude-sonnet-5", "error": "x-api-key required"}
+                ],
+            }
 
     async def fake_call(method, path, json_body=None):
         seen["path"] = path
@@ -788,9 +939,12 @@ async def test_check_model_health_reads_the_report_out_of_a_503(monkeypatch):
         text = "{...}"
 
         def json(self):
-            return {"healthy_endpoints": [],
-                    "unhealthy_endpoints": [{"model": "openai/openai/o1-pro",
-                                             "error": "model does not exist"}]}
+            return {
+                "healthy_endpoints": [],
+                "unhealthy_endpoints": [
+                    {"model": "openai/openai/o1-pro", "error": "model does not exist"}
+                ],
+            }
 
     async def fake_call(method, path, json_body=None):
         return FakeResp()
@@ -889,21 +1043,32 @@ async def test_key_and_team_handlers_dispatch(monkeypatch):
     calls = []
 
     async def fake_update_key(key, **kw):
-        calls.append(("update_key", key)); return {"updated": ["models"]}
+        calls.append(("update_key", key))
+        return {"updated": ["models"]}
 
     async def fake_create_team(team_alias, models=None):
-        calls.append(("create_team", team_alias)); return {"team": {"team_alias": team_alias, "team_id": "t1"}}
+        calls.append(("create_team", team_alias))
+        return {"team": {"team_alias": team_alias, "team_id": "t1"}}
 
     monkeypatch.setattr(executor.litellm_client, "update_key", fake_update_key)
     monkeypatch.setattr(executor.litellm_client, "create_team", fake_create_team)
     await executor.execute(
-        [Action(capability="litellm.update_key", arguments={"key": "hash-1", "models": ["x"]},
+        [
+            Action(
+                capability="litellm.update_key",
+                arguments={"key": "hash-1", "models": ["x"]},
                 target_ref={"system": "litellm", "id": "hash-1", "read_version": "unknown"},
-                reversibility="reversible"),
-         Action(capability="litellm.create_team", arguments={"team_alias": "cc-team"},
+                reversibility="reversible",
+            ),
+            Action(
+                capability="litellm.create_team",
+                arguments={"team_alias": "cc-team"},
                 target_ref={"system": "litellm", "id": "cc-team", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
+                reversibility="reversible",
+            ),
+        ],
+        approver="human:lee",
+        source_refs=[],
     )
     assert calls == [("update_key", "hash-1"), ("create_team", "cc-team")]
 
@@ -920,8 +1085,7 @@ def _tool_names(agent) -> set[str]:
 
 
 async def test_advisory_mode_has_no_propose_tool():
-    agent = await litellm_manager.build_litellm_manager(
-        model=make_litellm_model(), advisory=True)
+    agent = await litellm_manager.build_litellm_manager(model=make_litellm_model(), advisory=True)
     names = _tool_names(agent)
     assert names, "could not introspect agent tools"
     assert "propose_litellm_change" not in names
@@ -940,9 +1104,7 @@ async def test_direct_task_parks_a_proposal_behind_the_gate(monkeypatch):
 
     log = fake_world(monkeypatch)
     model = make_litellm_model()
-    out = await run_task(
-        "litellm-manager", "Add a cc-triage alias on Haiku.", model=model
-    )
+    out = await run_task("litellm-manager", "Add a cc-triage alias on Haiku.", model=model)
     assert out["deferred"] is True
 
     row = await repo.load_proposal(out["proposal_id"])
@@ -953,9 +1115,7 @@ async def test_direct_task_parks_a_proposal_behind_the_gate(monkeypatch):
     # Approval resumes under the litellm-manager definition (not inbox-triage)
     # and completes the session — the multi-agent resume path for the new agent.
     # fake_world answers the approval, so no real proxy call happens.
-    result = await gateway.approve_and_execute(
-        out["session_id"], out["proposal_id"], model=model
-    )
+    result = await gateway.approve_and_execute(out["session_id"], out["proposal_id"], model=model)
     assert result["ok"] is True
     assert await repo.session_status(out["session_id"]) == "DONE"
     assert [c for c, _a, _p in log] == ["litellm.add_model"]
@@ -977,9 +1137,7 @@ async def test_create_key_task_parks_and_resumes_behind_the_gate(monkeypatch):
     assert row["actions"][0]["capability"] == "litellm.create_key"
     assert row["actions"][0]["arguments"]["key_alias"] == "cc-triage-key"
 
-    result = await gateway.approve_and_execute(
-        out["session_id"], out["proposal_id"], model=model
-    )
+    result = await gateway.approve_and_execute(out["session_id"], out["proposal_id"], model=model)
     assert result["ok"] is True
     assert await repo.session_status(out["session_id"]) == "DONE"
     assert [c for c, _a, _p in log] == ["litellm.create_key"]
@@ -997,9 +1155,7 @@ async def test_fallbacks_task_parks_and_resumes_behind_the_gate(monkeypatch):
     assert out["deferred"] is True
     row = await repo.load_proposal(out["proposal_id"])
     assert row["actions"][0]["capability"] == "litellm.set_fallbacks"
-    result = await gateway.approve_and_execute(
-        out["session_id"], out["proposal_id"], model=model
-    )
+    result = await gateway.approve_and_execute(out["session_id"], out["proposal_id"], model=model)
     assert result["ok"] is True
     assert await repo.session_status(out["session_id"]) == "DONE"
     assert [c for c, _a, _p in log] == ["litellm.set_fallbacks"]
@@ -1027,9 +1183,7 @@ async def test_update_model_task_parks_and_resumes_behind_the_gate(monkeypatch):
     assert row["actions"][0]["capability"] == "litellm.update_model"
     assert "model_id" in row["actions"][0]["arguments"]
 
-    result = await gateway.approve_and_execute(
-        out["session_id"], out["proposal_id"], model=model
-    )
+    result = await gateway.approve_and_execute(out["session_id"], out["proposal_id"], model=model)
     assert result["ok"] is True
     assert await repo.session_status(out["session_id"]) == "DONE"
     assert [c for c, _a, _p in log] == ["litellm.update_model"]
@@ -1114,10 +1268,13 @@ async def test_list_provider_credentials_decrypts_and_shapes_the_row(monkeypatch
 
     monkeypatch.setattr(litellm_credstore.asyncpg, "connect", fake_connect)
     out = await litellm_credstore.list_provider_credentials()
-    assert out == [{
-        "credential_name": "anthropic-main", "provider": "anthropic",
-        "values": {"api_key": "sk-ant-real"},
-    }]
+    assert out == [
+        {
+            "credential_name": "anthropic-main",
+            "provider": "anthropic",
+            "values": {"api_key": "sk-ant-real"},
+        }
+    ]
 
 
 async def test_list_provider_credentials_treats_one_failing_field_as_plaintext(monkeypatch):
@@ -1200,14 +1357,27 @@ class _ProbeResp:
 
 
 def _tool_calls(n):
-    return [{"id": f"call_{i}", "type": "function",
-             "function": {"name": "get_weather", "arguments": "{}"}} for i in range(n)]
+    return [
+        {
+            "id": f"call_{i}",
+            "type": "function",
+            "function": {"name": "get_weather", "arguments": "{}"},
+        }
+        for i in range(n)
+    ]
 
 
 def _make_probe_fake_call(
-    *, model_name="probe-model", declared_info=None, fail_chat_status=None,
-    schema_inconclusive=False, single_tool_call=False, bisect_limit=None,
-    seen_bodies=None, pdf_fail=False, thinking_template_seen=False,
+    *,
+    model_name="probe-model",
+    declared_info=None,
+    fail_chat_status=None,
+    schema_inconclusive=False,
+    single_tool_call=False,
+    bisect_limit=None,
+    seen_bodies=None,
+    pdf_fail=False,
+    thinking_template_seen=False,
     ceiling_message="max_tokens must be <= 32768",
 ):
     """A battery-wide fake `litellm_client._call` covering every check
@@ -1220,15 +1390,15 @@ def _make_probe_fake_call(
         if seen_bodies is not None and json_body is not None:
             seen_bodies.append(json_body)
         if method == "GET" and path == "/model/info":
-            return _ProbeResp(200, {"data": [
-                {"model_name": model_name, "model_info": declared_info}
-            ]})
+            return _ProbeResp(
+                200, {"data": [{"model_name": model_name, "model_info": declared_info}]}
+            )
         assert path == "/v1/chat/completions"
         body = json_body or {}
         messages = body.get("messages") or []
 
         if body.get("stream"):
-            return _ProbeResp(200, text="data: {\"choices\":[{\"delta\":{}}]}\n\n")
+            return _ProbeResp(200, text='data: {"choices":[{"delta":{}}]}\n\n')
 
         if "chat_template_kwargs" in body:
             msg = {"content": "yes"}
@@ -1238,61 +1408,81 @@ def _make_probe_fake_call(
 
         if "tools" in body:
             n = 1 if (single_tool_call or isinstance(body.get("tool_choice"), dict)) else 2
-            return _ProbeResp(200, {"choices": [
-                {"message": {"tool_calls": _tool_calls(n)}, "finish_reason": "tool_calls"}
-            ]})
+            return _ProbeResp(
+                200,
+                {
+                    "choices": [
+                        {"message": {"tool_calls": _tool_calls(n)}, "finish_reason": "tool_calls"}
+                    ]
+                },
+            )
 
         rf = body.get("response_format") or {}
         if rf.get("type") == "json_schema":
             if schema_inconclusive:
-                return _ProbeResp(200, {"choices": [
-                    {"message": {"content": ""}, "finish_reason": "length"}
-                ]})
-            return _ProbeResp(200, {"choices": [
-                {"message": {"content": '{"answer": 4}'}, "finish_reason": "stop"}
-            ]})
+                return _ProbeResp(
+                    200, {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]}
+                )
+            return _ProbeResp(
+                200,
+                {"choices": [{"message": {"content": '{"answer": 4}'}, "finish_reason": "stop"}]},
+            )
         if rf.get("type") == "json_object":
-            return _ProbeResp(200, {"choices": [
-                {"message": {"content": '{"answer": 4}'}, "finish_reason": "stop"}
-            ]})
+            return _ProbeResp(
+                200,
+                {"choices": [{"message": {"content": '{"answer": 4}'}, "finish_reason": "stop"}]},
+            )
 
         if any(isinstance(m.get("content"), list) for m in messages):
             parts = next(m["content"] for m in messages if isinstance(m.get("content"), list))
             if any(isinstance(p, dict) and p.get("type") == "file" for p in parts):
                 if pdf_fail:
                     return _ProbeResp(500, {"error": {"message": "file input not supported"}})
-                return _ProbeResp(200, {"choices": [
-                    {"message": {"content": "1"}, "finish_reason": "stop"}
-                ]})
-            return _ProbeResp(200, {"choices": [
-                {"message": {"content": "red"}, "finish_reason": "stop"}
-            ]})
+                return _ProbeResp(
+                    200, {"choices": [{"message": {"content": "1"}, "finish_reason": "stop"}]}
+                )
+            return _ProbeResp(
+                200, {"choices": [{"message": {"content": "red"}, "finish_reason": "stop"}]}
+            )
 
         if "reasoning_effort" in body:
-            return _ProbeResp(200, {"choices": [
-                {"message": {"content": "yes", "reasoning_content": "17 has no even divisors"},
-                 "finish_reason": "stop"}
-            ]})
+            return _ProbeResp(
+                200,
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "yes",
+                                "reasoning_content": "17 has no even divisors",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ]
+                },
+            )
 
         if body.get("max_tokens") == 1_000_000:
             return _ProbeResp(400, {"error": {"message": ceiling_message}})
 
-        if bisect_limit is not None and messages and \
-                "Reply OK." in (messages[0].get("content") or ""):
+        if (
+            bisect_limit is not None
+            and messages
+            and "Reply OK." in (messages[0].get("content") or "")
+        ):
             filler = messages[0]["content"].count("0 ")
             if filler <= bisect_limit:
-                return _ProbeResp(200, {"choices": [
-                    {"message": {"content": "OK"}, "finish_reason": "stop"}
-                ]})
+                return _ProbeResp(
+                    200, {"choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}]}
+                )
             return _ProbeResp(400, {"error": {"message": "context length exceeded"}})
 
         if fail_chat_status is not None:
             return _ProbeResp(fail_chat_status, {"error": {"message": "not found"}})
 
         # plain chat gate + system-message check: both land here
-        return _ProbeResp(200, {"choices": [
-            {"message": {"content": "OK"}, "finish_reason": "stop"}
-        ]})
+        return _ProbeResp(
+            200, {"choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}]}
+        )
 
     return fake_call
 
@@ -1303,16 +1493,23 @@ async def test_list_models_surfaces_capability_declarations_none_preserving(monk
 
     async def fake_call(method, path, json_body=None, auth_key=None, timeout=30):
         assert path == "/model/info"
-        return _ProbeResp(200, {"data": [{
-            "model_name": "cc-default",
-            "litellm_params": {"custom_llm_provider": "openai"},
-            "model_info": {
-                "id": "id-1",
-                "supports_vision": True,
-                "max_input_tokens": 81920,
-                "created_date": "2026-01-01",  # stray, non-native custom key
+        return _ProbeResp(
+            200,
+            {
+                "data": [
+                    {
+                        "model_name": "cc-default",
+                        "litellm_params": {"custom_llm_provider": "openai"},
+                        "model_info": {
+                            "id": "id-1",
+                            "supports_vision": True,
+                            "max_input_tokens": 81920,
+                            "created_date": "2026-01-01",  # stray, non-native custom key
+                        },
+                    }
+                ]
             },
-        }]})
+        )
 
     monkeypatch.setattr(litellm_client, "_call", fake_call)
 
@@ -1337,9 +1534,18 @@ async def test_probe_model_measures_each_capability_and_suggests_the_diff(monkey
 
     out = await litellm_client.probe_model("probe-model")
 
-    for key in ("chat", "system_messages", "tool_choice", "function_calling",
-                "parallel_function_calling", "response_schema", "json_object",
-                "vision", "reasoning", "streaming"):
+    for key in (
+        "chat",
+        "system_messages",
+        "tool_choice",
+        "function_calling",
+        "parallel_function_calling",
+        "response_schema",
+        "json_object",
+        "vision",
+        "reasoning",
+        "streaming",
+    ):
         assert out["observed"][key]["ok"] is True, key
     assert out["observed"]["max_output_tokens"]["value"] == 32768
     assert out["suggested_model_info"] == {
@@ -1365,9 +1571,12 @@ async def test_probe_model_context_length_refusal_is_inconclusive_not_a_cap(monk
     No request isolates the output cap on such an endpoint: no value."""
     monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
     monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
-    fake_call = _make_probe_fake_call(ceiling_message=(
-        "This endpoint's maximum context length is 262144 tokens. However, you "
-        "requested about 1000008 tokens (8 of text input, 1000000 in the output)."))
+    fake_call = _make_probe_fake_call(
+        ceiling_message=(
+            "This endpoint's maximum context length is 262144 tokens. However, you "
+            "requested about 1000008 tokens (8 of text input, 1000000 in the output)."
+        )
+    )
     monkeypatch.setattr(litellm_client, "_call", fake_call)
 
     out = await litellm_client.probe_model("probe-model")
@@ -1383,7 +1592,8 @@ async def test_probe_model_echoed_request_size_is_never_a_cap(monkeypatch):
     monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
     monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
     fake_call = _make_probe_fake_call(
-        ceiling_message="requested 1000008 tokens; max_tokens must be <= 32768")
+        ceiling_message="requested 1000008 tokens; max_tokens must be <= 32768"
+    )
     monkeypatch.setattr(litellm_client, "_call", fake_call)
 
     out = await litellm_client.probe_model("probe-model")
@@ -1391,7 +1601,9 @@ async def test_probe_model_echoed_request_size_is_never_a_cap(monkeypatch):
     assert out["observed"]["max_output_tokens"]["value"] == 32768
 
 
-async def test_probe_model_measured_ceiling_fills_a_blank_never_overwrites_a_declaration(monkeypatch):
+async def test_probe_model_measured_ceiling_fills_a_blank_never_overwrites_a_declaration(
+    monkeypatch,
+):
     """The declared cap is the one the runtime clamps to; every probe caller
     carries `suggested_model_info` into an update_model proposal, so a
     measurement may only fill a blank. It stays visible in `observed`."""
@@ -1461,7 +1673,9 @@ async def test_probe_model_bisects_the_context_ceiling_when_asked(monkeypatch):
     monkeypatch.setattr(litellm_client, "_call", counting_fake)
 
     out = await litellm_client.probe_model(
-        "probe-model", measure_context=True, context_ceiling=8192,
+        "probe-model",
+        measure_context=True,
+        context_ceiling=8192,
     )
 
     value = out["observed"]["max_input_tokens"]["value"]
@@ -1498,9 +1712,9 @@ async def test_probe_model_declared_rerank_mode_dispatches_without_explicit_batt
 
     async def fake_call(method, path, json_body=None, auth_key=None, timeout=30):
         if method == "GET" and path == "/model/info":
-            return _ProbeResp(200, {"data": [
-                {"model_name": "probe-model", "model_info": {"mode": "rerank"}}
-            ]})
+            return _ProbeResp(
+                200, {"data": [{"model_name": "probe-model", "model_info": {"mode": "rerank"}}]}
+            )
         assert path == "/v1/rerank"
         return _ProbeResp(200, {"results": [{"index": 0, "relevance_score": 0.9}]})
 
@@ -1539,7 +1753,8 @@ async def test_probe_model_thinking_template_notes_but_never_declares(monkeypatc
     monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
     monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
     fake_call = _make_probe_fake_call(
-        declared_info={"thinking_mechanism": None}, thinking_template_seen=True,
+        declared_info={"thinking_mechanism": None},
+        thinking_template_seen=True,
     )
     monkeypatch.setattr(litellm_client, "_call", fake_call)
 
@@ -1554,7 +1769,8 @@ async def test_probe_model_thinking_template_skipped_when_mechanism_declared(mon
     monkeypatch.setattr(settings, "llm_proxy_admin_key", "sk-test")
     monkeypatch.setattr(settings, "llm_proxy_base_url", "http://proxy.test")
     fake_call = _make_probe_fake_call(
-        declared_info={"thinking_mechanism": "qwen_template"}, thinking_template_seen=True,
+        declared_info={"thinking_mechanism": "qwen_template"},
+        thinking_template_seen=True,
     )
     monkeypatch.setattr(litellm_client, "_call", fake_call)
 
@@ -1586,9 +1802,14 @@ async def test_probe_model_runs_a_mode_matched_battery_for_audio_transcription(m
     async def fake_call(method, path, json_body=None, auth_key=None, timeout=30, files=None):
         seen.append((method, path, files))
         if path == "/model/info":
-            return _ProbeResp(200, {"data": [
-                {"model_name": "stt-model", "model_info": {"mode": "audio_transcription"}}
-            ]})
+            return _ProbeResp(
+                200,
+                {
+                    "data": [
+                        {"model_name": "stt-model", "model_info": {"mode": "audio_transcription"}}
+                    ]
+                },
+            )
         assert path == "/v1/audio/transcriptions"
         assert files and "file" in files
         return _ProbeResp(200, {"text": ""})
@@ -1632,9 +1853,9 @@ async def test_probe_model_unknown_mode_is_inconclusive_not_a_chat_404(monkeypat
     async def fake_call(method, path, json_body=None, auth_key=None, timeout=30, files=None):
         seen.append(path)
         assert path == "/model/info"
-        return _ProbeResp(200, {"data": [
-            {"model_name": "rt-model", "model_info": {"mode": "realtime"}}
-        ]})
+        return _ProbeResp(
+            200, {"data": [{"model_name": "rt-model", "model_info": {"mode": "realtime"}}]}
+        )
 
     monkeypatch.setattr(litellm_client, "_call", fake_call)
 

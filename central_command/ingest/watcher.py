@@ -47,7 +47,9 @@ async def _walk_filesystem(source: dict) -> dict:
         raise ValueError(f"source {source['id']!r} has no config.root")
     root = Path(root_str)
     if not root.is_dir():
-        raise ValueError(f"source {source['id']!r} root does not exist or is not a directory: {root}")
+        raise ValueError(
+            f"source {source['id']!r} root does not exist or is not a directory: {root}"
+        )
 
     include = config.get("include") or []
     exclude = config.get("exclude") or []
@@ -75,8 +77,9 @@ async def _walk_filesystem(source: dict) -> dict:
         seen_uris.append(uri)
         raw_sha256 = hashlib.sha256(data).hexdigest()
         text, status, error = extract_text(rel, data)
-        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest() if status == "ok" \
-            else raw_sha256
+        content_hash = (
+            hashlib.sha256(text.encode("utf-8")).hexdigest() if status == "ok" else raw_sha256
+        )
         meta = {
             "size_bytes": stat.st_size,
             "mtime": stat.st_mtime,
@@ -87,8 +90,14 @@ async def _walk_filesystem(source: dict) -> dict:
             meta["error"] = error
 
         result = await repo.record_observation(
-            source["id"], rel, uri, path.name, content_hash, text,
-            reader_for(rel, data), meta,
+            source["id"],
+            rel,
+            uri,
+            path.name,
+            content_hash,
+            text,
+            reader_for(rel, data),
+            meta,
         )
         if result["new_lineage"]:
             new_lineages += 1
@@ -175,7 +184,8 @@ async def _walk_confluence(source: dict) -> dict:
         raw_bytes = (page.get("body") or "").encode("utf-8")
         text, status, error = extract_text(f"{page_id}.html", raw_bytes)
         content_hash = (
-            hashlib.sha256(text.encode("utf-8")).hexdigest() if status == "ok"
+            hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if status == "ok"
             else hashlib.sha256(raw_bytes).hexdigest()
         )
         meta = {
@@ -188,8 +198,14 @@ async def _walk_confluence(source: dict) -> dict:
             meta["error"] = error
 
         obs = await repo.record_observation(
-            source["id"], page_id, page.get("url") or f"confluence://{page_id}",
-            page.get("title"), content_hash, text, "markitdown", meta,
+            source["id"],
+            page_id,
+            page.get("url") or f"confluence://{page_id}",
+            page.get("title"),
+            content_hash,
+            text,
+            "markitdown",
+            meta,
         )
         if obs["new_lineage"]:
             new_lineages += 1
@@ -237,8 +253,10 @@ async def walk_source(source: dict) -> dict:
         summary = await watcher(source)
     except Exception as exc:
         await events.emit(
-            "catalog.walk.completed", ref_id=source["id"],
-            payload={"error": str(exc)}, actor="watcher",
+            "catalog.walk.completed",
+            ref_id=source["id"],
+            payload={"error": str(exc)},
+            actor="watcher",
         )
         raise
 
@@ -247,7 +265,9 @@ async def walk_source(source: dict) -> dict:
 
     if summary["new_lineages"] or summary["new_versions"] or summary["marked_missing"]:
         await events.emit(
-            "catalog.walk.completed", ref_id=source["id"],
-            payload=summary, actor="watcher",
+            "catalog.walk.completed",
+            ref_id=source["id"],
+            payload=summary,
+            actor="watcher",
         )
     return summary

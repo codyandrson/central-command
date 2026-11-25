@@ -50,9 +50,7 @@ async def clean():
 async def _wipe():
     conn = await repo._conn()
     try:
-        await conn.execute(
-            "delete from work_item where message_id like '<gmail-msg-feedtest%'"
-        )
+        await conn.execute("delete from work_item where message_id like '<gmail-msg-feedtest%'")
     finally:
         await conn.close()
 
@@ -93,8 +91,10 @@ async def test_poll_skips_known_mail_without_refetching(monkeypatch):
     fetched = []
 
     async def fake_list(scope_query):
-        return [{"uuid": "feedtest001", "conversation_id": "feedthread001"},
-                {"uuid": "feedtest002", "conversation_id": "feedthread002"}]
+        return [
+            {"uuid": "feedtest001", "conversation_id": "feedthread001"},
+            {"uuid": "feedtest002", "conversation_id": "feedthread002"},
+        ]
 
     async def fake_get(uuid):
         fetched.append(uuid)

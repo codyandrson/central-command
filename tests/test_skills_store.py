@@ -26,7 +26,9 @@ async def test_only_one_current_version_per_doc_key(clean_skills):
     try:
         await conn.execute(
             "insert into skill (id, title, summary) values ($1, $2, $3)",
-            "cc-test-jira", "Jira", "How we use Jira",
+            "cc-test-jira",
+            "Jira",
+            "How we use Jira",
         )
         await conn.execute(
             """insert into skill_doc (id, skill_id, doc_key, kind, title, content, version)
@@ -49,15 +51,15 @@ async def test_superseded_version_coexists_with_current(clean_skills):
     try:
         await conn.execute(
             "insert into skill (id, title, summary) values ($1, $2, $3)",
-            "cc-test-jira", "Jira", "How we use Jira",
+            "cc-test-jira",
+            "Jira",
+            "How we use Jira",
         )
         await conn.execute(
             """insert into skill_doc (id, skill_id, doc_key, kind, title, content, version)
                values ('cc-test-d1', 'cc-test-jira', 'guidance', 'guidance', 'G', 'v1', 1)"""
         )
-        await conn.execute(
-            "update skill_doc set is_current = false where id = 'cc-test-d1'"
-        )
+        await conn.execute("update skill_doc set is_current = false where id = 'cc-test-d1'")
         await conn.execute(
             """insert into skill_doc (id, skill_id, doc_key, kind, title, content, version)
                values ('cc-test-d2', 'cc-test-jira', 'guidance', 'guidance', 'G', 'v2', 2)"""
@@ -97,9 +99,7 @@ async def test_revoking_a_skill_keeps_the_row(clean_skills):
     would silently re-grant something the operator took away."""
     await repo.create_skill("cc-test-lite", "LiteLLM", "Running the proxy")
     await repo.grant_skill("inbox-triage", "cc-test-lite")
-    assert [s["skill_id"] for s in await repo.list_agent_skills("inbox-triage")] == [
-        "cc-test-lite"
-    ]
+    assert [s["skill_id"] for s in await repo.list_agent_skills("inbox-triage")] == ["cc-test-lite"]
 
     assert await repo.revoke_skill("inbox-triage", "cc-test-lite", "not needed")
     assert await repo.list_agent_skills("inbox-triage") == []
@@ -144,9 +144,7 @@ async def test_skill_detail_reports_docs_and_holders(clean_skills):
     from central_command.api import routes
 
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
-    await repo.add_skill_doc(
-        "cc-test-lite", "guidance", "guidance", "How we run it", "body"
-    )
+    await repo.add_skill_doc("cc-test-lite", "guidance", "guidance", "How we run it", "body")
     await repo.grant_skill("inbox-triage", "cc-test-lite")
 
     detail = await routes.get_skill_route("cc-test-lite")
@@ -207,9 +205,7 @@ async def test_creating_a_skill_id_that_already_exists_is_a_conflict(clean_skill
 
     await create_skill_route(SkillIn(id="cc-test-lite", title="LiteLLM", summary="a"))
     with pytest.raises(HTTPException) as exc:
-        await create_skill_route(
-            SkillIn(id="cc-test-lite", title="Something else", summary="b")
-        )
+        await create_skill_route(SkillIn(id="cc-test-lite", title="Something else", summary="b"))
     assert exc.value.status_code == 409
     assert (await repo.get_skill("cc-test-lite"))["title"] == "LiteLLM"
 
@@ -257,7 +253,8 @@ async def test_the_guidance_doc_key_and_the_guidance_kind_go_together(clean_skil
         SkillDocIn(doc_key="keys", kind="reference", title="K", content="body"),
     )
     assert {d["doc_key"] for d in await repo.list_skill_docs("cc-test-lite")} == {
-        "guidance", "keys",
+        "guidance",
+        "keys",
     }
 
 
@@ -368,9 +365,7 @@ async def test_granting_a_retired_skill_is_refused(clean_skills):
 
     before_id = await repo.latest_event_id()
     with pytest.raises(HTTPException) as exc:
-        await routes.grant_skill_route(
-            "inbox-triage", routes.SkillGrantIn(skill_id="cc-test-back")
-        )
+        await routes.grant_skill_route("inbox-triage", routes.SkillGrantIn(skill_id="cc-test-back"))
     assert exc.value.status_code == 409
 
     # No grant row was written — not just a status-only refusal.
@@ -407,9 +402,7 @@ async def test_granting_an_unknown_skill_is_still_404_not_409(clean_skills):
     from central_command.api import routes
 
     with pytest.raises(HTTPException) as exc:
-        await routes.grant_skill_route(
-            "inbox-triage", routes.SkillGrantIn(skill_id="cc-test-nope")
-        )
+        await routes.grant_skill_route("inbox-triage", routes.SkillGrantIn(skill_id="cc-test-nope"))
     assert exc.value.status_code == 404
 
 
@@ -485,12 +478,20 @@ async def test_a_version_posted_with_provenance_stores_it_and_its_text(clean_ski
     await _make_skill()
     hash_ = hashlib.sha256(b"# Body\ntext").hexdigest()
     doc = await repo.add_skill_doc(
-        "cc-test-prov", "guidance", "guidance", "G", "# Body\ntext",
-        added_by="installer", bundled_release="2.77.0",
-        bundled_path="skills/prov/SKILL.md", bundled_hash=hash_,
+        "cc-test-prov",
+        "guidance",
+        "guidance",
+        "G",
+        "# Body\ntext",
+        added_by="installer",
+        bundled_release="2.77.0",
+        bundled_path="skills/prov/SKILL.md",
+        bundled_hash=hash_,
     )
     assert (doc["bundled_release"], doc["bundled_path"], doc["bundled_hash"]) == (
-        "2.77.0", "skills/prov/SKILL.md", hash_,
+        "2.77.0",
+        "skills/prov/SKILL.md",
+        hash_,
     )
     row = await _bundled_text_row(hash_)
     assert row["content"] == "# Body\ntext"
@@ -501,7 +502,9 @@ async def test_a_version_posted_with_provenance_stores_it_and_its_text(clean_ski
     (cur,) = await repo.list_skill_docs("cc-test-prov")
     for r in (hist, cur):
         assert (r["bundled_release"], r["bundled_path"], r["bundled_hash"]) == (
-            "2.77.0", "skills/prov/SKILL.md", hash_,
+            "2.77.0",
+            "skills/prov/SKILL.md",
+            hash_,
         )
 
 
@@ -514,8 +517,13 @@ async def test_the_same_text_arriving_again_is_the_same_row(clean_skills):
     hash_ = hashlib.sha256(b"same").hexdigest()
     for release in ("2.77.0", "2.78.0"):
         await repo.add_skill_doc(
-            "cc-test-prov", "guidance", "guidance", "G", "same",
-            bundled_release=release, bundled_path="skills/prov/SKILL.md",
+            "cc-test-prov",
+            "guidance",
+            "guidance",
+            "G",
+            "same",
+            bundled_release=release,
+            bundled_path="skills/prov/SKILL.md",
             bundled_hash=hash_,
         )
     conn = await repo._conn()
@@ -525,7 +533,10 @@ async def test_the_same_text_arriving_again_is_the_same_row(clean_skills):
         await conn.close()
     assert n == 1
     assert (await _bundled_text_row(hash_))["first_seen_release"] == "2.77.0"
-    assert [d["version"] for d in await repo.skill_doc_history("cc-test-prov", "guidance")] == [2, 1]
+    assert [d["version"] for d in await repo.skill_doc_history("cc-test-prov", "guidance")] == [
+        2,
+        1,
+    ]
 
 
 @pytestmark_db

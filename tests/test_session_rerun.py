@@ -36,9 +36,13 @@ def pinned(monkeypatch):
     fake_world(monkeypatch)
     monkeypatch.setattr(settings, "auditor_enabled", False)
     monkeypatch.setattr(
-        routes, "resolve_model",
-        aresolve(lambda *a, **k: FunctionModel(
-            lambda m, i: ModelResponse(parts=[TextPart("the answer")]))),
+        routes,
+        "resolve_model",
+        aresolve(
+            lambda *a, **k: FunctionModel(
+                lambda m, i: ModelResponse(parts=[TextPart("the answer")])
+            )
+        ),
     )
 
 
@@ -82,8 +86,8 @@ async def _finished_task() -> tuple[str, str]:
 async def _proposal(session_id: str, status: str = "AWAITING_HUMAN") -> str:
     proposal_id = "prop_" + uuid.uuid4().hex[:12]
     await repo.save_proposal(
-        proposal_id, session_id, AGENT, "Do a thing", [], [], "an effect",
-        "idem_" + proposal_id)
+        proposal_id, session_id, AGENT, "Do a thing", [], [], "an effect", "idem_" + proposal_id
+    )
     if status != "AWAITING_HUMAN":
         await repo.set_proposal_status(proposal_id, status)
     return proposal_id
@@ -114,7 +118,8 @@ async def _events_since(after_id: int, *ref_ids: str) -> list[dict]:
     try:
         rows = await conn.fetch(
             "select id, kind, ref_id, payload from audit_event where id > $1 and ref_id = any($2::text[])",
-            after_id, list(ref_ids),
+            after_id,
+            list(ref_ids),
         )
         return [dict(r) for r in rows]
     finally:
@@ -163,19 +168,27 @@ async def test_a_rerun_closes_the_old_session_and_runs_under_the_current_charter
     assert len(system) == 1
     assert charter["content"] in system[0]
     old_first = before["messages"][0]
-    assert not any(charter["content"] in p.get("content", "") for p in old_first["parts"]
-                   if p["part_kind"] == "system-prompt"), "the old record is what it was told"
+    assert not any(
+        charter["content"] in p.get("content", "")
+        for p in old_first["parts"]
+        if p["part_kind"] == "system-prompt"
+    ), "the old record is what it was told"
 
     events = await _events_since(mark, old, task_id, new)
     assert _kinds_after(events, "session.rerun", "task.started")[:2] == [
-        "session.rerun", "task.started"]
+        "session.rerun",
+        "task.started",
+    ]
     reruns = [e for e in events if e["kind"] == "session.rerun"]
     assert len(reruns) == 1
     assert reruns[0]["ref_id"] == old
     payload = reruns[0]["payload"]
     payload = payload if isinstance(payload, dict) else json.loads(payload)
-    assert payload == {"new_session_id": new, "task_id": task_id,
-                       "charter_version": charter["version"]}
+    assert payload == {
+        "new_session_id": new,
+        "task_id": task_id,
+        "charter_version": charter["version"],
+    }
 
 
 async def test_the_rpc_returns_the_new_key_without_awaiting_the_run():
@@ -324,7 +337,8 @@ async def test_the_old_session_keeps_its_task_and_its_kind_and_locks():
     assert (await repo.task_for_session(old))["id"] == task_id
 
     history = await nerve_gateway._dispatch(
-        "chat.history", {"sessionKey": f"agent:{AGENT}:{old}"}, _noop)
+        "chat.history", {"sessionKey": f"agent:{AGENT}:{old}"}, _noop
+    )
     composer = history["composer"]
     assert composer["enabled"] is False
     assert composer["code"] == "rerun"
@@ -337,21 +351,24 @@ async def test_the_old_session_keeps_its_task_and_its_kind_and_locks():
 
     with pytest.raises(HTTPException) as e:
         await nerve_gateway._dispatch(
-            "chat.send", {"sessionKey": f"agent:{AGENT}:{old}", "message": "hello"}, _noop)
+            "chat.send", {"sessionKey": f"agent:{AGENT}:{old}", "message": "hello"}, _noop
+        )
     assert e.value.status_code == 409
 
 
 async def test_the_composer_offers_a_rerun_only_where_the_server_says_so():
     _, old = await _finished_task()
     history = await nerve_gateway._dispatch(
-        "chat.history", {"sessionKey": f"agent:{AGENT}:{old}"}, _noop)
+        "chat.history", {"sessionKey": f"agent:{AGENT}:{old}"}, _noop
+    )
     assert history["composer"]["rerun"] == {"eligible": True, "reason": None}
     assert history["composer"]["session"]["rerunOf"] is None
 
     new = (await _rpc_rerun(old))["sessionId"]
     await _settled(new)
     fresh = await nerve_gateway._dispatch(
-        "chat.history", {"sessionKey": f"agent:{AGENT}:{new}"}, _noop)
+        "chat.history", {"sessionKey": f"agent:{AGENT}:{new}"}, _noop
+    )
     assert fresh["composer"]["session"]["rerunOf"] == old
     assert fresh["composer"]["rerun"]["eligible"] is True
 
@@ -359,7 +376,8 @@ async def test_the_composer_offers_a_rerun_only_where_the_server_says_so():
     await repo.create_conversation_session(conversation, AGENT)
     await repo.mark_session_awaiting_operator(conversation)
     open_lane = await nerve_gateway._dispatch(
-        "chat.history", {"sessionKey": f"agent:{AGENT}:{conversation}"}, _noop)
+        "chat.history", {"sessionKey": f"agent:{AGENT}:{conversation}"}, _noop
+    )
     assert open_lane["composer"]["enabled"] is True
     assert open_lane["composer"]["rerun"] == {"eligible": False, "reason": rerun.NO_STORED_INPUTS}
 
@@ -453,7 +471,8 @@ async def test_a_cancel_while_queued_voids_the_start():
                 await _rpc_rerun(old)
             else:
                 queued = asyncio.create_task(
-                    routes._run_assigned_task(await repo.get_task(task_id)))
+                    routes._run_assigned_task(await repo.get_task(task_id))
+                )
             await asyncio.sleep(0.02)
             await routes.cancel_task(task_id)
         finally:
@@ -538,8 +557,12 @@ async def test_the_shape_of_the_refusal_is_the_one_eligibility_gave():
 async def test_the_columns_exist_on_the_shipped_schema():
     conn = await repo._conn()
     try:
-        names = {r["column_name"] for r in await conn.fetch(
-            "select column_name from information_schema.columns where table_name = 'session'")}
+        names = {
+            r["column_name"]
+            for r in await conn.fetch(
+                "select column_name from information_schema.columns where table_name = 'session'"
+            )
+        }
     finally:
         await conn.close()
     assert {"rerun_of", "rerun_by"} <= names
@@ -565,13 +588,18 @@ async def _conversation(opening: str = "What is on my plate?") -> str:
 
 
 def _first_user_prompt(run_state: dict) -> str:
-    return next(p["content"] for m in run_state["messages"] for p in m["parts"]
-                if p["part_kind"] == "user-prompt")
+    return next(
+        p["content"]
+        for m in run_state["messages"]
+        for p in m["parts"]
+        if p["part_kind"] == "user-prompt"
+    )
 
 
 async def _composer_rerun(session: dict) -> dict:
     history = await nerve_gateway._dispatch(
-        "chat.history", {"sessionKey": f"agent:{session['agent_id']}:{session['id']}"}, _noop)
+        "chat.history", {"sessionKey": f"agent:{session['agent_id']}:{session['id']}"}, _noop
+    )
     return history["composer"]["rerun"]
 
 
@@ -585,7 +613,9 @@ async def _enrolled_email(subject: str) -> str:
             insert into work_item (id, message_id, feed, source, subject, payload, kind)
             values ($1, $2, 'live', 'test', $3, $4::jsonb, 'email')
             """,
-            item_id, f"<{item_id}@example.com>", subject,
+            item_id,
+            f"<{item_id}@example.com>",
+            subject,
             json.dumps({"text": f"Subject: {subject}\n\nPlease look.", "from": "pat@example.com"}),
         )
     finally:
@@ -611,7 +641,9 @@ async def _landed_email(subject: str) -> tuple[str, str]:
     try:
         await conn.execute(
             "update work_item set state = 'PROCESSED', session_id = $2 where id = $1",
-            item_id, session_id)
+            item_id,
+            session_id,
+        )
     finally:
         await conn.close()
     return item_id, session_id
@@ -627,8 +659,16 @@ async def _item_session(item_id: str) -> tuple[str, str]:
 
 
 def test_every_row_says_where_its_inputs_live_and_what_starts_it_or_why_not():
-    assert set(rerun.KINDS) == {"task", "orchestrator", "conversation", "email", "discussion",
-                                "document", "wiki-repair", "agent-run"}
+    assert set(rerun.KINDS) == {
+        "task",
+        "orchestrator",
+        "conversation",
+        "email",
+        "discussion",
+        "document",
+        "wiki-repair",
+        "agent-run",
+    }
     for row in rerun.KINDS.values():
         assert row.inputs
         assert bool(row.start) != bool(row.refusal), row.name
@@ -673,7 +713,8 @@ async def test_the_real_run_project_creates_its_session_under_the_owed_id():
     old = "sess_" + uuid.uuid4().hex[:12]
     new = "sess_" + uuid.uuid4().hex[:12]
     await orchestration.run_project(
-        await repo.get_task(task_id), model=None, session_id=new, rerun_of=old)
+        await repo.get_task(task_id), model=None, session_id=new, rerun_of=old
+    )
     row = await repo.get_session(new)
     assert row["rerun_of"] == old
     assert (await repo.get_task(task_id))["session_id"] == new
@@ -705,7 +746,9 @@ async def test_row_conversation_opens_a_new_lane_from_the_opening_message():
     try:
         await conn.execute(
             "update session set model_override = 'cc-special', thinking_override = 'low' "
-            "where id = $1", old)
+            "where id = $1",
+            old,
+        )
     finally:
         await conn.close()
     assert await _composer_rerun(await repo.get_session(old)) == {"eligible": True, "reason": None}
@@ -717,8 +760,12 @@ async def test_row_conversation_opens_a_new_lane_from_the_opening_message():
     assert row["rerun_of"] == old
     assert (row["model_override"], row["thinking_override"]) == ("cc-special", "low")
     assert _first_user_prompt(await repo.get_session_run_state(new)) == "What is on my plate?"
-    prompts = [p["content"] for m in (await repo.get_session_run_state(new))["messages"]
-               for p in m["parts"] if p["part_kind"] == "user-prompt"]
+    prompts = [
+        p["content"]
+        for m in (await repo.get_session_run_state(new))["messages"]
+        for p in m["parts"]
+        if p["part_kind"] == "user-prompt"
+    ]
     assert prompts == ["What is on my plate?"], "the opening message only, not every turn"
 
     closed = await repo.get_session(old)
@@ -726,18 +773,32 @@ async def test_row_conversation_opens_a_new_lane_from_the_opening_message():
     assert (await nerve_gateway._latest_conversation(AGENT, open_only=True))["id"] == new
 
     history = await nerve_gateway._dispatch(
-        "chat.history", {"sessionKey": f"agent:{AGENT}:{old}"}, _noop)
+        "chat.history", {"sessionKey": f"agent:{AGENT}:{old}"}, _noop
+    )
     composer = history["composer"]
-    assert (composer["enabled"], composer["code"], composer["kind"]) == (False, "rerun", "conversation")
+    assert (composer["enabled"], composer["code"], composer["kind"]) == (
+        False,
+        "rerun",
+        "conversation",
+    )
     assert new in composer["message"]
     assert history["messages"], "the old lane stays readable"
 
 
 async def test_row_conversation_opening_survives_compaction():
-    assert rerun._opening_message({
-        "archived": [{"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "first"}]}],
-        "messages": [{"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "later"}]}],
-    }) == "first"
+    assert (
+        rerun._opening_message(
+            {
+                "archived": [
+                    {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "first"}]}
+                ],
+                "messages": [
+                    {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "later"}]}
+                ],
+            }
+        )
+        == "first"
+    )
 
 
 async def test_row_conversation_with_no_opening_message_refuses():
@@ -786,8 +847,11 @@ async def test_row_email_keeps_the_link_until_the_new_runs_terminal_mark(monkeyp
     assert rows[new]["work_subject"] == subject
     assert [i["id"] for i in await repo.work_items_for_session(old)] == [item_id]
     assert (await repo.work_items_for_sessions([old]))[old]["id"] == item_id
-    composer = (await nerve_gateway._dispatch(
-        "chat.history", {"sessionKey": f"agent:inbox-triage:{old}"}, _noop))["composer"]
+    composer = (
+        await nerve_gateway._dispatch(
+            "chat.history", {"sessionKey": f"agent:inbox-triage:{old}"}, _noop
+        )
+    )["composer"]
     assert composer["kind"] == "triage run"
 
 
@@ -796,7 +860,10 @@ async def test_row_email_requeue_is_rule_exempt_and_keeps_the_link():
     new = "sess_" + uuid.uuid4().hex[:12]
     assert await repo.claim_rerun(old, new, work_item_id=item_id)
     assert await _item_session(item_id) == (old, "UNPROCESSED")
-    assert (await repo.claim_owed_rerun(work_item_id=item_id)) == {"rerun_of": old, "session_id": new}
+    assert (await repo.claim_owed_rerun(work_item_id=item_id)) == {
+        "rerun_of": old,
+        "session_id": new,
+    }
     conn = await repo._conn()
     try:
         payload = await conn.fetchval("select payload from work_item where id = $1", item_id)
@@ -825,11 +892,16 @@ async def test_rows_document_and_wiki_repair_refuse(kind):
     try:
         await conn.execute(
             "update work_item set kind = $2, state = 'PROCESSED', session_id = $3 where id = $1",
-            item_id, kind, session_id)
+            item_id,
+            kind,
+            session_id,
+        )
     finally:
         await conn.close()
     await _assert_refused(session_id, rerun.NO_STORED_INPUTS)
-    assert (await _composer_rerun(await repo.get_session(session_id)))["reason"] == rerun.NO_STORED_INPUTS
+    assert (await _composer_rerun(await repo.get_session(session_id)))[
+        "reason"
+    ] == rerun.NO_STORED_INPUTS
 
 
 async def test_a_kind_the_table_does_not_list_refuses():
@@ -839,7 +911,10 @@ async def test_a_kind_the_table_does_not_list_refuses():
     try:
         await conn.execute(
             "update work_item set kind = 'not_a_kind', state = 'PROCESSED', session_id = $2 "
-            "where id = $1", item_id, session_id)
+            "where id = $1",
+            item_id,
+            session_id,
+        )
     finally:
         await conn.close()
     await _assert_refused(session_id, "cannot be re-run")
@@ -854,7 +929,9 @@ async def test_row_agent_run_refuses_a_session_with_no_stored_inputs(agent_id):
     session_id = await _closed_oneshot(agent_id)
     await _assert_refused(session_id, rerun.NO_STORED_INPUTS)
     assert (await _composer_rerun(await repo.get_session(session_id))) == {
-        "eligible": False, "reason": rerun.NO_STORED_INPUTS}
+        "eligible": False,
+        "reason": rerun.NO_STORED_INPUTS,
+    }
 
 
 async def test_a_running_session_says_so_on_the_composer_too():
@@ -862,7 +939,8 @@ async def test_a_running_session_says_so_on_the_composer_too():
     await repo.create_running_session(session_id, "coach")
     await _assert_refused(session_id, "stop it first")
     assert (await _composer_rerun(await repo.get_session(session_id)))["reason"] == (
-        "it is running; stop it first")
+        "it is running; stop it first"
+    )
 
 
 async def test_an_update_hold_refuses_every_kind(monkeypatch):
@@ -888,15 +966,19 @@ async def test_a_rerun_carries_the_current_version_and_the_old_keeps_its_own():
     after = await repo.save_charter_version(AGENT, "The charter after.", "test")
 
     stale = await repo.get_session(old)
-    assert (stale["charter_version"], stale["charter_current"]) == (before["version"], after["version"])
+    assert (stale["charter_version"], stale["charter_current"]) == (
+        before["version"],
+        after["version"],
+    )
 
     new = (await _rpc_rerun(old))["sessionId"]
     row = await _settled(new)
 
     assert row["charter_version"] == after["version"]
     assert (await repo.get_session(old))["charter_version"] == before["version"]
-    composer = (await nerve_gateway._dispatch(
-        "chat.history", {"sessionKey": f"agent:{AGENT}:{old}"}, _noop))["composer"]
+    composer = (
+        await nerve_gateway._dispatch("chat.history", {"sessionKey": f"agent:{AGENT}:{old}"}, _noop)
+    )["composer"]
     assert composer["session"]["charterVersion"] == before["version"]
     assert composer["session"]["charterCurrent"] == after["version"]
 
@@ -930,6 +1012,7 @@ async def test_an_email_rerun_that_met_a_down_dependency_keeps_the_chain(monkeyp
     async def down(*a, **k):
         def refuse(messages, info):
             raise httpx.ConnectError("connection refused")
+
         return FunctionModel(refuse)
 
     real = dispatcher.resolve_model
@@ -985,8 +1068,11 @@ async def test_a_queued_reruns_lane_says_it_is_queued_not_that_nothing_is_there(
     await lock.acquire()
     try:
         new = (await _rpc_rerun(old))["sessionId"]
-        composer = (await nerve_gateway._dispatch(
-            "chat.history", {"sessionKey": f"agent:{AGENT}:{new}"}, _noop))["composer"]
+        composer = (
+            await nerve_gateway._dispatch(
+                "chat.history", {"sessionKey": f"agent:{AGENT}:{new}"}, _noop
+            )
+        )["composer"]
     finally:
         lock.release()
     assert composer["code"] == "no_session"
@@ -998,14 +1084,19 @@ async def test_a_queued_reruns_lane_says_it_is_queued_not_that_nothing_is_there(
 
 
 async def test_a_key_nothing_names_still_says_there_is_no_session():
-    composer = (await nerve_gateway._dispatch(
-        "chat.history", {"sessionKey": f"agent:{AGENT}:sess_nothing_here"}, _noop))["composer"]
+    composer = (
+        await nerve_gateway._dispatch(
+            "chat.history", {"sessionKey": f"agent:{AGENT}:sess_nothing_here"}, _noop
+        )
+    )["composer"]
     assert composer["message"] == "no session sess_nothing_here"
 
 
 async def test_a_charter_frame_names_its_agent_in_ref_id():
     """The cockpit reloads the header on this frame, reading the agent from `ref_id`."""
     mark = await _last_event_id()
-    await routes.save_charter(AGENT, routes.CharterIn(content="A pushed charter.", rationale="test"))
+    await routes.save_charter(
+        AGENT, routes.CharterIn(content="A pushed charter.", rationale="test")
+    )
     events = await _events_since(mark, AGENT)
     assert [e["kind"] for e in events] == ["charter.updated"]

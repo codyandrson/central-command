@@ -158,14 +158,15 @@ async def test_a_row_from_before_the_stamp_stays_null_with_no_derivation():
     conn = await repo._conn()
     try:
         await conn.execute(
-            "insert into session (id, agent_id, status) values ($1, $2, 'DONE')",
-            session_id, AGENT)
+            "insert into session (id, agent_id, status) values ($1, $2, 'DONE')", session_id, AGENT
+        )
     finally:
         await conn.close()
     row = await repo.get_session(session_id)
     assert (row["charter_version"], row["charter_current"]) == (None, current["version"])
-    listed = next(r for r in await repo.list_sessions(limit=500, agent_id=AGENT)
-                  if r["id"] == session_id)
+    listed = next(
+        r for r in await repo.list_sessions(limit=500, agent_id=AGENT) if r["id"] == session_id
+    )
     assert listed["charter_version"] is None
     assert listed["charter_current"] == current["version"]
 

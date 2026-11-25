@@ -57,8 +57,7 @@ def test_every_top_level_yaml_in_deploy_k3s_is_a_kubernetes_manifest():
     directly in the directory (not recursive). Each document needs
     apiVersion and kind or the whole apply fails."""
     files = sorted(
-        p for p in K3S.iterdir()
-        if p.is_file() and p.suffix in {".yaml", ".yml", ".json"}
+        p for p in K3S.iterdir() if p.is_file() and p.suffix in {".yaml", ".yml", ".json"}
     )
     assert files, "no manifests found in deploy/k3s/"
     for path in files:

@@ -74,7 +74,11 @@ SCRIPTS = [
 ]
 REGISTRY_KEYS = {"dockerio", "ghcr", "mcr"}
 COMPONENTS = {"core", "n8n", "sandbox-base", "crawler-base", "speech", "pgweb"}
-REGISTRY_VAR = {"CC_REGISTRY_DOCKERIO": "dockerio", "CC_REGISTRY_GHCR": "ghcr", "CC_REGISTRY_MCR": "mcr"}
+REGISTRY_VAR = {
+    "CC_REGISTRY_DOCKERIO": "dockerio",
+    "CC_REGISTRY_GHCR": "ghcr",
+    "CC_REGISTRY_MCR": "mcr",
+}
 REGISTRY_HOST = {"docker.io": "dockerio", "ghcr.io": "ghcr", "mcr.microsoft.com": "mcr"}
 
 
@@ -115,7 +119,9 @@ def test_resolver_tag_matcher_self_test():
     # may be WSL's launcher, which cannot open a Windows path.
     r = subprocess.run(
         [BASH, "resolve-images.sh", "--self-test"],
-        cwd=SINGLE, capture_output=True, text=True,
+        cwd=SINGLE,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stdout + r.stderr
 
@@ -170,10 +176,15 @@ def test_an_honoured_pin_stays_invisible_to_the_self_write_check(tmp_path):
 
     def ref_for(var: str) -> str:
         r = subprocess.run(
-            [BASH, "-c",
-             f'MANIFEST="{manifest.as_posix()}"; '
-             + _manifest_ref_for_body() + f'; manifest_ref_for {var}'],
-            capture_output=True, text=True,
+            [
+                BASH,
+                "-c",
+                f'MANIFEST="{manifest.as_posix()}"; '
+                + _manifest_ref_for_body()
+                + f"; manifest_ref_for {var}",
+            ],
+            capture_output=True,
+            text=True,
         )
         assert r.returncode == 0, r.stdout + r.stderr
         return r.stdout.strip()
@@ -213,7 +224,9 @@ def _compose_refs() -> set[tuple[str, str]]:
     """
     rows = _manifest()
     refs = set()
-    for m in re.finditer(r"^\s*image:\s*(\S+)\s*$", COMPOSE.read_text(encoding="utf-8"), flags=re.MULTILINE):
+    for m in re.finditer(
+        r"^\s*image:\s*(\S+)\s*$", COMPOSE.read_text(encoding="utf-8"), flags=re.MULTILINE
+    ):
         ref = m.group(1)
         if ref.startswith("localhost/"):
             continue  # the three locally-built images: exact, never resolved
@@ -250,13 +263,20 @@ def test_the_one_shell_derivation_names_every_row_as_the_mirror_does(tmp_path):
     rows = [ln.split("#", 1)[0].split() for ln in text.splitlines()]
     expected = [f"{_img_var(r[1])} {r[5]}" for r in rows if len(r) == 6]
     assert len(expected) > 5
-    script = ('. "$1/deploy/env-lib.sh"; cc_images_rows "$2" | '
-              'while read -r p c; do printf "%s %s\\n" "$(cc_img_var "$p")" "$c"; done')
+    script = (
+        '. "$1/deploy/env-lib.sh"; cc_images_rows "$2" | '
+        'while read -r p c; do printf "%s %s\\n" "$(cc_img_var "$p")" "$c"; done'
+    )
     for name, body in (("lf.txt", text), ("crlf.txt", text.replace("\n", "\r\n"))):
         copy = tmp_path / name
         copy.write_bytes(body.encode())
-        out = subprocess.run(["bash", "-c", script, "_", str(ROOT), str(copy)],
-                             capture_output=True, text=True, timeout=60, check=False)
+        out = subprocess.run(
+            ["bash", "-c", script, "_", str(ROOT), str(copy)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
         assert out.returncode == 0, out.stderr
         assert out.stdout.splitlines() == expected
 
@@ -341,11 +361,17 @@ def test_images_txt_has_no_orphans():
         assert ref in used, f"images.txt pins {ref[1]} but nothing references it"
 
 
-SEAM_RE = re.compile(r"\bCC_(?:REGISTRY_[A-Z]+|APT_(?:SECURITY_)?MIRROR|PYPI_INDEX_URL|PYTHON_MIRROR|NPM_REGISTRY)\b")
+SEAM_RE = re.compile(
+    r"\bCC_(?:REGISTRY_[A-Z]+|APT_(?:SECURITY_)?MIRROR|PYPI_INDEX_URL|PYTHON_MIRROR|NPM_REGISTRY)\b"
+)
 
 
 def _declared() -> set[str]:
-    return set(re.findall(r"^#?\s*(CC_[A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.MULTILINE))
+    return set(
+        re.findall(
+            r"^#?\s*(CC_[A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.MULTILINE
+        )
+    )
 
 
 def test_every_seam_the_scripts_read_is_declared_in_env_example():
@@ -354,7 +380,9 @@ def test_every_seam_the_scripts_read_is_declared_in_env_example():
         for seam in set(SEAM_RE.findall(path.read_text(encoding="utf-8"))):
             if seam.endswith("_") or "${" in seam:
                 continue
-            assert seam in declared, f"{path.relative_to(ROOT)} reads {seam}, which .env.example does not declare"
+            assert seam in declared, (
+                f"{path.relative_to(ROOT)} reads {seam}, which .env.example does not declare"
+            )
 
 
 # A PER-RUN override, never an answer: each of these is passed on the command
@@ -367,25 +395,33 @@ RUNTIME_ONLY = {
     # DERIVED and exported for compose, never written into .env (v2.43.0, design
     # record 2026-09-23 D4): each is composed from CC_CA_BUNDLE /
     # CC_TLS_INSECURE, and the rule since v2.42.0 is that one fact has one key.
-    "CC_LITELLM_SSL_VERIFY", "CC_CA_BUNDLE_IN_CONTAINER", "CC_CA_BUNDLE_MOUNT_SRC",
+    "CC_LITELLM_SSL_VERIFY",
+    "CC_CA_BUNDLE_IN_CONTAINER",
+    "CC_CA_BUNDLE_MOUNT_SRC",
     # deploy/single/machine-lib.sh's own constants: the paths it writes inside
     # the podman machine, and its source guard. Not answers — a machine's
     # containers.conf path is not the operator's choice.
-    "CC_MACHINE_REGISTRIES_CONF", "CC_MACHINE_PROXY_CONF", "CC_MACHINE_CA_PEM",
+    "CC_MACHINE_REGISTRIES_CONF",
+    "CC_MACHINE_PROXY_CONF",
+    "CC_MACHINE_CA_PEM",
     "CC_MACHINE_LIB_LOADED",
     # ...and the memory bar its verdict judges against (ledger F6). A threshold
     # the product decided, not a question: raising it would change what `check`
     # PASSES, which is a release decision rather than a site's answer.
-    "CC_MEM_WANT_GB", "CC_MEM_BAR_MIB",
-    "CC_VERIFY_LIVE", "CC_VERIFY_MAX_WAIT",   # verify.sh: which checks to run
-    "CC_PROBE_TIMEOUT",                        # a slow backend, for one run
-    "CC_SKIP_DB_BACKUP", "CC_BACKUP_DIR",      # update.sh's deliberate opt-outs
-    "CC_UPDATE_DRIVEN", "CC_UPDATE_FORCE",     # set by update-run.sh / by hand
-    "CC_UPDATE_DIR",                           # api/update.py hands it to the runner
-    "CC_ENV_LIB_LOADED",                       # env-lib.sh's own source guard
-    "CC_QUESTIONS_LIB_LOADED",                 # questions-lib.sh's own source guard
-    "CC_LEDGER_LIB_LOADED",                    # ledger-lib.sh's own source guard
-    "CC_SUPERVISE_LIB_LOADED",                 # supervise-lib.sh's own source guard
+    "CC_MEM_WANT_GB",
+    "CC_MEM_BAR_MIB",
+    "CC_VERIFY_LIVE",
+    "CC_VERIFY_MAX_WAIT",  # verify.sh: which checks to run
+    "CC_PROBE_TIMEOUT",  # a slow backend, for one run
+    "CC_SKIP_DB_BACKUP",
+    "CC_BACKUP_DIR",  # update.sh's deliberate opt-outs
+    "CC_UPDATE_DRIVEN",
+    "CC_UPDATE_FORCE",  # set by update-run.sh / by hand
+    "CC_UPDATE_DIR",  # api/update.py hands it to the runner
+    "CC_ENV_LIB_LOADED",  # env-lib.sh's own source guard
+    "CC_QUESTIONS_LIB_LOADED",  # questions-lib.sh's own source guard
+    "CC_LEDGER_LIB_LOADED",  # ledger-lib.sh's own source guard
+    "CC_SUPERVISE_LIB_LOADED",  # supervise-lib.sh's own source guard
     # ...and each phase file's (deploy/single/phases/<phase>.sh, v2.58.0).
     *(f"CC_PHASE_{p.stem.upper()}_LOADED" for p in phase_files()),
     # F25's print-once marker for the tls-insecure WARN: EXPORTED by
@@ -404,7 +440,8 @@ RUNTIME_ONLY = {
     "CC_STAGED_FOR",
     # setup.sh's own LISTS, not answers: which keys are ports and which
     # credentials make-secrets.sh owns (v2.44.0's `check` reads both).
-    "CC_PORT_KEYS", "CC_GENERATED_KEYS",
+    "CC_PORT_KEYS",
+    "CC_GENERATED_KEYS",
     # The build scripts' print-what-you-would-run mode: a test/debug switch, not
     # an install answer (F34 — it is how the staged context is pinned without
     # podman).
@@ -412,7 +449,8 @@ RUNTIME_ONLY = {
     # The retired UPSTREAM keys: discover-llm.sh still accepts them in DIRECT
     # mode (a bare probe against a server), but the provider lives in the
     # proxy's database now and validate() calls them out if they reappear.
-    "CC_EMBED_BASE_URL", "CC_EMBED_API_KEY",
+    "CC_EMBED_BASE_URL",
+    "CC_EMBED_API_KEY",
 }
 
 
@@ -428,7 +466,9 @@ def test_env_example_declares_every_key_the_deployment_interpolates():
     """
     declared = _declared()
     sources = single_scripts() + [
-        COMPOSE, ROOT / "deploy" / "discover.sh", ROOT / "deploy" / "env-lib.sh",
+        COMPOSE,
+        ROOT / "deploy" / "discover.sh",
+        ROOT / "deploy" / "env-lib.sh",
     ]
     missing: dict[str, set[str]] = {}
     for path in sources:
@@ -533,19 +573,21 @@ def test_fetch_phase_runs_before_anything_deploys():
         r"for p in (machine fetch llm stack app verify test boot demo); do",
         text,
     )
-    assert m, (
-        "setup.sh's full run must go check -> machine -> fetch -> llm -> ..."
-    )
+    assert m, "setup.sh's full run must go check -> machine -> fetch -> llm -> ..."
     assert re.search(r"^\s*run_phase check; local crc=", text, flags=re.MULTILINE), (
         "the full run must start with the check gate, before any mutating phase"
     )
-    assert "build_if_missing" not in text, "stack must ASSERT images (need_image), never build them mid-deploy"
+    assert "build_if_missing" not in text, (
+        "stack must ASSERT images (need_image), never build them mid-deploy"
+    )
 
 
 def test_airgap_env_example_teaches_the_live_uv_variable():
     text = (ROOT / "deploy" / "airgap.env.example").read_text(encoding="utf-8")
     assert "UV_DEFAULT_INDEX=" in text
-    assert not re.search(r"^#?\s*UV_INDEX_URL=", text, flags=re.MULTILINE), "UV_INDEX_URL is deprecated — only UV_DEFAULT_INDEX may be offered as a seam"
+    assert not re.search(r"^#?\s*UV_INDEX_URL=", text, flags=re.MULTILINE), (
+        "UV_INDEX_URL is deprecated — only UV_DEFAULT_INDEX may be offered as a seam"
+    )
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
@@ -564,7 +606,7 @@ MACHINE_LIB = SINGLE / "machine-lib.sh"
 
 # consumer -> (CA variable, insecure variable) as cc_export_tls_env must set them
 HOST_FANOUT = {
-    "curl": ("CURL_CA_BUNDLE", None),          # -k has no env var: the .curlrc
+    "curl": ("CURL_CA_BUNDLE", None),  # -k has no env var: the .curlrc
     "openssl/uv/python": ("SSL_CERT_FILE", None),
     "requests-based": ("REQUESTS_CA_BUNDLE", None),
     "pip": ("PIP_CERT", "PIP_TRUSTED_HOST"),
@@ -603,14 +645,21 @@ def test_the_host_curl_gets_the_ca_as_an_OPTION_not_only_an_env_var(tmp_path):
     Both knobs may apply at once, and the file is REWRITTEN each run, so a knob
     turned back off must not leave its line behind.
     """
+
     def curlrc(**env) -> str:
         state = tmp_path / ("-".join(sorted(env)) or "none")
         r = subprocess.run(
-            [BASH, "-c",
-             (f'. "{ENV_LIB.as_posix()}"; cc_export_tls_env "{state.as_posix()}"; '
-             'printf "CURL_HOME=%s\n" "${CURL_HOME:-unset}"; '
-             f'cat "{(state / "curl" / ".curlrc").as_posix()}" 2>/dev/null')],
-            capture_output=True, text=True,
+            [
+                BASH,
+                "-c",
+                (
+                    f'. "{ENV_LIB.as_posix()}"; cc_export_tls_env "{state.as_posix()}"; '
+                    'printf "CURL_HOME=%s\n" "${CURL_HOME:-unset}"; '
+                    f'cat "{(state / "curl" / ".curlrc").as_posix()}" 2>/dev/null'
+                ),
+            ],
+            capture_output=True,
+            text=True,
             env={"PATH": "/usr/bin:/bin:/usr/local/bin", **env},
         )
         assert r.returncode == 0, r.stdout + r.stderr
@@ -661,10 +710,14 @@ def test_the_trust_fanout_reaches_every_consumer_in_the_table():
 def test_every_command_in_the_profile_calls_the_one_fanout():
     """One function, called everywhere — per-tool lists are what drifted."""
     for script in (
-        SINGLE / "setup.sh", SINGLE / "update.sh", SINGLE / "verify.sh",
-        SINGLE / "make-secrets.sh", SINGLE / "resolve-images.sh",
+        SINGLE / "setup.sh",
+        SINGLE / "update.sh",
+        SINGLE / "verify.sh",
+        SINGLE / "make-secrets.sh",
+        SINGLE / "resolve-images.sh",
         SINGLE / "discover-llm.sh",
-        SINGLE / "build-sandbox-image.sh", SINGLE / "build-crawler-image.sh",
+        SINGLE / "build-sandbox-image.sh",
+        SINGLE / "build-crawler-image.sh",
     ):
         assert "cc_export_tls_env" in script.read_text(encoding="utf-8"), (
             f"{script.name} reads .env but never calls cc_export_tls_env — the "
@@ -675,8 +728,11 @@ def test_every_command_in_the_profile_calls_the_one_fanout():
 def test_every_command_that_sees_the_insecure_knob_says_so():
     """Never silent, never a PASS. One WARN line per run, naming consumers."""
     for script in (
-        SINGLE / "setup.sh", SINGLE / "update.sh", SINGLE / "verify.sh",
-        SINGLE / "make-secrets.sh", SINGLE / "resolve-images.sh",
+        SINGLE / "setup.sh",
+        SINGLE / "update.sh",
+        SINGLE / "verify.sh",
+        SINGLE / "make-secrets.sh",
+        SINGLE / "resolve-images.sh",
         ROOT / "deploy" / "discover.sh",
         SINGLE / "build-sandbox-image.sh",
         SINGLE / "build-crawler-image.sh",
@@ -718,14 +774,13 @@ def test_the_builds_carry_the_knobs_into_the_image():
     for script in BUILD_SCRIPTS:
         text = (SINGLE / script).read_text(encoding="utf-8")
         assert "--tls-verify=false" in text, f"{script}: no --tls-verify=false path"
-        assert 'CC_TLS_INSECURE=1' in text, f"{script}: the insecure build-arg is missing"
+        assert "CC_TLS_INSECURE=1" in text, f"{script}: the insecure build-arg is missing"
         assert "cc_stage_build_context" in text, (
             f"{script}: the CA must travel as cc-ca.crt in a STAGED context "
             "(deploy/env-lib.sh's cc_stage_build_context)"
         )
         assert "$STATE_DIR/build/" in text, (
-            f"{script}: the staged context belongs under the state dir, never in "
-            "the checkout"
+            f"{script}: the staged context belongs under the state dir, never in the checkout"
         )
         # Comments still TELL the story of the secret; code must not use it.
         code = "\n".join(l.split("#", 1)[0] for l in text.splitlines())
@@ -742,9 +797,7 @@ def test_the_builds_carry_the_knobs_into_the_image():
         )
         # The comments still TELL the story of the secret; instructions must not
         # use it.
-        instructions = "\n".join(
-            l for l in text.splitlines() if not l.lstrip().startswith("#")
-        )
+        instructions = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
         assert "--mount=type=secret" not in instructions, (
             f"{df.name}: the build secret is gone (F34) — see the build scripts"
         )
@@ -755,17 +808,14 @@ def test_the_builds_carry_the_knobs_into_the_image():
             f"{df.name}: an EMPTY cc-ca.crt must read as 'no CA' — test it with -s"
         )
         assert "update-ca-certificates" in text, f"{df.name}: the CA is never installed"
-        assert 'Acquire::https::Verify-Peer "false"' in text, (
-            f"{df.name}: apt has no insecure path"
-        )
+        assert 'Acquire::https::Verify-Peer "false"' in text, f"{df.name}: apt has no insecure path"
         # ...and the apt-insecure fragment still comes FIRST, because the CA
         # branch may have to apt-get install ca-certificates (v2.43.0 ordering).
         assert text.index('Acquire::https::Verify-Peer "false"') < text.index(
             "[ -s /usr/local/share/ca-certificates/cc-ca.crt ]"
         ), f"{df.name}: the insecure fragment must be written before apt is used"
         assert "$CC_CA_BUNDLE" not in text, (
-            f"{df.name}: the CA PATH is the host's business; the context file is "
-            "always cc-ca.crt"
+            f"{df.name}: the CA PATH is the host's business; the context file is always cc-ca.crt"
         )
 
 
@@ -811,16 +861,20 @@ def _build_dry_run(script: str, tmp_path: pathlib.Path, ca: pathlib.Path | None)
     }
     if ca is not None:
         env["CC_CA_BUNDLE"] = str(ca)
-    r = subprocess.run([BASH, str(SINGLE / script)], capture_output=True,
-                       text=True, env=env, cwd=str(tmp_path))
+    r = subprocess.run(
+        [BASH, str(SINGLE / script)], capture_output=True, text=True, env=env, cwd=str(tmp_path)
+    )
     assert r.returncode == 0, r.stdout + r.stderr
     return r.stdout
 
 
-@pytest.mark.parametrize("script,dockerfile", [
-    ("build-sandbox-image.sh", "sandbox.Dockerfile"),
-    ("build-crawler-image.sh", "Dockerfile"),
-])
+@pytest.mark.parametrize(
+    "script,dockerfile",
+    [
+        ("build-sandbox-image.sh", "sandbox.Dockerfile"),
+        ("build-crawler-image.sh", "Dockerfile"),
+    ],
+)
 def test_the_resolved_build_command_uses_the_staged_context(script, dockerfile, tmp_path):
     """The context IS the staged directory, and -f points inside it.
 
@@ -834,9 +888,17 @@ def test_the_resolved_build_command_uses_the_staged_context(script, dockerfile, 
     # dry run. What the dry run must not do is ADD or CHANGE anything there.
     image = script.replace("build-", "cc-").replace("-image.sh", "")
     state = subprocess.run(
-        [BASH, "-c", (f'. "{(ROOT / "deploy" / "env-lib.sh").as_posix()}"; '
-                     f'cc_state_dir "{(ROOT / ".env").as_posix()}" "{ROOT.as_posix()}"')],
-        capture_output=True, text=True).stdout.strip()
+        [
+            BASH,
+            "-c",
+            (
+                f'. "{(ROOT / "deploy" / "env-lib.sh").as_posix()}"; '
+                f'cc_state_dir "{(ROOT / ".env").as_posix()}" "{ROOT.as_posix()}"'
+            ),
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     staged = pathlib.Path(state) / "build" / image if state else None
 
     def snapshot():
@@ -861,9 +923,7 @@ def test_the_resolved_build_command_uses_the_staged_context(script, dockerfile, 
     assert "--secret" not in argv, argv
     # A dry run touches nothing: whatever was staged before is exactly what is
     # staged after, and nothing appeared where nothing was.
-    assert snapshot() == before, (
-        f"CC_BUILD_DRY_RUN=1 changed {ctx} — it must only print"
-    )
+    assert snapshot() == before, f"CC_BUILD_DRY_RUN=1 changed {ctx} — it must only print"
 
 
 @pytest.mark.parametrize("script", BUILD_SCRIPTS)
@@ -895,10 +955,14 @@ def test_staging_replaces_the_context_and_never_keeps_a_stale_ca(tmp_path):
 
     def run(with_ca: bool):
         r = subprocess.run(
-            [BASH, "-c",
-             (f'. "{lib}"; cc_stage_build_context "{staged}" '
-             f'"{ca if with_ca else ""}" "{src}"')],
-            capture_output=True, text=True)
+            [
+                BASH,
+                "-c",
+                (f'. "{lib}"; cc_stage_build_context "{staged}" "{ca if with_ca else ""}" "{src}"'),
+            ],
+            capture_output=True,
+            text=True,
+        )
         assert r.returncode == 0, r.stdout + r.stderr
 
     run(True)
@@ -941,7 +1005,7 @@ def test_the_machine_phase_is_in_the_order_and_the_docs():
     lib = MACHINE_LIB.read_text(encoding="utf-8")
     assert "registries.conf.d/cc-central-command.conf" in lib
     assert "containers.conf.d/cc-proxy.conf" in lib
-    for main_file in ("/etc/containers/registries.conf\"", "/etc/containers/containers.conf\""):
+    for main_file in ('/etc/containers/registries.conf"', '/etc/containers/containers.conf"'):
         assert main_file not in setup, (
             "the machine phase must never write a MAIN containers configuration file"
         )
@@ -956,15 +1020,17 @@ def test_the_machine_phase_is_in_the_order_and_the_docs():
 # The COPY plus the whole RUN block it guards — the RUN ends at its unindented
 # `fi`, which is why the pattern names that rather than "the next instruction".
 TRUST_STEP = re.compile(
-    r"^COPY cc-ca\.cr\[t\][^\n]*\nRUN set -e;.*?\n    fi\n", re.DOTALL | re.MULTILINE)
-BUILD_BASE = "python:3.12-slim-trixie"   # ships ca-certificates + openssl
+    r"^COPY cc-ca\.cr\[t\][^\n]*\nRUN set -e;.*?\n    fi\n", re.DOTALL | re.MULTILINE
+)
+BUILD_BASE = "python:3.12-slim-trixie"  # ships ca-certificates + openssl
 
 
 def _docker() -> str | None:
     for exe in ("docker", "podman"):
         try:
-            r = subprocess.run([exe, "image", "inspect", BUILD_BASE],
-                               capture_output=True, text=True)
+            r = subprocess.run(
+                [exe, "image", "inspect", BUILD_BASE], capture_output=True, text=True
+            )
         except FileNotFoundError:
             # Not installed at all (the Windows testbed has podman only, and
             # `docker` raised WinError 2 here, 2026-09-25) — that is "not on
@@ -996,8 +1062,9 @@ def built_images():
     yield built
     engine, tags = built
     for tag in tags:
-        subprocess.run([engine[0], "rmi", "-f", tag], capture_output=True, text=True, check=False,
-                       timeout=120)
+        subprocess.run(
+            [engine[0], "rmi", "-f", tag], capture_output=True, text=True, check=False, timeout=120
+        )
 
 
 @pytest.mark.parametrize("df", DOCKERFILES, ids=lambda p: p.parent.name)
@@ -1015,12 +1082,12 @@ def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path, built_images)
     ctx = tmp_path / "ctx"
     ctx.mkdir()
     (ctx / "Dockerfile").write_text(
-        f"FROM {BUILD_BASE}\nARG CC_TLS_INSECURE=0\n{step}\n", encoding="utf-8")
+        f"FROM {BUILD_BASE}\nARG CC_TLS_INSECURE=0\n{step}\n", encoding="utf-8"
+    )
 
     def build(tag: str) -> subprocess.CompletedProcess:
         tags.append(tag)  # before the build: a half-built tag is removed too
-        return subprocess.run([exe, "build", "-t", tag, str(ctx)],
-                              capture_output=True, text=True)
+        return subprocess.run([exe, "build", "-t", tag, str(ctx)], capture_output=True, text=True)
 
     # 1. No CA. Under docker/BuildKit that is a context with NO cc-ca.crt at
     #    all — what a k3s build from the repo context is, and a zero-match glob
@@ -1034,19 +1101,28 @@ def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path, built_images)
         (ctx / "cc-ca.crt").write_text("", encoding="utf-8")
     r = build(noca)
     assert r.returncode == 0, (
-        ("an EMPTY cc-ca.crt must build and install nothing:\n" if exe == "podman"
-         else "a zero-match `COPY cc-ca.cr[t]` must be a no-op:\n") + r.stdout + r.stderr
+        (
+            "an EMPTY cc-ca.crt must build and install nothing:\n"
+            if exe == "podman"
+            else "a zero-match `COPY cc-ca.cr[t]` must be a no-op:\n"
+        )
+        + r.stdout
+        + r.stderr
     )
-    r = subprocess.run([exe, "run", "--rm", noca,
-                        "sh", "-c", "ls /usr/local/share/ca-certificates/"],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [exe, "run", "--rm", noca, "sh", "-c", "ls /usr/local/share/ca-certificates/"],
+        capture_output=True,
+        text=True,
+    )
     if exe == "podman":
         # The empty file is copied (the step keeps it as a marker) but the `-s`
         # guard must not have installed it into the system bundle: nothing
         # under /etc/ssl/certs mentions the marker name.
-        r2 = subprocess.run([exe, "run", "--rm", noca, "sh", "-c",
-                             "ls /etc/ssl/certs/ | grep -c cc-ca || true"],
-                            capture_output=True, text=True)
+        r2 = subprocess.run(
+            [exe, "run", "--rm", noca, "sh", "-c", "ls /etc/ssl/certs/ | grep -c cc-ca || true"],
+            capture_output=True,
+            text=True,
+        )
         assert r2.stdout.strip() == "0", "an EMPTY CA file was installed into the bundle"
     else:
         assert "cc-ca.crt" not in r.stdout, "no CA was given, yet one is installed"
@@ -1056,21 +1132,45 @@ def test_the_trust_step_builds_with_and_without_a_ca(df, tmp_path, built_images)
     key = tmp_path / "ca.key"
     pem = tmp_path / "ca.pem"
     gen = subprocess.run(
-        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-         "-keyout", str(key), "-out", str(pem), "-days", "2", "-subj",
-         "/CN=Central Command Test CA"], capture_output=True, text=True)
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(pem),
+            "-days",
+            "2",
+            "-subj",
+            "/CN=Central Command Test CA",
+        ],
+        capture_output=True,
+        text=True,
+    )
     if gen.returncode != 0:
         pytest.skip("no usable openssl to mint a test CA: " + gen.stderr[-200:])
-    body = next(l for l in pem.read_text().splitlines()
-            if l and "CERTIFICATE" not in l)
+    body = next(l for l in pem.read_text().splitlines() if l and "CERTIFICATE" not in l)
     (ctx / "cc-ca.crt").write_text(pem.read_text(), encoding="utf-8")
 
     r = build(withca)
     assert r.returncode == 0, r.stdout + r.stderr
     r = subprocess.run(
-        [exe, "run", "--rm", withca, "sh", "-c",
-         "grep -c '" + body + "' /etc/ssl/certs/ca-certificates.crt"],
-        capture_output=True, text=True)
+        [
+            exe,
+            "run",
+            "--rm",
+            withca,
+            "sh",
+            "-c",
+            "grep -c '" + body + "' /etc/ssl/certs/ca-certificates.crt",
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.stdout.strip() not in ("", "0"), (
         f"{df.name}: the staged CA never reached /etc/ssl/certs/ca-certificates.crt "
         "— which is what PIP_CERT / NPM_CONFIG_CAFILE / NODE_EXTRA_CA_CERTS point at"
@@ -1138,7 +1238,8 @@ def test_a_single_certificate_bundle_warns_while_a_public_source_is_reachable(tm
         "CC_PYTHON_MIRROR=https://m.corp.example/python\n"
         "CC_NPM_REGISTRY=https://m.corp.example/npm/\n"
         "CC_APT_MIRROR=https://m.corp.example/debian\n"
-        "CC_HF_ENDPOINT=https://m.corp.example/hf\n")
+        "CC_HF_ENDPOINT=https://m.corp.example/hf\n"
+    )
     out = _check_ca_bundle_harness(env)
     assert out.startswith("PASS answers-ca-bundle:"), out
 
@@ -1201,13 +1302,19 @@ def test_loopback_check_exempts_registry_mirror_and_image_pin_keys(tmp_path):
     assert "WARN loopback-addressing" in out, out
     lh_line = next(l for l in out.splitlines() if l.startswith("LH="))
     assert "CC_API_HOST_URL" in lh_line, lh_line
-    for exempt in ("CC_REGISTRY_DOCKERIO", "CC_REGISTRY_GHCR", "CC_REGISTRY_MCR", "CC_IMG_POSTGRES"):
-        assert exempt not in lh_line, f"{exempt} should be exempt from the loopback check: {lh_line}"
+    for exempt in (
+        "CC_REGISTRY_DOCKERIO",
+        "CC_REGISTRY_GHCR",
+        "CC_REGISTRY_MCR",
+        "CC_IMG_POSTGRES",
+    ):
+        assert exempt not in lh_line, (
+            f"{exempt} should be exempt from the loopback check: {lh_line}"
+        )
 
     # No app key mentions localhost: PASS, even with every registry seam set.
     env.write_text(
-        "CC_REGISTRY_DOCKERIO=localhost:5000\n"
-        "CC_IMG_POSTGRES=localhost:5000/library/postgres:16\n",
+        "CC_REGISTRY_DOCKERIO=localhost:5000\nCC_IMG_POSTGRES=localhost:5000/library/postgres:16\n",
         encoding="utf-8",
     )
     out = _loopback_check_harness(env)
@@ -1223,11 +1330,17 @@ def test_tls_insecure_warn_once_prints_exactly_one_line_per_run():
     (F25, 2026-09-24 Windows testbed run). `cc_tls_insecure_warn_once` is the
     one gate: exactly one WARN per run, never zero when the knob is on."""
     r = subprocess.run(
-        [BASH, "-c",
-         (f'. "{ENV_LIB.as_posix()}"; '
-         'cc_tls_insecure_warn_once x; '
-         'cc_tls_insecure_warn_once y || true')],
-        capture_output=True, text=True,
+        [
+            BASH,
+            "-c",
+            (
+                f'. "{ENV_LIB.as_posix()}"; '
+                "cc_tls_insecure_warn_once x; "
+                "cc_tls_insecure_warn_once y || true"
+            ),
+        ],
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stdout + r.stderr
     lines = [l for l in r.stdout.splitlines() if l.startswith("WARN tls-insecure")]
@@ -1257,7 +1370,8 @@ def test_a_standalone_script_still_warns_once():
     print-ONCE gate, never a suppress-always one."""
     r = subprocess.run(
         [BASH, "-c", f'. "{ENV_LIB.as_posix()}"; cc_tls_insecure_warn_once solo'],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stdout + r.stderr
     assert r.stdout.count("WARN tls-insecure") == 1, r.stdout
@@ -1309,7 +1423,10 @@ def test_the_app_phase_derives_the_proxy_url_the_app_dials():
     live model resolve raise LLMProviderNotConfigured (Windows testbed,
     2026-09-25: the demo feed was a 500)."""
     src = installer_source()
-    assert re.search(r'set_kv_if_unset "\$ENV_FILE" CC_LLM_BASE_URL "http://127\.0\.0\.1:\$\{CC_LITELLM_PORT\}"', src), (
-        "the app phase must derive CC_LLM_BASE_URL from CC_LITELLM_PORT"
+    assert re.search(
+        r'set_kv_if_unset "\$ENV_FILE" CC_LLM_BASE_URL "http://127\.0\.0\.1:\$\{CC_LITELLM_PORT\}"',
+        src,
+    ), "the app phase must derive CC_LLM_BASE_URL from CC_LITELLM_PORT"
+    assert "for k in CC_LLM_BASE_URL CC_DEFAULT_MODEL CC_LLM_API_KEY" in src, (
+        "status must check CC_LLM_BASE_URL and CC_DEFAULT_MODEL too"
     )
-    assert "for k in CC_LLM_BASE_URL CC_DEFAULT_MODEL CC_LLM_API_KEY" in src, "status must check CC_LLM_BASE_URL and CC_DEFAULT_MODEL too"

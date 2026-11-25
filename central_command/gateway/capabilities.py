@@ -46,24 +46,28 @@ ACKNOWLEDGED_SHADOW_FLOOR = 1
 # and not overridable; adding to it is the operator's call, never an agent's.
 # Task creation is NOT here and has no row: it is a trigger (DL-186).
 EXEMPT_WRITES = (
-    "operator graph curation",     # integrations/neo4j_writer.py, the operator's own edits
-    "wiki annotation (auto)",      # wiki_annotation_mode="auto": template over claim rows, no model
+    "operator graph curation",  # integrations/neo4j_writer.py, the operator's own edits
+    "wiki annotation (auto)",  # wiki_annotation_mode="auto": template over claim rows, no model
 )
 
 
 @dataclass(frozen=True)
 class Capability:
-    name: str          # the wire name a proposal Action carries (version-stripped)
-    kind: str          # "write" | "read"
-    gate: str          # "human approval" | "ungated read" | "ungated" (in-sandbox writes, D-sandbox)
-    default_gate: str  # DEFAULT_GATES: who decides when no override applies (FR-4) — declared on every row
-    risk: str          # what a wrong use costs, in plain words
-    holder: str        # which component invokes it
-    route: str         # the concrete path to the world
+    name: str  # the wire name a proposal Action carries (version-stripped)
+    kind: str  # "write" | "read"
+    gate: str  # "human approval" | "ungated read" | "ungated" (in-sandbox writes, D-sandbox)
+    default_gate: (
+        str  # DEFAULT_GATES: who decides when no override applies (FR-4) — declared on every row
+    )
+    risk: str  # what a wrong use costs, in plain words
+    holder: str  # which component invokes it
+    route: str  # the concrete path to the world
     arguments: list[str]
     description: str
-    reversibility: str = ""   # REVERSIBILITIES on every write row, "" on a read (server-held; never the agent's claim)
-    acknowledge: bool = False  # an override here needs the operator's acknowledgement + a shadow floor of 1
+    reversibility: str = ""  # REVERSIBILITIES on every write row, "" on a read (server-held; never the agent's claim)
+    acknowledge: bool = (
+        False  # an override here needs the operator's acknowledgement + a shadow floor of 1
+    )
     # The arguments that name the world target of a write, declared by the operator's
     # code (never read from the agent's `target_ref`). A target scope on an override
     # must match ALL of them; () means the row has no world target and takes no
@@ -73,12 +77,18 @@ class Capability:
 
     def __post_init__(self) -> None:
         if self.default_gate not in DEFAULT_GATES:
-            raise ValueError(f"{self.name}: default_gate {self.default_gate!r} not in {DEFAULT_GATES}")
+            raise ValueError(
+                f"{self.name}: default_gate {self.default_gate!r} not in {DEFAULT_GATES}"
+            )
         if self.kind == "write":
             if self.reversibility not in REVERSIBILITIES:
-                raise ValueError(f"{self.name}: reversibility {self.reversibility!r} not in {REVERSIBILITIES}")
+                raise ValueError(
+                    f"{self.name}: reversibility {self.reversibility!r} not in {REVERSIBILITIES}"
+                )
             if self.reversibility == "irreversible" and not self.acknowledge:
-                raise ValueError(f"{self.name}: an irreversible capability must require acknowledgement")
+                raise ValueError(
+                    f"{self.name}: an irreversible capability must require acknowledgement"
+                )
             # The graduation bar, layer 1 (epic-cockpit-rerun-reversibility-macros
             # R6, A8): an irreversible class never graduates to the auditor. The
             # bar reads exactly this server-held mark, never an agent's claim.
@@ -87,7 +97,9 @@ class Capability:
                     f"{self.name}: an irreversible capability cannot have default_gate 'auditor'"
                 )
         elif self.reversibility or self.acknowledge:
-            raise ValueError(f"{self.name}: only a write carries a reversibility mark or acknowledgement")
+            raise ValueError(
+                f"{self.name}: only a write carries a reversibility mark or acknowledgement"
+            )
 
 
 REGISTRY: list[Capability] = [
@@ -115,7 +127,18 @@ REGISTRY: list[Capability] = [
         risk="external, reversible — a wrongly created issue can be closed or deleted in the Jira UI",
         holder="Executor",
         route="integrations/jira.py → Jira REST createIssue (native, D23; native only, no n8n façade fallback)",
-        arguments=["project_key", "summary", "description?", "issue_type (a name from jira_list_issue_types for the project)", "parent?", "due_date?", "labels?", "custom_fields?", "assignee? (user_id from jira.find_users)", "estimate_hours? (the native original estimate)"],
+        arguments=[
+            "project_key",
+            "summary",
+            "description?",
+            "issue_type (a name from jira_list_issue_types for the project)",
+            "parent?",
+            "due_date?",
+            "labels?",
+            "custom_fields?",
+            "assignee? (user_id from jira.find_users)",
+            "estimate_hours? (the native original estimate)",
+        ],
         description=(
             "Create a new Jira issue for not-yet-tracked work. Built after the "
             "2026-07-20 charter-v2 incident: the coached charter instructed the "
@@ -185,17 +208,27 @@ REGISTRY: list[Capability] = [
         gate="human approval",
         default_gate="human",
         reversibility="reversible",
-        risk=("external, reversible — the planning fields' previous values can be "
-              "restored in the Jira UI or by a later proposal; a wrong number moves "
-              "the issue in the ranked backlog until it is corrected"),
+        risk=(
+            "external, reversible — the planning fields' previous values can be "
+            "restored in the Jira UI or by a later proposal; a wrong number moves "
+            "the issue in the ranked backlog until it is corrected"
+        ),
         holder="Executor",
-        route=("integrations/jira.py set_planning_fields → Jira REST editIssue, ONE "
-               "edit: the custom fields resolved by the configured plan_field_* names "
-               "through /field, the native due date, and the native original "
-               "estimate as update.timetracking (native only — no façade counterpart)"),
-        arguments=["issue_key", "stakes?", "value?", "lateness_loss?",
-                   "deadline_type? (hard | soft)", "estimate_hours?",
-                   "due_date? (YYYY-MM-DD; at least one of these six)"],
+        route=(
+            "integrations/jira.py set_planning_fields → Jira REST editIssue, ONE "
+            "edit: the custom fields resolved by the configured plan_field_* names "
+            "through /field, the native due date, and the native original "
+            "estimate as update.timetracking (native only — no façade counterpart)"
+        ),
+        arguments=[
+            "issue_key",
+            "stakes?",
+            "value?",
+            "lateness_loss?",
+            "deadline_type? (hard | soft)",
+            "estimate_hours?",
+            "due_date? (YYYY-MM-DD; at least one of these six)",
+        ],
         description=(
             "Set an issue's PLANNING fields (the EA planning design, D3 and D8; "
             "DL-221 step 4b): the stakes in words, value, lateness loss and "
@@ -217,8 +250,14 @@ REGISTRY: list[Capability] = [
         risk="internal, append-only — a wrong fact is supersedable, never silently edited",
         holder="Executor",
         route="graphiti-core add_episode, in-process, via the durable ingest queue → group central_command (tenanted; never `main`)",
-        arguments=["name", "episode_body", "source_description", "reference_time",
-                   "scope", "for_agent"],
+        arguments=[
+            "name",
+            "episode_body",
+            "source_description",
+            "reference_time",
+            "scope",
+            "for_agent",
+        ],
         description=(
             "Commit a distilled, human-approved claim to the team knowledge "
             "graph. The Executor stamps the trust level (trust=human-approved, or "
@@ -256,8 +295,15 @@ REGISTRY: list[Capability] = [
         risk="reversible — a new relationship with an explicit validity window, with its own provenance episode",
         holder="Executor",
         route="neo4j_writer.create_edge (bolt)",
-        arguments=["source_uuid", "target_uuid", "name", "fact",
-                   "valid_at", "invalid_at", "verification_id"],
+        arguments=[
+            "source_uuid",
+            "target_uuid",
+            "name",
+            "fact",
+            "valid_at",
+            "invalid_at",
+            "verification_id",
+        ],
         description="Add a relationship the extraction dropped (2026-08-20).",
     ),
     Capability(
@@ -284,10 +330,18 @@ REGISTRY: list[Capability] = [
         risk="reversible — rename/re-summarise/re-type, re-embedded when the text changed",
         holder="Executor",
         route="neo4j_writer.update_node (bolt)",
-        arguments=["uuid", "name", "summary", "labels", "aliases", "birth_date", "phone",
-                   "verification_id"],
+        arguments=[
+            "uuid",
+            "name",
+            "summary",
+            "labels",
+            "aliases",
+            "birth_date",
+            "phone",
+            "verification_id",
+        ],
         description="Fix an entity's name, summary, or type labels, or a Person's "
-                    "aliases, birth date or phone.",
+        "aliases, birth date or phone.",
     ),
     Capability(
         name="graph.delete_node",
@@ -313,9 +367,19 @@ REGISTRY: list[Capability] = [
         risk="reversible — wording, endpoints (repoint), or validity window; restore clears invalid_at AND expired_at",
         holder="Executor",
         route="neo4j_writer.update_edge (bolt; repoint is copy-then-delete)",
-        arguments=["uuid", "name", "fact", "source_uuid", "target_uuid",
-                   "valid_at", "invalid_at", "clear_valid", "clear_invalid",
-                   "clear_expired", "verification_id"],
+        arguments=[
+            "uuid",
+            "name",
+            "fact",
+            "source_uuid",
+            "target_uuid",
+            "valid_at",
+            "invalid_at",
+            "clear_valid",
+            "clear_invalid",
+            "clear_expired",
+            "verification_id",
+        ],
         description="Fix a relationship's fact, endpoints, or temporal validity.",
     ),
     Capability(
@@ -741,8 +805,15 @@ REGISTRY: list[Capability] = [
         ),
         holder="Executor",
         route="db/repo.py → add_skill_doc (new version + rebuilt FTS chunks), the same call POST /api/skills/{id}/docs makes",
-        arguments=["skill_id", "doc_key", "title", "content", "source_url?",
-                   "captured_at?", "describes?"],
+        arguments=[
+            "skill_id",
+            "doc_key",
+            "title",
+            "content",
+            "source_url?",
+            "captured_at?",
+            "describes?",
+        ],
         description=(
             "Add or re-version ONE document on an existing skill. `kind` is "
             "deliberately not an argument: doc_key='guidance' is the guidance "
@@ -771,8 +842,14 @@ REGISTRY: list[Capability] = [
         ),
         holder="Executor",
         route="db/repo.py → add_agent_note (retire + insert in one transaction, under the store lock and the scope's character budget)",
-        arguments=["scope", "text", "retire_ids?", "source_quote", "source_session_id",
-                   "quote_source"],
+        arguments=[
+            "scope",
+            "text",
+            "retire_ids?",
+            "source_quote",
+            "source_session_id",
+            "quote_source",
+        ],
         description=(
             "Add ONE note to the note store (DL-217), optionally retiring named "
             "notes OF THE SAME SCOPE in the same transaction so an agent at its "
@@ -800,8 +877,7 @@ REGISTRY: list[Capability] = [
         ),
         holder="Executor",
         route="db/repo.py → retire_agent_note (retired_at + the retiring proposal)",
-        arguments=["note_id", "reason", "source_quote?", "source_session_id?",
-                   "quote_source?"],
+        arguments=["note_id", "reason", "source_quote?", "source_session_id?", "quote_source?"],
         description=(
             "Retire ONE active note: the drafter's own private note, or an "
             "operator-scope note the operator asked to be forgotten — the latter "
@@ -1008,9 +1084,18 @@ REGISTRY: list[Capability] = [
             "any invited attendee has already been notified"
         ),
         holder="Executor",
-        route=("integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode create_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"),
-        arguments=["title", "start", "end", "description?", "attendees?", "calendar_id?",
-                   "plan? ({kind: placeholder} or {kind: work_block, issue_key, date})"],
+        route=(
+            "integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode create_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"
+        ),
+        arguments=[
+            "title",
+            "start",
+            "end",
+            "description?",
+            "attendees?",
+            "calendar_id?",
+            "plan? ({kind: placeholder} or {kind: work_block, issue_key, date})",
+        ],
         description=(
             "Put a new event on the operator's calendar. start/end are RFC3339 "
             "with an explicit offset or Z — the façade compares instants, never "
@@ -1035,8 +1120,18 @@ REGISTRY: list[Capability] = [
             "and a wrong change can be changed back; attendees are re-notified"
         ),
         holder="Executor",
-        route=("integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode update_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"),
-        arguments=["event_id", "title?", "start?", "end?", "description?", "attendees?", "calendar_id?"],
+        route=(
+            "integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode update_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"
+        ),
+        arguments=[
+            "event_id",
+            "title?",
+            "start?",
+            "end?",
+            "description?",
+            "attendees?",
+            "calendar_id?",
+        ],
         description=(
             "Change an existing event, addressed by the event_id from a read. "
             "Partial merge: only the fields supplied change. Moving a meeting is "
@@ -1060,7 +1155,9 @@ REGISTRY: list[Capability] = [
             "invitation thread; the biggest blast radius on the calendar surface"
         ),
         holder="Executor",
-        route=("integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode delete_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"),
+        route=(
+            "integrations/calendar_facade.py → n8n cc-calendar-facade webhook, mode delete_event (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set"
+        ),
         arguments=["event_id", "reason", "calendar_id?"],
         description=(
             "Cancel an event, addressed by the event_id from a read; never a "
@@ -1092,9 +1189,11 @@ REGISTRY: list[Capability] = [
             "touching the event by calendar.release_event"
         ),
         holder="Executor",
-        route=("integrations/calendar_facade.py get_event (the existence read: n8n "
-               "cc-calendar-facade mode get_event, or integrations/exchange.py) → "
-               "db/repo.py record_calendar_plan_event"),
+        route=(
+            "integrations/calendar_facade.py get_event (the existence read: n8n "
+            "cc-calendar-facade mode get_event, or integrations/exchange.py) → "
+            "db/repo.py record_calendar_plan_event"
+        ),
         arguments=["event_id", "kind (placeholder)", "calendar_id?"],
         description=(
             "Adopt an event the operator already keeps as a STRUCTURE PLACEHOLDER "
@@ -1146,8 +1245,10 @@ REGISTRY: list[Capability] = [
             "rewritten or deleted"
         ),
         holder="Executor",
-        route=("integrations/jira.py get_issue (the planning numbers, re-read per "
-               "issue at execution) → db/repo.py record_day_plan (day_plan table)"),
+        route=(
+            "integrations/jira.py get_issue (the planning numbers, re-read per "
+            "issue at execution) → db/repo.py record_day_plan (day_plan table)"
+        ),
         arguments=["date", "items ([{issue_key, reason}], 1 to 10)"],
         description=(
             "Store the day's plan (the EA planning design, D6): the local date and "
@@ -1201,9 +1302,11 @@ REGISTRY: list[Capability] = [
             "the tracker and the agent drafting it created the block"
         ),
         holder="Executor",
-        route=("integrations/jira.py get_issue (the issue's status category, read at "
-               "execution) → integrations/calendar_facade.py get_event and delete_event "
-               "(as calendar.delete_event) → db/repo.py retire_calendar_plan_event"),
+        route=(
+            "integrations/jira.py get_issue (the issue's status category, read at "
+            "execution) → integrations/calendar_facade.py get_event and delete_event "
+            "(as calendar.delete_event) → db/repo.py retire_calendar_plan_event"
+        ),
         arguments=["event_id", "calendar_id?"],
         description=(
             "Remove a work block whose issue is FINISHED (DL-221): the issue's status "
@@ -1258,8 +1361,7 @@ REGISTRY: list[Capability] = [
         ),
         holder="Executor",
         route="db/repo.py → create_loe (line_of_effort table)",
-        arguments=["loe_id", "name", "agent_id", "semantic", "cadence?",
-                   "presentation?"],
+        arguments=["loe_id", "name", "agent_id", "semantic", "cadence?", "presentation?"],
         description=(
             "Bring a new line of effort into existence on the operator's "
             "behalf, after interviewing them: the goal's name, the questions "
@@ -1286,8 +1388,15 @@ REGISTRY: list[Capability] = [
         ),
         holder="Executor",
         route="db/repo.py → update_loe / retire_loe (line_of_effort table)",
-        arguments=["loe_id", "name?", "cadence?", "semantic?", "presentation?",
-                   "retire?", "reason?"],
+        arguments=[
+            "loe_id",
+            "name?",
+            "cadence?",
+            "semantic?",
+            "presentation?",
+            "retire?",
+            "reason?",
+        ],
         description=(
             "Recalibrate a line of effort — its name, cadence, questions and "
             "thresholds (`semantic`), or display config (`presentation`) — or "
@@ -1317,8 +1426,7 @@ REGISTRY: list[Capability] = [
             "the rows propose_bulk_dismiss reserved as FOLD_PENDING); the "
             "handler only re-counts and reports"
         ),
-        arguments=["query", "unprocessed", "match_digest", "provider_matches?",
-                   "samples?"],
+        arguments=["query", "unprocessed", "match_digest", "provider_matches?", "samples?"],
         description=(
             "Dismiss a PINNED set of bulk/promotional emails in one decision. "
             "The set is resolved at PROPOSE time — `query` is the Gmail search "
@@ -1357,8 +1465,15 @@ REGISTRY: list[Capability] = [
             "the rule at claim time, before hydration of siblings and before "
             "any model call (ingest/mail_rules.py)"
         ),
-        arguments=["criteria", "description", "reason", "exceptions?",
-                   "apply_to_queued?", "queued_matches?", "samples?"],
+        arguments=[
+            "criteria",
+            "description",
+            "reason",
+            "exceptions?",
+            "apply_to_queued?",
+            "queued_matches?",
+            "samples?",
+        ],
         description=(
             "Create a standing inbox rule: mail matching every criterion "
             "(from_address exact, from_domain or subdomain, subject_contains, "
@@ -1584,8 +1699,10 @@ REGISTRY: list[Capability] = [
         default_gate="none",
         risk="none to the world — a list; changing the calendar is a separate, gated capability",
         holder="agent (read_calendar tool) + control plane (the EA's brief block)",
-        route=("n8n cc-calendar-facade webhook (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set — "
-               "a CalendarView there, which expands recurrences"),
+        route=(
+            "n8n cc-calendar-facade webhook (Google OAuth stays in n8n) or integrations/exchange.py (EWS over NTLM) when CC_EXCHANGE_* is set — "
+            "a CalendarView there, which expands recurrences"
+        ),
         arguments=["time_min", "time_max", "calendar_id?"],
         description=(
             "The operator's calendar over an RFC3339 window, normalised and "
@@ -1620,8 +1737,10 @@ REGISTRY: list[Capability] = [
         default_gate="none",
         risk="none to the world",
         holder="agents (jira_planning_gaps tool)",
-        route=("reports/ea_backlog.py planning_gaps → integrations/jira.py list_fields + "
-               "searchIssues with plan_backlog_jql (the ranked backlog's own read)"),
+        route=(
+            "reports/ea_backlog.py planning_gaps → integrations/jira.py list_fields + "
+            "searchIssues with plan_backlog_jql (the ranked backlog's own read)"
+        ),
         arguments=[],
         description=(
             "The backlog issues that lack planning inputs (the EA planning design, "
@@ -1639,9 +1758,11 @@ REGISTRY: list[Capability] = [
         default_gate="none",
         risk="none to the world",
         holder="agents (jira_team_load tool)",
-        route=("reports/ea_team.py load → integrations/jira.py searchIssues with "
-               "plan_team_jql (bounded by plan_team_limit), and a second search "
-               "with its assignee clause turned round for the unassigned count"),
+        route=(
+            "reports/ea_team.py load → integrations/jira.py searchIssues with "
+            "plan_team_jql (bounded by plan_team_limit), and a second search "
+            "with its assignee clause turned round for the unassigned count"
+        ),
         arguments=[],
         description=(
             "The team's load computed in code (the EA planning design, D10; "
@@ -2038,7 +2159,6 @@ REGISTRY: list[Capability] = [
         arguments=["uuid", "attachment_id"],
         description="Fetch one attachment's bytes by the id a message record lists, at claim time, inside the retry machinery.",
     ),
-
     # --- in-sandbox activity (D-sandbox, slice 1): ungated, no exit ----------
     # gate="ungated" (not "ungated read") — these DO mutate state, but only the
     # state of an agent's own ephemeral, gVisor-isolated sandbox pod. Nothing
@@ -2126,7 +2246,6 @@ REGISTRY: list[Capability] = [
         arguments=[],
         description="Destroy the agent's current sandbox session; the next sandbox call creates a fresh one.",
     ),
-
     # --- mcp.sync_source (D-sandbox slice 2): the one gated exit -------------
     Capability(
         name="mcp.sync_source",
@@ -2154,7 +2273,6 @@ REGISTRY: list[Capability] = [
             "slice 2)."
         ),
     ),
-
     # --- mcp.build_image / mcp.server_deploy (D-sandbox slice 3) -------------
     Capability(
         name="mcp.build_image",
@@ -2220,7 +2338,6 @@ REGISTRY: list[Capability] = [
             "is a later slice; this capability only makes the pod exist."
         ),
     ),
-
     # --- litellm.register_mcp_server (D-sandbox slice 4) ---------------------
     Capability(
         name="litellm.register_mcp_server",
@@ -2255,7 +2372,6 @@ REGISTRY: list[Capability] = [
             "list from the proxy, a silent failure (live finding 2026-08-05)."
         ),
     ),
-
     # --- mcp.server_remove (operator decision 2026-08-03) ---------------------
     Capability(
         name="mcp.server_remove",
@@ -2290,7 +2406,6 @@ REGISTRY: list[Capability] = [
             "source or image tags."
         ),
     ),
-
     # --- mcp.server_register / mcp.server_unregister (DL-233) -----------------
     Capability(
         name="mcp.server_register",
@@ -2369,7 +2484,6 @@ REGISTRY: list[Capability] = [
             "gate — so a server id is read, never guessed."
         ),
     ),
-
     # --- mcp.tool_call (D-sandbox slice 5) ------------------------------------
     Capability(
         name="mcp.tool_call",
@@ -2411,9 +2525,9 @@ REGISTRY: list[Capability] = [
 @dataclass(frozen=True)
 class Policy:
     name: str
-    status: str        # "enforced" | "planned"
-    enforced_at: str   # where in the code the check lives (or would)
-    guard: str         # the test that locks it in ("" if planned)
+    status: str  # "enforced" | "planned"
+    enforced_at: str  # where in the code the check lives (or would)
+    guard: str  # the test that locks it in ("" if planned)
     description: str
 
 
@@ -2429,8 +2543,10 @@ POLICIES: list[Policy] = [
             "without review (approval attaches to the action class, not the "
             "delegation)"
         ),
-        guard=("tests/test_orchestration.py::"
-               "test_gated_child_parks_proposal_and_resumes_after_approval"),
+        guard=(
+            "tests/test_orchestration.py::"
+            "test_gated_child_parks_proposal_and_resumes_after_approval"
+        ),
         description=(
             "The orchestrator runs projects as a durable assign→receive→decide "
             "loop. Delegating is a trigger: a sub-agent answering a question "
@@ -2994,8 +3110,10 @@ def overridable(c: Capability) -> tuple[bool, str]:
     if c.default_gate == "none":
         return False, "nothing gates it (default gate none), so there is nothing to relax"
     if c.default_gate == "auditor":
-        return True, ("the operator decides it by default (a graduated auditor may "
-                      "confirm it); an override relaxes it to none for one agent")
+        return True, (
+            "the operator decides it by default (a graduated auditor may "
+            "confirm it); an override relaxes it to none for one agent"
+        )
     return True, "the operator decides it by default; an override relaxes it to none for one agent"
 
 

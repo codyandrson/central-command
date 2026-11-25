@@ -27,12 +27,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SETUP = ROOT / "deploy" / "k3s" / "setup.sh"
 
-SUDO = '''#!/usr/bin/env bash
+SUDO = """#!/usr/bin/env bash
 printf 'sudo %s\\n' "$*" >> "$STUB_LOG"
 exec "$@"
-'''
+"""
 
-K3S = '''#!/usr/bin/env bash
+K3S = """#!/usr/bin/env bash
 printf 'k3s %s\\n' "$*" >> "$STUB_LOG"
 args=" $* "
 case "$args" in
@@ -52,14 +52,14 @@ case "$args" in
   *"cypher-shell"*)     echo 0 ;;
 esac
 exit 0
-'''
+"""
 
-SYSTEMCTL = '''#!/usr/bin/env bash
+SYSTEMCTL = """#!/usr/bin/env bash
 printf 'systemctl %s\\n' "$*" >> "$STUB_LOG"
 exit 0
-'''
+"""
 
-BACKUP = '''#!/usr/bin/env bash
+BACKUP = """#!/usr/bin/env bash
 printf 'backup REPO=%s OUT=%s\\n' "$REPO" "$CC_BACKUP_DIR" >> "$STUB_LOG"
 [[ "${STUB_BACKUP:-ok}" == fail ]] && exit 1
 mkdir -p "$CC_BACKUP_DIR"
@@ -68,12 +68,15 @@ for f in central_command_S.sql.gz litellm_S.sql.gz n8n_S.sql.gz keys_S.env env_S
   echo dump > "$CC_BACKUP_DIR/$f"
 done
 exit 0
-'''
+"""
 
 
 def _git(tree: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(tree), "-c", "user.name=t", "-c", "user.email=t@example.com",
-                    *args], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(tree), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        check=True,
+        capture_output=True,
+    )
 
 
 @pytest.fixture
@@ -117,10 +120,19 @@ def _run(tree: Path, *args: str, **stub_env: str):
     log = tree.parent / "calls.log"
     log.write_text("")
     env = dict(os.environ)
-    env.update(PATH=f"{tree.parent / 'stubs'}{os.pathsep}{env['PATH']}", STUB_LOG=str(log),
-               CC_BACKUP_DIR=str(tree.parent / "backups"), **stub_env)
-    r = subprocess.run(["bash", str(tree / "deploy" / "k3s" / "setup.sh"), "reset", *args],
-                       env=env, capture_output=True, text=True, timeout=120)
+    env.update(
+        PATH=f"{tree.parent / 'stubs'}{os.pathsep}{env['PATH']}",
+        STUB_LOG=str(log),
+        CC_BACKUP_DIR=str(tree.parent / "backups"),
+        **stub_env,
+    )
+    r = subprocess.run(
+        ["bash", str(tree / "deploy" / "k3s" / "setup.sh"), "reset", *args],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
     return r, [c for c in log.read_text().splitlines() if c]
 
 
@@ -148,21 +160,26 @@ def test_a_bare_reset_changes_nothing_and_stops_for_the_operator(tree: Path):
 def test_a_confirmed_reset_backs_up_then_wipes_exactly_the_spine_and_the_graph(tree: Path):
     r, calls = _run(tree, "--confirm-wipe")
     assert "FAIL " not in r.stdout, r.stdout + r.stderr
-    assert r.returncode in (0, 2), r.stdout + r.stderr   # 2: a host drop-in WARN
+    assert r.returncode in (0, 2), r.stdout + r.stderr  # 2: a host drop-in WARN
 
     backup_at = next(i for i, c in enumerate(calls) if c.startswith("backup "))
-    first_change = next(i for i, c in enumerate(calls)
-                        if " delete " in c or " scale " in c or "systemctl stop" in c)
+    first_change = next(
+        i for i, c in enumerate(calls) if " delete " in c or " scale " in c or "systemctl stop" in c
+    )
     assert backup_at < first_change, "the backup must finish before anything is stopped or deleted"
     assert f"REPO={tree}" in calls[backup_at]
 
     # The empty spine loads schema.sql from a ConfigMap, once: it is rebuilt
     # from the checkout before the volume goes.
     assert calls.index("make-secrets") < next(
-        i for i, c in enumerate(calls) if " delete pvc cc-pgdata" in c)
+        i for i, c in enumerate(calls) if " delete pvc cc-pgdata" in c
+    )
 
-    deleted = sorted(c.split(" delete pvc ")[1].split()[0] for c in calls
-                     if c.startswith("k3s ") and " delete pvc " in c)
+    deleted = sorted(
+        c.split(" delete pvc ")[1].split()[0]
+        for c in calls
+        if c.startswith("k3s ") and " delete pvc " in c
+    )
     assert deleted == ["cc-neo4j-data", "cc-pgdata"]
     for c in calls:
         if c.startswith("k3s "):
@@ -174,8 +191,15 @@ def test_a_confirmed_reset_backs_up_then_wipes_exactly_the_spine_and_the_graph(t
 
     keep = _keep_dir(tree)
     assert sorted(p.name for p in keep.iterdir() if p.is_file()) == [
-        "central_command_S.sql.gz", "env-app_S.env", "env-web_S.env", "env_S.env", "keys_S.env",
-        "litellm_S.sql.gz", "n8n_S.sql.gz", "neo4j_S.dump.gz"]
+        "central_command_S.sql.gz",
+        "env-app_S.env",
+        "env-web_S.env",
+        "env_S.env",
+        "keys_S.env",
+        "litellm_S.sql.gz",
+        "n8n_S.sql.gz",
+        "neo4j_S.dump.gz",
+    ]
     # The app's answers moved beside the dumps; the containers' env stayed.
     assert not (tree / ".env").exists() and not (tree / "web" / ".env").exists()
     assert "jira.example.com" in (keep / "env" / "root.env").read_text()
@@ -194,7 +218,9 @@ def test_a_store_a_previous_run_left_at_zero_is_started_before_the_backup(tree: 
     assert "FAIL " not in r.stdout, r.stdout + r.stderr
     backup_at = next(i for i, c in enumerate(calls) if c.startswith("backup "))
     resumed = [i for i, c in enumerate(calls) if "scale deploy/cc-postgres --replicas=1" in c]
-    assert resumed and resumed[0] < backup_at, "the stopped store must be running before backup.sh dumps it"
+    assert resumed and resumed[0] < backup_at, (
+        "the stopped store must be running before backup.sh dumps it"
+    )
     assert "PASS reset-resume-cc-postgres:" in r.stdout
 
 
@@ -210,7 +236,9 @@ def test_dead_pods_are_removed_before_the_claim_is_deleted(tree: Path):
         assert drained < dead < wiped, (dep, calls)
 
 
-def test_a_claim_a_previous_run_left_half_deleted_is_finished_and_recreated_before_the_backup(tree: Path):
+def test_a_claim_a_previous_run_left_half_deleted_is_finished_and_recreated_before_the_backup(
+    tree: Path,
+):
     r, calls = _run(tree, "--confirm-wipe", STUB_PVC_DELETING="2026-10-07T19:20:00Z")
     assert "FAIL " not in r.stdout, r.stdout + r.stderr
     backup_at = next(i for i, c in enumerate(calls) if c.startswith("backup "))

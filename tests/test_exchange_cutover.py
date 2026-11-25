@@ -40,13 +40,12 @@ from central_command.runtime import packs
 
 @pytest.fixture
 def on_exchange(monkeypatch):
-    monkeypatch.setattr(settings, "exchange_url",
-                        "https://mail.corp.example/ews/exchange.asmx", raising=False)
-    monkeypatch.setattr(settings, "exchange_username", "operator@corp.example",
-                        raising=False)
+    monkeypatch.setattr(
+        settings, "exchange_url", "https://mail.corp.example/ews/exchange.asmx", raising=False
+    )
+    monkeypatch.setattr(settings, "exchange_username", "operator@corp.example", raising=False)
     monkeypatch.setattr(settings, "exchange_password", "secret", raising=False)
-    monkeypatch.setattr(settings, "exchange_email", "operator@corp.example",
-                        raising=False)
+    monkeypatch.setattr(settings, "exchange_email", "operator@corp.example", raising=False)
     assert exchange.configured() is True
 
 
@@ -57,11 +56,13 @@ def on_gmail(monkeypatch):
     monkeypatch.setattr(settings, "exchange_password", "", raising=False)
     # The n8n path is "configured" only with url AND token (story 11.10 / R30);
     # the suite's guard holds both blank, so this fixture sets both.
-    monkeypatch.setattr(settings, "email_facade_url",
-                        "http://n8n.example.com:5678/webhook/cc-email-facade")
+    monkeypatch.setattr(
+        settings, "email_facade_url", "http://n8n.example.com:5678/webhook/cc-email-facade"
+    )
     monkeypatch.setattr(settings, "email_facade_token", "test-token")
-    monkeypatch.setattr(settings, "calendar_facade_url",
-                        "http://n8n.example.com:5678/webhook/cc-calendar-facade")
+    monkeypatch.setattr(
+        settings, "calendar_facade_url", "http://n8n.example.com:5678/webhook/cc-calendar-facade"
+    )
     monkeypatch.setattr(settings, "calendar_facade_token", "test-token")
     assert exchange.configured() is False
 
@@ -81,14 +82,21 @@ def no_http(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name,args,expected", [
-    ("list_refs", ("in:inbox",), [{"uuid": "AAA=", "conversation_id": "c",
-                                   "message_id": "<a@corp.example>"}]),
-    ("get_message", ("AAA=",), {"uuid": "AAA=", "subject": "Budget"}),
-    ("report_spam", ("AAA=",), {"ok": True, "folder": "Junk Email"}),
-])
-async def test_the_email_facade_routes_to_exchange(on_exchange, no_http, monkeypatch,
-                                                   name, args, expected):
+@pytest.mark.parametrize(
+    "name,args,expected",
+    [
+        (
+            "list_refs",
+            ("in:inbox",),
+            [{"uuid": "AAA=", "conversation_id": "c", "message_id": "<a@corp.example>"}],
+        ),
+        ("get_message", ("AAA=",), {"uuid": "AAA=", "subject": "Budget"}),
+        ("report_spam", ("AAA=",), {"ok": True, "folder": "Junk Email"}),
+    ],
+)
+async def test_the_email_facade_routes_to_exchange(
+    on_exchange, no_http, monkeypatch, name, args, expected
+):
     async def fake(*a, **k):
         assert a == args
         return expected
@@ -98,19 +106,24 @@ async def test_the_email_facade_routes_to_exchange(on_exchange, no_http, monkeyp
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name,args", [
-    ("list_refs", ("in:inbox",)),
-    ("get_message", ("AAA=",)),
-    ("report_spam", ("AAA=",)),
-    ("send", (["a@x.example"], "s", "b")),
-    ("move", ("AAA=", "Invoices")),
-    ("list_folders", ()),
-])
-async def test_an_exchange_error_becomes_an_email_facade_error(on_exchange, no_http,
-                                                              monkeypatch, name, args):
+@pytest.mark.parametrize(
+    "name,args",
+    [
+        ("list_refs", ("in:inbox",)),
+        ("get_message", ("AAA=",)),
+        ("report_spam", ("AAA=",)),
+        ("send", (["a@x.example"], "s", "b")),
+        ("move", ("AAA=", "Invoices")),
+        ("list_folders", ()),
+    ],
+)
+async def test_an_exchange_error_becomes_an_email_facade_error(
+    on_exchange, no_http, monkeypatch, name, args
+):
     """Every caller in the codebase catches `EmailFacadeError`. If an
     `ExchangeError` escaped, the feed loop, `mail_search` and the dispatcher
     would each meet an exception type they do not handle."""
+
     async def boom(*a, **k):
         raise exchange.ExchangeError("EWS said no")
 
@@ -138,6 +151,7 @@ async def test_without_exchange_the_email_facade_still_calls_n8n(on_gmail, monke
         return FakeResponse()
 
     import httpx
+
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
     refs = await email_facade.list_refs("in:inbox newer_than:1d")
@@ -159,7 +173,7 @@ async def test_send_and_move_refuse_honestly_on_gmail(on_gmail):
 
 @pytest.mark.asyncio
 async def test_list_folders_on_gmail_answers_with_labels(on_gmail):
-    """"Folders are labels here" is a real answer; an error would teach the
+    """ "Folders are labels here" is a real answer; an error would teach the
     agent that the mailbox is broken rather than differently shaped."""
     folders = await email_facade.list_folders()
     addresses = {f["path"] for f in folders}
@@ -171,8 +185,7 @@ async def test_list_folders_on_gmail_answers_with_labels(on_gmail):
 
 
 @pytest.mark.asyncio
-async def test_the_calendar_facade_routes_every_mode_to_exchange(on_exchange, no_http,
-                                                                 monkeypatch):
+async def test_the_calendar_facade_routes_every_mode_to_exchange(on_exchange, no_http, monkeypatch):
     calls = []
 
     async def fake_list(time_min, time_max, calendar_id="primary"):
@@ -202,21 +215,27 @@ async def test_the_calendar_facade_routes_every_mode_to_exchange(on_exchange, no
 
     monkeypatch.setattr(exchange, "get_event", fake_get)
 
-    assert await calendar_facade.list_events("2026-09-25T00:00:00Z",
-                                             "2026-09-26T00:00:00Z") == {
-        "events": [], "truncated": False}
-    assert await calendar_facade.create_event("Standup", "2026-09-25T09:00:00Z",
-                                              "2026-09-25T09:15:00Z") == {"event_id": "EV1="}
+    assert await calendar_facade.list_events("2026-09-25T00:00:00Z", "2026-09-26T00:00:00Z") == {
+        "events": [],
+        "truncated": False,
+    }
+    assert await calendar_facade.create_event(
+        "Standup", "2026-09-25T09:00:00Z", "2026-09-25T09:15:00Z"
+    ) == {"event_id": "EV1="}
     assert await calendar_facade.update_event("EV1=", title="Standup!") == {"event_id": "EV1="}
     assert await calendar_facade.delete_event("EV1=") == "EV1="
     assert await calendar_facade.get_event("EV1=") == {"event_id": "EV1="}
-    assert [c[0] for c in calls] == ["list_events", "create_event", "update_event",
-                                     "delete_event", "get_event"]
+    assert [c[0] for c in calls] == [
+        "list_events",
+        "create_event",
+        "update_event",
+        "delete_event",
+        "get_event",
+    ]
 
 
 @pytest.mark.asyncio
-async def test_an_exchange_error_becomes_a_calendar_facade_error(on_exchange, no_http,
-                                                                 monkeypatch):
+async def test_an_exchange_error_becomes_a_calendar_facade_error(on_exchange, no_http, monkeypatch):
     async def boom(*a, **k):
         raise exchange.ExchangeError("EWS said no")
 
@@ -242,12 +261,22 @@ def _exchange_day(monkeypatch, events, truncated=False):
 
 @pytest.mark.asyncio
 async def test_an_exchange_only_site_is_configured_and_its_day_comes_from_exchange(
-    on_exchange, no_http, monkeypatch,
+    on_exchange,
+    no_http,
+    monkeypatch,
 ):
     from central_command.reports import ea_calendar
-    seen = _exchange_day(monkeypatch, [{"start": "2026-09-25T09:00:00+00:00",
-                                        "end": "2026-09-25T10:00:00+00:00",
-                                        "summary": "Standup"}])
+
+    seen = _exchange_day(
+        monkeypatch,
+        [
+            {
+                "start": "2026-09-25T09:00:00+00:00",
+                "end": "2026-09-25T10:00:00+00:00",
+                "summary": "Standup",
+            }
+        ],
+    )
     assert calendar_facade.configured() is False
     assert calendar_facade.provider_configured() is True
 
@@ -260,14 +289,15 @@ async def test_an_exchange_only_site_is_configured_and_its_day_comes_from_exchan
 @pytest.mark.asyncio
 async def test_an_exchange_window_past_its_cap_is_unknown(on_exchange, no_http, monkeypatch):
     from central_command.reports import ea_calendar
+
     _exchange_day(monkeypatch, [], truncated=True)
-    assert await ea_calendar.day(1) == {"available": False,
-                                        "reason": ea_calendar.TRUNCATED_REASON}
+    assert await ea_calendar.day(1) == {"available": False, "reason": ea_calendar.TRUNCATED_REASON}
 
 
 @pytest.mark.asyncio
 async def test_an_exchange_refusal_is_unknown(on_exchange, no_http, monkeypatch):
     from central_command.reports import ea_calendar
+
     _exchange_day(monkeypatch, [])
 
     async def refused(*a, **k):
@@ -295,6 +325,7 @@ async def test_without_exchange_the_calendar_facade_still_calls_n8n(on_gmail, mo
         return FakeResponse()
 
     import httpx
+
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
     out = await calendar_facade.list_events("2026-09-25T00:00:00Z", "2026-09-26T00:00:00Z")
@@ -311,8 +342,14 @@ GMAIL_ONLY_TOOLS = {"propose_unsubscribe"}
 EXCHANGE_ONLY_CAPS = {"mail.send", "mail.move"}
 GMAIL_ONLY_CAPS = {"mail.unsubscribe"}
 
-MAIL_PACKS = ("mail-read", "mail-spam-propose", "mail-unsubscribe-propose",
-              "mail-send-propose", "mail-file-propose", "mail-rule-propose")
+MAIL_PACKS = (
+    "mail-read",
+    "mail-spam-propose",
+    "mail-unsubscribe-propose",
+    "mail-send-propose",
+    "mail-file-propose",
+    "mail-rule-propose",
+)
 
 
 def _offered_everything(pack_names):
@@ -340,18 +377,17 @@ def test_exchange_withholds_the_gmail_only_members(on_exchange):
 
 def test_everything_else_is_offered_on_both_providers(on_gmail, monkeypatch):
     gmail_tools, gmail_caps = _offered_everything(MAIL_PACKS)
-    monkeypatch.setattr(settings, "exchange_url", "https://mail/ews/exchange.asmx",
-                        raising=False)
-    monkeypatch.setattr(settings, "exchange_username", "operator@corp.example",
-                        raising=False)
+    monkeypatch.setattr(settings, "exchange_url", "https://mail/ews/exchange.asmx", raising=False)
+    monkeypatch.setattr(settings, "exchange_username", "operator@corp.example", raising=False)
     monkeypatch.setattr(settings, "exchange_password", "secret", raising=False)
     exchange_tools, exchange_caps = _offered_everything(MAIL_PACKS)
     assert gmail_tools - GMAIL_ONLY_TOOLS == exchange_tools - EXCHANGE_ONLY_TOOLS
     assert gmail_caps - GMAIL_ONLY_CAPS == exchange_caps - EXCHANGE_ONLY_CAPS
 
 
-@pytest.mark.parametrize("fixture,withheld", [("on_gmail", EXCHANGE_ONLY_CAPS),
-                                              ("on_exchange", GMAIL_ONLY_CAPS)])
+@pytest.mark.parametrize(
+    "fixture,withheld", [("on_gmail", EXCHANGE_ONLY_CAPS), ("on_exchange", GMAIL_ONLY_CAPS)]
+)
 def test_granted_capability_names_agrees_with_offered(request, fixture, withheld):
     """The toolset, the generated charter and the gateway's policy check all go
     through `_offered` — if `granted_capability_names` disagreed, an agent
@@ -381,24 +417,33 @@ def test_a_supplied_message_id_wins_over_the_synthesised_form():
     supplied = {"uuid": "AAA=", "conversation_id": "c", "message_id": "<a@corp.example>"}
     assert ledger.ref_message_id(supplied) == "<a@corp.example>"
     # Kept EXACTLY — it is an RFC 822 id, not a template to fill in.
-    assert ledger._provider_parsed({**supplied, "subject": "s", "from": "f",
-                                    "body_text": "", "body_html": "",
-                                    "snippet": ""})["message_id"] == "<a@corp.example>"
+    assert (
+        ledger._provider_parsed(
+            {
+                **supplied,
+                "subject": "s",
+                "from": "f",
+                "body_text": "",
+                "body_html": "",
+                "snippet": "",
+            }
+        )["message_id"]
+        == "<a@corp.example>"
+    )
 
 
 def test_without_one_the_gmail_form_is_synthesised():
-    assert ledger.ref_message_id({"uuid": "gmail-1"}) == \
-        "<gmail-msg-gmail-1@central_command.feed>"
-    assert ledger.ref_message_id({"uuid": "gmail-1", "message_id": ""}) == \
-        "<gmail-msg-gmail-1@central_command.feed>"
+    assert ledger.ref_message_id({"uuid": "gmail-1"}) == "<gmail-msg-gmail-1@central_command.feed>"
+    assert (
+        ledger.ref_message_id({"uuid": "gmail-1", "message_id": ""})
+        == "<gmail-msg-gmail-1@central_command.feed>"
+    )
 
 
 def test_provider_source_follows_the_configured_mailbox(on_gmail, monkeypatch):
     assert ledger.provider_source() == "gmail"
-    monkeypatch.setattr(settings, "exchange_url", "https://mail/ews/exchange.asmx",
-                        raising=False)
-    monkeypatch.setattr(settings, "exchange_username", "operator@corp.example",
-                        raising=False)
+    monkeypatch.setattr(settings, "exchange_url", "https://mail/ews/exchange.asmx", raising=False)
+    monkeypatch.setattr(settings, "exchange_username", "operator@corp.example", raising=False)
     monkeypatch.setattr(settings, "exchange_password", "secret", raising=False)
     assert ledger.provider_source() == "exchange"
 
@@ -406,8 +451,10 @@ def test_provider_source_follows_the_configured_mailbox(on_gmail, monkeypatch):
 def test_the_thread_id_shape_is_unchanged():
     """Provider-neutral in NAMING only: changing the shape would orphan every
     existing thread lock."""
-    assert ledger.provider_thread_id({"conversation_id": "c1"}) == \
-        "<gmail-thread-c1@central_command.feed>"
+    assert (
+        ledger.provider_thread_id({"conversation_id": "c1"})
+        == "<gmail-thread-c1@central_command.feed>"
+    )
 
 
 # --- parity for the two new capabilities --------------------------------------
@@ -438,9 +485,15 @@ def test_the_arg_specs_require_what_the_handlers_subscript():
 def test_the_registry_routes_mention_the_exchange_seam():
     """One clause each, so the operator reading a decision knows which system
     the approval actually reaches."""
-    for name in ("calendar.create_event", "calendar.update_event",
-                 "calendar.delete_event", "calendar.list_events",
-                 "mail.report_spam", "email.list_refs", "email.get_message"):
+    for name in (
+        "calendar.create_event",
+        "calendar.update_event",
+        "calendar.delete_event",
+        "calendar.list_events",
+        "mail.report_spam",
+        "email.list_refs",
+        "email.get_message",
+    ):
         row = next(c for c in REGISTRY if c.name == name)
         assert "exchange" in row.route.lower(), name
 

@@ -81,8 +81,7 @@ def _write_trigger(force: bool) -> None:
     global _triggered_at, _trigger_error
     path = _trigger_path()
     tmp = f"{path}.tmp"
-    body = {"target": hold.target, "force": force,
-            "requested_at": datetime.now(UTC).isoformat()}
+    body = {"target": hold.target, "force": force, "requested_at": datetime.now(UTC).isoformat()}
     if hold.kind == "restart":
         body["action"] = "restart"  # an update's trigger never carries the key
     try:
@@ -129,9 +128,13 @@ async def _poll() -> None:
         try:
             await repo.request_stop_for_update()
             running = await repo.running_sessions_for_hold()
-            if not running and not os.path.exists(_trigger_path()) and (
-                _triggered_at is None
-                or (datetime.now(UTC) - _triggered_at).total_seconds() > _RETRIGGER_S
+            if (
+                not running
+                and not os.path.exists(_trigger_path())
+                and (
+                    _triggered_at is None
+                    or (datetime.now(UTC) - _triggered_at).total_seconds() > _RETRIGGER_S
+                )
             ):
                 _write_trigger(force=False)
                 await events.emit(f"{hold.kind}.triggered", payload=_payload(), actor="system")
@@ -150,7 +153,8 @@ def _refuse_other_kind(kind: str) -> None:
         raise HTTPException(422, f"unknown hold kind {kind!r}")
     if hold.active and hold.kind != kind:
         raise HTTPException(
-            409, f"a {hold.kind} hold is engaged — finish or cancel it before the {kind}")
+            409, f"a {hold.kind} hold is engaged — finish or cancel it before the {kind}"
+        )
 
 
 async def status() -> dict:
@@ -173,7 +177,9 @@ async def engage(target: str, kind: str = "update") -> dict:
         if kind == "restart" and not os.path.isdir(os.path.dirname(_trigger_path())):
             # No updater seam (the single-node profile has no root unit): a
             # trigger nothing consumes would pause the team for nothing.
-            raise HTTPException(501, "restart is only available where the root updater is installed")
+            raise HTTPException(
+                501, "restart is only available where the root updater is installed"
+            )
         hold.active, hold.kind = True, kind
         hold.target, hold.since = target, datetime.now(UTC)
         _triggered_at = _trigger_error = None
@@ -205,9 +211,11 @@ async def update_now(kind: str = "update") -> dict:
     if _trigger_error:
         raise HTTPException(503, _trigger_error)
     running = await repo.running_sessions_for_hold()
-    await events.emit(f"{hold.kind}.triggered",
-                      payload=_payload(force=True, killed=[r["id"] for r in running]),
-                      actor="operator")
+    await events.emit(
+        f"{hold.kind}.triggered",
+        payload=_payload(force=True, killed=[r["id"] for r in running]),
+        actor="operator",
+    )
     return await status()
 
 
@@ -220,7 +228,8 @@ async def resume_held_sessions() -> list[str]:
     ids = await repo.sessions_stopped_for_update()
     for sid in ids:
         orchestration._spawn_detached(
-            "session", sid, lambda sid=sid: orchestration.resume_stopped_session(sid))
+            "session", sid, lambda sid=sid: orchestration.resume_stopped_session(sid)
+        )
     if ids:
         log.info("update hold: resuming %d session(s) parked for the update", len(ids))
     return ids

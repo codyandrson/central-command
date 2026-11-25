@@ -18,17 +18,23 @@ from central_command.runtime.deps import TriageDeps
 # Shaped like the façade's `message` mode after the 2026-09-12 edit; the
 # header values are modelled on real Gmail-delivered mail.
 ELIGIBLE = {
-    "uuid": "u1", "from": "News <news@shop.example>", "subject": "Weekly",
+    "uuid": "u1",
+    "from": "News <news@shop.example>",
+    "subject": "Weekly",
     "list_unsubscribe": "<mailto:unsub@shop.example>, <https://shop.example/u/abc>",
     "list_unsubscribe_post": "List-Unsubscribe=One-Click",
     "authentication_results": [
-        ("i=1; mx.google.com;       dkim=pass header.i=@shop.example header.s=s1 "
-         "header.b=AbCd;       spf=pass (google.com: domain designates 1.2.3.4)"),
+        (
+            "i=1; mx.google.com;       dkim=pass header.i=@shop.example header.s=s1 "
+            "header.b=AbCd;       spf=pass (google.com: domain designates 1.2.3.4)"
+        ),
     ],
     "dkim_signatures": [
-        ("v=1; a=rsa-sha256; c=relaxed/relaxed; d=shop.example; s=s1;        "
-         "h=list-unsubscribe-post:list-unsubscribe:date:subject:to:from;        "
-         "bh=x;        b=AbCdEfGh\n         IjKl"),
+        (
+            "v=1; a=rsa-sha256; c=relaxed/relaxed; d=shop.example; s=s1;        "
+            "h=list-unsubscribe-post:list-unsubscribe:date:subject:to:from;        "
+            "bh=x;        b=AbCdEfGh\n         IjKl"
+        ),
     ],
 }
 # The verdict's header.b= is the prefix of the covering signature's b= — the
@@ -42,33 +48,68 @@ class _Ctx:
 
 def test_eligibility_is_decided_from_the_headers():
     assert one_click_unsubscribe(ELIGIBLE) == (
-        "https://shop.example/u/abc", "eligible (signed by shop.example)")
+        "https://shop.example/u/abc",
+        "eligible (signed by shop.example)",
+    )
 
 
-@pytest.mark.parametrize("change,why", [
-    ({"list_unsubscribe": "<mailto:unsub@shop.example>"}, "mailto only"),
-    ({"list_unsubscribe_post": ""}, "one-click"),
-    ({"authentication_results": ["mx.google.com; dkim=fail header.i=@shop.example"]},
-     "DKIM did not pass"),
-    # A verdict under any other authserv-id is the sender's to forge.
-    ({"authentication_results": ["relay.attacker.example; dkim=pass header.i=@shop.example"]},
-     "no authentication verdict"),
-    # So is one claiming mx.google.com that sits BELOW Gmail's own (Gmail
-    # prepends; only the first counts).
-    ({"authentication_results": ["mx.google.com; dkim=fail header.i=@shop.example",
-                                 "mx.google.com; dkim=pass header.i=@shop.example header.b=AbCd"]},
-     "DKIM did not pass"),
-    ({"dkim_signatures": ["v=1; d=shop.example; h=from:subject:date; b=AbCdEfGh"]}, "covers"),
-    # A covering signature that is NOT the one Gmail verified (b= mismatch).
-    ({"dkim_signatures": [("v=1; d=attacker.example; "
-                          "h=list-unsubscribe:list-unsubscribe-post:from; b=ZZZZ")]}, "covers"),
-    ({"list_unsubscribe": "<https://127.0.0.1/u/abc>"}, "not a public hostname"),
-    ({"list_unsubscribe": "<https://localhost/u/abc>"}, "not a public hostname"),
-    ({"list_unsubscribe": "<https://[::1]/u/abc>"}, "not a public hostname"),
-    # A façade predating the edit sends none of the fields: not eligible, never a crash.
-    ({"list_unsubscribe": None, "list_unsubscribe_post": None,
-      "authentication_results": None, "dkim_signatures": None}, "no https"),
-])
+@pytest.mark.parametrize(
+    "change,why",
+    [
+        ({"list_unsubscribe": "<mailto:unsub@shop.example>"}, "mailto only"),
+        ({"list_unsubscribe_post": ""}, "one-click"),
+        (
+            {"authentication_results": ["mx.google.com; dkim=fail header.i=@shop.example"]},
+            "DKIM did not pass",
+        ),
+        # A verdict under any other authserv-id is the sender's to forge.
+        (
+            {
+                "authentication_results": [
+                    "relay.attacker.example; dkim=pass header.i=@shop.example"
+                ]
+            },
+            "no authentication verdict",
+        ),
+        # So is one claiming mx.google.com that sits BELOW Gmail's own (Gmail
+        # prepends; only the first counts).
+        (
+            {
+                "authentication_results": [
+                    "mx.google.com; dkim=fail header.i=@shop.example",
+                    "mx.google.com; dkim=pass header.i=@shop.example header.b=AbCd",
+                ]
+            },
+            "DKIM did not pass",
+        ),
+        ({"dkim_signatures": ["v=1; d=shop.example; h=from:subject:date; b=AbCdEfGh"]}, "covers"),
+        # A covering signature that is NOT the one Gmail verified (b= mismatch).
+        (
+            {
+                "dkim_signatures": [
+                    (
+                        "v=1; d=attacker.example; "
+                        "h=list-unsubscribe:list-unsubscribe-post:from; b=ZZZZ"
+                    )
+                ]
+            },
+            "covers",
+        ),
+        ({"list_unsubscribe": "<https://127.0.0.1/u/abc>"}, "not a public hostname"),
+        ({"list_unsubscribe": "<https://localhost/u/abc>"}, "not a public hostname"),
+        ({"list_unsubscribe": "<https://[::1]/u/abc>"}, "not a public hostname"),
+        # A façade predating the edit sends none of the fields: not eligible, never a crash.
+        (
+            {
+                "list_unsubscribe": None,
+                "list_unsubscribe_post": None,
+                "authentication_results": None,
+                "dkim_signatures": None,
+            },
+            "no https",
+        ),
+    ],
+)
 def test_anything_short_of_rfc8058_is_ineligible(change, why):
     url, reason = one_click_unsubscribe({**ELIGIBLE, **change})
     assert url is None and why in reason
@@ -80,8 +121,12 @@ async def test_propose_report_spam_pins_the_item_the_run_is_handling(monkeypatch
 
     async def item(ref):
         assert ref == "wi_1"
-        return {"id": "wi_1", "provider_uuid": "u1",
-                "sender": "Prize Desk <x@spam.example>", "subject": "You won"}
+        return {
+            "id": "wi_1",
+            "provider_uuid": "u1",
+            "sender": "Prize Desk <x@spam.example>",
+            "subject": "You won",
+        }
 
     monkeypatch.setattr(repo, "mail_item", item)
     with pytest.raises(CallDeferred) as exc:
@@ -110,8 +155,12 @@ async def test_propose_unsubscribe_pins_the_url_it_read(monkeypatch):
     from central_command.db import repo
 
     async def item(ref):
-        return {"id": "wi_1", "provider_uuid": "u1",
-                "sender": "News <news@shop.example>", "subject": "Weekly"}
+        return {
+            "id": "wi_1",
+            "provider_uuid": "u1",
+            "sender": "News <news@shop.example>",
+            "subject": "Weekly",
+        }
 
     async def get_message(uuid):
         assert uuid == "u1"
@@ -145,6 +194,7 @@ async def test_propose_unsubscribe_proposes_nothing_without_one_click(monkeypatc
 
 class _Client:
     """Stands in for httpx.AsyncClient: records the POST, answers `status`."""
+
     status = 200
     posted: ClassVar[list] = []
     kwargs: ClassVar[dict] = {}
@@ -163,6 +213,7 @@ class _Client:
 
         class R:
             status_code = _Client.status
+
         return R()
 
 
@@ -187,7 +238,9 @@ class _Loop:
         return [(None, None, None, "", (a, port)) for a in self.addrs]
 
 
-@pytest.mark.parametrize("addr", ["127.0.0.1", "10.0.0.5", "100.64.0.42", "169.254.1.1", "::1", "fd00::1"])
+@pytest.mark.parametrize(
+    "addr", ["127.0.0.1", "10.0.0.5", "100.64.0.42", "169.254.1.1", "::1", "fd00::1"]
+)
 @pytest.mark.asyncio
 async def test_executor_refuses_a_host_that_resolves_inward(monkeypatch, addr):
     class A:
@@ -220,7 +273,7 @@ async def test_executor_posts_a_bare_one_click_to_the_messages_own_url(monkeypat
     args = {"provider_uuid": "u1", "url": "https://shop.example/u/abc", "sender": "News"}
     out = await executor._mail_unsubscribe(args, "operator", "inbox-triage")
     assert "HTTP 200" in out
-    (url, kw), = outbound.posted
+    ((url, kw),) = outbound.posted
     assert url == "https://shop.example/u/abc"
     assert kw["content"] == b"List-Unsubscribe=One-Click"
     assert outbound.kwargs["follow_redirects"] is False
@@ -259,7 +312,8 @@ async def test_executor_treats_a_redirect_as_failure(monkeypatch, outbound):
     outbound.status = 302
     with pytest.raises(executor.ExecutorError):
         await executor._mail_unsubscribe(
-            {"provider_uuid": "u1", "url": "https://shop.example/u/abc"}, "operator", None)
+            {"provider_uuid": "u1", "url": "https://shop.example/u/abc"}, "operator", None
+        )
 
 
 @pytest.mark.asyncio
@@ -272,5 +326,6 @@ async def test_executor_reports_spam_through_the_facade(monkeypatch):
 
     monkeypatch.setattr(email_facade, "report_spam", report_spam)
     out = await executor._mail_report_spam(
-        {"provider_uuid": "u1", "sender": "S", "subject": "T"}, "operator", "inbox-triage")
+        {"provider_uuid": "u1", "sender": "S", "subject": "T"}, "operator", "inbox-triage"
+    )
     assert calls == ["u1"] and "SPAM" in out

@@ -104,9 +104,7 @@ def verified_evidence(evidence, source_text: str) -> list[dict]:
     for e in evidence:
         d = e.model_dump() if hasattr(e, "model_dump") else dict(e)
         if d.get("kind") == "document":
-            d["claim_matches_source"] = claim_supported(
-                d.get("claim") or "", source_text
-            )
+            d["claim_matches_source"] = claim_supported(d.get("claim") or "", source_text)
         out.append(d)
     return out
 
@@ -159,8 +157,12 @@ async def run_document(
     )
 
     result = await _run_live(
-        agent, prompt, model=resolved, deps=deps,
-        agent_id=AGENT_ID, session_id=session_id,
+        agent,
+        prompt,
+        model=resolved,
+        deps=deps,
+        agent_id=AGENT_ID,
+        session_id=session_id,
     )
     tokens = _total_tokens(result)
 
@@ -171,15 +173,22 @@ async def run_document(
         from central_command.runtime.converse import land_session
 
         await land_session(session_id, agent_id=AGENT_ID)
-        return {"deferred": False, "output": str(result.output), "tokens": tokens,
-                "session_id": session_id}
+        return {
+            "deferred": False,
+            "output": str(result.output),
+            "tokens": tokens,
+            "session_id": session_id,
+        }
 
     kind = classify_deferred(call)
     if kind == "ask":
         from central_command.runtime.questions import park_question
 
         asked = await park_question(
-            session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+            session_id=session_id,
+            agent_id=AGENT_ID,
+            result=result,
+            call=call,
         )
         return {**asked, "tokens": tokens}
     if kind != "proposal":
@@ -187,15 +196,19 @@ async def run_document(
 
         await land_session(session_id, agent_id=AGENT_ID)
         return {
-            "deferred": False, "tokens": tokens, "session_id": session_id,
+            "deferred": False,
+            "tokens": tokens,
+            "session_id": session_id,
             "output": (
-                f"(reached for `{getattr(call, 'tool_name', '?')}`, which the "
-                "steward cannot drive)"
+                f"(reached for `{getattr(call, 'tool_name', '?')}`, which the steward cannot drive)"
             ),
         }
 
     parked = await park_proposal(
-        session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+        session_id=session_id,
+        agent_id=AGENT_ID,
+        result=result,
+        call=call,
         evidence=verified_evidence(deferred_proposal(result, call).evidence, source_text),
         context={"kind": "document", **({"item_id": item_id} if item_id else {})},
     )

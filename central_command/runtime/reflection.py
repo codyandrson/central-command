@@ -115,9 +115,7 @@ class Reflection(BaseModel):
     skill_correction: SkillCorrection | None = None
 
 
-def bound_episodes(
-    episodes: list[ReflectedEpisode], limit: int
-) -> list[ReflectedEpisode]:
+def bound_episodes(episodes: list[ReflectedEpisode], limit: int) -> list[ReflectedEpisode]:
     """The per-session bound N, with the overflow NOTED rather than silently
     dropped: what did not fit is recorded on the last kept episode's
     source_description, so the operator sees that the bound bit."""
@@ -290,9 +288,9 @@ def _notes_section(max_notes: int) -> str:
         "of the task (how the operator wants your work shaped, a standing way you "
         "do something); never task progress, anything stale within a week, a "
         "fact about the world, or a procedure (that is a skill). Write it as a "
-        "declarative fact (\"The operator wants Jira summaries under 80 "
-        "characters\"), never an order to yourself (\"Always keep summaries "
-        "short\"). It is shown only to you, after the operator approves it. An "
+        'declarative fact ("The operator wants Jira summaries under 80 '
+        'characters"), never an order to yourself ("Always keep summaries '
+        'short"). It is shown only to you, after the operator approves it. An '
         "operating rule about how you work belongs HERE, not in a 'private' "
         "episode.\n"
         "  text — the fact, one or two sentences.\n"
@@ -332,8 +330,11 @@ LESSON_ROUTING = (
 
 
 def _distill_prompt(
-    charter: str, transcript: str, skill_texts: dict[str, str] | None = None,
-    lessons: bool = True, max_notes: int = 0,
+    charter: str,
+    transcript: str,
+    skill_texts: dict[str, str] | None = None,
+    lessons: bool = True,
+    max_notes: int = 0,
 ) -> str:
     """`lessons=False` is an agent that cannot propose episodes (no
     graph-propose): it is asked only for the skill correction (and a note,
@@ -346,7 +347,8 @@ def _distill_prompt(
             "records what it settled), so return an empty `episodes` list and "
             "no nomination; the "
             "only thing you may return is the skill correction described below"
-            + (" and a standing note" if max_notes > 0 else "") + "."
+            + (" and a standing note" if max_notes > 0 else "")
+            + "."
             + _correction_section(skill_texts or {})
             + _notes_section(max_notes)
             + f"\n\nYOUR CHARTER:\n---\n{charter}\n---\n\n"
@@ -357,8 +359,8 @@ def _distill_prompt(
         "few DURABLE lessons worth keeping — things that would make you or the "
         "team better next time. Most sessions teach nothing durable; an empty "
         "list is the right answer then, and padding is worse than silence.\n\n"
-        + LESSON_ROUTING +
-        "For each lesson:\n"
+        + LESSON_ROUTING
+        + "For each lesson:\n"
         "  episode_body — a DISTILLED claim of 1-3 sentences, self-contained, "
         "about the thing itself, naming the people, things and dates it "
         "depends on. Never pasted source text.\n"
@@ -374,8 +376,8 @@ def _distill_prompt(
         "about how you worked, with `quote` an EXACT verbatim span copied "
         "character for character out of the transcript, and `source_session_id` "
         "the id of this session. The quote is re-checked mechanically; a "
-        "reworded one is flagged. \"I was right to do X\" is as valid as \"I "
-        "should stop doing Y\". No nomination is fine."
+        'reworded one is flagged. "I was right to do X" is as valid as "I '
+        'should stop doing Y". No nomination is fine.'
         + (_correction_section(skill_texts) if skill_texts else "")
         + _notes_section(max_notes)
         + "\n\n"
@@ -384,9 +386,7 @@ def _distill_prompt(
     )
 
 
-def _episode_prompt(
-    episode: ReflectedEpisode, source_session_id: str, reference_time: str
-) -> str:
+def _episode_prompt(episode: ReflectedEpisode, source_session_id: str, reference_time: str) -> str:
     # reference_time is the SESSION's close — the source material here is the
     # transcript, and its time is a fact the code holds; the agent is told it
     # rather than asked to guess it (graph.add_episode requires the argument).
@@ -438,15 +438,21 @@ async def _propose_episode(
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
     agent = await build_hired_agent(
-        agent_id, model=model, charter=charter, packs=("graph-propose",),
-        capabilities=caps, skills_catalog=catalog,
+        agent_id,
+        model=model,
+        charter=charter,
+        packs=("graph-propose",),
+        capabilities=caps,
+        skills_catalog=catalog,
         team_section=await standing_sections(agent_id),
     )
     result = await _run_live(
-        agent, _episode_prompt(episode, source_session_id, _session_close_time()),
+        agent,
+        _episode_prompt(episode, source_session_id, _session_close_time()),
         model=model,
         deps=TriageDeps(agent_id=agent_id, session_id=session_id),
-        agent_id=agent_id, session_id=session_id,
+        agent_id=agent_id,
+        session_id=session_id,
     )
     call = extract_deferred(result)
     if call is None or classify_deferred(call) != "proposal":
@@ -471,7 +477,10 @@ async def _propose_episode(
         return f"{episode.name}: no graph.add_episode carrying scope={episode.scope!r}"
 
     await park_proposal(
-        session_id=session_id, agent_id=agent_id, result=result, call=call,
+        session_id=session_id,
+        agent_id=agent_id,
+        result=result,
+        call=call,
         context={"reflection": True, "source_session_id": source_session_id},
     )
     return None
@@ -499,8 +508,12 @@ async def _dropped(session_id: str, agent_id: str, c: SkillCorrection, reason: s
     await events.emit(
         "reflection.skill_correction_dropped",
         ref_id=session_id,
-        payload={"agent_id": agent_id, "skill_id": c.skill_id,
-                 "doc_key": c.doc_key, "reason": reason},
+        payload={
+            "agent_id": agent_id,
+            "skill_id": c.skill_id,
+            "doc_key": c.doc_key,
+            "reason": reason,
+        },
         actor="system",
     )
 
@@ -533,26 +546,38 @@ async def _propose_skill_correction(
     from central_command.runtime.skill_corrections import access_refusal, build_correction
 
     if c.skill_id not in loaded:
-        await _dropped(source_session_id, agent_id, c,
-                       f"the session did not load the skill {c.skill_id!r}")
+        await _dropped(
+            source_session_id, agent_id, c, f"the session did not load the skill {c.skill_id!r}"
+        )
         return None
     refusal = await access_refusal(agent_id, c.skill_id, c.doc_key, loaded)
     if refusal:
         await _dropped(source_session_id, agent_id, c, refusal)
         return None
     if not quote_clears_floor(c.quote):
-        await _dropped(source_session_id, agent_id, c,
-                       f"the quote is shorter than {QUOTE_MIN_WORDS} words / "
-                       f"{QUOTE_MIN_CHARS} characters")
+        await _dropped(
+            source_session_id,
+            agent_id,
+            c,
+            f"the quote is shorter than {QUOTE_MIN_WORDS} words / {QUOTE_MIN_CHARS} characters",
+        )
         return None
     if not any(claim_supported(c.quote, t) for t in corpus if t):
-        await _dropped(source_session_id, agent_id, c,
-                       "the quote is not one verbatim span of what the operator "
-                       "said or a tool returned in the session")
+        await _dropped(
+            source_session_id,
+            agent_id,
+            c,
+            "the quote is not one verbatim span of what the operator "
+            "said or a tool returned in the session",
+        )
         return None
     expected = await build_correction(
-        agent_id=agent_id, skill_id=c.skill_id, doc_key=c.doc_key,
-        find=c.find, replace=c.replace, why=c.why,
+        agent_id=agent_id,
+        skill_id=c.skill_id,
+        doc_key=c.doc_key,
+        find=c.find,
+        replace=c.replace,
+        why=c.why,
     )
     if isinstance(expected, str):
         await _dropped(source_session_id, agent_id, c, expected)
@@ -560,15 +585,23 @@ async def _propose_skill_correction(
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
     agent = await build_hired_agent(
-        agent_id, model=model, charter=charter, packs=("skill-propose",),
-        capabilities=caps, skills_catalog=catalog,
+        agent_id,
+        model=model,
+        charter=charter,
+        packs=("skill-propose",),
+        capabilities=caps,
+        skills_catalog=catalog,
         team_section=await standing_sections(agent_id),
     )
     result = await _run_live(
-        agent, _correction_prompt(c, source_session_id), model=model,
-        deps=TriageDeps(agent_id=agent_id, session_id=session_id,
-                        loaded_skills_from=source_session_id),
-        agent_id=agent_id, session_id=session_id,
+        agent,
+        _correction_prompt(c, source_session_id),
+        model=model,
+        deps=TriageDeps(
+            agent_id=agent_id, session_id=session_id, loaded_skills_from=source_session_id
+        ),
+        agent_id=agent_id,
+        session_id=session_id,
     )
     call = extract_deferred(result)
     if call is None or classify_deferred(call) != "proposal":
@@ -588,23 +621,35 @@ async def _propose_skill_correction(
     )
     if not matches:
         await land_session(session_id, agent_id=agent_id)
-        await _dropped(source_session_id, agent_id, c,
-                       "the drafted proposal is not the correction distilled at close")
+        await _dropped(
+            source_session_id,
+            agent_id,
+            c,
+            "the drafted proposal is not the correction distilled at close",
+        )
         return None
 
-    evidence = [e.model_dump() for e in proposal.evidence] + [{
-        "kind": "record",
-        "source_ref": f"session:{source_session_id}",
-        "locator": "the closed session's transcript",
-        "claim": c.quote,
-        # Checked above against the session itself — never None here.
-        "claim_matches_source": True,
-    }]
+    evidence = [e.model_dump() for e in proposal.evidence] + [
+        {
+            "kind": "record",
+            "source_ref": f"session:{source_session_id}",
+            "locator": "the closed session's transcript",
+            "claim": c.quote,
+            # Checked above against the session itself — never None here.
+            "claim_matches_source": True,
+        }
+    ]
     await park_proposal(
-        session_id=session_id, agent_id=agent_id, result=result, call=call,
+        session_id=session_id,
+        agent_id=agent_id,
+        result=result,
+        call=call,
         evidence=evidence,
-        context={"reflection": True, "source_session_id": source_session_id,
-                 "skill_correction": True},
+        context={
+            "reflection": True,
+            "source_session_id": source_session_id,
+            "skill_correction": True,
+        },
     )
     return None
 
@@ -673,7 +718,10 @@ async def _propose_note(
     from central_command.runtime.run import _run_live
 
     expected = await build_note_proposal(
-        agent_id=agent_id, scope="private", text=n.text, source_quote=n.quote,
+        agent_id=agent_id,
+        scope="private",
+        text=n.text,
+        source_quote=n.quote,
         grounding_session_id=source_session_id,
     )
     if isinstance(expected, str):
@@ -683,8 +731,12 @@ async def _propose_note(
 
     session_id = "sess_" + uuid.uuid4().hex[:12]
     agent = await build_hired_agent(
-        agent_id, model=model, charter=charter, packs=("note-propose",),
-        capabilities=caps, skills_catalog=catalog,
+        agent_id,
+        model=model,
+        charter=charter,
+        packs=("note-propose",),
+        capabilities=caps,
+        skills_catalog=catalog,
         team_section=await standing_sections(agent_id),
     )
     # The grounding is written on the drafting session's RECORD before it
@@ -696,12 +748,17 @@ async def _propose_note(
     # failed setup, and the update hold counts every RUNNING row.
     await repo.create_running_session(session_id, agent_id)
     await repo.update_session_run_state(
-        session_id, {"quote_session_id": source_session_id, "reflection_drafting": True})
+        session_id, {"quote_session_id": source_session_id, "reflection_drafting": True}
+    )
     result = await _run_live(
-        agent, _note_prompt(n), model=model,
-        deps=TriageDeps(agent_id=agent_id, session_id=session_id,
-                        quote_session_id=source_session_id),
-        agent_id=agent_id, session_id=session_id,
+        agent,
+        _note_prompt(n),
+        model=model,
+        deps=TriageDeps(
+            agent_id=agent_id, session_id=session_id, quote_session_id=source_session_id
+        ),
+        agent_id=agent_id,
+        session_id=session_id,
     )
     call = extract_deferred(result)
     if call is None or classify_deferred(call) != "proposal":
@@ -723,9 +780,11 @@ async def _propose_note(
         await land_session(session_id, agent_id=agent_id)
         return "standing note: the drafted proposal is not the note distilled at close"
     await park_proposal(
-        session_id=session_id, agent_id=agent_id, result=result, call=call,
-        context={"reflection": True, "source_session_id": source_session_id,
-                 "standing_note": True},
+        session_id=session_id,
+        agent_id=agent_id,
+        result=result,
+        call=call,
+        context={"reflection": True, "source_session_id": source_session_id, "standing_note": True},
     )
     return None
 
@@ -799,8 +858,7 @@ async def _reflect(session_id: str, agent_id: str, model, handed_back: bool = Fa
         return
     # Notes ride a distill call that is happening anyway (DL-217): they never
     # buy one, and only a note-propose holder is asked for one.
-    max_notes = (max(0, int(settings.reflection_max_notes))
-                 if "note-propose" in granted else 0)
+    max_notes = max(0, int(settings.reflection_max_notes)) if "note-propose" in granted else 0
 
     charter = await _charter_context(agent_id)
     distiller = Agent(
@@ -818,11 +876,12 @@ async def _reflect(session_id: str, agent_id: str, model, handed_back: bool = Fa
     )
     run_session = "sess_" + uuid.uuid4().hex[:12]
     result = await _run_live(
-        distiller, _distill_prompt(charter, transcript, skill_texts, lessons=lessons,
-                                   max_notes=max_notes),
+        distiller,
+        _distill_prompt(charter, transcript, skill_texts, lessons=lessons, max_notes=max_notes),
         model=model,
         deps=TriageDeps(agent_id=agent_id, session_id=run_session),
-        agent_id=agent_id, session_id=run_session,
+        agent_id=agent_id,
+        session_id=run_session,
     )
     from central_command.runtime.converse import land_session
 
@@ -830,20 +889,25 @@ async def _reflect(session_id: str, agent_id: str, model, handed_back: bool = Fa
     reflection: Reflection = result.output
 
     notes: list[str] = []
-    episodes = (bound_episodes(list(reflection.episodes), settings.reflection_max_episodes)
-                if lessons else [])
+    episodes = (
+        bound_episodes(list(reflection.episodes), settings.reflection_max_episodes)
+        if lessons
+        else []
+    )
     # The graph-propose grant was already checked before the distill call — an
     # agent without it proposes no episode and no nomination here.
     correction = reflection.skill_correction if skill_texts else None
     kept_notes: list[ReflectedNote] = []
     for i, n in enumerate(reflection.notes if max_notes else []):
         if i >= max_notes:
-            await _note_dropped(session_id, agent_id, n,
-                                f"over the per-session cap of {max_notes}")
+            await _note_dropped(session_id, agent_id, n, f"over the per-session cap of {max_notes}")
         elif _same_lesson(n.text, episodes):
-            await _note_dropped(session_id, agent_id, n,
-                                "the same lesson is also proposed as a graph episode; "
-                                "one lesson goes to one store")
+            await _note_dropped(
+                session_id,
+                agent_id,
+                n,
+                "the same lesson is also proposed as a graph episode; one lesson goes to one store",
+            )
         else:
             kept_notes.append(n)
     caps = catalog = None
@@ -863,8 +927,15 @@ async def _reflect(session_id: str, agent_id: str, model, handed_back: bool = Fa
     if correction is not None:
         try:
             note = await _propose_skill_correction(
-                agent_id, session_id, correction, loaded, _quote_corpus(run_state),
-                charter, caps, catalog, model,
+                agent_id,
+                session_id,
+                correction,
+                loaded,
+                _quote_corpus(run_state),
+                charter,
+                caps,
+                catalog,
+                model,
             )
         except Exception as exc:  # noqa: BLE001 — recorded with the episode notes
             note = f"skill correction of {correction.skill_id}: {type(exc).__name__}: {exc}"
@@ -891,8 +962,9 @@ async def _reflect(session_id: str, agent_id: str, model, handed_back: bool = Fa
         )
 
 
-async def reflect_on_close(session_id: str, agent_id: str, model=None,
-                           reason: str | None = None) -> None:
+async def reflect_on_close(
+    session_id: str, agent_id: str, model=None, reason: str | None = None
+) -> None:
     """THE entry point, run as a background task off `converse.close_session`.
 
     A reflection is an afterthought to a close that already succeeded, so it can

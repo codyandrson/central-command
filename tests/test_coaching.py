@@ -20,8 +20,14 @@ async def _make_proposal(agent_id: str, status: str, intent: str) -> str:
     await repo.upsert_agent(agent_id, agent_id, "demo", "test charter")
     await repo.save_paused_session(sid, agent_id, {})
     await repo.save_proposal(
-        proposal_id=pid, session_id=sid, agent_id=agent_id, intent=intent,
-        actions=[], evidence=[], expected_effect="", idempotency_key=f"{pid}:0",
+        proposal_id=pid,
+        session_id=sid,
+        agent_id=agent_id,
+        intent=intent,
+        actions=[],
+        evidence=[],
+        expected_effect="",
+        idempotency_key=f"{pid}:0",
         status=status,
     )
     return pid
@@ -33,8 +39,7 @@ async def test_counts_group_by_agent_and_status():
     await _make_proposal(agent, "EXECUTED", "b")
     await _make_proposal(agent, "REJECTED", "c")
 
-    rows = {(r["agent_id"], r["status"]): r["count"]
-            for r in await repo.proposal_counts_by_agent()}
+    rows = {(r["agent_id"], r["status"]): r["count"] for r in await repo.proposal_counts_by_agent()}
     assert rows[(agent, "EXECUTED")] == 2
     assert rows[(agent, "REJECTED")] == 1
 
@@ -45,13 +50,15 @@ async def test_coaching_route_surfaces_feedback_and_reopen_notes():
     agent = "coach-agent-" + uuid.uuid4().hex[:6]
     pid = await _make_proposal(agent, "REJECTED", "Set DEMO-9 due date")
     await events.emit(
-        "proposal.decided", ref_id=pid,
+        "proposal.decided",
+        ref_id=pid,
         payload={"verdict": "rejected", "feedback": "wrong year — use 2026"},
         actor="operator",
     )
     wid = "wi_coach_" + uuid.uuid4().hex[:8]
-    await events.emit("work.reopened", ref_id=wid,
-                      payload={"note": "this one is actionable"}, actor="operator")
+    await events.emit(
+        "work.reopened", ref_id=wid, payload={"note": "this one is actionable"}, actor="operator"
+    )
 
     out = await routes.coaching()
     rej = next(r for r in out["rejections"] if r["proposal_id"] == pid)
@@ -68,8 +75,10 @@ async def test_approved_decisions_are_not_listed_as_rejections():
 
     pid = await _make_proposal("coach-agent-x", "EXECUTED", "fine proposal")
     await events.emit(
-        "proposal.decided", ref_id=pid,
-        payload={"verdict": "approved", "session_id": "s"}, actor="operator",
+        "proposal.decided",
+        ref_id=pid,
+        payload={"verdict": "approved", "session_id": "s"},
+        actor="operator",
     )
     out = await routes.coaching()
     assert not any(r["proposal_id"] == pid for r in out["rejections"])

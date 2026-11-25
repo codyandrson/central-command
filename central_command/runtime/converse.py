@@ -86,16 +86,27 @@ async def _build(agent_id: str, model, charter: str | None):
 
         await ensure_registered()
         return await build(
-            model=model, charter=charter, packs=packs,
-            capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section, team_section=team,
+            model=model,
+            charter=charter,
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
+            team_section=team,
         )
     from central_command.runtime.agent import build_hired_agent
 
     return await build_hired_agent(
-        agent_id, model=model, charter=charter, packs=packs,
-        capabilities=caps, skills_catalog=catalog,
-        extra_toolsets=mcp_toolsets, mcp_section=mcp_section, team_section=team,
+        agent_id,
+        model=model,
+        charter=charter,
+        packs=packs,
+        capabilities=caps,
+        skills_catalog=catalog,
+        extra_toolsets=mcp_toolsets,
+        mcp_section=mcp_section,
+        team_section=team,
     )
 
 
@@ -153,7 +164,10 @@ def _deferred_text(call) -> str:
 
 
 async def _handle_non_proposal_deferral(
-    session_id: str, agent_id: str, call, result=None,
+    session_id: str,
+    agent_id: str,
+    call,
+    result=None,
 ) -> dict | None:
     """Answer a deferred call this surface owns; None means "it's a proposal".
 
@@ -166,8 +180,9 @@ async def _handle_non_proposal_deferral(
     it in its own idiom.)
     """
     tool = getattr(call, "tool_name", "") or ""
-    metadata = ((getattr(getattr(result, "output", None), "metadata", None) or {})
-                .get(getattr(call, "tool_call_id", None)) or {})
+    metadata = (getattr(getattr(result, "output", None), "metadata", None) or {}).get(
+        getattr(call, "tool_call_id", None)
+    ) or {}
     if metadata.get("kind") == "read" and result is not None:
         # A read found its dependency DOWN mid-turn (FR-40): the lane parks
         # AWAITING_RESUME on it and the sweep re-executes the read and lands
@@ -176,7 +191,10 @@ async def _handle_non_proposal_deferral(
         from central_command.runtime.resume_park import park_read
 
         stored = await park_read(
-            session_id=session_id, result=result, call=call, metadata=metadata,
+            session_id=session_id,
+            result=result,
+            call=call,
+            metadata=metadata,
             after="converse",
         )
         return _parked_reply(session_id, stored)
@@ -189,7 +207,10 @@ async def _handle_non_proposal_deferral(
         from central_command.runtime.consult import park_consult_wait
 
         waited = await park_consult_wait(
-            session_id=session_id, agent_id=agent_id, result=result, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=result,
+            call=call,
         )
         target = waited.get("target") or "the specialist"
         return {
@@ -212,7 +233,10 @@ async def _handle_non_proposal_deferral(
         from central_command.runtime.consult import park_task_wait_deferred
 
         waited = await park_task_wait_deferred(
-            session_id=session_id, agent_id=agent_id, result=result, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=result,
+            call=call,
         )
         return {
             "session_id": session_id,
@@ -239,9 +263,11 @@ async def _handle_non_proposal_deferral(
             await repo.mark_session_awaiting_operator(session_id)
             return {
                 "session_id": session_id,
-                "reply": ("(I reached for `conclude_discussion`, but this is an "
-                          "ordinary conversation, not a clarification I opened "
-                          "to unblock a task — so there is nothing to conclude.)"),
+                "reply": (
+                    "(I reached for `conclude_discussion`, but this is an "
+                    "ordinary conversation, not a clarification I opened "
+                    "to unblock a task — so there is nothing to conclude.)"
+                ),
                 "awaiting": "operator",
                 "refused_tool": tool,
             }
@@ -299,13 +325,17 @@ async def _turn(session_id: str, agent_id: str, message: str, model, *, first: b
     prompt = message
     try:
         result = await _run_live(
-            agent, prompt, model=model,
+            agent,
+            prompt,
+            model=model,
             # The turn has a landing tail (`_land_turn`), so a DOWN read or a
             # DOWN model mid-turn parks the lane in place (FR-40, story 6).
-            deps=TriageDeps(agent_id=agent_id, session_id=session_id,
-                            park_reads=True),
-            agent_id=agent_id, session_id=session_id, message_history=history,
-            continuable=True, after="converse",
+            deps=TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True),
+            agent_id=agent_id,
+            session_id=session_id,
+            message_history=history,
+            continuable=True,
+            after="converse",
         )
     except RunWindowExhausted as e:
         # The turn spent its whole request window without producing a reply. It
@@ -316,8 +346,11 @@ async def _turn(session_id: str, agent_id: str, message: str, model, *, first: b
         # pushes its lifecycle END frame on the non-exception path, and a
         # spinner that never clears is the 2026-07-23 "still thinking" lie.
         return {
-            "session_id": session_id, "reply": e.body, "awaiting": "continue",
-            "window_exhausted": True, "item_id": e.item_id,
+            "session_id": session_id,
+            "reply": e.body,
+            "awaiting": "continue",
+            "window_exhausted": True,
+            "item_id": e.item_id,
         }
     except RunStopped:
         # The operator pressed stop. Returned, not raised, for the same reason
@@ -326,7 +359,9 @@ async def _turn(session_id: str, agent_id: str, message: str, model, *, first: b
         # 2026-07-23 "still thinking" lie. The lane is STOPPED, readable, and
         # resumable from the Sessions panel.
         return {
-            "session_id": session_id, "awaiting": "stopped", "stopped": True,
+            "session_id": session_id,
+            "awaiting": "stopped",
+            "stopped": True,
             "reply": "(stopped by you — resume the session to continue)",
         }
     except RunParked as e:
@@ -341,10 +376,14 @@ async def _turn(session_id: str, agent_id: str, message: str, model, *, first: b
 def _parked_reply(session_id: str, stored: dict) -> dict:
     deps = ", ".join(stored.get("dependencies") or []) or "a dependency"
     return {
-        "session_id": session_id, "awaiting": "resume", "parked": True,
+        "session_id": session_id,
+        "awaiting": "resume",
+        "parked": True,
         "dependencies": list(stored.get("dependencies") or []),
-        "reply": (f"(paused — {deps} is down; your message is kept and the "
-                  "reply will land here once it is back)"),
+        "reply": (
+            f"(paused — {deps} is down; your message is kept and the "
+            "reply will land here once it is back)"
+        ),
     }
 
 
@@ -389,7 +428,10 @@ async def _land_turn(session_id: str, agent_id: str, result) -> dict:
     # gateway will return the session to AWAITING_OPERATOR when the decision
     # resolves, so the conversation continues (Option C).
     parked = await park_proposal(
-        session_id=session_id, agent_id=agent_id, result=result, call=call,
+        session_id=session_id,
+        agent_id=agent_id,
+        result=result,
+        call=call,
         context={"conversational": True},
     )
     return {
@@ -402,9 +444,14 @@ async def _land_turn(session_id: str, agent_id: str, result) -> dict:
 
 
 async def start_conversation(
-    agent_id: str, message: str | None = None, model=None, *,
-    session_id: str | None = None, rerun_of: str | None = None,
-    model_override: str | None = None, thinking_override: str | None = None,
+    agent_id: str,
+    message: str | None = None,
+    model=None,
+    *,
+    session_id: str | None = None,
+    rerun_of: str | None = None,
+    model_override: str | None = None,
+    thinking_override: str | None = None,
 ) -> dict:
     """Open a conversation with any active roster agent. With a first message
     the agent replies (or proposes) immediately; without one the session simply
@@ -412,12 +459,13 @@ async def start_conversation(
     already names, that lane's id, and its model settings."""
     if agent_id not in await conversational_agent_ids():
         # Retired or unknown — the only two ways to not be talkable now.
-        raise ValueError(
-            f"agent {agent_id!r} is not on the active roster (retired or unknown)"
-        )
+        raise ValueError(f"agent {agent_id!r} is not on the active roster (retired or unknown)")
     session_id = session_id or "sess_" + uuid.uuid4().hex[:12]
     await repo.create_conversation_session(
-        session_id, agent_id, rerun_of=rerun_of, model_override=model_override,
+        session_id,
+        agent_id,
+        rerun_of=rerun_of,
+        model_override=model_override,
         thinking_override=thinking_override,
     )
     if not (message and message.strip()):
@@ -447,12 +495,17 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
     from central_command.runtime import hold
 
     if hold.active:
-        cancel = ("cancel the restart in Settings, Connection" if hold.kind == "restart"
-                  else "cancel the update from the update dialog")
+        cancel = (
+            "cancel the restart in Settings, Connection"
+            if hold.kind == "restart"
+            else "cancel the update from the update dialog"
+        )
         return (
             "update_hold",
-            (f"{hold.waiting_for()} is waiting for the agents to finish — chat resumes "
-            f"after the restart (or {cancel})"),
+            (
+                f"{hold.waiting_for()} is waiting for the agents to finish — chat resumes "
+                f"after the restart (or {cancel})"
+            ),
         )
     session_id = session.get("id")
     if session.get("closed_reason") == "rerun":
@@ -460,35 +513,45 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
         # names the re-run and where the work went.
         return (
             "rerun",
-            (f"session {session_id} was re-run as {session.get('rerun_by')} — "
-            "its record stays readable here, and the work carries on there"),
+            (
+                f"session {session_id} was re-run as {session.get('rerun_by')} — "
+                "its record stays readable here, and the work carries on there"
+            ),
         )
     if session.get("mode") != "conversation":
         return (
             "not_a_conversation",
-            (f"session {session_id} is not a conversation — it is a record of "
-            "work (a task or triage run), which resolves through its proposals "
-            "and questions, never by being replied to"),
+            (
+                f"session {session_id} is not a conversation — it is a record of "
+                "work (a task or triage run), which resolves through its proposals "
+                "and questions, never by being replied to"
+            ),
         )
     status = session.get("status")
     if status == "AWAITING_HUMAN":
         return (
             "pending_proposal",
-            (f"conversation {session_id} is AWAITING_HUMAN — resolve the pending "
-            "decision in the Decisions Inbox before sending another message"),
+            (
+                f"conversation {session_id} is AWAITING_HUMAN — resolve the pending "
+                "decision in the Decisions Inbox before sending another message"
+            ),
         )
     if status == "AWAITING_AGENTS":
         return (
             "awaiting_agents",
-            (f"conversation {session_id} is waiting on a teammate it consulted — "
-            "the specialist's proposal is in the Decisions Inbox, and this "
-            "conversation resumes on its own once you have decided it"),
+            (
+                f"conversation {session_id} is waiting on a teammate it consulted — "
+                "the specialist's proposal is in the Decisions Inbox, and this "
+                "conversation resumes on its own once you have decided it"
+            ),
         )
     if status == "FAILED":
         return (
             "failed",
-            (f"conversation {session_id} FAILED — start a new conversation rather "
-            "than continuing a run that errored"),
+            (
+                f"conversation {session_id} FAILED — start a new conversation rather "
+                "than continuing a run that errored"
+            ),
         )
     if status == "DONE" and session.get("closed_reason") == "concluded":
         # The ONE exception to "a closed conversation reopens by being written
@@ -498,8 +561,10 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
         # (see below) — only a concluded discussion locks.
         return (
             "discussion_concluded",
-            (f"discussion {session_id} concluded and its task resumed — start a "
-            "new conversation with the agent instead"),
+            (
+                f"discussion {session_id} concluded and its task resumed — start a "
+                "new conversation with the agent instead"
+            ),
         )
     if status == "AWAITING_RESUME":
         # A dependency was DOWN mid-turn (a parked turn or read, story 6). The
@@ -509,8 +574,10 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
         parked_on = session.get("parked_on") or "a dependency"
         return (
             "awaiting_resume",
-            (f"conversation {session_id} is paused — {parked_on} is down; your "
-            "last message is kept and the reply lands here once it is back"),
+            (
+                f"conversation {session_id} is paused — {parked_on} is down; your "
+                "last message is kept and the reply lands here once it is back"
+            ),
         )
     if status == "AWAITING_CONTINUE":
         # The turn spent its request window and asked for another. Not
@@ -519,9 +586,11 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
         # not `failed`: the work is intact and one Inbox click resumes it.
         return (
             "awaiting_continue",
-            (f"conversation {session_id} used its full request window and is "
-            "paused — decide the continue item in the Decisions Inbox (continue "
-            "grants another window, decline ends the turn) before sending more"),
+            (
+                f"conversation {session_id} used its full request window and is "
+                "paused — decide the continue item in the Decisions Inbox (continue "
+                "grants another window, decline ends the turn) before sending more"
+            ),
         )
     if status == "STOPPED":
         # The operator stopped this turn themselves. Not `turn_in_progress`
@@ -530,10 +599,12 @@ def why_not_sendable(session: dict) -> tuple[str, str] | None:
         # act). The one lever is Resume, and the message says so.
         return (
             "stopped",
-            (f"conversation {session_id} was stopped mid-turn (by you, or by a "
-            "process restart) — resume the session to let the agent finish its "
-            "turn, or cancel the work for good; a new message would be lost "
-            "against a paused run"),
+            (
+                f"conversation {session_id} was stopped mid-turn (by you, or by a "
+                "process restart) — resume the session to let the agent finish its "
+                "turn, or cancel the work for good; a new message would be lost "
+                "against a paused run"
+            ),
         )
     if status not in ("AWAITING_OPERATOR", "DONE"):
         # RUNNING: the turn owns the session until it lands. DONE is allowed so
@@ -580,6 +651,7 @@ def wake_consult_waiters(session_id: str) -> None:
     runtime→gateway, and this is neither (the same reasoning `questions.py`
     records for its own resume dispatch).
     """
+
     async def _wake() -> None:
         try:
             from central_command.api.orchestration import resume_consult_wait
@@ -596,8 +668,12 @@ def wake_consult_waiters(session_id: str) -> None:
 
 
 async def land_session(
-    session_id: str, *, failed: bool = False,
-    agent_id: str | None = None, reason: str | None = None, **extra,
+    session_id: str,
+    *,
+    failed: bool = False,
+    agent_id: str | None = None,
+    reason: str | None = None,
+    **extra,
 ) -> None:
     """THE terminal-flip path for every run that ISN'T a conversation close:
     flip the session DONE/FAILED, then PUSH the frame the cockpit's sessions
@@ -629,7 +705,11 @@ async def land_session(
 
 
 async def close_session(
-    session_id: str, *, agent_id: str, reason: str, actor: str,
+    session_id: str,
+    *,
+    agent_id: str,
+    reason: str,
+    actor: str,
 ) -> None:
     """THE close path: flip the session DONE with its `reason`, then PUSH the
     frame the cockpit listens for.
@@ -684,7 +764,11 @@ async def close_session(
     # short by the operator, there is no completed work to reflect on.
     # "rerun" is the same case: the operator replaced this run, and a new one is
     # starting on the same inputs.
-    if settings.test_model or not settings.reflection_enabled or reason in ("dismissed", "cancelled", "rerun"):
+    if (
+        settings.test_model
+        or not settings.reflection_enabled
+        or reason in ("dismissed", "cancelled", "rerun")
+    ):
         return
     from central_command.runtime.reflection import reflect_on_close
 
@@ -746,18 +830,27 @@ async def end_conversation(session_id: str) -> dict:
         from central_command import events
 
         reason = "parked turn cancelled by the operator"
-        marker = {"reason": "cancelled", "after": "converse", "resumable": True,
-                  "stopped_at": datetime.now(UTC).isoformat()}
+        marker = {
+            "reason": "cancelled",
+            "after": "converse",
+            "resumable": True,
+            "stopped_at": datetime.now(UTC).isoformat(),
+        }
         if not await repo.cancel_parked_resume(session_id, marker, reason):
             raise ValueError(
                 f"conversation {session_id} is no longer parked — the reply "
                 "may already be landing; try again in a moment"
             )
         await events.emit(
-            "session.stopped", ref_id=session_id,
-            payload={"agent_id": session["agent_id"], "after": "converse",
-                     "task_id": None, "reason": "cancelled",
-                     "restart_reason": reason},
+            "session.stopped",
+            ref_id=session_id,
+            payload={
+                "agent_id": session["agent_id"],
+                "after": "converse",
+                "task_id": None,
+                "reason": "cancelled",
+                "restart_reason": reason,
+            },
             actor="operator",
         )
         return {"session_id": session_id, "status": "STOPPED"}
@@ -770,10 +863,11 @@ async def end_conversation(session_id: str) -> dict:
             "the turn land before closing, or cancel the work it belongs to"
         )
     if status != "AWAITING_OPERATOR":
-        raise ValueError(
-            f"conversation {session_id} is {status} — wait for the turn to finish"
-        )
+        raise ValueError(f"conversation {session_id} is {status} — wait for the turn to finish")
     await close_session(
-        session_id, agent_id=session["agent_id"], reason="operator", actor="operator",
+        session_id,
+        agent_id=session["agent_id"],
+        reason="operator",
+        actor="operator",
     )
     return {"session_id": session_id, "status": "DONE"}

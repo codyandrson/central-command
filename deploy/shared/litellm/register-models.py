@@ -78,6 +78,7 @@ Reads the master key from LITELLM_MASTER_KEY, falling back to deploy/k3s/.env;
 the proxy URL from CC_LITELLM_URL (default http://127.0.0.1:4000). The key is
 never printed.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -176,8 +177,12 @@ def upstream_rows(aliases, env, explicit_ok=()) -> tuple[dict[str, dict], list[s
         provider = explicit_provider(model_id) if alias in explicit_ok else None
         if provider:
             # Named its provider: the dedicated shape, verbatim (alias_shapes).
-            rows[alias] = {"model": model_id, "api_base": rerank_base(api_base, provider),
-                           "mode": "rerank", "api_key": key}
+            rows[alias] = {
+                "model": model_id,
+                "api_base": rerank_base(api_base, provider),
+                "mode": "rerank",
+                "api_key": key,
+            }
         else:
             rows[alias] = {"model": f"openai/{model_id}", "api_base": api_base, "api_key": key}
     return rows, notes
@@ -239,15 +244,26 @@ def alias_shapes(alias: str, policy: dict, env) -> dict[str, dict]:
     if not (base and key and answer):
         return {}
     base, _ = container_api_base(base)
-    extra = {k: v for k, v in (declared(policy).get(alias) or {}).items()
-             if k == "timeout"}
+    extra = {k: v for k, v in (declared(policy).get(alias) or {}).items() if k == "timeout"}
     provider = explicit_provider(answer)
     if provider:
-        return {"rerank": {"model": answer, "api_base": rerank_base(base, provider),
-                           "mode": "rerank", "api_key": key, **extra}}
+        return {
+            "rerank": {
+                "model": answer,
+                "api_base": rerank_base(base, provider),
+                "mode": "rerank",
+                "api_key": key,
+                **extra,
+            }
+        }
     return {
-        "rerank": {"model": f"cohere/{answer}", "api_base": rerank_base(base),
-                   "mode": "rerank", "api_key": key, **extra},
+        "rerank": {
+            "model": f"cohere/{answer}",
+            "api_base": rerank_base(base),
+            "mode": "rerank",
+            "api_key": key,
+            **extra,
+        },
         "chat": {"model": f"openai/{answer}", "api_base": base, "api_key": key, **extra},
     }
 
@@ -295,8 +311,11 @@ def optional_aliases(policy: dict) -> set[str]:
     """Aliases declared `optional: true` — never a reason to pause (exit 3),
     whatever --require says. `cc-rerank` on both profiles: graph search runs
     without a reranker (rank fusion), so a skeleton nobody filled is a choice."""
-    return {alias for alias, spec in (policy.get("registration_only") or {}).items()
-            if isinstance(spec, dict) and spec.get("optional")}
+    return {
+        alias
+        for alias, spec in (policy.get("registration_only") or {}).items()
+        if isinstance(spec, dict) and spec.get("optional")
+    }
 
 
 def row_state(alias: str, live_models: list[dict]) -> str:
@@ -312,8 +331,9 @@ def row_state(alias: str, live_models: list[dict]) -> str:
     return "filled"
 
 
-def ensure_shape(alias: str, kind: str, shapes: dict[str, dict],
-                 live_models: list[dict]) -> tuple[str, dict | None]:
+def ensure_shape(
+    alias: str, kind: str, shapes: dict[str, dict], live_models: list[dict]
+) -> tuple[str, dict | None]:
     """What `--shape alias=kind` does to the proxy — pure, so it is testable.
     -> (verdict, request) where verdict is
          same     the row already IS that shape: nothing to write (no flap)
@@ -327,8 +347,11 @@ def ensure_shape(alias: str, kind: str, shapes: dict[str, dict],
         return "underivable", None
     rows = [m for m in live_models if m.get("model_name") == alias]
     if not rows:
-        return "create", {"model_name": alias, "litellm_params": shape,
-                          "model_info": mode_info(shape)}
+        return "create", {
+            "model_name": alias,
+            "litellm_params": shape,
+            "model_info": mode_info(shape),
+        }
     if len(rows) > 1:
         return "operator", None
     lp = rows[0].get("litellm_params") or {}
@@ -338,8 +361,11 @@ def ensure_shape(alias: str, kind: str, shapes: dict[str, dict],
     ours = any(same_shape(lp, other) for other in shapes.values())
     skeleton = row_state(alias, rows) == "skeleton"
     if ours or skeleton:
-        return "update", {"model_name": alias, "litellm_params": shape,
-                          "model_info": {"id": info.get("id"), **mode_info(shape)}}
+        return "update", {
+            "model_name": alias,
+            "litellm_params": shape,
+            "model_info": {"id": info.get("id"), **mode_info(shape)},
+        }
     return "operator", None
 
 
@@ -363,9 +389,10 @@ def _master_key() -> str:
 def _request(method: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
-        f"{BASE_URL}{path}", data=data, method=method,
-        headers={"Authorization": f"Bearer {_master_key()}",
-                 "Content-Type": "application/json"},
+        f"{BASE_URL}{path}",
+        data=data,
+        method=method,
+        headers={"Authorization": f"Bearer {_master_key()}", "Content-Type": "application/json"},
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
@@ -383,6 +410,7 @@ def load_declaration(path: Path) -> dict:
     if path.suffix == ".json":
         return json.loads(text)
     import yaml
+
     return yaml.safe_load(text)
 
 
@@ -455,8 +483,11 @@ def probe_judged(policy: dict) -> set[str]:
     `mode: rerank`) or an ordinary chat model used as one (`openai/…`), and
     setup's probe — not a pattern — decides which (design record 2026-10-04,
     D3 as rebuilt in v2.62.0). A PLACEHOLDER left in one is still `pending`."""
-    return {alias for alias, spec in (policy.get("registration_only") or {}).items()
-            if isinstance(spec, dict) and spec.get("judged_by_probe")}
+    return {
+        alias
+        for alias, spec in (policy.get("registration_only") or {}).items()
+        if isinstance(spec, dict) and spec.get("judged_by_probe")
+    }
 
 
 def _norm(v):
@@ -470,12 +501,14 @@ def matches(pattern, live) -> bool:
     if not isinstance(live, str) or PLACEHOLDER in live:
         return False
     prefix, suffix = pattern.split(PLACEHOLDER, 1)
-    return live.startswith(prefix) and live.endswith(suffix) \
-        and len(live) > len(prefix) + len(suffix)
+    return (
+        live.startswith(prefix) and live.endswith(suffix) and len(live) > len(prefix) + len(suffix)
+    )
 
 
-def plan(want: dict[str, dict], live_models: list[dict],
-         invariants: dict[str, dict] | None = None) -> list[tuple[str, str, list[str]]]:
+def plan(
+    want: dict[str, dict], live_models: list[dict], invariants: dict[str, dict] | None = None
+) -> list[tuple[str, str, list[str]]]:
     """[(status, alias, problems)] — pure, so it is testable.
 
     `want` is what would be WRITTEN; `invariants` is what an existing row is
@@ -504,32 +537,39 @@ def plan(want: dict[str, dict], live_models: list[dict],
             out.append(("create", alias, []))
             continue
         live_params = live.get("litellm_params") or {}
-        pending = [k for k in OWNED
-                   if isinstance(live_params.get(k), str) and PLACEHOLDER in live_params[k]]
+        pending = [
+            k
+            for k in OWNED
+            if isinstance(live_params.get(k), str) and PLACEHOLDER in live_params[k]
+        ]
         if pending:
             # A skeleton the operator never filled in, where .env NOW declares
             # the upstream: the declared values may overwrite it (design record
             # D3). A row with anything else in it is the operator's and is
             # never touched, which is why only PLACEHOLDER rows reach here.
             if not any(isinstance(v, str) and PLACEHOLDER in v for v in params.values()):
-                out.append(("update", alias,
-                            [f"{k} is still {live_params[k]!r}" for k in pending]))
+                out.append(("update", alias, [f"{k} is still {live_params[k]!r}" for k in pending]))
             else:
-                out.append(("pending", alias,
-                            [f"{k} is still {live_params[k]!r}" for k in pending]))
+                out.append(
+                    ("pending", alias, [f"{k} is still {live_params[k]!r}" for k in pending])
+                )
             continue
-        problems = [f"{k}: {live_params.get(k)!r} does not match declared {v!r}"
-                    for k, v in (invariants.get(alias) or {}).items()
-                    # api_key is never compared: LiteLLM masks it in /model/info,
-                    # so a comparison would report permanent drift.
-                    if k in OWNED and not matches(v, live_params.get(k))]
+        problems = [
+            f"{k}: {live_params.get(k)!r} does not match declared {v!r}"
+            for k, v in (invariants.get(alias) or {}).items()
+            # api_key is never compared: LiteLLM masks it in /model/info,
+            # so a comparison would report permanent drift.
+            if k in OWNED and not matches(v, live_params.get(k))
+        ]
         # `extra_params:` keys sit outside OWNED and carry no PLACEHOLDER
         # patterns — exact comparison, absent counts as drift (the row was
         # re-created or edited without the value the alias needs).
-        problems += [f"{k}: {live_params.get(k)!r} does not match declared {v!r} "
-                     f"(extra_params — enter it on the row in the LiteLLM UI)"
-                     for k, v in (invariants.get(alias) or {}).items()
-                     if k not in OWNED and k != "api_key" and _norm(live_params.get(k)) != _norm(v)]
+        problems += [
+            f"{k}: {live_params.get(k)!r} does not match declared {v!r} "
+            f"(extra_params — enter it on the row in the LiteLLM UI)"
+            for k, v in (invariants.get(alias) or {}).items()
+            if k not in OWNED and k != "api_key" and _norm(live_params.get(k)) != _norm(v)
+        ]
         # graphiti-llm-specific invariant: the Responses->chat bridge prefix is
         # no longer wanted (2026-09-21) — the app's graphiti-core client uses
         # upstream's chat-completions client, and a bridged model 404s against
@@ -549,12 +589,18 @@ def plan(want: dict[str, dict], live_models: list[dict],
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dry-run", action="store_true",
-                    help="print what would be created; write nothing; exit 0")
-    ap.add_argument("--policy", type=Path, default=POLICY_PATH,
-                    help=f"the declaration (.yaml or .json; default {POLICY_PATH})")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--dry-run", action="store_true", help="print what would be created; write nothing; exit 0"
+    )
+    ap.add_argument(
+        "--policy",
+        type=Path,
+        default=POLICY_PATH,
+        help=f"the declaration (.yaml or .json; default {POLICY_PATH})",
+    )
     # WHICH aliases this deployment actually needs (space-separated) — the
     # single-node profile passes `cc_required_aliases` (deploy/env-lib.sh),
     # which drops cc-tts/cc-stt when CC_ENABLE_SPEECH=0. Every declared alias
@@ -563,17 +609,26 @@ def main() -> int:
     # not require is reported as `optional` and never counts toward exit 3:
     # the Windows testbed (2026-09-25, speech off) sat at the llm pause for two
     # aliases nothing on that install would ever call. Default: all of them.
-    ap.add_argument("--require", default="",
-                    help="space-separated aliases that must be filled in; the rest are optional")
+    ap.add_argument(
+        "--require",
+        default="",
+        help="space-separated aliases that must be filled in; the rest are optional",
+    )
     # The two narrow modes setup's reranker step uses (v2.62.1). Neither
     # touches any alias but the one named.
-    ap.add_argument("--shape", metavar="ALIAS=KIND",
-                    help="make a probe-judged alias's row the KIND shape (rerank|chat) derived "
-                         "from .env — only when the row is absent, a skeleton, or one setup made "
-                         "from .env; exit 0 done / 5 a row filled by hand, left alone / "
-                         "6 .env does not declare that shape")
-    ap.add_argument("--row-state", metavar="ALIAS",
-                    help="print absent | skeleton | filled for ALIAS and exit 0; writes nothing")
+    ap.add_argument(
+        "--shape",
+        metavar="ALIAS=KIND",
+        help="make a probe-judged alias's row the KIND shape (rerank|chat) derived "
+        "from .env — only when the row is absent, a skeleton, or one setup made "
+        "from .env; exit 0 done / 5 a row filled by hand, left alone / "
+        "6 .env does not declare that shape",
+    )
+    ap.add_argument(
+        "--row-state",
+        metavar="ALIAS",
+        help="print absent | skeleton | filled for ALIAS and exit 0; writes nothing",
+    )
     args = ap.parse_args()
     required = set(args.require.split()) if args.require.strip() else None
 
@@ -610,8 +665,11 @@ def main() -> int:
     for note in notes:
         print(f"  note     {note}")
     if upstream:
-        print("  declared in .env: " + " ".join(sorted(upstream))
-              + f"  (base {UPSTREAM_BASE_KEY}, key {UPSTREAM_API_KEY} — value not printed)")
+        print(
+            "  declared in .env: "
+            + " ".join(sorted(upstream))
+            + f"  (base {UPSTREAM_BASE_KEY}, key {UPSTREAM_API_KEY} — value not printed)"
+        )
 
     pp = policy_params(policy)
     live = _request("GET", "/model/info").get("data", [])
@@ -625,13 +683,17 @@ def main() -> int:
             # disagreeing silently is how an operator ends up debugging a model
             # id that is in the answer file and nowhere else.
             if alias in upstream:
-                lp = next((m.get("litellm_params") or {} for m in live
-                           if m.get("model_name") == alias), {})
+                lp = next(
+                    (m.get("litellm_params") or {} for m in live if m.get("model_name") == alias),
+                    {},
+                )
                 derived = list((shapes.get(alias) or {}).values()) or [upstream[alias]]
                 if not any(same_shape(lp, sh) for sh in derived):
-                    print(f"  note     {alias}: the row on the proxy is not what "
-                          f"{alias_env_key(alias)} / {UPSTREAM_BASE_KEY} declare — "
-                          "the row you filled in WINS; this script never overwrites one")
+                    print(
+                        f"  note     {alias}: the row on the proxy is not what "
+                        f"{alias_env_key(alias)} / {UPSTREAM_BASE_KEY} declare — "
+                        "the row you filled in WINS; this script never overwrites one"
+                    )
         elif status == "create":
             real = alias in upstream
             kind = "from .env" if real else "skeleton "
@@ -639,36 +701,68 @@ def main() -> int:
             print(f"  CREATE   {alias}  {kind} {json.dumps(redacted(row_params), sort_keys=True)}")
             if not args.dry_run:
                 stamp = datetime.now(UTC).isoformat()
-                _request("POST", "/model/new",
-                         {"model_name": alias, "litellm_params": row_params,
-                          "model_info": {**mode_info(row_params),
-                                         "created_by": "register-models.py", "created_at": stamp,
-                                         "updated_by": "register-models.py", "updated_at": stamp}})
+                _request(
+                    "POST",
+                    "/model/new",
+                    {
+                        "model_name": alias,
+                        "litellm_params": row_params,
+                        "model_info": {
+                            **mode_info(row_params),
+                            "created_by": "register-models.py",
+                            "created_at": stamp,
+                            "updated_by": "register-models.py",
+                            "updated_at": stamp,
+                        },
+                    },
+                )
                 created += 1
             if not real:
                 if required is not None and alias not in required:
-                    print(f"  optional {alias}  skeleton left for you (not required by this deployment's flags)")
+                    print(
+                        f"  optional {alias}  skeleton left for you (not required by this deployment's flags)"
+                    )
                 else:
-                    action_needed.append((alias, ["created as a skeleton — fill in model, api_base and the key/credential"]))
+                    action_needed.append(
+                        (
+                            alias,
+                            [
+                                "created as a skeleton — fill in model, api_base and the key/credential"
+                            ],
+                        )
+                    )
         elif status == "update":
             # Only ever a PLACEHOLDER row -> the values .env declares. `id` is
             # how /model/update addresses an existing deployment.
             row_params = {**want[alias], **pp.get(alias, {})}
-            print(f"  UPDATE   {alias}  was a skeleton ({'; '.join(problems)}), "
-                  f"now {json.dumps(redacted(row_params), sort_keys=True)}")
+            print(
+                f"  UPDATE   {alias}  was a skeleton ({'; '.join(problems)}), "
+                f"now {json.dumps(redacted(row_params), sort_keys=True)}"
+            )
             if not args.dry_run:
                 live_row = next(m for m in live if m.get("model_name") == alias)
                 stamp = datetime.now(UTC).isoformat()
-                _request("POST", "/model/update",
-                         {"model_name": alias, "litellm_params": row_params,
-                          "model_info": {"id": (live_row.get("model_info") or {}).get("id"),
-                                         "updated_by": "register-models.py",
-                                         "updated_at": stamp}})
+                _request(
+                    "POST",
+                    "/model/update",
+                    {
+                        "model_name": alias,
+                        "litellm_params": row_params,
+                        "model_info": {
+                            "id": (live_row.get("model_info") or {}).get("id"),
+                            "updated_by": "register-models.py",
+                            "updated_at": stamp,
+                        },
+                    },
+                )
                 patch_mode((live_row.get("model_info") or {}).get("id"), want[alias])
                 updated += 1
         elif required is not None and alias not in required:
-            print(f"  optional {alias}  " + "; ".join(problems)
-                  + "  (not required by this deployment's flags — left alone)")
+            print(
+                f"  optional {alias}  "
+                + "; ".join(problems)
+                + "  (not required by this deployment's flags — left alone)"
+            )
         else:
             print(f"  {status.upper():8} {alias}  " + "; ".join(problems))
             action_needed.append((alias, problems))
@@ -680,15 +774,21 @@ def main() -> int:
     print()
     if args.dry_run:
         counts = {s: sum(1 for x, *_ in actions if x == s) for s in ("create", "update")}
-        print(f"dry run: {counts['create']} row(s) would be created, "
-              f"{counts['update']} placeholder row(s) updated from .env; nothing was written.")
+        print(
+            f"dry run: {counts['create']} row(s) would be created, "
+            f"{counts['update']} placeholder row(s) updated from .env; nothing was written."
+        )
         return 0
     if not action_needed:
-        print(f"the proxy holds every alias {args.policy.name} requires, filled in and consistent"
-              + (f" ({updated} placeholder row(s) updated from .env)" if updated else ""))
+        print(
+            f"the proxy holds every alias {args.policy.name} requires, filled in and consistent"
+            + (f" ({updated} placeholder row(s) updated from .env)" if updated else "")
+        )
         return 0
-    print(f"OPERATOR ACTION — {created} row(s) created, {updated} updated from .env; "
-          f"{len(action_needed)} alias(es) need you in the LiteLLM UI:")
+    print(
+        f"OPERATOR ACTION — {created} row(s) created, {updated} updated from .env; "
+        f"{len(action_needed)} alias(es) need you in the LiteLLM UI:"
+    )
     for alias, problems in action_needed:
         print(f"  {alias}: " + "; ".join(problems))
     return EXIT_ACTION
@@ -703,26 +803,38 @@ def shape_main(spec: str, policy: dict, *, dry_run: bool = False) -> int:
     live = _request("GET", "/model/info").get("data", [])
     verdict, body = ensure_shape(alias, kind, shapes, live)
     if verdict == "underivable":
-        print(f"  shape    {alias}: .env does not declare a {kind} shape for it "
-              f"({UPSTREAM_BASE_KEY}, {UPSTREAM_API_KEY}, {alias_env_key(alias)})")
+        print(
+            f"  shape    {alias}: .env does not declare a {kind} shape for it "
+            f"({UPSTREAM_BASE_KEY}, {UPSTREAM_API_KEY}, {alias_env_key(alias)})"
+        )
         return 6
     if verdict == "operator":
-        print(f"  shape    {alias}: a row filled by hand — left alone (it is not one of the "
-              f"shapes {alias_env_key(alias)} derives); setup probes it as it is")
+        print(
+            f"  shape    {alias}: a row filled by hand — left alone (it is not one of the "
+            f"shapes {alias_env_key(alias)} derives); setup probes it as it is"
+        )
         return 5
     if verdict == "same":
         print(f"  shape    {alias}: already the {kind} shape — nothing written")
         return 0
-    print(f"  {verdict.upper():8} {alias}  {kind} shape "
-          f"{json.dumps(redacted(body['litellm_params']), sort_keys=True)}")
+    print(
+        f"  {verdict.upper():8} {alias}  {kind} shape "
+        f"{json.dumps(redacted(body['litellm_params']), sort_keys=True)}"
+    )
     if not dry_run:
         stamp = datetime.now(UTC).isoformat()
-        info = {**(body.get("model_info") or {}), "updated_by": "register-models.py",
-                "updated_at": stamp}
+        info = {
+            **(body.get("model_info") or {}),
+            "updated_by": "register-models.py",
+            "updated_at": stamp,
+        }
         if verdict == "create":
             info.update(created_by="register-models.py", created_at=stamp)
-        _request("POST", "/model/new" if verdict == "create" else "/model/update",
-                 {**body, "model_info": info})
+        _request(
+            "POST",
+            "/model/new" if verdict == "create" else "/model/update",
+            {**body, "model_info": info},
+        )
         if verdict == "update":
             patch_mode(info.get("id"), body["litellm_params"])
     return 0

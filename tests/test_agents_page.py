@@ -84,8 +84,12 @@ async def test_roster_carries_active_session_counts():
     session_id = f"test-active-{uuid.uuid4()}"
     try:
         await repo.hire_agent(
-            agent_id, "Active-session fixture", "test fixture", "You are a fixture.",
-            ["graph-read"], template="general",
+            agent_id,
+            "Active-session fixture",
+            "test fixture",
+            "You are a fixture.",
+            ["graph-read"],
+            template="general",
         )
         assert (await repo.open_session_counts_by_agent()).get(agent_id, 0) == 0
 
@@ -120,8 +124,12 @@ async def test_detail_keeps_revoked_grants_on_the_record():
     agent_id = "revoketest-x"
     try:
         await repo.hire_agent(
-            agent_id, "Revocation fixture", "test fixture", "You are a fixture.",
-            ["graph-read", "jira-read"], template="general",
+            agent_id,
+            "Revocation fixture",
+            "test fixture",
+            "You are a fixture.",
+            ["graph-read", "jira-read"],
+            template="general",
         )
         assert await repo.revoke_pack(agent_id, "jira-read", "no longer needed")
 
@@ -156,11 +164,17 @@ async def test_charter_history_carries_the_proposal_id():
     agent_id = "propidtest-x"
     try:
         await repo.hire_agent(
-            agent_id, "Proposal-id fixture", "test fixture", "You are a fixture.",
-            ["graph-read"], template="general",
+            agent_id,
+            "Proposal-id fixture",
+            "test fixture",
+            "You are a fixture.",
+            ["graph-read"],
+            template="general",
         )
         await repo.save_charter_version(
-            agent_id, "CHARTER v2, coached.", "from coaching",
+            agent_id,
+            "CHARTER v2, coached.",
+            "from coaching",
             created_by="agent:coach for propidtest-x (approved human:lee)",
             proposal_id="prop_fixture_1",
         )
@@ -222,13 +236,18 @@ async def test_signal_wire_shape_carries_author_to_the_picker():
     outcome = "Done, but I never learned which project key to use."
     try:
         await repo.hire_agent(
-            agent_id, "Signal fixture", "test fixture", "You are a fixture.",
-            ["graph-read"], template="general",
+            agent_id,
+            "Signal fixture",
+            "test fixture",
+            "You are a fixture.",
+            ["graph-read"],
+            template="general",
         )
         await repo.create_task(task_id, "A wire-shape task", "do it", agent_id)
         await repo.resolve_task(task_id, "DONE", outcome=outcome)
-        await events.emit("task.completed", ref_id=task_id,
-                          payload={"outcome": outcome}, actor="system")
+        await events.emit(
+            "task.completed", ref_id=task_id, payload={"outcome": outcome}, actor="system"
+        )
 
         signals = (await _agents_detail(agent_id))["signals"]
         assert len(signals) == 1, signals  # own rows only — a throwaway agent id
@@ -287,10 +306,15 @@ async def test_management_actions_route_through_their_rest_handlers():
     agent_id = "stage2test-x"
     await _drop_agent(agent_id)
     try:
-        hired = await _dispatch("agents.hire", {
-            "name": "Stage 2 fixture", "mission": "verify the wiring",
-            "template": "analyst",
-        }, None)
+        hired = await _dispatch(
+            "agents.hire",
+            {
+                "name": "Stage 2 fixture",
+                "mission": "verify the wiring",
+                "template": "analyst",
+            },
+            None,
+        )
         # The hire path derives the id from the name; work with what it made.
         agent_id = hired["agent"]["id"]
 
@@ -299,46 +323,67 @@ async def test_management_actions_route_through_their_rest_handlers():
         assert "jira-propose" in [g["pack"] for g in out["grants"] if not g["revoked_at"]]
 
         # Revoke reaches revoke_pack — and the row keeps its history.
-        out = await _dispatch("agents.revoke", {
-            "agentId": agent_id, "pack": "jira-propose", "reason": "wiring test",
-        }, None)
+        out = await _dispatch(
+            "agents.revoke",
+            {
+                "agentId": agent_id,
+                "pack": "jira-propose",
+                "reason": "wiring test",
+            },
+            None,
+        )
         revoked = [g for g in out["grants"] if g["pack"] == "jira-propose"]
         assert len(revoked) == 1 and revoked[0]["revoked_at"] is not None
         assert revoked[0]["revoked_reason"] == "wiring test"
 
         # Charter save reaches save_charter: a NEW version, history intact.
         before = await repo.current_charter(agent_id)
-        saved = await _dispatch("agents.charter.save", {
-            "agentId": agent_id, "content": "You are a fixture. Do fixture things.",
-            "rationale": "wiring test",
-        }, None)
+        saved = await _dispatch(
+            "agents.charter.save",
+            {
+                "agentId": agent_id,
+                "content": "You are a fixture. Do fixture things.",
+                "rationale": "wiring test",
+            },
+            None,
+        )
         assert saved["version"] == before["version"] + 1
         assert saved["warnings"] == []  # clean charter, nothing to read
 
         # The charter-v2 guard actually fires, and rides the RPC response —
         # this is what keeps the editor open instead of closing on save, so a
         # dead branch here would mean the operator never sees it.
-        flagged = await _dispatch("agents.charter.save", {
-            "agentId": agent_id,
-            "content": "You may use capability = 'jira.obliterate_everything'.",
-            "rationale": "wiring test: policy warning",
-        }, None)
+        flagged = await _dispatch(
+            "agents.charter.save",
+            {
+                "agentId": agent_id,
+                "content": "You may use capability = 'jira.obliterate_everything'.",
+                "rationale": "wiring test: policy warning",
+            },
+            None,
+        )
         assert flagged["warnings"], "a charter naming an unregistered capability must warn"
 
         # Revert reaches revert_charter — forward as a new version, never a
         # rollback. This is the one an operator is most likely to assume
         # destroys history.
         latest = (await repo.current_charter(agent_id))["version"]
-        reverted = await _dispatch("agents.charter.revert", {
-            "agentId": agent_id, "version": before["version"],
-        }, None)
+        reverted = await _dispatch(
+            "agents.charter.revert",
+            {
+                "agentId": agent_id,
+                "version": before["version"],
+            },
+            None,
+        )
         assert reverted["version"] == latest + 1, "a revert moves FORWARD"
         assert reverted["restored"] == before["version"]
         # Nothing was rewritten: every version ever saved is still there.
         versions = await repo.list_charter_versions(agent_id)
         assert len(versions) == latest + 1
-        assert (await repo.get_charter_version(agent_id, reverted["version"]))["content"] \
-            == (await repo.get_charter_version(agent_id, before["version"]))["content"]
+        assert (await repo.get_charter_version(agent_id, reverted["version"]))["content"] == (
+            await repo.get_charter_version(agent_id, before["version"])
+        )["content"]
 
         # Retire reaches retire_agent, reason invariant included.
         with pytest.raises(HTTPException) as exc:
@@ -357,7 +402,7 @@ async def test_management_actions_route_through_their_rest_handlers():
 
 @needs_pg
 async def test_coach_rpc_refuses_a_session_with_nothing_to_learn_from():
-    """"Nothing feeds a session unchosen" is the D5 rule, and the page's Coach
+    """ "Nothing feeds a session unchosen" is the D5 rule, and the page's Coach
     button is a new way to reach it — so the refusal has to hold through the
     RPC, not only through the REST route."""
     from fastapi import HTTPException
@@ -365,9 +410,15 @@ async def test_coach_rpc_refuses_a_session_with_nothing_to_learn_from():
     from central_command.api.nerve_gateway import _dispatch
 
     with pytest.raises(HTTPException) as exc:
-        await _dispatch("agents.coach", {
-            "agentId": "inbox-triage", "signalIds": [], "note": "   ",
-        }, None)
+        await _dispatch(
+            "agents.coach",
+            {
+                "agentId": "inbox-triage",
+                "signalIds": [],
+                "note": "   ",
+            },
+            None,
+        )
     assert exc.value.status_code == 422
 
 
@@ -384,8 +435,12 @@ async def test_coaching_a_retired_agent_says_retired_not_unknown():
     await _drop_agent(agent_id)
     try:
         await repo.hire_agent(
-            agent_id, "Retired fixture", "test fixture", "You are a fixture.",
-            ["graph-read"], template="analyst",
+            agent_id,
+            "Retired fixture",
+            "test fixture",
+            "You are a fixture.",
+            ["graph-read"],
+            template="analyst",
         )
         assert await repo.retire_agent(agent_id, "test over")
 
@@ -459,9 +514,15 @@ async def test_coach_rpc_logs_the_request_before_the_run(monkeypatch):
 
     monkeypatch.setattr(run_module, "run_coach", fake_run_coach)
 
-    out = await _dispatch("agents.coach", {
-        "agentId": "inbox-triage", "signalIds": [1, 2], "note": "be more careful",
-    }, None)
+    out = await _dispatch(
+        "agents.coach",
+        {
+            "agentId": "inbox-triage",
+            "signalIds": [1, 2],
+            "note": "be more careful",
+        },
+        None,
+    )
 
     # The RPC returns as soon as the run is LAUNCHED — the run itself is
     # detached behind the task record, so wait for it before reading `seen`.
@@ -502,9 +563,14 @@ async def test_a_coach_run_rides_a_task_record_and_lands_on_it(monkeypatch):
     async def drafts(agent_id, **kwargs):
         # A real run links the session to the task inside `_run_live`.
         await repo.start_task(kwargs["task_id"], "sess_coachtest")
-        return {"deferred": True, "session_id": "sess_coachtest",
-                "proposal_id": "prop_coachtest", "intent": "charter.update",
-                "target": agent_id, "signals": 1}
+        return {
+            "deferred": True,
+            "session_id": "sess_coachtest",
+            "proposal_id": "prop_coachtest",
+            "intent": "charter.update",
+            "target": agent_id,
+            "signals": 1,
+        }
 
     monkeypatch.setattr(run_module, "run_coach", drafts)
     out = await rest.coach_agent("inbox-triage", rest.CoachIn(note="be careful"))
@@ -550,7 +616,9 @@ async def test_the_coach_is_not_directly_taskable(monkeypatch):
     assert "coach" not in await taskable_agent_ids()
     with pytest.raises(HTTPException) as exc:
         await rest.create_and_run_task(
-            "draft yourself a better charter", None, "coach",
+            "draft yourself a better charter",
+            None,
+            "coach",
         )
     assert exc.value.status_code == 422
 

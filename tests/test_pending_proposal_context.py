@@ -53,14 +53,21 @@ def _vectors(monkeypatch, item_vec, by_intent):
 
 
 async def test_related_pending_proposal_is_appended_as_fact(monkeypatch):
-    _pending(monkeypatch, [
-        {"id": "p1", "intent": "record that Xcel Energy is the utility provider"},
-        {"id": "p2", "intent": "record that Docker sends expected marketing mail"},
-    ])
-    _vectors(monkeypatch, _XCEL, {
-        "record that Xcel Energy is the utility provider": _NEAR,
-        "record that Docker sends expected marketing mail": _FAR,
-    })
+    _pending(
+        monkeypatch,
+        [
+            {"id": "p1", "intent": "record that Xcel Energy is the utility provider"},
+            {"id": "p2", "intent": "record that Docker sends expected marketing mail"},
+        ],
+    )
+    _vectors(
+        monkeypatch,
+        _XCEL,
+        {
+            "record that Xcel Energy is the utility provider": _NEAR,
+            "record that Docker sends expected marketing mail": _FAR,
+        },
+    )
     out = await dispatcher._with_pending_proposals_context("body", {"id": "wi_1"})
     assert out.startswith("body\n\n[queue context]")
     assert "Xcel Energy is the utility provider" in out

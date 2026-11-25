@@ -33,8 +33,11 @@ def test_the_module_loads_neither_the_gateway_nor_the_runtime_nor_graphiti_core(
         "'graphiti_core'))])"
     )
     done = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True,
-        env={**os.environ, "PYTHONPATH": str(ROOT)}, cwd=ROOT,
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT)},
+        cwd=ROOT,
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "[]"

@@ -35,6 +35,7 @@ def _test_model(monkeypatch):
     # this doesn't depend on a live LLM key in the developer's .env.
     monkeypatch.setattr(settings, "test_model", True)
 
+
 # --- the rule (no database) ----------------------------------------------------
 
 
@@ -87,6 +88,7 @@ async def test_may_open_lane_at_N_minus_1_N_and_N_plus_1(monkeypatch):
 
 async def test_an_unlimited_agent_costs_no_query(monkeypatch):
     """The common case must not pay a database round trip per question."""
+
     async def explode(*a, **k):
         raise AssertionError("an unlimited agent must not be counted")
 
@@ -106,8 +108,7 @@ async def test_count_events_since_scopes_by_kind_actor_and_time():
     before = datetime.now(UTC)
     await events.emit(attention.CONTACT_EVENT, ref_id="i1", payload={}, actor=actor)
     await events.emit(attention.CONTACT_EVENT, ref_id="i2", payload={}, actor=actor)
-    await events.emit(attention.CONTACT_EVENT, ref_id="i3", payload={},
-                      actor="agent:someone-else")
+    await events.emit(attention.CONTACT_EVENT, ref_id="i3", payload={}, actor="agent:someone-else")
     await events.emit("agent.asked", ref_id="i4", payload={}, actor=actor)
 
     assert await repo.count_events_since(attention.CONTACT_EVENT, actor, before) == 2
@@ -125,8 +126,7 @@ class _Call:
     def __init__(self, question: str, needs_discussion: bool = True):
         self.tool_name = "ask_operator"
         self.tool_call_id = "call_attn"
-        self.args = {"question": question, "needs_discussion": needs_discussion,
-                     "why": "because"}
+        self.args = {"question": question, "needs_discussion": needs_discussion, "why": "because"}
 
 
 class _Result:
@@ -152,15 +152,15 @@ async def _ask(session_id: str, agent_id: str, question: str = "Which first?") -
         await ea.ensure_registered()
     await repo.create_running_session(session_id, agent_id)
     return await questions.park_question(
-        session_id=session_id, agent_id=agent_id, result=_Result(),
+        session_id=session_id,
+        agent_id=agent_id,
+        result=_Result(),
         call=_Call(question),
     )
 
 
 @needs_pg
-async def test_the_ea_over_budget_gets_no_lane_but_keeps_an_answerable_item(
-    monkeypatch, parked
-):
+async def test_the_ea_over_budget_gets_no_lane_but_keeps_an_answerable_item(monkeypatch, parked):
     monkeypatch.setattr(settings, "ea_contact_budget_per_day", 3)
 
     async def spent(kind, actor, since):

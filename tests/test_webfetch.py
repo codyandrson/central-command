@@ -118,7 +118,9 @@ async def test_non_2xx_yields_a_degradation_string_not_an_exception(monkeypatch)
 
 async def test_binary_content_degrades_to_an_honest_note_never_raw_bytes(monkeypatch):
     def handler(request):
-        return httpx.Response(200, headers={"content-type": "image/png"}, content=b"\x89PNG\r\n\x1a\n")
+        return httpx.Response(
+            200, headers={"content-type": "image/png"}, content=b"\x89PNG\r\n\x1a\n"
+        )
 
     _patch_client(monkeypatch, handler)
     result = await webfetch.fetch("https://example.test/pic.png")
@@ -154,6 +156,7 @@ async def test_mtls_identity_comes_from_config_not_the_call(monkeypatch, tmp_pat
     assert captured.get("verify") == str(ca)
 
     import inspect
+
     assert "url" in inspect.signature(tools_mod.fetch_url).parameters
     assert "cert" not in inspect.signature(tools_mod.fetch_url).parameters
 
@@ -185,9 +188,9 @@ async def test_cert_is_withheld_from_hosts_outside_the_allowlist(monkeypatch, tm
         return httpx.Response(200, headers={"content-type": "text/plain"}, text="ok")
 
     for url, expect_cert in (
-        ("https://corp.example.com/x", True),          # exact
-        ("https://jira.corp.example.com/x", True),     # dot-suffix
-        ("https://evilcorp.example.net/x", False),     # elsewhere
+        ("https://corp.example.com/x", True),  # exact
+        ("https://jira.corp.example.com/x", True),  # dot-suffix
+        ("https://evilcorp.example.net/x", False),  # elsewhere
         ("https://notcorp.example.com.evil.net/x", False),  # suffix spoof
     ):
         captured: dict = {}

@@ -50,16 +50,31 @@ def pinned(monkeypatch):
 def _episode(name: str) -> dict:
     return {
         "intent": f"Record {name}.",
-        "actions": [{
-            "capability": "graph.add_episode",
-            "arguments": {"name": name, "episode_body": f"{name} happened.",
-                          "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"},
-            "target_ref": {"system": "graphiti", "id": f"episode:{name}",
-                           "read_version": "n/a"},
-            "reversibility": "reversible",
-        }],
-        "evidence": [{"kind": "record", "source_ref": "chat", "locator": "chat",
-                      "claim": f"{name} happened."}],
+        "actions": [
+            {
+                "capability": "graph.add_episode",
+                "arguments": {
+                    "name": name,
+                    "episode_body": f"{name} happened.",
+                    "reference_time": "2026-01-01T00:00:00Z",
+                    "scope": "shared",
+                },
+                "target_ref": {
+                    "system": "graphiti",
+                    "id": f"episode:{name}",
+                    "read_version": "n/a",
+                },
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "record",
+                "source_ref": "chat",
+                "locator": "chat",
+                "claim": f"{name} happened.",
+            }
+        ],
         "expected_effect": f"episode {name} exists",
         "confidence": {"level": "high", "rationale": "The test states it."},
     }
@@ -68,15 +83,22 @@ def _episode(name: str) -> dict:
 # The live transcript's shape: one executed call, two deferred, first one parked.
 _TOUR_TURN = [
     ModelRequest(parts=[UserPromptPart(content="close out the tour")]),
-    ModelResponse(parts=[
-        ToolCallPart(tool_name="current_time", args={}, tool_call_id="t-time"),
-        ToolCallPart(tool_name="propose_action", args={"proposal": _episode("A")},
-                     tool_call_id="t-first"),
-        ToolCallPart(tool_name="propose_action", args={"proposal": _episode("B")},
-                     tool_call_id="t-second"),
-    ]),
-    ModelRequest(parts=[ToolReturnPart(tool_name="current_time", content="noon",
-                                       tool_call_id="t-time")]),
+    ModelResponse(
+        parts=[
+            ToolCallPart(tool_name="current_time", args={}, tool_call_id="t-time"),
+            ToolCallPart(
+                tool_name="propose_action", args={"proposal": _episode("A")}, tool_call_id="t-first"
+            ),
+            ToolCallPart(
+                tool_name="propose_action",
+                args={"proposal": _episode("B")},
+                tool_call_id="t-second",
+            ),
+        ]
+    ),
+    ModelRequest(
+        parts=[ToolReturnPart(tool_name="current_time", content="noon", tool_call_id="t-time")]
+    ),
 ]
 
 
@@ -104,6 +126,7 @@ async def test_a_single_deferred_call_is_answered_exactly_as_before():
 def _two_proposal_model(seen: dict) -> FunctionModel:
     """Turn 1 defers two proposals in one response. Turn 2 (the resume)
     records what came back for each and closes out in text."""
+
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         for m in messages:
             for p in getattr(m, "parts", []):
@@ -111,12 +134,21 @@ def _two_proposal_model(seen: dict) -> FunctionModel:
                     seen[p.tool_call_id] = (p.content, getattr(p, "outcome", None))
         if seen:
             return ModelResponse(parts=[TextPart(content="Closing out.")])
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="propose_action", args={"proposal": _episode("A")},
-                         tool_call_id="e2e-first"),
-            ToolCallPart(tool_name="propose_action", args={"proposal": _episode("B")},
-                         tool_call_id="e2e-second"),
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="propose_action",
+                    args={"proposal": _episode("A")},
+                    tool_call_id="e2e-first",
+                ),
+                ToolCallPart(
+                    tool_name="propose_action",
+                    args={"proposal": _episode("B")},
+                    tool_call_id="e2e-second",
+                ),
+            ]
+        )
+
     return FunctionModel(_respond)
 
 
@@ -128,16 +160,31 @@ async def test_approving_the_parked_proposal_resumes_past_its_sibling():
     assert out.get("proposed") is True
     sid, pid = out["session_id"], out["proposal_id"]
 
-    before = max((e["id"] for e in await repo.list_events_of_kinds(
-        ["session.resume_failed", "session.deferred_siblings_bounced"])), default=0)
+    before = max(
+        (
+            e["id"]
+            for e in await repo.list_events_of_kinds(
+                ["session.resume_failed", "session.deferred_siblings_bounced"]
+            )
+        ),
+        default=0,
+    )
     res = await gateway.approve_and_execute(sid, pid, model=model)
     assert "resume_parked" not in res
 
-    failed = [e for e in await repo.list_events_of_kinds(["session.resume_failed"], since_id=before)
-              if e["ref_id"] == sid]
+    failed = [
+        e
+        for e in await repo.list_events_of_kinds(["session.resume_failed"], since_id=before)
+        if e["ref_id"] == sid
+    ]
     assert failed == [], failed
-    bounced = [e for e in await repo.list_events_of_kinds(
-        ["session.deferred_siblings_bounced"], since_id=before) if e["ref_id"] == sid]
+    bounced = [
+        e
+        for e in await repo.list_events_of_kinds(
+            ["session.deferred_siblings_bounced"], since_id=before
+        )
+        if e["ref_id"] == sid
+    ]
     assert len(bounced) == 1 and bounced[0]["payload"]["bounced"] == ["propose_action"]
 
     # The model's resumed turn saw BOTH results: the executed one and the bounce.

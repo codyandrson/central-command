@@ -50,7 +50,9 @@ def _mock_client(monkeypatch, handler):
 @pytestmark_db
 @pytest.mark.asyncio
 async def test_unknown_skill_is_404():
-    body = routes.SkillSiteImportIn(skill_id="cc-test-site-missing", url="https://example.test/docs")
+    body = routes.SkillSiteImportIn(
+        skill_id="cc-test-site-missing", url="https://example.test/docs"
+    )
     with pytest.raises(HTTPException) as exc:
         await routes.import_skill_site_route(body)
     assert exc.value.status_code == 404
@@ -74,11 +76,7 @@ async def test_llms_full_happy_path_splits_into_sane_docs(clean_skills, monkeypa
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/llms-full.txt":
-            body = (
-                f"# Section One\n{para}\n\n"
-                f"## Section Two\n{para}\n\n"
-                f"## Section Three\n{para}\n"
-            )
+            body = f"# Section One\n{para}\n\n## Section Two\n{para}\n\n## Section Three\n{para}\n"
             return httpx.Response(200, text=body)
         return httpx.Response(404, text="not found")
 
@@ -88,7 +86,11 @@ async def test_llms_full_happy_path_splits_into_sane_docs(clean_skills, monkeypa
     result = await routes.import_skill_site_route(body)
 
     assert result["rung"] == "llms-full"
-    assert [d["doc_key"] for d in result["imported"]] == ["section-one", "section-two", "section-three"]
+    assert [d["doc_key"] for d in result["imported"]] == [
+        "section-one",
+        "section-two",
+        "section-three",
+    ]
     assert result["skipped"] == []
     assert result["truncated"] is False
 
@@ -143,7 +145,8 @@ async def test_sitemap_path_imports_pages_and_skips_empty(clean_skills, monkeypa
 
     assert result["rung"] == "sitemap"
     assert {d["source_url"] for d in result["imported"]} == {
-        "https://example.test/docs/a", "https://example.test/docs/b",
+        "https://example.test/docs/a",
+        "https://example.test/docs/b",
     }
     assert len(result["skipped"]) == 1
     assert result["truncated"] is False
@@ -159,14 +162,17 @@ async def test_sitemap_max_pages_caps_and_reports_truncated(clean_skills, monkey
         if request.url.path in ("/llms-full.txt", "/llms.txt"):
             return httpx.Response(404, text="not found")
         return httpx.Response(
-            200, headers={"content-type": "text/html"},
+            200,
+            headers={"content-type": "text/html"},
             text="<html><body><h1>Page</h1><p>enough content to extract from this page.</p></body></html>",
         )
 
     _mock_client(monkeypatch, handler)
     monkeypatch.setattr(site_import, "sitemap_search", lambda url: urls)
 
-    body = routes.SkillSiteImportIn(skill_id="cc-test-site-x", url="https://example.test/docs", max_pages=2)
+    body = routes.SkillSiteImportIn(
+        skill_id="cc-test-site-x", url="https://example.test/docs", max_pages=2
+    )
     result = await routes.import_skill_site_route(body)
 
     assert result["rung"] == "sitemap"

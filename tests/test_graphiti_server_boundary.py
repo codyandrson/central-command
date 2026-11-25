@@ -30,38 +30,47 @@ def test_the_retired_servers_build_inputs_are_gone_and_nothing_names_them():
     assert not (ROOT / "deploy" / "pi" / "graphiti").exists()
     assert not (ROOT / "deploy" / "k3s" / "build-graphiti-image.sh").exists()
     assert not (ROOT / "deploy" / "single" / "build-graphiti-image.sh").exists()
-    for rel in ("deploy/k3s/cc-update.sh", "deploy/k3s/setup.sh", "deploy/k3s/make-secrets.sh",
-                "deploy/k3s/verify.sh", "deploy/k3s/backup.sh",
-                "deploy/single/setup.sh", "deploy/single/update.sh"):
+    for rel in (
+        "deploy/k3s/cc-update.sh",
+        "deploy/k3s/setup.sh",
+        "deploy/k3s/make-secrets.sh",
+        "deploy/k3s/verify.sh",
+        "deploy/k3s/backup.sh",
+        "deploy/single/setup.sh",
+        "deploy/single/update.sh",
+    ):
         code = _code(rel)
         assert "build-graphiti-image.sh" not in code, rel
         assert "deploy/pi/graphiti" not in code, rel
 
 
 def test_nothing_creates_the_tombstoned_configmap_or_secret():
-    for rel in ("deploy/k3s/make-secrets.sh", "deploy/k3s/setup.sh",
-                "deploy/k3s/cc-update.sh"):
+    for rel in ("deploy/k3s/make-secrets.sh", "deploy/k3s/setup.sh", "deploy/k3s/cc-update.sh"):
         code = _code(rel)
         assert "cc-graphiti-config" not in code, rel
         assert not re.search(r"apply_secret\s+cc-graphiti\b", code), rel
     for manifest in (ROOT / "deploy" / "k3s").glob("*.yaml"):
-        assert not re.search(r"^\s*name:\s*(cc-graphiti-config|cc-graphiti)\s*$",
-                             manifest.read_text(encoding="utf-8"), re.MULTILINE), manifest.name
+        assert not re.search(
+            r"^\s*name:\s*(cc-graphiti-config|cc-graphiti)\s*$",
+            manifest.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        ), manifest.name
 
 
 def test_this_updater_has_no_graphiti_image_or_configmap_row():
     text = (ROOT / "deploy" / "k3s" / "cc-update.sh").read_text(encoding="utf-8")
-    images = text[text.index("IMAGES=("):]
-    images = images[:images.index("\n)\n")]
+    images = text[text.index("IMAGES=(") :]
+    images = images[: images.index("\n)\n")]
     assert "graphiti" not in images
-    cm = text[text.index("<<'CM'"):]
-    cm = cm[:cm.index("\nCM\n")]
+    cm = text[text.index("<<'CM'") :]
+    cm = cm[: cm.index("\nCM\n")]
     assert "graphiti" not in cm
 
 
 def test_tombstones_take_the_workload_and_what_it_mounted():
     lines = {
-        tuple(l.split()) for l in (ROOT / "deploy" / "k3s" / "removed.txt").read_text().splitlines()
+        tuple(l.split())
+        for l in (ROOT / "deploy" / "k3s" / "removed.txt").read_text().splitlines()
         if l.strip() and not l.lstrip().startswith("#")
     }
     assert ("central-command", "deployment", "cc-graphiti") in lines
@@ -75,15 +84,15 @@ def test_tombstones_take_the_workload_and_what_it_mounted():
 
 def test_the_patch_step_follows_every_install_and_tolerates_an_old_tree():
     upd = (ROOT / "deploy" / "k3s" / "cc-update.sh").read_text(encoding="utf-8")
-    rebuild = upd[upd.index("rebuild() {"):]
-    rebuild = rebuild[:rebuild.index("\n}\n")]
+    rebuild = upd[upd.index("rebuild() {") :]
+    rebuild = rebuild[: rebuild.index("\n}\n")]
     assert re.search(r"uv pip install[^\n]*\n\s*patch_graphiti\b", rebuild)
-    fn = upd[upd.index("patch_graphiti() {"):]
-    fn = fn[:fn.index("\n}\n")]
+    fn = upd[upd.index("patch_graphiti() {") :]
+    fn = fn[: fn.index("\n}\n")]
     # A rollback reinstalls a release that may have no script at all.
     assert '[[ -f "$REPO/scripts/apply_graphiti_patches.py" ]] || return 0' in fn
     setup = (ROOT / "deploy" / "k3s" / "setup.sh").read_text(encoding="utf-8")
-    app = setup[setup.index("phase_app() {"):]
+    app = setup[setup.index("phase_app() {") :]
     assert app.index("uv pip install") < app.index("scripts/apply_graphiti_patches.py")
 
 
@@ -105,7 +114,7 @@ def test_this_updater_keeps_the_bridges_steps():
     upd = (ROOT / "deploy" / "k3s" / "cc-update.sh").read_text(encoding="utf-8")
     for name in ("patch_graphiti() {", "ensure_app_env_defaults() {", "reconcile_app_config() {"):
         assert name in upd, name
-    main = upd[upd.index("\nmain() {"):]
+    main = upd[upd.index("\nmain() {") :]
     assert main.index("reconcile_app_config") < main.index('phase "starting services"')
     assert "grep -q -- '--scope-only'" in upd
     mint = (ROOT / "deploy" / "k3s" / "mint-keys.sh").read_text(encoding="utf-8")

@@ -45,10 +45,17 @@ async def test_heartbeat_schedules_carry_every_field_the_crons_adapter_reads(mon
     last_error — losing any of these blanks the crons tab's row (schedule
     type, the assignee picker, or the last-run chip)."""
     row = {
-        "id": "mail-poll", "name": "Mail poll", "schedule_kind": "every",
-        "schedule": {"every_seconds": 300}, "action_kind": "feed.poll",
-        "action_params": {}, "enabled": True, "created_by": "operator",
-        "last_fired_at": NOW, "created_at": NOW, "updated_at": NOW,
+        "id": "mail-poll",
+        "name": "Mail poll",
+        "schedule_kind": "every",
+        "schedule": {"every_seconds": 300},
+        "action_kind": "feed.poll",
+        "action_params": {},
+        "enabled": True,
+        "created_by": "operator",
+        "last_fired_at": NOW,
+        "created_at": NOW,
+        "updated_at": NOW,
     }
     monkeypatch.setattr(repo, "list_heartbeat_schedules", lambda **k: _async([row]))
     monkeypatch.setattr(repo, "list_events", lambda **k: _async([]))
@@ -58,8 +65,15 @@ async def test_heartbeat_schedules_carry_every_field_the_crons_adapter_reads(mon
     assert set(out.keys()) == {"schedules", "actions"}
     sched = out["schedules"][0]
     for key in (
-        "id", "name", "schedule_kind", "schedule", "action_kind",
-        "action_params", "enabled", "created_by", "last_fired_at",
+        "id",
+        "name",
+        "schedule_kind",
+        "schedule",
+        "action_kind",
+        "action_params",
+        "enabled",
+        "created_by",
+        "last_fired_at",
     ):
         assert key in sched, f"crons tab row loses its {key} — mapSchedule reads it directly"
     assert "next_due" in sched, "without next_due the crons row's nextRunAtMs is always blank"
@@ -78,10 +92,14 @@ async def test_heartbeat_actions_carry_the_whole_spec_the_cron_dialog_renders(mo
 
     spec = out["actions"]["litellm.discovery"]
     assert set(spec) == {"description", "params", "required", "doc", "levers", "choices", "runs_as"}
-    assert "STORED CREDENTIAL" in spec["doc"], "doc is the run function's docstring, the only real explanation"
+    assert "STORED CREDENTIAL" in spec["doc"], (
+        "doc is the run function's docstring, the only real explanation"
+    )
     assert "integrations.litellm.provider_catalog" in spec["levers"]
     assert spec["runs_as"] == "litellm-manager"
-    assert out["actions"]["ea.contact"]["choices"]["kind"], "an enum param must reach the dialog as its choices"
+    assert out["actions"]["ea.contact"]["choices"]["kind"], (
+        "an enum param must reach the dialog as its choices"
+    )
     assert out["actions"]["feed.poll"]["runs_as"] is None, "an action that tasks nobody says so"
 
 
@@ -90,14 +108,23 @@ async def test_heartbeat_schedule_action_params_carry_the_task_create_fields(mon
     reads `agent_id`/`instructions`/`model`/`thinking` off action_params — the
     "Agent task" dialog's assignee and instructions fields."""
     row = {
-        "id": "weekly-audit", "name": "Weekly audit", "schedule_kind": "cron",
-        "schedule": {"expr": "0 9 * * MON", "tz": "UTC"}, "action_kind": "task.create",
+        "id": "weekly-audit",
+        "name": "Weekly audit",
+        "schedule_kind": "cron",
+        "schedule": {"expr": "0 9 * * MON", "tz": "UTC"},
+        "action_kind": "task.create",
         "action_params": {
-            "agent_id": "jira-expert", "instructions": "Audit the board",
-            "title": "Weekly audit", "model": "qwen3-coder", "thinking": "high",
+            "agent_id": "jira-expert",
+            "instructions": "Audit the board",
+            "title": "Weekly audit",
+            "model": "qwen3-coder",
+            "thinking": "high",
         },
-        "enabled": True, "created_by": "operator", "last_fired_at": None,
-        "created_at": NOW, "updated_at": NOW,
+        "enabled": True,
+        "created_by": "operator",
+        "last_fired_at": None,
+        "created_at": NOW,
+        "updated_at": NOW,
     }
     monkeypatch.setattr(repo, "list_heartbeat_schedules", lambda **k: _async([row]))
     monkeypatch.setattr(repo, "list_events", lambda **k: _async([]))
@@ -106,8 +133,7 @@ async def test_heartbeat_schedule_action_params_carry_the_task_create_fields(mon
     params = out["schedules"][0]["action_params"]
     for key in ("agent_id", "instructions", "model", "thinking"):
         assert key in params, (
-            f"a scheduled agent task loses its {key} — the crons dialog can't "
-            "prefill it on edit"
+            f"a scheduled agent task loses its {key} — the crons dialog can't prefill it on edit"
         )
 
 
@@ -121,11 +147,22 @@ async def test_agents_list_carries_the_fields_the_crons_agent_picker_filters_on(
     'ACTIVE'` then maps to `{id, name}` — losing taskable or status empties
     the "assign to" dropdown silently (everything gets filtered out)."""
     agent = {
-        "id": "jira-expert", "name": "Jira Expert", "model": None, "thinking": None,
-        "created_at": NOW, "role": "jira", "status": "ACTIVE", "taskable": True,
-        "consultable": True, "conversational": True, "deviations": None,
-        "template": None, "hired_by": None, "retired_reason": None,
-        "retired_at": None, "charter_version": 1,
+        "id": "jira-expert",
+        "name": "Jira Expert",
+        "model": None,
+        "thinking": None,
+        "created_at": NOW,
+        "role": "jira",
+        "status": "ACTIVE",
+        "taskable": True,
+        "consultable": True,
+        "conversational": True,
+        "deviations": None,
+        "template": None,
+        "hired_by": None,
+        "retired_reason": None,
+        "retired_at": None,
+        "charter_version": 1,
     }
     monkeypatch.setattr(repo, "list_agents", lambda **k: _async([agent]))
     monkeypatch.setattr(repo, "list_grants", lambda _id: _async([]))
@@ -155,9 +192,7 @@ async def test_tasks_list_carries_every_field_mapTask_reads():
     await repo.create_running_session(child_session, agent_id)
     conn = await repo._conn()
     try:
-        await conn.execute(
-            "update session set status = 'STOPPED' where id = $1", child_session
-        )
+        await conn.execute("update session set status = 'STOPPED' where id = $1", child_session)
     finally:
         await conn.close()
 
@@ -168,7 +203,8 @@ async def test_tasks_list_carries_every_field_mapTask_reads():
     try:
         await conn.execute(
             "update task set parent_session_id = $2 where id = $1",
-            task_id, parent_session,
+            task_id,
+            parent_session,
         )
     finally:
         await conn.close()
@@ -177,9 +213,18 @@ async def test_tasks_list_carries_every_field_mapTask_reads():
     row = rows[task_id]
 
     for key in (
-        "id", "title", "instructions", "agent_id", "status", "session_id",
-        "parent_session_id", "outcome", "created_at", "started_at",
-        "terminal_at", "session_status",
+        "id",
+        "title",
+        "instructions",
+        "agent_id",
+        "status",
+        "session_id",
+        "parent_session_id",
+        "outcome",
+        "created_at",
+        "started_at",
+        "terminal_at",
+        "session_status",
     ):
         assert key in row, f"the kanban board loses its {key} column — mapTask reads it directly"
     assert row["parent_session_id"] == parent_session
@@ -214,7 +259,9 @@ async def test_sessions_list_carries_work_subject_for_the_activity_runs_tab():
             "insert into work_item (id, message_id, feed, source, subject,"
             " payload, state, session_id)"
             " values ($1, $2, 'test', 'test', $3, '{}'::jsonb, 'PROCESSED', $4)",
-            "wi_" + uuid.uuid4().hex[:12], uuid.uuid4().hex, "Renew the domain",
+            "wi_" + uuid.uuid4().hex[:12],
+            uuid.uuid4().hex,
+            "Renew the domain",
             session_id,
         )
     finally:
@@ -224,8 +271,16 @@ async def test_sessions_list_carries_work_subject_for_the_activity_runs_tab():
     row = rows[session_id]
 
     for key in (
-        "id", "agent_id", "status", "mode", "created_at", "updated_at",
-        "closed_reason", "parent_session_id", "task_title", "proposal_count",
+        "id",
+        "agent_id",
+        "status",
+        "mode",
+        "created_at",
+        "updated_at",
+        "closed_reason",
+        "parent_session_id",
+        "task_title",
+        "proposal_count",
         "token_estimate",
     ):
         assert key in row, f"the Activity Runs tab loses its {key} column"
@@ -244,7 +299,10 @@ async def test_activity_overview_carries_every_top_level_field(monkeypatch):
     all five into one screen precisely so the operator never reads a dispatch
     number from one instant beside a ledger number from another."""
     dispatch_status = {
-        "running": True, "may_dispatch": True, "reason": "ok", "in_flight": 1,
+        "running": True,
+        "may_dispatch": True,
+        "reason": "ok",
+        "in_flight": 1,
         "awaiting_human": 0,
         "valves": {"concurrency": 4, "approval_limit": 3},
         "ledger": {"UNPROCESSED": 2},
@@ -259,16 +317,24 @@ async def test_activity_overview_carries_every_top_level_field(monkeypatch):
 
     class FakeEngine:
         def status(self):
-            return {"running": True, "reason": "ok",
-                     "tick_seconds": settings.heartbeat_tick_seconds, "next_due": {}}
+            return {
+                "running": True,
+                "reason": "ok",
+                "tick_seconds": settings.heartbeat_tick_seconds,
+                "next_due": {},
+            }
 
     monkeypatch.setattr(routes, "_heartbeat_engine", lambda: FakeEngine())
 
     out = await routes.activity_overview()
 
     for key in (
-        "dispatch", "oldest_unprocessed_at", "failures", "dismiss_pending",
-        "heartbeat", "schedules",
+        "dispatch",
+        "oldest_unprocessed_at",
+        "failures",
+        "dismiss_pending",
+        "heartbeat",
+        "schedules",
     ):
         assert key in out, f"the Activity Overview tab loses its {key} section"
     assert out["dispatch"] == dispatch_status
@@ -281,9 +347,16 @@ async def test_activity_overview_failure_rows_carry_the_failures_strip_fields(mo
     itself must drop an already-acknowledged row (`failure_ack`), since the
     strip means "still wants a decision"."""
     open_failure = {
-        "id": "wi_open", "subject": "Bounced invoice", "kind": "email",
-        "source": "gmail", "state": "FAILED", "session_id": None, "attempts": 3,
-        "last_error": "Jira 400", "enrolled_at": NOW, "terminal_at": NOW,
+        "id": "wi_open",
+        "subject": "Bounced invoice",
+        "kind": "email",
+        "source": "gmail",
+        "state": "FAILED",
+        "session_id": None,
+        "attempts": 3,
+        "last_error": "Jira 400",
+        "enrolled_at": NOW,
+        "terminal_at": NOW,
         "payload": {},
     }
     acked_failure = {**open_failure, "id": "wi_acked", "payload": {"failure_ack": True}}
@@ -291,13 +364,19 @@ async def test_activity_overview_failure_rows_carry_the_failures_strip_fields(mo
     from central_command.ingest import dispatcher as dispatcher_mod
 
     monkeypatch.setattr(
-        dispatcher_mod.dispatcher, "status",
-        lambda: _async({
-            "running": False, "may_dispatch": False, "reason": "stopped",
-            "in_flight": 0, "awaiting_human": 0,
-            "valves": {"concurrency": 0, "approval_limit": 0},
-            "ledger": {},
-        }),
+        dispatcher_mod.dispatcher,
+        "status",
+        lambda: _async(
+            {
+                "running": False,
+                "may_dispatch": False,
+                "reason": "stopped",
+                "in_flight": 0,
+                "awaiting_human": 0,
+                "valves": {"concurrency": 0, "approval_limit": 0},
+                "ledger": {},
+            }
+        ),
     )
     monkeypatch.setattr(
         repo, "list_work_items", lambda *a, **k: _async([open_failure, acked_failure])
@@ -308,8 +387,12 @@ async def test_activity_overview_failure_rows_carry_the_failures_strip_fields(mo
 
     class FakeEngine:
         def status(self):
-            return {"running": False, "reason": "stopped",
-                     "tick_seconds": settings.heartbeat_tick_seconds, "next_due": {}}
+            return {
+                "running": False,
+                "reason": "stopped",
+                "tick_seconds": settings.heartbeat_tick_seconds,
+                "next_due": {},
+            }
 
     monkeypatch.setattr(routes, "_heartbeat_engine", lambda: FakeEngine())
 
@@ -322,8 +405,16 @@ async def test_activity_overview_failure_rows_carry_the_failures_strip_fields(mo
     )
     row = out["failures"][0]
     for key in (
-        "id", "subject", "kind", "source", "state", "session_id", "attempts",
-        "last_error", "enrolled_at", "terminal_at",
+        "id",
+        "subject",
+        "kind",
+        "source",
+        "state",
+        "session_id",
+        "attempts",
+        "last_error",
+        "enrolled_at",
+        "terminal_at",
     ):
         assert key in row, f"the Failures strip loses its {key} field"
 
@@ -335,8 +426,11 @@ async def test_events_list_carries_the_fields_the_events_tab_reads(monkeypatch):
     """`EventRow` (useActivity.ts) reads id/kind/ref_id/actor/payload/
     created_at — losing any of these blanks the audit-trail browser's row."""
     event = {
-        "id": 1, "kind": "task.completed", "ref_id": "task_1",
-        "actor": "agent:jira-expert", "payload": {"outcome": "done"},
+        "id": 1,
+        "kind": "task.completed",
+        "ref_id": "task_1",
+        "actor": "agent:jira-expert",
+        "payload": {"outcome": "done"},
         "created_at": NOW,
     }
     monkeypatch.setattr(repo, "list_events", lambda **k: _async([event]))
@@ -351,7 +445,9 @@ async def test_events_list_carries_the_fields_the_events_tab_reads(monkeypatch):
 
 async def test_event_kinds_carries_kind_and_count(monkeypatch):
     """`EventKind` (useActivity.ts) reads kind/count for the events facet bar."""
-    monkeypatch.setattr(repo, "event_kinds", lambda: _async([{"kind": "task.completed", "count": 3}]))
+    monkeypatch.setattr(
+        repo, "event_kinds", lambda: _async([{"kind": "task.completed", "count": 3}])
+    )
 
     out = await routes.get_event_kinds()
     assert out["kinds"] == [{"kind": "task.completed", "count": 3}]

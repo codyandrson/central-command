@@ -87,6 +87,7 @@ async def test_dismiss_withdraws_closes_session_and_never_resumes_the_agent(monk
     # agent to resume, this raises instead of silently redrafting.
     def _boom(*a, **k):
         raise AssertionError("dismiss_proposal must not resume the agent")
+
     monkeypatch.setattr(gateway, "build_agent_for", _boom)
 
     out = await gateway.dismiss_proposal(session_id, proposal_id, "Close, don't ask again.")
@@ -146,8 +147,11 @@ async def test_composer_state_stays_sendable_after_a_dismissal_close(monkeypatch
     from central_command.api import nerve_gateway
 
     row = {
-        "id": "sess_dismiss_wire", "agent_id": "jira-expert", "mode": "conversation",
-        "status": "DONE", "closed_reason": "dismissed",
+        "id": "sess_dismiss_wire",
+        "agent_id": "jira-expert",
+        "mode": "conversation",
+        "status": "DONE",
+        "closed_reason": "dismissed",
     }
 
     async def fake_get(_sid):
@@ -178,9 +182,7 @@ async def test_dismissing_a_task_bound_proposal_resolves_the_task_done():
 
     task = await repo.get_task(task_id)
     assert task["status"] == "DONE"
-    assert task["outcome"] == (
-        "operator dismissed the drafted proposal; no action needed"
-    )
+    assert task["outcome"] == ("operator dismissed the drafted proposal; no action needed")
 
     events = await repo.list_events(kind="task.completed", ref_id=task_id)
     assert events, "task.completed must fire the same as any other resolution"
@@ -192,8 +194,7 @@ async def test_dismissing_a_covering_proposal_releases_its_folds():
     it claimed to cover."""
     await ledger.enroll_email(_thread_msg(ROOT, "Sprint planning moves to Thursday."))
     await ledger.enroll_email(
-        _thread_msg(REPLY, "Correction: Thursday is out, let's do Friday 10:00.",
-                    in_reply_to=ROOT)
+        _thread_msg(REPLY, "Correction: Thursday is out, let's do Friday 10:00.", in_reply_to=ROOT)
     )
     result = await dispatcher.dispatch_once(model=make_folding_model())
     assert result and result["folded_message_ids"]
@@ -208,9 +209,7 @@ async def test_dismissing_a_covering_proposal_releases_its_folds():
         await conn.close()
     assert state_before == "FOLD_PENDING"
 
-    await gateway.dismiss_proposal(
-        result["session_id"], result["proposal_id"], "Not needed."
-    )
+    await gateway.dismiss_proposal(result["session_id"], result["proposal_id"], "Not needed.")
 
     conn = await repo._conn()
     try:

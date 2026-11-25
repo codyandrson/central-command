@@ -79,10 +79,12 @@ class _FakeClient:
 @pytest.fixture
 def fake_embedder(monkeypatch):
     """Returns a factory: `fake_embedder(vector)` -> list of request bodies."""
+
     def install(vector):
         calls: list[dict] = []
         monkeypatch.setattr(
-            neo4j_writer.httpx, "AsyncClient",
+            neo4j_writer.httpx,
+            "AsyncClient",
             lambda *a, **k: _FakeClient(vector, calls),
         )
         return calls
@@ -148,7 +150,9 @@ def test_a_vector_is_stored_the_bulk_way_and_a_missing_one_is_cleared():
     tail, params = neo4j_writer._vector("e", "fact_embedding", "edge", [0.5])
     assert "db.create.setRelationshipVectorProperty(e, 'fact_embedding', $vector)" in tail
     assert neo4j_writer._vector("n", "name_embedding", "node", None) == (
-        " SET n.name_embedding = null", {})
+        " SET n.name_embedding = null",
+        {},
+    )
 
 
 async def test_an_unreachable_embedder_raises_embedder_down(monkeypatch):
@@ -176,6 +180,7 @@ async def test_an_unreachable_embedder_raises_embedder_down(monkeypatch):
 # The other half of "EVERY write re-embeds": a walk, because a new write
 # function would simply not call embed() and nothing would ever say so.
 # --------------------------------------------------------------------------
+
 
 def _writer_functions():
     tree = ast.parse(WRITER.read_text(encoding="utf-8"))
@@ -209,7 +214,8 @@ def test_every_text_changing_graph_write_re_embeds():
             continue
         called = {
             (c.func.attr if isinstance(c.func, ast.Attribute) else getattr(c.func, "id", None))
-            for c in ast.walk(fn) if isinstance(c, ast.Call)
+            for c in ast.walk(fn)
+            if isinstance(c, ast.Call)
         }
         if "embed" not in called or "_vector" not in called:
             offenders.append(

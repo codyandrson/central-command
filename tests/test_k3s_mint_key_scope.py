@@ -33,7 +33,7 @@ MASTER = "sk-MARKER_MASTER_aaaaaaaa"
 SPINE = "sk-MARKER_SPINE_bbbbbbbbb"
 WANT = ["cc-default", "cc-tts", "cc-stt", "graphiti-llm", "cc-embedding", "cc-rerank"]
 
-STUB = r'''#!/usr/bin/env python3
+STUB = r"""#!/usr/bin/env python3
 import json, os, sys
 log = os.environ["STUB_LOG"]
 argv = sys.argv[1:]
@@ -54,7 +54,7 @@ if "/key/info" in url:
 if url.endswith("/key/update"):
     print("{}"); sys.exit(0)
 sys.exit(22)
-'''
+"""
 
 
 @pytest.fixture
@@ -67,7 +67,7 @@ def tree(tmp_path: Path) -> Path:
     shutil.copy(MINT.parent / "env-path.sh", tmp_path / "deploy" / "k3s" / "env-path.sh")
     # A make-secrets.sh that would prove --scope-only ran it.
     ms = tmp_path / "deploy" / "k3s" / "make-secrets.sh"
-    ms.write_text("#!/usr/bin/env bash\ntouch \"$(dirname \"$0\")/MADE_SECRETS\"\n")
+    ms.write_text('#!/usr/bin/env bash\ntouch "$(dirname "$0")/MADE_SECRETS"\n')
     ms.chmod(0o755)
     (tmp_path / "deploy" / "k3s" / ".env").write_text(f"LITELLM_MASTER_KEY={MASTER}\n")
     (tmp_path / ".env").write_text(f"CC_LLM_API_KEY={SPINE}\n")
@@ -88,7 +88,10 @@ def _run(tree: Path, scope) -> tuple[subprocess.CompletedProcess, list[dict]]:
     )
     r = subprocess.run(
         ["bash", str(tree / "deploy" / "k3s" / "mint-keys.sh"), "--scope-only"],
-        env=env, capture_output=True, text=True, timeout=60,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
     return r, calls
@@ -109,10 +112,17 @@ def test_a_narrow_key_gains_exactly_the_missing_aliases(tree: Path):
     assert r.returncode == 0, r.stdout + r.stderr
     (upd,) = _updates(calls)
     data = next(line for line in upd["cfg"].splitlines() if line.startswith("data = "))
-    body = json.loads(json.loads(data[len("data = "):]))
+    body = json.loads(json.loads(data[len("data = ") :]))
     assert body["key"] == SPINE
-    assert body["models"] == ["cc-default", "cc-tts", "cc-stt", "my-extra",
-                              "graphiti-llm", "cc-embedding", "cc-rerank"]
+    assert body["models"] == [
+        "cc-default",
+        "cc-tts",
+        "cc-stt",
+        "my-extra",
+        "graphiti-llm",
+        "cc-embedding",
+        "cc-rerank",
+    ]
     assert f"CC_LLM_API_KEY={SPINE}" in (tree / ".env").read_text()
     _no_secret_in_argv(calls)
 

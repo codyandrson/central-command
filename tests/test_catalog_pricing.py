@@ -22,8 +22,11 @@ pytestmark = pytest.mark.anyio
 
 MERCURY = {
     "id": "inception/mercury-2.5",
-    "pricing": {"prompt": "0.000000200000", "completion": "0.000000750000",
-                "input_cache_read": "0.000000020000"},
+    "pricing": {
+        "prompt": "0.000000200000",
+        "completion": "0.000000750000",
+        "input_cache_read": "0.000000020000",
+    },
 }
 
 
@@ -38,7 +41,9 @@ def test_pricing_from_catalog_maps_openrouter_shape_to_litellm_fields():
     }
     # A free model's zero is a real price, not an absence.
     assert litellm_client.pricing_from_catalog({"pricing": {"prompt": "0", "completion": 0}}) == {
-        "input_cost_per_token": 0.0, "output_cost_per_token": 0.0}
+        "input_cost_per_token": 0.0,
+        "output_cost_per_token": 0.0,
+    }
     # No pricing (OpenAI's / Anthropic's list shape) → nothing to declare.
     assert litellm_client.pricing_from_catalog({"id": "gpt-x"}) == {}
     assert litellm_client.pricing_from_catalog(None) == {}
@@ -49,38 +54,60 @@ def test_a_negative_catalog_price_is_an_absence_not_a_price():
     # Kilo publishes -1 for its auto routers (cost depends on the model the
     # router picks); copied verbatim, LiteLLM booked -$1 per token
     # (2026-09-26: -$5,036 across 42 probe calls). Drop it, keep the rest.
-    assert litellm_client.pricing_from_catalog({
-        "pricing": {"prompt": "-1", "completion": -1.0, "input_cache_read": "0.00000002"},
-    }) == {"cache_read_input_token_cost": 2e-8}
+    assert litellm_client.pricing_from_catalog(
+        {
+            "pricing": {"prompt": "-1", "completion": -1.0, "input_cache_read": "0.00000002"},
+        }
+    ) == {"cache_read_input_token_cost": 2e-8}
     # The contract refuses the same sentinel on a hand-written draft.
-    bad = validate_action_args("litellm.add_model", {
-        "model_name": "auto", "model": "openai/kilo-auto/frontier",
-        "model_info": {"input_cost_per_token": -1, "output_cost_per_token": "-1.0"},
-    })
+    bad = validate_action_args(
+        "litellm.add_model",
+        {
+            "model_name": "auto",
+            "model": "openai/kilo-auto/frontier",
+            "model_info": {"input_cost_per_token": -1, "output_cost_per_token": "-1.0"},
+        },
+    )
     assert len(bad) == 2 and all("negative" in p for p in bad)
-    assert validate_action_args("litellm.update_model", {
-        "model_id": "x", "litellm_params": {"input_cost_per_token": -1}})
+    assert validate_action_args(
+        "litellm.update_model", {"model_id": "x", "litellm_params": {"input_cost_per_token": -1}}
+    )
 
 
 def test_a_per_million_price_typed_as_per_token_is_refused_at_the_contract():
-    bad = validate_action_args("litellm.add_model", {
-        "model_name": "mercury-2.5", "model": "openai/inception/mercury-2.5",
-        "model_info": {"input_cost_per_token": 2.0, "output_cost_per_token": 7.5},
-    })
+    bad = validate_action_args(
+        "litellm.add_model",
+        {
+            "model_name": "mercury-2.5",
+            "model": "openai/inception/mercury-2.5",
+            "model_info": {"input_cost_per_token": 2.0, "output_cost_per_token": 7.5},
+        },
+    )
     assert len(bad) == 2 and all("per TOKEN" in p for p in bad)
     # The same ceiling on the litellm_params side, for add (`extra`) and update.
-    assert validate_action_args("litellm.add_model", {
-        "model_name": "m", "model": "openai/m", "extra": {"input_cost_per_token": "6.0"}})
-    assert validate_action_args("litellm.update_model", {
-        "model_id": "x", "litellm_params": {"output_cost_per_token": 1.8}})
+    assert validate_action_args(
+        "litellm.add_model",
+        {"model_name": "m", "model": "openai/m", "extra": {"input_cost_per_token": "6.0"}},
+    )
+    assert validate_action_args(
+        "litellm.update_model", {"model_id": "x", "litellm_params": {"output_cost_per_token": 1.8}}
+    )
     # A real per-token price passes; absence passes; a non-number is named.
-    assert validate_action_args("litellm.add_model", {
-        "model_name": "m", "model": "openai/m",
-        "model_info": {"input_cost_per_token": 2e-7, "output_cost_per_token": 0}}) == []
+    assert (
+        validate_action_args(
+            "litellm.add_model",
+            {
+                "model_name": "m",
+                "model": "openai/m",
+                "model_info": {"input_cost_per_token": 2e-7, "output_cost_per_token": 0},
+            },
+        )
+        == []
+    )
     assert validate_action_args("litellm.add_model", {"model_name": "m", "model": "openai/m"}) == []
-    assert validate_action_args("litellm.update_model", {
-        "model_id": "x", "model_info": {"input_cost_per_token": "cheap"}}) == [
-        "litellm.update_model: model_info.input_cost_per_token='cheap' is not a number"]
+    assert validate_action_args(
+        "litellm.update_model", {"model_id": "x", "model_info": {"input_cost_per_token": "cheap"}}
+    ) == ["litellm.update_model: model_info.input_cost_per_token='cheap' is not a number"]
 
 
 def test_the_litellm_model_handlers_have_a_shape_spec():
@@ -100,9 +127,12 @@ def _add_action(model_info: dict | None = None, extra: dict | None = None) -> Ac
         args["model_info"] = model_info
     if extra is not None:
         args["extra"] = extra
-    return Action(capability="litellm.add_model", arguments=args,
-                  target_ref={"system": "litellm", "id": "mercury-2.5", "read_version": "unknown"},
-                  reversibility="reversible")
+    return Action(
+        capability="litellm.add_model",
+        arguments=args,
+        target_ref={"system": "litellm", "id": "mercury-2.5", "read_version": "unknown"},
+        reversibility="reversible",
+    )
 
 
 @pytest.fixture
@@ -112,8 +142,10 @@ def proxy(monkeypatch):
 
     async def fake_add(model_name, model, api_key=None, model_info=None, extra=None):
         seen["add"] = {"model_info": model_info, "extra": extra, "api_key": api_key}
-        return {"ok": True, "model": {"model_name": model_name, "provider_model": model,
-                                      "model_id": "id-merc"}}
+        return {
+            "ok": True,
+            "model": {"model_name": model_name, "provider_model": model, "model_id": "id-merc"},
+        }
 
     async def fake_update(model_id, model_info=None, litellm_params=None, model_name=None):
         seen["update"] = {"model_info": model_info, "litellm_params": litellm_params}
@@ -123,9 +155,16 @@ def proxy(monkeypatch):
         return {"ok": True, "observed": {}, "suggested_model_info": {}}
 
     async def fake_list_models():
-        return {"models": [{"model_id": "id-merc", "model_name": "mercury-2.5",
-                            "provider_model": "openai/inception/mercury-2.5",
-                            "credential_name": "Kilo.ai"}]}
+        return {
+            "models": [
+                {
+                    "model_id": "id-merc",
+                    "model_name": "mercury-2.5",
+                    "provider_model": "openai/inception/mercury-2.5",
+                    "credential_name": "Kilo.ai",
+                }
+            ]
+        }
 
     async def fake_catalog_entry(credential_name, provider_model):
         seen["catalog_calls"].append((credential_name, provider_model))
@@ -142,12 +181,23 @@ def proxy(monkeypatch):
 async def test_add_prices_from_the_catalog_and_drops_what_the_agent_wrote(proxy):
     # Plausible-looking but wrong (the ceiling only catches unit errors).
     out = await executor.execute(
-        [_add_action(model_info={"mode": "chat", "input_cost_per_token": 1.5e-6,
-                                 "output_cost_per_token": 3e-6},
-                     extra={"litellm_credential_name": "Kilo.ai",
-                            "api_base": "https://api.kilo.ai/api/gateway",
-                            "cache_read_input_token_cost": 9e-7})],
-        approver="human:lee", source_refs=[])
+        [
+            _add_action(
+                model_info={
+                    "mode": "chat",
+                    "input_cost_per_token": 1.5e-6,
+                    "output_cost_per_token": 3e-6,
+                },
+                extra={
+                    "litellm_credential_name": "Kilo.ai",
+                    "api_base": "https://api.kilo.ai/api/gateway",
+                    "cache_read_input_token_cost": 9e-7,
+                },
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
+    )
     info = proxy["add"]["model_info"]
     assert info["input_cost_per_token"] == 2e-7
     assert info["output_cost_per_token"] == 7.5e-7
@@ -163,7 +213,9 @@ async def test_add_prices_from_the_catalog_and_drops_what_the_agent_wrote(proxy)
 async def test_add_without_a_stored_credential_never_asks_a_catalog(proxy):
     await executor.execute(
         [_add_action(model_info={"input_cost_per_token": 3e-6})],
-        approver="human:lee", source_refs=[])
+        approver="human:lee",
+        source_refs=[],
+    )
     assert proxy["catalog_calls"] == []
     assert "input_cost_per_token" not in proxy["add"]["model_info"]
 
@@ -171,11 +223,18 @@ async def test_add_without_a_stored_credential_never_asks_a_catalog(proxy):
 async def test_an_unreadable_catalog_still_adds_but_leaves_the_model_unpriced(proxy, monkeypatch):
     async def boom(credential_name, provider_model):
         raise litellm_client.LiteLLMError("provider answered 503")
+
     monkeypatch.setattr(executor.litellm_client, "catalog_entry_for", boom)
     out = await executor.execute(
-        [_add_action(model_info={"input_cost_per_token": 3e-6},
-                     extra={"litellm_credential_name": "Kilo.ai"})],
-        approver="human:lee", source_refs=[])
+        [
+            _add_action(
+                model_info={"input_cost_per_token": 3e-6},
+                extra={"litellm_credential_name": "Kilo.ai"},
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
+    )
     assert "input_cost_per_token" not in proxy["add"]["model_info"]
     result = out[0]["result"] if isinstance(out, list) else str(out)
     assert "unreadable" in result and "dropped the proposal's ['input_cost_per_token']" in result
@@ -183,13 +242,21 @@ async def test_an_unreadable_catalog_still_adds_but_leaves_the_model_unpriced(pr
 
 async def test_update_that_touches_a_price_is_repriced_from_the_catalog(proxy):
     await executor.execute(
-        [Action(capability="litellm.update_model",
-                arguments={"model_id": "id-merc",
-                           "model_info": {"input_cost_per_token": 4e-6, "supports_vision": False},
-                           "litellm_params": {"rpm": 10, "output_cost_per_token": 1e-5}},
+        [
+            Action(
+                capability="litellm.update_model",
+                arguments={
+                    "model_id": "id-merc",
+                    "model_info": {"input_cost_per_token": 4e-6, "supports_vision": False},
+                    "litellm_params": {"rpm": 10, "output_cost_per_token": 1e-5},
+                },
                 target_ref={"system": "litellm", "id": "id-merc", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[])
+                reversibility="reversible",
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
+    )
     upd = proxy["update"]
     assert upd["model_info"]["input_cost_per_token"] == 2e-7
     assert upd["model_info"]["output_cost_per_token"] == 7.5e-7
@@ -200,14 +267,19 @@ async def test_update_that_touches_a_price_is_repriced_from_the_catalog(proxy):
 
 async def test_update_that_leaves_prices_alone_makes_no_catalog_call(proxy):
     await executor.execute(
-        [Action(capability="litellm.update_model",
+        [
+            Action(
+                capability="litellm.update_model",
                 arguments={"model_id": "id-merc", "model_info": {"supports_vision": True}},
                 target_ref={"system": "litellm", "id": "id-merc", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[])
+                reversibility="reversible",
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
+    )
     assert proxy["catalog_calls"] == []
-    assert proxy["update"]["model_info"] == {"supports_vision": True,
-                                             "updated_by": "human:lee"}
+    assert proxy["update"]["model_info"] == {"supports_vision": True, "updated_by": "human:lee"}
 
 
 # --- drift + brief --------------------------------------------------------------
@@ -216,10 +288,12 @@ async def test_update_that_leaves_prices_alone_makes_no_catalog_call(proxy):
 def test_a_moved_price_changes_the_fingerprint():
     before = hb_actions.catalog_fingerprint(MERCURY)
     after = hb_actions.catalog_fingerprint(
-        {**MERCURY, "pricing": {**MERCURY["pricing"], "completion": "0.000001000000"}})
+        {**MERCURY, "pricing": {**MERCURY["pricing"], "completion": "0.000001000000"}}
+    )
     assert before != after
     assert hb_actions.catalog_fingerprint({"id": "m"}) == hb_actions.catalog_fingerprint(
-        {"id": "m", "description": "changed"})
+        {"id": "m", "description": "changed"}
+    )
 
 
 def test_the_add_brief_forbids_prices():

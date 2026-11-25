@@ -35,12 +35,12 @@ UPDATER = (ROOT / "deploy" / "k3s" / "cc-update.sh").read_text(encoding="utf-8")
 
 def _fn(name: str) -> str:
     start = UPDATER.index(f"\n{name}() {{") + 1
-    return UPDATER[start:UPDATER.index("\n}\n", start) + 3]
+    return UPDATER[start : UPDATER.index("\n}\n", start) + 3]
 
 
 def _array(name: str) -> str:
     start = UPDATER.index(f"\n{name}=(") + 1
-    return UPDATER[start:UPDATER.index("\n)\n", start) + 3]
+    return UPDATER[start : UPDATER.index("\n)\n", start) + 3]
 
 
 @pytest.fixture
@@ -54,17 +54,19 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _run(repo: Path, fn: str) -> subprocess.CompletedProcess:
-    script = "\n".join([
-        "set -uo pipefail",
-        'note() { printf "%s\\n" "$*"; }',
-        "RUNAS=()",
-        f"REPO='{repo}'",
-        _array("APP_ENV_DEFAULTS"),
-        _fn("patch_graphiti"),
-        _fn("ensure_app_env_defaults"),
-        _fn("reconcile_app_config"),
-        fn,
-    ])
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            'note() { printf "%s\\n" "$*"; }',
+            "RUNAS=()",
+            f"REPO='{repo}'",
+            _array("APP_ENV_DEFAULTS"),
+            _fn("patch_graphiti"),
+            _fn("ensure_app_env_defaults"),
+            _fn("reconcile_app_config"),
+            fn,
+        ]
+    )
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
 
 
@@ -112,7 +114,7 @@ def test_a_failed_patch_is_a_warning_never_a_stop(repo: Path):
 
 def test_a_key_the_merged_release_declares_is_appended_once(repo: Path):
     (repo / ".env.example").write_text("# a comment\n#CC_GRAPH_RERANK_ALIAS=\n")
-    (repo / ".env").write_text("CC_FEED_ENABLED=0")          # no trailing newline
+    (repo / ".env").write_text("CC_FEED_ENABLED=0")  # no trailing newline
     assert _run(repo, "ensure_app_env_defaults").returncode == 0
     assert (repo / ".env").read_text() == "CC_FEED_ENABLED=0\nCC_GRAPH_RERANK_ALIAS=cc-rerank\n"
     _run(repo, "ensure_app_env_defaults")
@@ -139,7 +141,9 @@ def test_this_release_does_not_declare_the_rerank_key_unless_it_reads_it():
     """The gate is real on THIS tree: a release ships the row before (or with)
     the code that reads it, and the key is appended only by an update INTO a
     release whose .env.example declares it."""
-    declared = re.search(r"^#? ?CC_GRAPH_RERANK_ALIAS=", (ROOT / ".env.example").read_text(), re.MULTILINE)
+    declared = re.search(
+        r"^#? ?CC_GRAPH_RERANK_ALIAS=", (ROOT / ".env.example").read_text(), re.MULTILINE
+    )
     reads = "graph_rerank_alias" in (ROOT / "central_command" / "config.py").read_text()
     assert bool(declared) == reads
 

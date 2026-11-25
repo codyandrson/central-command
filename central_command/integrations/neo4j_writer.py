@@ -90,8 +90,16 @@ log = logging.getLogger(__name__)
 # feature), so a label reaches Cypher via string interpolation and the allowlist
 # is what makes that safe. A type added to the ontology belongs here too.
 ENTITY_TYPES = (
-    "Person", "Preference", "Requirement", "Procedure", "Location",
-    "Event", "Organization", "Document", "Topic", "Object",
+    "Person",
+    "Preference",
+    "Requirement",
+    "Procedure",
+    "Location",
+    "Event",
+    "Organization",
+    "Document",
+    "Topic",
+    "Object",
 )
 
 # Must equal the embedder `graphiti_client` builds (the same two settings).
@@ -100,6 +108,7 @@ ENTITY_TYPES = (
 # the single-node profile discovers both at setup (2026-08-21 design).
 _EMBED_MODEL = settings.embed_alias
 _EMBED_DIMENSIONS = settings.embed_dim
+
 
 class WriteError(Exception):
     """A curation write that could not be applied as asked."""
@@ -232,9 +241,7 @@ def _validated_labels(labels: list[str] | None) -> list[str]:
     chosen = [l for l in (labels or []) if l != "Entity"]
     unknown = [l for l in chosen if l not in ENTITY_TYPES]
     if unknown:
-        raise WriteError(
-            f"unknown entity type(s) {unknown}; allowed: {', '.join(ENTITY_TYPES)}"
-        )
+        raise WriteError(f"unknown entity type(s) {unknown}; allowed: {', '.join(ENTITY_TYPES)}")
     return chosen
 
 
@@ -321,8 +328,7 @@ def normalise_phone(value: str) -> str | None:
 
 
 _OPERATOR_SOURCE = (
-    "Manually entered by the operator in the cockpit Graph panel"
-    " | trust=operator-direct"
+    "Manually entered by the operator in the cockpit Graph panel | trust=operator-direct"
 )
 
 
@@ -350,9 +356,7 @@ ACTION_KEY_PROPERTY = "cc_action_key"
 # to commit and then sees its element. Only keyed creates take it, always
 # first, so it cannot deadlock against anything.
 _ACTION_LOCK_KEY = "action-key-lock"
-_TAKE_ACTION_LOCK = (
-    "MERGE (m:CCGraphMeta {key: $lock}) SET m.last_keyed_create_at = $now"
-)
+_TAKE_ACTION_LOCK = "MERGE (m:CCGraphMeta {key: $lock}) SET m.last_keyed_create_at = $now"
 
 
 async def _keyed_node(run, key: str) -> dict | None:
@@ -403,8 +407,12 @@ async def _keyed_create(key: str, find, create) -> dict:
 
 
 async def _record_operator_episode(
-    content: str, group_id: str, mentions: list[str], entity_edges: list[str],
-    now: datetime | None = None, run=None,
+    content: str,
+    group_id: str,
+    mentions: list[str],
+    entity_edges: list[str],
+    now: datetime | None = None,
+    run=None,
 ) -> str:
     """Provenance for a hand-made fact: an Episodic node saying WHO (the
     operator), WHEN (now) and WHAT was entered, MENTIONS-linked to the entities
@@ -426,14 +434,22 @@ async def _record_operator_episode(
         CREATE (ep)-[m:MENTIONS]->(n)
         SET m.uuid = randomUUID(), m.group_id = $group_id, m.created_at = $now
         """,
-        uuid=ep_uuid, content=content, source_description=_OPERATOR_SOURCE,
-        group_id=group_id, now=now, entity_edges=entity_edges, mentions=mentions,
+        uuid=ep_uuid,
+        content=content,
+        source_description=_OPERATOR_SOURCE,
+        group_id=group_id,
+        now=now,
+        entity_edges=entity_edges,
+        mentions=mentions,
     )
     return ep_uuid
 
 
 async def create_node(
-    name: str, labels: list[str] | None, summary: str, group_id: str,
+    name: str,
+    labels: list[str] | None,
+    summary: str,
+    group_id: str,
     action_key: str | None = None,
 ) -> dict:
     """With `action_key` (the Executor's, DL-219) the node carries it and a
@@ -454,20 +470,35 @@ async def create_node(
     vec_tail, vec_params = _vector("n", "name_embedding", "node", vector)
     key_set = f", n.{ACTION_KEY_PROPERTY} = $action_key" if action_key else ""
     key_params = {"action_key": action_key} if action_key else {}
-    query = f"""
+    query = (
+        f"""
         CREATE (n:Entity{label_clause})
         SET n.uuid = $uuid, n.name = $name, n.summary = $summary,
             n.group_id = $group_id, n.created_at = $created_at,
             n.labels = $labels{key_set}
-        """ + vec_tail
-    params = dict(uuid=node_uuid, name=name, summary=summary, group_id=group_id,
-                  created_at=_now(), labels=extra + ["Entity"], **vec_params, **key_params)
+        """
+        + vec_tail
+    )
+    params = dict(
+        uuid=node_uuid,
+        name=name,
+        summary=summary,
+        group_id=group_id,
+        created_at=_now(),
+        labels=extra + ["Entity"],
+        **vec_params,
+        **key_params,
+    )
     content = f"{name}: {summary}" if summary else name
 
     async def create(run) -> dict:
         await run(query, **params)
         episode = await _record_operator_episode(
-            content, group_id, mentions=[node_uuid], entity_edges=[], run=run,
+            content,
+            group_id,
+            mentions=[node_uuid],
+            entity_edges=[],
+            run=run,
         )
         return {"uuid": node_uuid, "episode": episode}
 
@@ -477,9 +508,13 @@ async def create_node(
 
 
 async def update_node(
-    uuid: str, name: str | None = None, summary: str | None = None,
-    labels: list[str] | None = None, aliases: list[str] | None = None,
-    birth_date: str | None = None, phone: str | None = None,
+    uuid: str,
+    name: str | None = None,
+    summary: str | None = None,
+    labels: list[str] | None = None,
+    aliases: list[str] | None = None,
+    birth_date: str | None = None,
+    phone: str | None = None,
 ) -> dict:
     """Rename / re-summarise / re-type, and a Person's `aliases`, `birth_date`
     and `phone`. Re-embeds whenever the embedded text changed, because a stale
@@ -508,8 +543,7 @@ async def update_node(
         is_person = PERSON_LABEL in (current[0].get("labels") or [])
     person_sets: dict = {}
     if (aliases is not None or birth_date is not None or phone is not None) and not is_person:
-        raise WriteError(
-            "aliases, birth_date and phone belong to a Person; this entity is not one")
+        raise WriteError("aliases, birth_date and phone belong to a Person; this entity is not one")
     if aliases is not None:
         person_sets["aliases"] = normalise_aliases(aliases, new_name) or None
     elif is_person and new_name != old_name:
@@ -552,9 +586,7 @@ async def update_node(
     if text_changed:
         tail, vec_params = _vector("n", "name_embedding", "node", vector)
         params.update(vec_params)
-    await _write(
-        f"MATCH (n:Entity {{uuid: $uuid}}) SET {', '.join(sets)}{tail}", **params
-    )
+    await _write(f"MATCH (n:Entity {{uuid: $uuid}}) SET {', '.join(sets)}{tail}", **params)
     result: dict = {"uuid": uuid}
     if "aliases" in person_sets:
         result["aliases"] = person_sets["aliases"] or []
@@ -588,8 +620,12 @@ async def delete_node(uuid: str) -> dict:
 
 
 async def create_edge(
-    source_uuid: str, target_uuid: str, name: str, fact: str,
-    valid_at: str | None = None, invalid_at: str | None = None,
+    source_uuid: str,
+    target_uuid: str,
+    name: str,
+    fact: str,
+    valid_at: str | None = None,
+    invalid_at: str | None = None,
     action_key: str | None = None,
 ) -> dict:
     """A None `valid_at` is stored as null — an UNBOUNDED start (2026-09-19).
@@ -610,7 +646,8 @@ async def create_edge(
         MATCH (a:Entity {uuid: $source}), (b:Entity {uuid: $target})
         RETURN a.group_id AS group_id
         """,
-        source=source_uuid, target=target_uuid,
+        source=source_uuid,
+        target=target_uuid,
     )
     if not ends:
         raise WriteError("source or target entity not found")
@@ -621,7 +658,8 @@ async def create_edge(
     vec_tail, vec_params = _vector("e", "fact_embedding", "edge", vector)
     key_set = f", e.{ACTION_KEY_PROPERTY} = $action_key" if action_key else ""
     key_params = {"action_key": action_key} if action_key else {}
-    query = """
+    query = (
+        """
         MATCH (a:Entity {uuid: $source}), (b:Entity {uuid: $target})
         CREATE (a)-[e:RELATES_TO]->(b)
         SET e.uuid = $uuid, e.name = $name, e.fact = $fact,
@@ -632,21 +670,36 @@ async def create_edge(
                                 ELSE datetime($invalid_at) END,
             e.source_node_uuid = $source, e.target_node_uuid = $target,
             e.episodes = [$episode],
-            e.expired_at = null, e.reference_time = $created_at""" + key_set + """
-        """ + vec_tail
+            e.expired_at = null, e.reference_time = $created_at"""
+        + key_set
+        + """
+        """
+        + vec_tail
+    )
 
     async def create(run) -> dict:
         episode = await _record_operator_episode(
-            fact, ends[0]["group_id"],
-            mentions=[source_uuid, target_uuid], entity_edges=[edge_uuid], now=now,
+            fact,
+            ends[0]["group_id"],
+            mentions=[source_uuid, target_uuid],
+            entity_edges=[edge_uuid],
+            now=now,
             run=run,
         )
         await run(
             query,
-            source=source_uuid, target=target_uuid, uuid=edge_uuid, name=name,
-            fact=fact, group_id=ends[0]["group_id"], created_at=now,
-            valid_at=valid_at, invalid_at=invalid_at, episode=episode,
-            **vec_params, **key_params,
+            source=source_uuid,
+            target=target_uuid,
+            uuid=edge_uuid,
+            name=name,
+            fact=fact,
+            group_id=ends[0]["group_id"],
+            created_at=now,
+            valid_at=valid_at,
+            invalid_at=invalid_at,
+            episode=episode,
+            **vec_params,
+            **key_params,
         )
         return {"uuid": edge_uuid, "episode": episode}
 
@@ -656,10 +709,15 @@ async def create_edge(
 
 
 async def update_edge(
-    uuid: str, name: str | None = None, fact: str | None = None,
-    source_uuid: str | None = None, target_uuid: str | None = None,
-    valid_at: str | None = None, invalid_at: str | None = None,
-    clear_invalid: bool = False, clear_valid: bool = False,
+    uuid: str,
+    name: str | None = None,
+    fact: str | None = None,
+    source_uuid: str | None = None,
+    target_uuid: str | None = None,
+    valid_at: str | None = None,
+    invalid_at: str | None = None,
+    clear_invalid: bool = False,
+    clear_valid: bool = False,
     clear_expired: bool = False,
 ) -> dict:
     """Edit an edge, including REPOINTING it. Neo4j cannot move a relationship's
@@ -726,7 +784,9 @@ async def update_edge(
             DELETE e
             RETURN e2.uuid AS uuid
             """,
-            uuid=uuid, source=new_source, target=new_target,
+            uuid=uuid,
+            source=new_source,
+            target=new_target,
         )
         if not moved:
             raise WriteError("new source or target entity not found")
@@ -766,7 +826,8 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
         "MATCH (n:Entity) WHERE n.uuid IN [$keep, $drop] RETURN n.uuid AS uuid,"
         " n.name AS name, labels(n) AS labels, n.aliases AS aliases,"
         " n.birth_date AS birth_date, n.phone AS phone",
-        keep=keep_uuid, drop=drop_uuid,
+        keep=keep_uuid,
+        drop=drop_uuid,
     )
     if len(both) != 2:
         raise WriteError("both entities must exist to merge")
@@ -781,7 +842,8 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
         SET e2 = properties(e), e2.source_node_uuid = $keep
         RETURN count(e2) AS moved
         """,
-        keep=keep_uuid, drop=drop_uuid,
+        keep=keep_uuid,
+        drop=drop_uuid,
     )
     incoming = await _write(
         """
@@ -791,7 +853,8 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
         SET e2 = properties(e), e2.target_node_uuid = $keep
         RETURN count(e2) AS moved
         """,
-        keep=keep_uuid, drop=drop_uuid,
+        keep=keep_uuid,
+        drop=drop_uuid,
     )
     mentions = await _write(
         """
@@ -802,7 +865,8 @@ async def merge_nodes(keep_uuid: str, drop_uuid: str) -> dict:
         SET m2 = properties(m), m2.uuid = randomUUID()
         RETURN count(m2) AS moved
         """,
-        keep=keep_uuid, drop=drop_uuid,
+        keep=keep_uuid,
+        drop=drop_uuid,
     )
     aliases_added = await _fold_person_values(keep_row, drop_row)
     dropped = await delete_node(drop_uuid)
@@ -821,8 +885,10 @@ async def _fold_person_values(keep: dict, drop: dict) -> list[str]:
     if PERSON_LABEL not in (keep.get("labels") or []):
         return []
     existing = [a for a in (keep.get("aliases") or []) if isinstance(a, str)]
-    offered = [drop.get("name") or "", *(a for a in (drop.get("aliases") or [])
-                                         if isinstance(a, str))]
+    offered = [
+        drop.get("name") or "",
+        *(a for a in (drop.get("aliases") or []) if isinstance(a, str)),
+    ]
     merged = _merged_aliases([*existing, *offered], keep.get("name") or "")
     known = {_alias_key(a) for a in existing}
     added: list[str] = []
@@ -844,7 +910,8 @@ async def _fold_person_values(keep: dict, drop: dict) -> list[str]:
         await _write(
             "MATCH (n:Entity {uuid: $uuid}) SET "
             + ", ".join(f"n.{prop} = ${prop}" for prop in sets),
-            uuid=keep["uuid"], **sets,
+            uuid=keep["uuid"],
+            **sets,
         )
     return added
 
@@ -916,7 +983,8 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
                [o IN collect(CASE WHEN bookkeeping THEN other.uuid END) WHERE o IS NOT NULL]
                  AS bookkeeping
         """,
-        uuid=episode_uuid, operator_source=_OPERATOR_SOURCE,
+        uuid=episode_uuid,
+        operator_source=_OPERATOR_SOURCE,
     )
     remap: dict[str, str] = {}  # old entity uuid -> uuid now in the target group
     moved_nodes = split_nodes = moved_provenance = 0
@@ -924,7 +992,8 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
         if n["others"] == 0:
             await _write(
                 "MATCH (n:Entity {uuid: $uuid}) SET n.group_id = $group_id",
-                uuid=n["uuid"], group_id=group_id,
+                uuid=n["uuid"],
+                group_id=group_id,
             )
             if n["bookkeeping"]:
                 await _write(
@@ -935,7 +1004,8 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
                     MATCH (ep)-[m:MENTIONS]->(:Entity)
                     SET m.group_id = $group_id
                     """,
-                    uuids=n["bookkeeping"], group_id=group_id,
+                    uuids=n["bookkeeping"],
+                    group_id=group_id,
                 )
                 moved_provenance += len(n["bookkeeping"])
             remap[n["uuid"]] = n["uuid"]
@@ -966,7 +1036,8 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
         if exclusive and (src, dst) == (e["source"], e["target"]):
             await _write(
                 "MATCH ()-[e:RELATES_TO {uuid: $uuid}]->() SET e.group_id = $group_id",
-                uuid=e["uuid"], group_id=group_id,
+                uuid=e["uuid"],
+                group_id=group_id,
             )
             new_edge_uuids.append(e["uuid"])
             moved_edges += 1
@@ -984,12 +1055,20 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
             SET e2 = properties(e), e2.uuid = $new_uuid, e2.group_id = $group_id,
                 e2.source_node_uuid = $src, e2.target_node_uuid = $dst,
                 e2.episodes = [$episode]
-            """ + ("DELETE e" if exclusive
-                   # A split twin is a new fact, not the one an action created
-                   # (DL-219): the key stays on the original only.
-                   else f"REMOVE e2.{ACTION_KEY_PROPERTY}"),
-            uuid=e["uuid"], src=src, dst=dst, new_uuid=new_uuid,
-            group_id=group_id, episode=episode_uuid,
+            """
+            + (
+                "DELETE e"
+                if exclusive
+                # A split twin is a new fact, not the one an action created
+                # (DL-219): the key stays on the original only.
+                else f"REMOVE e2.{ACTION_KEY_PROPERTY}"
+            ),
+            uuid=e["uuid"],
+            src=src,
+            dst=dst,
+            new_uuid=new_uuid,
+            group_id=group_id,
+            episode=episode_uuid,
         )
         if exclusive:
             moved_edges += 1
@@ -999,7 +1078,8 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
                 MATCH ()-[e:RELATES_TO {uuid: $uuid}]->()
                 SET e.episodes = [x IN e.episodes WHERE x <> $episode]
                 """,
-                uuid=e["uuid"], episode=episode_uuid,
+                uuid=e["uuid"],
+                episode=episode_uuid,
             )
             split_edges += 1
         new_edge_uuids.append(new_uuid)
@@ -1013,7 +1093,9 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
         MATCH (ep)-[m:MENTIONS]->(n:Entity)
         SET m.group_id = $group_id
         """,
-        uuid=episode_uuid, group_id=group_id, entity_edges=new_edge_uuids,
+        uuid=episode_uuid,
+        group_id=group_id,
+        entity_edges=new_edge_uuids,
     )
     for old, new in remap.items():
         if old != new:
@@ -1025,12 +1107,19 @@ async def rescope_episode(episode_uuid: str, group_id: str) -> dict:
                 SET m2 = properties(m), m2.uuid = randomUUID(), m2.group_id = $group_id
                 DELETE m
                 """,
-                uuid=episode_uuid, old=old, new=new, group_id=group_id,
+                uuid=episode_uuid,
+                old=old,
+                new=new,
+                group_id=group_id,
             )
     return {
-        "uuid": episode_uuid, "from": old_group, "to": group_id,
-        "nodes_moved": moved_nodes, "nodes_split": split_nodes,
-        "edges_moved": moved_edges, "edges_split": split_edges,
+        "uuid": episode_uuid,
+        "from": old_group,
+        "to": group_id,
+        "nodes_moved": moved_nodes,
+        "nodes_split": split_nodes,
+        "edges_moved": moved_edges,
+        "edges_split": split_edges,
         "provenance_moved": moved_provenance,
     }
 
@@ -1050,7 +1139,10 @@ async def _copy_entity(uuid: str, labels: list[str], group_id: str) -> str:
             n2.created_at = $now
         REMOVE n2.{ACTION_KEY_PROPERTY}
         """,
-        uuid=uuid, new_uuid=new_uuid, group_id=group_id, now=_now(),
+        uuid=uuid,
+        new_uuid=new_uuid,
+        group_id=group_id,
+        now=_now(),
     )
     return new_uuid
 
@@ -1066,8 +1158,15 @@ class PreviewChanged(WriteError, WorldMoved):
     caller that catches that keeps catching it. Nothing redrafts from it: the
     proposal is already EXECUTED when the job runs."""
 
-    def __init__(self, message: str, *, episode_uuid: str = "", expected: object = None,
-                 actual: object = None, what_moved: str = ""):
+    def __init__(
+        self,
+        message: str,
+        *,
+        episode_uuid: str = "",
+        expected: object = None,
+        actual: object = None,
+        what_moved: str = "",
+    ):
         WriteError.__init__(self, message)
         self.target = f"graph:episode:{episode_uuid}" if episode_uuid else ""
         self.expected = expected
@@ -1091,7 +1190,10 @@ RETURN count(o) AS n
 
 
 async def delete_episode(
-    episode_uuid: str, *, expected: dict | None = None, known_dead_facts: list[str] = (),
+    episode_uuid: str,
+    *,
+    expected: dict | None = None,
+    known_dead_facts: list[str] = (),
 ) -> dict:
     """Delete one episode and what only it produced — upstream's
     `Graphiti.remove_episode` rule (computed by `neo4j_reader.
@@ -1125,8 +1227,11 @@ async def delete_episode(
             stripped = await run(STRIP_EPISODE_FROM_FACTS, uuid=episode_uuid)
             refs = await run(STRIP_DEAD_FACTS_FROM_EPISODES, dead=dead) if dead else []
             return {
-                "uuid": episode_uuid, "already_absent": True,
-                "facts_deleted": [], "collateral_deleted": [], "entities_deleted": [],
+                "uuid": episode_uuid,
+                "already_absent": True,
+                "facts_deleted": [],
+                "collateral_deleted": [],
+                "entities_deleted": [],
                 "facts_unlinked": stripped[0]["n"] if stripped else 0,
                 "episodes_updated": refs[0]["n"] if refs else 0,
             }
@@ -1136,8 +1241,10 @@ async def delete_episode(
                 raise PreviewChanged(
                     "the graph changed since this deletion was approved — nothing was "
                     "deleted: " + "; ".join(changes),
-                    episode_uuid=episode_uuid, expected=expected.get("digest"),
-                    actual=preview.get("digest"), what_moved="; ".join(changes),
+                    episode_uuid=episode_uuid,
+                    expected=expected.get("digest"),
+                    actual=preview.get("digest"),
+                    what_moved="; ".join(changes),
                 )
         sets = neo4j_reader.preview_sets(preview)
         dead = sorted(set(sets["facts"]) | set(sets["collateral_facts"]))
@@ -1147,9 +1254,12 @@ async def delete_episode(
         stripped = await run(STRIP_EPISODE_FROM_FACTS, uuid=episode_uuid)
         refs = await run(STRIP_DEAD_FACTS_FROM_EPISODES, dead=dead) if dead else []
         return {
-            "uuid": episode_uuid, "already_absent": False,
-            "name": preview["episode"]["name"], "group_id": preview["episode"]["group_id"],
-            "facts_deleted": sets["facts"], "collateral_deleted": sets["collateral_facts"],
+            "uuid": episode_uuid,
+            "already_absent": False,
+            "name": preview["episode"]["name"],
+            "group_id": preview["episode"]["group_id"],
+            "facts_deleted": sets["facts"],
+            "collateral_deleted": sets["collateral_facts"],
             "entities_deleted": sets["entities"],
             "facts_unlinked": stripped[0]["n"] if stripped else 0,
             "episodes_updated": refs[0]["n"] if refs else 0,

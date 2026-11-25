@@ -58,8 +58,18 @@ ROOT = Path(__file__).resolve().parents[1]
 # name, `NUL` is a RESERVED DEVICE NAME, and `shutil.copytree` then dies with
 # `[WinError 87]`. Same ignore list as test_single_configure_preseed.py.
 _DEBRIS = shutil.ignore_patterns(
-    "NUL", "nul", "CON", "con", "AUX", "aux", "PRN", "prn",
-    ".env", ".env.*", "__pycache__", "*.pyc",
+    "NUL",
+    "nul",
+    "CON",
+    "con",
+    "AUX",
+    "aux",
+    "PRN",
+    "prn",
+    ".env",
+    ".env.*",
+    "__pycache__",
+    "*.pyc",
 )
 
 
@@ -113,11 +123,14 @@ def tree(tmp_path: Path) -> Path:
     shutil.copy2(ROOT / "VERSION", repo / "VERSION")
     shutil.copy2(ROOT / ".gitignore", repo / ".gitignore")
     (repo / "central_command" / "db").mkdir(parents=True)
-    shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
-                 repo / "central_command" / "db" / "schema.sql")
+    shutil.copy2(
+        ROOT / "central_command" / "db" / "schema.sql",
+        repo / "central_command" / "db" / "schema.sql",
+    )
     # `check`'s run-modes row runs this stdlib-only file by path.
-    shutil.copy2(ROOT / "central_command" / "run_modes.py",
-                 repo / "central_command" / "run_modes.py")
+    shutil.copy2(
+        ROOT / "central_command" / "run_modes.py", repo / "central_command" / "run_modes.py"
+    )
     (tmp_path / "home").mkdir()
     state = tmp_path / "state"
     state.mkdir()
@@ -132,12 +145,16 @@ def _state_dir(repo: Path) -> Path:
 def _run(repo: Path, *args: str, env_extra: dict[str, str] | None = None):
     env = dict(os.environ)
     home = repo.parent / "home"
-    env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"),
-               CC_VERIFY_MAX_WAIT="1")
+    env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
     # A Central Command .env may be sourced into the session running pytest;
     # none of it may reach this temp install.
-    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_LLM_UPSTREAM_BASE_URL",
-                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY"):
+    for stale in (
+        "CC_STATE_DIR",
+        "CC_ENABLE_SPEECH",
+        "CC_LLM_UPSTREAM_BASE_URL",
+        "CC_LLM_PROXY_ADMIN_KEY",
+        "CC_LLM_API_KEY",
+    ):
         env.pop(stale, None)
     env.update(env_extra or {})
     return run_driver([_bash_exe(), "setup.sh", *args], cwd=repo / "deploy" / "single", env=env)
@@ -156,8 +173,7 @@ def _write_ledger(repo: Path, rows: list[tuple[str, str]]) -> Path:
 def _protocol(out: str) -> list[str]:
     """Only the output-protocol lines. The ledger TABLE is on stdout too, and a
     step name in it is not the phase having run."""
-    return [l for l in out.splitlines()
-            if l.startswith(("PASS ", "WARN ", "FAIL ", "USERACTION "))]
+    return [l for l in out.splitlines() if l.startswith(("PASS ", "WARN ", "FAIL ", "USERACTION "))]
 
 
 # ── the refusals ────────────────────────────────────────────────────────────
@@ -235,17 +251,20 @@ def test_failed_app_rows_block_verify_and_name_mint_key(tree: Path):
     """The step whose mid-function `return 1` used to skip nine `.env` writes
     and the cockpit build in silence. Its ledger row is now what `verify`
     refuses on, by name."""
-    _write_ledger(tree, [
-        ("check/tree-pristine", "done"),
-        ("machine/machine", "done"),
-        ("fetch/resolve-images", "done"),
-        ("llm/embed-dimension", "done"),
-        ("stack/embed-dimension", "done"),
-        ("stack/up-stack", "done"),
-        ("app/venv", "done"),
-        ("app/install", "failed"),
-        ("app/mint-key", "failed"),
-    ])
+    _write_ledger(
+        tree,
+        [
+            ("check/tree-pristine", "done"),
+            ("machine/machine", "done"),
+            ("fetch/resolve-images", "done"),
+            ("llm/embed-dimension", "done"),
+            ("stack/embed-dimension", "done"),
+            ("stack/up-stack", "done"),
+            ("app/venv", "done"),
+            ("app/install", "failed"),
+            ("app/mint-key", "failed"),
+        ],
+    )
 
     r = _run(tree, "verify")
 
@@ -260,11 +279,14 @@ def test_failed_app_rows_block_verify_and_name_mint_key(tree: Path):
 
 @drives_installer
 def test_status_prints_the_ledger_table_and_writes_no_ledger_row(tree: Path):
-    led = _write_ledger(tree, [
-        ("check/tree-pristine", "done"),
-        ("app/mint-key", "failed"),
-        ("llm/catalog-filled", "gate"),
-    ])
+    led = _write_ledger(
+        tree,
+        [
+            ("check/tree-pristine", "done"),
+            ("app/mint-key", "failed"),
+            ("llm/catalog-filled", "gate"),
+        ],
+    )
     before = led.read_bytes()
 
     r = _run(tree, "status")
@@ -274,9 +296,11 @@ def test_status_prints_the_ledger_table_and_writes_no_ledger_row(tree: Path):
     assert header, r.stdout
     for column in ("status", "version", "at", "reason"):
         assert column in header[0], header[0]
-    for step, status in (("check/tree-pristine", "done"),
-                         ("app/mint-key", "failed"),
-                         ("llm/catalog-filled", "gate")):
+    for step, status in (
+        ("check/tree-pristine", "done"),
+        ("app/mint-key", "failed"),
+        ("llm/catalog-filled", "gate"),
+    ):
         row = [l for l in r.stdout.splitlines() if l.startswith(step)]
         assert row and status in row[0], f"{step}: {r.stdout}"
     assert led.read_bytes() == before, "status mutates nothing, the ledger included"
@@ -299,8 +323,9 @@ def test_an_empty_ledger_exists_after_any_command(tree: Path):
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(repo), *args],
-                          capture_output=True, text=True, check=True)
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    )
 
 
 @pytest.fixture
@@ -324,8 +349,7 @@ def test_a_modified_tracked_file_is_refused_and_named(git_tree: Path):
     """P1's acceptance criterion: "a tree with one tracked file modified
     refuses every command and names the file"."""
     target = git_tree / "deploy" / "single" / "images.txt"
-    target.write_text(target.read_text(encoding="utf-8") + "\n# local tweak\n",
-                      encoding="utf-8")
+    target.write_text(target.read_text(encoding="utf-8") + "\n# local tweak\n", encoding="utf-8")
 
     r = _run(git_tree, "preflight")
 
@@ -343,12 +367,11 @@ def test_a_mutating_phase_refuses_on_a_modified_tree_too(git_tree: Path):
     difference cannot slip through by running a phase directly. `test` is the
     target: one row, and the suite must not actually run."""
     target = git_tree / "deploy" / "single" / "images.txt"
-    target.write_text(target.read_text(encoding="utf-8") + "\n# local tweak\n",
-                      encoding="utf-8")
+    target.write_text(target.read_text(encoding="utf-8") + "\n# local tweak\n", encoding="utf-8")
     # NOT blocked by the ledger — the point is that the TREE stops it.
-    _write_ledger(git_tree, [("check/tree-pristine", "done"),
-                             ("app/venv", "done"),
-                             ("app/install", "done")])
+    _write_ledger(
+        git_tree, [("check/tree-pristine", "done"), ("app/venv", "done"), ("app/install", "done")]
+    )
 
     r = _run(git_tree, "test")
 
@@ -400,8 +423,18 @@ import signal  # noqa: E402
 import socket  # noqa: E402
 import time  # noqa: E402
 
-_STUB_PHASES = ("check", "machine", "fetch", "llm", "stack", "app",
-                "verify", "test", "boot", "demo")
+_STUB_PHASES = (
+    "check",
+    "machine",
+    "fetch",
+    "llm",
+    "stack",
+    "app",
+    "verify",
+    "test",
+    "boot",
+    "demo",
+)
 
 
 def _stub_driver(repo: Path) -> Path:
@@ -414,18 +447,18 @@ def _stub_driver(repo: Path) -> Path:
     setup = repo / "deploy" / "single" / "setup.sh"
     text = setup.read_text(encoding="utf-8")
     tail = 'main "$@"'
-    assert text.rstrip().endswith(tail), "setup.sh no longer ends in main \"$@\""
+    assert text.rstrip().endswith(tail), 'setup.sh no longer ends in main "$@"'
     stub = [
         'for __f in $(compgen -A function p_); do eval "$__f() { return 0; }"; done',
         f'STUB_FLAGS="{flags.as_posix()}"',
     ]
     for p in _STUB_PHASES:
         stub.append(
-            f'phase_{p}() {{\n'
+            f"phase_{p}() {{\n"
             f'  if [[ -f "$STUB_FLAGS/fail-{p}" ]]; then fail "$(cat "$STUB_FLAGS/fail-{p}")" "stub: told to fail"; return 1; fi\n'
             f'  if [[ -f "$STUB_FLAGS/ua-{p}" ]]; then useraction "$(cat "$STUB_FLAGS/ua-{p}")" "stub: waiting on you"; return 3; fi\n'
             f'  pass "{p}-stub" "ran"\n'
-            f'}}'
+            f"}}"
         )
     head = text.rstrip()[: -len(tail)]
     setup.write_text(head + "\n".join(stub) + "\n" + tail + "\n", encoding="utf-8")
@@ -437,7 +470,7 @@ def _plan(out: str) -> dict[str, str]:
     lines = {}
     for l in out.splitlines():
         if l.startswith("PLAN "):
-            body = l[len("PLAN "):]
+            body = l[len("PLAN ") :]
             head, sep, _ = body.partition(": WILL")
             lines[head if sep else ""] = l
     return lines
@@ -445,8 +478,9 @@ def _plan(out: str) -> dict[str, str]:
 
 def _ledger_rows(repo: Path) -> dict[str, list[str]]:
     led = (_state_dir(repo) / "ledger.tsv").read_text(encoding="utf-8")
-    return {l.split("\t")[0]: l.split("\t") for l in led.splitlines()
-            if l and not l.startswith("#")}
+    return {
+        l.split("\t")[0]: l.split("\t") for l in led.splitlines() if l and not l.startswith("#")
+    }
 
 
 @drives_installer
@@ -474,8 +508,11 @@ def test_the_plan_on_an_empty_ledger_says_every_phase_runs_and_why(tree: Path):
 
 def _manifest_rows() -> list[list[str]]:
     steps = ROOT / "deploy" / "single" / "steps.tsv"
-    return [l.rstrip("\r").split("\t") for l in steps.read_text(encoding="utf-8").splitlines()
-            if l.strip() and not l.startswith("#")]
+    return [
+        l.rstrip("\r").split("\t")
+        for l in steps.read_text(encoding="utf-8").splitlines()
+        if l.strip() and not l.startswith("#")
+    ]
 
 
 @drives_installer
@@ -503,8 +540,10 @@ def test_the_plan_skips_an_all_done_phase_and_names_a_changed_input(tree: Path):
         what = "its 1 row is" if n == 1 else f"all {n} rows are"
         assert f"PLAN {p}: WILL SKIP — {what} done at" in plan[p], plan[p]
         assert "(last done 20" in plan[p], plan[p]
-    assert ("PLAN boot: WILL RUN — inputs changed: boot/boot-api reads one of "
-            "CC_API_PORT, CC_DATABASE_URL") in plan["boot"], plan["boot"]
+    assert (
+        "PLAN boot: WILL RUN — inputs changed: boot/boot-api reads one of "
+        "CC_API_PORT, CC_DATABASE_URL"
+    ) in plan["boot"], plan["boot"]
     assert not any("59871" in l for l in plan.values()), plan
     # ...and the run did what the plan said: check, and the touched phases only.
     ran = [l for l in changed.stdout.splitlines() if l.endswith("-stub: ran")]
@@ -538,8 +577,10 @@ def test_a_step_that_failed_is_never_recorded_done_even_when_its_probe_holds(tre
     (flags / "fail-verify").unlink()
     nxt = _run(tree)
     plan = _plan(nxt.stdout)
-    assert 'PLAN verify: WILL RUN — failed last time: verify/verify-live — "stub: told to fail"' \
-        in plan["verify"], plan["verify"]
+    assert (
+        'PLAN verify: WILL RUN — failed last time: verify/verify-live — "stub: told to fail"'
+        in plan["verify"]
+    ), plan["verify"]
     assert "PASS verify-stub: ran" in nxt.stdout, nxt.stdout
     assert _ledger_rows(tree)["verify/verify-live"][1] == "done"
 
@@ -589,7 +630,9 @@ def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes
         "#!/usr/bin/env bash\n"
         f'touch "{flags.as_posix()}/python-started"\n'
         f'[[ -f "{flags.as_posix()}/python-go" ]] && exit 0\n'
-        "sleep 120\n", encoding="utf-8")
+        "sleep 120\n",
+        encoding="utf-8",
+    )
     py.chmod(0o755)
     # A free API port: nothing of the host's may answer this temp install (and
     # until v2.57.0 a healthy API made `test` skip its suite).
@@ -603,9 +646,15 @@ def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes
     env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
     for stale in ("CC_STATE_DIR", "CC_RUN_LOCK_PID"):
         env.pop(stale, None)
-    proc = subprocess.Popen([_bash_exe(), "setup.sh", "test"], cwd=tree / "deploy" / "single",
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            stdin=subprocess.DEVNULL, env=env, start_new_session=True)
+    proc = subprocess.Popen(
+        [_bash_exe(), "setup.sh", "test"],
+        cwd=tree / "deploy" / "single",
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        env=env,
+        start_new_session=True,
+    )
     try:
         _wait_for(flags / "python-started")
         row = _ledger_rows(tree)["test/test"]
@@ -628,8 +677,10 @@ def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes
     assert f"pid {proc.pid}" in warn[0] and '"./setup.sh test"' in warn[0], warn[0]
     assert "`started`" in warn[0], warn[0]
     plan = _plan(r.stdout)
-    assert "PLAN test: WILL RUN — the last run was interrupted here: test/test was started at" \
-        in plan["test"], plan["test"]
+    assert (
+        "PLAN test: WILL RUN — the last run was interrupted here: test/test was started at"
+        in plan["test"]
+    ), plan["test"]
     assert "PASS test: the offline suite is green" in r.stdout, r.stdout
     assert _ledger_rows(tree)["test/test"][1] == "done"
     assert not (_state_dir(tree) / "run.lock").exists()
@@ -637,18 +688,23 @@ def test_a_phase_killed_mid_run_leaves_its_rows_started_and_the_next_run_resumes
 
 @drives_installer
 def test_a_started_requirement_refuses_and_says_the_run_was_interrupted(tree: Path):
-    _write_ledger(tree, [
-        ("check/tree-pristine", "done"),
-        ("machine/machine", "done"),
-        ("fetch/resolve-images", "done"),
-        ("llm/embed-dimension", "done"),
-        ("stack/embed-dimension", "done"),
-        ("stack/up-stack", "started"),
-    ])
+    _write_ledger(
+        tree,
+        [
+            ("check/tree-pristine", "done"),
+            ("machine/machine", "done"),
+            ("fetch/resolve-images", "done"),
+            ("llm/embed-dimension", "done"),
+            ("stack/embed-dimension", "done"),
+            ("stack/up-stack", "started"),
+        ],
+    )
     r = _run(tree, "verify")
     assert r.returncode == 1, r.stdout + r.stderr
-    assert "FAIL verify: requires stack/up-stack, which is started — an earlier run was interrupted" \
-        in r.stdout, r.stdout
+    assert (
+        "FAIL verify: requires stack/up-stack, which is started — an earlier run was interrupted"
+        in r.stdout
+    ), r.stdout
     # The plan said so first, and the refused phase was NOT marked started.
     assert "PLAN verify: WILL NOT RUN — it requires stack/up-stack, which is started" in r.stdout
     assert "verify/verify-deployed" not in _ledger_rows(tree)
@@ -682,8 +738,9 @@ def _append_tail(repo: Path, body: str) -> None:
     text = setup.read_text(encoding="utf-8")
     tail = 'main "$@"'
     assert text.rstrip().endswith(tail)
-    setup.write_text(text.rstrip()[: -len(tail)] + body.rstrip("\n") + "\n" + tail + "\n",
-                     encoding="utf-8")
+    setup.write_text(
+        text.rstrip()[: -len(tail)] + body.rstrip("\n") + "\n" + tail + "\n", encoding="utf-8"
+    )
 
 
 def _rows_done_through(repo: Path, last_phase: str) -> None:
@@ -714,8 +771,9 @@ def test_a_failed_mint_key_leaves_every_later_app_row_pending(tree: Path):
     and CC_DEFAULT_MODEL (the laptop's `done` rows), and leaves
     CC_LLM_PROXY_UI_URL blank (its `failed` rows with an empty reason). A
     later row's probe is never even asked."""
-    _set(tree / ".env", {"CC_LLM_PROXY_ADMIN_KEY": "sk-test-admin-0000000000",
-                         "CC_LLM_API_KEY": ""})
+    _set(
+        tree / ".env", {"CC_LLM_PROXY_ADMIN_KEY": "sk-test-admin-0000000000", "CC_LLM_API_KEY": ""}
+    )
     _rows_done_through(tree, "stack")
     for exe in ("python", "uvicorn"):
         f = tree / ".venv" / "bin" / exe
@@ -723,7 +781,9 @@ def test_a_failed_mint_key_leaves_every_later_app_row_pending(tree: Path):
         f.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
         f.chmod(0o755)
     asked = tree.parent / "later-probe-asked"
-    _append_tail(tree, f'''
+    _append_tail(
+        tree,
+        f'''
 uv() {{ return 0; }}
 # The proxy: up, but /key/generate answers no key (the laptop's run B).
 curl() {{
@@ -733,7 +793,8 @@ curl() {{
 }}
 # A LATER row's probe, instrumented: a row the phase never reached is never probed.
 p_llm_base_url() {{ touch "{asked.as_posix()}"; return 0; }}
-''')
+''',
+    )
 
     r = _run(tree, "app")
 
@@ -745,8 +806,10 @@ p_llm_base_url() {{ touch "{asked.as_posix()}"; return 0; }}
     for s in steps[:cut]:
         assert rows[s][1] == "done", (s, rows[s])
     assert rows["app/mint-key"][1] == "failed"
-    assert rows["app/mint-key"][5].startswith("/key/generate did not return a key"), rows["app/mint-key"]
-    later = steps[cut + 1:]
+    assert rows["app/mint-key"][5].startswith("/key/generate did not return a key"), rows[
+        "app/mint-key"
+    ]
+    later = steps[cut + 1 :]
     assert later and "app/app-llm-base-url" in later and "app/cockpit" in later, later
     for s in later:
         assert rows[s][1] == "pending" and rows[s][5] == "", (s, rows[s])
@@ -762,7 +825,9 @@ p_llm_base_url() {{ touch "{asked.as_posix()}"; return 0; }}
     # The next run's plan names the failed row — and does not call the rows it
     # never reached failed too (the laptop's said "(and 7 more rows failed)").
     plan = _plan(_run(tree, "app").stdout)
-    assert 'failed last time: app/mint-key — "/key/generate did not return a key' in plan["app"], plan
+    assert 'failed last time: app/mint-key — "/key/generate did not return a key' in plan["app"], (
+        plan
+    )
     assert "more rows failed" not in plan["app"], plan["app"]
 
 
@@ -771,11 +836,23 @@ _LLM_ALIASES = ("cc-default", "graphiti-llm", "cc-embedding", "gpt-4.1-nano", "c
 
 def _model_info(placeholders: tuple[str, ...]) -> str:
     import json
-    return json.dumps({"data": [
-        {"model_name": a, "litellm_params": {
-            "model": "openai/PLACEHOLDER" if a in placeholders else "openai/some-model",
-            "api_base": "PLACEHOLDER" if a in placeholders else "http://llm.example.com/v1"}}
-        for a in _LLM_ALIASES]})
+
+    return json.dumps(
+        {
+            "data": [
+                {
+                    "model_name": a,
+                    "litellm_params": {
+                        "model": "openai/PLACEHOLDER" if a in placeholders else "openai/some-model",
+                        "api_base": "PLACEHOLDER"
+                        if a in placeholders
+                        else "http://llm.example.com/v1",
+                    },
+                }
+                for a in _LLM_ALIASES
+            ]
+        }
+    )
 
 
 @drives_installer
@@ -795,12 +872,16 @@ def test_the_llm_catalog_pause_is_a_gate_and_the_rows_after_it_are_pending(tree:
     stub_py.write_text(
         "#!/usr/bin/env bash\n"
         'case "$1" in *register-models.py) echo "  PENDING  cc-embedding  model is still openai/PLACEHOLDER"; exit 3 ;; esac\n'
-        f'exec "{Path(sys.executable).as_posix()}" "$@"\n', encoding="utf-8")
+        f'exec "{Path(sys.executable).as_posix()}" "$@"\n',
+        encoding="utf-8",
+    )
     stub_py.chmod(0o755)
     info = tree.parent / "model-info.json"
     info.write_text(_model_info(("cc-embedding",)), encoding="utf-8")
     models = ",".join(f'{{"id":"{a}"}}' for a in _LLM_ALIASES)
-    _append_tail(tree, f'''
+    _append_tail(
+        tree,
+        f'''
 PY="{stub_py.as_posix()}"
 compose() {{ return 0; }}
 catch_up_images() {{ pass "$1" "stub: every container runs the image its ref resolves to now"; }}
@@ -816,7 +897,8 @@ curl() {{
     *) return 7 ;;
   esac
 }}
-''')
+''',
+    )
 
     r = _run(tree, "llm")
 
@@ -825,13 +907,19 @@ curl() {{
     assert len(ua) == 1 and ua[0].startswith("USERACTION catalog-filled:"), ua
     assert "FAIL" not in "\n".join(_protocol(r.stdout)), _protocol(r.stdout)
     rows = _ledger_rows(tree)
-    for s in ("llm/secrets", "llm/up-litellm", "llm/litellm-live", "llm/up-speech",
-              "llm/catalog-declared", "llm/catalog"):
+    for s in (
+        "llm/secrets",
+        "llm/up-litellm",
+        "llm/litellm-live",
+        "llm/up-speech",
+        "llm/catalog-declared",
+        "llm/catalog",
+    ):
         assert rows[s][1] == "done", (s, rows[s])
     gate = rows["llm/catalog-filled"]
     assert gate[1] == "gate" and "operator action needed" in gate[5], gate
     steps = _manifest_steps(tree, "llm")
-    later = steps[steps.index("llm/catalog-filled") + 1:]
+    later = steps[steps.index("llm/catalog-filled") + 1 :]
     assert "llm/probe-chat" in later and "llm/embed-dimension" in later, later
     for s in later:
         assert rows[s][1] == "pending" and rows[s][5] == "", (s, rows[s])
@@ -847,50 +935,72 @@ def _probe_script(info: str | None, *, crlf: bool = False) -> str:
     a stub proxy answering `info` (None: the proxy does not answer). `crlf`
     makes the interpreter end its lines the way Windows Python does on a pipe."""
     fns = installer_functions()
-    curl = ('curl() { [[ -p /dev/stdin ]] && cat >/dev/null; return 7; }' if info is None else
-            "curl() { [[ -p /dev/stdin ]] && cat >/dev/null; printf '%s' '" + info + "'; }")
+    curl = (
+        "curl() { [[ -p /dev/stdin ]] && cat >/dev/null; return 7; }"
+        if info is None
+        else "curl() { [[ -p /dev/stdin ]] && cat >/dev/null; printf '%s' '" + info + "'; }"
+    )
     py = Path(sys.executable).as_posix()
-    return "\n".join([
-        "set -uo pipefail",
-        # The product runs `$PY` UNQUOTED (it may be the multi-word uv
-        # fallback), so PY must survive word splitting: this interpreter's own
-        # path may hold a space (a Windows checkout under "Working Folder" —
-        # the 2026-10-02 testbed run's second pass, where `$PY` ran
-        # `C:/Users/<u>/Working` and every case read unfilled=[] with exit 1).
-        (f'__cc_test_py() {{ "{py}" "$@" | {{ while IFS= read -r l; do printf "%s\\r\\n" "$l"; done; }}; }}'
-         if crlf else f'__cc_test_py() {{ "{py}" "$@"; }}'),
-        "PY=__cc_test_py",
-        'ENV_FILE=/dev/null',
-        'get_kv() { printf sk-test-admin; }',
-        'p_flag() { printf 4000; }',
-        'cc_required_aliases() { printf "cc-default\\ngraphiti-llm\\ncc-embedding\\ngpt-4.1-nano\\n"; }',
-        curl,
-        "catalog_required_aliases() {" + fns["catalog_required_aliases"] + "\n}",
-        "catalog_unfilled() {" + fns["catalog_unfilled"] + "\n}",
-        "p_catalog_filled() {" + fns["p_catalog_filled"] + "\n}",
-        'echo "unfilled=[$(catalog_unfilled | tr "\\n" " ")]"',
-        "p_catalog_filled",
-    ])
+    return "\n".join(
+        [
+            "set -uo pipefail",
+            # The product runs `$PY` UNQUOTED (it may be the multi-word uv
+            # fallback), so PY must survive word splitting: this interpreter's own
+            # path may hold a space (a Windows checkout under "Working Folder" —
+            # the 2026-10-02 testbed run's second pass, where `$PY` ran
+            # `C:/Users/<u>/Working` and every case read unfilled=[] with exit 1).
+            (
+                f'__cc_test_py() {{ "{py}" "$@" | {{ while IFS= read -r l; do printf "%s\\r\\n" "$l"; done; }}; }}'
+                if crlf
+                else f'__cc_test_py() {{ "{py}" "$@"; }}'
+            ),
+            "PY=__cc_test_py",
+            "ENV_FILE=/dev/null",
+            "get_kv() { printf sk-test-admin; }",
+            "p_flag() { printf 4000; }",
+            'cc_required_aliases() { printf "cc-default\\ngraphiti-llm\\ncc-embedding\\ngpt-4.1-nano\\n"; }',
+            curl,
+            "catalog_required_aliases() {" + fns["catalog_required_aliases"] + "\n}",
+            "catalog_unfilled() {" + fns["catalog_unfilled"] + "\n}",
+            "p_catalog_filled() {" + fns["p_catalog_filled"] + "\n}",
+            'echo "unfilled=[$(catalog_unfilled | tr "\\n" " ")]"',
+            "p_catalog_filled",
+        ]
+    )
 
 
-@pytest.mark.parametrize("case,placeholders,extra,filled,unfilled", [
-    ("every required alias filled", (), None, True, ""),
-    ("one skeleton left", ("cc-embedding",), None, False, "cc-embedding"),
-    ("a skeleton BESIDE a real row of the same alias", (), "cc-default", False, "cc-default"),
-    ("an optional alias's skeleton only", ("cc-tts", "cc-stt"), None, True, ""),
-])
-def test_catalog_filled_reads_the_placeholder_convention(case, placeholders, extra, filled, unfilled):
+@pytest.mark.parametrize(
+    "case,placeholders,extra,filled,unfilled",
+    [
+        ("every required alias filled", (), None, True, ""),
+        ("one skeleton left", ("cc-embedding",), None, False, "cc-embedding"),
+        ("a skeleton BESIDE a real row of the same alias", (), "cc-default", False, "cc-default"),
+        ("an optional alias's skeleton only", ("cc-tts", "cc-stt"), None, True, ""),
+    ],
+)
+def test_catalog_filled_reads_the_placeholder_convention(
+    case, placeholders, extra, filled, unfilled
+):
     """llm/catalog-filled's probe means FILLED: register-models.py marks an
     unfilled skeleton with PLACEHOLDER in the litellm_params it owns, and
     /v1/models lists it like any row — which is why the old probe read the
     pause as done."""
     import json
+
     data = json.loads(_model_info(placeholders))
     if extra:
-        data["data"].append({"model_name": extra, "litellm_params": {
-            "model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"}})
-    r = subprocess.run([_bash_exe(), "-c", _probe_script(json.dumps(data))],
-                       capture_output=True, text=True, timeout=60)
+        data["data"].append(
+            {
+                "model_name": extra,
+                "litellm_params": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER"},
+            }
+        )
+    r = subprocess.run(
+        [_bash_exe(), "-c", _probe_script(json.dumps(data))],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     assert (r.returncode == 0) is filled, (case, r.stdout, r.stderr)
     assert f"unfilled=[{unfilled + ' ' if unfilled else ''}]" in r.stdout, (case, r.stdout)
 
@@ -901,9 +1011,15 @@ def test_the_unfilled_list_carries_no_carriage_return():
     "cc-default\\r" — the 2026-10-02 testbed run's second pass. The list is
     CR-free whatever the interpreter writes."""
     import json
+
     data = json.loads(_model_info(("cc-default", "cc-embedding")))
-    r = subprocess.run([_bash_exe(), "-c", _probe_script(json.dumps(data), crlf=True)],
-                       capture_output=True, text=True, timeout=60, check=False)
+    r = subprocess.run(
+        [_bash_exe(), "-c", _probe_script(json.dumps(data), crlf=True)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
     assert r.returncode != 0, (r.stdout, r.stderr)
     assert "unfilled=[cc-default cc-embedding ]" in r.stdout, repr(r.stdout)
 
@@ -917,37 +1033,49 @@ def test_the_skill_library_ids_carry_no_carriage_return():
     fns = installer_functions()
     py = Path(sys.executable).as_posix()
     body = '{"skills": [{"id": "alpha"}, {"id": "beta"}, {"id": "gamma"}]}'
+
     def script(curl_ok: bool) -> str:
-        return "\n".join([
-            "set -uo pipefail",
-            f'__cc_test_py() {{ "{py}" "$@" | {{ while IFS= read -r l; do printf "%s\\r\\n" "$l"; done; }}; }}',
-            "PY=__cc_test_py",
-            "api_url() { printf http://127.0.0.1:1; }",
-            ("curl() { printf '%s' '" + body + "'; }") if curl_ok else "curl() { return 7; }",
-            "skills_library_ids() {" + fns["skills_library_ids"] + "\n}",
-            'have="$(skills_library_ids)"; rc=$?',
-            'printf "rc=%s have=[%s]\\n" "$rc" "${have//$\'\\n\'/,}"',
-            '[[ $\'\\n\'"$have"$\'\\n\' == *$\'\\n\'alpha$\'\\n\'* ]] && echo alpha-found',
-        ])
-    r = subprocess.run([_bash_exe(), "-c", script(True)], capture_output=True, text=True,
-                       timeout=60, check=False)
-    assert "rc=0 have=[alpha,beta,gamma]" in r.stdout and "alpha-found" in r.stdout, repr(r.stdout + r.stderr)
-    r = subprocess.run([_bash_exe(), "-c", script(False)], capture_output=True, text=True,
-                       timeout=60, check=False)
+        return "\n".join(
+            [
+                "set -uo pipefail",
+                f'__cc_test_py() {{ "{py}" "$@" | {{ while IFS= read -r l; do printf "%s\\r\\n" "$l"; done; }}; }}',
+                "PY=__cc_test_py",
+                "api_url() { printf http://127.0.0.1:1; }",
+                ("curl() { printf '%s' '" + body + "'; }") if curl_ok else "curl() { return 7; }",
+                "skills_library_ids() {" + fns["skills_library_ids"] + "\n}",
+                'have="$(skills_library_ids)"; rc=$?',
+                'printf "rc=%s have=[%s]\\n" "$rc" "${have//$\'\\n\'/,}"',
+                "[[ $'\\n'\"$have\"$'\\n' == *$'\\n'alpha$'\\n'* ]] && echo alpha-found",
+            ]
+        )
+
+    r = subprocess.run(
+        [_bash_exe(), "-c", script(True)], capture_output=True, text=True, timeout=60, check=False
+    )
+    assert "rc=0 have=[alpha,beta,gamma]" in r.stdout and "alpha-found" in r.stdout, repr(
+        r.stdout + r.stderr
+    )
+    r = subprocess.run(
+        [_bash_exe(), "-c", script(False)], capture_output=True, text=True, timeout=60, check=False
+    )
     assert "rc=1 have=[]" in r.stdout, repr(r.stdout + r.stderr)
 
 
-@pytest.mark.parametrize("env_speech,dotenv_speech,filled,unfilled", [
-    # The PLAN's case: nothing exported yet, .env says speech is off, and the
-    # cc-tts/cc-stt skeletons were never filled — that is FILLED.
-    (None, "0", True, ""),
-    # .env says speech is on: the two skeletons are what the gate waits on.
-    (None, "1", False, "cc-tts cc-stt"),
-    # After load_env the process value is .env's value — the same verdict.
-    ("0", "0", True, ""),
-])
+@pytest.mark.parametrize(
+    "env_speech,dotenv_speech,filled,unfilled",
+    [
+        # The PLAN's case: nothing exported yet, .env says speech is off, and the
+        # cc-tts/cc-stt skeletons were never filled — that is FILLED.
+        (None, "0", True, ""),
+        # .env says speech is on: the two skeletons are what the gate waits on.
+        (None, "1", False, "cc-tts cc-stt"),
+        # After load_env the process value is .env's value — the same verdict.
+        ("0", "0", True, ""),
+    ],
+)
 def test_the_catalog_probes_read_the_speech_flag_from_env_file_when_it_is_not_exported(
-        tmp_path, env_speech, dotenv_speech, filled, unfilled):
+    tmp_path, env_speech, dotenv_speech, filled, unfilled
+):
     """F18 of the 2026-10-02 testbed run's second pass: the plan asks the
     probes BEFORE load_env exports .env, and cc_required_aliases reads only
     the environment (default: speech on). With CC_ENABLE_SPEECH=0 in .env and
@@ -957,39 +1085,51 @@ def test_the_catalog_probes_read_the_speech_flag_from_env_file_when_it_is_not_ex
     is stubbed."""
     fns = installer_functions()
     envf = tmp_path / "dot.env"
-    envf.write_text(f"CC_ENABLE_SPEECH={dotenv_speech}\nCC_LLM_PROXY_ADMIN_KEY=sk-test-admin\n",
-                    encoding="utf-8", newline="\n")
+    envf.write_text(
+        f"CC_ENABLE_SPEECH={dotenv_speech}\nCC_LLM_PROXY_ADMIN_KEY=sk-test-admin\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     info = _model_info(("cc-tts", "cc-stt"))
     py = Path(sys.executable).as_posix()
-    script = "\n".join([
-        "set -uo pipefail",
-        f'. "{(ROOT / "deploy" / "env-lib.sh").as_posix()}"',
-        f'. "{(ROOT / "deploy" / "single" / "questions-lib.sh").as_posix()}"',
-        f'__cc_test_py() {{ "{py}" "$@"; }}',
-        "PY=__cc_test_py",
-        f'ENV_FILE="{envf.as_posix()}"',
-        "get_kv() {" + fns["get_kv"] + "\n}",
-        "p_flag() {" + fns["p_flag"] + "\n}",
-        "curl() { [[ -p /dev/stdin ]] && cat >/dev/null; printf '%s' '" + info + "'; }",
-        "catalog_required_aliases() {" + fns["catalog_required_aliases"] + "\n}",
-        "p_catalog_aliases() { return 0; }",
-        "catalog_unfilled() {" + fns["catalog_unfilled"] + "\n}",
-        "p_catalog_filled() {" + fns["p_catalog_filled"] + "\n}",
-        'echo "unfilled=[$(catalog_unfilled | tr "\\n" " ")]"',
-        "p_catalog_filled",
-    ])
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            f'. "{(ROOT / "deploy" / "env-lib.sh").as_posix()}"',
+            f'. "{(ROOT / "deploy" / "single" / "questions-lib.sh").as_posix()}"',
+            f'__cc_test_py() {{ "{py}" "$@"; }}',
+            "PY=__cc_test_py",
+            f'ENV_FILE="{envf.as_posix()}"',
+            "get_kv() {" + fns["get_kv"] + "\n}",
+            "p_flag() {" + fns["p_flag"] + "\n}",
+            "curl() { [[ -p /dev/stdin ]] && cat >/dev/null; printf '%s' '" + info + "'; }",
+            "catalog_required_aliases() {" + fns["catalog_required_aliases"] + "\n}",
+            "p_catalog_aliases() { return 0; }",
+            "catalog_unfilled() {" + fns["catalog_unfilled"] + "\n}",
+            "p_catalog_filled() {" + fns["p_catalog_filled"] + "\n}",
+            'echo "unfilled=[$(catalog_unfilled | tr "\\n" " ")]"',
+            "p_catalog_filled",
+        ]
+    )
     env = {k: v for k, v in os.environ.items() if k != "CC_ENABLE_SPEECH"}
     if env_speech is not None:
         env["CC_ENABLE_SPEECH"] = env_speech
-    r = subprocess.run([_bash_exe(), "-c", script], capture_output=True, text=True,
-                       timeout=60, env=env, check=False)
+    r = subprocess.run(
+        [_bash_exe(), "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        check=False,
+    )
     assert (r.returncode == 0) is filled, (r.stdout, r.stderr)
     assert f"unfilled=[{unfilled + ' ' if unfilled else ''}]" in r.stdout, (r.stdout, r.stderr)
 
 
 def test_catalog_filled_is_false_when_the_proxy_does_not_answer():
-    r = subprocess.run([_bash_exe(), "-c", _probe_script(None)],
-                       capture_output=True, text=True, timeout=60)
+    r = subprocess.run(
+        [_bash_exe(), "-c", _probe_script(None)], capture_output=True, text=True, timeout=60
+    )
     assert r.returncode != 0, r.stdout + r.stderr
 
 
@@ -1003,8 +1143,9 @@ def test_catalog_filled_is_false_when_the_proxy_does_not_answer():
 
 
 def _git(repo: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
-                          check=True).stdout.strip()
+    return subprocess.run(
+        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
 
 
 def _deployment_with_waiting_update(repo: Path) -> None:
@@ -1046,7 +1187,9 @@ def test_a_merge_left_half_way_is_refused(tree: Path):
     _stub_driver(tree)
     _deployment_with_waiting_update(tree)
     git_dir = Path(_git(tree, "rev-parse", "--absolute-git-dir"))
-    (git_dir / "MERGE_HEAD").write_text(_git(tree, "rev-parse", "upstream") + "\n", encoding="utf-8")
+    (git_dir / "MERGE_HEAD").write_text(
+        _git(tree, "rev-parse", "upstream") + "\n", encoding="utf-8"
+    )
     r = _run(tree)
     assert r.returncode == 1, r.stdout + r.stderr
     fails = [l for l in r.stdout.splitlines() if l.startswith("FAIL merge-in-progress:")]

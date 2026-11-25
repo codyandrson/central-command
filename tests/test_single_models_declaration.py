@@ -6,6 +6,7 @@ the re-run checks the declared invariants (bridge prefix, rerank path, mode,
 timeouts) as patterns over the live row. Both profiles' declarations are pinned
 here, plus the single-node config template staying model-free.
 """
+
 import importlib.util
 from pathlib import Path
 
@@ -39,10 +40,19 @@ def test_single_config_declares_no_models_and_no_provider_env():
 def test_single_declaration_is_skeletons_with_the_invariants(rm):
     want = rm.declared(rm.load_declaration(SINGLE / "models.json"))
     # gpt-4.1-nano left in v2.62.0; cc-rerank is the optional reranker role.
-    assert set(want) == {"cc-default", "graphiti-llm", "cc-embedding", "cc-rerank", "cc-tts", "cc-stt"}
+    assert set(want) == {
+        "cc-default",
+        "graphiti-llm",
+        "cc-embedding",
+        "cc-rerank",
+        "cc-tts",
+        "cc-stt",
+    }
     assert want["graphiti-llm"]["model"] == "openai/PLACEHOLDER"
     # The speech aliases carry LiteLLM's audio modes — an invariant, like graphiti-llm's plain prefix.
-    assert want["cc-tts"]["mode"] == "audio_speech" and want["cc-stt"]["mode"] == "audio_transcription"
+    assert (
+        want["cc-tts"]["mode"] == "audio_speech" and want["cc-stt"]["mode"] == "audio_transcription"
+    )
     for params in want.values():
         assert "api_key" not in params
         assert rm.PLACEHOLDER in params["model"] and rm.PLACEHOLDER in params["api_base"]
@@ -73,10 +83,21 @@ def test_k3s_declaration_is_the_role_aliases_only(rm):
     # A role alias's timeout is in its registration block: 6000 for both chat
     # aliases (DL-204), short for the rest.
     assert want["cc-default"]["timeout"] == 6000 and want["graphiti-llm"]["timeout"] == 6000
-    assert (want["cc-embedding"]["timeout"], want["cc-tts"]["timeout"], want["cc-stt"]["timeout"]) == (60, 120, 180)
+    assert (
+        want["cc-embedding"]["timeout"],
+        want["cc-tts"]["timeout"],
+        want["cc-stt"]["timeout"],
+    ) == (60, 120, 180)
     for spec in policy["registration_only"].values():
-        assert not set(spec) & {"quality_tier", "strengths", "input_cost_per_token", "timeout",
-                                "thinking_mechanism", "thinking_levels", "supports_vision"}, spec
+        assert not set(spec) & {
+            "quality_tier",
+            "strengths",
+            "input_cost_per_token",
+            "timeout",
+            "thinking_mechanism",
+            "thinking_levels",
+            "supports_vision",
+        }, spec
 
 
 def test_both_profiles_declare_the_same_role_aliases(rm):
@@ -112,7 +133,9 @@ def test_only_the_speech_aliases_declare_one_job_at_a_time_and_no_retries(rm, de
     doc = rm.load_declaration(declaration)
     for alias in SPEECH_ALIASES:
         assert doc["registration_only"][alias]["policy_params"] == SPEECH_PARAMS
-    allowed = {f"/registration_only/{a}/policy_params/{k}" for a in SPEECH_ALIASES for k in SPEECH_PARAMS}
+    allowed = {
+        f"/registration_only/{a}/policy_params/{k}" for a in SPEECH_ALIASES for k in SPEECH_PARAMS
+    }
     assert set(_keys_anywhere(doc, set(SPEECH_PARAMS))) == allowed
 
 
@@ -124,14 +147,18 @@ K3S_CONFIG = ROOT / "deploy" / "shared" / "litellm" / "config.yaml"
 @pytest.fixture(scope="module")
 def k3s_config():
     import yaml
+
     return yaml.safe_load(K3S_CONFIG.read_text(encoding="utf-8"))
 
 
 def test_the_proxy_wide_settings_set_neither_speech_parameter(k3s_config):
     """A per-model limit is never fixed with a global setting."""
     for section in ("general_settings", "litellm_settings", "router_settings"):
-        assert not set(k3s_config.get(section) or {}) & {"max_parallel_requests", "num_retries",
-                                                         "default_max_parallel_requests"}, section
+        assert not set(k3s_config.get(section) or {}) & {
+            "max_parallel_requests",
+            "num_retries",
+            "default_max_parallel_requests",
+        }, section
 
 
 def test_config_declares_no_inert_fallbacks(k3s_config):
@@ -156,11 +183,13 @@ def test_health_check_settings_are_coherent(k3s_config):
 def test_matches_treats_a_declared_value_as_a_pattern(rm):
     m = rm.matches
     assert m("openai/chat_completions/PLACEHOLDER", "openai/chat_completions/gpt-4.1")
-    assert not m("openai/chat_completions/PLACEHOLDER", "openai/gpt-4.1")        # prefix lost
+    assert not m("openai/chat_completions/PLACEHOLDER", "openai/gpt-4.1")  # prefix lost
     assert not m("openai/chat_completions/PLACEHOLDER", "openai/chat_completions/PLACEHOLDER")
-    assert not m("openai/chat_completions/PLACEHOLDER", "openai/chat_completions/")  # nothing filled in
+    assert not m(
+        "openai/chat_completions/PLACEHOLDER", "openai/chat_completions/"
+    )  # nothing filled in
     assert m("PLACEHOLDER/v1/rerank", "http://10.0.0.5:8082/v1/rerank")
-    assert not m("PLACEHOLDER/v1/rerank", "http://10.0.0.5:8082/v1")             # path lost
+    assert not m("PLACEHOLDER/v1/rerank", "http://10.0.0.5:8082/v1")  # path lost
     assert m("PLACEHOLDER", "https://api.example.com/v1") and m("PLACEHOLDER", "http://host:8081")
     assert not m("PLACEHOLDER", "PLACEHOLDER") and not m("PLACEHOLDER", "")
     assert m("rerank", "rerank") and not m("rerank", "chat")
@@ -178,10 +207,24 @@ def test_plan_creates_absent_reports_pending_never_updates(rm):
     filled = [
         _live("cc-default", model="openai/gpt-4.1", api_base="https://api.example.com/v1"),
         _live("graphiti-llm", model="openai/gpt-4.1", api_base="https://api.example.com/v1"),
-        _live("cc-embedding", model="openai/text-embedding-3-small", api_base="https://embed.example.com/v1"),
+        _live(
+            "cc-embedding",
+            model="openai/text-embedding-3-small",
+            api_base="https://embed.example.com/v1",
+        ),
         _live("cc-rerank", model="openai/gpt-4.1-mini", api_base="https://api.example.com/v1"),
-        _live("cc-tts", model="openai/speaches-ai/Kokoro-82M-v1.0-ONNX", api_base="http://cc-speech:8000/v1", mode="audio_speech"),
-        _live("cc-stt", model="openai/whisper-1", api_base="https://stt.example.com/v1", mode="audio_transcription"),
+        _live(
+            "cc-tts",
+            model="openai/speaches-ai/Kokoro-82M-v1.0-ONNX",
+            api_base="http://cc-speech:8000/v1",
+            mode="audio_speech",
+        ),
+        _live(
+            "cc-stt",
+            model="openai/whisper-1",
+            api_base="https://stt.example.com/v1",
+            mode="audio_transcription",
+        ),
     ]
     assert [s for s, *_ in rm.plan(want, filled)] == ["ok"] * 6
     # The one thing the operator may not do (2026-09-21): re-add the old

@@ -74,7 +74,7 @@ def _require_well_formed(body: str, source: str, lineno: int) -> None:
         if not _MARKER.match(body, m.start()):
             raise ValueError(
                 f"{source}:{lineno}: malformed overlay marker "
-                f"{body[m.start(): m.start() + 60]!r}; expected "
+                f"{body[m.start() : m.start() + 60]!r}; expected "
                 "'<!-- overlay: <field> -->' with field [a-z0-9_]+"
             )
 
@@ -144,7 +144,7 @@ def render(
     out_lines: list[str] = []
 
     for lineno, line in enumerate(text.splitlines(keepends=True), start=first_line):
-        ending = line[len(line.rstrip("\r\n")):]
+        ending = line[len(line.rstrip("\r\n")) :]
         body = line[: len(line) - len(ending)]
 
         _require_well_formed(body, source, lineno)
@@ -160,7 +160,7 @@ def render(
         pos = 0
         for m in _MARKER.finditer(body):
             field = m.group("field")
-            pieces.append(body[pos: m.start()])
+            pieces.append(body[pos : m.start()])
             pos = m.end()
             if field in overlay:
                 resolved.add(field)
@@ -176,9 +176,7 @@ def render(
             # line's end follows, and two spaces around it become one.
             before = "".join(pieces)
             after = body[pos:]
-            if before.endswith((" ", "\t")) and (
-                after.strip() == "" or after[:1] in ",.;:)]"
-            ):
+            if before.endswith((" ", "\t")) and (after.strip() == "" or after[:1] in ",.;:)]"):
                 pieces = [before.rstrip(" \t")]
             elif before.endswith(" ") and after.startswith(" "):
                 pos += 1
@@ -189,7 +187,6 @@ def render(
         out_lines.append(rendered + ending)
 
     return "".join(out_lines), sorted(resolved), sorted(unresolved)
-
 
 
 # --- check (read-only) --------------------------------------------------------
@@ -222,7 +219,9 @@ def check(directory: str | Path, skills_dir: str | Path) -> tuple[list[str], boo
     """
     overlay = load(directory)
     marked = markers_under(skills_dir)
-    lines = [f"overlay dir: {directory}" + ("" if Path(directory).expanduser().is_dir() else " (absent)")]
+    lines = [
+        f"overlay dir: {directory}" + ("" if Path(directory).expanduser().is_dir() else " (absent)")
+    ]
     unresolved = 0
     for field in FIELDS:
         text = overlay.get(field, "")

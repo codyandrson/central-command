@@ -57,8 +57,16 @@ def _fake_call(monkeypatch, responses):
 # --- the version segment ------------------------------------------------------
 
 
-PATHS = ["/myself", "/field", "/issue/TASKS-1", "/search", "/project",
-         "/issueLink", "/filter", "/serverInfo"]
+PATHS = [
+    "/myself",
+    "/field",
+    "/issue/TASKS-1",
+    "/search",
+    "/project",
+    "/issueLink",
+    "/filter",
+    "/serverInfo",
+]
 
 
 @pytest.mark.parametrize("path", PATHS)
@@ -75,7 +83,7 @@ def test_myself_path_follows_the_flavor_and_the_constant_stays_cloud(monkeypatch
     assert jira._myself_path() == jira.MYSELF_PATH
     server(monkeypatch)
     assert jira._myself_path() == "/rest/api/2/myself"
-    assert jira.MYSELF_PATH == "/rest/api/3/myself"   # importers still see Cloud
+    assert jira.MYSELF_PATH == "/rest/api/3/myself"  # importers still see Cloud
 
 
 # --- rich text ----------------------------------------------------------------
@@ -89,9 +97,13 @@ def test_rich_text_is_adf_on_cloud_and_a_plain_string_on_data_center(monkeypatch
 
 
 async def test_create_issue_and_add_comment_send_the_flavor_s_shape(monkeypatch):
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, {"key": "TASKS-1"}), FakeResponse(200, {"id": "9"}),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(200, {"key": "TASKS-1"}),
+            FakeResponse(200, {"id": "9"}),
+        ],
+    )
     await jira.create_issue("TASKS", "S", "Example Type", description="body text")
     await jira.add_comment("TASKS-1", "a comment")
     assert calls[0][1] == "/rest/api/3/issue"
@@ -100,9 +112,13 @@ async def test_create_issue_and_add_comment_send_the_flavor_s_shape(monkeypatch)
     assert calls[1][2]["body"]["type"] == "doc"
 
     server(monkeypatch)
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, {"key": "TASKS-2"}), FakeResponse(200, {"id": "10"}),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(200, {"key": "TASKS-2"}),
+            FakeResponse(200, {"id": "10"}),
+        ],
+    )
     await jira.create_issue("TASKS", "S", "Example Type", description="body text")
     await jira.add_comment("TASKS-1", "a comment")
     assert calls[0][1] == "/rest/api/2/issue"
@@ -121,15 +137,20 @@ def test_a_data_center_textarea_arrives_as_a_string_and_still_reads(monkeypatch)
 
 
 def _server_page(keys, total):
-    return FakeResponse(200, {"issues": [{"key": k, "fields": {"summary": k}}
-                                         for k in keys], "total": total})
+    return FakeResponse(
+        200, {"issues": [{"key": k, "fields": {"summary": k}} for k in keys], "total": total}
+    )
 
 
 async def test_server_search_pages_by_offset_and_stops_at_total(monkeypatch):
     server(monkeypatch)
-    calls = _fake_call(monkeypatch, [
-        _server_page(["A-1", "A-2"], 4), _server_page(["A-3", "A-4"], 4),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            _server_page(["A-1", "A-2"], 4),
+            _server_page(["A-3", "A-4"], 4),
+        ],
+    )
     out = await jira.search_issues("project = A")
     assert [c[1] for c in calls] == ["/rest/api/2/search"] * 2
     assert calls[0][2]["startAt"] == 0 and calls[0][2]["maxResults"] == 50
@@ -149,7 +170,7 @@ async def test_server_search_respects_the_ten_page_cap_and_says_it_cut(monkeypat
 
     monkeypatch.setattr(jira, "_call", fake)
     out = await jira.search_issues("project = A")
-    assert len(calls) == 10          # the page cap, never an unbounded crawl
+    assert len(calls) == 10  # the page cap, never an unbounded crawl
     assert out["count"] == 10 and out["truncated"] is True
 
 
@@ -165,10 +186,18 @@ async def test_an_empty_server_page_stops_the_loop(monkeypatch):
 
 async def test_list_projects_is_one_unpaginated_get_under_server(monkeypatch):
     server(monkeypatch)
-    calls = _fake_call(monkeypatch, [FakeResponse(200, [
-        {"key": "TASKS", "name": "Tasks", "id": "1", "projectTypeKey": "software"},
-        {"key": "OPS", "name": "Ops", "id": "2", "projectTypeKey": "business"},
-    ])])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                200,
+                [
+                    {"key": "TASKS", "name": "Tasks", "id": "1", "projectTypeKey": "software"},
+                    {"key": "OPS", "name": "Ops", "id": "2", "projectTypeKey": "business"},
+                ],
+            )
+        ],
+    )
     out = await jira.list_projects()
     assert [c[1] for c in calls] == ["/rest/api/2/project"]
     assert out["count"] == 2 and out["projects"][0]["key"] == "TASKS"
@@ -176,10 +205,13 @@ async def test_list_projects_is_one_unpaginated_get_under_server(monkeypatch):
 
 async def test_create_project_names_the_lead_by_username_under_server(monkeypatch):
     server(monkeypatch)
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, {"name": "svc-bot", "displayName": "Service Bot"}),
-        FakeResponse(200, {"key": "NEW", "id": "100"}),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(200, {"name": "svc-bot", "displayName": "Service Bot"}),
+            FakeResponse(200, {"key": "NEW", "id": "100"}),
+        ],
+    )
     await jira.create_project("NEW", "New Project")
     assert calls[0][1] == "/rest/api/2/myself"
     assert calls[1][1] == "/rest/api/2/project"
@@ -195,9 +227,13 @@ async def test_create_project_fails_loudly_when_the_username_is_missing(monkeypa
 
 
 async def test_create_project_still_sends_an_account_id_under_cloud(monkeypatch):
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, {"accountId": "abc"}), FakeResponse(200, {"key": "NEW"}),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(200, {"accountId": "abc"}),
+            FakeResponse(200, {"key": "NEW"}),
+        ],
+    )
     await jira.create_project("NEW", "New Project")
     assert calls[1][2]["leadAccountId"] == "abc" and "lead" not in calls[1][2]
 
@@ -205,15 +241,16 @@ async def test_create_project_still_sends_an_account_id_under_cloud(monkeypatch)
 # --- what Data Center does not have ------------------------------------------
 
 
-@pytest.mark.parametrize("call", [
-    lambda: jira.list_filters(),
-    lambda: jira.list_dashboards(),
-    lambda: jira.list_gadgets(),
-    lambda: jira.create_dashboard("my dashboard"),
-])
-async def test_cloud_only_operations_refuse_under_server_without_any_http(
-    monkeypatch, call
-):
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: jira.list_filters(),
+        lambda: jira.list_dashboards(),
+        lambda: jira.list_gadgets(),
+        lambda: jira.create_dashboard("my dashboard"),
+    ],
+)
+async def test_cloud_only_operations_refuse_under_server_without_any_http(monkeypatch, call):
     server(monkeypatch)
     calls = _fake_call(monkeypatch, [])
     with pytest.raises(jira.JiraError, match="not available on Jira Data Center"):
@@ -275,14 +312,11 @@ async def test_a_cloud_instance_under_server_flavor_names_the_switch(monkeypatch
         await jira.list_projects()
 
 
-async def test_a_404_on_myself_under_cloud_reports_the_flavor_not_not_found(
-    monkeypatch
-):
+async def test_a_404_on_myself_under_cloud_reports_the_flavor_not_not_found(monkeypatch):
     """The message the operator actually needed: a Data Center instance 404s
     every v3 path, so `authCheck — not found` said nothing useful."""
     paths: list[str] = []
-    _patch_client(monkeypatch, _handler(paths, myself_status=404,
-                                        v2_deployment="Server"))
+    _patch_client(monkeypatch, _handler(paths, myself_status=404, v2_deployment="Server"))
     with pytest.raises(jira.JiraError, match="CC_JIRA_API_FLAVOR=server"):
         await jira.list_projects()
     assert "/rest/api/2/serverInfo" in paths
@@ -291,7 +325,7 @@ async def test_a_404_on_myself_under_cloud_reports_the_flavor_not_not_found(
 async def test_a_missing_deployment_type_is_not_a_failure(monkeypatch):
     """The check catches a wrong switch; it is not a new way to be down."""
     paths: list[str] = []
-    _patch_client(monkeypatch, _handler(paths))       # serverInfo, no deploymentType
+    _patch_client(monkeypatch, _handler(paths))  # serverInfo, no deploymentType
     out = await jira.list_projects()
     assert out["ok"] and out["count"] == 0
 
@@ -301,8 +335,7 @@ async def test_a_matching_deployment_type_passes_straight_through(monkeypatch):
     _patch_client(monkeypatch, _handler(paths, v3_deployment="Cloud"))
     out = await jira.list_projects()
     assert out["ok"]
-    assert paths == ["/rest/api/3/myself", "/rest/api/3/serverInfo",
-                     "/rest/api/3/project/search"]
+    assert paths == ["/rest/api/3/myself", "/rest/api/3/serverInfo", "/rest/api/3/project/search"]
 
 
 async def test_the_cross_check_runs_once_per_process(monkeypatch):
@@ -316,8 +349,9 @@ async def test_the_cross_check_runs_once_per_process(monkeypatch):
 # --- the guard ----------------------------------------------------------------
 
 
-SOURCE = (pathlib.Path(__file__).resolve().parent.parent
-          / "central_command" / "integrations" / "jira.py")
+SOURCE = (
+    pathlib.Path(__file__).resolve().parent.parent / "central_command" / "integrations" / "jira.py"
+)
 
 
 def test_no_rest_version_literal_lives_outside_the_api_helper():
@@ -328,8 +362,7 @@ def test_no_rest_version_literal_lives_outside_the_api_helper():
     offenders = [
         f"{n}: {line.strip()}"
         for n, line in enumerate(SOURCE.read_text().splitlines(), 1)
-        if re.search(r"/rest/api/[23]/", line)
-        and not line.startswith("MYSELF_PATH = ")
+        if re.search(r"/rest/api/[23]/", line) and not line.startswith("MYSELF_PATH = ")
     ]
     assert offenders == [], (
         "literal REST version segments outside _api()/MYSELF_PATH: " + "; ".join(offenders)

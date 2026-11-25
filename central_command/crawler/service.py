@@ -165,13 +165,17 @@ async def _llm_post_filter(mode: str) -> tuple[Any | None, list[str]]:
         return None, []
     if not _LLM_API_KEY:
         return None, [
-            ("filter='llm' requested but LLM_API_KEY is unset "
-            "(Secret cc-crawler-llm not applied) — used pruning instead")
+            (
+                "filter='llm' requested but LLM_API_KEY is unset "
+                "(Secret cc-crawler-llm not applied) — used pruning instead"
+            )
         ]
     if not await _llm_reachable():
         return None, [
-            (f"filter='llm' requested but the LiteLLM proxy at {_LLM_BASE_URL} "
-            "did not answer — used pruning instead")
+            (
+                f"filter='llm' requested but the LiteLLM proxy at {_LLM_BASE_URL} "
+                "did not answer — used pruning instead"
+            )
         ]
     return (
         LLMContentFilter(
@@ -288,8 +292,10 @@ async def crawl(req: CrawlRequest) -> CrawlResponse:
                 pages.append(Page(url=result.url, title=_title(result), markdown=md))
             else:
                 errors.append(
-                    {"url": getattr(result, "url", req.url),
-                     "error": getattr(result, "error_message", "") or "crawl failed"}
+                    {
+                        "url": getattr(result, "url", req.url),
+                        "error": getattr(result, "error_message", "") or "crawl failed",
+                    }
                 )
             if len(pages) >= max_pages or time.monotonic() >= deadline:
                 truncated = True

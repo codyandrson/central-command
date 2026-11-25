@@ -96,9 +96,7 @@ async def _rows_like(pattern: str) -> list[dict]:
 async def _state(message_id: str) -> str:
     conn = await repo._conn()
     try:
-        return await conn.fetchval(
-            "select state from work_item where message_id = $1", message_id
-        )
+        return await conn.fetchval("select state from work_item where message_id = $1", message_id)
     finally:
         await conn.close()
 
@@ -157,7 +155,9 @@ async def test_rejecting_the_covering_proposal_returns_siblings_to_the_queue():
     assert await _state(folded_id) == "FOLD_PENDING"
 
     await gateway.reject_with_feedback(
-        result["session_id"], result["proposal_id"], "Wrong — handle these separately.",
+        result["session_id"],
+        result["proposal_id"],
+        "Wrong — handle these separately.",
         model=make_spike_model(),
     )
     assert await _state(folded_id) == "UNPROCESSED", "released back for its own turn"
@@ -194,7 +194,8 @@ async def test_the_email_path_announces_its_proposal_exactly_once():
     assert result["deferred"]
 
     created = [
-        e for e in await repo.list_events(since_id=since, kind="proposal.created")
+        e
+        for e in await repo.list_events(since_id=since, kind="proposal.created")
         if e["ref_id"] == result["proposal_id"]
     ]
     assert len(created) == 1, "exactly one — not zero, and not two"

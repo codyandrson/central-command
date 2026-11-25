@@ -33,9 +33,10 @@ async def _insert_session(mode: str = "oneshot", status: str = "RUNNING") -> str
     conn = await repo._conn()
     try:
         await conn.execute(
-            "insert into session (id, agent_id, status, mode) values "
-            "($1, 'jira-expert', $2, $3)",
-            sess_id, status, mode,
+            "insert into session (id, agent_id, status, mode) values ($1, 'jira-expert', $2, $3)",
+            sess_id,
+            status,
+            mode,
         )
     finally:
         await conn.close()
@@ -44,9 +45,12 @@ async def _insert_session(mode: str = "oneshot", status: str = "RUNNING") -> str
 
 async def _finish_failed(sess_id: str) -> None:
     await finish_decision_resume(
-        session_id=sess_id, agent_id="jira-expert",
-        proposal_id=f"prop_{uuid.uuid4().hex[:8]}", after="failed",
-        final=None, agent=None,
+        session_id=sess_id,
+        agent_id="jira-expert",
+        proposal_id=f"prop_{uuid.uuid4().hex[:8]}",
+        after="failed",
+        final=None,
+        agent=None,
         failure_summary="Jira 400: no project SUPP",
     )
 
@@ -59,8 +63,7 @@ async def test_a_final_execution_failure_rests_the_session_open_and_flagged():
 
     row = await repo.get_session(sess_id)
     assert row["status"] == "AWAITING_OPERATOR", (
-        "the session must stay OPEN — landing it DONE was the silent-close "
-        "this rule exists to end"
+        "the session must stay OPEN — landing it DONE was the silent-close this rule exists to end"
     )
     assert row["exec_failure"] == "Jira 400: no project SUPP", (
         "the WHY rides the row: the sidebar chip and the eventual "

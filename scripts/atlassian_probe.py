@@ -84,9 +84,16 @@ def _emit(line: str, *, is_failure: bool) -> None:
 
 
 def _secrets() -> list[str]:
-    return [v for v in (settings.jira_api_token, settings.jira_email,
-                        settings.confluence_api_token, settings.confluence_email)
-            if v]
+    return [
+        v
+        for v in (
+            settings.jira_api_token,
+            settings.jira_email,
+            settings.confluence_api_token,
+            settings.confluence_email,
+        )
+        if v
+    ]
 
 
 def _scrub(text: str) -> str:
@@ -110,8 +117,15 @@ def skip(product: str, what: str, why: str) -> None:
     _emit(f"SKIP {product} {what} — {why}", is_failure=False)
 
 
-def report(product: str, method: str, path: str, resp: httpx.Response | None,
-           *, ok: bool | None = None, note: str = "") -> None:
+def report(
+    product: str,
+    method: str,
+    path: str,
+    resp: httpx.Response | None,
+    *,
+    ok: bool | None = None,
+    note: str = "",
+) -> None:
     """One check line. `ok` defaults to the HTTP status being 2xx."""
     global _checks, _failures
     _checks += 1
@@ -125,12 +139,15 @@ def report(product: str, method: str, path: str, resp: httpx.Response | None,
     tail = _snippet(resp.text)
     if note:
         tail = f"{note} | {tail}"
-    _emit(f"{'PASS' if good else 'FAIL'} {product} {method} {path} — "
-          f"{resp.status_code} {tail}", is_failure=not good)
+    _emit(
+        f"{'PASS' if good else 'FAIL'} {product} {method} {path} — {resp.status_code} {tail}",
+        is_failure=not good,
+    )
 
 
-async def _get(base: str, path: str, auth: dict,
-               method: str = "GET", body=None) -> httpx.Response | None:
+async def _get(
+    base: str, path: str, auth: dict, method: str = "GET", body=None
+) -> httpx.Response | None:
     url = base.rstrip("/") + path
     try:
         async with httpx.AsyncClient(
@@ -138,8 +155,10 @@ async def _get(base: str, path: str, auth: dict,
         ) as client:
             return await client.request(method, url, json=body)
     except Exception as exc:  # noqa: BLE001 — a probe reports, never raises
-        _emit(f"FAIL transport {method} {path} — {type(exc).__name__}: "
-              f"{_snippet(str(exc))}", is_failure=True)
+        _emit(
+            f"FAIL transport {method} {path} — {type(exc).__name__}: {_snippet(str(exc))}",
+            is_failure=True,
+        )
         return None
 
 
@@ -160,17 +179,21 @@ async def probe_jira() -> None:
         skip("jira", "(all checks)", "CC_JIRA_BASE_URL is unset")
         return
     if not jira.configured():
-        skip("jira", "(all checks)",
-             "no native credentials (CC_JIRA_API_TOKEN, plus CC_JIRA_EMAIL "
-             "under basic auth)")
+        skip(
+            "jira",
+            "(all checks)",
+            "no native credentials (CC_JIRA_API_TOKEN, plus CC_JIRA_EMAIL under basic auth)",
+        )
         return
 
     flavor = jira._flavor()
     base, auth = settings.jira_base_url, jira._auth_kwargs()
-    info(f"jira base={base} flavor={flavor} "
-         f"(CC_JIRA_API_FLAVOR={settings.jira_api_flavor!r}) "
-         f"auth_mode={jira.auth_mode()} "
-         f"(CC_JIRA_AUTH_MODE={settings.jira_auth_mode!r})")
+    info(
+        f"jira base={base} flavor={flavor} "
+        f"(CC_JIRA_API_FLAVOR={settings.jira_api_flavor!r}) "
+        f"auth_mode={jira.auth_mode()} "
+        f"(CC_JIRA_AUTH_MODE={settings.jira_auth_mode!r})"
+    )
 
     # serverInfo on BOTH versions: which one answers is itself the flavor
     # evidence, and deploymentType is what the client cross-checks.
@@ -180,8 +203,7 @@ async def probe_jira() -> None:
         body = _json(resp) or {}
         note = ""
         if isinstance(body, dict):
-            note = (f"deploymentType={body.get('deploymentType')!r} "
-                    f"version={body.get('version')!r}")
+            note = f"deploymentType={body.get('deploymentType')!r} version={body.get('version')!r}"
         report("jira", "GET", path, resp, note=note)
 
     myself = jira._myself_path()
@@ -195,13 +217,16 @@ async def probe_jira() -> None:
     if isinstance(fields, list):
         names = {str(f.get("name") or "") for f in fields if isinstance(f, dict)}
         ids = {str(f.get("id") or "") for f in fields if isinstance(f, dict)}
-        note = (f"{len(fields)} fields; 'Epic Link' present="
-                f"{'Epic Link' in names}; 'parent' in field list="
-                f"{'parent' in ids}")
+        note = (
+            f"{len(fields)} fields; 'Epic Link' present="
+            f"{'Epic Link' in names}; 'parent' in field list="
+            f"{'parent' in ids}"
+        )
     report("jira", "GET", path, resp, note=note)
 
-    path = jira._api("/project") if flavor == "server" else \
-        jira._api("/project/search?maxResults=1")
+    path = (
+        jira._api("/project") if flavor == "server" else jira._api("/project/search?maxResults=1")
+    )
     resp = await _get(base, path, auth)
     body = _json(resp)
     if isinstance(body, list):
@@ -221,8 +246,7 @@ async def probe_jira() -> None:
     fields_asked = ["summary", "description", "parent", "issuetype"]
     if flavor == "server":
         path = jira._api("/search")
-        body_out = {"jql": jql, "startAt": 0, "maxResults": 1,
-                    "fields": fields_asked}
+        body_out = {"jql": jql, "startAt": 0, "maxResults": 1, "fields": fields_asked}
     else:
         path = jira._api("/search/jql")
         body_out = {"jql": jql, "maxResults": 1, "fields": fields_asked}
@@ -236,12 +260,18 @@ async def probe_jira() -> None:
             issue_key = rows[0].get("key")
             issue_fields = rows[0].get("fields") or {}
             desc = issue_fields.get("description")
-            kind = ("dict = ADF" if isinstance(desc, dict)
-                    else "str = wiki markup" if isinstance(desc, str)
-                    else "None")
-            note = (f"{len(rows)} row(s); fields.description type="
-                    f"{type(desc).__name__} ({kind}); parent present="
-                    f"{'parent' in issue_fields}")
+            kind = (
+                "dict = ADF"
+                if isinstance(desc, dict)
+                else "str = wiki markup"
+                if isinstance(desc, str)
+                else "None"
+            )
+            note = (
+                f"{len(rows)} row(s); fields.description type="
+                f"{type(desc).__name__} ({kind}); parent present="
+                f"{'parent' in issue_fields}"
+            )
         else:
             note = "0 rows — no issue to sample description/parent from"
     report("jira", "POST", path, resp, note=note)
@@ -252,8 +282,7 @@ async def probe_jira() -> None:
         body = _json(resp) or {}
         note = ""
         if isinstance(body, dict):
-            names = [t.get("name") for t in (body.get("transitions") or [])
-                     if isinstance(t, dict)]
+            names = [t.get("name") for t in (body.get("transitions") or []) if isinstance(t, dict)]
             note = f"{len(names)} transitions: {', '.join(str(n) for n in names)}"
         report("jira", "GET", path, resp, note=note)
     else:
@@ -265,12 +294,24 @@ async def probe_jira() -> None:
     path = jira._api("/issueLinkType")
     resp = await _get(base, path, auth)
     body = _json(resp) or {}
-    names = {str(t.get("name")) for t in (body.get("issueLinkTypes") or [])
-             if isinstance(t, dict)} if isinstance(body, dict) else set()
+    names = (
+        {str(t.get("name")) for t in (body.get("issueLinkTypes") or []) if isinstance(t, dict)}
+        if isinstance(body, dict)
+        else set()
+    )
     missing = [t for t in jira.LINK_TYPES if t not in names]
-    report("jira", "GET", path, resp, ok=bool(resp is not None and names and not missing),
-           note=(f"all of {', '.join(jira.LINK_TYPES)} present" if names and not missing
-                 else f"MISSING link type(s): {', '.join(missing) or '(none read)'}"))
+    report(
+        "jira",
+        "GET",
+        path,
+        resp,
+        ok=bool(resp is not None and names and not missing),
+        note=(
+            f"all of {', '.join(jira.LINK_TYPES)} present"
+            if names and not missing
+            else f"MISSING link type(s): {', '.join(missing) or '(none read)'}"
+        ),
+    )
 
     # Does the token's account hold the permissions the gated writes need?
     # A missing one is not a connectivity failure, so it is reported, not
@@ -278,13 +319,16 @@ async def probe_jira() -> None:
     project = issue_key.rsplit("-", 1)[0] if issue_key else None
     if project:
         perms = "BROWSE_PROJECTS,CREATE_ISSUES,EDIT_ISSUES,LINK_ISSUES,ASSIGN_ISSUES,DELETE_ISSUES"
-        path = jira._api(f"/mypermissions?{urlencode({'projectKey': project, 'permissions': perms})}")
+        path = jira._api(
+            f"/mypermissions?{urlencode({'projectKey': project, 'permissions': perms})}"
+        )
         resp = await _get(base, path, auth)
         body = _json(resp) or {}
         held = (body.get("permissions") or {}) if isinstance(body, dict) else {}
         note = f"project {project}: " + ", ".join(
             f"{k}={'yes' if (held.get(k) or {}).get('havePermission') else 'NO'}"
-            for k in perms.split(","))
+            for k in perms.split(",")
+        )
         report("jira", "GET", path, resp, note=note)
 
         # Assignee identity is the one Cloud/Data Center split the writes
@@ -294,21 +338,40 @@ async def probe_jira() -> None:
         fragment = str(me.get("displayName") or "").split(" ")[0] if isinstance(me, dict) else ""
         if fragment:
             param = "username" if flavor == "server" else "query"
-            path = jira._api("/user/assignable/search?" + urlencode(
-                {param: fragment, "project": project, "maxResults": 5}))
+            path = jira._api(
+                "/user/assignable/search?"
+                + urlencode({param: fragment, "project": project, "maxResults": 5})
+            )
             resp = await _get(base, path, auth)
             rows = _json(resp)
             idf = "name" if flavor == "server" else "accountId"
-            ok = isinstance(rows, list) and bool(rows) and all(
-                isinstance(r, dict) and r.get(idf) for r in rows)
-            report("jira", "GET", path.split("?")[0] + f"?{param}=…", resp, ok=ok,
-                   note=(f"{len(rows)} assignable user(s), each with '{idf}'" if ok
-                         else f"no rows carrying '{idf}' — jira_find_users would find nobody"))
+            ok = (
+                isinstance(rows, list)
+                and bool(rows)
+                and all(isinstance(r, dict) and r.get(idf) for r in rows)
+            )
+            report(
+                "jira",
+                "GET",
+                path.split("?")[0] + f"?{param}=…",
+                resp,
+                ok=ok,
+                note=(
+                    f"{len(rows)} assignable user(s), each with '{idf}'"
+                    if ok
+                    else f"no rows carrying '{idf}' — jira_find_users would find nobody"
+                ),
+            )
         else:
-            skip("jira", "GET .../user/assignable/search", "no displayName on /myself to search for")
+            skip(
+                "jira", "GET .../user/assignable/search", "no displayName on /myself to search for"
+            )
     else:
-        skip("jira", "GET .../mypermissions, .../user/assignable/search",
-             "no issue sampled, so no project to ask about")
+        skip(
+            "jira",
+            "GET .../mypermissions, .../user/assignable/search",
+            "no issue sampled, so no project to ask about",
+        )
 
     if flavor == "server":
         # Data Center has no filter SEARCH and no dashboard search/gadget
@@ -317,16 +380,24 @@ async def probe_jira() -> None:
         for path in (jira._api("/filter/favourite"), jira._api("/dashboard")):
             resp = await _get(base, path, auth)
             report("jira", "GET", path, resp)
-        skip("jira", "GET /filter/search, /dashboard/search, /dashboard/gadgets",
-             "Cloud-only endpoints; withheld from packs under flavor 'server'")
+        skip(
+            "jira",
+            "GET /filter/search, /dashboard/search, /dashboard/gadgets",
+            "Cloud-only endpoints; withheld from packs under flavor 'server'",
+        )
     else:
-        for path in (jira._api("/filter/search?maxResults=1"),
-                     jira._api("/dashboard/search?maxResults=1"),
-                     jira._api("/dashboard/gadgets")):
+        for path in (
+            jira._api("/filter/search?maxResults=1"),
+            jira._api("/dashboard/search?maxResults=1"),
+            jira._api("/dashboard/gadgets"),
+        ):
             resp = await _get(base, path, auth)
             report("jira", "GET", path, resp)
-        skip("jira", "GET /filter/favourite, /dashboard",
-             "Data-Center-only read shapes; not used under flavor 'cloud'")
+        skip(
+            "jira",
+            "GET /filter/favourite, /dashboard",
+            "Data-Center-only read shapes; not used under flavor 'cloud'",
+        )
 
 
 # --- Confluence ---------------------------------------------------------------
@@ -352,19 +423,23 @@ async def confluence_version_line() -> None:
 
 async def probe_confluence() -> None:
     if not confluence.configured():
-        skip("confluence", "(all checks)",
-             "not configured (CC_CONFLUENCE_BASE_URL + credentials)")
+        skip("confluence", "(all checks)", "not configured (CC_CONFLUENCE_BASE_URL + credentials)")
         return
 
     flavor = confluence._flavor()
     base, auth = settings.confluence_base_url, confluence._auth_kwargs()
-    info(f"confluence base={base} flavor={flavor} "
-         f"(CC_CONFLUENCE_API_FLAVOR={settings.confluence_api_flavor!r}) "
-         f"auth_mode={confluence.auth_mode()} "
-         f"(CC_CONFLUENCE_AUTH_MODE={settings.confluence_auth_mode!r})")
+    info(
+        f"confluence base={base} flavor={flavor} "
+        f"(CC_CONFLUENCE_API_FLAVOR={settings.confluence_api_flavor!r}) "
+        f"auth_mode={confluence.auth_mode()} "
+        f"(CC_CONFLUENCE_AUTH_MODE={settings.confluence_auth_mode!r})"
+    )
 
-    path = (confluence._crud("/space?limit=1") if flavor == "server"
-            else confluence._crud("/spaces?limit=1"))
+    path = (
+        confluence._crud("/space?limit=1")
+        if flavor == "server"
+        else confluence._crud("/spaces?limit=1")
+    )
     resp = await _get(base, path, auth)
     body = _json(resp) or {}
     results = body.get("results") if isinstance(body, dict) else None
@@ -386,17 +461,20 @@ async def probe_confluence() -> None:
     if isinstance(body, dict):
         rows = body.get("results") or []
         if rows and isinstance(rows[0], dict):
-            content = rows[0].get("content") if isinstance(rows[0].get("content"), dict) else rows[0]
+            content = (
+                rows[0].get("content") if isinstance(rows[0].get("content"), dict) else rows[0]
+            )
             page_id = str(content.get("id")) if content.get("id") else None
-    report("confluence", "GET", path, resp,
-           note=f"page_id={page_id}" if page_id else "0 results")
+    report("confluence", "GET", path, resp, note=f"page_id={page_id}" if page_id else "0 results")
 
     if not page_id:
         skip("confluence", "GET <page> body.storage", "CQL search returned no page")
         return
-    path = (confluence._crud(f"/content/{page_id}?expand=body.storage,version,space")
-            if flavor == "server"
-            else confluence._crud(f"/pages/{page_id}?body-format=storage"))
+    path = (
+        confluence._crud(f"/content/{page_id}?expand=body.storage,version,space")
+        if flavor == "server"
+        else confluence._crud(f"/pages/{page_id}?body-format=storage")
+    )
     resp = await _get(base, path, auth)
     body = _json(resp) or {}
     storage = confluence._storage_value(body) if isinstance(body, dict) else None
@@ -412,9 +490,14 @@ async def probe_confluence() -> None:
         note = "body.storage present, empty body (0 chars — a legitimately empty page)"
     else:
         note = f"body.storage present, {len(storage)} chars"
-    report("confluence", "GET", path, resp,
-           ok=bool(resp and 200 <= resp.status_code < 300 and storage is not None),
-           note=note)
+    report(
+        "confluence",
+        "GET",
+        path,
+        resp,
+        ok=bool(resp and 200 <= resp.status_code < 300 and storage is not None),
+        note=note,
+    )
 
 
 async def run_checks(*, jira_on: bool = True, confluence_on: bool = True) -> dict:
@@ -430,8 +513,11 @@ async def run_checks(*, jira_on: bool = True, confluence_on: bool = True) -> dic
             await probe_jira()
         if confluence_on:
             await probe_confluence()
-        return {"checks": _checks, "failures": _failures,
-                "fail_lines": [line for failed, line in _sink if failed]}
+        return {
+            "checks": _checks,
+            "failures": _failures,
+            "fail_lines": [line for failed, line in _sink if failed],
+        }
     finally:
         _sink = None
 
@@ -446,8 +532,11 @@ async def main(argv: list[str] | None = None) -> int:
         elif arg in ("--jira-only", "--confluence-only"):
             only = arg
         else:
-            print(f"usage: atlassian_probe.py [--quiet] "
-                  f"[--jira-only|--confluence-only] (got {arg!r})", flush=True)
+            print(
+                f"usage: atlassian_probe.py [--quiet] "
+                f"[--jira-only|--confluence-only] (got {arg!r})",
+                flush=True,
+            )
             return 2
     if only != "--confluence-only":
         await probe_jira()

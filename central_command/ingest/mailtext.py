@@ -81,9 +81,7 @@ def html_to_text(html: str) -> str:
         # mail does: two of the first forty messages tried).
         tree = lxml.html.fromstring(_XML_DECL.sub("", html, count=1))
         _drop_hidden(tree)
-        text = Inscriptis(
-            tree, ParserConfig(display_links=False, display_images=False)
-        ).get_text()
+        text = Inscriptis(tree, ParserConfig(display_links=False, display_images=False)).get_text()
     except Exception:  # degrade, never a dead ingest
         log.exception("mailtext: html conversion failed; falling back to tag strip")
         text = _TAG_RE.sub(" ", re.sub(r"(?is)<(style|script|head)\b.*?</\1>", " ", html))
@@ -93,6 +91,7 @@ def html_to_text(html: str) -> str:
 def plain_to_text(text: str) -> str:
     """A text/plain body: normalised, with tracking-length URLs cut to their
     host — the path is a redirect token, never something triage reads."""
+
     def short(m: re.Match) -> str:
         return m.group(0) if len(m.group(0)) <= _LONG_URL else m.group(1) + "/…"
 

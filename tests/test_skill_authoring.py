@@ -56,8 +56,11 @@ def test_skill_writes_are_registered_and_dispatched():
 
 def test_skill_propose_pack_carries_its_tools_and_both_capabilities():
     pack = packs.PACKS["skill-propose"]
-    assert set(pack.tool_names) == {"propose_skill_create", "propose_skill_doc",
-                                    "propose_skill_correction"}
+    assert set(pack.tool_names) == {
+        "propose_skill_create",
+        "propose_skill_doc",
+        "propose_skill_correction",
+    }
     assert {c.name for c in pack.capabilities} == {"skill.create", "skill.doc_add"}
 
 
@@ -83,7 +86,9 @@ def _proposal_from(exc: CallDeferred) -> dict:
 async def test_propose_skill_create_parks_a_skill_create_action():
     with pytest.raises(CallDeferred) as e:
         await tools_mod.propose_skill_create(
-            _Ctx(), title="GBNF grammars", summary="when llama.cpp must obey a schema",
+            _Ctx(),
+            title="GBNF grammars",
+            summary="when llama.cpp must obey a schema",
             guidance_content="Use response_format json_schema; llama.cpp enforces it.",
         )
     action = _proposal_from(e.value)["actions"][0]
@@ -95,18 +100,20 @@ async def test_propose_skill_create_parks_a_skill_create_action():
 
 async def test_propose_skill_create_refuses_empty_guidance():
     out = await tools_mod.propose_skill_create(
-        _Ctx(), title="Empty", summary="s", guidance_content="   ",
+        _Ctx(),
+        title="Empty",
+        summary="s",
+        guidance_content="   ",
     )
     assert "refused" in out
 
 
 async def test_propose_skill_doc_needs_exactly_one_source():
     ctx = _Ctx()
+    assert "refused" in await tools_mod.propose_skill_doc(ctx, skill_id="s", doc_key="k", title="t")
     assert "refused" in await tools_mod.propose_skill_doc(
-        ctx, skill_id="s", doc_key="k", title="t")
-    assert "refused" in await tools_mod.propose_skill_doc(
-        ctx, skill_id="s", doc_key="k", title="t", content="x",
-        source_url="https://example.com")
+        ctx, skill_id="s", doc_key="k", title="t", content="x", source_url="https://example.com"
+    )
 
 
 async def test_propose_skill_doc_captures_the_url_at_propose_time(monkeypatch):
@@ -124,8 +131,11 @@ async def test_propose_skill_doc_captures_the_url_at_propose_time(monkeypatch):
 
     with pytest.raises(CallDeferred) as e:
         await tools_mod.propose_skill_doc(
-            _Ctx(), skill_id="gbnf-grammars", doc_key="llama-docs",
-            title="llama.cpp grammar docs", source_url="https://example.com/g",
+            _Ctx(),
+            skill_id="gbnf-grammars",
+            doc_key="llama-docs",
+            title="llama.cpp grammar docs",
+            source_url="https://example.com/g",
         )
     proposal = _proposal_from(e.value)
     args = proposal["actions"][0]["arguments"]
@@ -146,7 +156,10 @@ async def test_propose_skill_doc_parks_nothing_when_the_fetch_degrades(monkeypat
 
     # No CallDeferred: the model gets the degradation text and can try again.
     out = await tools_mod.propose_skill_doc(
-        _Ctx(), skill_id="s", doc_key="k", title="t",
+        _Ctx(),
+        skill_id="s",
+        doc_key="k",
+        title="t",
         source_url="https://example.com/missing",
     )
     assert "could not capture" in out and "Nothing" in out
@@ -187,9 +200,9 @@ async def test_search_web_never_raises_on_a_transport_failure(monkeypatch):
 @needs_pg
 async def test_skill_create_writes_the_skill_and_stamps_the_drafter(clean_skills):
     out = await executor._skill_create(
-        {"title": "CC authoring test", "summary": "s",
-         "guidance_content": "the guidance body"},
-        "human:lee", "knowledge-steward",
+        {"title": "CC authoring test", "summary": "s", "guidance_content": "the guidance body"},
+        "human:lee",
+        "knowledge-steward",
     )
     assert "cc-authoring-test" in out
     skill = await repo.get_skill("cc-authoring-test")
@@ -208,26 +221,30 @@ async def test_skill_create_refuses_an_existing_id(clean_skills):
     with pytest.raises(executor.ExecutorError, match="already exists"):
         await executor._skill_create(
             {"title": "CC authoring test", "summary": "s", "guidance_content": "x"},
-            "human:lee", "knowledge-steward",
+            "human:lee",
+            "knowledge-steward",
         )
 
 
 @needs_pg
 async def test_skill_doc_add_versions_and_derives_kind_from_doc_key(clean_skills):
     await repo.create_skill("cc-authoring-test", "CC authoring test", "s")
-    args = {"skill_id": "cc-authoring-test", "doc_key": "upstream",
-            "title": "Upstream docs", "content": "v1 body",
-            "source_url": "https://example.com/g",
-            "captured_at": "2026-08-07T12:00:00+00:00"}
+    args = {
+        "skill_id": "cc-authoring-test",
+        "doc_key": "upstream",
+        "title": "Upstream docs",
+        "content": "v1 body",
+        "source_url": "https://example.com/g",
+        "captured_at": "2026-08-07T12:00:00+00:00",
+    }
     assert "v1" in await executor._skill_doc_add(args, "human:lee", "knowledge-steward")
-    await executor._skill_doc_add({**args, "content": "v2 body"},
-                                  "human:lee", "knowledge-steward")
+    await executor._skill_doc_add({**args, "content": "v2 body"}, "human:lee", "knowledge-steward")
 
     docs = await repo.list_skill_docs("cc-authoring-test")
     current = [d for d in docs if d["doc_key"] == "upstream"]
     assert len(current) == 1 and current[0]["version"] == 2
     assert current[0]["content"] == "v2 body"
-    assert current[0]["kind"] == "reference"       # derived, never argued
+    assert current[0]["kind"] == "reference"  # derived, never argued
     assert current[0]["source_url"] == "https://example.com/g"
     # The capture instant is propose time, not write time.
     assert current[0]["captured_at"].isoformat().startswith("2026-08-07T12:00")
@@ -238,12 +255,16 @@ async def test_skill_doc_add_versions_and_derives_kind_from_doc_key(clean_skills
 async def test_skill_doc_add_refuses_unknown_and_retired_skills(clean_skills):
     with pytest.raises(executor.ExecutorError, match="unknown skill"):
         await executor._skill_doc_add(
-            {"skill_id": "cc-authoring-test-nope", "doc_key": "k",
-             "title": "t", "content": "c"}, "human:lee", "knowledge-steward")
+            {"skill_id": "cc-authoring-test-nope", "doc_key": "k", "title": "t", "content": "c"},
+            "human:lee",
+            "knowledge-steward",
+        )
 
     await repo.create_skill("cc-authoring-test", "CC authoring test", "s")
     await repo.retire_skill("cc-authoring-test", "superseded")
     with pytest.raises(executor.ExecutorError, match="RETIRED"):
         await executor._skill_doc_add(
-            {"skill_id": "cc-authoring-test", "doc_key": "k",
-             "title": "t", "content": "c"}, "human:lee", "knowledge-steward")
+            {"skill_id": "cc-authoring-test", "doc_key": "k", "title": "t", "content": "c"},
+            "human:lee",
+            "knowledge-steward",
+        )

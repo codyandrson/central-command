@@ -44,8 +44,10 @@ async def main() -> None:
     print("    evidence :", [e["claim"] for e in prop["evidence"]])
 
     # Operator safety: only approve a set_due_date on our throwaway issue.
-    if not (act["capability"].startswith("jira.set_due_date")
-            and act["arguments"].get("issue_key") == ISSUE):
+    if not (
+        act["capability"].startswith("jira.set_due_date")
+        and act["arguments"].get("issue_key") == ISSUE
+    ):
         print("  Proposal did not target the test issue as expected — NOT approving.")
         sys.exit(1)
 
@@ -60,8 +62,10 @@ async def main() -> None:
 
     expected = act["arguments"]["due_date"]
     if after.get("due_date") == expected:
-        print(f"\n✅ ACCEPTANCE PASSED — real Claude proposed, human approved, "
-              f"real Jira write executed ({ISSUE}.due_date is now {expected}).")
+        print(
+            f"\n✅ ACCEPTANCE PASSED — real Claude proposed, human approved, "
+            f"real Jira write executed ({ISSUE}.due_date is now {expected})."
+        )
     else:
         print(f"\n❌ FAILED — expected due_date {expected}, got {after.get('due_date')!r}")
         sys.exit(1)

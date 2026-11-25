@@ -39,7 +39,9 @@ class OutageRetryIn(BaseModel):
     include_interrupted: bool = False
 
 
-_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s]*@")   # greedy: up to the LAST @ in the authority
+_USERINFO = re.compile(
+    r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s]*@"
+)  # greedy: up to the LAST @ in the authority
 _SECRET = re.compile(
     r"(?i)(\bsk-[A-Za-z0-9_.-]{6,}"
     r"|\bbearer\s+\S+"
@@ -76,8 +78,12 @@ async def list_outages() -> dict:
     probes = await repo.dependency_probe_states()
     failing: dict[str, list[dict]] = {}
     for u in await repo.units_failing_despite_probe(settings.retry_loud_after_attempts):
-        entry = {"kind": u["unit"], "id": u["id"], "attempts": u["failures"],
-                 "last_error": u["last_error"]}
+        entry = {
+            "kind": u["unit"],
+            "id": u["id"],
+            "attempts": u["failures"],
+            "last_error": u["last_error"],
+        }
         for dep in recorded_dependencies(u["dependencies"]):
             failing.setdefault(dep, []).append(entry)
 
@@ -106,8 +112,9 @@ async def list_outages() -> dict:
     return {"dependencies": out}
 
 
-async def retry_outage(name: str, include_interrupted: bool = False,
-                       actor: str = "operator") -> dict:
+async def retry_outage(
+    name: str, include_interrupted: bool = False, actor: str = "operator"
+) -> dict:
     """The operator's retry-now for one dependency.
 
     Order is the emit-before rule: (1) `outage.retry_requested` is written
@@ -127,9 +134,13 @@ async def retry_outage(name: str, include_interrupted: bool = False,
         raise HTTPException(404, f"unknown dependency {name!r}")
 
     await events.emit(
-        "outage.retry_requested", ref_id=name,
-        payload={"dependency": name, "include_interrupted": bool(include_interrupted),
-                 "actor": actor},
+        "outage.retry_requested",
+        ref_id=name,
+        payload={
+            "dependency": name,
+            "include_interrupted": bool(include_interrupted),
+            "actor": actor,
+        },
         actor=actor,
     )
 
@@ -141,7 +152,9 @@ async def retry_outage(name: str, include_interrupted: bool = False,
         return {"probe": "down", "driven": zero}
 
     swept = await orchestration.retry_sweep(
-        cache=cache, only=name, ignore_not_before=True,
+        cache=cache,
+        only=name,
+        ignore_not_before=True,
         include_interrupted=bool(include_interrupted),
     )
     pulled = await repo.pull_queued_units_due(name)

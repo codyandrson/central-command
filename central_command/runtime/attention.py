@@ -57,14 +57,10 @@ async def contacts_today(agent_id: str, now: datetime | None = None) -> int:
     """How many conversations this agent has opened since local midnight."""
     from central_command.db import repo
 
-    return await repo.count_events_since(
-        CONTACT_EVENT, f"agent:{agent_id}", local_midnight(now)
-    )
+    return await repo.count_events_since(CONTACT_EVENT, f"agent:{agent_id}", local_midnight(now))
 
 
-async def may_open_lane(
-    agent_id: str | None, now: datetime | None = None
-) -> tuple[bool, int, int]:
+async def may_open_lane(agent_id: str | None, now: datetime | None = None) -> tuple[bool, int, int]:
     """(allowed, used, budget) for `agent_id` opening a conversation now.
 
     An unlimited agent is answered without touching the database — the common

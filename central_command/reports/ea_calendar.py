@@ -63,8 +63,11 @@ def _conflicts(events: list[dict]) -> list[dict]:
     strictly. All-day events and declined invitations are skipped entirely.
     """
     real = [
-        e for e in events
-        if not e.get("all_day") and not e.get("declined") and _dt(e.get("start"))
+        e
+        for e in events
+        if not e.get("all_day")
+        and not e.get("declined")
+        and _dt(e.get("start"))
         and _dt(e.get("end"))
     ]
     real.sort(key=lambda e: _dt(e["start"]))
@@ -72,11 +75,13 @@ def _conflicts(events: list[dict]) -> list[dict]:
     out: list[dict] = []
     for current, following in itertools.pairwise(real):
         if _dt(following["start"]) < _dt(current["end"]):
-            out.append({
-                "between": [current.get("summary"), following.get("summary")],
-                "overlap_from": following["start"],
-                "until": current["end"],
-            })
+            out.append(
+                {
+                    "between": [current.get("summary"), following.get("summary")],
+                    "overlap_from": following["start"],
+                    "until": current["end"],
+                }
+            )
     return out
 
 
@@ -100,7 +105,8 @@ def working_window(local_date, now: datetime | None = None) -> tuple[datetime, d
     if end <= start:
         raise ValueError(
             f"plan_day_end ({settings.plan_day_end}) must be after plan_day_start "
-            f"({settings.plan_day_start})")
+            f"({settings.plan_day_start})"
+        )
     if now is not None and now > start:
         start = now
     return start, end
@@ -121,8 +127,9 @@ def _busy(event: dict, tz: ZoneInfo) -> tuple[datetime, datetime] | None:
     return (start, end) if end > start else None
 
 
-def free_time(events: list[dict], window_from: datetime, window_to: datetime,
-              min_minutes: int) -> list[dict]:
+def free_time(
+    events: list[dict], window_from: datetime, window_to: datetime, min_minutes: int
+) -> list[dict]:
     """The free stretches of `[window_from, window_to)` after every timed
     commitment in `events` is subtracted, each `{"from", "to", "minutes"}`,
     earliest first. Pure.
@@ -157,8 +164,9 @@ def free_time(events: list[dict], window_from: datetime, window_to: datetime,
         if start > cursor:
             minutes = int((start - cursor).total_seconds() // 60)
             if minutes >= min_minutes:
-                out.append({"from": cursor.isoformat(), "to": start.isoformat(),
-                            "minutes": minutes})
+                out.append(
+                    {"from": cursor.isoformat(), "to": start.isoformat(), "minutes": minutes}
+                )
         cursor = max(cursor, end)
     return out
 
@@ -191,8 +199,7 @@ async def day(offset_days: int = 0) -> dict:
 
     tz = ZoneInfo(settings.ea_timezone)
     now = datetime.now(tz)
-    midnight = datetime.combine((now + timedelta(days=offset_days)).date(),
-                                time.min, tzinfo=tz)
+    midnight = datetime.combine((now + timedelta(days=offset_days)).date(), time.min, tzinfo=tz)
     start = now if offset_days <= 0 else midnight
     end = midnight + timedelta(days=1)
 
@@ -212,10 +219,8 @@ async def day(offset_days: int = 0) -> dict:
     # a bare DATE, which parses NAIVE, and min() over naive + aware raises —
     # one vacation marker beside one flight took out the whole read. "First
     # event" means the first timed commitment anyway.
-    starts = [s for s in (_dt(e.get("start")) for e in events
-                          if not e.get("all_day")) if s]
-    work_from, work_to = working_window(midnight.date(),
-                                        now if offset_days <= 0 else None)
+    starts = [s for s in (_dt(e.get("start")) for e in events if not e.get("all_day")) if s]
+    work_from, work_to = working_window(midnight.date(), now if offset_days <= 0 else None)
     free = free_time(events, work_from, work_to, int(settings.plan_min_block_minutes))
     return {
         "available": True,
@@ -262,24 +267,26 @@ async def week(start_offset: int = 1, days: int = 7) -> dict:
     for offset in range(start_offset, start_offset + max(0, int(days))):
         local = today + timedelta(days=offset)
         line = {"date": local.isoformat(), "day": local.strftime("%A")}
-        one = await day(offset)       # awaited in turn: sequential by construction
+        one = await day(offset)  # awaited in turn: sequential by construction
         if not one.get("available"):
-            lines.append({**line, "available": False,
-                          "reason": one.get("reason") or "unknown"})
+            lines.append({**line, "available": False, "reason": one.get("reason") or "unknown"})
             continue
         free = int(one.get("free_minutes") or 0)
         timed = _timed(one.get("events") or [])
-        lines.append({
-            **line, "available": True,
-            "timed_events": len(timed),
-            # The ids the caller joins to the plan ledger to tell commitments
-            # from the assistant's own events (this module holds no database).
-            "busy_event_ids": [str(e["event_id"]) for e in timed if e.get("event_id")],
-            "conflicts": len(one.get("conflicts") or []),
-            "free_minutes": free,
-            "free_time": one.get("free_time") or [],
-            "overbooked": free < threshold,
-        })
+        lines.append(
+            {
+                **line,
+                "available": True,
+                "timed_events": len(timed),
+                # The ids the caller joins to the plan ledger to tell commitments
+                # from the assistant's own events (this module holds no database).
+                "busy_event_ids": [str(e["event_id"]) for e in timed if e.get("event_id")],
+                "conflicts": len(one.get("conflicts") or []),
+                "free_minutes": free,
+                "free_time": one.get("free_time") or [],
+                "overbooked": free < threshold,
+            }
+        )
     known = [d for d in lines if d["available"]]
     return {
         "available": True,

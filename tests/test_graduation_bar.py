@@ -39,8 +39,15 @@ from tests.fake_world import fake_world
 
 def _row(**kw) -> Capability:
     base = {
-        "name": "x.write", "kind": "write", "gate": "human approval", "default_gate": "human",
-        "risk": "r", "holder": "Executor", "route": "r", "arguments": [], "description": "d",
+        "name": "x.write",
+        "kind": "write",
+        "gate": "human approval",
+        "default_gate": "human",
+        "risk": "r",
+        "holder": "Executor",
+        "route": "r",
+        "arguments": [],
+        "description": "d",
         "reversibility": "reversible",
     }
     return Capability(**{**base, **kw})
@@ -59,14 +66,18 @@ def test_the_bar_reads_only_the_irreversible_mark():
 
 
 def test_no_registry_row_is_both_auditor_gated_and_irreversible():
-    assert not [c.name for c in REGISTRY
-                if c.default_gate == "auditor" and c.reversibility == "irreversible"]
+    assert not [
+        c.name
+        for c in REGISTRY
+        if c.default_gate == "auditor" and c.reversibility == "irreversible"
+    ]
 
 
 def test_the_barred_classes_are_the_irreversible_write_rows():
     barred = barred_classes()
-    assert barred == sorted(c.name for c in REGISTRY
-                            if c.kind == "write" and c.reversibility == "irreversible")
+    assert barred == sorted(
+        c.name for c in REGISTRY if c.kind == "write" and c.reversibility == "irreversible"
+    )
     assert "mail.send" in barred
     assert "work.bulk_dismiss" not in barred
 
@@ -94,12 +105,23 @@ async def _proposal(capability: str, *, reversibility: str = "reversible") -> tu
     sid = "sess_grad_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(sid, "jira-expert")
     await repo.save_proposal(
-        pid, sid, "jira-expert", f"Run {capability}",
+        pid,
+        sid,
+        "jira-expert",
+        f"Run {capability}",
         # The agent's own `reversibility` claim is deliberately the opposite of
         # the registry's mark on the bar test: the bar must never read it.
-        [{"capability": capability, "arguments": _ARGS.get(capability, {}), "target_ref": {"system": "x"},
-          "reversibility": reversibility}],
-        [], "it happens", pid,
+        [
+            {
+                "capability": capability,
+                "arguments": _ARGS.get(capability, {}),
+                "target_ref": {"system": "x"},
+                "reversibility": reversibility,
+            }
+        ],
+        [],
+        "it happens",
+        pid,
     )
     return sid, pid
 
@@ -122,8 +144,11 @@ async def test_auditor_approval_of_an_irreversible_capability_parks_for_the_oper
     assert "proposal.executed" not in kinds
     assert world == [], "no write was performed"
 
-    barred = [e for e in await repo.list_events(ref_id=pid, limit=500)
-              if e["kind"] == "proposal.graduation_barred"]
+    barred = [
+        e
+        for e in await repo.list_events(ref_id=pid, limit=500)
+        if e["kind"] == "proposal.graduation_barred"
+    ]
     assert len(barred) == 1
     flags = barred[0]["payload"]["policy_flags"]
     assert flags[0]["policy"] == "irreversible-never-graduates"
@@ -141,8 +166,15 @@ async def test_one_irreversible_action_among_reversible_ones_parks_the_whole_pro
     pid = "prop_grad_" + uuid.uuid4().hex[:10]
     sid = "sess_grad_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(sid, "jira-expert")
-    acts = [{"capability": c, "arguments": _ARGS.get(c, {}), "target_ref": {"system": "x"},
-             "reversibility": "reversible"} for c in ("jira.add_comment", "mail.send")]
+    acts = [
+        {
+            "capability": c,
+            "arguments": _ARGS.get(c, {}),
+            "target_ref": {"system": "x"},
+            "reversibility": "reversible",
+        }
+        for c in ("jira.add_comment", "mail.send")
+    ]
     await repo.save_proposal(pid, sid, "jira-expert", "mixed", acts, [], "x", pid)
 
     with pytest.raises(gateway.GraduationBarred):

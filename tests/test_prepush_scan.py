@@ -61,10 +61,17 @@ class Repo:
         self.work, self.ident = work, ident
 
     def git(self, *args: str, env: dict | None = None) -> str:
-        e = {**os.environ, "GIT_AUTHOR_NAME": "Test Author", "GIT_AUTHOR_EMAIL": "t@example.com",
-             "GIT_COMMITTER_NAME": "Test Author", "GIT_COMMITTER_EMAIL": "t@example.com", **(env or {})}
-        return subprocess.run(["git", "-C", str(self.work), *args], check=True, capture_output=True,
-                              text=True, env=e).stdout.strip()
+        e = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Test Author",
+            "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "Test Author",
+            "GIT_COMMITTER_EMAIL": "t@example.com",
+            **(env or {}),
+        }
+        return subprocess.run(
+            ["git", "-C", str(self.work), *args], check=True, capture_output=True, text=True, env=e
+        ).stdout.strip()
 
     def commit(self, path: str, text: str, msg: str) -> str:
         p = self.work / path
@@ -76,14 +83,25 @@ class Repo:
 
     def scan(self, *refs: tuple[str, str, str, str]) -> subprocess.CompletedProcess:
         stdin = "".join(" ".join(r) + "\n" for r in refs)
-        return subprocess.run(["bash", str(SCAN)], input=stdin, capture_output=True, text=True,
-                              cwd=self.work, timeout=60,
-                              env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(self.ident)})
+        return subprocess.run(
+            ["bash", str(SCAN)],
+            input=stdin,
+            capture_output=True,
+            text=True,
+            cwd=self.work,
+            timeout=60,
+            env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(self.ident)},
+        )
 
     def tree(self, *args: str, ident: Path | None = None) -> subprocess.CompletedProcess:
-        return subprocess.run(["bash", str(SCAN), "--tree", *args], capture_output=True, text=True,
-                              cwd=self.work, timeout=60,
-                              env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(ident or self.ident)})
+        return subprocess.run(
+            ["bash", str(SCAN), "--tree", *args],
+            capture_output=True,
+            text=True,
+            cwd=self.work,
+            timeout=60,
+            env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(ident or self.ident)},
+        )
 
     @property
     def tip(self) -> str:
@@ -95,6 +113,7 @@ def _new(ref: str, sha: str):
 
 
 # ── new refs ────────────────────────────────────────────────────────────────
+
 
 def test_new_branch_carrying_a_shape_is_refused(repo: Repo):
     repo.git("checkout", "-q", "-b", "feat")
@@ -132,8 +151,14 @@ def test_new_annotated_tag_whose_message_carries_a_shape_is_refused(repo: Repo):
 
 
 def test_new_annotated_tag_whose_tagger_matches_the_list_but_message_is_clean_passes(repo: Repo):
-    repo.git("tag", "-a", "v1", "-m", "release 1",
-             env={"GIT_COMMITTER_NAME": IDENT, "GIT_COMMITTER_EMAIL": f"{IDENT}@example.com"})
+    repo.git(
+        "tag",
+        "-a",
+        "v1",
+        "-m",
+        "release 1",
+        env={"GIT_COMMITTER_NAME": IDENT, "GIT_COMMITTER_EMAIL": f"{IDENT}@example.com"},
+    )
     obj = repo.git("rev-parse", "v1")
     assert IDENT in repo.git("cat-file", "-p", obj), "the tagger line should carry the identifier"
     assert repo.scan(_new("refs/tags/v1", obj)).returncode == 0
@@ -178,6 +203,7 @@ def test_new_branch_shape_under_docs_vendor_is_still_excluded(repo: Repo):
 
 # ── existing refs ───────────────────────────────────────────────────────────
 
+
 def test_existing_branch_with_a_secret_added_then_reverted_is_refused(repo: Repo):
     old = repo.tip
     repo.commit("a.txt", f"token = {SHAPE}\n", "add")
@@ -220,6 +246,7 @@ def test_existing_annotated_tag_moved_with_a_shape_in_its_message_is_refused(rep
 
 # ── deletes, failures, several refs ─────────────────────────────────────────
 
+
 def test_branch_delete_passes(repo: Repo):
     assert repo.scan(("(delete)", ZERO, "refs/heads/feat", repo.tip)).returncode == 0
 
@@ -251,6 +278,7 @@ def test_the_refusal_output_names_the_ref(repo: Repo):
 
 # ── the hook, driven by a real push ─────────────────────────────────────────
 
+
 def _install(repo: Repo):
     hook = repo.work / ".git" / "hooks" / "pre-push"
     hook.write_text(f'#!/usr/bin/env bash\nexec bash "{SCAN}"\n')
@@ -258,8 +286,12 @@ def _install(repo: Repo):
 
 
 def _push(repo: Repo, *args: str):
-    return subprocess.run(["git", "-C", str(repo.work), "push", *args], capture_output=True, text=True,
-                          env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(repo.ident)})
+    return subprocess.run(
+        ["git", "-C", str(repo.work), "push", *args],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(repo.ident)},
+    )
 
 
 def test_real_push_of_a_new_tag_on_an_unpublished_commit_with_a_shape_is_refused(repo: Repo):
@@ -268,8 +300,14 @@ def test_real_push_of_a_new_tag_on_an_unpublished_commit_with_a_shape_is_refused
     repo.git("tag", "-a", "v1", "-m", "release")
     r = _push(repo, "origin", "v1")
     assert r.returncode != 0 and "SECRET SHAPE" in r.stderr
-    assert "v1" not in subprocess.run(["git", "-C", str(repo.work), "ls-remote", "--tags", "origin"],
-                                      capture_output=True, text=True).stdout
+    assert (
+        "v1"
+        not in subprocess.run(
+            ["git", "-C", str(repo.work), "ls-remote", "--tags", "origin"],
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
 
 
 def test_real_push_of_a_clean_new_tag_goes_through(repo: Repo):
@@ -279,6 +317,7 @@ def test_real_push_of_a_clean_new_tag_goes_through(repo: Repo):
 
 
 # ── whole-tree mode (--tree) ────────────────────────────────────────────────
+
 
 def _out(r: subprocess.CompletedProcess) -> str:
     return r.stdout + r.stderr
@@ -352,8 +391,18 @@ def test_tree_refuses_outside_a_repository(tmp_path: Path):
         pytest.skip("POSIX bash and git needed")
     lst = tmp_path / "list"
     lst.write_text(f"{IDENT}\n")
-    r = subprocess.run(["bash", str(SCAN), "--tree"], capture_output=True, text=True, cwd=tmp_path, timeout=60,
-                       env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(lst), "GIT_CEILING_DIRECTORIES": str(tmp_path.parent)})
+    r = subprocess.run(
+        ["bash", str(SCAN), "--tree"],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        timeout=60,
+        env={
+            **os.environ,
+            "CC_PRIVATE_IDENTIFIERS": str(lst),
+            "GIT_CEILING_DIRECTORIES": str(tmp_path.parent),
+        },
+    )
     assert r.returncode == 1
 
 
@@ -370,11 +419,24 @@ def test_tree_mode_needs_the_exact_argument_other_vectors_are_hook_mode(repo: Re
     # git runs a pre-push hook with the remote's name and URL as $1 and $2.
     repo.git("checkout", "-q", "-b", "feat")
     sha = repo.commit("a.txt", f"host {IDENT}\n", "add")
-    for argv in (["origin", "git@example.com:o/r.git"], ["--trees"], ["tree"], ["origin", "--tree"]):
-        r = subprocess.run(["bash", str(SCAN), *argv], input=" ".join(_new("refs/heads/feat", sha)) + "\n",
-                           capture_output=True, text=True, cwd=repo.work, timeout=60,
-                           env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(repo.ident)})
-        assert r.returncode == 1 and "PRIVATE IDENTIFIER" in r.stderr and "tree:" not in r.stderr, argv
+    for argv in (
+        ["origin", "git@example.com:o/r.git"],
+        ["--trees"],
+        ["tree"],
+        ["origin", "--tree"],
+    ):
+        r = subprocess.run(
+            ["bash", str(SCAN), *argv],
+            input=" ".join(_new("refs/heads/feat", sha)) + "\n",
+            capture_output=True,
+            text=True,
+            cwd=repo.work,
+            timeout=60,
+            env={**os.environ, "CC_PRIVATE_IDENTIFIERS": str(repo.ident)},
+        )
+        assert r.returncode == 1 and "PRIVATE IDENTIFIER" in r.stderr and "tree:" not in r.stderr, (
+            argv
+        )
 
 
 def test_real_push_still_refuses_a_listed_value_and_passes_a_clean_one(repo: Repo):
@@ -385,6 +447,11 @@ def test_real_push_still_refuses_a_listed_value_and_passes_a_clean_one(repo: Rep
     repo.commit("b.txt", f"host {IDENT}\n", "dirty")
     r = _push(repo, "origin", "master")
     assert r.returncode != 0 and "PRIVATE IDENTIFIER" in r.stderr
-    assert repo.git("rev-parse", "HEAD") != subprocess.run(
-        ["git", "-C", str(repo.work), "ls-remote", "origin", "refs/heads/master"],
-        capture_output=True, text=True).stdout.split()[0]
+    assert (
+        repo.git("rev-parse", "HEAD")
+        != subprocess.run(
+            ["git", "-C", str(repo.work), "ls-remote", "origin", "refs/heads/master"],
+            capture_output=True,
+            text=True,
+        ).stdout.split()[0]
+    )

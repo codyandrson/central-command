@@ -42,34 +42,44 @@ class _FakeClient:
 async def test_graph_status_carries_graphistry_state_to_the_cockpit(monkeypatch):
     monkeypatch.setattr(neo4j_reader, "ping", lambda: _ok(True))
     monkeypatch.setattr(
-        neo4j_reader, "counts",
+        neo4j_reader,
+        "counts",
         lambda: _ok({"node_count": 102, "edge_count": 112, "group_ids": ["main"]}),
     )
 
     # disabled: the toggle is off, so no probe is even attempted.
     monkeypatch.setattr(
-        repo, "get_app_setting",
+        repo,
+        "get_app_setting",
         lambda key, default: _ok({"graphistry_enabled": False, "graphistry_url": ""}),
     )
     status = await routes.graph_status()
     assert status == {
-        "available": True, "node_count": 102, "edge_count": 112,
+        "available": True,
+        "node_count": 102,
+        "edge_count": 112,
         "group_ids": ["main"],
         "groups": [{"id": "main", "scope": "public", "agent_id": None}],
         "graphistry": "disabled",
-        "graphistry_enabled": False, "graphistry_url": "",
+        "graphistry_enabled": False,
+        "graphistry_url": "",
     }
 
     # unreachable: enabled, but the probe fails (workstation off / GPU busy —
     # an EXPECTED state, not an error, per the design spec).
     monkeypatch.setattr(
-        repo, "get_app_setting",
-        lambda key, default: _ok({
-            "graphistry_enabled": True, "graphistry_url": "http://ws:8080",
-        }),
+        repo,
+        "get_app_setting",
+        lambda key, default: _ok(
+            {
+                "graphistry_enabled": True,
+                "graphistry_url": "http://ws:8080",
+            }
+        ),
     )
     monkeypatch.setattr(
-        httpx, "AsyncClient",
+        httpx,
+        "AsyncClient",
         lambda **kw: _FakeClient(exc=httpx.ConnectError("refused")),
     )
     status = await routes.graph_status()
@@ -89,14 +99,22 @@ async def _ok(value):
 
 async def test_graph_neighborhood_wire_shape(monkeypatch):
     canned = {
-        "nodes": [{"uuid": "n1", "name": "Lee", "labels": ["Entity"],
-                   "summary": "s", "group_id": "main"}],
-        "edges": [{
-            "uuid": "e1", "source": "n1", "target": "n2", "name": "USED_FOR",
-            "fact": "fact text", "valid_at": "2026-07-09T05:20:06+00:00",
-            "invalid_at": None, "created_at": "2026-07-09T05:20:15+00:00",
-            "invalid": False,
-        }],
+        "nodes": [
+            {"uuid": "n1", "name": "Lee", "labels": ["Entity"], "summary": "s", "group_id": "main"}
+        ],
+        "edges": [
+            {
+                "uuid": "e1",
+                "source": "n1",
+                "target": "n2",
+                "name": "USED_FOR",
+                "fact": "fact text",
+                "valid_at": "2026-07-09T05:20:06+00:00",
+                "invalid_at": None,
+                "created_at": "2026-07-09T05:20:15+00:00",
+                "invalid": False,
+            }
+        ],
     }
 
     async def fake_neighborhood(uuid, at, limit):
@@ -108,8 +126,15 @@ async def test_graph_neighborhood_wire_shape(monkeypatch):
     assert result == canned
     edge = result["edges"][0]
     assert set(edge) == {
-        "uuid", "source", "target", "name", "fact",
-        "valid_at", "invalid_at", "created_at", "invalid",
+        "uuid",
+        "source",
+        "target",
+        "name",
+        "fact",
+        "valid_at",
+        "invalid_at",
+        "created_at",
+        "invalid",
     }
 
 
@@ -126,13 +151,12 @@ async def test_graph_settings_put_round_trips(monkeypatch):
     monkeypatch.setattr(repo, "set_app_setting", fake_set)
     monkeypatch.setattr(neo4j_reader, "ping", lambda: _ok(False))
 
-    body = routes.GraphSettingsIn(
-        graphistry_enabled=True, graphistry_url="http://ws:8080"
-    )
+    body = routes.GraphSettingsIn(graphistry_enabled=True, graphistry_url="http://ws:8080")
     result = await routes.graph_settings_put(body)
 
     assert store[routes._GRAPH_SETTINGS_KEY] == {
-        "graphistry_enabled": True, "graphistry_url": "http://ws:8080",
+        "graphistry_enabled": True,
+        "graphistry_url": "http://ws:8080",
     }
     assert result["graphistry_enabled"] is True
     assert result["graphistry_url"] == "http://ws:8080"
@@ -189,8 +213,7 @@ async def test_curation_writes_land_on_the_governance_record(monkeypatch):
     monkeypatch.setattr(events, "emit", fake_emit)
     monkeypatch.setattr(neo4j_writer, "create_edge", fake_create_edge)
 
-    body = routes.GraphEdgeIn(
-        source_uuid="a", target_uuid="b", name="KNOWS", fact="A knows B")
+    body = routes.GraphEdgeIn(source_uuid="a", target_uuid="b", name="KNOWS", fact="A knows B")
     await routes.graph_edge_create(body)
 
     assert len(emitted) == 1
@@ -217,8 +240,12 @@ async def test_graph_episodes_defaults_to_private_only_for_an_agent(monkeypatch)
         seen["private_only"] = private_only
         seen["last_n"] = last_n
         return [
-            {"uuid": "2", "name": "mine", "group_id": graphiti.private_group("jira-expert"),
-             "created_at": "2026-08-02T00:00:00Z"},
+            {
+                "uuid": "2",
+                "name": "mine",
+                "group_id": graphiti.private_group("jira-expert"),
+                "created_at": "2026-08-02T00:00:00Z",
+            },
         ]
 
     async def fake_count_episodes(group_ids):
@@ -248,10 +275,18 @@ async def test_graph_episodes_scope_all_widens_back_to_shared_and_private(monkey
     async def fake_get_episodes(last_n=50, agent_id=None, private_only=False):
         seen["private_only"] = private_only
         return [
-            {"uuid": "1", "name": "shared", "group_id": graphiti.settings.graph_write_group,
-             "created_at": "2026-08-01T00:00:00Z"},
-            {"uuid": "2", "name": "mine", "group_id": graphiti.private_group("jira-expert"),
-             "created_at": "2026-08-02T00:00:00Z"},
+            {
+                "uuid": "1",
+                "name": "shared",
+                "group_id": graphiti.settings.graph_write_group,
+                "created_at": "2026-08-01T00:00:00Z",
+            },
+            {
+                "uuid": "2",
+                "name": "mine",
+                "group_id": graphiti.private_group("jira-expert"),
+                "created_at": "2026-08-02T00:00:00Z",
+            },
         ]
 
     monkeypatch.setattr(graphiti, "get_episodes", fake_get_episodes)
@@ -272,8 +307,14 @@ async def test_graph_episodes_without_agent_id_is_all_shared(monkeypatch):
     async def fake_get_episodes(last_n=50, agent_id=None, private_only=False):
         assert agent_id is None
         assert private_only is False
-        return [{"uuid": "1", "name": "shared", "group_id": graphiti.settings.graph_write_group,
-                  "created_at": "2026-08-01T00:00:00Z"}]
+        return [
+            {
+                "uuid": "1",
+                "name": "shared",
+                "group_id": graphiti.settings.graph_write_group,
+                "created_at": "2026-08-01T00:00:00Z",
+            }
+        ]
 
     monkeypatch.setattr(graphiti, "get_episodes", fake_get_episodes)
     monkeypatch.setattr(neo4j_reader, "count_episodes", lambda group_ids: _ok(1))
@@ -294,18 +335,23 @@ async def test_graph_status_classifies_group_ids_into_public_and_private_scope(m
     monkeypatch.setattr(repo, "list_agents", fake_list_agents)
     monkeypatch.setattr(neo4j_reader, "ping", lambda: _ok(True))
     monkeypatch.setattr(
-        neo4j_reader, "counts",
-        lambda: _ok({
-            "node_count": 3, "edge_count": 1,
-            "group_ids": [
-                graphiti.settings.graph_write_group,
-                graphiti.private_group("jira-expert"),
-                "some_unknown_group",
-            ],
-        }),
+        neo4j_reader,
+        "counts",
+        lambda: _ok(
+            {
+                "node_count": 3,
+                "edge_count": 1,
+                "group_ids": [
+                    graphiti.settings.graph_write_group,
+                    graphiti.private_group("jira-expert"),
+                    "some_unknown_group",
+                ],
+            }
+        ),
     )
     monkeypatch.setattr(
-        repo, "get_app_setting",
+        repo,
+        "get_app_setting",
         lambda key, default: _ok({"graphistry_enabled": False, "graphistry_url": ""}),
     )
 
@@ -313,13 +359,19 @@ async def test_graph_status_classifies_group_ids_into_public_and_private_scope(m
     by_id = {g["id"]: g for g in status["groups"]}
 
     assert by_id[graphiti.settings.graph_write_group] == {
-        "id": graphiti.settings.graph_write_group, "scope": "public", "agent_id": None,
+        "id": graphiti.settings.graph_write_group,
+        "scope": "public",
+        "agent_id": None,
     }
     assert by_id[graphiti.private_group("jira-expert")] == {
-        "id": graphiti.private_group("jira-expert"), "scope": "private", "agent_id": "jira-expert",
+        "id": graphiti.private_group("jira-expert"),
+        "scope": "private",
+        "agent_id": "jira-expert",
     }
     assert by_id["some_unknown_group"] == {
-        "id": "some_unknown_group", "scope": "public", "agent_id": None,
+        "id": "some_unknown_group",
+        "scope": "public",
+        "agent_id": None,
     }
 
 
@@ -327,32 +379,64 @@ async def test_graph_audit_wire_shape(monkeypatch):
     """The cockpit's audit panel reads these exact keys — pin them here per
     the repo rule (backend test pins wire shape, not a frontend one)."""
     canned = {
-        "duplicate_entities": [{
-            "a": {"uuid": "n1", "name": "Lee", "labels": ["Entity", "Person"], "group_id": "main"},
-            "b": {"uuid": "n2", "name": "Lee", "labels": ["Entity", "Person"], "group_id": "main"},
-            "similarity": 0.95, "basis": "embedding",
-        }],
-        "duplicate_edges": [{
-            "source": {"uuid": "n1", "name": "Lee"},
-            "target": {"uuid": "n3", "name": "Acme"},
-            "edges": [
-                {"uuid": "e1", "name": "WORKS_AT", "fact": "f1",
-                 "created_at": "2026-08-01T00:00:00+00:00", "valid_at": None},
-                {"uuid": "e2", "name": "WORKS_AT", "fact": "f2",
-                 "created_at": "2026-08-02T00:00:00+00:00", "valid_at": None},
-            ],
-        }],
+        "duplicate_entities": [
+            {
+                "a": {
+                    "uuid": "n1",
+                    "name": "Lee",
+                    "labels": ["Entity", "Person"],
+                    "group_id": "main",
+                },
+                "b": {
+                    "uuid": "n2",
+                    "name": "Lee",
+                    "labels": ["Entity", "Person"],
+                    "group_id": "main",
+                },
+                "similarity": 0.95,
+                "basis": "embedding",
+            }
+        ],
+        "duplicate_edges": [
+            {
+                "source": {"uuid": "n1", "name": "Lee"},
+                "target": {"uuid": "n3", "name": "Acme"},
+                "edges": [
+                    {
+                        "uuid": "e1",
+                        "name": "WORKS_AT",
+                        "fact": "f1",
+                        "created_at": "2026-08-01T00:00:00+00:00",
+                        "valid_at": None,
+                    },
+                    {
+                        "uuid": "e2",
+                        "name": "WORKS_AT",
+                        "fact": "f2",
+                        "created_at": "2026-08-02T00:00:00+00:00",
+                        "valid_at": None,
+                    },
+                ],
+            }
+        ],
         "health": {
             "isolated_nodes": [{"uuid": "n4", "name": "Orphan", "group_id": "main"}],
             "untyped_nodes": [{"uuid": "n5", "name": "Vague", "group_id": "main"}],
             "missing_embedding_nodes": [{"uuid": "n6", "name": "NoVec", "group_id": "main"}],
-            "dangling_edges": [{
-                "uuid": "e3", "claimed_source": "n1", "actual_source": "n7",
-                "claimed_target": "n3", "actual_target": "n3",
-            }],
+            "dangling_edges": [
+                {
+                    "uuid": "e3",
+                    "claimed_source": "n1",
+                    "actual_source": "n7",
+                    "claimed_target": "n3",
+                    "actual_target": "n3",
+                }
+            ],
             "counts": {
-                "isolated_nodes": 1, "untyped_nodes": 1,
-                "missing_embedding_nodes": 1, "dangling_edges": 1,
+                "isolated_nodes": 1,
+                "untyped_nodes": 1,
+                "missing_embedding_nodes": 1,
+                "dangling_edges": 1,
             },
         },
     }
@@ -369,8 +453,11 @@ async def test_graph_audit_wire_shape(monkeypatch):
     assert result == canned
     assert set(result) == {"duplicate_entities", "duplicate_edges", "health"}
     assert set(result["health"]) == {
-        "isolated_nodes", "untyped_nodes", "missing_embedding_nodes",
-        "dangling_edges", "counts",
+        "isolated_nodes",
+        "untyped_nodes",
+        "missing_embedding_nodes",
+        "dangling_edges",
+        "counts",
     }
     assert seen == {"group_id": "main", "threshold": 0.87}
 
@@ -418,9 +505,13 @@ async def test_episode_walk_wire_shape(monkeypatch):
     from fastapi import HTTPException
 
     index_row = {
-        "uuid": "ep-1", "name": "mail 42", "source_description": "gmail",
-        "group_id": "central_command", "created_at": "2026-09-13T00:00:00+00:00",
-        "valid_at": None, "entity_count": 3,
+        "uuid": "ep-1",
+        "name": "mail 42",
+        "source_description": "gmail",
+        "group_id": "central_command",
+        "created_at": "2026-09-13T00:00:00+00:00",
+        "valid_at": None,
+        "entity_count": 3,
     }
     seen = {}
 
@@ -434,11 +525,28 @@ async def test_episode_walk_wire_shape(monkeypatch):
             return None
         return {
             "episode": {**index_row, "content": "the text"},
-            "nodes": [{"uuid": "n1", "name": "Jane Doe", "labels": ["Entity", "Person"],
-                       "summary": "", "group_id": "central_command"}],
-            "edges": [{"uuid": "e1", "source": "n1", "target": "n2", "name": "KNOWS",
-                       "fact": "f", "valid_at": None, "invalid_at": None,
-                       "created_at": "2026-09-13T00:00:00+00:00", "invalid": False}],
+            "nodes": [
+                {
+                    "uuid": "n1",
+                    "name": "Jane Doe",
+                    "labels": ["Entity", "Person"],
+                    "summary": "",
+                    "group_id": "central_command",
+                }
+            ],
+            "edges": [
+                {
+                    "uuid": "e1",
+                    "source": "n1",
+                    "target": "n2",
+                    "name": "KNOWS",
+                    "fact": "f",
+                    "valid_at": None,
+                    "invalid_at": None,
+                    "created_at": "2026-09-13T00:00:00+00:00",
+                    "invalid": False,
+                }
+            ],
         }
 
     monkeypatch.setattr(neo4j_reader, "episode_index", fake_index)
@@ -453,7 +561,15 @@ async def test_episode_walk_wire_shape(monkeypatch):
     assert sg["episode"]["content"] == "the text"
     assert set(sg["nodes"][0]) == {"uuid", "name", "labels", "summary", "group_id"}
     assert set(sg["edges"][0]) == {
-        "uuid", "source", "target", "name", "fact", "valid_at", "invalid_at", "created_at", "invalid",
+        "uuid",
+        "source",
+        "target",
+        "name",
+        "fact",
+        "valid_at",
+        "invalid_at",
+        "created_at",
+        "invalid",
     }
 
     with pytest.raises(HTTPException) as exc:

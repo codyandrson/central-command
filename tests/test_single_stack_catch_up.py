@@ -69,7 +69,7 @@ def _bash() -> str:
 # on) — unless <state>/fail-recreate exists, or no such file was prepared (a
 # recreate that "succeeded" without changing anything). <state>/fail-ps makes
 # `ps` fail. Every call is logged.
-_PODMAN = r'''#!/usr/bin/env bash
+_PODMAN = r"""#!/usr/bin/env bash
 echo "podman $*" >> "$STUB/log"
 case "$1" in
   ps)     [[ -f "$STUB/fail-ps" ]] && exit 125
@@ -107,7 +107,7 @@ case "$1" in
     exit 0 ;;
 esac
 exit 0
-'''
+"""
 
 
 class Stack:
@@ -127,8 +127,11 @@ class Stack:
         self.env_lines = {
             # Forward slashes: setup.sh SOURCES .env (bash drops the backslashes).
             "CC_STATE_DIR": (tmp / "state").as_posix(),
-            "CC_ENABLE_N8N": "0", "CC_ENABLE_CRAWLER": "1", "CC_ENABLE_SPEECH": "0",
-            "CC_ENABLE_SANDBOX": "0", "CC_ENABLE_PGWEB": "0",
+            "CC_ENABLE_N8N": "0",
+            "CC_ENABLE_CRAWLER": "1",
+            "CC_ENABLE_SPEECH": "0",
+            "CC_ENABLE_SANDBOX": "0",
+            "CC_ENABLE_PGWEB": "0",
             "CC_IMG_POSTGRES": "docker.io/library/postgres:16.16-trixie",
             "CC_IMG_NEO4J": "docker.io/library/neo4j:5.26.33",
             "CC_IMG_BERRIAI_LITELLM_DATABASE": "ghcr.io/berriai/litellm-database:main-stable",
@@ -140,15 +143,17 @@ class Stack:
         assert text.rstrip().endswith(tail)
         # __drift: image_drift, with the verdict it leaves in DRIFT/DRIFT_KIND
         # printed, so a test can read which services and why.
-        hook = ('__drift() { local rc=0 s; image_drift "$@" || rc=$?; '
-                'for s in "${DRIFT[@]-}"; do [[ -n "$s" ]] && echo "DRIFT $s ${DRIFT_KIND[$s]}"; done; '
-                'return $rc; }\n'
-                'if [[ -n "${__CALL:-}" ]]; then "$@"; exit $?; fi\n')
+        hook = (
+            '__drift() { local rc=0 s; image_drift "$@" || rc=$?; '
+            'for s in "${DRIFT[@]-}"; do [[ -n "$s" ]] && echo "DRIFT $s ${DRIFT_KIND[$s]}"; done; '
+            "return $rc; }\n"
+            'if [[ -n "${__CALL:-}" ]]; then "$@"; exit $?; fi\n'
+        )
         write_lf(setup, text.rstrip()[: -len(tail)] + hook + tail + "\n")
         b = tmp / "bin"
         b.mkdir()
         write_lf(b / "podman", _PODMAN, mode=0o755)
-        python_shim(b)   # $PY must be a real interpreter (no python3 in Git's /usr/bin)
+        python_shim(b)  # $PY must be a real interpreter (no python3 in Git's /usr/bin)
         # The proxy answers /health/liveliness: p_litellm_live is not under test.
         write_lf(b / "curl", "#!/usr/bin/env bash\nexit 0\n", mode=0o755)
         # Every enabled service, on the image its ref names, everything current.
@@ -169,10 +174,12 @@ class Stack:
         write_lf(self.repo / ".env", env)
 
     def sync(self) -> None:
-        write_lf(self.stub / "containers",
-                 "".join(f"{s} {i}\n" for s, i in self.containers.items()))
-        write_lf(self.stub / "images",
-                 "".join(f"{r} {d} {i}\n" for r, (d, i) in self.images.items()))
+        write_lf(
+            self.stub / "containers", "".join(f"{s} {i}\n" for s, i in self.containers.items())
+        )
+        write_lf(
+            self.stub / "images", "".join(f"{r} {d} {i}\n" for r, (d, i) in self.images.items())
+        )
 
     def rebuild(self, ref: str, new: str = NEW) -> None:
         """A new image behind an UNCHANGED ref: a fetch rebuild, or a re-pull."""
@@ -204,15 +211,26 @@ class Stack:
 
     def call(self, *args: str, **extra: str) -> subprocess.CompletedProcess:
         env = with_stub_path(
-            {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
-             "HOME": str(self.tmp / "home"), "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
-             "STUB": self.stub.as_posix(), "LANG": "C.UTF-8", "__CALL": "1", **extra},
-            self.tmp / "bin")
+            {
+                "PATH": os.pathsep.join(
+                    [str(self.tmp / "bin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+                ),
+                "HOME": str(self.tmp / "home"),
+                "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
+                "STUB": self.stub.as_posix(),
+                "LANG": "C.UTF-8",
+                "__CALL": "1",
+                **extra,
+            },
+            self.tmp / "bin",
+        )
         return run_driver([_bash(), str(self.single / "setup.sh"), *args], cwd=self.single, env=env)
 
     def drift(self, *services: str) -> tuple[int, dict[str, str]]:
         r = self.call("__drift", *services)
-        kinds = {l.split()[1]: l.split()[2] for l in r.stdout.splitlines() if l.startswith("DRIFT ")}
+        kinds = {
+            l.split()[1]: l.split()[2] for l in r.stdout.splitlines() if l.startswith("DRIFT ")
+        }
         return r.returncode, kinds
 
 
@@ -244,10 +262,12 @@ def _yaml() -> dict:
 
 
 def _table(stack: Stack) -> dict[str, list[str]]:
-    script = ('stack_load || exit 1; echo "PROJECT $STACK_PROJECT"; '
-              'for s in "${STACK_SVCS[@]}"; do printf "SVC %s\\t%s\\t%s\\t%s\\n" "$s" '
-              '"${STACK_PROFILE[$s]}" "${STACK_IMAGE[$s]}" "${STACK_VOLS[$s]}"; done; '
-              'for v in "${!STACK_NAMED_VOL[@]}"; do echo "VOL $v"; done')
+    script = (
+        'stack_load || exit 1; echo "PROJECT $STACK_PROJECT"; '
+        'for s in "${STACK_SVCS[@]}"; do printf "SVC %s\\t%s\\t%s\\t%s\\n" "$s" '
+        '"${STACK_PROFILE[$s]}" "${STACK_IMAGE[$s]}" "${STACK_VOLS[$s]}"; done; '
+        'for v in "${!STACK_NAMED_VOL[@]}"; do echo "VOL $v"; done'
+    )
     r = stack.call("eval", script)
     assert r.returncode == 0, r.stdout + r.stderr
     out: dict[str, list[str]] = {"svc": [], "vol": [], "project": []}
@@ -300,15 +320,20 @@ def test_every_stateful_service_keeps_its_data_on_a_named_volume(stack: Stack):
     named = set(y["volumes"])
     r = stack.call("eval", 'for e in "${STACK_STATEFUL[@]}"; do echo "$e"; done')
     stateful = dict(l.split(" ", 1) for l in r.stdout.splitlines())
-    with_volume = {svc for svc, spec in y["services"].items()
-                   if any(v.split(":", 1)[0] in named for v in spec.get("volumes", []))}
+    with_volume = {
+        svc
+        for svc, spec in y["services"].items()
+        if any(v.split(":", 1)[0] in named for v in spec.get("volumes", []))
+    }
     assert with_volume == set(stateful), (
         "a service mounts a named volume but STACK_STATEFUL does not say where its data "
         f"lives (or lists one that has none): {sorted(with_volume ^ set(stateful))}"
     )
     for svc, path in stateful.items():
         mounts = [v for v in y["services"][svc]["volumes"] if v.split(":")[1] == path]
-        assert mounts and mounts[0].split(":", 1)[0] in named, f"{svc}: {path} is not on a named volume"
+        assert mounts and mounts[0].split(":", 1)[0] in named, (
+            f"{svc}: {path} is not on a named volume"
+        )
         assert stack.call("stack_data_on_volume", svc).returncode == 0, svc
     # A stateless service is always safe to recreate.
     assert stack.call("stack_data_on_volume", "crawler").returncode == 0
@@ -331,8 +356,7 @@ def test_compose_expand_follows_compose_interpolation(stack: Stack):
     assert r.stdout == "mirror.example.com/library/postgres:16.9"
     r = _expand(stack, "localhost/cc-local:${CC_LOCAL_TAG:-1.0.2-test}")
     assert r.stdout == "localhost/cc-local:1.0.2-test"
-    r = _expand(stack, "localhost/cc-local:${CC_LOCAL_TAG:-1.0.2-test}",
-                CC_LOCAL_TAG="9.9-test")
+    r = _expand(stack, "localhost/cc-local:${CC_LOCAL_TAG:-1.0.2-test}", CC_LOCAL_TAG="9.9-test")
     assert r.stdout == "localhost/cc-local:9.9-test", "the shell's value wins, as in a phase"
 
 
@@ -419,7 +443,10 @@ def test_id_spellings_and_a_digest_pinned_ref_agree(stack: Stack):
     pin = "ghcr.io/berriai/litellm-database@sha256:" + "e" * 64
     stack.env_lines["CC_IMG_BERRIAI_LITELLM_DATABASE"] = pin
     stack.write_env()
-    stack.images["ghcr.io/berriai/litellm-database:<none>"] = ("sha256:" + "e" * 64, "sha256:" + OLD)
+    stack.images["ghcr.io/berriai/litellm-database:<none>"] = (
+        "sha256:" + "e" * 64,
+        "sha256:" + OLD,
+    )
     stack.sync()
     assert stack.drift() == (0, {})
 
@@ -502,13 +529,15 @@ def test_the_up_stack_probe_reads_false_on_any_stale_container(stack: Stack):
 
 
 def test_steps_tsv_names_the_drift_aware_probes():
-    rows = {(l.split("\t")[0], l.split("\t")[1]): l.split("\t")
-            for l in (SINGLE / "steps.tsv").read_text(encoding="utf-8").splitlines()
-            if l and not l.startswith("#")}
+    rows = {
+        (l.split("\t")[0], l.split("\t")[1]): l.split("\t")
+        for l in (SINGLE / "steps.tsv").read_text(encoding="utf-8").splitlines()
+        if l and not l.startswith("#")
+    }
     assert rows[("llm", "up-litellm")][6] == "p_up_litellm"
     assert rows[("stack", "up-stack")][6] == "p_up_stack"
     src = installer_source()
-    body = src[src.index("\np_up_stack() {"):]
+    body = src[src.index("\np_up_stack() {") :]
     body = body[: body.index("\n}\n")]
     assert "image_drift" in body
 
@@ -574,15 +603,22 @@ def test_a_stateful_service_without_a_named_volume_is_reported_never_recreated(s
     compose = stack.single / "compose.yaml"
     text = compose.read_text(encoding="utf-8")
     assert "      - pgdata:/var/lib/postgresql/data\n" in text
-    write_lf(compose, text.replace("      - pgdata:/var/lib/postgresql/data\n",
-                                    "      - ./pgdata:/var/lib/postgresql/data\n"))
+    write_lf(
+        compose,
+        text.replace(
+            "      - pgdata:/var/lib/postgresql/data\n",
+            "      - ./pgdata:/var/lib/postgresql/data\n",
+        ),
+    )
     stack.rebuild("docker.io/library/postgres:16.16-trixie")
 
     r = stack.call("catch_up_images", "up-stack")
 
     assert r.returncode == 1, r.stdout + r.stderr
     fails = _lines(r.stdout, "FAIL up-stack: postgres")
-    assert len(fails) == 1 and "NOT recreated" in fails[0] and "/var/lib/postgresql/data" in fails[0]
+    assert (
+        len(fails) == 1 and "NOT recreated" in fails[0] and "/var/lib/postgresql/data" in fails[0]
+    )
     # litellm-db's data IS on its named volume: it is still caught up.
     assert stack.recreates() == [["litellm-db"]]
     assert stack.container_ids()["postgres"] == OLD
@@ -595,8 +631,11 @@ def test_absent_and_unfetched_are_fails_that_name_the_move(stack: Stack):
     stack.sync()
     r = stack.call("catch_up_images", "up-stack")
     assert r.returncode == 1
-    assert any("crawler's image localhost/cc-crawler:1 is not in local storage" in l
-               and "./setup.sh (it resumes at fetch" in l for l in _lines(r.stdout, "FAIL up-stack:")), r.stdout
+    assert any(
+        "crawler's image localhost/cc-crawler:1 is not in local storage" in l
+        and "./setup.sh (it resumes at fetch" in l
+        for l in _lines(r.stdout, "FAIL up-stack:")
+    ), r.stdout
     assert any("neo4j has no container" in l for l in _lines(r.stdout, "FAIL up-stack:")), r.stdout
     assert stack.recreates() == []
 
@@ -606,11 +645,13 @@ def test_a_failed_or_ineffective_recreate_is_a_fail_never_a_pass(stack: Stack):
     stack.rebuild("localhost/cc-crawler:1")
     write_lf(stack.stub / "fail-recreate", "")
     r = stack.call("catch_up_images", "up-stack")
-    assert r.returncode == 1 and _lines(r.stdout, "FAIL up-stack: could not recreate crawler"), r.stdout
+    assert r.returncode == 1 and _lines(r.stdout, "FAIL up-stack: could not recreate crawler"), (
+        r.stdout
+    )
     assert not _lines(r.stdout, "PASS up-stack: crawler")
 
     (stack.stub / "fail-recreate").unlink()
-    (stack.stub / "recreate" / "crawler").unlink()        # "succeeds", changes nothing
+    (stack.stub / "recreate" / "crawler").unlink()  # "succeeds", changes nothing
     r = stack.call("catch_up_images", "up-stack")
     assert r.returncode == 1
     assert _lines(r.stdout, "FAIL up-stack: crawler was recreated and still does not run"), r.stdout
@@ -629,12 +670,12 @@ def test_podman_that_cannot_be_asked_fails_the_catch_up(stack: Stack):
 def _body(name: str) -> str:
     src = installer_source()
     start = src.index(f"\n{name}() {{")
-    return src[start: src.index("\n}\n", start)]
+    return src[start : src.index("\n}\n", start)]
 
 
 def test_both_phases_catch_up_right_after_their_compose_up():
     stack_body = _body("phase_stack")
-    up = stack_body.index('up -d --wait || return 1')
+    up = stack_body.index("up -d --wait || return 1")
     assert stack_body.index('catch_up_images "up-stack" || return 1') > up
     llm_body = _body("phase_llm")
     up = llm_body.index("compose up -d --wait litellm || return 1")
@@ -646,6 +687,6 @@ def test_both_phases_catch_up_right_after_their_compose_up():
 def test_update_deploys_the_stack_between_llm_and_app():
     src = (SINGLE / "update.sh").read_text(encoding="utf-8")
     start = src.index("\ndeploy_current_tree() {")
-    body = src[start: src.index("\n}\n", start)]
+    body = src[start : src.index("\n}\n", start)]
     phases = re.findall(r"^\s*deploy_phase (\w+) ", body, flags=re.MULTILINE)
     assert phases == ["fetch", "llm", "stack", "app", "verify"], phases

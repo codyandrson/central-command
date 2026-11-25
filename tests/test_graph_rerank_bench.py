@@ -38,8 +38,10 @@ def test_the_corpus_is_deterministic_and_seeded(bench):
 def test_questions_come_from_the_ground_truth_and_are_deterministic(bench):
     corpus = bench.make_corpus()
     f = corpus[0]["facts"][0]
-    edges = [{"uuid": "e1", "src": f["a"], "dst": f["b"]},
-             {"uuid": "e2", "src": "Nobody", "dst": "Nothing"}]
+    edges = [
+        {"uuid": "e1", "src": f["a"], "dst": f["b"]},
+        {"uuid": "e2", "src": "Nobody", "dst": "Nothing"},
+    ]
     assert bench.targets_for(f, edges) == ["e1"]
     q1 = bench.build_questions(corpus, edges)
     assert q1 == bench.build_questions(corpus, edges)
@@ -81,28 +83,43 @@ def test_the_refusal_happens_before_anything_is_imported():
     """Run as a program with no flag: exit 2, and graphiti_core was never
     imported (the throwaway scripts imported recipes before the client had
     prepared the environment)."""
-    code = (f"import runpy, sys; sys.argv=['x']\n"
-            f"try:\n    runpy.run_path({str(SCRIPT)!r}, run_name='__main__')\n"
-            f"except SystemExit as e:\n    print('EXIT', e.code)\n"
-            f"print('LOADED', any(m.startswith('graphiti_core') or m.startswith('central_command') "
-            f"for m in sys.modules))")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                         cwd=ROOT, timeout=60)
+    code = (
+        f"import runpy, sys; sys.argv=['x']\n"
+        f"try:\n    runpy.run_path({str(SCRIPT)!r}, run_name='__main__')\n"
+        f"except SystemExit as e:\n    print('EXIT', e.code)\n"
+        f"print('LOADED', any(m.startswith('graphiti_core') or m.startswith('central_command') "
+        f"for m in sys.modules))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT, timeout=60
+    )
     assert "EXIT 2" in out.stdout and "LOADED False" in out.stdout, out
 
 
-@pytest.mark.parametrize("group,refused", [
-    ("bench_rerank", False), ("main", True), ("central_command", True),
-    ("central_command_ea", True), ("domain_x", True),
-])
+@pytest.mark.parametrize(
+    "group,refused",
+    [
+        ("bench_rerank", False),
+        ("main", True),
+        ("central_command", True),
+        ("central_command_ea", True),
+        ("domain_x", True),
+    ],
+)
 def test_it_never_takes_an_application_group(bench, group, refused):
     why = bench.refuse_app_group(group, "main,central_command,domain_x", "central_command")
     assert (why is not None) is refused
 
 
 def test_the_verdict_table_names_every_condition(bench):
-    results = {"none (rank fusion)": {"ranks": [1, None], "latencies": [0.1, 0.2], "failed": 0},
-               "chat cc-rerank": {"ranks": [1, 2], "latencies": [3.0], "failed": 1,
-                                  "vs_none": bench.paired([1, None], [1, 2])}}
+    results = {
+        "none (rank fusion)": {"ranks": [1, None], "latencies": [0.1, 0.2], "failed": 0},
+        "chat cc-rerank": {
+            "ranks": [1, 2],
+            "latencies": [3.0],
+            "failed": 1,
+            "vs_none": bench.paired([1, None], [1, 2]),
+        },
+    }
     table = bench.verdict_table(results, 8)
     assert "none (rank fusion)" in table and "chat cc-rerank" in table and "top-8" in table

@@ -83,16 +83,25 @@ def test_every_name_but_local_has_a_probe_and_nothing_else_does():
     assert set(probes.PROBES) == set(deps.PROBED)
     assert deps.LOCAL not in probes.PROBES
     # probes.py may not import the contract, so its copies are pinned equal.
-    for const in ("LLM", "EMBEDDER", "GRAPH", "LITELLM", "N8N", "CALENDAR",
-                  "JIRA", "CONFLUENCE", "FORGE", "SANDBOX"):
+    for const in (
+        "LLM",
+        "EMBEDDER",
+        "GRAPH",
+        "LITELLM",
+        "N8N",
+        "CALENDAR",
+        "JIRA",
+        "CONFLUENCE",
+        "FORGE",
+        "SANDBOX",
+    ):
         assert getattr(probes, const) == getattr(deps, const)
     assert probes._DOWN_STATUS == set(TRANSIENT_STATUS)
 
 
 def test_every_registry_row_and_every_handler_has_its_dependencies():
     names = {r.name for r in REGISTRY}
-    assert names <= set(deps.CAPABILITY_DEPENDENCY), (
-        names - set(deps.CAPABILITY_DEPENDENCY))
+    assert names <= set(deps.CAPABILITY_DEPENDENCY), names - set(deps.CAPABILITY_DEPENDENCY)
     assert set(executor.HANDLERS) <= set(deps.CAPABILITY_DEPENDENCY)
 
 
@@ -106,8 +115,13 @@ def test_the_documented_capability_shapes():
     assert d("mail.send") == d("email.get_message") == (deps.N8N,)
     assert d("litellm.add_model") == d("autodiscovery.skip") == (deps.LITELLM,)
     assert d("sandbox.exec") == d("mcp.server_deploy") == (deps.SANDBOX,)
-    for local in ("catalog.tag", "charter.update", "skill.create", "loe.create",
-                  "work.bulk_dismiss"):
+    for local in (
+        "catalog.tag",
+        "charter.update",
+        "skill.create",
+        "loe.create",
+        "work.bulk_dismiss",
+    ):
         assert d(local) == (deps.LOCAL,)
     assert d("web.fetch") == ()
 
@@ -117,12 +131,13 @@ def test_every_read_tool_reachable_from_a_pack_is_mapped():
     for pack in packs.PACKS.values() if hasattr(packs, "PACKS") else ():
         reachable |= set(getattr(pack, "tools", ()) or ())
     for name in reachable:
-        assert (name in deps.TOOL_DEPENDENCY or name.startswith("propose_")
-                or name in deps.NOT_READS), name
+        assert (
+            name in deps.TOOL_DEPENDENCY or name.startswith("propose_") or name in deps.NOT_READS
+        ), name
 
 
 def test_gate_names_drops_local_and_adds_the_model_turn():
-    assert deps.gate_names(None) == ("llm",)                 # none reads llm
+    assert deps.gate_names(None) == ("llm",)  # none reads llm
     assert deps.gate_names(("local",)) == ()
     assert deps.gate_names(("graph", "embedder")) == ("graph", "embedder")
     assert deps.gate_names(("graph",), model_turn=True) == ("graph", "llm")
@@ -142,8 +157,12 @@ def test_probes_module_imports_only_config_httpx_and_the_standard_library():
 
     for mod in roots:
         top = mod.split(".")[0]
-        assert (mod in allowed_own or top in {"httpx"}
-                or top in sys.stdlib_module_names or top == "__future__"), mod
+        assert (
+            mod in allowed_own
+            or top in {"httpx"}
+            or top in sys.stdlib_module_names
+            or top == "__future__"
+        ), mod
 
 
 # --- the probes themselves --------------------------------------------------------
@@ -151,8 +170,12 @@ def test_probes_module_imports_only_config_httpx_and_the_standard_library():
 
 async def test_unconfigured_services_probe_up_and_a_503_probes_down(monkeypatch):
     real = {
-        n: f for n, f in (("jira", probes.probe_jira), ("confluence", probes.probe_confluence),
-                          ("forge", probes.probe_forge))
+        n: f
+        for n, f in (
+            ("jira", probes.probe_jira),
+            ("confluence", probes.probe_confluence),
+            ("forge", probes.probe_forge),
+        )
     }
     monkeypatch.setattr(settings, "jira_base_url", "")
     monkeypatch.setattr(settings, "confluence_base_url", "")
@@ -192,7 +215,8 @@ async def test_unconfigured_services_probe_up_and_a_503_probes_down(monkeypatch)
 
 async def test_the_forge_is_up_when_any_instance_answers(monkeypatch):
     monkeypatch.setattr(
-        settings, "forge_instances",
+        settings,
+        "forge_instances",
         "a=github:https://down.example.com,b=gitlab:https://up.example.com",
     )
 
@@ -223,8 +247,7 @@ async def _jira_parked_proposal(monkeypatch) -> str:
     monkeypatch.setattr(executor.jira, "set_due_date", set_due_date)
     model = make_sc1_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
-    out = await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model)
+    out = await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
     assert out["execution"] == "parked"
     return run["proposal_id"]
 
@@ -295,9 +318,9 @@ async def test_a_flip_emits_exactly_one_down_then_one_up_across_three_sweeps(
 
     await make_parks_due()
 
-    await orchestration.retry_sweep()                      # down
+    await orchestration.retry_sweep()  # down
     await make_parks_due()
-    await orchestration.retry_sweep()                      # still down: silent
+    await orchestration.retry_sweep()  # still down: silent
     assert (await _kinds("jira"))[baseline:] == ["dependency.down"]
 
     up["on"] = True
@@ -310,15 +333,16 @@ async def test_a_flip_emits_exactly_one_down_then_one_up_across_three_sweeps(
 
     _graph_spy(monkeypatch)
     await make_parks_due()
-    out = await orchestration.retry_sweep()                # up: the edge
+    out = await orchestration.retry_sweep()  # up: the edge
     await orchestration.sweep_settle()
     assert pid in out["retried_executions"]
     await make_parks_due()
-    await orchestration.retry_sweep()                      # steady: silent
+    await orchestration.retry_sweep()  # steady: silent
 
     assert (await _kinds("jira"))[baseline:] == ["dependency.down", "dependency.up"]
-    up_event = [e for e in await repo.list_events(ref_id="jira")
-                if e["kind"] == "dependency.up"][-1]
+    up_event = [e for e in await repo.list_events(ref_id="jira") if e["kind"] == "dependency.up"][
+        -1
+    ]
     assert up_event["payload"]["down_since"] is not None
     row = (await repo.dependency_probe_states())["jira"]
     assert row["state"] == "up" and row["down_since"] is None
@@ -388,15 +412,17 @@ async def test_a_bare_neo4j_outage_parks_the_proposal_with_graph_and_embedder(
     monkeypatch.setattr(graphiti_ingest, "enqueue", enqueue)
     model = make_sc1_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
-    out = await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model)
+    out = await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
 
     assert out["execution"] == "parked"
     row = await repo.load_proposal(run["proposal_id"])
     assert row["status"] == "RETRY_PENDING"
     assert row["retry_state"]["dependencies"] == ["graph", "embedder"]
-    ev = next(e for e in await repo.list_events(ref_id=run["proposal_id"])
-          if e["kind"] == "proposal.execution_parked")
+    ev = next(
+        e
+        for e in await repo.list_events(ref_id=run["proposal_id"])
+        if e["kind"] == "proposal.execution_parked"
+    )
     assert ev["payload"]["dependencies"] == ["graph", "embedder"]
 
 
@@ -409,13 +435,16 @@ async def test_execution_failed_carries_the_flag_and_the_dependencies(monkeypatc
     monkeypatch.setitem(executor.HANDLERS, "graph.create_node", boom)
     from central_command.contract import Action, Reversibility
 
-    action = Action(capability="graph.create_node",
-                    arguments={"name": "n", "group_id": "g", "summary": "s"},
-                    target_ref={"kind": "node"},
-                    reversibility=Reversibility.reversible)
+    action = Action(
+        capability="graph.create_node",
+        arguments={"name": "n", "group_id": "g", "summary": "s"},
+        target_ref={"kind": "node"},
+        reversibility=Reversibility.reversible,
+    )
     with pytest.raises(executor.ExecutionFailed) as caught:
-        await executor.execute([action], approver="human:lee", source_refs=[],
-                               proposer="agent", proposal_id=None)
+        await executor.execute(
+            [action], approver="human:lee", source_refs=[], proposer="agent", proposal_id=None
+        )
     assert caught.value.transient is True
     assert caught.value.dependencies == ("graph", "embedder")
 
@@ -424,8 +453,9 @@ async def test_execution_failed_carries_the_flag_and_the_dependencies(monkeypatc
 
     monkeypatch.setitem(executor.HANDLERS, "graph.create_node", semantic)
     with pytest.raises(executor.ExecutionFailed) as caught:
-        await executor.execute([action], approver="human:lee", source_refs=[],
-                               proposer="agent", proposal_id=None)
+        await executor.execute(
+            [action], approver="human:lee", source_refs=[], proposer="agent", proposal_id=None
+        )
     assert caught.value.transient is False
 
     # A typed DependencyDown names its own dependencies.
@@ -434,8 +464,9 @@ async def test_execution_failed_carries_the_flag_and_the_dependencies(monkeypatc
 
     monkeypatch.setitem(executor.HANDLERS, "graph.create_node", typed)
     with pytest.raises(executor.ExecutionFailed) as caught:
-        await executor.execute([action], approver="human:lee", source_refs=[],
-                               proposer="agent", proposal_id=None)
+        await executor.execute(
+            [action], approver="human:lee", source_refs=[], proposer="agent", proposal_id=None
+        )
     assert caught.value.transient is True and caught.value.dependencies == ("litellm",)
 
 
@@ -451,8 +482,8 @@ async def test_a_task_park_records_the_model_unless_the_error_names_more():
     other = "task_" + uuid.uuid4().hex[:12]
     await repo.create_task(other, "dep stamp 2", "Advise only.", "jira-expert")
     state = await orchestration.park_task_retry(
-        other, DependencyDown(("graph", "embedder"), "search_knowledge_graph",
-                              RuntimeError("down")))
+        other, DependencyDown(("graph", "embedder"), "search_knowledge_graph", RuntimeError("down"))
+    )
     assert state["dependencies"] == ["graph", "embedder"]
 
 
@@ -463,13 +494,22 @@ async def test_a_decision_park_records_llm_and_a_read_park_keeps_its_tuple():
     sid = "sess_" + uuid.uuid4().hex[:12]
     await repo.create_session(sid, "jira-expert") if hasattr(repo, "create_session") else None
     stored = await resume_park.park_resume(
-        sid, {"after": "approved", "attempts": 1, "kind": "result",
-              "text": "t", "tool_call_id": "c"},
-        ModelHTTPError(429, "cc-default", body="No deployments available"))
+        sid,
+        {"after": "approved", "attempts": 1, "kind": "result", "text": "t", "tool_call_id": "c"},
+        ModelHTTPError(429, "cc-default", body="No deployments available"),
+    )
     assert stored["dependencies"] == ["llm"]
     stored = await resume_park.park_resume(
-        sid, {"after": "task", "attempts": 1, "kind": "read",
-              "dependencies": ["jira"], "tool_call_id": "c"}, "down")
+        sid,
+        {
+            "after": "task",
+            "attempts": 1,
+            "kind": "read",
+            "dependencies": ["jira"],
+            "tool_call_id": "c",
+        },
+        "down",
+    )
     assert stored["dependencies"] == ["jira"]
 
 
@@ -477,18 +517,20 @@ async def test_a_decision_park_records_llm_and_a_read_park_keeps_its_tuple():
 async def test_a_transient_ledger_release_writes_work_item_dependencies():
     from central_command.ingest import ledger
 
-    raw = (f"Message-ID: <cc-deps-{uuid.uuid4().hex[:8]}@example.com>\n"
-           "From: sender@example.com\nSubject: Deps test\n"
-           "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n")
+    raw = (
+        f"Message-ID: <cc-deps-{uuid.uuid4().hex[:8]}@example.com>\n"
+        "From: sender@example.com\nSubject: Deps test\n"
+        "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n"
+    )
     await ledger.enroll_email(raw)
     item = await repo.claim_next_work_item("sess_deps")
     assert item is not None
-    await repo.release_work_item(item["id"], error="down", count_attempt=False,
-                                 dependencies=("embedder",))
+    await repo.release_work_item(
+        item["id"], error="down", count_attempt=False, dependencies=("embedder",)
+    )
     conn = await repo._conn()
     try:
-        got = await conn.fetchval(
-            "select dependencies from work_item where id = $1", item["id"])
+        got = await conn.fetchval("select dependencies from work_item where id = $1", item["id"])
         await conn.execute("delete from work_item where id = $1", item["id"])
     finally:
         await conn.close()
@@ -505,20 +547,22 @@ async def test_the_dispatcher_stamps_a_transient_release_with_the_model(monkeypa
         raise ModelHTTPError(429, "cc-default", body="No deployments available")
 
     monkeypatch.setitem(
-        dispatcher.HANDLERS, "email",
+        dispatcher.HANDLERS,
+        "email",
         dispatcher._KindHandler(boom, "agent:inbox-triage", False),
     )
-    raw = (f"Message-ID: <cc-deps-{uuid.uuid4().hex[:8]}@example.com>\n"
-           "From: sender@example.com\nSubject: Deps test 2\n"
-           "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n")
+    raw = (
+        f"Message-ID: <cc-deps-{uuid.uuid4().hex[:8]}@example.com>\n"
+        "From: sender@example.com\nSubject: Deps test 2\n"
+        "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n"
+    )
     await ledger.enroll_email(raw)
     item = await repo.claim_next_work_item("sess_deps2")
     out = await dispatcher.process_claimed(item)
     assert out["transient"] is True
     conn = await repo._conn()
     try:
-        got = await conn.fetchval(
-            "select dependencies from work_item where id = $1", item["id"])
+        got = await conn.fetchval("select dependencies from work_item where id = $1", item["id"])
         await conn.execute("delete from work_item where id = $1", item["id"])
     finally:
         await conn.close()
@@ -591,8 +635,10 @@ async def test_a_queued_completion_is_busy_not_down_when_the_proxy_answers(monke
 
     # Queued completion, proxy there: up (busy).
     assert await probes.probe_llm() is True
-    assert calls == [("POST", "http://127.0.0.1:4000/v1/chat/completions"),
-                     ("GET", "http://127.0.0.1:4000/health/liveliness")]
+    assert calls == [
+        ("POST", "http://127.0.0.1:4000/v1/chat/completions"),
+        ("GET", "http://127.0.0.1:4000/health/liveliness"),
+    ]
 
     # Queued completion, proxy not answering: down.
     liveliness["code"] = 503

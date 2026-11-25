@@ -38,4 +38,6 @@ def test_every_cc_speech_url_in_prose_uses_the_service_port():
         mentions = re.findall(r"cc-speech:(\d+)", path.read_text(encoding="utf-8"))
         assert mentions, f"{path.name} never names cc-speech:<port>"
         wrong = sorted({m for m in mentions if int(m) != port})
-        assert not wrong, f"{path.relative_to(ROOT)} says cc-speech:{wrong} — the Service port is {port}"
+        assert not wrong, (
+            f"{path.relative_to(ROOT)} says cc-speech:{wrong} — the Service port is {port}"
+        )

@@ -81,9 +81,7 @@ async def _build_agent(model=None):
 
     packs = await granted_packs(AGENT_ID)
     if "orchestrate" not in packs:
-        raise RuntimeError(
-            "the orchestrator's 'orchestrate' pack grant is missing or revoked"
-        )
+        raise RuntimeError("the orchestrator's 'orchestrate' pack grant is missing or revoked")
     # The orchestrator holds task-create like every active agent but the
     # auditor (story 4.9), but a PROJECT run creates work through assign_work
     # after an approved plan and nothing else: its assignment loop is unchanged.
@@ -96,8 +94,7 @@ async def _build_agent(model=None):
     # proposals, or through session-close reflection.
     # note-propose (DL-217) likewise: a note parks a proposal, which a round
     # cannot land; the orchestrator keeps notes from its chat lane.
-    packs = tuple(p for p in packs if p not in ("task-create", "skill-propose",
-                                                "note-propose"))
+    packs = tuple(p for p in packs if p not in ("task-create", "skill-propose", "note-propose"))
     governed = await repo.current_charter(AGENT_ID)
     caps, catalog = await skills_mod.loadout(AGENT_ID)
     from central_command.runtime.notes import standing_sections
@@ -106,7 +103,8 @@ async def _build_agent(model=None):
         model=await _resolve_project_model(model),
         charter=governed["content"] if governed else None,
         packs=packs,
-        capabilities=caps, skills_catalog=catalog,
+        capabilities=caps,
+        skills_catalog=catalog,
         team_section=await standing_sections(AGENT_ID),
     )
 
@@ -154,8 +152,9 @@ def _call_args(call) -> dict:
 # --- the round processor -------------------------------------------------------
 
 
-async def run_project(task: dict, model=None, *, session_id: str | None = None,
-                      rerun_of: str | None = None) -> dict:
+async def run_project(
+    task: dict, model=None, *, session_id: str | None = None, rerun_of: str | None = None
+) -> dict:
     """Entry point: run the orchestration loop for a project task assigned to
     the orchestrator. Returns when the loop parks (children/operator pending)
     or finishes; the caller's detached wrapper records any exception FAILED.
@@ -168,14 +167,26 @@ async def run_project(task: dict, model=None, *, session_id: str | None = None,
     # read or a DOWN model mid-round parks the session in place (FR-40, story 6).
     deps = TriageDeps(session_id=session_id, agent_id=AGENT_ID, park_reads=True)
     state = {
-        "task_id": task["id"], "round": 0, "stalls": 0, "assigns": 0,
-        "plan_approved": False, "retries": 0, "pending": {},
+        "task_id": task["id"],
+        "round": 0,
+        "stalls": 0,
+        "assigns": 0,
+        "plan_approved": False,
+        "retries": 0,
+        "pending": {},
     }
     try:
         result = await _run_live(
-            agent, _briefing(task, await _agent_cards()), model=None, deps=deps,
-            agent_id=AGENT_ID, session_id=session_id, task_id=task["id"],
-            continuable=True, after="orchestrator", continue_state=state,
+            agent,
+            _briefing(task, await _agent_cards()),
+            model=None,
+            deps=deps,
+            agent_id=AGENT_ID,
+            session_id=session_id,
+            task_id=task["id"],
+            continuable=True,
+            after="orchestrator",
+            continue_state=state,
             rerun_of=rerun_of,
         )
     except RunWindowExhausted as e:
@@ -190,8 +201,13 @@ def _orch_parked(e, state: dict) -> dict:
     AWAITING_RESUME with a `turn` park carrying the loop state, and — like a
     stall or window park — the project task row is NOT touched: it stays
     IN_PROGRESS while the sweep waits for the dependency."""
-    return {"parked": True, "session_id": e.session_id, "task_id": state["task_id"],
-            "kind": "turn", "dependencies": list(e.stored.get("dependencies") or [])}
+    return {
+        "parked": True,
+        "session_id": e.session_id,
+        "task_id": state["task_id"],
+        "kind": "turn",
+        "dependencies": list(e.stored.get("dependencies") or []),
+    }
 
 
 def _orch_window_parked(e: RunWindowExhausted, state: dict) -> dict:  # noqa: F821 — annotation only (postponed); imported where it is raised
@@ -199,8 +215,13 @@ def _orch_window_parked(e: RunWindowExhausted, state: dict) -> dict:  # noqa: F8
     continue item, exactly like a stall park — and like a stall park the project
     task row is NOT touched: it is IN_PROGRESS and still is, waiting on a human.
     """
-    return {"parked": True, "window_exhausted": True, "session_id": e.session_id,
-            "task_id": state["task_id"], "item_id": e.item_id}
+    return {
+        "parked": True,
+        "window_exhausted": True,
+        "session_id": e.session_id,
+        "task_id": state["task_id"],
+        "item_id": e.item_id,
+    }
 
 
 async def _finish(task_id: str, session_id: str, text: str) -> dict:
@@ -209,16 +230,24 @@ async def _finish(task_id: str, session_id: str, text: str) -> dict:
     await land_session(session_id, agent_id=AGENT_ID)
     await repo.resolve_task(task_id, "DONE", outcome=text)
     await events.emit(
-        "task.completed", ref_id=task_id,
+        "task.completed",
+        ref_id=task_id,
         payload={"outcome": text[:500], "orchestration": True},
         actor=f"agent:{AGENT_ID}",
     )
     await events.emit(
-        "orchestration.completed", ref_id=session_id,
-        payload={"task_id": task_id}, actor=f"agent:{AGENT_ID}",
+        "orchestration.completed",
+        ref_id=session_id,
+        payload={"task_id": task_id},
+        actor=f"agent:{AGENT_ID}",
     )
-    return {"parked": False, "done": True, "task_id": task_id,
-            "session_id": session_id, "output": text}
+    return {
+        "parked": False,
+        "done": True,
+        "task_id": task_id,
+        "session_id": session_id,
+        "output": text,
+    }
 
 
 async def _fail(task_id: str, session_id: str, reason: str) -> dict:
@@ -227,19 +256,34 @@ async def _fail(task_id: str, session_id: str, reason: str) -> dict:
     await land_session(session_id, failed=True, agent_id=AGENT_ID, reason=reason)
     await repo.resolve_task(task_id, "FAILED", outcome=reason)
     await events.emit(
-        "task.run_failed", ref_id=task_id,
-        payload={"error": reason, "session_id": session_id,
-                 # Only the stringified reason survives to here.
-                 "transient": classify_failure_text(reason) == "transient"},
+        "task.run_failed",
+        ref_id=task_id,
+        payload={
+            "error": reason,
+            "session_id": session_id,
+            # Only the stringified reason survives to here.
+            "transient": classify_failure_text(reason) == "transient",
+        },
         actor=f"agent:{AGENT_ID}",
     )
-    return {"parked": False, "done": False, "failed": reason,
-            "task_id": task_id, "session_id": session_id}
+    return {
+        "parked": False,
+        "done": False,
+        "failed": reason,
+        "task_id": task_id,
+        "session_id": session_id,
+    }
 
 
 async def _reject_batch(
-    task: dict, session_id: str, result, state: dict, deps, model,
-    calls, problems: list[str],
+    task: dict,
+    session_id: str,
+    result,
+    state: dict,
+    deps,
+    model,
+    calls,
+    problems: list[str],
 ) -> dict:
     """Corrective immediate resume: NOTHING from the batch executes; every call
     gets the same honest rejection so the orchestrator re-decides. Bounded —
@@ -250,30 +294,41 @@ async def _reject_batch(
 
     state["retries"] += 1
     await events.emit(
-        "orchestration.batch_rejected", ref_id=session_id,
-        payload={"problems": problems, "retry": state["retries"],
-                 "task_id": task["id"]},
+        "orchestration.batch_rejected",
+        ref_id=session_id,
+        payload={"problems": problems, "retry": state["retries"], "task_id": task["id"]},
         actor="system",
     )
     if state["retries"] > _MAX_BATCH_RETRIES:
         return await _fail(
-            task["id"], session_id,
+            task["id"],
+            session_id,
             f"orchestration: {_MAX_BATCH_RETRIES} invalid tool batches in a row "
             f"(last problems: {'; '.join(problems)})",
         )
     dtr = DeferredToolResults()
-    msg = ("BATCH REJECTED — nothing was executed: " + "; ".join(problems) +
-           ". Re-decide this round (the rules are in your charter).")
+    msg = (
+        "BATCH REJECTED — nothing was executed: "
+        + "; ".join(problems)
+        + ". Re-decide this round (the rules are in your charter)."
+    )
     for c in calls:
         dtr.calls[c.tool_call_id] = msg
     agent = await _build_agent(model)
     fresh = TriageDeps(session_id=session_id, agent_id=AGENT_ID, park_reads=True)
     try:
         result2 = await _run_live(
-            agent, None, model=None, deps=fresh, agent_id=AGENT_ID,
-            session_id=session_id, message_history=result.all_messages(),
+            agent,
+            None,
+            model=None,
+            deps=fresh,
+            agent_id=AGENT_ID,
+            session_id=session_id,
+            message_history=result.all_messages(),
             deferred_tool_results=dtr,
-            continuable=True, after="orchestrator", continue_state=state,
+            continuable=True,
+            after="orchestrator",
+            continue_state=state,
         )
     except RunWindowExhausted as e:
         # Caught HERE, not at the callers: `_reject_batch` is reached through
@@ -284,13 +339,19 @@ async def _reject_batch(
     return await _process(task, session_id, result2, state, fresh, model)
 
 
-_REPLAN_NOTE = ("this is guidance, not plan approval: submit_plan again before "
-                "assign_work")
+_REPLAN_NOTE = "this is guidance, not plan approval: submit_plan again before assign_work"
 
 
 async def _park_stalled(
-    task: dict, session_id: str, result, state: dict, calls, reason: str,
-    ledger: list[dict], *, no_progress: bool = False,
+    task: dict,
+    session_id: str,
+    result,
+    state: dict,
+    calls,
+    reason: str,
+    ledger: list[dict],
+    *,
+    no_progress: bool = False,
 ) -> dict:
     """The stall escalation (The operator: pause when stuck, never silently retry):
     the requested calls are NOT executed; ONE operator item carries the reason
@@ -305,9 +366,14 @@ async def _park_stalled(
     from central_command.runtime.durable import dump_run_state
 
     await events.emit(
-        "orchestration.stalled", ref_id=session_id,
-        payload={"reason": reason, "task_id": task["id"],
-                 "round": state["round"], "ledger": ledger[-3:]},
+        "orchestration.stalled",
+        ref_id=session_id,
+        payload={
+            "reason": reason,
+            "task_id": task["id"],
+            "round": state["round"],
+            "ledger": ledger[-3:],
+        },
         actor="system",
     )
     item_id = "oi_" + uuid.uuid4().hex[:12]
@@ -316,34 +382,54 @@ async def _park_stalled(
         f"Round {state['round']}; recent progress ledger: {json.dumps(ledger[-3:])}\n"
         "The orchestrator's requested actions were NOT executed. Your answer "
         "resumes the loop as trusted guidance."
-        + (" Because the loop made no progress, answering also withdraws plan "
-           "approval: the orchestrator must submit a new plan for your review "
-           "before it assigns more work." if no_progress else "")
+        + (
+            " Because the loop made no progress, answering also withdraws plan "
+            "approval: the orchestrator must submit a new plan for your review "
+            "before it assigns more work."
+            if no_progress
+            else ""
+        )
     )
     await repo.create_operator_item(
-        item_id, "stall", session_id, AGENT_ID, body, task_id=task["id"],
+        item_id,
+        "stall",
+        session_id,
+        AGENT_ID,
+        body,
+        task_id=task["id"],
     )
     await events.emit(
-        "orchestration.question", ref_id=item_id,
-        payload={"kind": "stall", "session_id": session_id, "task_id": task["id"],
-                 "body": body[:500]},
+        "orchestration.question",
+        ref_id=item_id,
+        payload={
+            "kind": "stall",
+            "session_id": session_id,
+            "task_id": task["id"],
+            "body": body[:500],
+        },
         actor="system",
     )
     state["pending"] = {
-        c.tool_call_id: {"kind": "stall", "item_id": item_id,
-                         "no_progress": no_progress} for c in calls
+        c.tool_call_id: {"kind": "stall", "item_id": item_id, "no_progress": no_progress}
+        for c in calls
     }
     await repo.park_session_awaiting_agents(
         session_id,
         {"messages": dump_run_state(result, "")["messages"], "orch": state},
     )
     await events.emit(
-        "orchestration.parked", ref_id=session_id,
+        "orchestration.parked",
+        ref_id=session_id,
         payload={"task_id": task["id"], "pending": {"stall": len(calls)}},
         actor="system",
     )
-    return {"parked": True, "stalled": True, "session_id": session_id,
-            "task_id": task["id"], "item_id": item_id}
+    return {
+        "parked": True,
+        "stalled": True,
+        "session_id": session_id,
+        "task_id": task["id"],
+        "item_id": item_id,
+    }
 
 
 async def _precheck_backstops(session_id: str, assigns) -> list[str]:
@@ -366,8 +452,7 @@ async def _precheck_backstops(session_id: str, assigns) -> list[str]:
         refusal = await backstops.check(prov, target, pending=i)
         if refusal:
             await backstops.refuse(prov, target, refusal, f"agent:{AGENT_ID}")
-            lines.append(f"assign_work to {target!r} refused "
-                         f"({refusal.reason}): {refusal.message}")
+            lines.append(f"assign_work to {target!r} refused ({refusal.reason}): {refusal.message}")
     return lines
 
 
@@ -391,19 +476,26 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
         from central_command.runtime.resume_park import park_read
 
         stored = await park_read(
-            session_id=session_id, result=result, call=reads[0],
-            metadata=metadata[reads[0].tool_call_id], after="orchestrator",
-            task_id=task["id"], state=state,
+            session_id=session_id,
+            result=result,
+            call=reads[0],
+            metadata=metadata[reads[0].tool_call_id],
+            after="orchestrator",
+            task_id=task["id"],
+            state=state,
         )
-        return {"parked": True, "session_id": session_id, "task_id": task["id"],
-                "kind": "read", "dependencies": list(stored.get("dependencies") or [])}
+        return {
+            "parked": True,
+            "session_id": session_id,
+            "task_id": task["id"],
+            "kind": "read",
+            "dependencies": list(stored.get("dependencies") or []),
+        }
     state["round"] += 1
 
     # Stall accounting from THIS round's ledger (deps are fresh per round).
     ledger = deps.progress_ledger
-    stalled_now = bool(ledger) and (
-        (not ledger[-1]["made_progress"]) or ledger[-1]["in_a_loop"]
-    )
+    stalled_now = bool(ledger) and ((not ledger[-1]["made_progress"]) or ledger[-1]["in_a_loop"])
     state["stalls"] = state["stalls"] + 1 if stalled_now else 0
 
     plans = [c for c in calls if c.tool_name == "submit_plan"]
@@ -416,24 +508,25 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
     no_progress = False
     if state["stalls"] >= settings.orch_stall_limit:
         no_progress = True
-        reason = (f"{state['stalls']} consecutive rounds without progress "
-                  "(the progress ledger)")
+        reason = f"{state['stalls']} consecutive rounds without progress (the progress ledger)"
     elif state["round"] > settings.orch_max_rounds:
         reason = f"round backstop hit ({settings.orch_max_rounds})"
     elif state["assigns"] + len(assigns) > settings.orch_fanout_limit:
         reason = f"fan-out backstop hit ({settings.orch_fanout_limit} assignments)"
     if reason is not None:
-        return await _park_stalled(task, session_id, result, state, calls,
-                                   reason, ledger, no_progress=no_progress)
+        return await _park_stalled(
+            task, session_id, result, state, calls, reason, ledger, no_progress=no_progress
+        )
 
     # Batch validation — all-or-nothing, so a bad target never half-executes.
     problems: list[str] = []
     if strangers:
-        problems.append(
-            f"unexpected deferred call(s): {[c.tool_name for c in strangers]}")
+        problems.append(f"unexpected deferred call(s): {[c.tool_name for c in strangers]}")
     if assigns and not state["plan_approved"]:
-        problems.append("assign_work before an APPROVED plan — submit_plan and "
-                        "wait for the operator's review first")
+        problems.append(
+            "assign_work before an APPROVED plan — submit_plan and "
+            "wait for the operator's review first"
+        )
     from central_command.runtime.roster import taskable_agent_ids
 
     taskable = [a for a in await taskable_agent_ids() if a != AGENT_ID]
@@ -446,11 +539,13 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
             problems.append(
                 f"assign_work target {target!r} is yourself — a task assigned "
                 f"back into its own chain is a cycle and is refused (choose "
-                f"from: {taskable})")
+                f"from: {taskable})"
+            )
         elif target not in taskable:
             problems.append(
                 f"assign_work target {target!r} is not an ACTIVE taskable roster "
-                f"agent (choose from: {taskable})")
+                f"agent (choose from: {taskable})"
+            )
         if not str(args.get("instructions", "")).strip():
             problems.append("assign_work requires non-empty instructions")
     for c in plans:
@@ -462,20 +557,27 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
     if assigns and not problems:
         problems += await _precheck_backstops(session_id, assigns)
     if problems:
-        return await _reject_batch(task, session_id, result, state, deps, model,
-                                   calls, problems)
+        return await _reject_batch(task, session_id, result, state, deps, model, calls, problems)
     state["retries"] = 0
 
     # Execute the batch. The round event goes on the log BEFORE the work it
     # authorises (M8); each child/item then writes its own events.
     await events.emit(
-        "orchestration.round", ref_id=session_id,
-        payload={"task_id": task["id"], "round": state["round"],
-                 "plans": len(plans), "questions": len(asks),
-                 "assignments": [
-                     {"agent_id": _call_args(c).get("agent_id"),
-                      "title": str(_call_args(c).get("title", ""))[:120]}
-                     for c in assigns]},
+        "orchestration.round",
+        ref_id=session_id,
+        payload={
+            "task_id": task["id"],
+            "round": state["round"],
+            "plans": len(plans),
+            "questions": len(asks),
+            "assignments": [
+                {
+                    "agent_id": _call_args(c).get("agent_id"),
+                    "title": str(_call_args(c).get("title", ""))[:120],
+                }
+                for c in assigns
+            ],
+        },
         actor=f"agent:{AGENT_ID}",
     )
     pending: dict[str, dict] = {}
@@ -485,15 +587,18 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
         body = args.get("plan") or args.get("question") or ""
         item_id = "oi_" + uuid.uuid4().hex[:12]
         await repo.create_operator_item(
-            item_id, kind, session_id, AGENT_ID, body, task_id=task["id"],
+            item_id,
+            kind,
+            session_id,
+            AGENT_ID,
+            body,
+            task_id=task["id"],
             tool_call_id=c.tool_call_id,
         )
         await events.emit(
-            "orchestration.question" if kind == "question"
-            else "orchestration.plan_submitted",
+            "orchestration.question" if kind == "question" else "orchestration.plan_submitted",
             ref_id=item_id,
-            payload={"session_id": session_id, "task_id": task["id"],
-                     "body": body[:1000]},
+            payload={"session_id": session_id, "task_id": task["id"], "body": body[:1000]},
             actor=f"agent:{AGENT_ID}",
         )
         pending[c.tool_call_id] = {"kind": kind, "item_id": item_id}
@@ -502,8 +607,11 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
 
         args = _call_args(c)
         r = await create_and_run_task(
-            str(args["instructions"]), str(args.get("title") or "")[:120] or None,
-            args["agent_id"], actor=f"agent:{AGENT_ID}", background=True,
+            str(args["instructions"]),
+            str(args.get("title") or "")[:120] or None,
+            args["agent_id"],
+            actor=f"agent:{AGENT_ID}",
+            background=True,
             parent_session_id=session_id,
         )
         pending[c.tool_call_id] = {"kind": "assign", "task_id": r["task_id"]}
@@ -511,30 +619,42 @@ async def _process(task, session_id: str, result, state: dict, deps, model) -> d
     state["pending"] = pending
 
     await repo.park_session_awaiting_agents(
-        session_id, {"messages": dump_run_state(result, "")["messages"],
-                     "orch": state},
+        session_id,
+        {"messages": dump_run_state(result, "")["messages"], "orch": state},
     )
     await events.emit(
-        "orchestration.parked", ref_id=session_id,
-        payload={"task_id": task["id"],
-                 "pending": {k: sum(1 for p in pending.values()
-                                    if p["kind"] == k)
-                             for k in ("assign", "plan_review", "question")}},
+        "orchestration.parked",
+        ref_id=session_id,
+        payload={
+            "task_id": task["id"],
+            "pending": {
+                k: sum(1 for p in pending.values() if p["kind"] == k)
+                for k in ("assign", "plan_review", "question")
+            },
+        },
         actor="system",
     )
-    return {"parked": True, "session_id": session_id, "task_id": task["id"],
-            "pending": len(pending)}
+    return {
+        "parked": True,
+        "session_id": session_id,
+        "task_id": task["id"],
+        "pending": len(pending),
+    }
 
 
 # --- resume --------------------------------------------------------------------
 
 
 def _child_result(t: dict) -> str:
-    return json.dumps({
-        "task_id": t["id"], "agent_id": t["agent_id"], "status": t["status"],
-        "outcome": (t.get("outcome") or "")[:_OUTCOME_CHARS],
-        "session_id": t.get("session_id"),
-    })
+    return json.dumps(
+        {
+            "task_id": t["id"],
+            "agent_id": t["agent_id"],
+            "status": t["status"],
+            "outcome": (t.get("outcome") or "")[:_OUTCOME_CHARS],
+            "session_id": t.get("session_id"),
+        }
+    )
 
 
 async def _collect(pending: dict) -> tuple[bool, dict, dict]:
@@ -553,13 +673,15 @@ async def _collect(pending: dict) -> tuple[bool, dict, dict]:
             # A child that declared one did so through declare_gap, which wrote a
             # gap.declared event against its own session.
             for gap in await repo.gaps_for_session(t.get("session_id")):
-                flags["gaps"].append({
-                    **gap,
-                    "task_id": t["id"],
-                    "agent_id": t["agent_id"],  # the task row is authoritative:
-                    # gap["agent_id"] came from ctx.deps at declare_gap time and
-                    # can be None — spread first so the task row always wins.
-                })
+                flags["gaps"].append(
+                    {
+                        **gap,
+                        "task_id": t["id"],
+                        "agent_id": t["agent_id"],  # the task row is authoritative:
+                        # gap["agent_id"] came from ctx.deps at declare_gap time and
+                        # can be None — spread first so the task row always wins.
+                    }
+                )
         else:  # plan_review | question | stall
             item = await repo.get_operator_item(p["item_id"])
             if item is None or item["status"] != "ANSWERED":
@@ -569,17 +691,18 @@ async def _collect(pending: dict) -> tuple[bool, dict, dict]:
                 approved = item.get("verdict") == "approved"
                 flags["plan_approved"] = approved
                 results[call_id] = (
-                    ("PLAN APPROVED by the operator."
-                     + (f" Note (trusted): {answer}" if answer else ""))
-                    if approved else
-                    f"PLAN NOT APPROVED — operator revision note (trusted): {answer}"
+                    (
+                        "PLAN APPROVED by the operator."
+                        + (f" Note (trusted): {answer}" if answer else "")
+                    )
+                    if approved
+                    else f"PLAN NOT APPROVED — operator revision note (trusted): {answer}"
                 )
             else:
                 from central_command.runtime.questions import lane_exchange
 
-                results[call_id] = (
-                    f"OPERATOR ANSWER (trusted): {answer}"
-                    + await lane_exchange(item)
+                results[call_id] = f"OPERATOR ANSWER (trusted): {answer}" + await lane_exchange(
+                    item
                 )
                 if p["kind"] == "stall" and p.get("no_progress"):
                     # An answered NO-PROGRESS stall withdraws plan approval (R13):
@@ -614,8 +737,7 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
         from central_command.runtime.converse import land_session
 
         reason = "orchestration state names no task_id — cannot resume"
-        await land_session(session_id, failed=True, agent_id=AGENT_ID,
-                           reason=reason)
+        await land_session(session_id, failed=True, agent_id=AGENT_ID, reason=reason)
         raise ValueError(reason)
     ready, results, flags = await _collect(state.get("pending") or {})
     if not ready:
@@ -638,12 +760,14 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
         state["stalls"] = 0
     for gap in flags["gaps"]:
         await events.emit(
-            "orchestration.capability_gap", ref_id=session_id,
+            "orchestration.capability_gap",
+            ref_id=session_id,
             payload={**gap, "project_task_id": state["task_id"]},
             actor="system",
         )
     await events.emit(
-        "orchestration.resumed", ref_id=session_id,
+        "orchestration.resumed",
+        ref_id=session_id,
         payload={"task_id": state["task_id"], "resolved": len(results)},
         actor="system",
     )
@@ -656,10 +780,17 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
         agent = await _build_agent(model)
         deps = TriageDeps(session_id=session_id, agent_id=AGENT_ID, park_reads=True)
         result = await _run_live(
-            agent, None, model=None, deps=deps, agent_id=AGENT_ID,
-            session_id=session_id, message_history=load_messages(claimed),
+            agent,
+            None,
+            model=None,
+            deps=deps,
+            agent_id=AGENT_ID,
+            session_id=session_id,
+            message_history=load_messages(claimed),
             deferred_tool_results=dtr,
-            continuable=True, after="orchestrator", continue_state=state,
+            continuable=True,
+            after="orchestrator",
+            continue_state=state,
         )
         return await _process(task, session_id, result, state, deps, model)
     except RunWindowExhausted as e:
@@ -671,8 +802,7 @@ async def maybe_resume(session_id: str, model=None) -> dict | None:
         return _orch_parked(e, state)
     except Exception as e:  # a resume error must reach the record
         log.exception("orchestration resume failed for %s", session_id)
-        return await _fail(state["task_id"], session_id,
-                           f"orchestration resume failed: {e}")
+        return await _fail(state["task_id"], session_id, f"orchestration resume failed: {e}")
 
 
 async def child_resolved(task: dict) -> None:
@@ -744,7 +874,9 @@ async def park_orphaned_resumes(armed_before: datetime | None = None) -> list[st
         # A restart is not an outage: nothing to wait out, so due at once —
         # the same sweep pass drives it.
         await resume_park.park_resume(
-            row["id"], row["pending"], "the resume died with its process",
+            row["id"],
+            row["pending"],
+            "the resume died with its process",
             due_now=True,
         )
         orphaned.append(row["id"])
@@ -773,42 +905,62 @@ async def land_orphans_at_startup() -> dict:
         if outcome == "resume":
             pending = row.get("pending") or {}
             await events.emit(
-                "session.resume_parked", ref_id=sid,
-                payload={"after": pending.get("after"), "restart": True,
-                         "attempts": pending.get("attempts"),
-                         "dependencies": pending.get("dependencies"),
-                         "not_before": pending.get("not_before"),
-                         "error": row["reason"], "transient": True},
+                "session.resume_parked",
+                ref_id=sid,
+                payload={
+                    "after": pending.get("after"),
+                    "restart": True,
+                    "attempts": pending.get("attempts"),
+                    "dependencies": pending.get("dependencies"),
+                    "not_before": pending.get("not_before"),
+                    "error": row["reason"],
+                    "transient": True,
+                },
                 actor="system",
             )
         elif outcome in ("task_rerun", "stopped"):
             await events.emit(
-                "session.stopped", ref_id=sid,
-                payload={"agent_id": row["agent_id"], "task_id": row.get("task_id"),
-                         "after": "task" if outcome == "task_rerun" else None,
-                         "reason": "restart", "restart_reason": row["reason"]},
+                "session.stopped",
+                ref_id=sid,
+                payload={
+                    "agent_id": row["agent_id"],
+                    "task_id": row.get("task_id"),
+                    "after": "task" if outcome == "task_rerun" else None,
+                    "reason": "restart",
+                    "restart_reason": row["reason"],
+                },
                 actor="system",
             )
             if outcome == "task_rerun":
                 state = row["retry_state"]
                 await events.emit(
-                    "task.run_parked", ref_id=row["task_id"],
-                    payload={"restart": True, "kind": "restart", "attempts": 0,
-                             "transient": False, "session_id": sid,
-                             "dependencies": state["dependencies"],
-                             "not_before": state["not_before"],
-                             "error": state["last_error"]},
+                    "task.run_parked",
+                    ref_id=row["task_id"],
+                    payload={
+                        "restart": True,
+                        "kind": "restart",
+                        "attempts": 0,
+                        "transient": False,
+                        "session_id": sid,
+                        "dependencies": state["dependencies"],
+                        "not_before": state["not_before"],
+                        "error": state["last_error"],
+                    },
                     actor="system",
                 )
         elif outcome == "turn_lost":
             await events.emit(
-                "session.turn_lost", ref_id=sid,
+                "session.turn_lost",
+                ref_id=sid,
                 payload={"agent_id": row["agent_id"], "reason": row["reason"]},
                 actor="system",
             )
     if landed:
-        log.warning("startup: landed %d orphaned RUNNING session(s): %s", len(landed),
-                    ", ".join(f"{r['session_id']}={r['outcome']}" for r in landed))
+        log.warning(
+            "startup: landed %d orphaned RUNNING session(s): %s",
+            len(landed),
+            ", ".join(f"{r['session_id']}={r['outcome']}" for r in landed),
+        )
 
     from central_command.gateway import gateway
 
@@ -817,8 +969,7 @@ async def land_orphans_at_startup() -> dict:
         # The one payload, shared with the in-process handback.
         await gateway.emit_execution_interrupted(prop)
     if interrupted:
-        log.warning("startup: %d execution(s) interrupted, held for the operator",
-                    len(interrupted))
+        log.warning("startup: %d execution(s) interrupted, held for the operator", len(interrupted))
     return {"sessions": landed, "interrupted": [p["id"] for p in interrupted]}
 
 
@@ -881,9 +1032,13 @@ async def resume_sweep() -> dict:
             if unit == "session":
                 try:
                     await events.emit(
-                        "session.resume_failed", ref_id=unit_id,
-                        payload={"error": str(e)[:500], "after": "sweep",
-                                 "transient": classify_failure(e) == TRANSIENT},
+                        "session.resume_failed",
+                        ref_id=unit_id,
+                        payload={
+                            "error": str(e)[:500],
+                            "after": "sweep",
+                            "transient": classify_failure(e) == TRANSIENT,
+                        },
                         actor="system",
                     )
                 except Exception:  # the record failing is not the sweep's end
@@ -909,13 +1064,11 @@ async def resume_sweep() -> dict:
     # is what actually drives it.
     orphaned = await park_orphaned_resumes()
     for sid in await repo.sessions_awaiting_agents():
-        ran, r = await guarded("session", sid,
-                               lambda sid=sid: resume_awaiting_agents(sid))
+        ran, r = await guarded("session", sid, lambda sid=sid: resume_awaiting_agents(sid))
         if ran:
             (resumed if r is not None else still_parked).append(sid)
     for sid in await repo.sessions_awaiting_resume():
-        ran, r = await guarded("session", sid,
-                               lambda sid=sid: resume_parked_session(sid))
+        ran, r = await guarded("session", sid, lambda sid=sid: resume_parked_session(sid))
         if ran:
             (resumed if r is not None else still_parked).append(sid)
 
@@ -932,12 +1085,13 @@ async def resume_sweep() -> dict:
 
     waiting = []
     for prop in reversed(await repo.list_proposals("RETRY_PENDING")):
+
         async def _wait_entry(pid=prop["id"]):
             row = await repo.load_proposal(pid)
             if _interrupted(row):
                 return None  # held for the operator — never replayed by a sweep
-            return (pid, gate_names(_proposal_dependencies(
-                (row or {}).get("retry_state") or {})))
+            return (pid, gate_names(_proposal_dependencies((row or {}).get("retry_state") or {})))
+
         ran, entry = await guarded("proposal", prop["id"], _wait_entry)
         if entry is not None:
             waiting.append(entry)
@@ -947,23 +1101,25 @@ async def resume_sweep() -> dict:
         if any([not await cache.healthy(n) for n in names]):
             still_pending.append(pid)
             continue
-        ran, r = await guarded("proposal", pid,
-                               lambda pid=pid: gateway.retry_execution(pid))
+        ran, r = await guarded("proposal", pid, lambda pid=pid: gateway.retry_execution(pid))
         if ran:
             (retried if r is not None else still_pending).append(pid)
 
     tasks_retried, tasks_still_parked = [], []
     for task in await repo.tasks_awaiting_retry(due_only=True):
-        ran, r = await guarded("task", task["id"],
-                               lambda tid=task["id"]: retry_parked_task(tid))
+        ran, r = await guarded("task", task["id"], lambda tid=task["id"]: retry_parked_task(tid))
         if ran:
             (tasks_retried if r is not None else tasks_still_parked).append(task["id"])
-    return {"resumed": resumed, "still_parked": still_parked,
-            "errors": errors,
-            "orphaned": orphaned,
-            "retried": retried, "still_pending": still_pending,
-            "tasks_retried": tasks_retried,
-            "tasks_still_parked": tasks_still_parked}
+    return {
+        "resumed": resumed,
+        "still_parked": still_parked,
+        "errors": errors,
+        "orphaned": orphaned,
+        "retried": retried,
+        "still_pending": still_pending,
+        "tasks_retried": tasks_retried,
+        "tasks_still_parked": tasks_still_parked,
+    }
 
 
 # --- the gated retry sweep (outage equivalence, slice 5) -----------------------
@@ -1021,13 +1177,19 @@ async def _record_probe_changes(cache, states: dict[str, dict]) -> list[dict]:
             seconds = None
             if down_since is not None:
                 seconds = round((datetime.now(UTC) - down_since).total_seconds())
-            payload = {"dependency": name,
-                       "down_since": down_since.isoformat() if down_since else None,
-                       "down_seconds": seconds}
+            payload = {
+                "dependency": name,
+                "down_since": down_since.isoformat() if down_since else None,
+                "down_seconds": seconds,
+            }
         else:
             payload = {"dependency": name, "error": error}
-        await events.emit("dependency.up" if up else "dependency.down",
-                          ref_id=name, payload=payload, actor="system")
+        await events.emit(
+            "dependency.up" if up else "dependency.down",
+            ref_id=name,
+            payload=payload,
+            actor="system",
+        )
         changes.append({"dependency": name, "state": "up" if up else "down"})
     return changes
 
@@ -1057,8 +1219,9 @@ async def _already_reported(unit: dict) -> bool:
     than the report (an upgrade must not re-announce every unit already
     reported), and a unit whose episode began AFTER it is a later outage. A
     unit with no recorded episode keeps the old once-per-id reading."""
-    last = await repo.list_events(kind="retry.failing_despite_probe",
-                                  ref_id=unit["id"], limit=1, newest_first=True)
+    last = await repo.list_events(
+        kind="retry.failing_despite_probe", ref_id=unit["id"], limit=1, newest_first=True
+    )
     if not last:
         return False
     current = _as_utc(unit.get("episode"))
@@ -1091,11 +1254,15 @@ async def _report_failing_despite_probe() -> list[dict]:
         if await _already_reported(unit):
             continue
         await events.emit(
-            "retry.failing_despite_probe", ref_id=unit["id"],
-            payload={"unit": unit["unit"], "failures": unit["failures"],
-                     "dependencies": unit["dependencies"],
-                     "last_error": (unit["last_error"] or "")[:500],
-                     "episode": unit.get("episode")},
+            "retry.failing_despite_probe",
+            ref_id=unit["id"],
+            payload={
+                "unit": unit["unit"],
+                "failures": unit["failures"],
+                "dependencies": unit["dependencies"],
+                "last_error": (unit["last_error"] or "")[:500],
+                "episode": unit.get("episode"),
+            },
             actor="system",
         )
         reported.append({"unit": unit["unit"], "id": unit["id"]})
@@ -1191,9 +1358,13 @@ async def probe_and_record(names, cache=None, *, states=None):
     return cache, changes
 
 
-async def retry_sweep(cache=None, *, only: str | None = None,
-                      ignore_not_before: bool = False,
-                      include_interrupted: bool = False) -> dict:
+async def retry_sweep(
+    cache=None,
+    *,
+    only: str | None = None,
+    ignore_not_before: bool = False,
+    include_interrupted: bool = False,
+) -> dict:
     """Drive every parked unit whose dependency is UP — the cadence half of
     outage equivalence, called by the `retry.sweep` heartbeat action.
 
@@ -1262,17 +1433,27 @@ async def retry_sweep(cache=None, *, only: str | None = None,
     # (unit, id, names it is gated on, driver, landed list, detached)
     units: list[tuple] = []
 
-    async def _drive(unit: str, unit_id: str, names: tuple[str, ...], driver,
-                     landed: list, *, detached: bool = False):
+    async def _drive(
+        unit: str,
+        unit_id: str,
+        names: tuple[str, ...],
+        driver,
+        landed: list,
+        *,
+        detached: bool = False,
+    ):
         # Every dependency the unit recorded (plus the model, when its re-drive
         # is a model turn) must probe up; the skip names the down ones. `local`
         # never appears here — `gate_names` drops it.
         down = [d for d in names if not await cache.healthy(d)]
         if down:
             skipped_gated.append(
-                {"unit": unit, "id": unit_id,
-                 "dependency": down[0] if len(names) == 1 else list(names),
-                 **({"down": down} if len(names) > 1 else {})}
+                {
+                    "unit": unit,
+                    "id": unit_id,
+                    "dependency": down[0] if len(names) == 1 else list(names),
+                    **({"down": down} if len(names) > 1 else {}),
+                }
             )
             return
         if detached:
@@ -1290,8 +1471,14 @@ async def retry_sweep(cache=None, *, only: str | None = None,
             out = await driver()
         except Exception as e:  # one bad unit must not end the sweep
             log.exception("retry sweep: %s %s failed", unit, unit_id)
-            errors.append({"unit": unit, "id": unit_id, "error": str(e)[:300],
-                           "transient": classify_failure(e) == TRANSIENT})
+            errors.append(
+                {
+                    "unit": unit,
+                    "id": unit_id,
+                    "error": str(e)[:300],
+                    "transient": classify_failure(e) == TRANSIENT,
+                }
+            )
             return
         if out is not None:  # None = someone else holds the claim, or it moved
             landed.append(unit_id)
@@ -1314,14 +1501,17 @@ async def retry_sweep(cache=None, *, only: str | None = None,
         # (a row with no record reads as the model).
         names = gate_names(pending.get("dependencies"), model_turn=True)
         if pending.get("kind") == "read":
-            units.append(("session", sid, names,
-                          lambda sid=sid: resume_parked_read(sid), resumed, True))
+            units.append(
+                ("session", sid, names, lambda sid=sid: resume_parked_read(sid), resumed, True)
+            )
         elif pending.get("kind") == "turn":
-            units.append(("session", sid, names,
-                          lambda sid=sid: resume_parked_turn(sid), resumed, True))
+            units.append(
+                ("session", sid, names, lambda sid=sid: resume_parked_turn(sid), resumed, True)
+            )
         else:
-            units.append(("session", sid, names,
-                          lambda sid=sid: resume_parked_session(sid), resumed, True))
+            units.append(
+                ("session", sid, names, lambda sid=sid: resume_parked_session(sid), resumed, True)
+            )
 
     # (b) Approved proposals parked RETRY_PENDING — the blocked call is the
     # EXECUTOR's, so the gate is what the failed capability needs. NOT also
@@ -1338,10 +1528,16 @@ async def retry_sweep(cache=None, *, only: str | None = None,
         state = (row or {}).get("retry_state") or {}
         if not wanted(_proposal_dependencies(state)):
             continue
-        units.append(("proposal", prop["id"],
-                      gate_names(_proposal_dependencies(state)),
-                      lambda pid=prop["id"]: gateway.retry_execution(pid),
-                      retried_executions, False))
+        units.append(
+            (
+                "proposal",
+                prop["id"],
+                gate_names(_proposal_dependencies(state)),
+                lambda pid=prop["id"]: gateway.retry_execution(pid),
+                retried_executions,
+                False,
+            )
+        )
 
     # (c) Tasks parked for a re-run, DUE ones only (`not_before` is applied in
     # SQL) — a re-run is an agent run, so it gates on the LLM too.
@@ -1349,9 +1545,16 @@ async def retry_sweep(cache=None, *, only: str | None = None,
         recorded = (task.get("retry_state") or {}).get("dependencies")
         if not wanted(recorded):
             continue
-        units.append(("task", task["id"], gate_names(recorded, model_turn=True),
-                      lambda tid=task["id"]: retry_parked_task(tid),
-                      retried_tasks, True))
+        units.append(
+            (
+                "task",
+                task["id"],
+                gate_names(recorded, model_turn=True),
+                lambda tid=task["id"]: retry_parked_task(tid),
+                retried_tasks,
+                True,
+            )
+        )
 
     # The probes: every name a waiting unit needs, plus every dependency the
     # table records DOWN (re-probed even with no waiting work, so a banner never
@@ -1360,8 +1563,7 @@ async def retry_sweep(cache=None, *, only: str | None = None,
     recorded_down: list[str] = []
     queued: list[str] = []
     if only is None:
-        recorded_down = [n for n, r in states.items()
-                         if r.get("state") == "down" and n in PROBED]
+        recorded_down = [n for n, r in states.items() if r.get("state") == "down" and n in PROBED]
         # And what the queues the sweep does not drive are waiting on (a ledger
         # item released on an embedder outage, a deferred ingest job): probed
         # only, so their own loops' gates and the banner see the outage (story 7).
@@ -1382,10 +1584,14 @@ async def retry_sweep(cache=None, *, only: str | None = None,
     for unit, unit_id, names, driver, landed, detached in units:
         await _drive(unit, unit_id, names, driver, landed, detached=detached)
 
-    result = {"resumed": resumed, "orphaned": orphaned,
-              "retried_executions": retried_executions,
-              "retried_tasks": retried_tasks, "skipped_gated": skipped_gated,
-              "errors": errors}
+    result = {
+        "resumed": resumed,
+        "orphaned": orphaned,
+        "retried_executions": retried_executions,
+        "retried_tasks": retried_tasks,
+        "skipped_gated": skipped_gated,
+        "errors": errors,
+    }
     if cache.results:
         result["probes"] = cache.results
     if changes:
@@ -1444,26 +1650,32 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
     model = await resolve_model(model, agent_id=agent_id)
 
     await events.emit(
-        "session.resume_retried", ref_id=session_id,
-        payload={"after": after, "attempt": attempts,
-                 "proposal_id": pending.get("proposal_id"),
-                 "item_id": pending.get("item_id"),
-                 # What the park waited on (R34): the recorded list, never a
-                 # guess from the error text — an untyped transient error was
-                 # recorded as ['llm'] when it parked.
-                 "dependencies": pending.get("dependencies")},
+        "session.resume_retried",
+        ref_id=session_id,
+        payload={
+            "after": after,
+            "attempt": attempts,
+            "proposal_id": pending.get("proposal_id"),
+            "item_id": pending.get("item_id"),
+            # What the park waited on (R34): the recorded list, never a
+            # guess from the error text — an untyped transient error was
+            # recorded as ['llm'] when it parked.
+            "dependencies": pending.get("dependencies"),
+        },
         actor="system",
     )
 
     messages = load_messages(claimed)
     results = await deferred_results(
-        messages, pending["tool_call_id"],
+        messages,
+        pending["tool_call_id"],
         # Same framing the live reject path uses — `pending["text"]` is the
         # verbatim feedback and stays that way in the record.
         ToolDenied(resume_park.framed_denial(pending["text"]))
         if pending["kind"] == "denial"
         else pending["text"],
-        session_id=session_id, agent_id=agent_id,
+        session_id=session_id,
+        agent_id=agent_id,
     )
     final = None
     agent = None
@@ -1478,7 +1690,8 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
             # run_state the messages are, and a mid-chain specialist that came
             # back here with `chain=()` would bypass the depth/cycle refusals.
             deps=TriageDeps(
-                agent_id=agent_id, session_id=session_id,
+                agent_id=agent_id,
+                session_id=session_id,
                 consult_chain=_parked_chain(claimed),
             ),
             # The same loop breaker every fresh run gets. This leg drives
@@ -1496,23 +1709,32 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
             # outage lasts (epic-outage-doctrine story 4 — no limit, no
             # promotion; a unit failing against a healthy probe is reported by
             # the sweep instead, `retry.failing_despite_probe`).
-            await resume_park.park_resume(
-                session_id, {**pending, "attempts": attempts}, e
-            )
+            await resume_park.park_resume(session_id, {**pending, "attempts": attempts}, e)
             return {"parked": True, "session_id": session_id, "attempts": attempts}
         # Semantic: today's terminal handling for this path.
         await events.emit(
-            "session.resume_failed", ref_id=session_id,
-            payload={"error": str(e), "proposal_id": pending.get("proposal_id"),
-                     "item_id": pending.get("item_id"), "after": after,
-                     "transient": transient, "attempts": attempts},
+            "session.resume_failed",
+            ref_id=session_id,
+            payload={
+                "error": str(e),
+                "proposal_id": pending.get("proposal_id"),
+                "item_id": pending.get("item_id"),
+                "after": after,
+                "transient": transient,
+                "attempts": attempts,
+            },
             actor="system",
         )
 
     if after == "answered":
         return await _finish_answered_resume(
-            final, agent=agent, model=model, pending=pending,
-            session_id=session_id, agent_id=agent_id, error_text=error_text,
+            final,
+            agent=agent,
+            model=model,
+            pending=pending,
+            session_id=session_id,
+            agent_id=agent_id,
+            error_text=error_text,
         )
 
     if after == "consulted":
@@ -1527,24 +1749,35 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
 
             reason = error_text or pending.get("last_error") or "resume failed"
             await land_session(
-                session_id, failed=True, agent_id=agent_id, reason=reason,
+                session_id,
+                failed=True,
+                agent_id=agent_id,
+                reason=reason,
             )
             return {"resumed": False, "session_id": session_id}
         out = await _settle_consult_resume(
-            final, agent=agent, model=model, session_id=session_id,
-            agent_id=agent_id, task_id=pending.get("task_id"),
-            chain=_parked_chain(claimed), proposal_id=pending.get("proposal_id"),
+            final,
+            agent=agent,
+            model=model,
+            session_id=session_id,
+            agent_id=agent_id,
+            task_id=pending.get("task_id"),
+            chain=_parked_chain(claimed),
+            proposal_id=pending.get("proposal_id"),
         )
         await decide_landed(out, model=model)
-        return {"resumed": True, "session_id": session_id,
-                "after": "consulted", **out}
+        return {"resumed": True, "session_id": session_id, "after": "consulted", **out}
 
     from central_command.gateway import gateway
 
     out = await gateway.finish_decision_resume(
-        session_id=session_id, agent_id=agent_id,
-        proposal_id=pending.get("proposal_id"), after=after, final=final,
-        agent=agent, model=model,
+        session_id=session_id,
+        agent_id=agent_id,
+        proposal_id=pending.get("proposal_id"),
+        after=after,
+        final=final,
+        agent=agent,
+        model=model,
         outcome_text=pending["text"] if after == "approved" else None,
         feedback=pending["text"] if after == "rejected" else None,
         decided_event_id=pending.get("decided_event_id"),
@@ -1554,8 +1787,7 @@ async def resume_parked_session(session_id: str, model=None) -> dict | None:
         # even when it is the DRIVE step that keeps failing.
         pending={**pending, "attempts": attempts},
     )
-    return {"resumed": True, "session_id": session_id, "after": after,
-            "attempts": attempts, **out}
+    return {"resumed": True, "session_id": session_id, "after": after, "attempts": attempts, **out}
 
 
 def _parked_read(run_state: dict | None) -> dict | None:
@@ -1616,10 +1848,15 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
     await resume_park.arm(session_id, {**pending, "attempts": attempts})
 
     await events.emit(
-        "session.resume_retried", ref_id=session_id,
-        payload={"after": after, "attempt": attempts, "kind": "read",
-                 "tool": pending.get("tool"),
-                 "dependencies": pending.get("dependencies")},
+        "session.resume_retried",
+        ref_id=session_id,
+        payload={
+            "after": after,
+            "attempt": attempts,
+            "kind": "read",
+            "tool": pending.get("tool"),
+            "dependencies": pending.get("dependencies"),
+        },
         actor="system",
     )
 
@@ -1629,7 +1866,9 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
     deps = TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True)
     try:
         text = await tools_mod.run_read_by_name(
-            pending["tool"], pending.get("args") or {}, deps,
+            pending["tool"],
+            pending.get("args") or {},
+            deps,
         )
     except CallDeferred as paused:
         # A re-executed read that pauses for another reason: the outage is
@@ -1644,8 +1883,10 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
         from central_command.runtime.durable import PROPOSE_TOOLS
 
         meta = paused.metadata or {}
-        call = next((c for c in unanswered_calls(messages)
-                     if c.tool_call_id == pending["tool_call_id"]), None)
+        call = next(
+            (c for c in unanswered_calls(messages) if c.tool_call_id == pending["tool_call_id"]),
+            None,
+        )
         if call is None:
             raise
         shim = SimpleNamespace(
@@ -1656,12 +1897,20 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
             # A consult whose specialist now DRAFTED: the asker waits on that
             # proposal through the consult-wait seam.
             waited = await consult_mod.park_consult_wait(
-                session_id=session_id, agent_id=agent_id, result=shim, call=call,
+                session_id=session_id,
+                agent_id=agent_id,
+                result=shim,
+                call=call,
                 task_id=task_id,
             )
             await _land_task_question_outcome(task_id, waited)
-            return {"resumed": True, "session_id": session_id, "after": after,
-                    "attempts": attempts, **waited}
+            return {
+                "resumed": True,
+                "session_id": session_id,
+                "after": after,
+                "attempts": attempts,
+                **waited,
+            }
         if "proposal" not in meta or call.tool_name not in PROPOSE_TOOLS:
             raise
         # A propose tool that parked on its own read (`propose_delete_episode`,
@@ -1674,29 +1923,45 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
         # reaches it from. Any other tail cannot have parked a read and is
         # refused loudly, never landed as a task.
         if after not in _READ_TAILS:
-            reason = (f"a parked {pending['tool']} drafted a proposal on resume, "
-                      f"but its tail {after!r} has no proposal landing")
+            reason = (
+                f"a parked {pending['tool']} drafted a proposal on resume, "
+                f"but its tail {after!r} has no proposal landing"
+            )
             await converse_mod.land_session(
-                session_id, failed=True, agent_id=agent_id, reason=reason,
+                session_id,
+                failed=True,
+                agent_id=agent_id,
+                reason=reason,
             )
             if task_id:
                 # `_land_resumed_run_failure` lands only a `task` tail's row;
                 # nothing owns this one, so it lands here rather than sitting
                 # IN_PROGRESS against a FAILED session.
-                await repo.resolve_task(task_id, "FAILED",
-                                        outcome=f"resumed run failed: {reason}")
+                await repo.resolve_task(task_id, "FAILED", outcome=f"resumed run failed: {reason}")
                 await events.emit(
-                    "task.run_failed", ref_id=task_id,
+                    "task.run_failed",
+                    ref_id=task_id,
                     payload={"error": reason[:300], "transient": False, "after": after},
                     actor="system",
                 )
             raise RuntimeError(reason) from None
         out = await _land_tail(
-            session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
-            state=pending.get("state") or {}, result=shim, deps=deps, model=model,
+            session_id=session_id,
+            agent_id=agent_id,
+            after=after,
+            task_id=task_id,
+            state=pending.get("state") or {},
+            result=shim,
+            deps=deps,
+            model=model,
         )
-        return {"resumed": True, "session_id": session_id, "after": after,
-                "attempts": attempts, **out}
+        return {
+            "resumed": True,
+            "session_id": session_id,
+            "after": after,
+            "attempts": attempts,
+            **out,
+        }
     except ModelRetry as retry:
         # The dependency is back and ANSWERED with a no the model can act on
         # (a propose read's episode is gone): the model gets the retry prompt
@@ -1704,32 +1969,49 @@ async def resume_parked_read(session_id: str, model=None) -> dict | None:
         text = retry
     except DependencyDown as down:
         stored = await resume_park.park_resume(
-            session_id, {**pending, "attempts": attempts}, down.original,
+            session_id,
+            {**pending, "attempts": attempts},
+            down.original,
         )
-        return {"parked": True, "session_id": session_id, "attempts": attempts,
-                "dependencies": stored.get("dependencies")}
+        return {
+            "parked": True,
+            "session_id": session_id,
+            "attempts": attempts,
+            "dependencies": stored.get("dependencies"),
+        }
     except Exception as e:  # a record the tool no longer accepts
         # Not an outage: the stored call cannot be re-run at all (its
         # arguments no longer fit the tool). Loud, with the reason, and the
         # task lands like any resumed run that died semantically.
         await converse_mod.land_session(
-            session_id, failed=True, agent_id=agent_id,
+            session_id,
+            failed=True,
+            agent_id=agent_id,
             reason=f"parked read could not be re-executed: {type(e).__name__}: {e}",
         )
         await _land_resumed_run_failure(task_id, e, after=after)
         raise
 
     results = await deferred_results(
-        messages, pending["tool_call_id"], text,
-        session_id=session_id, agent_id=agent_id, decided_metadata={"kind": "read"},
+        messages,
+        pending["tool_call_id"],
+        text,
+        session_id=session_id,
+        agent_id=agent_id,
+        decided_metadata={"kind": "read"},
     )
     out = await _drive_tail(
-        session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
-        state=pending.get("state") or {}, messages=messages,
-        deferred_tool_results=results, attempts=attempts, model=model,
+        session_id=session_id,
+        agent_id=agent_id,
+        after=after,
+        task_id=task_id,
+        state=pending.get("state") or {},
+        messages=messages,
+        deferred_tool_results=results,
+        attempts=attempts,
+        model=model,
     )
-    return {"resumed": True, "session_id": session_id, "after": after,
-            "attempts": attempts, **out}
+    return {"resumed": True, "session_id": session_id, "after": after, "attempts": attempts, **out}
 
 
 def _tail_parked(e, after: str, state: dict) -> dict:
@@ -1783,23 +2065,41 @@ async def resume_parked_turn(session_id: str, model=None) -> dict | None:
     attempts = int(pending.get("attempts", 0)) + 1
     await resume_park.arm(session_id, {**pending, "attempts": attempts})
     await events.emit(
-        "session.resume_retried", ref_id=session_id,
-        payload={"after": after, "attempt": attempts, "kind": "turn",
-                 "dependencies": pending.get("dependencies")},
+        "session.resume_retried",
+        ref_id=session_id,
+        payload={
+            "after": after,
+            "attempt": attempts,
+            "kind": "turn",
+            "dependencies": pending.get("dependencies"),
+        },
         actor="system",
     )
     out = await _drive_tail(
-        session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
-        state=pending.get("state") or {}, messages=load_messages(claimed),
-        attempts=attempts, window=int(pending.get("window") or 1), model=model,
+        session_id=session_id,
+        agent_id=agent_id,
+        after=after,
+        task_id=task_id,
+        state=pending.get("state") or {},
+        messages=load_messages(claimed),
+        attempts=attempts,
+        window=int(pending.get("window") or 1),
+        model=model,
     )
-    return {"resumed": True, "session_id": session_id, "after": after,
-            "attempts": attempts, **out}
+    return {"resumed": True, "session_id": session_id, "after": after, "attempts": attempts, **out}
 
 
 async def _drive_tail(
-    *, session_id: str, agent_id: str, after: str, task_id: str | None,
-    state: dict, messages, attempts: int, model, deferred_tool_results=None,
+    *,
+    session_id: str,
+    agent_id: str,
+    after: str,
+    task_id: str | None,
+    state: dict,
+    messages,
+    attempts: int,
+    model,
+    deferred_tool_results=None,
     window: int = 1,
 ) -> dict:
     """Re-enter a parked run through its landing tail and land it — shared by
@@ -1814,12 +2114,20 @@ async def _drive_tail(
     deps = TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True)
     try:
         result = await run_mod._run_live(
-            agent, None, model=run_model, deps=deps,
-            agent_id=agent_id, session_id=session_id,
-            message_history=messages, deferred_tool_results=deferred_tool_results,
+            agent,
+            None,
+            model=run_model,
+            deps=deps,
+            agent_id=agent_id,
+            session_id=session_id,
+            message_history=messages,
+            deferred_tool_results=deferred_tool_results,
             task_id=None if after == "orchestrator" else task_id,
-            continuable=True, window=window, after=after,
-            continue_state=state or None, park_attempts=attempts,
+            continuable=True,
+            window=window,
+            after=after,
+            continue_state=state or None,
+            park_attempts=attempts,
         )
     except run_mod.RunStopped:
         return {"stopped": True, "session_id": session_id}
@@ -1843,8 +2151,14 @@ async def _drive_tail(
         await _land_resumed_run_failure(task_id, e, after=after)
         raise
     return await _land_tail(
-        session_id=session_id, agent_id=agent_id, after=after, task_id=task_id,
-        state=state, result=result, deps=deps, model=model,
+        session_id=session_id,
+        agent_id=agent_id,
+        after=after,
+        task_id=task_id,
+        state=state,
+        result=result,
+        deps=deps,
+        model=model,
     )
 
 
@@ -1856,8 +2170,15 @@ _READ_TAILS = ("task", "converse", "orchestrator")
 
 
 async def _land_tail(
-    *, session_id: str, agent_id: str, after: str, task_id: str | None,
-    state: dict, result, deps, model,
+    *,
+    session_id: str,
+    agent_id: str,
+    after: str,
+    task_id: str | None,
+    state: dict,
+    result,
+    deps,
+    model,
 ) -> dict:
     """Land a run that re-entered through its tail exactly as an uninterrupted
     one lands: the orchestrator round (`_process`), the chat turn
@@ -1872,15 +2193,21 @@ async def _land_tail(
     if after == "orchestrator":
         task = await repo.get_task(state.get("task_id") or task_id)
         if task is None:
-            return await _fail(state.get("task_id") or task_id, session_id,
-                               "the project task vanished while parked")
+            return await _fail(
+                state.get("task_id") or task_id,
+                session_id,
+                "the project task vanished while parked",
+            )
         return await _process(task, session_id, result, state, deps, model)
     if after == "converse":
         out = await converse_mod._land_turn(session_id, agent_id, result)
         await decide_landed(out, model=model)
         return out
     out = await run_mod._land(
-        result, session_id=session_id, agent_id=agent_id, task_id=task_id,
+        result,
+        session_id=session_id,
+        agent_id=agent_id,
+        task_id=task_id,
         tokens=run_mod._total_tokens(result),
     )
     await _land_task_question_outcome(task_id, out)
@@ -1911,7 +2238,9 @@ async def _finished_for_waiters(session: dict) -> bool:
 
 
 def _consult_outcome_text(
-    target: str, prop: dict | None, closed_reason: str | None,
+    target: str,
+    prop: dict | None,
+    closed_reason: str | None,
     answer: str | None = None,
 ) -> str:
     """What the asker is told when its specialist finishes — its specialist's
@@ -2047,24 +2376,33 @@ async def resume_consult_wait(session_id: str, model=None) -> dict | None:
     # would read as "nothing happened".
     spec_state = await repo.get_session_run_state(specialist_session) or {}
     outcome_text = _consult_outcome_text(
-        target, prop, spec.get("closed_reason"),
+        target,
+        prop,
+        spec.get("closed_reason"),
         answer=spec_state.get("consult_answer"),
     )
     model = await resolve_model(model, agent_id=agent_id)
 
     await events.emit(
-        "agent.consult_resumed", ref_id=session_id,
-        payload={"asker": agent_id, "target": target,
-                 "specialist_session_id": specialist_session,
-                 "proposal_id": (prop or {}).get("id"),
-                 "proposal_status": (prop or {}).get("status")},
+        "agent.consult_resumed",
+        ref_id=session_id,
+        payload={
+            "asker": agent_id,
+            "target": target,
+            "specialist_session_id": specialist_session,
+            "proposal_id": (prop or {}).get("id"),
+            "proposal_status": (prop or {}).get("status"),
+        },
         actor="system",
     )
 
     pending = resume_park.pending_resume(
-        kind="result", text=outcome_text,
-        tool_call_id=wait["tool_call_id"], after="consulted",
-        proposal_id=(prop or {}).get("id"), task_id=wait.get("task_id"),
+        kind="result",
+        text=outcome_text,
+        tool_call_id=wait["tool_call_id"],
+        after="consulted",
+        proposal_id=(prop or {}).get("id"),
+        task_id=wait.get("task_id"),
     )
     try:
         agent = await build_agent_for(agent_id, model=model)
@@ -2072,12 +2410,16 @@ async def resume_consult_wait(session_id: str, model=None) -> dict | None:
         final = await agent.run(
             message_history=messages,
             deferred_tool_results=await deferred_results(
-                messages, wait["tool_call_id"], outcome_text,
-                session_id=session_id, agent_id=agent_id,
+                messages,
+                wait["tool_call_id"],
+                outcome_text,
+                session_id=session_id,
+                agent_id=agent_id,
             ),
             model=model,
             deps=TriageDeps(
-                agent_id=agent_id, session_id=session_id,
+                agent_id=agent_id,
+                session_id=session_id,
                 consult_chain=_parked_chain(claimed),
             ),
             usage_limits=UsageLimits(request_limit=settings.run_request_limit),
@@ -2091,15 +2433,22 @@ async def resume_consult_wait(session_id: str, model=None) -> dict | None:
         from central_command.runtime.converse import land_session
 
         await land_session(
-            session_id, failed=True, agent_id=agent_id,
+            session_id,
+            failed=True,
+            agent_id=agent_id,
             reason=f"consult resume failed: {e}",
         )
         return {"resumed": False, "session_id": session_id, "error": str(e)}
 
     out = await _settle_consult_resume(
-        final, agent=agent, model=model, session_id=session_id,
-        agent_id=agent_id, task_id=wait.get("task_id"),
-        chain=_parked_chain(claimed), proposal_id=(prop or {}).get("id"),
+        final,
+        agent=agent,
+        model=model,
+        session_id=session_id,
+        agent_id=agent_id,
+        task_id=wait.get("task_id"),
+        chain=_parked_chain(claimed),
+        proposal_id=(prop or {}).get("id"),
     )
     await decide_landed(out, model=model)
     return {"resumed": True, "session_id": session_id, "target": target, **out}
@@ -2157,16 +2506,22 @@ async def resume_task_wait(session_id: str, model=None) -> dict | None:
     model = await resolve_model(model, agent_id=agent_id)
 
     await events.emit(
-        "agent.task_resumed", ref_id=session_id,
-        payload={"agent_id": agent_id, "task_id": task["id"],
-                 "task_status": task["status"],
-                 "proposal_id": wait.get("proposal_id")},
+        "agent.task_resumed",
+        ref_id=session_id,
+        payload={
+            "agent_id": agent_id,
+            "task_id": task["id"],
+            "task_status": task["status"],
+            "proposal_id": wait.get("proposal_id"),
+        },
         actor="system",
     )
 
     pending = resume_park.pending_resume(
-        kind="result", text=outcome_text,
-        tool_call_id=wait["tool_call_id"], after="approved",
+        kind="result",
+        text=outcome_text,
+        tool_call_id=wait["tool_call_id"],
+        after="approved",
         proposal_id=wait.get("proposal_id"),
     )
     try:
@@ -2175,8 +2530,11 @@ async def resume_task_wait(session_id: str, model=None) -> dict | None:
         final = await agent.run(
             message_history=messages,
             deferred_tool_results=await deferred_results(
-                messages, wait["tool_call_id"], outcome_text,
-                session_id=session_id, agent_id=agent_id,
+                messages,
+                wait["tool_call_id"],
+                outcome_text,
+                session_id=session_id,
+                agent_id=agent_id,
             ),
             model=model,
             deps=TriageDeps(agent_id=agent_id, session_id=session_id),
@@ -2191,7 +2549,9 @@ async def resume_task_wait(session_id: str, model=None) -> dict | None:
         from central_command.runtime.converse import land_session
 
         await land_session(
-            session_id, failed=True, agent_id=agent_id,
+            session_id,
+            failed=True,
+            agent_id=agent_id,
             reason=f"task-wait resume failed: {e}",
         )
         return {"resumed": False, "session_id": session_id, "error": str(e)}
@@ -2199,9 +2559,15 @@ async def resume_task_wait(session_id: str, model=None) -> dict | None:
     from central_command.gateway import gateway
 
     out = await gateway.finish_decision_resume(
-        session_id=session_id, agent_id=agent_id,
-        proposal_id=wait.get("proposal_id"), after="approved", final=final,
-        agent=agent, model=model, outcome_text=outcome_text, pending=pending,
+        session_id=session_id,
+        agent_id=agent_id,
+        proposal_id=wait.get("proposal_id"),
+        after="approved",
+        final=final,
+        agent=agent,
+        model=model,
+        outcome_text=outcome_text,
+        pending=pending,
     )
     return {"resumed": True, "session_id": session_id, "task_id": task["id"], **out}
 
@@ -2220,8 +2586,15 @@ def _parked_chain(run_state: dict | None) -> tuple[str, ...]:
 
 
 async def _settle_consult_resume(
-    final, *, agent, model, session_id: str, agent_id: str, task_id: str | None,
-    chain: tuple[str, ...] = (), proposal_id: str | None = None,
+    final,
+    *,
+    agent,
+    model,
+    session_id: str,
+    agent_id: str,
+    task_id: str | None,
+    chain: tuple[str, ...] = (),
+    proposal_id: str | None = None,
 ) -> dict:
     """What the woken asker ended on. Every outcome a fresh run can reach, the
     resumed leg can reach too — including consulting AGAIN, which parks another
@@ -2264,25 +2637,41 @@ async def _settle_consult_resume(
     kind = classify_deferred(call)
     if kind == "proposal":
         parked = await park_proposal(
-            session_id=session_id, agent_id=agent_id, result=final, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=final,
+            call=call,
         )
-        return {"deferred": True, "proposal_id": parked["proposal_id"],
-                "intent": parked["proposal"].intent}
+        return {
+            "deferred": True,
+            "proposal_id": parked["proposal_id"],
+            "intent": parked["proposal"].intent,
+        }
     if kind == "ask":
         return await park_question(
-            session_id=session_id, agent_id=agent_id, result=final, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=final,
+            call=call,
             task_id=task_id,
         )
     if kind == "consult":
         return await park_consult_wait(
-            session_id=session_id, agent_id=agent_id, result=final, call=call,
-            task_id=task_id, chain=chain,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=final,
+            call=call,
+            task_id=task_id,
+            chain=chain,
         )
     if kind == "task_wait":
         from central_command.runtime.consult import park_task_wait_deferred
 
         return await park_task_wait_deferred(
-            session_id=session_id, agent_id=agent_id, result=final, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=final,
+            call=call,
         )
     await land_session(session_id, agent_id=agent_id)
     return {
@@ -2295,7 +2684,13 @@ async def _settle_consult_resume(
 
 
 async def _finish_answered_resume(
-    final, *, agent, model, pending: dict, session_id: str, agent_id: str,
+    final,
+    *,
+    agent,
+    model,
+    pending: dict,
+    session_id: str,
+    agent_id: str,
     error_text: str | None = None,
 ) -> dict:
     """The `after=answered` tail: `questions._settle` (the one the live path
@@ -2314,9 +2709,13 @@ async def _finish_answered_resume(
             # The same event the live path writes when a question resume fails,
             # so a retried failure reads identically to a first-try one.
             await events.emit(
-                "task.run_failed", ref_id=task_id,
-                payload={"error": reason, "item_id": item_id,
-                         "transient": classify_failure_text(reason) == "transient"},
+                "task.run_failed",
+                ref_id=task_id,
+                payload={
+                    "error": reason,
+                    "item_id": item_id,
+                    "transient": classify_failure_text(reason) == "transient",
+                },
                 actor="system",
             )
         from central_command.runtime.converse import land_session
@@ -2324,8 +2723,13 @@ async def _finish_answered_resume(
         await land_session(session_id, failed=True, agent_id=agent_id, reason=reason)
         return {"resumed": False, "session_id": session_id}
     out = await questions._settle(
-        final, agent=agent, model=model, item=item, session_id=session_id,
-        agent_id=agent_id, may_drive=True,
+        final,
+        agent=agent,
+        model=model,
+        item=item,
+        session_id=session_id,
+        agent_id=agent_id,
+        may_drive=True,
     )
     await _land_task_question_outcome(item.get("task_id"), out)
     return {"resumed": True, "session_id": session_id, "after": "answered", **out}
@@ -2398,17 +2802,21 @@ async def park_task_retry(
     }
     if item_id:
         state["item_id"] = item_id
-    if not await repo.park_task_retry(
-        task_id, state, hint=f"{RETRY_HINT}: {state['last_error']}"
-    ):
+    if not await repo.park_task_retry(task_id, state, hint=f"{RETRY_HINT}: {state['last_error']}"):
         return None
     await events.emit(
-        "task.run_parked", ref_id=task_id,
-        payload={"transient": True, "attempts": attempts, "kind": kind,
-                 "error": state["last_error"], "item_id": item_id,
-                 "dependencies": state["dependencies"],
-                 "backoff_seconds": backoff,
-                 "not_before": state["not_before"]},
+        "task.run_parked",
+        ref_id=task_id,
+        payload={
+            "transient": True,
+            "attempts": attempts,
+            "kind": kind,
+            "error": state["last_error"],
+            "item_id": item_id,
+            "dependencies": state["dependencies"],
+            "backoff_seconds": backoff,
+            "not_before": state["not_before"],
+        },
         actor="system",
     )
     return state
@@ -2449,9 +2857,9 @@ async def retry_parked_task(task_id: str, model=None) -> dict | None:
     kind = state.get("kind") or "run"
 
     await events.emit(
-        "task.run_retried", ref_id=task_id,
-        payload={"attempt": attempts, "kind": kind,
-                 "agent_id": task.get("agent_id")},
+        "task.run_retried",
+        ref_id=task_id,
+        payload={"attempt": attempts, "kind": kind, "agent_id": task.get("agent_id")},
         actor="system",
     )
 
@@ -2478,26 +2886,30 @@ async def retry_parked_task(task_id: str, model=None) -> dict | None:
         # (epic-outage-doctrine story 4). None = semantic (or the task went
         # terminal underneath): today's FAILED landing, at once.
         parked = await park_task_retry(
-            task_id, e, kind=kind, attempts=attempts + 1,
+            task_id,
+            e,
+            kind=kind,
+            attempts=attempts + 1,
             item_id=state.get("item_id"),
             episode_at=state.get("episode_at") or state.get("parked_at"),
         )
         if parked is not None:
-            return {"parked": True, "task_id": task_id,
-                    "attempts": attempts + 1}
+            return {"parked": True, "task_id": task_id, "attempts": attempts + 1}
         await repo.resolve_task(task_id, "FAILED", outcome=f"run failed: {e}")
         await events.emit(
-            "task.run_failed", ref_id=task_id,
-            payload={"error": str(e),
-                     "transient": classify_failure(e) == TRANSIENT,
-                     "attempts": attempts},
+            "task.run_failed",
+            ref_id=task_id,
+            payload={
+                "error": str(e),
+                "transient": classify_failure(e) == TRANSIENT,
+                "attempts": attempts,
+            },
             actor=f"agent:{task.get('agent_id')}",
         )
         # A FAILED child still resumes its waiting orchestrator — the failure IS
         # the result the loop needs to decide on (D7 phase 2).
         spawn_child_resolved(task)
-        return {"task_id": task_id, "ok": False, "error": str(e),
-                "attempts": attempts}
+        return {"task_id": task_id, "ok": False, "error": str(e), "attempts": attempts}
 
     return {"task_id": task_id, "retried": True, "attempts": attempts, **out}
 
@@ -2542,15 +2954,12 @@ async def _continue_agent(after: str, agent_id: str, model):
         return await _build_agent(model), None
     resolved = await resolve_model(model, agent_id=agent_id)
     if after == "converse":
-        agent = await converse_mod._build(
-            agent_id, resolved, await load_charter(agent_id)
-        )
+        agent = await converse_mod._build(agent_id, resolved, await load_charter(agent_id))
         return agent, resolved
     return await build_agent_for(agent_id, model=resolved), resolved
 
 
-async def _land_resumed_run_failure(task_id: str | None, e: BaseException, *,
-                                    after: str) -> None:
+async def _land_resumed_run_failure(task_id: str | None, e: BaseException, *, after: str) -> None:
     """A resumed or continued run died mid-turn. `_run_live` has already
     landed the SESSION (FAILED, with the reason); this lands the TASK, which
     nothing else owns from here — the startup sweep only lands tasks whose
@@ -2571,7 +2980,8 @@ async def _land_resumed_run_failure(task_id: str | None, e: BaseException, *,
         return
     await repo.resolve_task(task_id, "FAILED", outcome=f"resumed run failed: {e}")
     await events.emit(
-        "task.run_failed", ref_id=task_id,
+        "task.run_failed",
+        ref_id=task_id,
         payload={"error": str(e)[:300], "transient": False, "after": after},
         actor="system",
     )
@@ -2612,10 +3022,16 @@ async def continue_session(item_id: str, model=None) -> dict | None:
     window = int(marker.get("windows") or 1) + 1
 
     await events.emit(
-        "session.continued", ref_id=session_id,
-        payload={"item_id": item_id, "agent_id": agent_id, "window": window,
-                 "requests": settings.run_request_limit, "task_id": task_id,
-                 "after": after},
+        "session.continued",
+        ref_id=session_id,
+        payload={
+            "item_id": item_id,
+            "agent_id": agent_id,
+            "window": window,
+            "requests": settings.run_request_limit,
+            "task_id": task_id,
+            "after": after,
+        },
         actor="operator",
     )
 
@@ -2625,14 +3041,21 @@ async def continue_session(item_id: str, model=None) -> dict | None:
     deps = TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True)
     try:
         result = await run_mod._run_live(
-            agent, None, model=run_model, deps=deps,
-            agent_id=agent_id, session_id=session_id,
+            agent,
+            None,
+            model=run_model,
+            deps=deps,
+            agent_id=agent_id,
+            session_id=session_id,
             message_history=load_messages(claimed),
             # The orchestrator's task row is already IN_PROGRESS from round 1
             # and its id travels in the loop state — re-linking it here would
             # differ from what `maybe_resume` does on the same session.
             task_id=None if after == "orchestrator" else task_id,
-            continuable=True, window=window, after=after, continue_state=state,
+            continuable=True,
+            window=window,
+            after=after,
+            continue_state=state,
         )
     except run_mod.RunStopped:
         # The operator stopped the continued run. Already parked STOPPED by
@@ -2659,8 +3082,9 @@ async def continue_session(item_id: str, model=None) -> dict | None:
     if after == "orchestrator":
         task = await repo.get_task(state["task_id"])
         if task is None:  # the project was deleted under the park
-            return await _fail(state["task_id"], session_id,
-                               "the project task vanished while parked")
+            return await _fail(
+                state["task_id"], session_id, "the project task vanished while parked"
+            )
         out = await _process(task, session_id, result, state, deps, model)
         return {"continued": True, "window": window, **out}
     if after == "converse":
@@ -2669,7 +3093,10 @@ async def continue_session(item_id: str, model=None) -> dict | None:
         return {"continued": True, "window": window, **out}
 
     out = await run_mod._land(
-        result, session_id=session_id, agent_id=agent_id, task_id=task_id,
+        result,
+        session_id=session_id,
+        agent_id=agent_id,
+        task_id=task_id,
         tokens=run_mod._total_tokens(result),
     )
     # The shared task-row landing, so a continued run lands exactly as an
@@ -2700,7 +3127,10 @@ async def request_stop(session_id: str) -> bool:
     if not await repo.request_session_stop(session_id):
         return False
     await events.emit(
-        "session.stop_requested", ref_id=session_id, payload={}, actor="operator",
+        "session.stop_requested",
+        ref_id=session_id,
+        payload={},
+        actor="operator",
     )
     return True
 
@@ -2739,7 +3169,8 @@ async def resume_stopped_session(session_id: str, model=None) -> dict | None:
     task_id = marker.get("task_id")
 
     await events.emit(
-        "session.resumed", ref_id=session_id,
+        "session.resumed",
+        ref_id=session_id,
         payload={"agent_id": agent_id, "after": after, "task_id": task_id},
         actor="operator",
     )
@@ -2750,12 +3181,18 @@ async def resume_stopped_session(session_id: str, model=None) -> dict | None:
     deps = TriageDeps(agent_id=agent_id, session_id=session_id, park_reads=True)
     try:
         result = await run_mod._run_live(
-            agent, None, model=run_model, deps=deps,
-            agent_id=agent_id, session_id=session_id,
+            agent,
+            None,
+            model=run_model,
+            deps=deps,
+            agent_id=agent_id,
+            session_id=session_id,
             message_history=load_messages(claimed),
             task_id=None if after == "orchestrator" else task_id,
-            continuable=True, window=int(marker.get("windows") or 1),
-            after=after, continue_state=state,
+            continuable=True,
+            window=int(marker.get("windows") or 1),
+            after=after,
+            continue_state=state,
         )
     except run_mod.RunStopped:
         # Stopped again at the first boundary — the accepted race documented on
@@ -2778,17 +3215,20 @@ async def resume_stopped_session(session_id: str, model=None) -> dict | None:
     if after == "orchestrator":
         task = await repo.get_task(state["task_id"])
         if task is None:
-            return await _fail(state["task_id"], session_id,
-                               "the project task vanished while stopped")
-        return {"resumed": True, **await _process(task, session_id, result, state,
-                                                  deps, model)}
+            return await _fail(
+                state["task_id"], session_id, "the project task vanished while stopped"
+            )
+        return {"resumed": True, **await _process(task, session_id, result, state, deps, model)}
     if after == "converse":
         out = await converse_mod._land_turn(session_id, agent_id, result)
         await decide_landed(out, model=model)
         return {"resumed": True, **out}
 
     out = await run_mod._land(
-        result, session_id=session_id, agent_id=agent_id, task_id=task_id,
+        result,
+        session_id=session_id,
+        agent_id=agent_id,
+        task_id=task_id,
         tokens=run_mod._total_tokens(result),
     )
     await _land_task_question_outcome(task_id, out)
@@ -2810,19 +3250,29 @@ async def _decline_continue(item_id: str) -> dict | None:
     task_id = marker.get("task_id")
     from central_command.runtime.converse import land_session
 
-    await land_session(session_id, failed=True, agent_id=item["agent_id"],
-                       reason="the operator declined another continue window")
+    await land_session(
+        session_id,
+        failed=True,
+        agent_id=item["agent_id"],
+        reason="the operator declined another continue window",
+    )
     await events.emit(
-        "session.window_declined", ref_id=session_id,
-        payload={"item_id": item_id, "agent_id": item["agent_id"],
-                 "windows": marker.get("windows"), "task_id": task_id},
+        "session.window_declined",
+        ref_id=session_id,
+        payload={
+            "item_id": item_id,
+            "agent_id": item["agent_id"],
+            "windows": marker.get("windows"),
+            "task_id": task_id,
+        },
         actor="operator",
     )
     reason = "the operator declined another request window"
     if task_id:
         await repo.resolve_task(task_id, "FAILED", outcome=reason)
         await events.emit(
-            "task.run_failed", ref_id=task_id,
+            "task.run_failed",
+            ref_id=task_id,
             payload={"error": reason, "item_id": item_id, "transient": False},
             actor="operator",
         )
@@ -2846,15 +3296,12 @@ async def answer_item(item_id: str, answer: str, verdict: str | None = None) -> 
         if verdict not in ("approved", "revise"):
             raise ValueError("plan review requires verdict 'approved' or 'revise'")
         if verdict == "revise" and not answer.strip():
-            raise ValueError("a revision requires a note — the orchestrator "
-                             "replans from it")
+            raise ValueError("a revision requires a note — the orchestrator replans from it")
     elif item["kind"] == "continue":
         # A window grant is a yes/no, not an answer: the run has no question to
         # answer, it ran out of rope. A note is welcome and optional.
         if verdict not in ("approved", "declined"):
-            raise ValueError(
-                "a continuation requires verdict 'approved' or 'declined'"
-            )
+            raise ValueError("a continuation requires verdict 'approved' or 'declined'")
     else:
         verdict = None
         if not answer.strip():
@@ -2863,10 +3310,15 @@ async def answer_item(item_id: str, answer: str, verdict: str | None = None) -> 
     if not ok:
         raise ValueError(f"operator item {item_id!r} is already answered")
     event = await events.emit(
-        "orchestration.item_answered", ref_id=item_id,
-        payload={"kind": item["kind"], "session_id": item["session_id"],
-                 "task_id": item.get("task_id"), "verdict": verdict,
-                 "answer": answer.strip()[:2000]},
+        "orchestration.item_answered",
+        ref_id=item_id,
+        payload={
+            "kind": item["kind"],
+            "session_id": item["session_id"],
+            "task_id": item.get("task_id"),
+            "verdict": verdict,
+            "answer": answer.strip()[:2000],
+        },
         actor="operator",
     )
     # A question from a PLAIN assigned task resumes that task's own run, not an
@@ -2881,16 +3333,15 @@ async def answer_item(item_id: str, answer: str, verdict: str | None = None) -> 
         try:
             await _close_answered_discussion(item, answer.strip())
         except Exception:  # the answer record outranks the close
-            log.exception(
-                "closing the discussion lane of %s failed", item_id
-            )
+            log.exception("closing the discussion lane of %s failed", item_id)
     if item["kind"] == "continue":
         # The verdict is already recorded above — emit before the run it
         # authorises, like every other decision here.
-        keep(asyncio.create_task(
-            continue_session(item_id) if verdict == "approved"
-            else _decline_continue(item_id)
-        ))
+        keep(
+            asyncio.create_task(
+                continue_session(item_id) if verdict == "approved" else _decline_continue(item_id)
+            )
+        )
     elif item["kind"] == "question" and not await _belongs_to_a_project(item):
         # Only a question an AGENT asked has a run paused on it (its
         # `tool_call_id`). A notice the SYSTEM raised (the retired exhaustion
@@ -2901,8 +3352,7 @@ async def answer_item(item_id: str, answer: str, verdict: str | None = None) -> 
             keep(asyncio.create_task(_resume_task_question(item_id, answer.strip())))
     else:
         keep(asyncio.create_task(child_resolved({"parent_session_id": item["session_id"]})))
-    return {"item_id": item_id, "kind": item["kind"], "verdict": verdict,
-            "event_id": event["id"]}
+    return {"item_id": item_id, "kind": item["kind"], "verdict": verdict, "event_id": event["id"]}
 
 
 async def _close_answered_discussion(item: dict, answer: str) -> None:
@@ -2948,7 +3398,9 @@ async def _close_answered_discussion(item: dict, answer: str) -> None:
     )
     await repo.update_session_run_state(session_id, {**run_state, "messages": messages})
     await converse.close_session(
-        session_id, agent_id=session["agent_id"], reason="concluded",
+        session_id,
+        agent_id=session["agent_id"],
+        reason="concluded",
         actor="operator",
     )
 
@@ -2976,14 +3428,12 @@ async def _resume_task_question(item_id: str, answer: str) -> None:
         # and a transient one of those is still an outage, not the task's
         # fault: the task queues for a re-entry through this same path, with
         # the operator's answer re-read from the item row.
-        if task_id and await park_task_retry(
-            task_id, e, kind="answer", item_id=item_id
-        ):
+        if task_id and await park_task_retry(task_id, e, kind="answer", item_id=item_id):
             return
         await events.emit(
-            "task.run_failed", ref_id=task_id or item_id,
-            payload={"error": str(e), "item_id": item_id,
-                     "transient": is_transient(e)},
+            "task.run_failed",
+            ref_id=task_id or item_id,
+            payload={"error": str(e), "item_id": item_id, "transient": is_transient(e)},
             actor="system",
         )
         if task_id:
@@ -3031,9 +3481,13 @@ async def _land_task_question_outcome(task_id: str | None, out: dict) -> None:
         return
     if out.get("asked"):
         await events.emit(
-            "task.blocked", ref_id=task_id,
-            payload={"item_id": out["item_id"], "session_id": out["session_id"],
-                     "question": out["question"][:500]},
+            "task.blocked",
+            ref_id=task_id,
+            payload={
+                "item_id": out["item_id"],
+                "session_id": out["session_id"],
+                "question": out["question"][:500],
+            },
             actor="system",
         )
         return
@@ -3047,17 +3501,19 @@ async def _land_task_question_outcome(task_id: str | None, out: dict) -> None:
     if out.get("deferred"):
         await repo.park_task_review(task_id, out["session_id"])
         await events.emit(
-            "task.review", ref_id=task_id,
-            payload={"proposal_id": out["proposal_id"],
-                     "session_id": out["session_id"]},
+            "task.review",
+            ref_id=task_id,
+            payload={"proposal_id": out["proposal_id"], "session_id": out["session_id"]},
             actor="system",
         )
         await decide_landed(out)
         return
     await repo.resolve_task(task_id, "DONE", outcome=str(out.get("output", "")))
     await events.emit(
-        "task.completed", ref_id=task_id,
-        payload={"outcome": str(out.get("output", ""))[:500]}, actor="system",
+        "task.completed",
+        ref_id=task_id,
+        payload={"outcome": str(out.get("output", ""))[:500]},
+        actor="system",
     )
 
 

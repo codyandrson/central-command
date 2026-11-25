@@ -108,9 +108,7 @@ def _decode(att: dict) -> tuple[str, str, bytes]:
     media_type = str(att.get("mimeType") or att.get("media_type") or "").strip().lower()
     raw = att.get("content") or att.get("data") or ""
     if not isinstance(raw, str) or not raw:
-        raise AttachmentRefused(
-            "attachment_empty", f"{name!r} arrived with no content.", name
-        )
+        raise AttachmentRefused("attachment_empty", f"{name!r} arrived with no content.", name)
     try:
         data = base64.b64decode(raw, validate=True)
     except (binascii.Error, ValueError) as exc:
@@ -120,15 +118,12 @@ def _decode(att: dict) -> tuple[str, str, bytes]:
             name,
         ) from exc
     if not data:
-        raise AttachmentRefused(
-            "attachment_empty", f"{name!r} is empty (0 bytes).", name
-        )
+        raise AttachmentRefused("attachment_empty", f"{name!r} is empty (0 bytes).", name)
     cap = settings.attachment_max_bytes
     if len(data) > cap:
         raise AttachmentRefused(
             "attachment_too_large",
-            f"{name!r} is {len(data):,} bytes, over the "
-            f"{cap:,}-byte attachment limit.",
+            f"{name!r} is {len(data):,} bytes, over the {cap:,}-byte attachment limit.",
             name,
         )
     return name, media_type, data
@@ -217,8 +212,7 @@ async def _transcribe_page(model_id: str, png: bytes) -> str:
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": "data:image/png;base64,"
-                                    + base64.b64encode(png).decode()
+                                    "url": "data:image/png;base64," + base64.b64encode(png).decode()
                                 },
                             },
                         ],
@@ -237,9 +231,7 @@ def _normalize_ocr(text: str | None) -> str:
     return "" if t == OCR_EMPTY_SENTINEL else t
 
 
-async def _ocr_scanned_pdf(
-    name: str, data: bytes, model_id: str | None
-) -> tuple[str, bool] | None:
+async def _ocr_scanned_pdf(name: str, data: bytes, model_id: str | None) -> tuple[str, bool] | None:
     """The scanned-PDF fallback: render pages, transcribe each through the
     session's model. Returns the text, or None when the path is unavailable or
     produced nothing — None means the caller's `attachment_no_text` refusal
@@ -335,9 +327,7 @@ async def _images_deliverable(model_id: str | None) -> tuple[bool, str]:
     )
 
 
-async def prepare(
-    attachments: list | None, *, model_id: str | None
-) -> tuple[str, list[dict]]:
+async def prepare(attachments: list | None, *, model_id: str | None) -> tuple[str, list[dict]]:
     """Validate EVERY attachment and return (markdown_block, manifest).
 
     Raises `AttachmentRefused` on the first failure — all-or-nothing per send.

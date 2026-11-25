@@ -36,6 +36,7 @@ def pinned(monkeypatch):
     # fractions against a bare 10k window, so pin the headroom off here.
     async def bare_settings():
         return {**context.DEFAULTS, "output_headroom": False}
+
     monkeypatch.setattr(context, "load_settings", bare_settings)
     yield
     context._last_fraction.clear()
@@ -65,18 +66,27 @@ async def test_a_run_state_write_preserves_keys_it_did_not_mention():
     """The property the split needs: `update_session_run_state({'messages': …})`
     must not take `archived` (or a pending marker) down with it."""
     session_id = await _a_session()
-    await repo.update_session_run_state(session_id, {
-        "messages": [{"kind": "request", "parts": []}],
-        "archived": [{"kind": "request", "parts": [{"part_kind": "system-prompt",
-                                                    "content": "the charter"}]}],
-    })
+    await repo.update_session_run_state(
+        session_id,
+        {
+            "messages": [{"kind": "request", "parts": []}],
+            "archived": [
+                {
+                    "kind": "request",
+                    "parts": [{"part_kind": "system-prompt", "content": "the charter"}],
+                }
+            ],
+        },
+    )
     await repo.park_session_awaiting_continue(session_id, {"windows": 1})
 
     # A plain transcript snapshot — mentions `messages` and nothing else.
-    await repo.update_session_run_state(session_id, {
-        "messages": [{"kind": "request", "parts": []},
-                     {"kind": "response", "parts": []}],
-    })
+    await repo.update_session_run_state(
+        session_id,
+        {
+            "messages": [{"kind": "request", "parts": []}, {"kind": "response", "parts": []}],
+        },
+    )
 
     rs = await repo.get_session_run_state(session_id)
     assert len(rs["messages"]) == 2, "the writer's own key IS replaced wholesale"
@@ -109,9 +119,14 @@ async def test_the_paused_save_also_merges():
     """`save_paused_session` is a park, not a reset — same rule."""
     session_id = await _a_session()
     await repo.update_session_run_state(session_id, {"archived": [{"kind": "request"}]})
-    await repo.save_paused_session(session_id, "ctx-test-agent", {
-        "messages": [{"kind": "response", "parts": []}], "tool_call_id": "call_1",
-    })
+    await repo.save_paused_session(
+        session_id,
+        "ctx-test-agent",
+        {
+            "messages": [{"kind": "response", "parts": []}],
+            "tool_call_id": "call_1",
+        },
+    )
 
     rs = await repo.get_session_run_state(session_id)
     assert rs["tool_call_id"] == "call_1"
@@ -131,8 +146,10 @@ def test_full_messages_reads_both_halves_and_tolerates_neither():
         "archived comes FIRST — it is the older half of one transcript"
     )
     # The human-read surface sees the whole thing, oldest first.
-    assert [t["content"] for t in simplify_messages({"archived": old, "messages": live})] \
-        == ["then", "now"]
+    assert [t["content"] for t in simplify_messages({"archived": old, "messages": live})] == [
+        "then",
+        "now",
+    ]
 
 
 # --- the pressure signal ------------------------------------------------------
@@ -143,8 +160,11 @@ def _bulky(fraction: float, window: int) -> dict:
     (the estimate is chars/CHARS_PER_TOKEN, and json.dumps adds ~20 chars of
     framing)."""
     chars = int(fraction * window * context.CHARS_PER_TOKEN)
-    return {"messages": [{"kind": "request", "parts": [
-        {"part_kind": "user-prompt", "content": "x" * chars}]}]}
+    return {
+        "messages": [
+            {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "x" * chars}]}
+        ]
+    }
 
 
 @needs_pg
@@ -154,8 +174,11 @@ async def test_pressure_fires_over_the_threshold_and_then_throttles(monkeypatch)
     session_id = await _a_session()
 
     async def emitted() -> list[dict]:
-        return [e for e in await repo.list_events_of_kinds(["session.context_pressure"])
-                if e["ref_id"] == session_id]
+        return [
+            e
+            for e in await repo.list_events_of_kinds(["session.context_pressure"])
+            if e["ref_id"] == session_id
+        ]
 
     await context.check_pressure(session_id, _bulky(0.5, 10_000), agent_id="ctx-test-agent")
     assert await emitted() == [], "under the threshold says nothing"
@@ -184,12 +207,16 @@ async def test_the_test_model_measures_nothing(monkeypatch):
 
     await context.check_pressure(session_id, _bulky(0.9, 10_000), agent_id="ctx-test-agent")
 
-    assert [e for e in await repo.list_events_of_kinds(["session.context_pressure"])
-            if e["ref_id"] == session_id] == []
+    assert [
+        e
+        for e in await repo.list_events_of_kinds(["session.context_pressure"])
+        if e["ref_id"] == session_id
+    ] == []
 
 
 async def test_a_broken_check_cannot_break_the_run(monkeypatch):
     """Telemetry riding on a run must never be able to kill it."""
+
     async def boom() -> int:
         raise RuntimeError("proxy on fire")
 
@@ -212,10 +239,15 @@ async def test_pressure_measures_against_the_session_models_window(monkeypatch):
 
     async def fake_emit(kind, **kw):
         emitted.append((kind, kw["payload"]))
+
     from central_command import events
+
     monkeypatch.setattr(events, "emit", fake_emit)
-    run_state = {"messages": [{"kind": "request", "parts": [
-        {"part_kind": "user-prompt", "content": "x" * 40_000}]}]}
+    run_state = {
+        "messages": [
+            {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "x" * 40_000}]}
+        ]
+    }
 
     await context.check_pressure("sess_bigmodel", run_state, agent_id="a", model="big-model")
     assert emitted == [], "under 2% of a 1M window is not pressure"

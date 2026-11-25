@@ -72,7 +72,8 @@ async def test_transcript_is_persisted_incrementally_while_running(monkeypatch):
     # And each one announced itself on the log (content stays in run_state —
     # the event carries counts only).
     steps = [
-        e for e in await repo.list_events_of_kinds(["session.step"])
+        e
+        for e in await repo.list_events_of_kinds(["session.step"])
         if e["ref_id"] == run["session_id"]
     ]
     assert len(steps) == len(snapshots)
@@ -108,11 +109,14 @@ async def test_failed_run_keeps_the_partial_transcript():
     def _respond(messages, info) -> ModelResponse:
         calls["n"] += 1
         if calls["n"] == 1:
-            return ModelResponse(parts=[ToolCallPart(
-                tool_name="record_thread_decision",
-                args={"fold": False, "covered_message_ids": [],
-                      "rationale": "solo email"},
-            )])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="record_thread_decision",
+                        args={"fold": False, "covered_message_ids": [], "rationale": "solo email"},
+                    )
+                ]
+            )
         raise RuntimeError("model exploded mid-run")
 
     before = {s["id"] for s in await repo.list_sessions(limit=500)}
@@ -139,10 +143,14 @@ async def test_a_looping_run_is_cut_off_and_keeps_its_partial_transcript(monkeyp
     monkeypatch.setattr(settings, "run_request_limit", 3)
 
     def _loop(messages, info) -> ModelResponse:
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="record_thread_decision",
-            args={"fold": False, "covered_message_ids": [], "rationale": "again"},
-        )])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="record_thread_decision",
+                    args={"fold": False, "covered_message_ids": [], "rationale": "again"},
+                )
+            ]
+        )
 
     before = {s["id"] for s in await repo.list_sessions(limit=500)}
     with pytest.raises(UsageLimitExceeded):
@@ -150,9 +158,7 @@ async def test_a_looping_run_is_cut_off_and_keeps_its_partial_transcript(monkeyp
 
     new = [s for s in await repo.list_sessions(limit=500) if s["id"] not in before]
     assert len(new) == 1 and new[0]["status"] == "FAILED"
-    kinds = [t["kind"] for t in simplify_messages(
-        await repo.get_session_run_state(new[0]["id"])
-    )]
+    kinds = [t["kind"] for t in simplify_messages(await repo.get_session_run_state(new[0]["id"]))]
     assert "tool-call" in kinds and "tool-return" in kinds
 
 
@@ -180,9 +186,7 @@ async def test_the_startup_landing_closes_orphans_whatever_their_age_never_faile
             assert await repo.session_status(sid) == "STOPPED"
             assert (await repo.get_session(sid))["closed_reason"] == repo.RESTART_REASON
     finally:
-        await conn.execute(
-            "delete from session where id in ($1, $2)", stale, fresh
-        )
+        await conn.execute("delete from session where id in ($1, $2)", stale, fresh)
         await conn.close()
 
 
@@ -201,9 +205,7 @@ async def test_outgoing_request_is_persisted_before_the_first_response(monkeypat
         return await real_update(session_id, run_state)
 
     monkeypatch.setattr(repo, "update_session_run_state", recording_update)
-    await ingest_and_propose(
-        "Dana: DEMO-1 slipped, due Aug 3.", model=make_no_action_model()
-    )
+    await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=make_no_action_model())
     messages = first[0]["messages"]
     # Nothing but the request: no model response has happened yet.
     assert messages and all(m["kind"] == "request" for m in messages)

@@ -56,9 +56,13 @@ _HOSTNAME_KEY = "kubernetes" + r"\.io/hostname"
 # scalar after the key, a `values: [lit]`, or a `values:` block list.
 _HOSTNAME_VALUE = re.compile(
     _HOSTNAME_KEY + r"""["']?\s*[:=]\s*["']?[A-Za-z0-9]"""
-    r"""|""" + _HOSTNAME_KEY + r"""(?:[^\n]*\n){0,4}?[^\n]*values["']?\s*:\s*(?:\[\s*["']?|\n\s*-\s*["']?)[A-Za-z0-9]"""
+    r"""|"""
+    + _HOSTNAME_KEY
+    + r"""(?:[^\n]*\n){0,4}?[^\n]*values["']?\s*:\s*(?:\[\s*["']?|\n\s*-\s*["']?)[A-Za-z0-9]"""
 )
-_UNIT_KEY = re.compile(r"^(User|Group|WorkingDirectory|ExecStart|EnvironmentFile|Environment)=(.*)$", re.MULTILINE)
+_UNIT_KEY = re.compile(
+    r"^(User|Group|WorkingDirectory|ExecStart|EnvironmentFile|Environment)=(.*)$", re.MULTILINE
+)
 _TOKEN = re.compile(r"@[A-Za-z_][A-Za-z0-9_]*@|\$\{[^}]+\}|\{\{[^}]+\}\}|<[^>]+>")
 
 _WEB_OURS = re.compile(
@@ -77,7 +81,9 @@ def in_scope(path: str) -> bool:
 
 
 def tracked_files(root: Path) -> list[str]:
-    out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], check=True, capture_output=True).stdout
+    out = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z"], check=True, capture_output=True
+    ).stdout
     return [p for p in out.decode("utf-8", "surrogateescape").split("\0") if p and in_scope(p)]
 
 
@@ -143,6 +149,7 @@ def _need_checkout() -> None:
 
 # -- the tree ----------------------------------------------------------------
 
+
 def test_tracked_tree_holds_no_shape():
     _need_checkout()
     hits = sorted(find_hits(ROOT))
@@ -154,6 +161,7 @@ def test_tracked_tree_holds_no_shape():
 
 
 # -- the shapes, each planted in a temp tracked file -------------------------
+
 
 def _repo(tmp_path: Path, files: dict[str, str]) -> Path:
     if not shutil.which("git"):
@@ -170,7 +178,7 @@ def _repo(tmp_path: Path, files: dict[str, str]) -> Path:
 def _planted(shape: str) -> tuple[str, str]:
     """(path, text) planting `shape`, its values built at runtime."""
     ip = ".".join(["100", "64", "1", "9"])  # noqa: FLY002 — no literal address in the source; in 100.64.0.0/10, outside the /24
-    name = "zq" + "7acct"                                       # not in the example set
+    name = "zq" + "7acct"  # not in the example set
     if shape == "a":
         return "deploy/x.sh", f"ssh {ip}\n"
     if shape == "b":
@@ -178,7 +186,10 @@ def _planted(shape: str) -> tuple[str, str]:
     if shape == "c":
         return "deploy/k3s/x.sh", "T=${CC_COMPUTE" + "_SSH:-" + name + "@host}\n"
     if shape == "d":
-        return "central_command/x.py", 'sel = {"key": "kubernetes.io/' + 'hostname", "values": ["' + name + '"]}\n'
+        return (
+            "central_command/x.py",
+            'sel = {"key": "kubernetes.io/' + 'hostname", "values": ["' + name + '"]}\n',
+        )
     if shape == "e":
         return "deploy/k3s/cc-x.service.in", f"[Service]\nUser={name}\n"
     raise AssertionError(shape)
@@ -194,7 +205,10 @@ def test_planted_shape_fails(tmp_path, shape):
 def test_a_unit_template_home_path_is_shape_e(tmp_path):
     # Also shape b (a /home/<name>/ path); the point is that e fires on a path in a directive.
     path = "deploy/k3s/cc-x.service.in"
-    root = _repo(tmp_path / "r", {path: "[Service]\nUser=@CC_OWNER@\nWorkingDirectory=/home/" + "zq7acct/repo\n"})
+    root = _repo(
+        tmp_path / "r",
+        {path: "[Service]\nUser=@CC_OWNER@\nWorkingDirectory=/home/" + "zq7acct/repo\n"},
+    )
     assert (path, "e") in find_hits(root)
 
 
@@ -242,7 +256,7 @@ def test_the_working_tree_is_not_scanned_only_tracked_files(tmp_path):
     path, text = _planted("a")
     root = _repo(tmp_path / "r", {"README.md": "clean\n"})
     (root / path).parent.mkdir(parents=True, exist_ok=True)
-    (root / path).write_text(text)                     # untracked
+    (root / path).write_text(text)  # untracked
     assert find_hits(root) == set()
 
 

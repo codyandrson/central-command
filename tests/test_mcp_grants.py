@@ -49,9 +49,7 @@ async def _insert_mcp_server(server_id: str, status: str = "registered", **extra
 async def _cleanup_mcp_server(server_id: str) -> None:
     conn = await repo._conn()
     try:
-        await conn.execute(
-            "delete from agent_mcp_gate_override where server_id = $1", server_id
-        )
+        await conn.execute("delete from agent_mcp_gate_override where server_id = $1", server_id)
         await conn.execute("delete from mcp_tool where server_id = $1", server_id)
         await conn.execute("delete from mcp_server where id = $1", server_id)
     finally:
@@ -62,9 +60,7 @@ async def _cleanup_agent(agent_id: str) -> None:
     conn = await repo._conn()
     try:
         await conn.execute("delete from agent_grant where agent_id = $1", agent_id)
-        await conn.execute(
-            "delete from agent_mcp_gate_override where agent_id = $1", agent_id
-        )
+        await conn.execute("delete from agent_mcp_gate_override where agent_id = $1", agent_id)
         await conn.execute("delete from agent where id = $1", agent_id)
     finally:
         await conn.close()
@@ -80,8 +76,14 @@ async def test_upsert_mcp_tools_preserves_default_gate_on_rediscovery():
     try:
         await repo.upsert_mcp_tools(server_id, [{"name": "do_thing", "description": "v1"}])
         rows = await repo.list_mcp_tools(server_id)
-        assert rows == [{"server_id": server_id, "tool_name": "do_thing",
-                         "default_gate": "human approval", "description": "v1"}]
+        assert rows == [
+            {
+                "server_id": server_id,
+                "tool_name": "do_thing",
+                "default_gate": "human approval",
+                "description": "v1",
+            }
+        ]
 
         # The operator ungates it.
         assert await repo.set_mcp_tool_default_gate(server_id, "do_thing", "ungated")
@@ -179,10 +181,13 @@ async def test_mcp_charter_section_renders_effective_gates_per_agent():
     await _insert_mcp_server(server_id)
     await repo.upsert_agent(agent_id, "MCP Grant Test", "mg", "test")
     try:
-        await repo.upsert_mcp_tools(server_id, [
-            {"name": "read_thing", "description": "reads"},
-            {"name": "write_thing", "description": "writes"},
-        ])
+        await repo.upsert_mcp_tools(
+            server_id,
+            [
+                {"name": "read_thing", "description": "reads"},
+                {"name": "write_thing", "description": "writes"},
+            ],
+        )
         await repo.set_agent_mcp_gate_override(agent_id, server_id, "read_thing", "ungated")
 
         section = await packs.mcp_charter_section(agent_id, [f"mcp:{server_id}"])
@@ -229,10 +234,13 @@ async def test_toolset_split_by_effective_gate(monkeypatch):
     await _insert_mcp_server(server_id)
     await repo.upsert_agent(agent_id, "MCP Grant Test", "mg", "test")
     try:
-        await repo.upsert_mcp_tools(server_id, [
-            {"name": "gated_tool", "description": ""},
-            {"name": "ungated_tool", "description": ""},
-        ])
+        await repo.upsert_mcp_tools(
+            server_id,
+            [
+                {"name": "gated_tool", "description": ""},
+                {"name": "ungated_tool", "description": ""},
+            ],
+        )
         await repo.set_agent_mcp_gate_override(agent_id, server_id, "ungated_tool", "ungated")
 
         toolsets = await packs.mcp_toolsets_for(agent_id, [f"mcp:{server_id}"])
@@ -275,9 +283,7 @@ async def test_propose_mcp_tool_call_refuses_unknown_tool(monkeypatch):
     server_id = "mg-svr-f"
     await _insert_mcp_server(server_id)
     try:
-        out = await tools_mod.propose_mcp_tool_call(
-            _Ctx(), server_id, "no-such-tool", {}, "why"
-        )
+        out = await tools_mod.propose_mcp_tool_call(_Ctx(), server_id, "no-such-tool", {}, "why")
         assert "not a known tool" in out
     finally:
         await _cleanup_mcp_server(server_id)
@@ -318,15 +324,20 @@ async def test_propose_mcp_tool_call_captures_expected_proposal_shape(monkeypatc
 
         with pytest.raises(CallDeferred) as exc:
             await tools_mod.propose_mcp_tool_call(
-                _Ctx(agent_id=agent_id), server_id, "gated_tool",
-                {"x": 1}, "need to do the thing",
+                _Ctx(agent_id=agent_id),
+                server_id,
+                "gated_tool",
+                {"x": 1},
+                "need to do the thing",
             )
         proposal = exc.value.metadata["proposal"]
         action = proposal["actions"][0]
         assert action["capability"] == "mcp.tool_call@v1"
         assert action["arguments"] == {
-            "server_id": server_id, "tool_name": "gated_tool",
-            "arguments": {"x": 1}, "rationale": "need to do the thing",
+            "server_id": server_id,
+            "tool_name": "gated_tool",
+            "arguments": {"x": 1},
+            "rationale": "need to do the thing",
         }
     finally:
         await _cleanup_mcp_server(server_id)
@@ -347,8 +358,12 @@ def test_mcp_tool_call_is_registered_gated_and_dispatched():
 def _tool_call_action(server_id: str, tool_name: str = "gated_tool") -> Action:
     return Action(
         capability="mcp.tool_call@v1",
-        arguments={"server_id": server_id, "tool_name": tool_name,
-                   "arguments": {}, "rationale": "why"},
+        arguments={
+            "server_id": server_id,
+            "tool_name": tool_name,
+            "arguments": {},
+            "rationale": "why",
+        },
         target_ref={"system": "mcp_server", "id": server_id, "read_version": "unknown"},
         reversibility=Reversibility.reversible,
     )
@@ -361,7 +376,9 @@ async def test_tool_call_refuses_when_server_not_registered(monkeypatch):
     try:
         with pytest.raises(executor.ExecutionFailed, match="not registered"):
             await executor.execute(
-                [_tool_call_action(server_id)], approver="human:lee", source_refs=[],
+                [_tool_call_action(server_id)],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _cleanup_mcp_server(server_id)
@@ -375,7 +392,8 @@ async def test_tool_call_refuses_unknown_tool_at_execute_time(monkeypatch):
         with pytest.raises(executor.ExecutionFailed, match="not a known tool"):
             await executor.execute(
                 [_tool_call_action(server_id, "no-such-tool")],
-                approver="human:lee", source_refs=[],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _cleanup_mcp_server(server_id)
@@ -396,7 +414,9 @@ async def test_tool_call_happy_path_dispatches_and_caps_result(monkeypatch):
         monkeypatch.setattr(litellm_client, "call_mcp_tool", fake_call)
 
         outcome = await executor.execute(
-            [_tool_call_action(server_id)], approver="human:lee", source_refs=[],
+            [_tool_call_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         # The PROXY name (underscored) — LiteLLM forbids '-' and 404s on a name
         # it never registered. Live-verified 2026-08-04.
@@ -491,7 +511,9 @@ async def test_set_mcp_tool_gate_route_validates_and_emits(monkeypatch):
         await repo.upsert_mcp_tools(server_id, [{"name": "t", "description": ""}])
 
         with pytest.raises(HTTPException) as exc:
-            await routes.set_mcp_tool_gate(server_id, "t", routes.MCPToolGateIn(default_gate="bogus"))
+            await routes.set_mcp_tool_gate(
+                server_id, "t", routes.MCPToolGateIn(default_gate="bogus")
+            )
         assert exc.value.status_code == 422
 
         seen = {}
@@ -509,7 +531,9 @@ async def test_set_mcp_tool_gate_route_validates_and_emits(monkeypatch):
         assert seen["payload"]["tool_name"] == "t"
 
         with pytest.raises(HTTPException) as exc:
-            await routes.set_mcp_tool_gate(server_id, "no-such-tool", routes.MCPToolGateIn(default_gate="ungated"))
+            await routes.set_mcp_tool_gate(
+                server_id, "no-such-tool", routes.MCPToolGateIn(default_gate="ungated")
+            )
         assert exc.value.status_code == 404
     finally:
         await _cleanup_mcp_server(server_id)
@@ -600,10 +624,13 @@ async def test_agent_mcp_overrides_route_wire_shape_override_over_default_and_hi
     await repo.upsert_agent(agent_id, "MCP Read Test", "mg", "test")
     await repo.upsert_agent(other, "MCP Read Test 2", "mg", "test")
     try:
-        await repo.upsert_mcp_tools(server_id, [
-            {"name": "echo", "description": "Echo back the input text"},
-            {"name": "shout", "description": "Upper-case it"},
-        ])
+        await repo.upsert_mcp_tools(
+            server_id,
+            [
+                {"name": "echo", "description": "Echo back the input text"},
+                {"name": "shout", "description": "Upper-case it"},
+            ],
+        )
         await repo.grant_pack(agent_id, f"mcp:{server_id}")
         # An agent with no mcp: grant: held servers are empty, whatever overrides exist.
         none = jsonable_encoder(await routes.get_agent_mcp_overrides(other))
@@ -616,18 +643,35 @@ async def test_agent_mcp_overrides_route_wire_shape_override_over_default_and_hi
         assert out["mcp_grants"] == [f"mcp:{server_id}"]
         [srv] = out["servers"]
         assert set(srv) == {"server_id", "status", "retired_at", "tools"}
-        assert (srv["server_id"], srv["status"], srv["retired_at"]) == (server_id, "registered", None)
+        assert (srv["server_id"], srv["status"], srv["retired_at"]) == (
+            server_id,
+            "registered",
+            None,
+        )
         tools = {t["tool_name"]: t for t in srv["tools"]}
         assert set(tools["echo"]) == {
-            "tool_name", "description", "default_gate", "effective_gate", "source"}
+            "tool_name",
+            "description",
+            "default_gate",
+            "effective_gate",
+            "source",
+        }
         assert tools["echo"]["default_gate"] == "human approval"
         assert tools["echo"]["effective_gate"] == "ungated"
         assert tools["echo"]["source"] == "override"
         assert tools["shout"]["effective_gate"] == "human approval"
         assert tools["shout"]["source"] == "default"
         [ov] = out["overrides"]
-        assert set(ov) == {"agent_id", "server_id", "tool_name", "gate", "granted_by",
-                           "granted_at", "revoked_at", "default_gate"}
+        assert set(ov) == {
+            "agent_id",
+            "server_id",
+            "tool_name",
+            "gate",
+            "granted_by",
+            "granted_at",
+            "revoked_at",
+            "default_gate",
+        }
         assert ov["revoked_at"] is None and ov["gate"] == "ungated"
         assert ov["default_gate"] == "human approval"
 
@@ -646,7 +690,9 @@ async def test_agent_mcp_overrides_route_wire_shape_override_over_default_and_hi
         out = jsonable_encoder(await routes.get_agent_mcp_overrides(agent_id))
         tools = {t["tool_name"]: t for t in out["servers"][0]["tools"]}
         assert (tools["shout"]["default_gate"], tools["shout"]["effective_gate"]) == (
-            "ungated", "ungated")
+            "ungated",
+            "ungated",
+        )
 
         # A revoked mcp: grant: the server is no longer held.
         assert await repo.revoke_pack(agent_id, f"mcp:{server_id}", None)
@@ -679,8 +725,18 @@ async def test_list_mcp_servers_route_adds_active_overrides_and_holders_keeps_ol
         out = jsonable_encoder(await routes.list_mcp_servers_and_tools())
         row = next(s for s in out["servers"] if s["id"] == server_id)
         # Existing keys unchanged.
-        assert {"id", "status", "image_ref", "digest", "namespace", "litellm_alias",
-                "created_by", "created_at", "retired_at", "tools"} <= set(row)
+        assert {
+            "id",
+            "status",
+            "image_ref",
+            "digest",
+            "namespace",
+            "litellm_alias",
+            "created_by",
+            "created_at",
+            "retired_at",
+            "tools",
+        } <= set(row)
         [tool] = row["tools"]
         assert {"server_id", "tool_name", "default_gate", "description"} <= set(tool)
         assert tool["default_gate"] == "human approval"
@@ -704,9 +760,16 @@ async def test_the_read_routes_are_get_only_and_the_write_routes_keep_their_even
     """No write method was added beside the two existing ones, and the
     existing writes still emit exactly their events (the cockpit reads back
     after each write rather than trusting a reply)."""
-    got = {(r.path.removeprefix("/api"), m)
-           for r in routes.router.routes for m in getattr(r, "methods", ())}
-    assert {m for p, m in got if p == "/agents/{agent_id}/mcp-overrides"} == {"GET", "PUT", "DELETE"}
+    got = {
+        (r.path.removeprefix("/api"), m)
+        for r in routes.router.routes
+        for m in getattr(r, "methods", ())
+    }
+    assert {m for p, m in got if p == "/agents/{agent_id}/mcp-overrides"} == {
+        "GET",
+        "PUT",
+        "DELETE",
+    }
     assert {m for p, m in got if p == "/mcp/servers"} == {"GET"}
     assert {m for p, m in got if p == "/mcp/servers/{server_id}/tools/{tool_name}"} == {"PATCH"}
 
@@ -721,9 +784,13 @@ async def test_the_read_routes_are_get_only_and_the_write_routes_keep_their_even
             seen.append(kind)
 
         monkeypatch.setattr(events, "emit", fake_emit)
-        await routes.set_mcp_tool_gate(server_id, "echo", routes.MCPToolGateIn(default_gate="ungated"))
+        await routes.set_mcp_tool_gate(
+            server_id, "echo", routes.MCPToolGateIn(default_gate="ungated")
+        )
         await routes.set_mcp_override(
-            agent_id, routes.MCPOverrideIn(server_id=server_id, tool_name="echo", gate="human approval"))
+            agent_id,
+            routes.MCPOverrideIn(server_id=server_id, tool_name="echo", gate="human approval"),
+        )
         await routes.revoke_mcp_override(agent_id, server_id, "echo")
         assert seen == ["mcp.gate_changed", "mcp.override_set", "mcp.override_revoked"]
     finally:

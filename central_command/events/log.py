@@ -70,7 +70,7 @@ async def subscribe() -> AsyncIterator[asyncio.Queue]:
     """
     q: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_MAX)
     _subscribers.add(q)
-    if _closing:                 # subscribed during shutdown: release at once
+    if _closing:  # subscribed during shutdown: release at once
         _release(q)
     try:
         yield q
@@ -149,7 +149,7 @@ async def stream(last_id: int = 0) -> AsyncIterator[dict]:
 
         while True:
             event = await q.get()
-            if event is None:          # the log closed — stop following
+            if event is None:  # the log closed — stop following
                 return
             if event["id"] <= last_id:
                 continue  # already sent during replay

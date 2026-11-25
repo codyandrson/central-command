@@ -34,19 +34,22 @@ A_ID, B_ID, C_ID = "chaintest-a", "chaintest-b", "chaintest-c"
 
 _DRAFT = {
     "intent": "Link TASKS-12 as blocking TASKS-13 — the dependency is real.",
-    "actions": [{
-        "capability": "jira.link_issues",
-        "arguments": {"from_key": "TASKS-12", "to_key": "TASKS-13",
-                      "link_type": "Blocks"},
-        "target_ref": {"system": "jira", "id": "TASKS-12", "read_version": "unknown"},
-        "reversibility": "reversible",
-    }],
-    "evidence": [{
-        "kind": "jira",
-        "source_ref": "jira:TASKS-12",
-        "locator": "jira_get_issue(TASKS-12)",
-        "claim": "TASKS-12 has no outward link to TASKS-13.",
-    }],
+    "actions": [
+        {
+            "capability": "jira.link_issues",
+            "arguments": {"from_key": "TASKS-12", "to_key": "TASKS-13", "link_type": "Blocks"},
+            "target_ref": {"system": "jira", "id": "TASKS-12", "read_version": "unknown"},
+            "reversibility": "reversible",
+        }
+    ],
+    "evidence": [
+        {
+            "kind": "jira",
+            "source_ref": "jira:TASKS-12",
+            "locator": "jira_get_issue(TASKS-12)",
+            "claim": "TASKS-12 has no outward link to TASKS-13.",
+        }
+    ],
     "expected_effect": "TASKS-12 blocks TASKS-13",
     "confidence": {"level": "high", "rationale": "The test states it."},
 }
@@ -99,13 +102,15 @@ def _consulting_model(target: str, prefix: str, question: str = "what do you kno
         for message in reversed(messages):
             for part in getattr(message, "parts", []):
                 if isinstance(part, ToolReturnPart) and part.tool_name == "consult_agent":
-                    return ModelResponse(
-                        parts=[TextPart(content=f"{prefix}: {part.content}")]
-                    )
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="consult_agent",
-            args={"agent_id": target, "question": question},
-        )])
+                    return ModelResponse(parts=[TextPart(content=f"{prefix}: {part.content}")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="consult_agent",
+                    args={"agent_id": target, "question": question},
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -116,9 +121,11 @@ def _drafting_model():
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="propose_action", args={"proposal": _DRAFT}),
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="propose_action", args={"proposal": _DRAFT}),
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -140,14 +147,20 @@ def _cycling_model(target: str):
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         calls = sum(
-            1 for m in messages for p in getattr(m, "parts", [])
+            1
+            for m in messages
+            for p in getattr(m, "parts", [])
             if isinstance(p, ToolCallPart) and p.tool_name == "consult_agent"
         )
         if calls < 2:
-            return ModelResponse(parts=[ToolCallPart(
-                tool_name="consult_agent",
-                args={"agent_id": target, "question": "one more thing?"},
-            )])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="consult_agent",
+                        args={"agent_id": target, "question": "one more thing?"},
+                    )
+                ]
+            )
         for message in reversed(messages):
             for part in getattr(message, "parts", []):
                 if isinstance(part, ToolReturnPart) and part.tool_name == "consult_agent":
@@ -174,16 +187,31 @@ def _text_model(text: str):
 
 async def _hire_trio() -> None:
     await repo.hire_agent(
-        A_ID, "Chain A", "the asker", "You are A, the asker.",
-        ["consult"], template="analyst", consultable=True,
+        A_ID,
+        "Chain A",
+        "the asker",
+        "You are A, the asker.",
+        ["consult"],
+        template="analyst",
+        consultable=True,
     )
     await repo.hire_agent(
-        B_ID, "Chain B", "the middle specialist", "You are B, consulted by A.",
-        ["consult"], template="analyst", consultable=True,
+        B_ID,
+        "Chain B",
+        "the middle specialist",
+        "You are B, consulted by A.",
+        ["consult"],
+        template="analyst",
+        consultable=True,
     )
     await repo.hire_agent(
-        C_ID, "Chain C", "the leaf specialist", "You are C, the leaf.",
-        ["jira-propose"], template="analyst", consultable=True,
+        C_ID,
+        "Chain C",
+        "the leaf specialist",
+        "You are C, the leaf.",
+        ["jira-propose"],
+        template="analyst",
+        consultable=True,
     )
 
 
@@ -191,14 +219,10 @@ async def _fire_trio() -> None:
     conn = await repo._conn()
     try:
         for agent_id in (A_ID, B_ID, C_ID):
-            await conn.execute(
-                "delete from proposal where agent_id = $1", agent_id)
-            await conn.execute(
-                "delete from session where agent_id = $1", agent_id)
-            await conn.execute(
-                "delete from agent_grant where agent_id = $1", agent_id)
-            await conn.execute(
-                "delete from guidance_version where agent_id = $1", agent_id)
+            await conn.execute("delete from proposal where agent_id = $1", agent_id)
+            await conn.execute("delete from session where agent_id = $1", agent_id)
+            await conn.execute("delete from agent_grant where agent_id = $1", agent_id)
+            await conn.execute("delete from guidance_version where agent_id = $1", agent_id)
             await conn.execute("delete from agent where id = $1", agent_id)
     finally:
         await conn.close()
@@ -218,19 +242,22 @@ async def _park_a_chain(monkeypatch, b_model=None) -> _Chain:
     `run_task` is the entry deliberately: the park has to happen through the
     same call site production uses, not through a hand-built run_state."""
     monkeypatch.setattr(
-        consult_mod, "_consult_model",
-        aresolve(lambda agent_id, model=None: (
-            (b_model or _consulting_model(C_ID, "B synthesized"))
-            if agent_id == B_ID else _drafting_model()
-        )),
+        consult_mod,
+        "_consult_model",
+        aresolve(
+            lambda agent_id, model=None: (
+                (b_model or _consulting_model(C_ID, "B synthesized"))
+                if agent_id == B_ID
+                else _drafting_model()
+            )
+        ),
     )
     out = await run_task(
-        A_ID, "Should TASKS-12 block TASKS-13?",
+        A_ID,
+        "Should TASKS-12 block TASKS-13?",
         model=_consulting_model(B_ID, "A acted on"),
     )
-    assert out.get("consult_waiting"), (
-        f"A did not park on its consult — the chain collapsed: {out}"
-    )
+    assert out.get("consult_waiting"), f"A did not park on its consult — the chain collapsed: {out}"
     a_session = out["session_id"]
 
     a_state = await repo.get_session_run_state(a_session)
@@ -275,7 +302,9 @@ async def test_the_whole_chain_parks_and_unwinds_on_the_decision(monkeypatch, wo
         # The operator approves the LEAF's proposal.
         log = fake_world(monkeypatch)
         await gateway.approve_and_execute(
-            chain.c, chain.proposal_id, approver="operator",
+            chain.c,
+            chain.proposal_id,
+            approver="operator",
             model=_text_model("C: done, the link is in place."),
         )
         assert [c for c, _, _ in log] == ["jira.link_issues"]
@@ -283,7 +312,8 @@ async def test_the_whole_chain_parks_and_unwinds_on_the_decision(monkeypatch, wo
 
         # Wake B, the way the hook (or the sweep) does.
         woke_b = await orchestration.resume_consult_wait(
-            chain.b, model=_consulting_model(C_ID, "B synthesized"),
+            chain.b,
+            model=_consulting_model(C_ID, "B synthesized"),
         )
         assert woke_b and woke_b["resumed"] is True
         assert (await repo.get_session(chain.b))["status"] == "DONE"
@@ -296,7 +326,8 @@ async def test_the_whole_chain_parks_and_unwinds_on_the_decision(monkeypatch, wo
         # proposal B never drafted, which is what the pre-2026-08-23 outcome
         # text would have said ("finished without leaving a proposal").
         woke_a = await orchestration.resume_consult_wait(
-            chain.a, model=_consulting_model(B_ID, "A acted on"),
+            chain.a,
+            model=_consulting_model(B_ID, "A acted on"),
         )
         assert woke_a and woke_a["resumed"] is True
         assert (await repo.get_session(chain.a))["status"] == "DONE"
@@ -318,7 +349,9 @@ async def test_a_rejection_redraft_leaves_the_whole_chain_parked(monkeypatch, wo
     try:
         chain = await _park_a_chain(monkeypatch)
         await gateway.reject_with_feedback(
-            chain.c, chain.proposal_id, "wrong link type — try again",
+            chain.c,
+            chain.proposal_id,
+            "wrong link type — try again",
             model=_drafting_model(),
         )
         # C redrafted: a NEW proposal on the SAME session, still awaiting.
@@ -351,7 +384,8 @@ async def test_a_dismissal_wakes_the_middle_of_the_chain(monkeypatch, woken):
         await gateway.dismiss_proposal(chain.c, chain.proposal_id, "no action needed")
 
         woke = await orchestration.resume_consult_wait(
-            chain.b, model=_consulting_model(C_ID, "B synthesized"),
+            chain.b,
+            model=_consulting_model(C_ID, "B synthesized"),
         )
         assert woke and woke["resumed"] is True
         answer = (await repo.get_session_run_state(chain.b))["consult_answer"]
@@ -379,7 +413,9 @@ async def test_the_consult_chain_survives_into_the_resumed_deps(monkeypatch, wok
         chain = await _park_a_chain(monkeypatch)
         log = fake_world(monkeypatch)
         await gateway.approve_and_execute(
-            chain.c, chain.proposal_id, approver="operator",
+            chain.c,
+            chain.proposal_id,
+            approver="operator",
             model=_text_model("C: done."),
         )
         assert [c for c, _, _ in log] == ["jira.link_issues"]
@@ -408,10 +444,14 @@ async def test_a_failed_mid_chain_specialist_wakes_its_asker_honestly(monkeypatc
     try:
         chain = await _park_a_chain(monkeypatch)
         await land_session(
-            chain.b, failed=True, agent_id=B_ID, reason="the run died with its process",
+            chain.b,
+            failed=True,
+            agent_id=B_ID,
+            reason="the run died with its process",
         )
         woke = await orchestration.resume_consult_wait(
-            chain.a, model=_consulting_model(B_ID, "A acted on"),
+            chain.a,
+            model=_consulting_model(B_ID, "A acted on"),
         )
         assert woke and woke["resumed"] is True
         assert "Nothing was changed" in woke["output"]
@@ -430,19 +470,26 @@ async def test_degrading_is_reached_only_when_persistence_itself_fails(monkeypat
     asker to proceed without an answer is the honest thing left."""
     await _hire_trio()
     try:
+
         async def _no_session(*a, **kw):
             raise RuntimeError("postgres is down")
 
         monkeypatch.setattr(repo, "create_running_session", _no_session)
         monkeypatch.setattr(
-            consult_mod, "_consult_model",
-            aresolve(lambda agent_id, model=None: (
-                _consulting_model(C_ID, "B synthesized")
-                if agent_id == B_ID else _drafting_model()
-            )),
+            consult_mod,
+            "_consult_model",
+            aresolve(
+                lambda agent_id, model=None: (
+                    _consulting_model(C_ID, "B synthesized")
+                    if agent_id == B_ID
+                    else _drafting_model()
+                )
+            ),
         )
         answer = await consult_mod.consult(
-            B_ID, "please advise", caller_id=A_ID,
+            B_ID,
+            "please advise",
+            caller_id=A_ID,
             session_id="sess_" + uuid.uuid4().hex[:8],
         )
         assert "returned no answer" in answer

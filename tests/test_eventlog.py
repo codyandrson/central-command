@@ -144,7 +144,7 @@ async def test_a_follower_ends_when_the_log_closes(since):
     SIGKILLed the process — on EVERY restart, which is how a routine deploy came
     to kill twelve in-flight resumes. The timeout could not be sized to real work
     while this was true."""
-    events.log.opened()          # a prior lifespan shutdown may have closed it
+    events.log.opened()  # a prior lifespan shutdown may have closed it
     drained: list[dict] = []
 
     async def follow():
@@ -153,7 +153,7 @@ async def test_a_follower_ends_when_the_log_closes(since):
 
     before = len(events.log._subscribers)
     follower = asyncio.create_task(follow())
-    for _ in range(100):               # it subscribes BEFORE its replay query
+    for _ in range(100):  # it subscribes BEFORE its replay query
         if len(events.log._subscribers) > before:
             break
         await asyncio.sleep(0.01)
@@ -190,7 +190,7 @@ async def test_a_stalled_follower_still_ends(since):
 
         try:
             events.log.close()
-            while True:                # drain to the sentinel
+            while True:  # drain to the sentinel
                 item = await asyncio.wait_for(q.get(), timeout=2)
                 if item is None:
                     break
@@ -213,6 +213,7 @@ def test_the_close_flag_is_not_loop_bound():
             async with logmod.subscribe() as q:
                 logmod.close()
                 return await asyncio.wait_for(q.get(), timeout=2) is None
+
         try:
             return asyncio.run(go())
         finally:

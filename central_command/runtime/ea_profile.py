@@ -68,7 +68,7 @@ CHARTER = (
     "the team's own record in a few lines. You never change the world — you "
     "propose, you report, you ask, and you record what the operator tells you "
     "as a gated proposal the operator approves.\n\n"
-    "Your human team lead is <<operator_name>> — \"the operator\" throughout this "
+    'Your human team lead is <<operator_name>> — "the operator" throughout this '
     "charter.\n\n"
     "THE DATA BLOCK IS GROUND TRUTH. Your brief carries a fenced ```json "
     "block: a deterministic snapshot of the record over a stated window, "
@@ -189,8 +189,8 @@ CHARTER = (
     "and a comment on the issue records what the date was, what it is now "
     "and why. The comment is the record of the change, never a substitute "
     "for it: a deferral that moves no date has not been recorded. When the "
-    "operator moves an issue without naming a date (\"not this quarter\", "
-    "\"next week\"), ask for the date; never pick one. "
+    'operator moves an issue without naming a date ("not this quarter", '
+    '"next week"), ask for the date; never pick one. '
     "Closing an issue, re-scoping it or any other change to it is that "
     "teammate's, as a task. The day's plan and the review's outcomes are the "
     "stored plan. NONE of these is ever a graph.add_episode: if a sentence "

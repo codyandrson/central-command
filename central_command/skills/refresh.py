@@ -70,8 +70,8 @@ DECISIONS: tuple[str, ...] = get_args(Decision)
 class BundledDoc:
     """One bundled file on disk, as the library would store it."""
 
-    path: str   # relative to the checkout: 'skills/jira/references/api.md'
-    kind: str   # 'guidance' | 'reference'
+    path: str  # relative to the checkout: 'skills/jira/references/api.md'
+    kind: str  # 'guidance' | 'reference'
     text: str
     meta: dict  # frontmatter fields, as written
 
@@ -95,12 +95,15 @@ def read_disk(root: Path, overlay: dict[str, str]) -> dict[tuple[str, str], Bund
         if ref_dir.is_dir():
             files += [
                 ("reference", importer._doc_key(f.name), f)
-                for f in sorted(ref_dir.glob("*.md")) if f.is_file()
+                for f in sorted(ref_dir.glob("*.md"))
+                if f.is_file()
             ]
         for kind, key, f in files:
             rel = f.relative_to(root).as_posix()
             if (skill_id, key) in docs:
-                raise ValueError(f"{rel} and {docs[(skill_id, key)].path} collide on doc_key {key!r}")
+                raise ValueError(
+                    f"{rel} and {docs[(skill_id, key)].path} collide on doc_key {key!r}"
+                )
             doc = importer.normalise_doc_text(kind, importer._read_text(f), str(f), overlay=overlay)
             docs[(skill_id, key)] = BundledDoc(rel, kind, doc.text, doc.meta)
     return docs
@@ -111,7 +114,11 @@ def _hash(text: str | None) -> str | None:
 
 
 def decide(
-    disk_doc: BundledDoc | None, lib: dict | None, prov: dict | None, seen: set[tuple], key: tuple,
+    disk_doc: BundledDoc | None,
+    lib: dict | None,
+    prov: dict | None,
+    seen: set[tuple],
+    key: tuple,
 ) -> dict | None:
     """One doc's act, or None when nothing changes. Pure: the rule in one place.
 
@@ -132,16 +139,16 @@ def decide(
         base = prov["bundled_text"]
 
     if theirs is not None and theirs == base:
-        return None                                   # the release did not change it
-    if ours is not None and ours == base:             # nobody edited it
+        return None  # the release did not change it
+    if ours is not None and ours == base:  # nobody edited it
         return {"act": "follow"} if theirs is not None else {"act": "retire"}
     if theirs is None:
         if ours is None or base is None:
-            return None                               # retired on both sides, or never bundled
+            return None  # retired on both sides, or never bundled
         change = "removed"
     else:
         if ours == theirs:
-            return {"act": "follow"}                  # already the release's text: the base catches up
+            return {"act": "follow"}  # already the release's text: the base catches up
         change = "changed"
     flag = {
         "change": change,
@@ -150,13 +157,14 @@ def decide(
         "release_hash": _hash(theirs),
     }
     if (*key, change, flag["base_hash"], flag["release_hash"]) in seen:
-        return None                                   # already put to the operator
+        return None  # already put to the operator
     act = "keep" if change == "changed" and ours is not None else "flag"
     return {"act": act, "flag": flag}
 
 
-def _release_post(key: tuple, doc: BundledDoc, disk: dict, release: str, actor: str,
-                  *, is_new_skill: bool) -> tuple[dict, dict | None]:
+def _release_post(
+    key: tuple, doc: BundledDoc, disk: dict, release: str, actor: str, *, is_new_skill: bool
+) -> tuple[dict, dict | None]:
     """The version that takes the release's text, and the skill fields that go
     with it: the skill's title and summary follow the guidance doc's frontmatter
     (A2), and a new skill takes its default holders."""
@@ -167,13 +175,16 @@ def _release_post(key: tuple, doc: BundledDoc, disk: dict, release: str, actor: 
         meta = disk[(skill_id, "guidance")].meta
         title, summary = importer.skill_title_summary(meta, skill_id)
         skill = {
-            "title": title, "summary": summary, "follow": is_guidance,
+            "title": title,
+            "summary": summary,
+            "follow": is_guidance,
             "default_agents": importer.parse_id_list(meta.get("default_agents", "")),
         }
     post = {
         "kind": doc.kind,
         "title": skill["title"] if is_guidance else Path(doc.path).stem,
-        "content": doc.text, "added_by": actor,
+        "content": doc.text,
+        "added_by": actor,
         "captured_at": datetime.now(UTC),
         **importer.provenance(release, doc.path, doc.text),
         "bundled_text": doc.text,
@@ -181,34 +192,47 @@ def _release_post(key: tuple, doc: BundledDoc, disk: dict, release: str, actor: 
     return post, skill
 
 
-async def _emit_written(key: tuple, out: dict, skill: dict | None, release: str, actor: str,
-                        *, kept: bool = False) -> None:
+async def _emit_written(
+    key: tuple, out: dict, skill: dict | None, release: str, actor: str, *, kept: bool = False
+) -> None:
     skill_id, doc_key = key
     if out["created_skill"]:
         await events.emit(
-            "skill.created", ref_id=skill_id,
-            payload={"title": skill["title"], "summary": skill["summary"]}, actor=actor,
+            "skill.created",
+            ref_id=skill_id,
+            payload={"title": skill["title"], "summary": skill["summary"]},
+            actor=actor,
         )
         for agent_id in out["grants"]["applied"]:
             await events.emit(
-                "skill.granted", ref_id=agent_id,
-                payload={"skill_id": skill_id, "default": True}, actor="seed:skill",
+                "skill.granted",
+                ref_id=agent_id,
+                payload={"skill_id": skill_id, "default": True},
+                actor="seed:skill",
             )
     if out["doc"] is not None:
         await events.emit(
-            "skill.doc_added", ref_id=skill_id,
+            "skill.doc_added",
+            ref_id=skill_id,
             payload={
-                "doc_key": doc_key, "kind": out["doc"]["kind"], "version": out["doc"]["version"],
-                "describes": out["doc"]["describes"], "bundled_release": out["doc"]["bundled_release"],
+                "doc_key": doc_key,
+                "kind": out["doc"]["kind"],
+                "version": out["doc"]["version"],
+                "describes": out["doc"]["describes"],
+                "bundled_release": out["doc"]["bundled_release"],
                 **({"kept": True} if kept else {}),
             },
             actor=actor,
         )
     if out["retired"] is not None:
         await events.emit(
-            "skill.doc_retired", ref_id=skill_id,
-            payload={"doc_key": doc_key, "version": out["retired"]["version"],
-                     "reason": out["retired"]["retired_reason"]},
+            "skill.doc_retired",
+            ref_id=skill_id,
+            payload={
+                "doc_key": doc_key,
+                "version": out["retired"]["version"],
+                "reason": out["retired"]["retired_reason"],
+            },
             actor=actor,
         )
 
@@ -220,28 +244,46 @@ async def _write(key, act, disk, library, release, actor="updater") -> None:
     doc = disk.get(key)
     if act["act"] == "follow":
         post, skill = _release_post(
-            key, doc, disk, release, actor, is_new_skill=skill_id not in library["skills"],
+            key,
+            doc,
+            disk,
+            release,
+            actor,
+            is_new_skill=skill_id not in library["skills"],
         )
         out = await repo.apply_bundled_skill_doc(
-            skill_id, doc_key, ours_hash=ours_hash, post=post, skill=skill,
+            skill_id,
+            doc_key,
+            ours_hash=ours_hash,
+            post=post,
+            skill=skill,
         )
         await _emit_written(key, out, skill, release, actor)
     elif act["act"] == "retire":
         out = await repo.apply_bundled_skill_doc(
-            skill_id, doc_key, ours_hash=ours_hash, retire_reason=f"removed in v{release}",
+            skill_id,
+            doc_key,
+            ours_hash=ours_hash,
+            retire_reason=f"removed in v{release}",
         )
         await _emit_written(key, out, None, release, actor)
     else:
         post = None
         if act["act"] == "keep":
             post = {
-                "kind": doc.kind, "title": None, "content": None, "added_by": actor,
+                "kind": doc.kind,
+                "title": None,
+                "content": None,
+                "added_by": actor,
                 "captured_at": datetime.now(UTC),
                 **importer.provenance(release, doc.path, doc.text),
                 "bundled_text": doc.text,
             }
         out = await repo.apply_bundled_skill_doc(
-            skill_id, doc_key, ours_hash=ours_hash, post=post,
+            skill_id,
+            doc_key,
+            ours_hash=ours_hash,
+            post=post,
             flag={**act["flag"], "release": release},
         )
         await _emit_written(key, out, None, release, actor, kept=True)
@@ -270,7 +312,9 @@ async def sync() -> dict:
     for key in keys:
         if library["skills"].get(key[0]) == "RETIRED":
             continue
-        act = decide(disk.get(key), library["docs"].get(key), library["provenance"].get(key), seen, key)
+        act = decide(
+            disk.get(key), library["docs"].get(key), library["provenance"].get(key), seen, key
+        )
         if act is not None:
             plan.append((key, act))
 
@@ -290,9 +334,14 @@ async def sync() -> dict:
             flagged.append(label)
     counts["unchanged"] = len(keys) - len(plan)
     await events.emit(
-        "skill.review_computed", release,
-        {"release": release, "counts": counts, "flagged": flagged,
-         "failed": [f["doc"] for f in failed]},
+        "skill.review_computed",
+        release,
+        {
+            "release": release,
+            "counts": counts,
+            "flagged": flagged,
+            "failed": [f["doc"] for f in failed],
+        },
     )
     return {"release": release, "counts": counts, "flagged": flagged, "failed": failed}
 
@@ -305,7 +354,11 @@ class FlagMoved(ValueError):
 
 
 async def resolve_flag(
-    skill_id: str, doc_key: str, decision: Decision, *, ours_hash: str | None,
+    skill_id: str,
+    doc_key: str,
+    decision: Decision,
+    *,
+    ours_hash: str | None,
     content: str | None = None,
 ) -> dict:
     """Carry out the operator's decision on a doc's open flag, and close it.
@@ -343,8 +396,13 @@ async def resolve_flag(
         post = {"kind": None, "title": None, "content": content, "added_by": "operator"}
     try:
         out = await repo.apply_bundled_skill_doc(
-            skill_id, doc_key, ours_hash=ours_hash, post=post, retire_reason=retire,
-            skill=skill, decision=decision,
+            skill_id,
+            doc_key,
+            ours_hash=ours_hash,
+            post=post,
+            retire_reason=retire,
+            skill=skill,
+            decision=decision,
         )
     except repo.SkillDocFlagClosed:
         raise
@@ -352,9 +410,9 @@ async def resolve_flag(
         raise FlagMoved(str(e)) from e
     await _emit_written(key, out, skill, release, "operator")
     await events.emit(
-        "skill.review_resolved", ref_id=skill_id,
-        payload={"release": release, "skill_id": skill_id, "doc_key": doc_key,
-                 "verdict": decision},
+        "skill.review_resolved",
+        ref_id=skill_id,
+        payload={"release": release, "skill_id": skill_id, "doc_key": doc_key, "verdict": decision},
         actor="operator",
     )
     return {"skill_id": skill_id, "doc_key": doc_key, "release": release, "decision": decision}
@@ -403,7 +461,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--actor", choices=("updater",), default="updater")
     args = parser.parse_args(argv)
     if args.command in ("review", "check"):
-        print(f"nothing to review for {args.target}: bundled skill docs are compared at the start of the release (DL-232)")
+        print(
+            f"nothing to review for {args.target}: bundled skill docs are compared at the start of the release (DL-232)"
+        )
         return 0
     try:
         return asyncio.run(_run_sync())

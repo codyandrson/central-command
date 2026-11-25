@@ -45,8 +45,11 @@ async def clean_skills():
 async def test_unknown_skill_is_404(clean_skills):
     with pytest.raises(HTTPException) as exc:
         await routes.import_skill_file_route(
-            skill_id="cc-test-file-import-missing", doc_key="api",
-            title=None, describes=None, file=_upload(b"hello", "notes.txt"),
+            skill_id="cc-test-file-import-missing",
+            doc_key="api",
+            title=None,
+            describes=None,
+            file=_upload(b"hello", "notes.txt"),
         )
     assert exc.value.status_code == 404
 
@@ -56,8 +59,10 @@ async def test_unknown_skill_is_404(clean_skills):
 async def test_file_import_lands_a_current_doc_version_with_filename_title(clean_skills):
     await repo.create_skill("cc-test-file-import", "T", "S")
     doc = await routes.import_skill_file_route(
-        skill_id="cc-test-file-import", doc_key="api",
-        title=None, describes="v1",
+        skill_id="cc-test-file-import",
+        doc_key="api",
+        title=None,
+        describes="v1",
         file=_upload(b"# Endpoints\nGET /thing", "my-notes.md"),
     )
     assert doc["version"] == 1
@@ -77,8 +82,10 @@ async def test_file_import_lands_a_current_doc_version_with_filename_title(clean
 async def test_guidance_doc_key_is_kind_guidance(clean_skills):
     await repo.create_skill("cc-test-file-import", "T", "S")
     doc = await routes.import_skill_file_route(
-        skill_id="cc-test-file-import", doc_key="guidance",
-        title="Guide", describes=None,
+        skill_id="cc-test-file-import",
+        doc_key="guidance",
+        title="Guide",
+        describes=None,
         file=_upload(b"# Guide", "guide.md"),
     )
     assert doc["kind"] == "guidance"
@@ -91,8 +98,10 @@ async def test_oversize_upload_is_422(clean_skills, monkeypatch):
     monkeypatch.setattr(routes, "MAX_IMPORT_FILE_BYTES", 10)
     with pytest.raises(HTTPException) as exc:
         await routes.import_skill_file_route(
-            skill_id="cc-test-file-import", doc_key="api",
-            title=None, describes=None,
+            skill_id="cc-test-file-import",
+            doc_key="api",
+            title=None,
+            describes=None,
             file=_upload(b"this is way more than ten bytes", "big.txt"),
         )
     assert exc.value.status_code == 422
@@ -113,8 +122,10 @@ async def test_conversion_failure_is_422_carrying_markitdowns_error(clean_skills
 
     with pytest.raises(HTTPException) as exc:
         await routes.import_skill_file_route(
-            skill_id="cc-test-file-import", doc_key="api",
-            title=None, describes=None,
+            skill_id="cc-test-file-import",
+            doc_key="api",
+            title=None,
+            describes=None,
             file=_upload(b"\x00\x01garbage", "weird.bin"),
         )
     assert exc.value.status_code == 422

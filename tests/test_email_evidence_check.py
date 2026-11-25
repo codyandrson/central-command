@@ -66,8 +66,10 @@ def test_no_sources_leaves_the_flag_absent():
 
 def test_a_recorded_verdict_is_never_overwritten():
     """The gateway runs this over evidence another checker already judged."""
-    already = {**_ev("email", "DEMO-1 slipped, due Aug 3.").model_dump(),
-               "claim_matches_source": False}
+    already = {
+        **_ev("email", "DEMO-1 slipped, due Aug 3.").model_dump(),
+        "claim_matches_source": False,
+    }
     out = verified_email_evidence([already], [EMAIL])
     assert out[0]["claim_matches_source"] is False
 
@@ -113,8 +115,12 @@ def _triage_model(claim: str, *, redraft_claim: str | None = None) -> FunctionMo
     redraft = {
         **_PROPOSAL,
         "intent": "Set the due date on DEMO-1 to Aug 10 — per the operator's feedback.",
-        "actions": [{**_PROPOSAL["actions"][0],
-                     "arguments": {"issue_key": "DEMO-1", "due_date": "2026-08-10"}}],
+        "actions": [
+            {
+                **_PROPOSAL["actions"][0],
+                "arguments": {"issue_key": "DEMO-1", "due_date": "2026-08-10"},
+            }
+        ],
         "evidence": [{**_PROPOSAL["evidence"][0], "claim": redraft_claim or claim}],
         "expected_effect": "DEMO-1.duedate == 2026-08-10",
     }
@@ -122,18 +128,20 @@ def _triage_model(claim: str, *, redraft_claim: str | None = None) -> FunctionMo
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         made = sum(
             isinstance(p, ToolCallPart) and p.tool_name == "propose_action"
-            for m in messages for p in getattr(m, "parts", [])
+            for m in messages
+            for p in getattr(m, "parts", [])
         )
         if made == 0:
-            return ModelResponse(parts=[ToolCallPart(tool_name="propose_action",
-                                                     args={"proposal": first})])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="propose_action", args={"proposal": first})]
+            )
         transcript = "\n".join(
-            str(getattr(p, "content", ""))
-            for m in messages for p in getattr(m, "parts", [])
+            str(getattr(p, "content", "")) for m in messages for p in getattr(m, "parts", [])
         )
         if redraft_claim is not None and made == 1 and "2026-08-10" in transcript:
-            return ModelResponse(parts=[ToolCallPart(tool_name="propose_action",
-                                                     args={"proposal": redraft})])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="propose_action", args={"proposal": redraft})]
+            )
         for m in messages:
             for p in getattr(m, "parts", []):
                 if isinstance(p, ToolReturnPart) and p.tool_name == "propose_action":
@@ -170,9 +178,10 @@ async def test_a_paraphrased_email_quote_is_flagged_and_parks_an_override(demo):
     # due date trips the past-due policy first; move the date so the evidence
     # verdict is the only thing left to park on.
     action = row["actions"][0]
-    future = {**row, "actions": [
-        {**action, "arguments": {**action["arguments"], "due_date": "2099-01-01"}}
-    ]}
+    future = {
+        **row,
+        "actions": [{**action, "arguments": {**action["arguments"], "due_date": "2099-01-01"}}],
+    }
     assert "does not match its recorded source" in await overrides.review_flags(future)
 
 
@@ -180,12 +189,17 @@ def _raw(body: str, n: int = 1) -> str:
     # Distinct sender domain AND subject per item: the relatedness hold parks
     # anything related (thread, subject, sender, shared entity key) to an item
     # still busy, and the first test's proposal is left awaiting the operator.
-    return "\n".join([
-        f"Message-ID: <cc-evidence-{n}@example.com>",
-        f"From: dana@example{n}.com",
-        f"Subject: Evidence check {n}",
-        "Date: Wed, 1 Jul 2026 09:00:00 +0000",
-    ]) + f"\n\n{body}\n"
+    return (
+        "\n".join(
+            [
+                f"Message-ID: <cc-evidence-{n}@example.com>",
+                f"From: dana@example{n}.com",
+                f"Subject: Evidence check {n}",
+                "Date: Wed, 1 Jul 2026 09:00:00 +0000",
+            ]
+        )
+        + f"\n\n{body}\n"
+    )
 
 
 @pytestmark_db
@@ -214,8 +228,9 @@ async def test_a_redraft_that_re_cites_the_mail_is_checked_through_the_session_l
     # A different issue in the body than the first-draft test's, so the two
     # items share no entity key and the hold leaves this one free to claim.
     mail = "Dana: DEMO-2 slipped, due Aug 3."
-    model = _triage_model("DEMO-2 slipped, due Aug 3.",
-                          redraft_claim="Dana says DEMO-2's deadline is now August 3rd.")
+    model = _triage_model(
+        "DEMO-2 slipped, due Aug 3.", redraft_claim="Dana says DEMO-2's deadline is now August 3rd."
+    )
     enrolled = await ledger.enroll_email(_raw(mail, n=12))
     result = await dispatcher.dispatch_item(enrolled["item_id"], model=model)
     assert result and result["deferred"] is True
@@ -223,8 +238,10 @@ async def test_a_redraft_that_re_cites_the_mail_is_checked_through_the_session_l
     assert first["claim_matches_source"] is True
 
     out = await gateway.reject_with_feedback(
-        result["session_id"], result["proposal_id"],
-        "Wrong — I spoke to Dana, make it 2026-08-10.", model=model,
+        result["session_id"],
+        result["proposal_id"],
+        "Wrong — I spoke to Dana, make it 2026-08-10.",
+        model=model,
     )
     redraft = await repo.load_proposal(out["redraft_proposal_id"])
     assert redraft["evidence"][0]["kind"] == "email"

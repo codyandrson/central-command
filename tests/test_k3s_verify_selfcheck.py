@@ -34,7 +34,8 @@ ROOT = Path(__file__).resolve().parents[1]
 VERIFY = ROOT / "deploy" / "k3s" / "verify.sh"
 
 pytestmark = pytest.mark.skipif(
-    os.name == "nt" or not shutil.which("bash"), reason="verify.sh runs under bash on Linux")
+    os.name == "nt" or not shutil.which("bash"), reason="verify.sh runs under bash on Linux"
+)
 
 # verify.sh runs the module under `env -i`, so the canned answer travels in
 # files beside the stub, not in the environment.
@@ -49,7 +50,9 @@ exit "$(cat "$here/rc")"
 
 
 def _function() -> str:
-    m = re.search(r"^selfcheck_check\(\) \{\n.*?^\}\n", VERIFY.read_text(), re.MULTILINE | re.DOTALL)
+    m = re.search(
+        r"^selfcheck_check\(\) \{\n.*?^\}\n", VERIFY.read_text(), re.MULTILINE | re.DOTALL
+    )
     assert m, "verify.sh has no selfcheck_check function"
     return m.group(0)
 
@@ -71,12 +74,14 @@ def _run(tmp_path: Path, lines: str, rc: int = 0, *, clean: int = 0, venv: bool 
         "skip() { printf 'skip %s\\n' \"$1\"; SKIP=$((SKIP+1)); }\n"
         f"CLEAN={clean}\n"
         "export CC_FROM_DEPLOY_ENV=sourced-into-verify\n"
-        + _function() + "selfcheck_check\nprintf 'COUNTS %d %d %d\\n' $PASS $FAIL $SKIP\n"
+        + _function()
+        + "selfcheck_check\nprintf 'COUNTS %d %d %d\\n' $PASS $FAIL $SKIP\n"
     )
     args = tree / ".venv" / "bin" / "args.txt"
     env = {"PATH": os.environ["PATH"], "HOME": str(tmp_path)}
-    r = subprocess.run(["bash", "-c", script], cwd=tree, env=env,
-                       capture_output=True, text=True, timeout=60)
+    r = subprocess.run(
+        ["bash", "-c", script], cwd=tree, env=env, capture_output=True, text=True, timeout=60
+    )
     return r, args, tree
 
 
@@ -92,7 +97,11 @@ def test_a_pass_line_passes(tmp_path):
 
 
 def test_a_fail_line_fails_verify_and_the_other_lines_still_show(tmp_path):
-    r, _, _ = _run(tmp_path, "PASS selfcheck-a: fine\\nFAIL selfcheck-completion-as-app: set CC_LLM_API_KEY\\n", rc=1)
+    r, _, _ = _run(
+        tmp_path,
+        "PASS selfcheck-a: fine\\nFAIL selfcheck-completion-as-app: set CC_LLM_API_KEY\\n",
+        rc=1,
+    )
     assert _counts(r) == (1, 1, 0)
     assert "FAIL selfcheck-completion-as-app: set CC_LLM_API_KEY" in r.stdout
 
@@ -106,25 +115,34 @@ def test_a_warn_line_passes_with_its_text_and_exit_2_is_not_a_failure(tmp_path):
 def test_the_graph_embedder_row_passes_on_a_fresh_install(tmp_path):
     """A fresh install has no record and no vectors: that row PASSes, so verify
     does not fail it."""
-    r, _, _ = _run(tmp_path, "PASS selfcheck-graph-embedder: the graph holds no vectors "
-                             "and no embedder record yet\\n")
+    r, _, _ = _run(
+        tmp_path,
+        "PASS selfcheck-graph-embedder: the graph holds no vectors and no embedder record yet\\n",
+    )
     assert _counts(r) == (1, 0, 0)
     assert "ok selfcheck-graph-embedder:" in r.stdout
 
 
 def test_a_graph_embedder_mismatch_fails_verify_naming_the_command(tmp_path):
-    r, _, _ = _run(tmp_path, "FAIL selfcheck-graph-embedder: configured a/1024, graph holds "
-                             "b/768; run: python -m central_command.graph_reembed status\\n", rc=1)
+    r, _, _ = _run(
+        tmp_path,
+        "FAIL selfcheck-graph-embedder: configured a/1024, graph holds "
+        "b/768; run: python -m central_command.graph_reembed status\\n",
+        rc=1,
+    )
     assert _counts(r) == (0, 1, 0)
     assert "run: python -m central_command.graph_reembed status" in r.stdout
 
 
-@pytest.mark.parametrize(("lines", "rc"), [
-    ("", 0),                                             # printed nothing
-    ("", 1),
-    ("PASS selfcheck-a: fine\\n", 3),                    # died part-way, no FAIL line
-    ("Traceback (most recent call last):\\n", 1),        # the module could not run
-])
+@pytest.mark.parametrize(
+    ("lines", "rc"),
+    [
+        ("", 0),  # printed nothing
+        ("", 1),
+        ("PASS selfcheck-a: fine\\n", 3),  # died part-way, no FAIL line
+        ("Traceback (most recent call last):\\n", 1),  # the module could not run
+    ],
+)
 def test_a_module_that_could_not_run_fails_verify(tmp_path, lines, rc):
     r, _, _ = _run(tmp_path, lines, rc=rc)
     assert _counts(r)[1] == 1, r.stdout
@@ -159,12 +177,19 @@ def test_verify_calls_the_section_on_every_run_after_the_run_modes_check():
     assert "== F. the application self-check ==" in text
     # The skip is the function's own `(( CLEAN ))`, not a branch around the call
     # in the shape test_run_modes.py reads as the old clean-install carve-out.
-    after = "\n".join(lines[lines.index("run_modes_check"):])
+    after = "\n".join(lines[lines.index("run_modes_check") :])
     assert 'CLEAN" == "1"' not in after
     assert "--pre-boot" not in _function()
 
 
-@pytest.mark.parametrize("rel", ["deploy/k3s/cc-update.sh", "deploy/k3s/cc-backup.timer",
-                                 "deploy/k3s/cc-update.service", "deploy/k3s/cc-uvicorn.service"])
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "deploy/k3s/cc-update.sh",
+        "deploy/k3s/cc-backup.timer",
+        "deploy/k3s/cc-update.service",
+        "deploy/k3s/cc-uvicorn.service",
+    ],
+)
 def test_the_self_check_is_never_in_the_updater_or_on_a_timer(rel):
     assert "selfcheck" not in shipped_text(rel)

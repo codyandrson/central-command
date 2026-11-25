@@ -69,11 +69,11 @@ def test_the_tour_kind_takes_no_calendar_day():
 # module docstring before "fixing" a failure here.
 _AUDIT = {
     #                     can propose an episode, accepts a direct task
-    "ea":                 (True,  True),
-    "inbox-triage":       (True,  False),
-    "jira-expert":        (True,  True),
-    "knowledge-steward":  (True,  False),
-    "coach":              (False, False),
+    "ea": (True, True),
+    "inbox-triage": (True, False),
+    "jira-expert": (True, True),
+    "knowledge-steward": (True, False),
+    "coach": (False, False),
 }
 
 
@@ -173,7 +173,9 @@ async def test_an_intro_task_opens_the_lane_and_parks_its_episode(monkeypatch):
 
     result = await routes.create_and_run_task(
         await tour.intro_task_instructions("jira-expert"),
-        "Introduce yourself", "jira-expert", actor="agent:ea",
+        "Introduce yourself",
+        "jira-expert",
+        actor="agent:ea",
     )
 
     # The lane opened, seeded with the introduction itself.
@@ -186,15 +188,19 @@ async def test_an_intro_task_opens_the_lane_and_parks_its_episode(monkeypatch):
     # The operator answers; the agent concludes; the task resumes in the
     # background and parks its episode.
     turn = await converse.conversation_turn(
-        lane_id, "Ask me before you touch anything with a deadline on it.",
+        lane_id,
+        "Ask me before you touch anything with a deadline on it.",
         model=make_ea_conclude_model(),
     )
     assert turn.get("concluded") is True
 
     for _ in range(200):
         await asyncio.sleep(0.05)
-        mine = [p for p in await repo.list_proposals("AWAITING_HUMAN")
-                if p["session_id"] == result["session_id"]]
+        mine = [
+            p
+            for p in await repo.list_proposals("AWAITING_HUMAN")
+            if p["session_id"] == result["session_id"]
+        ]
         if mine:
             break
     else:  # pragma: no cover — a hang, not flake
@@ -215,8 +221,13 @@ async def test_firing_the_tour_contact_hands_the_ea_its_host_brief():
     from central_command.heartbeat.engine import fire
 
     await ea.ensure_registered()
-    out = await fire({"id": "tour-test", "action_kind": "ea.contact",
-                      "action_params": {"kind": "onboarding_tour"}})
+    out = await fire(
+        {
+            "id": "tour-test",
+            "action_kind": "ea.contact",
+            "action_params": {"kind": "onboarding_tour"},
+        }
+    )
     assert out["ok"], out
     result = out["result"]
     assert result["delivered"] is True and result["kind"] == "onboarding_tour"
@@ -256,7 +267,6 @@ async def test_step_1b_says_plainly_when_there_is_no_jira(monkeypatch):
     brief = await tour.brief()
     assert "Jira and Confluence are NOT configured in this deployment" in brief
     # The three keys, named, so the operator can act without asking.
-    for key in ("CC_JIRA_BASE_URL", "CC_JIRA_EMAIL", "CC_JIRA_API_TOKEN",
-                "CC_CONFLUENCE_"):
+    for key in ("CC_JIRA_BASE_URL", "CC_JIRA_EMAIL", "CC_JIRA_API_TOKEN", "CC_CONFLUENCE_"):
         assert key in brief
     assert "Do not propose those introductions until then" in brief

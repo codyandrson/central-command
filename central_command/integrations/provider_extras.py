@@ -26,8 +26,13 @@ from importlib import metadata
 # exchange.py also imports, is a core dependency (inscriptis needs it too).
 EXTRAS: dict[str, tuple[str, ...]] = {
     "exchange": ("exchangelib",),
-    "google": ("google-api-python-client", "google-auth", "google-auth-oauthlib",
-               "httplib2", "google-auth-httplib2"),
+    "google": (
+        "google-api-python-client",
+        "google-auth",
+        "google-auth-oauthlib",
+        "httplib2",
+        "google-auth-httplib2",
+    ),
 }
 
 
@@ -55,10 +60,12 @@ def refusal(extra: str) -> str | None:
     absent = _absent(extra)
     if not absent:
         return None
-    return (f"the {extra} provider is selected but {', '.join(absent)} "
-            f"{'is' if len(absent) == 1 else 'are'} not installed — install the "
-            f"`{extra}` extra: uv pip install -e \".[dev,runtime,{extra}]\" "
-            f"(the installers add it when the root .env selects the provider)")
+    return (
+        f"the {extra} provider is selected but {', '.join(absent)} "
+        f"{'is' if len(absent) == 1 else 'are'} not installed — install the "
+        f'`{extra}` extra: uv pip install -e ".[dev,runtime,{extra}]" '
+        f"(the installers add it when the root .env selects the provider)"
+    )
 
 
 def missing() -> list[str]:

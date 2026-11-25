@@ -25,10 +25,18 @@ async def _async(value):
 
 def _row(agent_id: str, actions: list[dict], status: str = "AWAITING_HUMAN") -> dict:
     return {
-        "id": "prop_1", "session_id": "sess_1", "agent_id": agent_id,
-        "intent": "test", "status": status, "actions": actions, "evidence": [],
-        "expected_effect": "", "created_at": None, "decided_at": None,
-        "confidence": None, "origin": None,
+        "id": "prop_1",
+        "session_id": "sess_1",
+        "agent_id": agent_id,
+        "intent": "test",
+        "status": status,
+        "actions": actions,
+        "evidence": [],
+        "expected_effect": "",
+        "created_at": None,
+        "decided_at": None,
+        "confidence": None,
+        "origin": None,
     }
 
 
@@ -42,8 +50,12 @@ def _patch_common(monkeypatch, row: dict):
 async def test_skill_doc_add_carries_a_diff_against_the_current_version(monkeypatch):
     action = {
         "capability": "skill.doc_add",
-        "arguments": {"skill_id": "sk_1", "doc_key": "guidance",
-                       "title": "Guidance", "content": "new line\nold line\n"},
+        "arguments": {
+            "skill_id": "sk_1",
+            "doc_key": "guidance",
+            "title": "Guidance",
+            "content": "new line\nold line\n",
+        },
     }
     row = _row("agent-1", [action])
     _patch_common(monkeypatch, row)
@@ -64,8 +76,12 @@ async def test_skill_doc_add_carries_a_diff_against_the_current_version(monkeypa
 async def test_skill_doc_add_with_no_prior_version_carries_no_diff(monkeypatch):
     action = {
         "capability": "skill.doc_add",
-        "arguments": {"skill_id": "sk_2", "doc_key": "reference",
-                       "title": "Reference", "content": "brand new"},
+        "arguments": {
+            "skill_id": "sk_2",
+            "doc_key": "reference",
+            "title": "Reference",
+            "content": "brand new",
+        },
     }
     row = _row("agent-1", [action])
     _patch_common(monkeypatch, row)
@@ -152,10 +168,16 @@ async def test_malformed_operator_event_ref_does_not_break_the_render(monkeypatc
     via int(). Leading digits still enrich; pure prose renders unenriched."""
     row = _row("ea", [{"capability": "graph.add_episode", "arguments": {}}])
     row["evidence"] = [
-        {"kind": "operator", "claim": "scope it private",
-         "source_ref": "event:75 (prop_9ad2a18c3def) and the operator's current instruction"},
-        {"kind": "operator", "claim": "no digits at all",
-         "source_ref": "event:the operator said so"},
+        {
+            "kind": "operator",
+            "claim": "scope it private",
+            "source_ref": "event:75 (prop_9ad2a18c3def) and the operator's current instruction",
+        },
+        {
+            "kind": "operator",
+            "claim": "no digits at all",
+            "source_ref": "event:the operator said so",
+        },
     ]
     _patch_common(monkeypatch, row)
 

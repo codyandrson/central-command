@@ -56,8 +56,12 @@ async def test_a_stored_row_with_read_version_still_loads_and_executes(monkeypat
     assert Action(**action.model_dump(mode="json")).target_ref == action.target_ref
 
     async def fake_create_project(key, name, project_type_key="software"):
-        return {"ok": True, "kind": "jira", "operation": "createProject",
-                "project": {"key": key, "id": "10099", "name": name, "url": "u"}}
+        return {
+            "ok": True,
+            "kind": "jira",
+            "operation": "createProject",
+            "project": {"key": key, "id": "10099", "name": name, "url": "u"},
+        }
 
     monkeypatch.setattr(jira, "create_project", fake_create_project)
     text = await executor.HANDLERS[action.capability](action.arguments, "lee", "jira-expert")

@@ -108,7 +108,7 @@ def override_ids_of(approver: str | None) -> list[str]:
     bare `override:` prefix test — the same rule)."""
     if not approver or not approver.startswith(APPROVER_PREFIX):
         return []
-    ids = [i for i in approver[len(APPROVER_PREFIX):].split(OVERRIDE_JOIN) if i]
+    ids = [i for i in approver[len(APPROVER_PREFIX) :].split(OVERRIDE_JOIN) if i]
     return sorted(set(ids))
 
 
@@ -125,12 +125,16 @@ def decided_by_override(event: dict) -> bool:
     — `override_id` for one, `override_ids` for several — never counts as
     operator agreement."""
     payload = event.get("payload") or {}
-    return bool(override_ids_of(event.get("actor")) or payload.get("override_id")
-                or payload.get("override_ids"))
+    return bool(
+        override_ids_of(event.get("actor"))
+        or payload.get("override_id")
+        or payload.get("override_ids")
+    )
 
 
 def _capability(action: dict) -> str:
     return str(action.get("capability", "")).split("@", 1)[0]
+
 
 # --- scope ------------------------------------------------------------------
 #
@@ -220,7 +224,7 @@ def scope_covers(override: dict, action: dict, ctx: dict | None = None) -> bool:
             if value in (None, "", []):
                 if name in spec.required:
                     return False
-                continue            # an optional target not named is not a target
+                continue  # an optional target not named is not a target
             vals = _flat(value)
             if vals is None:
                 return False
@@ -260,18 +264,25 @@ def validate_scope(capability: str, scope: dict | None) -> list[str]:
         elif not isinstance(form, dict) or not isinstance(form.get("name"), str):
             problems.append("an argument scope is {name, values}")
         elif form["name"] not in _arg_names(capability):
-            problems.append(f"{capability} has no argument {form['name']!r} "
-                            f"(known: {', '.join(sorted(_arg_names(capability)))})")
+            problems.append(
+                f"{capability} has no argument {form['name']!r} "
+                f"(known: {', '.join(sorted(_arg_names(capability)))})"
+            )
         if isinstance(form, dict) and not (
-                isinstance(form.get("values"), list) and form["values"]
-                and all(_scalar(v) is not None for v in form["values"])):
+            isinstance(form.get("values"), list)
+            and form["values"]
+            and all(_scalar(v) is not None for v in form["values"])
+        ):
             problems.append("an argument scope needs a non-empty list of exact values")
     if "target" in scope:
         values = scope["target"]
         if not target_args_of(capability):
-            problems.append(f"{capability} declares no target argument, so it takes no target scope")
-        if not (isinstance(values, list) and values
-                and all(isinstance(v, str) and v for v in values)):
+            problems.append(
+                f"{capability} declares no target argument, so it takes no target scope"
+            )
+        if not (
+            isinstance(values, list) and values and all(isinstance(v, str) and v for v in values)
+        ):
             problems.append("a target scope needs a non-empty list of target values")
     if "schedule" in scope and not (isinstance(scope["schedule"], str) and scope["schedule"]):
         problems.append("a schedule scope names one heartbeat schedule id")
@@ -298,8 +309,11 @@ def scope_text(override: dict) -> str:
         where = "Jira project" if capability.startswith("jira.") else "the target"
         vals = " or ".join(str(v) for v in scope["target"])
         verb = "are all" if len(declared) > 1 else "is"
-        parts.append(f"only where {names} {verb} in {where} {vals}" if where != "the target"
-                     else f"only where {names} {verb} {vals}")
+        parts.append(
+            f"only where {names} {verb} in {where} {vals}"
+            if where != "the target"
+            else f"only where {names} {verb} {vals}"
+        )
     if "schedule" in scope:
         parts.append(f"only in work started by the {scope['schedule']} schedule")
     return "; and ".join(parts)
@@ -325,16 +339,20 @@ def scope_text(override: dict) -> str:
 @dataclass(frozen=True)
 class ShadowState:
     override_id: str
-    k: int          # matching proposals the operator has approved so far
-    n: int          # the override's shadow period
+    k: int  # matching proposals the operator has approved so far
+    n: int  # the override's shadow period
 
     @property
     def complete(self) -> bool:
         return self.k >= self.n
 
     def as_mark(self) -> dict:
-        return {"override_id": self.override_id, "k": self.k, "n": self.n,
-                "complete": self.complete}
+        return {
+            "override_id": self.override_id,
+            "k": self.k,
+            "n": self.n,
+            "complete": self.complete,
+        }
 
 
 async def _schedule_ctx(session_id: str | None) -> dict:
@@ -349,8 +367,10 @@ async def _proposal_covered(override: dict, proposal: dict) -> bool:
     ctx = None
     if (override.get("scope") or {}).get("schedule"):
         ctx = await _schedule_ctx(proposal.get("session_id"))
-    return any(_capability(a) == override["capability"] and scope_covers(override, a, ctx)
-               for a in proposal["actions"] or [])
+    return any(
+        _capability(a) == override["capability"] and scope_covers(override, a, ctx)
+        for a in proposal["actions"] or []
+    )
 
 
 async def shadow_progress(override: dict) -> int:
@@ -358,7 +378,8 @@ async def shadow_progress(override: dict) -> int:
     override's pinned window (see the section comment)."""
     count = 0
     for p in await repo.shadow_approval_candidates(
-            override["agent_id"], override["capability"], override["granted_at"]):
+        override["agent_id"], override["capability"], override["granted_at"]
+    ):
         if override["id"] in ((p.get("override_eval") or {}).get("suspended") or []):
             continue
         if await _proposal_covered(override, p):
@@ -378,8 +399,7 @@ async def shadow_state(override: dict) -> ShadowState:
 
 
 def shadow_text(states) -> str:
-    return "shadow period: " + "; ".join(
-        f"override {s.override_id} {s.k} of {s.n}" for s in states)
+    return "shadow period: " + "; ".join(f"override {s.override_id} {s.k} of {s.n}" for s in states)
 
 
 async def resolve(proposal_row: dict) -> Decision:
@@ -390,8 +410,7 @@ async def resolve(proposal_row: dict) -> Decision:
     caps = [_capability(a) for a in actions]
     # `auditor` records that a graduated class MAY be auditor-confirmed; at this
     # seam it gates exactly like `human` (it changes no behaviour).
-    default = "human" if any(_DEFAULT_GATES.get(c, "human") != "none" for c in caps) \
-        else "none"
+    default = "human" if any(_DEFAULT_GATES.get(c, "human") != "none" for c in caps) else "none"
     if default == "none" or proposal_row.get("agent_id") == AUDITOR_ID:
         return Decision(default)
 
@@ -407,7 +426,7 @@ async def resolve(proposal_row: dict) -> Decision:
     ctx: dict | None = None
     for index, (action, cap) in enumerate(zip(actions, caps)):
         if _DEFAULT_GATES.get(cap, "human") == "none" and cap in _DEFAULT_GATES:
-            continue            # nothing gates this action; there is nothing to cover
+            continue  # nothing gates this action; there is nothing to cover
         if cap not in live_by_cap:
             live_by_cap[cap] = await repo.live_gate_overrides(proposal_row["agent_id"], cap)
         live = live_by_cap[cap]
@@ -419,8 +438,9 @@ async def resolve(proposal_row: dict) -> Decision:
             granted = await _granted_capabilities(proposal_row["agent_id"])
         if live and cap not in granted:
             suspended += [o["id"] for o in live if o["id"] not in suspended]
-            reason = reason or (f"the override is suspended: {cap} is outside the "
-                                "agent's live pack grants")
+            reason = reason or (
+                f"the override is suspended: {cap} is outside the agent's live pack grants"
+            )
             continue
         # A capability whose registry row requires acknowledgement (irreversible
         # or LIVE / highest blast radius) is honoured only with the operator's
@@ -482,11 +502,21 @@ async def resolve(proposal_row: dict) -> Decision:
     if not reason and not action_map:
         reason = "no gated action is covered"
     if reason:
-        return Decision(default, reason=reason, considered=True,
-                        suspended=tuple(suspended), shadow=shadow,
-                        shadowed=shadowed)
-    return Decision("none", override_ids=tuple(sorted(set(action_map.values()))),
-                    considered=True, action_map=action_map, shadow=shadow)
+        return Decision(
+            default,
+            reason=reason,
+            considered=True,
+            suspended=tuple(suspended),
+            shadow=shadow,
+            shadowed=shadowed,
+        )
+    return Decision(
+        "none",
+        override_ids=tuple(sorted(set(action_map.values()))),
+        considered=True,
+        action_map=action_map,
+        shadow=shadow,
+    )
 
 
 async def _granted_capabilities(agent_id: str) -> set[str]:
@@ -518,10 +548,10 @@ async def review_flags(proposal_row: dict, granted: set[str] | None = None) -> s
     for a in actions:
         if _capability(a) == "charter.update":
             flags += policy.check_charter_content(
-                str((a.get("arguments") or {}).get("content", "")))
+                str((a.get("arguments") or {}).get("content", ""))
+            )
         if _capability(a) == "memory.note_add":
-            flags += policy.check_note_content(
-                str((a.get("arguments") or {}).get("text", "")))
+            flags += policy.check_note_content(str((a.get("arguments") or {}).get("text", "")))
     if flags:
         f = flags[0]
         return f"policy flag {f['policy']}: {f['problem']}"
@@ -535,8 +565,9 @@ async def review_flags(proposal_row: dict, granted: set[str] | None = None) -> s
     return ""
 
 
-OPERATOR_HOLD_REASON = ("the operator reopened this work item with a note "
-                        "(eyes on it), so no override decides it")
+OPERATOR_HOLD_REASON = (
+    "the operator reopened this work item with a note (eyes on it), so no override decides it"
+)
 
 
 async def operator_hold_reason(proposal_row: dict) -> str:
@@ -563,13 +594,20 @@ UNEVALUATED_PARKS = ("redraft", "follow_on")
 async def record_unevaluated_park(proposal_id: str, kind: str) -> bool:
     if kind not in UNEVALUATED_PARKS:
         raise ValueError(f"{kind!r} is not an unevaluated park")
-    return await repo.record_override_eval(proposal_id, {
-        "override_id": None, "outcome": "parked", "reason": kind, "at": _now(),
-    })
+    return await repo.record_override_eval(
+        proposal_id,
+        {
+            "override_id": None,
+            "outcome": "parked",
+            "reason": kind,
+            "at": _now(),
+        },
+    )
 
 
 _live_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
-    weakref.WeakKeyDictionary())
+    weakref.WeakKeyDictionary()
+)
 
 
 async def _announce_live(decision: Decision, proposal_id: str) -> None:
@@ -586,9 +624,14 @@ async def _announce_live(decision: Decision, proposal_id: str) -> None:
             if await repo.count_events("override.live", mark.override_id):
                 continue
             await events.emit(
-                "override.live", ref_id=mark.override_id,
-                payload={"override_id": mark.override_id, "shadow_runs": mark.n,
-                         "progress": mark.k, "proposal_id": proposal_id},
+                "override.live",
+                ref_id=mark.override_id,
+                payload={
+                    "override_id": mark.override_id,
+                    "shadow_runs": mark.n,
+                    "progress": mark.k,
+                    "proposal_id": proposal_id,
+                },
                 actor="gateway",
             )
 
@@ -611,8 +654,9 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
         return None
     record = {
         "override_id": decision.override_id,
-        "outcome": ("decided" if decision.override_ids
-                    else "shadow" if decision.shadowed else "parked"),
+        "outcome": (
+            "decided" if decision.override_ids else "shadow" if decision.shadowed else "parked"
+        ),
         "reason": decision.reason or None,
         "at": _now(),
     }
@@ -632,10 +676,15 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
         if decision.shadowed:
             for m in open_marks:
                 await events.emit(
-                    "override.shadowed", ref_id=proposal_id,
-                    payload={"override_id": m.override_id, "k": m.k, "n": m.n,
-                             "proposal_id": proposal_id,
-                             "overrides": [x.as_mark() for x in decision.shadow]},
+                    "override.shadowed",
+                    ref_id=proposal_id,
+                    payload={
+                        "override_id": m.override_id,
+                        "k": m.k,
+                        "n": m.n,
+                        "proposal_id": proposal_id,
+                        "overrides": [x.as_mark() for x in decision.shadow],
+                    },
                     actor="gateway",
                 )
         return record
@@ -646,7 +695,10 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
     approver = approver_for(decision.override_ids)
     try:
         await gateway.approve_and_execute(
-            row["session_id"], proposal_id, approver=approver, model=model,
+            row["session_id"],
+            proposal_id,
+            approver=approver,
+            model=model,
         )
     except OverrideRefused as e:
         # The pre-check (or the Executor's backstop) refused and handed the
@@ -660,13 +712,20 @@ async def decide_on_park(proposal_id: str, model=None) -> dict | None:
         # AFTER the claim leaves the status moved, and `decided` stays true.
         fresh = await repo.load_proposal(proposal_id)
         if fresh is not None and fresh["status"] == "AWAITING_HUMAN":
-            record = {**record, "outcome": "parked",
-                      "reason": f"the override decision did not run: {e}"}
+            record = {
+                **record,
+                "outcome": "parked",
+                "reason": f"the override decision did not run: {e}",
+            }
             await repo.amend_override_eval(proposal_id, record)
         await events.emit(
-            "override.error", ref_id=proposal_id,
-            payload={"override_id": decision.override_id,
-                     "override_ids": list(decision.override_ids), "error": str(e)},
+            "override.error",
+            ref_id=proposal_id,
+            payload={
+                "override_id": decision.override_id,
+                "override_ids": list(decision.override_ids),
+                "error": str(e),
+            },
             actor=approver,
         )
     return record
@@ -693,8 +752,12 @@ def _stored_map(proposal_row: dict | None) -> dict[int, str]:
 
 
 async def check_override_approval(
-    approver: str, actions: list[dict], *, proposer: str | None,
-    proposal_row: dict | None = None, offset: int = 0,
+    approver: str,
+    actions: list[dict],
+    *,
+    proposer: str | None,
+    proposal_row: dict | None = None,
+    offset: int = 0,
 ) -> None:
     """Re-check an override approval against FRESH server-held state; raise
     `OverrideRefused` naming the failing override, or return. Read-only. The
@@ -723,17 +786,22 @@ async def check_override_approval(
         if o["revoked_at"] is not None:
             raise OverrideRefused(oid, "the override was revoked")
         if o["agent_id"] != proposer or o["agent_id"] == AUDITOR_ID:
-            raise OverrideRefused(oid, f"the override belongs to {o['agent_id']}, "
-                                       f"not the drafter {proposer}")
+            raise OverrideRefused(
+                oid, f"the override belongs to {o['agent_id']}, not the drafter {proposer}"
+            )
         if o["gate"] != "none":
             raise OverrideRefused(oid, f"the override's gate is {o['gate']}")
         state = await shadow_state(o)
         if not state.complete:
-            raise OverrideRefused(oid, "the override is still in its shadow period "
-                                       f"({state.k} of {state.n})")
+            raise OverrideRefused(
+                oid, f"the override is still in its shadow period ({state.k} of {state.n})"
+            )
         if o["capability"] not in granted:
-            raise OverrideRefused(oid, f"the override is suspended: {o['capability']} "
-                                       "is outside the agent's live pack grants")
+            raise OverrideRefused(
+                oid,
+                f"the override is suspended: {o['capability']} "
+                "is outside the agent's live pack grants",
+            )
         if proposal_row is not None and not proposal_row["created_at"] > o["granted_at"]:
             raise OverrideRefused(oid, "the proposal predates the override")
 
@@ -745,20 +813,20 @@ async def check_override_approval(
             continue
         oid = stored.get(index) or (ids[0] if len(ids) == 1 else None)
         if oid not in rows:
-            raise OverrideRefused(oid, f"action {index} ({cap}) has no override "
-                                       "of this approval mapped to it")
+            raise OverrideRefused(
+                oid, f"action {index} ({cap}) has no override of this approval mapped to it"
+            )
         o = rows[oid]
         if o["capability"] != cap:
-            raise OverrideRefused(oid, f"action {index} is {cap}, the override "
-                                       f"covers {o['capability']}")
+            raise OverrideRefused(
+                oid, f"action {index} is {cap}, the override covers {o['capability']}"
+            )
         if requires_acknowledgement(cap) and not o["acknowledged_irreversible_at"]:
-            raise OverrideRefused(oid, f"{cap} requires an acknowledgement the "
-                                       "override lacks")
+            raise OverrideRefused(oid, f"{cap} requires an acknowledgement the override lacks")
         if ctx is None and (o["scope"] or {}).get("schedule"):
             ctx = await _schedule_ctx((proposal_row or {}).get("session_id"))
         if not scope_covers(o, action, ctx):
-            raise OverrideRefused(oid, f"action {index} ({cap}) is outside the "
-                                       "override's scope")
+            raise OverrideRefused(oid, f"action {index} ({cap}) is outside the override's scope")
 
     if proposal_row is not None:
         flagged = await review_flags({**proposal_row, "actions": actions}, granted)
@@ -769,16 +837,21 @@ async def check_override_approval(
             raise OverrideRefused(ids[0] if len(ids) == 1 else None, hold)
 
 
-async def emit_refused(proposal_id: str, approver: str, refused: OverrideRefused,
-                       stage: str) -> None:
+async def emit_refused(
+    proposal_id: str, approver: str, refused: OverrideRefused, stage: str
+) -> None:
     """`override.refused`: which override, why, for which proposal — written
     BEFORE the proposal is handed back, so the log reads in the right order."""
     await events.emit(
-        "override.refused", ref_id=proposal_id,
-        payload={"override_id": refused.override_id,
-                 "override_ids": override_ids_of(approver),
-                 "reason": refused.reason, "proposal_id": proposal_id,
-                 "stage": stage},
+        "override.refused",
+        ref_id=proposal_id,
+        payload={
+            "override_id": refused.override_id,
+            "override_ids": override_ids_of(approver),
+            "reason": refused.reason,
+            "proposal_id": proposal_id,
+            "stage": stage,
+        },
         actor=approver,
     )
 
@@ -801,7 +874,8 @@ async def decide_landed(out: dict | None, model=None) -> dict | None:
         return await decide_on_park(proposal_id, model=model)
     except Exception as e:  # noqa: BLE001 — the operator's gate takes it back, loudly
         await events.emit(
-            "override.error", ref_id=proposal_id,
+            "override.error",
+            ref_id=proposal_id,
             payload={"override_id": None, "error": str(e), "stage": "evaluate"},
             actor="gateway",
         )
@@ -860,15 +934,21 @@ _WRITE_ROWS = {c.name: c for c in REGISTRY if c.kind == "write"}
 _ALL_ROWS = {c.name: c for c in REGISTRY}
 
 _author_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
-    weakref.WeakKeyDictionary())
+    weakref.WeakKeyDictionary()
+)
 
 
 def _same_scope(a, b) -> bool:
     return json.dumps(a or {}, sort_keys=True) == json.dumps(b or {}, sort_keys=True)
 
 
-async def author(agent_id: str, capability: str, scope: dict | None = None,
-                 acknowledge_irreversible: bool = False, by: str = "operator") -> dict:
+async def author(
+    agent_id: str,
+    capability: str,
+    scope: dict | None = None,
+    acknowledge_irreversible: bool = False,
+    by: str = "operator",
+) -> dict:
     """Write a new override (always a new id; the gate relaxes to `none`
     only) and return `{"override": <listing row>, "warnings": [...]}`.
 
@@ -895,35 +975,59 @@ async def author(agent_id: str, capability: str, scope: dict | None = None,
         row = _WRITE_ROWS[capability]
         problems.append(
             f"{capability} is {row.reversibility}"
-            + ("" if row.reversibility == "irreversible" else " but LIVE or of the highest blast radius")
-            + ": an override on it needs the operator's explicit acknowledgement")
+            + (
+                ""
+                if row.reversibility == "irreversible"
+                else " but LIVE or of the highest blast radius"
+            )
+            + ": an override on it needs the operator's explicit acknowledgement"
+        )
     if problems:
         raise AuthoringRefused(422, problems)
 
     lock = _author_locks.setdefault(asyncio.get_running_loop(), asyncio.Lock())
     async with lock:
-        if any(_same_scope(o["scope"], scope)
-               for o in await repo.live_gate_overrides(agent_id, capability)):
-            raise AuthoringRefused(409, [
-                (f"{agent_id} already holds a live override on {capability} with this "
-                "scope; revoke it first (a scope change is a revoke plus a new override)")])
+        if any(
+            _same_scope(o["scope"], scope)
+            for o in await repo.live_gate_overrides(agent_id, capability)
+        ):
+            raise AuthoringRefused(
+                409,
+                [
+                    (
+                        f"{agent_id} already holds a live override on {capability} with this "
+                        "scope; revoke it first (a scope change is a revoke plus a new override)"
+                    )
+                ],
+            )
         row = await repo.create_gate_override(
-            agent_id, capability, scope=scope, granted_by=by, shadow_runs=None,
+            agent_id,
+            capability,
+            scope=scope,
+            granted_by=by,
+            shadow_runs=None,
             acknowledged_irreversible=bool(ack_required and acknowledge_irreversible),
         )
     await events.emit(
-        "override.created", ref_id=row["id"],
-        payload={"override_id": row["id"], "agent_id": agent_id,
-                 "capability": capability, "scope": scope,
-                 "scope_text": scope_text(row), "shadow_runs": row["shadow_runs"],
-                 "acknowledged_irreversible": row["acknowledged_irreversible_at"] is not None},
+        "override.created",
+        ref_id=row["id"],
+        payload={
+            "override_id": row["id"],
+            "agent_id": agent_id,
+            "capability": capability,
+            "scope": scope,
+            "scope_text": scope_text(row),
+            "shadow_runs": row["shadow_runs"],
+            "acknowledged_irreversible": row["acknowledged_irreversible_at"] is not None,
+        },
         actor=by,
     )
     warnings = []
     if capability not in await _granted_capabilities(agent_id):
         warnings.append(
             f"{agent_id} holds no live pack that covers {capability}: the override is "
-            "suspended until a pack grant covers it")
+            "suspended until a pack grant covers it"
+        )
     return {"override": await describe(row), "warnings": warnings}
 
 
@@ -937,9 +1041,14 @@ async def revoke(override_id: str, reason: str | None = None, by: str = "operato
         raise AuthoringRefused(409, [f"override {override_id!r} is already revoked"])
     row = await repo.get_gate_override(override_id)
     await events.emit(
-        "override.revoked", ref_id=override_id,
-        payload={"override_id": override_id, "agent_id": row["agent_id"],
-                 "capability": row["capability"], "reason": reason},
+        "override.revoked",
+        ref_id=override_id,
+        payload={
+            "override_id": override_id,
+            "agent_id": row["agent_id"],
+            "capability": row["capability"],
+            "reason": reason,
+        },
         actor=by,
     )
     return await describe(row)
@@ -951,8 +1060,11 @@ async def match_stats(override: dict) -> tuple[int, datetime | None]:
     in its shadow period, or a park), and when the last was created."""
     count, last = 0, None
     for p in await repo.override_match_candidates(
-            override["agent_id"], override["capability"], override["granted_at"],
-            override.get("revoked_at")):
+        override["agent_id"],
+        override["capability"],
+        override["granted_at"],
+        override.get("revoked_at"),
+    ):
         if await _proposal_covered(override, p):
             count += 1
             last = p["created_at"]
@@ -974,8 +1086,13 @@ async def describe(override: dict, granted: set[str] | None = None) -> dict:
     else:
         if granted is None:
             granted = await _granted_capabilities(override["agent_id"])
-        state = ("suspended" if override["capability"] not in granted
-                 else "shadow" if not shadow.complete else "live")
+        state = (
+            "suspended"
+            if override["capability"] not in granted
+            else "shadow"
+            if not shadow.complete
+            else "live"
+        )
     matches, last_match = await match_stats(override)
     return {
         "id": override["id"],
@@ -1022,52 +1139,96 @@ EXEMPT = "exempt"
 SWEEP_ONLY = "sweep only"
 
 PARK_SITES: dict[str, tuple[str, str]] = {
-    "runtime/run.py:ingest_and_propose": (HOOK,
-        ("ingest/dispatcher.process_claimed, at function scope after the fold "
-        "reservation and the auditor's bulk hook, before work.processed")),
-    "runtime/steward.py:run_document": (HOOK,
-        "ingest/dispatcher.process_claimed (the document handler), same place"),
-    "runtime/wiki_agent.py:run_repair": (HOOK,
-        "ingest/dispatcher.process_claimed (the wiki-repair handler), same place"),
-    "runtime/run.py:_land": (HOOK,
-        ("api/routes._run_one_assigned_task (run_task, after task.review); "
-        "api/orchestration._land_task_question_outcome for continue_session, "
-        "resume_stopped_session and resume_parked_read (a parked propose read "
-        "that drafted on re-execution, through _land_tail)")),
-    "runtime/run.py:run_coach": (HOOK,
-        ("api/routes.coach_agent (synchronous) and routes._run_coach_detached "
-        "(after task.review)")),
-    "runtime/converse.py:_land_turn": (HOOK,
-        ("the chat lane api/nerve_gateway._chat_send; the heartbeat discussion "
-        "nudge heartbeat/actions._nudge_discussion; the converse branches of "
-        "api/orchestration.continue_session and resume_stopped_session; "
-        "api/orchestration._land_tail for a resumed read or turn")),
-    "runtime/questions.py:_settle": (HOOK,
-        ("api/orchestration._land_task_question_outcome (every answered-question "
-        "resume: _resume_task_question, _retry_answered_question, "
-        "_finish_answered_resume)")),
-    "runtime/consult.py:consult": (HOOK,
-        ("the asker's own landing: the consult wait result carries the "
-        "specialist's proposal_id, so whichever caller lands the asker's run "
-        "(rows above) decides it once the asker is parked AWAITING_AGENTS")),
-    "api/orchestration.py:_settle_consult_resume": (HOOK,
-        ("api/orchestration.resume_consult_wait and resume_parked_session "
-        "(after=consulted), after the settle returns")),
-    "runtime/reflection.py:_propose_episode": (SWEEP_ONLY,
-        ("a reflection runs as a background task off runtime's close_session "
-        "with no API-tier landing; its proposal is evaluated by the startup "
-        "override_sweep")),
-    "runtime/reflection.py:_propose_skill_correction": (SWEEP_ONLY,
-        ("the episode's case: the skill correction is parked by the same "
-        "background reflection off close_session, with no API-tier landing; "
-        "its proposal is evaluated by the startup override_sweep")),
-    "runtime/reflection.py:_propose_note": (SWEEP_ONLY,
-        ("the episode's case: a standing note is parked by the same background "
-        "reflection off close_session, with no API-tier landing; its proposal "
-        "is evaluated by the startup override_sweep")),
-    "gateway/gateway.py:_park_redraft": (EXEMPT,
-        "a redraft is recorded unevaluated at the park (story 16)"),
-    "gateway/gateway.py:finish_decision_resume": (EXEMPT,
-        ("a follow-on on the approved leg is recorded unevaluated at the park "
-        "(story 16)")),
+    "runtime/run.py:ingest_and_propose": (
+        HOOK,
+        (
+            "ingest/dispatcher.process_claimed, at function scope after the fold "
+            "reservation and the auditor's bulk hook, before work.processed"
+        ),
+    ),
+    "runtime/steward.py:run_document": (
+        HOOK,
+        "ingest/dispatcher.process_claimed (the document handler), same place",
+    ),
+    "runtime/wiki_agent.py:run_repair": (
+        HOOK,
+        "ingest/dispatcher.process_claimed (the wiki-repair handler), same place",
+    ),
+    "runtime/run.py:_land": (
+        HOOK,
+        (
+            "api/routes._run_one_assigned_task (run_task, after task.review); "
+            "api/orchestration._land_task_question_outcome for continue_session, "
+            "resume_stopped_session and resume_parked_read (a parked propose read "
+            "that drafted on re-execution, through _land_tail)"
+        ),
+    ),
+    "runtime/run.py:run_coach": (
+        HOOK,
+        ("api/routes.coach_agent (synchronous) and routes._run_coach_detached (after task.review)"),
+    ),
+    "runtime/converse.py:_land_turn": (
+        HOOK,
+        (
+            "the chat lane api/nerve_gateway._chat_send; the heartbeat discussion "
+            "nudge heartbeat/actions._nudge_discussion; the converse branches of "
+            "api/orchestration.continue_session and resume_stopped_session; "
+            "api/orchestration._land_tail for a resumed read or turn"
+        ),
+    ),
+    "runtime/questions.py:_settle": (
+        HOOK,
+        (
+            "api/orchestration._land_task_question_outcome (every answered-question "
+            "resume: _resume_task_question, _retry_answered_question, "
+            "_finish_answered_resume)"
+        ),
+    ),
+    "runtime/consult.py:consult": (
+        HOOK,
+        (
+            "the asker's own landing: the consult wait result carries the "
+            "specialist's proposal_id, so whichever caller lands the asker's run "
+            "(rows above) decides it once the asker is parked AWAITING_AGENTS"
+        ),
+    ),
+    "api/orchestration.py:_settle_consult_resume": (
+        HOOK,
+        (
+            "api/orchestration.resume_consult_wait and resume_parked_session "
+            "(after=consulted), after the settle returns"
+        ),
+    ),
+    "runtime/reflection.py:_propose_episode": (
+        SWEEP_ONLY,
+        (
+            "a reflection runs as a background task off runtime's close_session "
+            "with no API-tier landing; its proposal is evaluated by the startup "
+            "override_sweep"
+        ),
+    ),
+    "runtime/reflection.py:_propose_skill_correction": (
+        SWEEP_ONLY,
+        (
+            "the episode's case: the skill correction is parked by the same "
+            "background reflection off close_session, with no API-tier landing; "
+            "its proposal is evaluated by the startup override_sweep"
+        ),
+    ),
+    "runtime/reflection.py:_propose_note": (
+        SWEEP_ONLY,
+        (
+            "the episode's case: a standing note is parked by the same background "
+            "reflection off close_session, with no API-tier landing; its proposal "
+            "is evaluated by the startup override_sweep"
+        ),
+    ),
+    "gateway/gateway.py:_park_redraft": (
+        EXEMPT,
+        "a redraft is recorded unevaluated at the park (story 16)",
+    ),
+    "gateway/gateway.py:finish_decision_resume": (
+        EXEMPT,
+        ("a follow-on on the approved leg is recorded unevaluated at the park (story 16)"),
+    ),
 }

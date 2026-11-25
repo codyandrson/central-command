@@ -23,9 +23,7 @@ def _client(timeout: float) -> httpx.AsyncClient:
         if settings.sandbox_runner_token
         else {}
     )
-    return httpx.AsyncClient(
-        base_url=settings.sandbox_runner_url, timeout=timeout, headers=headers
-    )
+    return httpx.AsyncClient(base_url=settings.sandbox_runner_url, timeout=timeout, headers=headers)
 
 
 async def create_session(agent_id: str, session_id: str) -> dict:

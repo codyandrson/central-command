@@ -48,17 +48,28 @@ PROPOSE_TOOLS = frozenset(
         "propose_jira_update",  # dropped from every toolset 2026-08-21; kept
         # here so a deferred call under this name, parked by a session from
         # before the drop (pre-2026-08-16..08-21), still classifies and resumes.
-        "propose_litellm_change", "propose_calendar_change",
+        "propose_litellm_change",
+        "propose_calendar_change",
         "propose_mcp_sync_source",
-        "propose_mcp_build", "propose_mcp_deploy", "propose_mcp_register",
-        "propose_mcp_remove", "propose_mcp_tool_call",
-        "propose_mcp_server_register", "propose_mcp_server_unregister",
-        "propose_skill_create", "propose_skill_doc", "propose_skill_correction",
-        "propose_note", "propose_note_retire",
+        "propose_mcp_build",
+        "propose_mcp_deploy",
+        "propose_mcp_register",
+        "propose_mcp_remove",
+        "propose_mcp_tool_call",
+        "propose_mcp_server_register",
+        "propose_mcp_server_unregister",
+        "propose_skill_create",
+        "propose_skill_doc",
+        "propose_skill_correction",
+        "propose_note",
+        "propose_note_retire",
         "propose_loe",
-        "propose_bulk_dismiss", "propose_mail_rule",
-        "propose_report_spam", "propose_unsubscribe",
-        "propose_mail_send", "propose_mail_move",
+        "propose_bulk_dismiss",
+        "propose_mail_rule",
+        "propose_report_spam",
+        "propose_unsubscribe",
+        "propose_mail_send",
+        "propose_mail_move",
         "propose_delete_episode",
     }
 )
@@ -181,9 +192,7 @@ def deferred_proposal(result, call) -> Proposal:
 def dump_run_state(result, tool_call_id: str) -> dict:
     """Serialize everything needed to resume in another process, as JSON-able data."""
     return {
-        "messages": ModelMessagesTypeAdapter.dump_python(
-            result.all_messages(), mode="json"
-        ),
+        "messages": ModelMessagesTypeAdapter.dump_python(result.all_messages(), mode="json"),
         "tool_call_id": tool_call_id,
     }
 
@@ -236,10 +245,15 @@ def retry_text(part) -> str | None:
 # one's turn. A transcript reader skips them; the one a person needs to see, a
 # loaded skill's guidance, which 2.18 carried in the `load_capability` return,
 # is shown with that return (`load_return_text`).
-BOOKKEEPING_KINDS = frozenset({
-    "instruction-baseline", "instruction-delta", "tool-availability-delta",
-    "capability-load-delta", "model-settings-delta",
-})
+BOOKKEEPING_KINDS = frozenset(
+    {
+        "instruction-baseline",
+        "instruction-delta",
+        "tool-availability-delta",
+        "capability-load-delta",
+        "model-settings-delta",
+    }
+)
 
 
 def is_bookkeeping(part) -> bool:
@@ -271,15 +285,24 @@ def load_return_text(part: dict, request_parts: list, load_ids: dict) -> str | N
     recorded as an `instruction-delta` part `capability:<its id>` in the same
     request (the id from its call, via `load_call_ids`). None for any other
     part."""
-    if part.get("part_kind") != "tool-return" or part.get("tool_kind") != "capability-load" \
-            or retry_text(part) is not None:
+    if (
+        part.get("part_kind") != "tool-return"
+        or part.get("tool_kind") != "capability-load"
+        or retry_text(part) is not None
+    ):
         return None
     text = part.get("content")
     text = text if isinstance(text, str) else json.dumps(text, default=str)
     capability = load_ids.get(part.get("tool_call_id"))
-    guidance = [str(p.get("content")) for p in request_parts
-                if capability and isinstance(p, dict) and p.get("part_kind") == "instruction-delta"
-                and str(p.get("id", "")) == f"capability:{capability}" and p.get("content")]
+    guidance = [
+        str(p.get("content"))
+        for p in request_parts
+        if capability
+        and isinstance(p, dict)
+        and p.get("part_kind") == "instruction-delta"
+        and str(p.get("id", "")) == f"capability:{capability}"
+        and p.get("content")
+    ]
     return "\n\n".join([text, *guidance])
 
 
@@ -337,13 +360,15 @@ def unanswered_calls(messages) -> list[ToolCallPart]:
         return []
     answered = {
         part.tool_call_id
-        for m in messages[last + 1:] if isinstance(m, ModelRequest)
+        for m in messages[last + 1 :]
+        if isinstance(m, ModelRequest)
         for part in m.parts
-        if isinstance(part, ToolReturnPart) or (retry_text(part) is not None
-                                                and getattr(part, "tool_call_id", None))
+        if isinstance(part, ToolReturnPart)
+        or (retry_text(part) is not None and getattr(part, "tool_call_id", None))
     }
     return [
-        part for part in messages[last].parts
+        part
+        for part in messages[last].parts
         if isinstance(part, ToolCallPart) and part.tool_call_id not in answered
     ]
 
@@ -384,17 +409,26 @@ def answer_pending_calls(messages, tool_call_id: str, report: str) -> list | Non
             text = report
         else:
             text = SIBLING_NOT_PARKED.format(tool=call.tool_name)
-        parts.append(ToolReturnPart(
-            tool_name=call.tool_name, content=text, tool_call_id=call.tool_call_id,
-        ))
+        parts.append(
+            ToolReturnPart(
+                tool_name=call.tool_name,
+                content=text,
+                tool_call_id=call.tool_call_id,
+            )
+        )
     if not found:
         return None
     return [*messages, ModelRequest(parts=parts)]
 
 
 async def deferred_results(
-    messages, tool_call_id: str, result, *, session_id: str | None = None,
-    agent_id: str | None = None, decided_metadata: dict | None = None,
+    messages,
+    tool_call_id: str,
+    result,
+    *,
+    session_id: str | None = None,
+    agent_id: str | None = None,
+    decided_metadata: dict | None = None,
 ) -> DeferredToolResults:
     """THE way a paused run gets its results: `result` for the decided call,
     and a `ToolFailed` for every SIBLING deferred in the same response.
@@ -432,10 +466,14 @@ async def deferred_results(
         # another call.
         # By name only (a sibling's pause metadata is not persisted), so a
         # propose-tool sibling keeps the ordinary text.
-        text = SIBLING_READ_NOT_RUN if (
-            call.tool_name in _NAMED_READS
-            and tool_call_id_is_read(messages, tool_call_id, decided_metadata)
-        ) else SIBLING_NOT_PARKED
+        text = (
+            SIBLING_READ_NOT_RUN
+            if (
+                call.tool_name in _NAMED_READS
+                and tool_call_id_is_read(messages, tool_call_id, decided_metadata)
+            )
+            else SIBLING_NOT_PARKED
+        )
         results.calls[call.tool_call_id] = ToolFailed(text.format(tool=call.tool_name))
         bounced.append(call.tool_name)
     if bounced and session_id:
@@ -444,16 +482,24 @@ async def deferred_results(
         await events.emit(
             "session.deferred_siblings_bounced",
             ref_id=session_id,
-            payload={"agent_id": agent_id, "decided_tool_call_id": tool_call_id,
-                     "bounced": bounced},
+            payload={
+                "agent_id": agent_id,
+                "decided_tool_call_id": tool_call_id,
+                "bounced": bounced,
+            },
             actor="system",
         )
     return results
 
 
 async def resume(
-    agent, messages, tool_call_id: str, executor_result: str, model=None,
-    agent_id: str | None = None, session_id: str | None = None,
+    agent,
+    messages,
+    tool_call_id: str,
+    executor_result: str,
+    model=None,
+    agent_id: str | None = None,
+    session_id: str | None = None,
 ):
     """Resume a paused run with the Executor's result for the deferred call.
 
@@ -486,8 +532,11 @@ async def resume(
     from central_command.runtime.deps import TriageDeps
 
     results = await deferred_results(
-        messages, tool_call_id, executor_result,
-        session_id=session_id, agent_id=agent_id,
+        messages,
+        tool_call_id,
+        executor_result,
+        session_id=session_id,
+        agent_id=agent_id,
     )
     return await agent.run(
         message_history=messages,
@@ -532,10 +581,12 @@ def simplify_messages(run_state: dict, max_chars: int = 6000) -> list[dict]:
                 content = str(part.get("content", ""))
             else:
                 content = str({k: v for k, v in part.items() if k != "part_kind"})
-            turns.append({
-                "kind": kind,
-                "tool": part.get("tool_name"),
-                "content": content[:max_chars],
-                "truncated": len(content) > max_chars,
-            })
+            turns.append(
+                {
+                    "kind": kind,
+                    "tool": part.get("tool_name"),
+                    "content": content[:max_chars],
+                    "truncated": len(content) > max_chars,
+                }
+            )
     return turns

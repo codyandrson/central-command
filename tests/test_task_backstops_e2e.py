@@ -39,8 +39,13 @@ from tests.test_orchestration import _assigning_model
 
 pytestmark = needs_pg
 
-A, B, C, D, E = ("jira-expert", "litellm-manager", "confluence-expert",
-                 "wiki-agent", "inbox-triage")
+A, B, C, D, E = (
+    "jira-expert",
+    "litellm-manager",
+    "confluence-expert",
+    "wiki-agent",
+    "inbox-triage",
+)
 DEADLINE = 30.0
 _OPEN = ("NEW", "ASSIGNED", "IN_PROGRESS")
 
@@ -54,27 +59,33 @@ def pinned(monkeypatch):
 
 
 def _returns(messages) -> list[str]:
-    return [str(p.content) for m in messages for p in getattr(m, "parts", [])
-            if isinstance(p, ToolReturnPart) and p.tool_name == "create_task"]
+    return [
+        str(p.content)
+        for m in messages
+        for p in getattr(m, "parts", [])
+        if isinstance(p, ToolReturnPart) and p.tool_name == "create_task"
+    ]
 
 
 def _creator(calls: list[dict], seen: list[str]) -> FunctionModel:
     """Fires `calls` as create_task tool calls in ONE response, then closes out
     in text once the results are back, recording what the agent was told."""
+
     def respond(messages, info) -> ModelResponse:
         got = _returns(messages)
         if got:
             seen.extend(got)
             return ModelResponse(parts=[TextPart(content="Closed — " + " | ".join(got))])
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="create_task", args=dict(c)) for c in calls])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="create_task", args=dict(c)) for c in calls]
+        )
+
     return FunctionModel(respond)
 
 
 def _hop(assignee: str, seen: list[str]) -> FunctionModel:
     """The self-perpetuating agent: every time it runs it creates a successor."""
-    return _creator([{"agent_id": assignee, "instructions": f"carry on to {assignee}"}],
-                    seen)
+    return _creator([{"agent_id": assignee, "instructions": f"carry on to {assignee}"}], seen)
 
 
 def _text(content: str = "Done.") -> FunctionModel:
@@ -123,8 +134,9 @@ async def _lineage(root: str) -> list[dict]:
     rows = await repo.list_tasks(limit=500)
     found, frontier = {root}, {root}
     while frontier:
-        frontier = {t["id"] for t in rows
-                    if t.get("parent_task_id") in frontier and t["id"] not in found}
+        frontier = {
+            t["id"] for t in rows if t.get("parent_task_id") in frontier and t["id"] not in found
+        }
         found |= frontier
     return [t for t in rows if t["id"] in found]
 
@@ -160,7 +172,8 @@ async def _settle(root: str, count: int) -> list[dict]:
             raise AssertionError(
                 f"chain did not settle at {count} tasks within {DEADLINE}s: "
                 f"{[(t['id'], t['agent_id'], t['status']) for t in tasks]} "
-                f"{await _problems(tasks)}")
+                f"{await _problems(tasks)}"
+            )
         await asyncio.sleep(0.05)
 
 
@@ -180,8 +193,7 @@ def _by_agent(tasks: list[dict]) -> dict[str, dict]:
 
 
 async def _operator_task(agent: str) -> str:
-    out = await routes.create_and_run_task(
-        "start the chain", None, agent, background=True)
+    out = await routes.create_and_run_task("start the chain", None, agent, background=True)
     return out["task_id"]
 
 
@@ -191,8 +203,9 @@ async def _operator_task(agent: str) -> str:
 async def test_a_self_perpetuating_chain_stops_at_the_depth_cap(scripted):
     ring = [A, B, C, D, E]
     seen: dict[str, list[str]] = {a: [] for a in ring}
-    resolver = scripted({a: _hop(ring[(i + 1) % len(ring)], seen[a])
-                         for i, a in enumerate(ring[:-1])})
+    resolver = scripted(
+        {a: _hop(ring[(i + 1) % len(ring)], seen[a]) for i, a in enumerate(ring[:-1])}
+    )
     assert settings.task_max_depth == 3
     since = await repo.latest_event_id()
 
@@ -200,8 +213,12 @@ async def test_a_self_perpetuating_chain_stops_at_the_depth_cap(scripted):
     # operator task + T1 + T2 + T3: the fourth creation is the one refused.
     tasks = await _settle(root, 4)
 
-    assert [t["agent_id"] for t in sorted(tasks, key=lambda t: len(t["creator_chain"]))] \
-        == [A, B, C, D]
+    assert [t["agent_id"] for t in sorted(tasks, key=lambda t: len(t["creator_chain"]))] == [
+        A,
+        B,
+        C,
+        D,
+    ]
     by = _by_agent(tasks)
     assert by[D]["creator_chain"] == [A, B, C]
     assert by[D]["created_by"] == f"agent:{C}"
@@ -226,8 +243,11 @@ async def test_a_self_perpetuating_chain_stops_at_the_depth_cap(scripted):
     for a in (A, B, C):
         assert (await _card(by[a]["id"]))["refusals"] is None
     # And no inbox item: a refusal is not a decision for the operator.
-    assert not [i for i in await repo.list_operator_items("OPEN")
-                if i["session_id"] in {t["session_id"] for t in tasks}]
+    assert not [
+        i
+        for i in await repo.list_operator_items("OPEN")
+        if i["session_id"] in {t["session_id"] for t in tasks}
+    ]
 
 
 # --- (b) a pair that assign each other ----------------------------------------
@@ -263,13 +283,19 @@ async def test_two_agents_assigning_each_other_stop_as_a_cycle(scripted):
 
 
 async def test_a_run_firing_more_creations_than_the_limit_is_cut_at_the_limit(
-        scripted, monkeypatch):
+    scripted, monkeypatch
+):
     monkeypatch.setattr(settings, "task_fanout_limit", 3)
     seen: dict[str, list[str]] = {A: []}
     targets = [B, C, D, B, C]
-    scripted({A: _creator(
-        [{"agent_id": t, "instructions": f"job {i}"} for i, t in enumerate(targets)],
-        seen[A])})
+    scripted(
+        {
+            A: _creator(
+                [{"agent_id": t, "instructions": f"job {i}"} for i, t in enumerate(targets)],
+                seen[A],
+            )
+        }
+    )
     since = await repo.latest_event_id()
 
     root = await _operator_task(A)
@@ -281,18 +307,17 @@ async def test_a_run_firing_more_creations_than_the_limit_is_cut_at_the_limit(
     assert len(refused) == 2  # the 4th and 5th, one event each
     assert {e["payload"]["reason"] for e in refused} == {"fan-out"}
     assert {e["ref_id"] for e in refused} == {root}
-    assert all(e["payload"]["limit"] == 3 and e["payload"]["created"] == 3
-               for e in refused)
+    assert all(e["payload"]["limit"] == 3 and e["payload"]["created"] == 3 for e in refused)
     assert len(seen[A]) == 5
-    assert sum(r.startswith("Task NOT created") and "fan-out" in r
-               for r in seen[A]) == 2
+    assert sum(r.startswith("Task NOT created") and "fan-out" in r for r in seen[A]) == 2
     card = await _card(root)
     assert card["refusals"]["count"] == 2
     assert card["refusals"]["latest_reason"] == "fan-out"
 
 
 async def test_concurrent_creations_from_one_task_never_overshoot_the_limit(
-        monkeypatch, no_detached_runs):
+    monkeypatch, no_detached_runs
+):
     """The lock, exercised directly: the tool calls race under asyncio.gather
     (a real run serialises them — the tool is sequential — so only a direct
     burst can overlap), and the bound is exact."""
@@ -304,8 +329,9 @@ async def test_concurrent_creations_from_one_task_never_overshoot_the_limit(
     since = await repo.latest_event_id()
     ctx = SimpleNamespace(deps=TriageDeps(agent_id=A, session_id=session))
 
-    outs = await asyncio.gather(*[
-        create_task(ctx, [B, C, D][i % 3], f"burst {i}") for i in range(10)])
+    outs = await asyncio.gather(
+        *[create_task(ctx, [B, C, D][i % 3], f"burst {i}") for i in range(10)]
+    )
 
     tasks = await _lineage(root)
     assert len(tasks) == 1 + 4
@@ -331,8 +357,8 @@ async def test_an_inherited_chain_marks_the_ancestor_task(monkeypatch, no_detach
     since = await repo.latest_event_id()
 
     out = await create_task(
-        SimpleNamespace(deps=TriageDeps(agent_id=B, session_id=specialist)),
-        C, "go deeper")
+        SimpleNamespace(deps=TriageDeps(agent_id=B, session_id=specialist)), C, "go deeper"
+    )
 
     assert out.startswith("Task NOT created") and "depth" in out
     (refused,) = await _refused_events(since)
@@ -376,17 +402,16 @@ async def test_an_agent_created_project_parks_its_plan_before_round_one(scripted
     # Parked, not spinning: IN_PROGRESS with a live (awaiting) session.
     assert project["status"] == "IN_PROGRESS"
     assert await repo.session_status(sid) == "AWAITING_AGENTS"
-    (plan,) = [i for i in await repo.list_operator_items("OPEN")
-               if i["session_id"] == sid]
+    (plan,) = [i for i in await repo.list_operator_items("OPEN") if i["session_id"] == sid]
     assert plan["kind"] == "plan_review"
     # No assignment happened before the operator read the plan.
-    assert [t for t in await repo.list_tasks(limit=500)
-            if t.get("parent_session_id") == sid] == []
+    assert [t for t in await repo.list_tasks(limit=500) if t.get("parent_session_id") == sid] == []
     assert len(tasks) == 2 and await _refused_events(since) == []
 
 
 async def test_a_project_batch_over_the_limit_is_refused_whole_and_marks_the_project(
-        scripted, monkeypatch):
+    scripted, monkeypatch
+):
     seen: dict[str, list[str]] = {A: []}
     scripted({A: _hop("orchestrator", seen[A])})
     root = await _operator_task(A)
@@ -395,8 +420,7 @@ async def test_a_project_batch_over_the_limit_is_refused_whole_and_marks_the_pro
     monkeypatch.setattr(settings, "task_fanout_limit", 2)
     since = await repo.latest_event_id()
 
-    (plan,) = [i for i in await repo.list_operator_items("OPEN")
-               if i["session_id"] == sid]
+    (plan,) = [i for i in await repo.list_operator_items("OPEN") if i["session_id"] == sid]
     await repo.answer_operator_item(plan["id"], "", "approved")
     await orchestration.maybe_resume(sid, model=_assigning_model(B, C, D))
 
@@ -405,8 +429,7 @@ async def test_a_project_batch_over_the_limit_is_refused_whole_and_marks_the_pro
     assert refused[0]["ref_id"] == project["id"]  # the project task, not a child
     assert refused[0]["payload"]["limit"] == 2
     # All-or-nothing: not even the two individually-fine assignments exist.
-    assert [t for t in await repo.list_tasks(limit=500)
-            if t.get("parent_session_id") == sid] == []
+    assert [t for t in await repo.list_tasks(limit=500) if t.get("parent_session_id") == sid] == []
     assert (await _card(project["id"]))["refusals"]["latest_reason"] == "fan-out"
     assert (await _card(root))["refusals"] is None
     tasks = await _settle(root, 2)

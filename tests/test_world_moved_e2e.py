@@ -76,15 +76,20 @@ async def settle_leftovers():
     left running, executing or parked first, so these drive only their own rows
     (the test database is throwaway) — the same settle tests/test_restart_landing.py
     uses."""
+
     async def settle():
         conn = await repo._conn()
         try:
-            await conn.execute("update session set status = 'DONE' "
-                               "where status in ('RUNNING', 'AWAITING_RESUME')")
-            await conn.execute("update proposal set status = 'FAILED', retry_state = null "
-                               "where status in ('EXECUTING', 'RETRY_PENDING')")
-            await conn.execute("update task set status = 'CANCELLED' "
-                               "where status in ('IN_PROGRESS', 'ASSIGNED')")
+            await conn.execute(
+                "update session set status = 'DONE' where status in ('RUNNING', 'AWAITING_RESUME')"
+            )
+            await conn.execute(
+                "update proposal set status = 'FAILED', retry_state = null "
+                "where status in ('EXECUTING', 'RETRY_PENDING')"
+            )
+            await conn.execute(
+                "update task set status = 'CANCELLED' where status in ('IN_PROGRESS', 'ASSIGNED')"
+            )
         finally:
             await conn.close()
 
@@ -100,6 +105,7 @@ async def _rpc(method: str, params: dict | None = None) -> dict:
 
 def _session_model(monkeypatch, model) -> None:
     """The approve route resolves the session's model itself: hand it the fake."""
+
     async def fixed(*_a, **_kw):
         return model
 
@@ -157,8 +163,12 @@ async def test_a_page_moving_before_every_execution_redrafts_three_times_then_st
         assert out["ok"] is False and "redraft_proposal_id" not in out
         redraft = await _only_redraft(ids[-1])
         assert redraft["status"] == "AWAITING_HUMAN", "every redraft waits for the operator"
-        assert redraft["redraft"] == {"of": ids[-1], "root": first["id"],
-                                      "cause": "world_moved", "world_moved_count": n}
+        assert redraft["redraft"] == {
+            "of": ids[-1],
+            "root": first["id"],
+            "cause": "world_moved",
+            "world_moved_count": n,
+        }
         ids.append(redraft["id"])
 
     page["version"] += 1
@@ -175,7 +185,11 @@ async def test_a_page_moving_before_every_execution_redrafts_three_times_then_st
         assert kinds.index("proposal.decided") < kinds.index("proposal.failed")
     assert sum([await _count("proposal.redraft_limit_reached", pid) for pid in ids]) == 1
     assert (await _event("proposal.redraft_limit_reached", ids[-1]))["payload"] == {
-        "root": first["id"], "count": 3, "limit": 3, "proposal_id": ids[-1]}
+        "root": first["id"],
+        "count": 3,
+        "limit": 3,
+        "proposal_id": ids[-1],
+    }
     assert (await _event("proposal.failed", ids[-1]))["payload"]["chain_exhausted"] is True
 
     # Loud: the session rests flagged exec_failed, the task is FAILED.
@@ -257,9 +271,12 @@ async def test_an_interrupted_execution_retried_by_the_operator_re_checks_and_sa
     # Decided and claimed for execution, then the process died before the
     # write — staged in the gateway's own order, as the restart landing tests do.
     assert await repo.claim_proposal_for_execution(row["id"]) is not None
-    await events.emit("proposal.decided", ref_id=row["id"],
-                      payload={"verdict": "approved", "session_id": row["session_id"]},
-                      actor="human:doe")
+    await events.emit(
+        "proposal.decided",
+        ref_id=row["id"],
+        payload={"verdict": "approved", "session_id": row["session_id"]},
+        actor="human:doe",
+    )
     await orchestration.land_orphans_at_startup()
     held = await repo.load_proposal(row["id"])
     assert held["status"] == "RETRY_PENDING" and held["retry_state"]["interrupted"] is True
@@ -270,8 +287,7 @@ async def test_an_interrupted_execution_retried_by_the_operator_re_checks_and_sa
     assert plain["driven"]["proposals"] == 0, "the hold is the operator's to lift"
     assert (await repo.load_proposal(row["id"]))["status"] == "RETRY_PENDING"
 
-    out = await _rpc("outages.retry", {"dependency": "confluence",
-                                       "includeInterrupted": True})
+    out = await _rpc("outages.retry", {"dependency": "confluence", "includeInterrupted": True})
     await orchestration.sweep_settle()
     assert out["driven"]["proposals"] == 1
 
@@ -293,7 +309,8 @@ async def test_an_override_decided_proposal_whose_world_moved_redrafts_for_the_o
     monkeypatch,
 ):
     override = await repo.create_gate_override(
-        AGENT, "confluence.update_page", shadow_runs=0, acknowledged_irreversible=True)
+        AGENT, "confluence.update_page", shadow_runs=0, acknowledged_irreversible=True
+    )
     try:
         page = _counting_confluence(monkeypatch, version=6)  # moved since the drafter read v4
         drafter = _Drafter(_page_update(4), _page_update(6))
@@ -421,8 +438,10 @@ async def test_a_death_before_the_drafter_resumes_is_resumed_once_by_the_startup
     conn = await repo._conn()
     try:
         await conn.execute(
-            "update session set updated_at = $2::timestamptz - interval '60 seconds' "
-            "where id = $1", sid, orchestration.PROCESS_STARTED_AT)
+            "update session set updated_at = $2::timestamptz - interval '60 seconds' where id = $1",
+            sid,
+            orchestration.PROCESS_STARTED_AT,
+        )
     finally:
         await conn.close()
 
@@ -439,8 +458,12 @@ async def test_a_death_before_the_drafter_resumes_is_resumed_once_by_the_startup
     assert len(resumed) == 1, "the drafter is resumed exactly once"
     assert "the world moved" in resumed[0]["returns"][-1]
     redraft = await _only_redraft(first["id"])
-    assert redraft["redraft"] == {"of": first["id"], "root": first["id"],
-                                  "cause": "world_moved", "world_moved_count": 1}
+    assert redraft["redraft"] == {
+        "of": first["id"],
+        "root": first["id"],
+        "cause": "world_moved",
+        "world_moved_count": 1,
+    }
     assert redraft["status"] == "AWAITING_HUMAN"
     assert "PUT" not in page["calls"]
 
@@ -456,10 +479,21 @@ async def test_a_changed_deletion_preview_lands_world_moved_through_the_approve_
     pid = "prop_wme_" + uuid.uuid4().hex[:10]
     action = _delete_action(_preview("d1")).model_dump(mode="json")
     await repo.save_proposal(
-        pid, sid, AGENT, "Delete episode X", [action],
-        [{"kind": "operator", "source_ref": "operator:task", "locator": "test",
-          "claim": "Operator asked for the deletion."}],
-        "episode X is gone", pid,
+        pid,
+        sid,
+        AGENT,
+        "Delete episode X",
+        [action],
+        [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "test",
+                "claim": "Operator asked for the deletion.",
+            }
+        ],
+        "episode X is gone",
+        pid,
     )
     graph_world["preview"] = _preview("d2", facts=["F1"])  # a fact landed since
 
@@ -470,8 +504,7 @@ async def test_a_changed_deletion_preview_lands_world_moved_through_the_approve_
     assert (await repo.load_proposal(pid))["status"] == "FAILED"
     payload = (await _event("proposal.failed", pid))["payload"]
     assert payload["transient"] is False
-    assert (payload["world_moved"]["expected"], payload["world_moved"]["actual"]) == (
-        "d1", "d2")
+    assert (payload["world_moved"]["expected"], payload["world_moved"]["actual"]) == ("d1", "d2")
     assert payload["world_moved"]["target"] == "graph:episode:X"
     kinds = await _kinds(pid)
     assert kinds.index("proposal.decided") < kinds.index("proposal.failed")
@@ -501,17 +534,24 @@ async def test_an_operator_charter_edit_before_approval_fails_world_moved_and_th
 
     ids = [first["id"]]
     for n in (1, 2, 3):
-        await routes.save_charter(target, routes.CharterIn(
-            content=f"OPERATOR EDIT {n}", rationale="the operator's own edit"))
+        await routes.save_charter(
+            target,
+            routes.CharterIn(content=f"OPERATOR EDIT {n}", rationale="the operator's own edit"),
+        )
         approved = await _approve(ids[-1])
         assert approved["ok"] is False
         assert (await _event("proposal.failed", ids[-1]))["payload"]["world_moved"][
-            "what_moved"] == f"{target}'s charter moved v{n} -> v{n + 1}"
+            "what_moved"
+        ] == f"{target}'s charter moved v{n} -> v{n + 1}"
         assert (await repo.current_charter(target))["content"] == f"OPERATOR EDIT {n}"
         redraft = await _only_redraft(ids[-1])
         assert redraft["status"] == "AWAITING_HUMAN"
-        assert redraft["redraft"] == {"of": ids[-1], "root": first["id"],
-                                      "cause": "world_moved", "world_moved_count": n}
+        assert redraft["redraft"] == {
+            "of": ids[-1],
+            "root": first["id"],
+            "cause": "world_moved",
+            "world_moved_count": n,
+        }
         args = redraft["actions"][0]["arguments"]
         assert args["base_version"] == n + 1, "stamped with the version the report showed"
         assert f"OPERATOR EDIT {n}" in args["content"]

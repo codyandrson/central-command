@@ -46,7 +46,8 @@ def _scanned_pdf() -> bytes:
             b"<</XObject<</I0 4 0 R>>>>/Contents 5 0 R>>"
         ),
         b"<</Type/XObject/Subtype/Image/Width 10/Height 10/ColorSpace/DeviceRGB"
-        b"/BitsPerComponent 8/Filter/DCTDecode/Length %d>>stream\n" % len(img)
+        b"/BitsPerComponent 8/Filter/DCTDecode/Length %d>>stream\n"
+        % len(img)
         + img
         + b"\nendstream",
     ]
@@ -62,9 +63,7 @@ def _scanned_pdf() -> bytes:
     out.write(b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1))
     for o in offs:
         out.write(b"%010d 00000 n \n" % o)
-    out.write(
-        b"trailer<</Size %d/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF" % (len(objs) + 1, xref)
-    )
+    out.write(b"trailer<</Size %d/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF" % (len(objs) + 1, xref))
     return out.getvalue()
 
 
@@ -126,9 +125,7 @@ async def test_markitdown_really_does_return_nothing_for_a_scan():
     revisited deliberately instead of silently becoming dead weight."""
     from markitdown import MarkItDown
 
-    result = MarkItDown().convert_stream(
-        io.BytesIO(_scanned_pdf()), file_extension=".pdf"
-    )
+    result = MarkItDown().convert_stream(io.BytesIO(_scanned_pdf()), file_extension=".pdf")
     assert (result.text_content or "").strip() == ""
 
 
@@ -265,9 +262,7 @@ async def test_unknown_capability_refuses_rather_than_assuming_yes(monkeypatch):
     monkeypatch.setattr(litellm, "model_accepts_images", _boom)
 
     with pytest.raises(attachments.AttachmentRefused) as e:
-        await attachments.prepare(
-            [_att("shot.png", "image/png", PNG_1PX)], model_id="cc-default"
-        )
+        await attachments.prepare([_att("shot.png", "image/png", PNG_1PX)], model_id="cc-default")
     assert e.value.code == "attachment_images_unsupported"
     assert "could not check" in e.value.message
 
@@ -275,9 +270,7 @@ async def test_unknown_capability_refuses_rather_than_assuming_yes(monkeypatch):
 async def test_test_model_refuses_images_without_asking_the_proxy(monkeypatch):
     monkeypatch.setattr(attachments.settings, "test_model", True)
     with pytest.raises(attachments.AttachmentRefused) as e:
-        await attachments.prepare(
-            [_att("shot.png", "image/png", PNG_1PX)], model_id=None
-        )
+        await attachments.prepare([_att("shot.png", "image/png", PNG_1PX)], model_id=None)
     assert e.value.code == "attachment_images_unsupported"
 
 
@@ -327,9 +320,7 @@ async def test_undecodable_payload_is_refused():
 
 async def test_empty_and_oversized_files_are_refused(monkeypatch):
     with pytest.raises(attachments.AttachmentRefused) as e:
-        await attachments.prepare(
-            [_att("empty.txt", "text/plain", b"")], model_id="cc-default"
-        )
+        await attachments.prepare([_att("empty.txt", "text/plain", b"")], model_id="cc-default")
     assert e.value.code == "attachment_empty"
 
     monkeypatch.setattr(attachments.settings, "attachment_max_bytes", 10)
@@ -381,7 +372,9 @@ def test_a_cap_whose_base64_frame_exceeds_the_websocket_limit_is_refused(monkeyp
         _fresh_settings(monkeypatch, CC_ATTACHMENT_MAX_BYTES=str(over))
     # The largest cap that fits is accepted: 3/4 of the limit.
     fits = WS_MAX_SIZE_BYTES * 3 // 4
-    assert _fresh_settings(monkeypatch, CC_ATTACHMENT_MAX_BYTES=str(fits)).attachment_max_bytes == fits
+    assert (
+        _fresh_settings(monkeypatch, CC_ATTACHMENT_MAX_BYTES=str(fits)).attachment_max_bytes == fits
+    )
     with pytest.raises(ValidationError):
         _fresh_settings(monkeypatch, CC_ATTACHMENT_MAX_BYTES="0")
 
@@ -405,9 +398,7 @@ def test_the_three_places_that_start_the_api_carry_the_one_ws_limit():
     assert m and int(m.group(1)) == default_mb
 
 
-DOCX_MIME = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-)
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 async def test_a_corrupt_file_refuses_instead_of_raising_through():
@@ -516,8 +507,11 @@ async def _refusing_send(monkeypatch, attachment: dict):
 
     with pytest.raises(HTTPException) as exc:
         await nerve_gateway._chat_send(
-            {"sessionKey": "agent:ea:main", "message": "have a look at this",
-             "attachments": [attachment]},
+            {
+                "sessionKey": "agent:ea:main",
+                "message": "have a look at this",
+                "attachments": [attachment],
+            },
             _notify,
         )
     return exc.value, notifications, emitted
@@ -602,9 +596,7 @@ async def test_session_model_precedence_matches_the_runtime_seam():
 
     from central_command.runtime import models
 
-    src = inspect.getsource(models.resolve_session_model) + inspect.getsource(
-        models.resolve_model
-    )
+    src = inspect.getsource(models.resolve_session_model) + inspect.getsource(models.resolve_model)
     assert "get_session_model_override" in src
     assert "configured_model_name" in src and 'row.get("model")' in src
     ours = inspect.getsource(attachments.session_model_id)
@@ -635,8 +627,15 @@ async def test_a_file_with_no_message_is_a_valid_send(monkeypatch):
     monkeypatch.setattr(nerve_gateway.events, "emit", _emit)
     monkeypatch.setattr(attachments, "session_model_id", _model_id)
     # The fake hands back a never-finished future: the caller holds what create_task returns.
-    monkeypatch.setattr(nerve_gateway.asyncio, "create_task", lambda coro: (
-        coro.close(), sent.append(True), nerve_gateway.asyncio.get_running_loop().create_future())[2])
+    monkeypatch.setattr(
+        nerve_gateway.asyncio,
+        "create_task",
+        lambda coro: (
+            coro.close(),
+            sent.append(True),
+            nerve_gateway.asyncio.get_running_loop().create_future(),
+        )[2],
+    )
 
     ack = await nerve_gateway._chat_send(
         {

@@ -67,17 +67,36 @@ async def test_bad_date_and_link_type_are_rejected(monkeypatch):
 
 
 async def test_get_issue_normalizes_the_envelope_and_flattens_adf(monkeypatch):
-    _fake_call(monkeypatch, [FakeResponse(200, {
-        "key": "TASKS-12",
-        "fields": {
-            "summary": "S", "labels": ["a"], "duedate": "2026-08-28",
-            "priority": {"name": "High"}, "status": {"name": "To Do"},
-            "issuetype": {"name": "Task"}, "created": "2026-01-01T00:00:00Z",
-            "description": {"type": "doc", "version": 1, "content": [
-                {"type": "paragraph", "content": [{"type": "text", "text": "hello"}]},
-            ]},
-        },
-    })])
+    _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                200,
+                {
+                    "key": "TASKS-12",
+                    "fields": {
+                        "summary": "S",
+                        "labels": ["a"],
+                        "duedate": "2026-08-28",
+                        "priority": {"name": "High"},
+                        "status": {"name": "To Do"},
+                        "issuetype": {"name": "Task"},
+                        "created": "2026-01-01T00:00:00Z",
+                        "description": {
+                            "type": "doc",
+                            "version": 1,
+                            "content": [
+                                {
+                                    "type": "paragraph",
+                                    "content": [{"type": "text", "text": "hello"}],
+                                },
+                            ],
+                        },
+                    },
+                },
+            )
+        ],
+    )
     out = await jira.get_issue("TASKS-12")
     issue = out["issue"]
     assert out["ok"] and out["operation"] == "getIssue"
@@ -87,23 +106,43 @@ async def test_get_issue_normalizes_the_envelope_and_flattens_adf(monkeypatch):
 
 
 async def test_transition_resolves_by_name_case_insensitively(monkeypatch):
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, {"transitions": [
-            {"id": "21", "name": "In Progress", "to": {"name": "In Progress"}}]}),
-        FakeResponse(204, {}),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                200,
+                {
+                    "transitions": [
+                        {"id": "21", "name": "In Progress", "to": {"name": "In Progress"}}
+                    ]
+                },
+            ),
+            FakeResponse(204, {}),
+        ],
+    )
     out = await jira.transition_issue("TASKS-12", "in progress")
     assert out["issue"]["transition"] == "In Progress"  # canonical name echoed
     assert calls[1][2] == {"transition": {"id": "21"}}
 
 
 async def test_unavailable_transition_fails_with_the_available_set(monkeypatch):
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, {"transitions": [
-            {"id": "11", "name": "To Do", "to": {"name": "To Do"}}]}),
-        FakeResponse(200, {"fields": {"status": {"name": "To Do"},
-                                      "updated": "2026-10-28T12:00:00.000+0000"}}),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                200, {"transitions": [{"id": "11", "name": "To Do", "to": {"name": "To Do"}}]}
+            ),
+            FakeResponse(
+                200,
+                {
+                    "fields": {
+                        "status": {"name": "To Do"},
+                        "updated": "2026-10-28T12:00:00.000+0000",
+                    }
+                },
+            ),
+        ],
+    )
     with pytest.raises(jira.JiraError, match="available: To Do") as ei:
         await jira.transition_issue("TASKS-12", "Ship It")
     # The integration reports the facts and knows no proposal: it is NOT a
@@ -119,9 +158,18 @@ async def test_unavailable_transition_fails_with_the_available_set(monkeypatch):
 def _links_body(*links):
     """A GET issue?fields=issuelinks body — the READ shape, which is
     unambiguous: `outwardIssue` = the viewed issue <outward phrase> it."""
-    return {"fields": {"issuelinks": [
-        {"id": lid, "type": {"name": t, "inward": "is blocked by", "outward": "blocks"},
-         side: {"key": other}} for lid, t, side, other in links]}}
+    return {
+        "fields": {
+            "issuelinks": [
+                {
+                    "id": lid,
+                    "type": {"name": t, "inward": "is blocked by", "outward": "blocks"},
+                    side: {"key": other},
+                }
+                for lid, t, side, other in links
+            ]
+        }
+    }
 
 
 @pytest.fixture(params=["cloud", "server"])
@@ -139,30 +187,42 @@ async def test_link_create_puts_the_blocker_in_inward_issue_and_reads_it_back(mo
     reference: "from the first issue [inwardIssue] … using the outward
     description"). The old test pinned the request body and so pinned the
     bug; this one ends on what Jira STORED."""
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, _links_body()),                                       # before
-        FakeResponse(201, {}),
-        FakeResponse(200, _links_body(("901", "Blocks", "outwardIssue", "TASKS-88"))),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(200, _links_body()),  # before
+            FakeResponse(201, {}),
+            FakeResponse(200, _links_body(("901", "Blocks", "outwardIssue", "TASKS-88"))),
+        ],
+    )
     out = await jira.link_issues("TASKS-85", "TASKS-88", "Blocks")
     body = calls[1][2]
     assert body["inwardIssue"] == {"key": "TASKS-85"}
     assert body["outwardIssue"] == {"key": "TASKS-88"}
-    assert calls[1][1] == ("/rest/api/2/issueLink" if flavor == "server"
-                           else "/rest/api/3/issueLink")
+    assert calls[1][1] == (
+        "/rest/api/2/issueLink" if flavor == "server" else "/rest/api/3/issueLink"
+    )
     assert out["link"]["direction_verified"] is True
 
 
 async def test_a_link_stored_inverted_is_removed_and_the_action_fails(monkeypatch):
     """If any instance maps the create call the other way round, the wrong
     dependency must not stand, and must not be reported as done."""
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, _links_body(("5", "Relates", "outwardIssue", "TASKS-1"))),
-        FakeResponse(201, {}),
-        FakeResponse(200, _links_body(("5", "Relates", "outwardIssue", "TASKS-1"),
-                                      ("902", "Blocks", "inwardIssue", "TASKS-88"))),
-        FakeResponse(204, {}),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(200, _links_body(("5", "Relates", "outwardIssue", "TASKS-1"))),
+            FakeResponse(201, {}),
+            FakeResponse(
+                200,
+                _links_body(
+                    ("5", "Relates", "outwardIssue", "TASKS-1"),
+                    ("902", "Blocks", "inwardIssue", "TASKS-88"),
+                ),
+            ),
+            FakeResponse(204, {}),
+        ],
+    )
     with pytest.raises(jira.JiraError, match="INVERTED"):
         await jira.link_issues("TASKS-85", "TASKS-88", "Blocks")
     assert calls[3][:2] == ("DELETE", "/rest/api/3/issueLink/902")  # only the new one
@@ -171,7 +231,7 @@ async def test_a_link_stored_inverted_is_removed_and_the_action_fails(monkeypatc
 async def test_delete_link_matches_only_the_named_direction(monkeypatch, flavor):
     """Removing "88 blocks 85" when asked for "85 blocks 88" would be the
     inversion bug again — the stored direction must match exactly."""
-    stored = _links_body(("7", "Blocks", "outwardIssue", "TASKS-85"))   # 88 blocks 85
+    stored = _links_body(("7", "Blocks", "outwardIssue", "TASKS-85"))  # 88 blocks 85
     _fake_call(monkeypatch, [FakeResponse(200, stored)])
     with pytest.raises(jira.JiraError, match="no Blocks link to TASKS-88 in that direction"):
         await jira.delete_link("TASKS-85", "TASKS-88", "Blocks")
@@ -199,9 +259,15 @@ async def test_update_attributes_sends_only_what_it_is_given(monkeypatch, flavor
 
 async def test_delete_issue_snapshots_first_and_refuses_unnamed_subtasks(monkeypatch, flavor):
     v = "2" if flavor == "server" else "3"
-    issue = {"fields": {"summary": "Old task", "status": {"name": "To Do"},
-                        "issuetype": {"name": "Task"}, "labels": ["solar"],
-                        "subtasks": []}}
+    issue = {
+        "fields": {
+            "summary": "Old task",
+            "status": {"name": "To Do"},
+            "issuetype": {"name": "Task"},
+            "labels": ["solar"],
+            "subtasks": [],
+        }
+    }
     calls = _fake_call(monkeypatch, [FakeResponse(200, issue), FakeResponse(204, {})])
     out = await jira.delete_issue("TASKS-9")
     assert calls[1][:2] == ("DELETE", f"/rest/api/{v}/issue/TASKS-9?deleteSubtasks=false")
@@ -214,7 +280,9 @@ async def test_delete_issue_snapshots_first_and_refuses_unnamed_subtasks(monkeyp
     assert [m for m, _, _ in calls] == ["GET"]  # nothing deleted
 
 
-async def test_assignee_is_an_account_id_on_cloud_and_a_username_on_data_center(monkeypatch, flavor):
+async def test_assignee_is_an_account_id_on_cloud_and_a_username_on_data_center(
+    monkeypatch, flavor
+):
     calls = _fake_call(monkeypatch, [FakeResponse(204, {})])
     await jira.assign_issue("TASKS-9", "jdoe")
     v, key = ("2", "name") if flavor == "server" else ("3", "accountId")
@@ -232,11 +300,19 @@ async def test_assignee_is_an_account_id_on_cloud_and_a_username_on_data_center(
 
 async def test_find_users_speaks_each_products_parameter_and_id(monkeypatch, flavor):
     if flavor == "server":
-        rows = [{"name": "jdoe", "key": "JIRAUSER1", "displayName": "Jane Doe",
-                 "emailAddress": "jane@example.com", "active": True}]
+        rows = [
+            {
+                "name": "jdoe",
+                "key": "JIRAUSER1",
+                "displayName": "Jane Doe",
+                "emailAddress": "jane@example.com",
+                "active": True,
+            }
+        ]
     else:
-        rows = [{"accountId": "5b10ac8d82e05b22cc7d4ef5", "displayName": "Jane Doe",
-                 "active": True}]
+        rows = [
+            {"accountId": "5b10ac8d82e05b22cc7d4ef5", "displayName": "Jane Doe", "active": True}
+        ]
     calls = _fake_call(monkeypatch, [FakeResponse(200, rows)])
     out = await jira.find_users("jane", "TASKS")
     path = calls[0][1]
@@ -263,25 +339,48 @@ async def test_get_issue_returns_ownership_staleness_and_dependencies(monkeypatc
     """The three axes jira-expert declared missing — assignee, updated, links
     (+ parent for epic hygiene) — reach the caller, with link relations phrased
     in the direction they are actually stored."""
-    calls = _fake_call(monkeypatch, [FakeResponse(200, {
-        "key": "TASKS-12",
-        "fields": {
-            "summary": "S", "status": {"name": "To Do"},
-            "updated": "2026-07-01T09:00:00Z",
-            "assignee": {"displayName": "Dana Ruiz"},
-            "parent": {"key": "TASKS-1", "fields": {"summary": "Epic"}},
-            "issuelinks": [
-                {"type": {"name": "Blocks", "inward": "is blocked by",
-                          "outward": "blocks"},
-                 "outwardIssue": {"key": "TASKS-14", "fields": {
-                     "summary": "Renewal", "status": {"name": "Done"}}}},
-                {"type": {"name": "Blocks", "inward": "is blocked by",
-                          "outward": "blocks"},
-                 "inwardIssue": {"key": "TASKS-9", "fields": {
-                     "summary": "Upstream", "status": {"name": "To Do"}}}},
-            ],
-        },
-    })])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                200,
+                {
+                    "key": "TASKS-12",
+                    "fields": {
+                        "summary": "S",
+                        "status": {"name": "To Do"},
+                        "updated": "2026-07-01T09:00:00Z",
+                        "assignee": {"displayName": "Dana Ruiz"},
+                        "parent": {"key": "TASKS-1", "fields": {"summary": "Epic"}},
+                        "issuelinks": [
+                            {
+                                "type": {
+                                    "name": "Blocks",
+                                    "inward": "is blocked by",
+                                    "outward": "blocks",
+                                },
+                                "outwardIssue": {
+                                    "key": "TASKS-14",
+                                    "fields": {"summary": "Renewal", "status": {"name": "Done"}},
+                                },
+                            },
+                            {
+                                "type": {
+                                    "name": "Blocks",
+                                    "inward": "is blocked by",
+                                    "outward": "blocks",
+                                },
+                                "inwardIssue": {
+                                    "key": "TASKS-9",
+                                    "fields": {"summary": "Upstream", "status": {"name": "To Do"}},
+                                },
+                            },
+                        ],
+                    },
+                },
+            )
+        ],
+    )
     issue = (await jira.get_issue("TASKS-12"))["issue"]
 
     # The projection must actually ASK for the fields, or none of this exists.
@@ -294,21 +393,40 @@ async def test_get_issue_returns_ownership_staleness_and_dependencies(monkeypatc
     # Direction is not cosmetic: TASKS-12 BLOCKS one issue and IS BLOCKED BY
     # the other. Reading these the wrong way round inverts a dependency.
     assert issue["links"] == [
-        {"relation": "blocks", "type": "Blocks", "direction": "outward",
-         "issue_key": "TASKS-14", "summary": "Renewal", "status": "Done"},
-        {"relation": "is blocked by", "type": "Blocks", "direction": "inward",
-         "issue_key": "TASKS-9", "summary": "Upstream", "status": "To Do"},
+        {
+            "relation": "blocks",
+            "type": "Blocks",
+            "direction": "outward",
+            "issue_key": "TASKS-14",
+            "summary": "Renewal",
+            "status": "Done",
+        },
+        {
+            "relation": "is blocked by",
+            "type": "Blocks",
+            "direction": "inward",
+            "issue_key": "TASKS-9",
+            "summary": "Upstream",
+            "status": "To Do",
+        },
     ]
 
 
 async def test_unassigned_is_none_not_a_missing_key(monkeypatch):
     """An unassigned issue is the POINT of an ownership audit: it must read as
     a definite null, never as an absent/unknown field."""
-    _fake_call(monkeypatch, [FakeResponse(200, {
-        "key": "TASKS-12",
-        "fields": {"summary": "S", "assignee": None, "issuelinks": [],
-                   "parent": None},
-    })])
+    _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                200,
+                {
+                    "key": "TASKS-12",
+                    "fields": {"summary": "S", "assignee": None, "issuelinks": [], "parent": None},
+                },
+            )
+        ],
+    )
     issue = (await jira.get_issue("TASKS-12"))["issue"]
     assert issue["assignee"] is None and "assignee" in issue
     assert issue["links"] == [] and issue["parent"] is None
@@ -319,18 +437,29 @@ async def test_malformed_links_are_dropped_and_overflow_is_declared(monkeypatch)
     """A link whose other end cannot be named is not actionable, so it is
     dropped; and a pathological link count is reported, never silently cut."""
     links = [
-        {"type": {"name": "Relates", "outward": "relates to"},
-         "outwardIssue": {"key": f"TASKS-{i}", "fields": {}}}
+        {
+            "type": {"name": "Relates", "outward": "relates to"},
+            "outwardIssue": {"key": f"TASKS-{i}", "fields": {}},
+        }
         for i in range(2, jira.MAX_LINKS + 5)
     ]
-    links.append({"type": {"name": "Blocks"}})          # no other end at all
-    links.append("not even a dict")                      # provider drift
-    _fake_call(monkeypatch, [FakeResponse(200, {
-        "key": "TASKS-12", "fields": {"summary": "S", "issuelinks": links},
-    })])
+    links.append({"type": {"name": "Blocks"}})  # no other end at all
+    links.append("not even a dict")  # provider drift
+    _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                200,
+                {
+                    "key": "TASKS-12",
+                    "fields": {"summary": "S", "issuelinks": links},
+                },
+            )
+        ],
+    )
     issue = (await jira.get_issue("TASKS-12"))["issue"]
     assert len(issue["links"]) == jira.MAX_LINKS
-    assert issue["links_omitted"] == 3   # the 3 valid ones past the cap
+    assert issue["links_omitted"] == 3  # the 3 valid ones past the cap
     assert all(link["issue_key"] for link in issue["links"])
 
 
@@ -355,7 +484,7 @@ async def test_a_limit_pages_past_100_and_says_when_it_cut(monkeypatch):
     out = await jira.search_issues("order by created DESC", limit=150)
 
     assert len(calls) == 2, "must page until the requested limit is satisfied"
-    assert calls[0][2]["maxResults"] == 100      # page size stays Jira's cap
+    assert calls[0][2]["maxResults"] == 100  # page size stays Jira's cap
     assert calls[1][2]["nextPageToken"] == "t1"
     assert out["count"] == 150
     # Rows beyond the limit were cut, and more exist behind t2 — say both.
@@ -374,19 +503,36 @@ async def test_a_satisfied_limit_stops_without_claiming_truncation(monkeypatch):
 async def test_search_rows_carry_the_scalars_and_a_link_count(monkeypatch):
     """Board-wide sweeps get ownership/staleness plus a link COUNT — enough to
     find orphans and hubs without blowing the token budget on full link lists."""
-    calls = _fake_call(monkeypatch, [FakeResponse(200, {"isLast": True, "issues": [
-        {"key": "TASKS-12", "fields": {
-            "summary": "S", "status": {"name": "To Do"},
-            "updated": "2026-07-01T09:00:00Z",
-            "assignee": {"displayName": "Dana Ruiz"},
-            "parent": {"key": "TASKS-1", "fields": {"summary": "Epic"}},
-            "issuelinks": [
-                {"type": {"name": "Blocks", "outward": "blocks"},
-                 "outwardIssue": {"key": "TASKS-14", "fields": {}}},
-            ],
-        }},
-        {"key": "TASKS-13", "fields": {"summary": "Orphan"}},
-    ]})])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                200,
+                {
+                    "isLast": True,
+                    "issues": [
+                        {
+                            "key": "TASKS-12",
+                            "fields": {
+                                "summary": "S",
+                                "status": {"name": "To Do"},
+                                "updated": "2026-07-01T09:00:00Z",
+                                "assignee": {"displayName": "Dana Ruiz"},
+                                "parent": {"key": "TASKS-1", "fields": {"summary": "Epic"}},
+                                "issuelinks": [
+                                    {
+                                        "type": {"name": "Blocks", "outward": "blocks"},
+                                        "outwardIssue": {"key": "TASKS-14", "fields": {}},
+                                    },
+                                ],
+                            },
+                        },
+                        {"key": "TASKS-13", "fields": {"summary": "Orphan"}},
+                    ],
+                },
+            )
+        ],
+    )
     out = await jira.search_issues("project = TASKS")
 
     assert calls[0][2]["fields"] == jira.SEARCH_FIELDS
@@ -421,7 +567,7 @@ async def test_a_fixable_read_error_reaches_the_agent(monkeypatch):
 
     # The actionable words must survive to the model.
     assert "Unbounded JQL" in out and "search restriction" in out
-    assert "retry once" in out          # ...with a route out of the failure
+    assert "retry once" in out  # ...with a route out of the failure
     assert "proceed without it" in out  # ...and permission to give up honestly
 
 
@@ -495,9 +641,12 @@ async def test_create_issue_validates_shapes_before_the_provider(monkeypatch):
 async def test_create_issue_posts_the_right_fields_and_envelope(monkeypatch):
     calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-99"})])
     out = await jira.create_issue(
-        "TASKS", "Verify Example Bank trial deposits", "Task",
+        "TASKS",
+        "Verify Example Bank trial deposits",
+        "Task",
         description="From the account-verification email.",
-        due_date="2026-07-30", labels=["email-derived"],
+        due_date="2026-07-30",
+        labels=["email-derived"],
     )
     method, path, body = calls[0]
     assert (method, path) == ("POST", "/rest/api/3/issue")
@@ -578,7 +727,10 @@ async def test_bad_parent_key_is_refused(monkeypatch):
 async def test_parent_passes_through_to_fields_and_the_returned_issue(monkeypatch):
     calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-101"})])
     out = await jira.create_issue(
-        "TASKS", "New subtask", "Sub-task", parent="TASKS-1",
+        "TASKS",
+        "New subtask",
+        "Sub-task",
+        parent="TASKS-1",
     )
     body = calls[0][2]
     assert body["fields"]["parent"] == {"key": "TASKS-1"}
@@ -594,21 +746,32 @@ def types_cache(monkeypatch):
 
 
 def _dc_page(types, *, start=0, last=True, total=None):
-    return {"start": start, "size": len(types), "total": total if total is not None else len(types),
-            "last": last, "values": types}
+    return {
+        "start": start,
+        "size": len(types),
+        "total": total if total is not None else len(types),
+        "last": last,
+        "values": types,
+    }
 
 
 def _cloud_page(types, *, start=0, total=None):
-    return {"startAt": start, "maxResults": 100, "total": total if total is not None else len(types),
-            "issueTypes": types}
+    return {
+        "startAt": start,
+        "maxResults": 100,
+        "total": total if total is not None else len(types),
+        "issueTypes": types,
+    }
 
 
 _TYPES = [
     {"id": "10001", "name": "Feature", "subtask": False, "description": "dropped"},
     {"id": "10002", "name": "Sub-Task", "subtask": True, "iconUrl": "dropped"},
 ]
-_ROWS = [{"id": "10001", "name": "Feature", "subtask": False},
-         {"id": "10002", "name": "Sub-Task", "subtask": True}]
+_ROWS = [
+    {"id": "10001", "name": "Feature", "subtask": False},
+    {"id": "10002", "name": "Sub-Task", "subtask": True},
+]
 
 
 async def test_list_issue_types_uses_the_flavours_createmeta_path(monkeypatch, flavor, types_cache):
@@ -616,9 +779,17 @@ async def test_list_issue_types_uses_the_flavours_createmeta_path(monkeypatch, f
     calls = _fake_call(monkeypatch, [FakeResponse(200, page)])
     out = await jira.list_issue_types("TASKS")
     v = "2" if flavor == "server" else "3"
-    assert calls == [("GET", f"/rest/api/{v}/issue/createmeta/TASKS/issuetypes?maxResults=100&startAt=0", None)]
-    assert out == {"ok": True, "kind": "jira", "operation": "listIssueTypes",
-                   "project_key": "TASKS", "issue_types": _ROWS, "count": 2}
+    assert calls == [
+        ("GET", f"/rest/api/{v}/issue/createmeta/TASKS/issuetypes?maxResults=100&startAt=0", None)
+    ]
+    assert out == {
+        "ok": True,
+        "kind": "jira",
+        "operation": "listIssueTypes",
+        "project_key": "TASKS",
+        "issue_types": _ROWS,
+        "count": 2,
+    }
 
 
 async def test_list_issue_types_pages_until_the_total(monkeypatch, flavor, types_cache):
@@ -655,19 +826,22 @@ async def test_list_issue_types_raises_jiras_refusal(monkeypatch, flavor, types_
 async def test_list_issue_types_is_cached_per_project_for_the_ttl(monkeypatch, types_cache):
     clock = [1000.0]
     monkeypatch.setattr(jira.time, "monotonic", lambda: clock[0])
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, _cloud_page(_TYPES)),
-        FakeResponse(200, _cloud_page(_TYPES[:1])),
-        FakeResponse(200, _cloud_page(_TYPES[1:])),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(200, _cloud_page(_TYPES)),
+            FakeResponse(200, _cloud_page(_TYPES[:1])),
+            FakeResponse(200, _cloud_page(_TYPES[1:])),
+        ],
+    )
     first = await jira.list_issue_types("TASKS")
     again = await jira.list_issue_types("TASKS")
     assert len(calls) == 1 and again == first
 
-    other = await jira.list_issue_types("OPS")          # its own project, its own entry
+    other = await jira.list_issue_types("OPS")  # its own project, its own entry
     assert len(calls) == 2 and other["count"] == 1
 
-    clock[0] += jira.CUSTOM_FIELDS_TTL + 1              # a type added in the UI shows
+    clock[0] += jira.CUSTOM_FIELDS_TTL + 1  # a type added in the UI shows
     refreshed = await jira.list_issue_types("TASKS")
     assert len(calls) == 3 and refreshed["count"] == 1
 
@@ -714,9 +888,7 @@ async def test_create_dashboard_rejects_ambiguous_gadget_ref(monkeypatch):
     with pytest.raises(jira.JiraError, match="EXACTLY ONE"):
         await jira.create_dashboard("my dashboard", gadgets=[{}])
     with pytest.raises(jira.JiraError, match="EXACTLY ONE"):
-        await jira.create_dashboard(
-            "my dashboard", gadgets=[{"uri": "a", "module_key": "b"}]
-        )
+        await jira.create_dashboard("my dashboard", gadgets=[{"uri": "a", "module_key": "b"}])
     assert calls == []
 
 
@@ -739,24 +911,30 @@ async def test_placeholder_filter_id_is_refused_before_anything_is_created(monke
 
 def _gadget_xml(*prefs):
     """A gadget's own XML — the declaration `_gadget_prefs` reads."""
-    return FakeResponse(200, text="".join(
-        f'<UserPref name="{p}" datatype="hidden" />' for p in prefs
-    ))
+    return FakeResponse(
+        200, text="".join(f'<UserPref name="{p}" datatype="hidden" />' for p in prefs)
+    )
 
 
 async def test_filter_name_resolves_to_the_real_id_before_the_dashboard(monkeypatch):
-    calls = _fake_call(monkeypatch, [
-        # the gadget's declared prefs, then list_filters (the resolution) …
-        _gadget_xml("filterId", "num", "isConfigured"),
-        FakeResponse(200, {"values": [{"id": "10067", "name": "Example Off-Road Tasks"}]}),
-        # … then the dashboard, then the gadget, then its config PUT.
-        FakeResponse(200, {"id": "10002", "name": "my dashboard"}),
-        FakeResponse(200, {"id": 10013}),
-        FakeResponse(201),
-    ])
-    out = await jira.create_dashboard("my dashboard", gadgets=[
-        {"uri": "g", "config": {"filterName": "Example Off-Road Tasks", "num": "10"}},
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            # the gadget's declared prefs, then list_filters (the resolution) …
+            _gadget_xml("filterId", "num", "isConfigured"),
+            FakeResponse(200, {"values": [{"id": "10067", "name": "Example Off-Road Tasks"}]}),
+            # … then the dashboard, then the gadget, then its config PUT.
+            FakeResponse(200, {"id": "10002", "name": "my dashboard"}),
+            FakeResponse(200, {"id": 10013}),
+            FakeResponse(201),
+        ],
+    )
+    out = await jira.create_dashboard(
+        "my dashboard",
+        gadgets=[
+            {"uri": "g", "config": {"filterName": "Example Off-Road Tasks", "num": "10"}},
+        ],
+    )
     _method, path, body = calls[4]
     assert path.endswith("/items/10013/properties/config")
     assert body == {"num": "10", "filterId": "filter-10067", "isConfigured": "true"}
@@ -764,13 +942,20 @@ async def test_filter_name_resolves_to_the_real_id_before_the_dashboard(monkeypa
 
 
 async def test_unresolvable_filter_name_fails_the_whole_write(monkeypatch):
-    calls = _fake_call(monkeypatch, [
-        _gadget_xml("filterId"), FakeResponse(200, {"values": []}),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            _gadget_xml("filterId"),
+            FakeResponse(200, {"values": []}),
+        ],
+    )
     with pytest.raises(jira.JiraError, match="matched 0 filters"):
-        await jira.create_dashboard("my dashboard", gadgets=[
-            {"uri": "g", "config": {"filterName": "no such filter"}},
-        ])
+        await jira.create_dashboard(
+            "my dashboard",
+            gadgets=[
+                {"uri": "g", "config": {"filterName": "no such filter"}},
+            ],
+        )
     # Only reads happened — the dashboard was never created.
     assert [m for m, _, _ in calls] == ["GET", "GET"]
 
@@ -778,9 +963,12 @@ async def test_unresolvable_filter_name_fails_the_whole_write(monkeypatch):
 async def test_two_filter_keys_at_once_is_refused(monkeypatch):
     calls = _fake_call(monkeypatch, [])
     with pytest.raises(jira.JiraError, match="give exactly one"):
-        await jira.create_dashboard("my dashboard", gadgets=[
-            {"uri": "g", "config": {"filterId": "filter-1", "filterName": "x"}},
-        ])
+        await jira.create_dashboard(
+            "my dashboard",
+            gadgets=[
+                {"uri": "g", "config": {"filterId": "filter-1", "filterName": "x"}},
+            ],
+        )
     assert calls == []
 
 
@@ -794,16 +982,22 @@ async def test_gadget_is_marked_configured_and_bound_under_its_own_pref(monkeypa
     placeholder), and only Filter Results declares `filterId` — Pie Chart,
     Created vs Resolved and Stats bind under `projectOrFilterId` and silently
     ignored the key they were sent."""
-    calls = _fake_call(monkeypatch, [
-        _gadget_xml("projectOrFilterId", "statType", "isConfigured"),
-        FakeResponse(200, {"id": "10002", "name": "my dashboard"}),
-        FakeResponse(200, {"id": 10013}),
-        FakeResponse(201),
-    ])
-    await jira.create_dashboard("my dashboard", gadgets=[
-        # the caller names filterId — the gadget only ever reads projectOrFilterId
-        {"uri": "piechart.xml", "config": {"filterId": "filter-10100", "statType": "statuses"}},
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            _gadget_xml("projectOrFilterId", "statType", "isConfigured"),
+            FakeResponse(200, {"id": "10002", "name": "my dashboard"}),
+            FakeResponse(200, {"id": 10013}),
+            FakeResponse(201),
+        ],
+    )
+    await jira.create_dashboard(
+        "my dashboard",
+        gadgets=[
+            # the caller names filterId — the gadget only ever reads projectOrFilterId
+            {"uri": "piechart.xml", "config": {"filterId": "filter-10100", "statType": "statuses"}},
+        ],
+    )
     assert calls[3][2] == {
         "statType": "statuses",
         "projectOrFilterId": "filter-10100",
@@ -814,13 +1008,19 @@ async def test_gadget_is_marked_configured_and_bound_under_its_own_pref(monkeypa
 async def test_a_pref_the_gadget_does_not_declare_fails_loudly(monkeypatch):
     """`num` was sent to Created vs Resolved, whose row count is `daysprevious`.
     Jira answered 200 and dropped it. Silence is the bug — refuse instead."""
-    calls = _fake_call(monkeypatch, [
-        _gadget_xml("projectOrFilterId", "daysprevious", "isConfigured"),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            _gadget_xml("projectOrFilterId", "daysprevious", "isConfigured"),
+        ],
+    )
     with pytest.raises(jira.JiraError, match=r"does not declare \['num'\]"):
-        await jira.create_dashboard("my dashboard", gadgets=[
-            {"uri": "cvr.xml", "config": {"filterId": "filter-1", "num": "30"}},
-        ])
+        await jira.create_dashboard(
+            "my dashboard",
+            gadgets=[
+                {"uri": "cvr.xml", "config": {"filterId": "filter-1", "num": "30"}},
+            ],
+        )
     assert [m for m, _, _ in calls] == ["GET"]  # nothing was created
 
 
@@ -833,24 +1033,38 @@ async def test_an_invented_gadget_uri_fails_before_the_dashboard_exists(monkeypa
     not a gadget: refuse the whole write."""
     calls = _fake_call(monkeypatch, [FakeResponse(404, text="nope")])
     with pytest.raises(jira.JiraError, match="does not resolve to a gadget"):
-        await jira.create_dashboard("my dashboard", gadgets=[
-            {"uri": "/rest/gadgets/1.0/dashboards/10000/gadget/pie-chart?title=X",
-             "title": "Priority Breakdown"},
-        ])
+        await jira.create_dashboard(
+            "my dashboard",
+            gadgets=[
+                {
+                    "uri": "/rest/gadgets/1.0/dashboards/10000/gadget/pie-chart?title=X",
+                    "title": "Priority Breakdown",
+                },
+            ],
+        )
     assert [m for m, _, _ in calls] == ["GET"]  # nothing was created
 
 
 async def test_unreadable_gadget_declaration_leaves_the_config_alone(monkeypatch):
     """A module_key gadget has no XML to read. Unknown prefs must mean "do not
     guess" — never "reject the caller's config" and never a fabricated key."""
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, {"id": "10002", "name": "my dashboard"}),
-        FakeResponse(200, {"id": 10013}),
-        FakeResponse(201),
-    ])
-    await jira.create_dashboard("my dashboard", gadgets=[
-        {"module_key": "com.example:gadget", "config": {"filterId": "filter-7", "whatever": "1"}},
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(200, {"id": "10002", "name": "my dashboard"}),
+            FakeResponse(200, {"id": 10013}),
+            FakeResponse(201),
+        ],
+    )
+    await jira.create_dashboard(
+        "my dashboard",
+        gadgets=[
+            {
+                "module_key": "com.example:gadget",
+                "config": {"filterId": "filter-7", "whatever": "1"},
+            },
+        ],
+    )
     assert calls[2][2] == {"whatever": "1", "filterId": "filter-7"}
 
 

@@ -81,8 +81,10 @@ def test_the_chat_question_is_upstreams_verbatim():
     system, user = _upstream_prompt_parts()
     assert graphiti_client.CHAT_RERANK_SYSTEM == system
     code = compile(ast.Expression(user), "<upstream prompt>", "eval")
-    for query, passage in [("Who leads Atlas?", "Jane Doe leads Atlas."),
-                           ("q {braces}", "p with {braces} and\nnewline")]:
+    for query, passage in [
+        ("Who leads Atlas?", "Jane Doe leads Atlas."),
+        ("q {braces}", "p with {braces} and\nnewline"),
+    ]:
         rendered = eval(code, {"passage": passage, "query": query})  # upstream's literal
         assert graphiti_client.chat_rerank_user_prompt(query, passage) == rendered
 
@@ -101,11 +103,17 @@ def test_upstream_still_sends_the_logit_bias_we_deliberately_drop():
 # --- the kind ----------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("alias,kind,expected", [
-    ("", "", None), ("", "chat", None),
-    ("cc-rerank", "", "rerank"), ("cc-rerank", "rerank", "rerank"),
-    ("cc-rerank", "chat", "chat"), ("cc-rerank", " Chat ", "chat"),
-])
+@pytest.mark.parametrize(
+    "alias,kind,expected",
+    [
+        ("", "", None),
+        ("", "chat", None),
+        ("cc-rerank", "", "rerank"),
+        ("cc-rerank", "rerank", "rerank"),
+        ("cc-rerank", "chat", "chat"),
+        ("cc-rerank", " Chat ", "chat"),
+    ],
+)
 def test_the_kind_follows_the_setting_and_empty_means_rerank(monkeypatch, alias, kind, expected):
     monkeypatch.setattr(settings, "graph_rerank_alias", alias)
     monkeypatch.setattr(settings, "graph_rerank_kind", kind)
@@ -144,10 +152,19 @@ async def test_no_reranker_refuses_to_be_called():
 # --- reading the chat answer ---------------------------------------------------------
 
 
-@pytest.mark.parametrize("token,expected_true", [
-    ("True", True), (" true", True), ("▁True", True), ("ĠTRUE", True),
-    ("False", False), (" false", False), ("▁False", False), ("FALSE.", None),
-])
+@pytest.mark.parametrize(
+    "token,expected_true",
+    [
+        ("True", True),
+        (" true", True),
+        ("▁True", True),
+        ("ĠTRUE", True),
+        ("False", False),
+        (" false", False),
+        ("▁False", False),
+        ("FALSE.", None),
+    ],
+)
 def test_the_answer_token_is_read_robustly(token, expected_true):
     lp = math.log(0.8)
     if expected_true is None:
@@ -158,10 +175,13 @@ def test_the_answer_token_is_read_robustly(token, expected_true):
     assert score == pytest.approx(0.8 if expected_true else 0.2)
 
 
-@pytest.mark.parametrize("top", [
-    [{"token": "We", "logprob": -0.1}, {"token": "True", "logprob": -2.5}],  # a reasoning token
-    [{"token": "<think>", "logprob": -0.01}],
-])
+@pytest.mark.parametrize(
+    "top",
+    [
+        [{"token": "We", "logprob": -0.1}, {"token": "True", "logprob": -2.5}],  # a reasoning token
+        [{"token": "<think>", "logprob": -0.01}],
+    ],
+)
 def test_a_reasoning_token_is_an_error_naming_the_causes_never_a_neutral_score(top):
     with pytest.raises(graphiti_client.RerankError) as exc:
         graphiti_client.chat_rerank_score("cc-rerank", top)
@@ -198,7 +218,9 @@ class _FakeCompletions:
             token, p = self.answer(passage)
             top = [SimpleNamespace(token=token, logprob=math.log(p))]
             content = [SimpleNamespace(top_logprobs=top)]
-            return SimpleNamespace(choices=[SimpleNamespace(logprobs=SimpleNamespace(content=content))])
+            return SimpleNamespace(
+                choices=[SimpleNamespace(logprobs=SimpleNamespace(content=content))]
+            )
         except asyncio.CancelledError:
             self.cancelled += 1
             raise
@@ -227,7 +249,10 @@ async def test_the_chat_reranker_scores_p_true_and_sends_upstreams_parameters():
         assert req["temperature"] == 0 and req["max_tokens"] == 1
         assert req["logprobs"] is True and req["top_logprobs"] == 2
         assert "logit_bias" not in req
-        assert req["messages"][0] == {"role": "system", "content": graphiti_client.CHAT_RERANK_SYSTEM}
+        assert req["messages"][0] == {
+            "role": "system",
+            "content": graphiti_client.CHAT_RERANK_SYSTEM,
+        }
     st = graphiti_client.rerank_stats()
     assert st["calls"] == 1 and st["failures"] == 0 and st["median_latency_s"] is not None
 
@@ -274,14 +299,24 @@ def _mock_httpx(monkeypatch, handler):
     monkeypatch.setattr(graphiti_client.httpx, "AsyncClient", factory)
 
 
-@pytest.mark.parametrize("status,expected", [
-    (503, TRANSIENT), (502, TRANSIENT), (429, TRANSIENT), (408, TRANSIENT),
-    # 403 is transient in the taxonomy (an edge firewall's temporary deny);
-    # a key-scope 403 then fails after the read path's one retry, loudly.
-    (403, TRANSIENT),
-    (400, SEMANTIC), (401, SEMANTIC), (404, SEMANTIC),
-])
-async def test_an_http_failure_raises_and_is_classified_by_its_status(monkeypatch, status, expected):
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        (503, TRANSIENT),
+        (502, TRANSIENT),
+        (429, TRANSIENT),
+        (408, TRANSIENT),
+        # 403 is transient in the taxonomy (an edge firewall's temporary deny);
+        # a key-scope 403 then fails after the read path's one retry, loudly.
+        (403, TRANSIENT),
+        (400, SEMANTIC),
+        (401, SEMANTIC),
+        (404, SEMANTIC),
+    ],
+)
+async def test_an_http_failure_raises_and_is_classified_by_its_status(
+    monkeypatch, status, expected
+):
     _mock_httpx(monkeypatch, lambda r: httpx.Response(status, json={"error": "nope"}))
     client = graphiti_client.RerankClient(PROXY, "sk-x", "cc-rerank")
     with pytest.raises(graphiti_client.RerankHTTPError) as exc:
@@ -301,13 +336,18 @@ async def test_a_connection_failure_propagates_as_transient(monkeypatch):
     assert classify_failure(exc.value) == TRANSIENT
 
 
-@pytest.mark.parametrize("body", [
-    {"unexpected": True},
-    {"results": [{"index": 0, "relevance_score": 0.5}]},  # one of two candidates scored
-    {"results": [{"index": 0, "relevance_score": 0.5}, {"index": 0, "relevance_score": 0.4}]},
-    {"results": [{"index": 0}, {"index": 1}]},
-])
-async def test_a_malformed_rerank_answer_is_a_semantic_error_not_placeholder_scores(monkeypatch, body):
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"unexpected": True},
+        {"results": [{"index": 0, "relevance_score": 0.5}]},  # one of two candidates scored
+        {"results": [{"index": 0, "relevance_score": 0.5}, {"index": 0, "relevance_score": 0.4}]},
+        {"results": [{"index": 0}, {"index": 1}]},
+    ],
+)
+async def test_a_malformed_rerank_answer_is_a_semantic_error_not_placeholder_scores(
+    monkeypatch, body
+):
     _mock_httpx(monkeypatch, lambda r: httpx.Response(200, json=body))
     with pytest.raises(graphiti_client.RerankError) as exc:
         await graphiti_client.RerankClient(PROXY, "sk-x", "cc-rerank").rank("q", ["a", "b"])

@@ -80,9 +80,7 @@ async def _get_pool() -> asyncpg.Pool:
         if _pool is None or _pool_url != settings.database_url:
             if _pool is not None:
                 _pool.terminate()
-            _pool = await asyncpg.create_pool(
-                settings.database_url, min_size=0, max_size=_POOL_MAX
-            )
+            _pool = await asyncpg.create_pool(settings.database_url, min_size=0, max_size=_POOL_MAX)
             _pool_url = settings.database_url
         return _pool
 
@@ -117,7 +115,10 @@ async def upsert_agent(agent_id: str, name: str, model: str, charter: str) -> No
             insert into agent (id, name, model, charter) values ($1, $2, $3, $4)
             on conflict (id) do nothing
             """,
-            agent_id, name, model, charter,
+            agent_id,
+            name,
+            model,
+            charter,
         )
     finally:
         await conn.close()
@@ -126,8 +127,10 @@ async def upsert_agent(agent_id: str, name: str, model: str, charter: str) -> No
 def _current_charter_sql(agent_id_sql: str) -> str:
     """The agent's CURRENT charter version as a SQL expression, 0 for the built-in
     code charter. In the row's own statement, so a stamp and its row are one write."""
-    return ("coalesce((select g.version from guidance_version g "
-            f"where g.agent_id = {agent_id_sql} and g.status = 'CURRENT'), 0)")
+    return (
+        "coalesce((select g.version from guidance_version g "
+        f"where g.agent_id = {agent_id_sql} and g.status = 'CURRENT'), 0)"
+    )
 
 
 async def save_paused_session(session_id: str, agent_id: str, run_state: dict) -> None:
@@ -137,13 +140,15 @@ async def save_paused_session(session_id: str, agent_id: str, run_state: dict) -
         await conn.execute(
             f"""
             insert into session (id, agent_id, status, run_state, charter_version)
-            values ($1, $2, 'AWAITING_HUMAN', $3::jsonb, {_current_charter_sql('$2')})
+            values ($1, $2, 'AWAITING_HUMAN', $3::jsonb, {_current_charter_sql("$2")})
             on conflict (id) do update
               set status = 'AWAITING_HUMAN',
                   run_state = coalesce(session.run_state, '{{}}'::jsonb) || $3::jsonb,
                   updated_at = now()
             """,
-            session_id, agent_id, json.dumps(run_state),
+            session_id,
+            agent_id,
+            json.dumps(run_state),
         )
     finally:
         await conn.close()
@@ -171,9 +176,7 @@ async def get_session_run_state(session_id: str) -> dict | None:
     """Run state regardless of status — the Workspace transcript source."""
     conn = await _conn()
     try:
-        row = await conn.fetchrow(
-            "select run_state from session where id = $1", session_id
-        )
+        row = await conn.fetchrow("select run_state from session where id = $1", session_id)
         if row is None or row["run_state"] is None:
             return None
         rs = row["run_state"]
@@ -217,14 +220,17 @@ async def mark_session_closed(session_id: str, reason: str) -> None:
         await conn.execute(
             "update session set status = 'DONE', closed_reason = $2, "
             "updated_at = now() where id = $1",
-            session_id, reason,
+            session_id,
+            reason,
         )
     finally:
         await conn.close()
 
 
 async def create_running_session(
-    session_id: str, agent_id: str, parent_session_id: str | None = None,
+    session_id: str,
+    agent_id: str,
+    parent_session_id: str | None = None,
     rerun_of: str | None = None,
 ) -> None:
     """A session row exists from the moment the run STARTS (live transcript):
@@ -240,10 +246,13 @@ async def create_running_session(
             f"""
             insert into session (id, agent_id, status, parent_session_id, rerun_of,
                                  charter_version)
-            values ($1, $2, 'RUNNING', $3, $4, {_current_charter_sql('$2')})
+            values ($1, $2, 'RUNNING', $3, $4, {_current_charter_sql("$2")})
             on conflict (id) do nothing
             """,
-            session_id, agent_id, parent_session_id, rerun_of,
+            session_id,
+            agent_id,
+            parent_session_id,
+            rerun_of,
         )
     finally:
         await conn.close()
@@ -277,7 +286,8 @@ async def update_session_run_state(session_id: str, run_state: dict) -> bool:
             "update session set "
             "run_state = coalesce(run_state, '{}'::jsonb) || $2::jsonb, "
             "updated_at = now() where id = $1 returning stop_requested",
-            session_id, json.dumps(run_state),
+            session_id,
+            json.dumps(run_state),
         )
         return bool(row and row["stop_requested"])
     finally:
@@ -301,7 +311,8 @@ async def park_session_awaiting_agents(session_id: str, run_state: dict) -> None
                    updated_at = now()
              where id = $1
             """,
-            session_id, json.dumps(run_state),
+            session_id,
+            json.dumps(run_state),
         )
     finally:
         await conn.close()
@@ -342,7 +353,8 @@ async def drop_session_run_state_keys(session_id: str, keys: list[str]) -> None:
         await conn.execute(
             "update session set run_state = coalesce(run_state, '{}'::jsonb) - $2::text[], "
             "updated_at = now() where id = $1",
-            session_id, list(keys),
+            session_id,
+            list(keys),
         )
     finally:
         await conn.close()
@@ -413,7 +425,8 @@ async def park_session_awaiting_resume(session_id: str, pending: dict) -> None:
                    updated_at = now()
              where id = $1
             """,
-            session_id, json.dumps(pending),
+            session_id,
+            json.dumps(pending),
         )
     finally:
         await conn.close()
@@ -474,7 +487,8 @@ async def park_session_awaiting_continue(session_id: str, marker: dict) -> None:
                    updated_at = now()
              where id = $1
             """,
-            session_id, json.dumps(marker),
+            session_id,
+            json.dumps(marker),
         )
     finally:
         await conn.close()
@@ -531,8 +545,7 @@ async def request_session_stop(session_id: str) -> bool:
     conn = await _conn()
     try:
         r = await conn.execute(
-            "update session set stop_requested = true "
-            "where id = $1 and status = 'RUNNING'",
+            "update session set stop_requested = true where id = $1 and status = 'RUNNING'",
             session_id,
         )
         return r.endswith(" 1")
@@ -557,7 +570,8 @@ async def park_session_stopped(session_id: str, marker: dict) -> None:
                    updated_at = now()
              where id = $1
             """,
-            session_id, json.dumps(marker),
+            session_id,
+            json.dumps(marker),
         )
     finally:
         await conn.close()
@@ -581,7 +595,9 @@ async def cancel_parked_resume(session_id: str, marker: dict, reason: str) -> bo
                    updated_at = now()
              where id = $1 and status = 'AWAITING_RESUME'
             """,
-            session_id, json.dumps(marker), reason,
+            session_id,
+            json.dumps(marker),
+            reason,
         )
         return r.endswith(" 1")
     finally:
@@ -656,15 +672,21 @@ async def latest_proposal_for_session(session_id: str) -> dict | None:
     conn = await _conn()
     try:
         row = await conn.fetchrow(
-            "select * from proposal where session_id = $1 "
-            "order by created_at desc limit 1",
+            "select * from proposal where session_id = $1 order by created_at desc limit 1",
             session_id,
         )
         if row is None:
             return None
         d = dict(row)
-        for k in ("actions", "evidence", "provenance", "confidence", "origin",
-                  "retry_state", "redraft"):
+        for k in (
+            "actions",
+            "evidence",
+            "provenance",
+            "confidence",
+            "origin",
+            "retry_state",
+            "redraft",
+        ):
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else v
         return d
@@ -770,9 +792,12 @@ async def sessions_with_orphaned_resume(armed_before: datetime) -> list[dict]:
             armed_before,
         )
         return [
-            {"id": r["id"],
-             "pending": json.loads(r["pending"]) if isinstance(r["pending"], str)
-             else r["pending"]}
+            {
+                "id": r["id"],
+                "pending": json.loads(r["pending"])
+                if isinstance(r["pending"], str)
+                else r["pending"],
+            }
             for r in rows
         ]
     finally:
@@ -783,8 +808,13 @@ async def sessions_with_orphaned_resume(armed_before: datetime) -> list[dict]:
 
 
 async def create_operator_item(
-    item_id: str, kind: str, session_id: str, agent_id: str,
-    body: str, task_id: str | None = None, tool_call_id: str | None = None,
+    item_id: str,
+    kind: str,
+    session_id: str,
+    agent_id: str,
+    body: str,
+    task_id: str | None = None,
+    tool_call_id: str | None = None,
 ) -> None:
     conn = await _conn()
     try:
@@ -794,7 +824,13 @@ async def create_operator_item(
                 (id, kind, session_id, agent_id, task_id, body, tool_call_id)
             values ($1, $2, $3, $4, $5, $6, $7)
             """,
-            item_id, kind, session_id, agent_id, task_id, body, tool_call_id,
+            item_id,
+            kind,
+            session_id,
+            agent_id,
+            task_id,
+            body,
+            tool_call_id,
         )
     finally:
         await conn.close()
@@ -809,9 +845,7 @@ async def get_operator_item(item_id: str) -> dict | None:
         await conn.close()
 
 
-async def answer_operator_item(
-    item_id: str, answer: str, verdict: str | None = None
-) -> bool:
+async def answer_operator_item(item_id: str, answer: str, verdict: str | None = None) -> bool:
     """Record the operator's answer. Guarded: an already-answered item is never
     re-answered — the first answer is the one the parked run resumes with."""
     conn = await _conn()
@@ -822,7 +856,9 @@ async def answer_operator_item(
                set status = 'ANSWERED', answer = $2, verdict = $3, answered_at = now()
              where id = $1 and status = 'OPEN'
             """,
-            item_id, answer, verdict,
+            item_id,
+            answer,
+            verdict,
         )
         return r.endswith(" 1")
     finally:
@@ -834,7 +870,8 @@ async def list_operator_items(status: str | None = "OPEN") -> list[dict]:
     try:
         if status is None:
             rows = await conn.fetch(
-                "select * from operator_item order by created_at desc limit 200")
+                "select * from operator_item order by created_at desc limit 200"
+            )
         else:
             rows = await conn.fetch(
                 "select * from operator_item where status = $1 order by created_at",
@@ -855,7 +892,8 @@ async def operator_item_statuses(item_ids: list[str]) -> dict[str, str]:
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            "select id, status from operator_item where id = any($1::text[])", ids)
+            "select id, status from operator_item where id = any($1::text[])", ids
+        )
         return {r["id"]: r["status"] for r in rows}
     finally:
         await conn.close()
@@ -865,8 +903,11 @@ async def operator_item_statuses(item_ids: list[str]) -> dict[str, str]:
 
 
 async def create_conversation_session(
-    session_id: str, agent_id: str, rerun_of: str | None = None,
-    model_override: str | None = None, thinking_override: str | None = None,
+    session_id: str,
+    agent_id: str,
+    rerun_of: str | None = None,
+    model_override: str | None = None,
+    thinking_override: str | None = None,
 ) -> None:
     """A conversation session starts RUNNING in mode='conversation' — the mode
     is what makes text replies rest in AWAITING_OPERATOR instead of going DONE.
@@ -878,10 +919,14 @@ async def create_conversation_session(
             insert into session (id, agent_id, status, mode, rerun_of,
                                  model_override, thinking_override, charter_version)
             values ($1, $2, 'RUNNING', 'conversation', $3, $4, $5,
-                    {_current_charter_sql('$2')})
+                    {_current_charter_sql("$2")})
             on conflict (id) do nothing
             """,
-            session_id, agent_id, rerun_of, model_override, thinking_override,
+            session_id,
+            agent_id,
+            rerun_of,
+            model_override,
+            thinking_override,
         )
     finally:
         await conn.close()
@@ -894,7 +939,7 @@ async def restamp_unstarted_session(session_id: str) -> None:
     try:
         await conn.execute(
             f"""
-            update session set charter_version = {_current_charter_sql('session.agent_id')}
+            update session set charter_version = {_current_charter_sql("session.agent_id")}
              where id = $1 and run_state is null
             """,
             session_id,
@@ -935,8 +980,7 @@ async def clear_stop_request(session_id: str) -> None:
     conn = await _conn()
     try:
         await conn.execute(
-            "update session set stop_requested = false "
-            "where id = $1 and stop_requested",
+            "update session set stop_requested = false where id = $1 and stop_requested",
             session_id,
         )
     finally:
@@ -973,12 +1017,12 @@ async def mark_session_awaiting_operator(session_id: str, run_state: dict | None
                 "update session set status = 'AWAITING_OPERATOR', "
                 "run_state = coalesce(run_state, '{}'::jsonb) || $2::jsonb, "
                 "updated_at = now() where id = $1",
-                session_id, json.dumps(run_state),
+                session_id,
+                json.dumps(run_state),
             )
         else:
             await conn.execute(
-                "update session set status = 'AWAITING_OPERATOR', updated_at = now() "
-                "where id = $1",
+                "update session set status = 'AWAITING_OPERATOR', updated_at = now() where id = $1",
                 session_id,
             )
     finally:
@@ -1012,13 +1056,16 @@ async def mark_session_exec_failed_open(
                 "exec_failure = $2, "
                 "run_state = coalesce(run_state, '{}'::jsonb) || $3::jsonb, "
                 "updated_at = now() where id = $1",
-                session_id, reason, json.dumps(run_state),
+                session_id,
+                reason,
+                json.dumps(run_state),
             )
         else:
             await conn.execute(
                 "update session set status = 'AWAITING_OPERATOR', "
                 "exec_failure = $2, updated_at = now() where id = $1",
-                session_id, reason,
+                session_id,
+                reason,
             )
     finally:
         await conn.close()
@@ -1028,9 +1075,7 @@ async def get_session_model_override(session_id: str) -> str | None:
     """The cockpit-set model for this session, or None for "agent default"."""
     conn = await _conn()
     try:
-        row = await conn.fetchrow(
-            "select model_override from session where id = $1", session_id
-        )
+        row = await conn.fetchrow("select model_override from session where id = $1", session_id)
         return row["model_override"] if row else None
     finally:
         await conn.close()
@@ -1041,9 +1086,7 @@ async def get_session_thinking_override(session_id: str) -> str | None:
     'xhigh'), or None for the deployment default."""
     conn = await _conn()
     try:
-        row = await conn.fetchrow(
-            "select thinking_override from session where id = $1", session_id
-        )
+        row = await conn.fetchrow("select thinking_override from session where id = $1", session_id)
         return row["thinking_override"] if row else None
     finally:
         await conn.close()
@@ -1056,7 +1099,8 @@ async def set_session_thinking_override(session_id: str, level: str | None) -> b
     try:
         result = await conn.execute(
             "update session set thinking_override = $2, updated_at = now() where id = $1",
-            session_id, level,
+            session_id,
+            level,
         )
         return result.endswith(" 1")
     finally:
@@ -1067,9 +1111,7 @@ async def get_session_operator_title(session_id: str) -> str | None:
     """The operator's name for this conversation, or None if never renamed."""
     conn = await _conn()
     try:
-        row = await conn.fetchrow(
-            "select operator_title from session where id = $1", session_id
-        )
+        row = await conn.fetchrow("select operator_title from session where id = $1", session_id)
         return row["operator_title"] if row else None
     finally:
         await conn.close()
@@ -1084,7 +1126,8 @@ async def set_session_operator_title(session_id: str, title: str | None) -> bool
     try:
         result = await conn.execute(
             "update session set operator_title = $2 where id = $1",
-            session_id, title,
+            session_id,
+            title,
         )
         return result.endswith(" 1")
     finally:
@@ -1098,7 +1141,8 @@ async def set_session_model_override(session_id: str, model: str | None) -> bool
     try:
         result = await conn.execute(
             "update session set model_override = $2, updated_at = now() where id = $1",
-            session_id, model,
+            session_id,
+            model,
         )
         return result.endswith(" 1")
     finally:
@@ -1162,8 +1206,10 @@ def _owes_pending_resume(run_state: dict | None) -> bool:
     messages = rs.get("messages") or []
     if not messages or messages[-1].get("kind") != "response":
         return False
-    return any(p.get("part_kind") == "tool-call" and p.get("tool_call_id") == call_id
-               for p in messages[-1].get("parts", []))
+    return any(
+        p.get("part_kind") == "tool-call" and p.get("tool_call_id") == call_id
+        for p in messages[-1].get("parts", [])
+    )
 
 
 def _restart_task_retry_state(now: datetime) -> dict:
@@ -1171,10 +1217,15 @@ def _restart_task_retry_state(now: datetime) -> dict:
     due now, whatever its age (the operator's ruling of 2026-10-27: they issued
     it and can cancel it). `kind: restart` re-enters through the plain run
     entry; `attempts: 0` because a restart is not a failure of the task."""
-    return {"kind": "restart", "attempts": 0, "restart": True,
-            "not_before": now.isoformat(), "parked_at": now.isoformat(),
-            "dependencies": [LLM],
-            "last_error": "the run died with its process"}
+    return {
+        "kind": "restart",
+        "attempts": 0,
+        "restart": True,
+        "not_before": now.isoformat(),
+        "parked_at": now.isoformat(),
+        "dependencies": [LLM],
+        "last_error": "the run died with its process",
+    }
 
 
 async def park_orphaned_sessions() -> list[dict]:
@@ -1219,15 +1270,13 @@ async def park_orphaned_sessions() -> list[dict]:
                 rs = r["run_state"]
                 rs = json.loads(rs) if isinstance(rs, str) else (rs or {})
                 task = await conn.fetchrow(
-                    "select id from task where session_id = $1 "
-                    "and status = 'IN_PROGRESS'", sid,
+                    "select id from task where session_id = $1 and status = 'IN_PROGRESS'",
+                    sid,
                 )
                 task_id = task["id"] if task else None
-                entry = {"session_id": sid, "agent_id": agent_id,
-                         "task_id": task_id}
+                entry = {"session_id": sid, "agent_id": agent_id, "task_id": task_id}
                 if _owes_pending_resume(rs):
-                    pending = {**rs["pending_resume"],
-                               "not_before": now.isoformat()}
+                    pending = {**rs["pending_resume"], "not_before": now.isoformat()}
                     await conn.execute(
                         """
                         update session set status = 'AWAITING_RESUME',
@@ -1236,10 +1285,12 @@ async def park_orphaned_sessions() -> list[dict]:
                                updated_at = now()
                          where id = $1
                         """,
-                        sid, json.dumps(pending),
+                        sid,
+                        json.dumps(pending),
                     )
-                    out.append({**entry, "outcome": "resume",
-                                "reason": RESTART_REASON, "pending": pending})
+                    out.append(
+                        {**entry, "outcome": "resume", "reason": RESTART_REASON, "pending": pending}
+                    )
                     continue
                 if task_id:
                     state = _restart_task_retry_state(now)
@@ -1249,32 +1300,40 @@ async def park_orphaned_sessions() -> list[dict]:
                                retry_state = $2::jsonb, outcome = $3
                          where id = $1
                         """,
-                        task_id, json.dumps(state),
+                        task_id,
+                        json.dumps(state),
                         "queued for re-run (process restarted)",
                     )
                     reason = restart_reason(task_id)
-                    await _stop_for_restart(conn, sid, reason, after="task",
-                                            task_id=task_id, resumable=False)
-                    out.append({**entry, "outcome": "task_rerun",
-                                "reason": reason, "retry_state": state})
+                    await _stop_for_restart(
+                        conn, sid, reason, after="task", task_id=task_id, resumable=False
+                    )
+                    out.append(
+                        {**entry, "outcome": "task_rerun", "reason": reason, "retry_state": state}
+                    )
                     continue
                 if r["mode"] == "conversation":
                     tail = record_tail(rs)
                     if tail == "closed":
                         await conn.execute(
                             "update session set status = 'AWAITING_OPERATOR', "
-                            "updated_at = now() where id = $1", sid,
+                            "updated_at = now() where id = $1",
+                            sid,
                         )
-                        out.append({**entry, "outcome": "turn_landed",
-                                    "reason": RESTART_REASON})
+                        out.append({**entry, "outcome": "turn_landed", "reason": RESTART_REASON})
                     elif tail == "request":
                         # The parked-turn shape (`resume_park.park_turn`), due
                         # now: a restart is not an outage, nothing to wait out.
-                        pending = {"kind": "turn", "after": "converse",
-                                   "attempts": 0, "dependencies": [LLM],
-                                   "window": 1, "last_error": RESTART_REASON,
-                                   "parked_at": now.isoformat(),
-                                   "not_before": now.isoformat()}
+                        pending = {
+                            "kind": "turn",
+                            "after": "converse",
+                            "attempts": 0,
+                            "dependencies": [LLM],
+                            "window": 1,
+                            "last_error": RESTART_REASON,
+                            "parked_at": now.isoformat(),
+                            "not_before": now.isoformat(),
+                        }
                         await conn.execute(
                             """
                             update session set status = 'AWAITING_RESUME',
@@ -1283,40 +1342,57 @@ async def park_orphaned_sessions() -> list[dict]:
                                    updated_at = now()
                              where id = $1
                             """,
-                            sid, json.dumps(pending),
+                            sid,
+                            json.dumps(pending),
                         )
-                        out.append({**entry, "outcome": "resume",
-                                    "reason": RESTART_REASON, "pending": pending})
+                        out.append(
+                            {
+                                **entry,
+                                "outcome": "resume",
+                                "reason": RESTART_REASON,
+                                "pending": pending,
+                            }
+                        )
                     else:
                         reason = "the last turn was lost to a restart; say it again"
                         await conn.execute(
                             "update session set status = 'DONE', "
                             "closed_reason = $2, updated_at = now() where id = $1",
-                            sid, reason,
+                            sid,
+                            reason,
                         )
-                        out.append({**entry, "outcome": "turn_lost",
-                                    "reason": reason})
+                        out.append({**entry, "outcome": "turn_lost", "reason": reason})
                     continue
-                await _stop_for_restart(conn, sid, RESTART_REASON, after=None,
-                                        resumable=False)
-                out.append({**entry, "outcome": "stopped",
-                            "reason": RESTART_REASON})
+                await _stop_for_restart(conn, sid, RESTART_REASON, after=None, resumable=False)
+                out.append({**entry, "outcome": "stopped", "reason": RESTART_REASON})
         return out
     finally:
         await conn.close()
 
 
-async def _stop_for_restart(conn, session_id: str, reason: str, *, after: str | None,
-                            task_id: str | None = None, resumable: bool) -> None:
+async def _stop_for_restart(
+    conn,
+    session_id: str,
+    reason: str,
+    *,
+    after: str | None,
+    task_id: str | None = None,
+    resumable: bool,
+) -> None:
     """Close a dead run's transcript STOPPED — kept whole, never FAILED — with a
     `pending_stop` marker saying a restart did it. `resumable` is false unless
     the record ends at a safe re-entry point; the resume driver refuses a
     non-resumable restart stop (`orchestration.resume_stopped_session`), so the
     operator's Resume lever can never re-enter a dead tool batch or race the
     task's fresh re-run."""
-    marker = {"reason": "restart", "restart_reason": reason, "after": after,
-              "task_id": task_id, "resumable": resumable,
-              "stopped_at": datetime.now(UTC).isoformat()}
+    marker = {
+        "reason": "restart",
+        "restart_reason": reason,
+        "after": after,
+        "task_id": task_id,
+        "resumable": resumable,
+        "stopped_at": datetime.now(UTC).isoformat(),
+    }
     await conn.execute(
         """
         update session set status = 'STOPPED', stop_requested = false,
@@ -1326,7 +1402,9 @@ async def _stop_for_restart(conn, session_id: str, reason: str, *, after: str | 
                updated_at = now()
          where id = $1
         """,
-        session_id, json.dumps(marker), reason,
+        session_id,
+        json.dumps(marker),
+        reason,
     )
 
 
@@ -1339,9 +1417,11 @@ def _rerun_chain(first: str, *, origin: bool = False) -> str:
     the row names only the newest run. `claim_owed_rerun`'s tail walk keeps its own
     SQL: it also needs the previous id and a depth cap."""
     cols, step = ("origin, id", "c.origin, n.rerun_by") if origin else ("id", "n.rerun_by")
-    return (f"with recursive chain({cols}) as ({first} union "
-            f"select {step} from session n join chain c on n.id = c.id "
-            "where n.rerun_by is not null)")
+    return (
+        f"with recursive chain({cols}) as ({first} union "
+        f"select {step} from session n join chain c on n.id = c.id "
+        "where n.rerun_by is not null)"
+    )
 
 
 async def list_sessions(
@@ -1388,9 +1468,7 @@ async def list_sessions(
         where.append(f"s.agent_id = {_arg(agent_id)}")
     if before is not None:
         # Strict keyset: everything ordered after the cursor row itself.
-        where.append(
-            f"(s.created_at, s.id) < ({_arg(before)}, {_arg(before_id or '')})"
-        )
+        where.append(f"(s.created_at, s.id) < ({_arg(before)}, {_arg(before_id or '')})")
     if exclude_terminal_oneshot:
         # A re-run pair stays: both rows show the link, and the cockpit keeps them
         # under its closed-sessions toggle.
@@ -1407,7 +1485,8 @@ async def list_sessions(
             "case when s.status = 'STOPPED' then "
             "coalesce(s.run_state->'pending_stop'->>'reason', '') = 'restart' "
             "and not coalesce((s.run_state->'pending_stop'->>'resumable')::boolean, false) "
-            "else false end))")
+            "else false end))"
+        )
     limit_ph = _arg(limit)
     where_sql = " and ".join(where)
 
@@ -1419,7 +1498,7 @@ async def list_sessions(
                    s.parent_session_id, s.closed_reason, s.model_override,
                    s.thinking_override, s.exec_failure, s.rerun_of, s.rerun_by,
                    s.charter_version, s.operator_title,
-                   {_current_charter_sql('s.agent_id')} as charter_current,
+                   {_current_charter_sql("s.agent_id")} as charter_current,
                    (select par.agent_id from session par
                      where par.id = s.parent_session_id) as parent_agent_id,
                    (select p.intent from proposal p where p.session_id = s.id
@@ -1492,9 +1571,7 @@ async def session_agent_ids() -> list[str]:
     (and can never disagree with the rows beside it)."""
     conn = await _conn()
     try:
-        rows = await conn.fetch(
-            "select distinct agent_id from session order by agent_id"
-        )
+        rows = await conn.fetch("select distinct agent_id from session order by agent_id")
         return [r["agent_id"] for r in rows]
     finally:
         await conn.close()
@@ -1525,9 +1602,15 @@ async def save_proposal(
                     $11::jsonb, $12::jsonb)
             on conflict (id) do update set status = excluded.status
             """,
-            proposal_id, session_id, agent_id, intent,
-            json.dumps(actions), json.dumps(evidence), expected_effect,
-            status, idempotency_key,
+            proposal_id,
+            session_id,
+            agent_id,
+            intent,
+            json.dumps(actions),
+            json.dumps(evidence),
+            expected_effect,
+            status,
+            idempotency_key,
             json.dumps(confidence) if confidence is not None else None,
             json.dumps(origin) if origin is not None else None,
             json.dumps(redraft) if redraft is not None else None,
@@ -1569,7 +1652,8 @@ async def live_consult_draft(caller_session_id: str, agent_id: str) -> dict | No
               and origin->>'caller_session_id' = $1
             order by created_at desc limit 1
             """,
-            caller_session_id, agent_id,
+            caller_session_id,
+            agent_id,
         )
         return dict(row) if row else None
     finally:
@@ -1581,7 +1665,8 @@ async def set_proposal_status(proposal_id: str, status: str) -> None:
     try:
         await conn.execute(
             "update proposal set status = $2, decided_at = now() where id = $1",
-            proposal_id, status,
+            proposal_id,
+            status,
         )
     finally:
         await conn.close()
@@ -1616,8 +1701,16 @@ async def load_proposal(proposal_id: str) -> dict | None:
         if row is None:
             return None
         d = dict(row)
-        for k in ("actions", "evidence", "provenance", "confidence", "origin",
-                  "retry_state", "override_eval", "redraft"):
+        for k in (
+            "actions",
+            "evidence",
+            "provenance",
+            "confidence",
+            "origin",
+            "retry_state",
+            "override_eval",
+            "redraft",
+        ):
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else v
         return d
@@ -1707,7 +1800,8 @@ async def proposal_chain(proposal_ids: list[str]) -> dict[str, dict]:
                      order by e.id desc limit 1) as failed_payload
               from walk w join proposal p on p.id = w.id
             """,
-            proposal_ids, _CHAIN_WALK_CAP,
+            proposal_ids,
+            _CHAIN_WALK_CAP,
         )
     finally:
         await conn.close()
@@ -1729,19 +1823,25 @@ async def proposal_chain(proposal_ids: list[str]) -> dict[str, dict]:
         for r in walked[1:]:
             decided = _j(r["decided_payload"]) or {}
             failed = _j(r["failed_payload"])
-            links.append({
-                "id": r["id"],
-                "status": r["status"],
-                "verdict": decided.get("verdict"),
-                "approver": r["decided_actor"] or r["provenance_approver"],
-                "decided_at": r["decided_at"],
-                "failure": ({
-                    "capability": failed.get("failed_capability"),
-                    "error": failed.get("error"),
-                    "world_moved": failed.get("world_moved"),
-                } if failed else None),
-                "chain_exhausted": bool((failed or {}).get("chain_exhausted")),
-            })
+            links.append(
+                {
+                    "id": r["id"],
+                    "status": r["status"],
+                    "verdict": decided.get("verdict"),
+                    "approver": r["decided_actor"] or r["provenance_approver"],
+                    "decided_at": r["decided_at"],
+                    "failure": (
+                        {
+                            "capability": failed.get("failed_capability"),
+                            "error": failed.get("error"),
+                            "world_moved": failed.get("world_moved"),
+                        }
+                        if failed
+                        else None
+                    ),
+                    "chain_exhausted": bool((failed or {}).get("chain_exhausted")),
+                }
+            )
         links.reverse()  # the walk ran leaf-ward to root; the wire is oldest first
         own_failed = _j(own["failed_payload"]) or {}
         out[pid] = {
@@ -1761,7 +1861,8 @@ async def set_proposal_executed(proposal_id: str, provenance: dict) -> None:
               set status = 'EXECUTED', provenance = $2::jsonb, decided_at = now()
             where id = $1
             """,
-            proposal_id, json.dumps(provenance),
+            proposal_id,
+            json.dumps(provenance),
         )
     finally:
         await conn.close()
@@ -1786,7 +1887,8 @@ async def park_proposal_retry(proposal_id: str, retry_state: dict) -> None:
                set status = 'RETRY_PENDING', retry_state = $2::jsonb
              where id = $1
             """,
-            proposal_id, json.dumps(retry_state),
+            proposal_id,
+            json.dumps(retry_state),
         )
     finally:
         await conn.close()
@@ -1833,8 +1935,15 @@ async def claim_proposal_retry(proposal_id: str) -> dict | None:
         if row is None:
             return None
         d = dict(row)
-        for k in ("actions", "evidence", "provenance", "confidence", "origin",
-                  "retry_state", "override_eval"):
+        for k in (
+            "actions",
+            "evidence",
+            "provenance",
+            "confidence",
+            "origin",
+            "retry_state",
+            "override_eval",
+        ):
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else v
         return d
@@ -1878,7 +1987,8 @@ async def _write_execution_cursor(proposal_id: str, change) -> bool:
             await conn.execute(
                 "update proposal set retry_state = $2::jsonb "
                 "where id = $1 and status = 'EXECUTING'",
-                proposal_id, json.dumps(state),
+                proposal_id,
+                json.dumps(state),
             )
             return True
     finally:
@@ -1890,14 +2000,22 @@ async def record_action_started(proposal_id: str, index: int, capability: str) -
     False when the row is not EXECUTING (nothing written). Writing the same
     start twice is a no-op; starting any action but the next one raises
     `ExecutionCursorMismatch` (a completed action is never started again)."""
+
     def change(state: dict) -> dict:
         completed = list(state.get("completed_results") or [])
         if index != len(completed):
             raise ExecutionCursorMismatch(
                 f"proposal {proposal_id}: action {index + 1} cannot start, the "
-                f"stored cursor has {len(completed)} action(s) complete")
-        state.update({"completed_results": completed, "next_action_index": index,
-                      "in_flight_index": index, "in_flight_capability": capability})
+                f"stored cursor has {len(completed)} action(s) complete"
+            )
+        state.update(
+            {
+                "completed_results": completed,
+                "next_action_index": index,
+                "in_flight_index": index,
+                "in_flight_capability": capability,
+            }
+        )
         return state
 
     return await _write_execution_cursor(proposal_id, change)
@@ -1908,6 +2026,7 @@ async def record_action_completed(proposal_id: str, index: int, result: str) -> 
     `completed_results[index]` (by index, so a repeated write never appends
     twice), `next_action_index = index + 1`, the in-flight keys cleared. False
     when the row is not EXECUTING (nothing written)."""
+
     def change(state: dict) -> dict:
         completed = list(state.get("completed_results") or [])
         if index == len(completed):
@@ -1917,7 +2036,8 @@ async def record_action_completed(proposal_id: str, index: int, result: str) -> 
         else:
             raise ExecutionCursorMismatch(
                 f"proposal {proposal_id}: action {index + 1} cannot complete, the "
-                f"stored cursor has {len(completed)} action(s) complete")
+                f"stored cursor has {len(completed)} action(s) complete"
+            )
         state.update({"completed_results": completed, "next_action_index": index + 1})
         state.pop("in_flight_index", None)
         state.pop("in_flight_capability", None)
@@ -1944,15 +2064,17 @@ async def hand_back_execution(proposal_id: str, status: str) -> bool:
              where id = $1 and status = 'EXECUTING'
             returning id
             """,
-            proposal_id, status,
+            proposal_id,
+            status,
         )
         return moved is not None
     finally:
         await conn.close()
 
 
-async def _interrupted_state(conn, proposal_id: str, actions: list, prior: dict | None,
-                             *, now: str, last_error: str) -> dict:
+async def _interrupted_state(
+    conn, proposal_id: str, actions: list, prior: dict | None, *, now: str, last_error: str
+) -> dict:
     """THE record of an execution stopped mid-run with no Executor verdict — one
     shape for the startup landing and the in-process handback. MERGED into the
     stored cursor (its completed prefix kept); a row with no retry_state at all
@@ -1962,31 +2084,39 @@ async def _interrupted_state(conn, proposal_id: str, actions: list, prior: dict 
     keys move again if the operator retries), as `interrupted_action`."""
     from central_command.contract.dependencies import dependencies_for_capability
 
-    state = dict(prior) if prior else {
-        "next_action_index": 0, "completed_results": [], "attempts": 0,
-    }
+    state = (
+        dict(prior)
+        if prior
+        else {
+            "next_action_index": 0,
+            "completed_results": [],
+            "attempts": 0,
+        }
+    )
     # A first execution's cursor carries no park bookkeeping: no attempt spent.
     state.setdefault("attempts", 0)
     if not state.get("approver"):
         approver = await conn.fetchval(
             "select actor from audit_event where kind = 'proposal.decided' "
             "and ref_id = $1 and payload->>'verdict' = 'approved' "
-            "order by id desc limit 1", proposal_id,
+            "order by id desc limit 1",
+            proposal_id,
         )
         if approver:
             state["approver"] = approver
     index = int(state.get("next_action_index") or 0)
-    capability = (actions[index].get("capability")
-                  if 0 <= index < len(actions) else None)
-    state.update({
-        "interrupted": True,
-        "parked_at": now,
-        "dependencies": list(dependencies_for_capability(capability)),
-        "last_error": last_error[:500],
-        "in_flight_index": index,
-        "in_flight_capability": capability,
-        "interrupted_action": {"index": index, "capability": capability},
-    })
+    capability = actions[index].get("capability") if 0 <= index < len(actions) else None
+    state.update(
+        {
+            "interrupted": True,
+            "parked_at": now,
+            "dependencies": list(dependencies_for_capability(capability)),
+            "last_error": last_error[:500],
+            "in_flight_index": index,
+            "in_flight_capability": capability,
+            "interrupted_action": {"index": index, "capability": capability},
+        }
+    )
     if capability:
         state["failed_capability"] = capability
     return state
@@ -2014,15 +2144,21 @@ async def park_interrupted_execution(proposal_id: str, last_error: str) -> dict 
             actions = json.loads(actions) if isinstance(actions, str) else (actions or [])
             prior = r["retry_state"]
             prior = json.loads(prior) if isinstance(prior, str) else prior
-            state = await _interrupted_state(conn, r["id"], actions, prior,
-                                             now=now, last_error=last_error)
+            state = await _interrupted_state(
+                conn, r["id"], actions, prior, now=now, last_error=last_error
+            )
             await conn.execute(
                 "update proposal set status = 'RETRY_PENDING', "
                 "retry_state = $2::jsonb where id = $1",
-                r["id"], json.dumps(state),
+                r["id"],
+                json.dumps(state),
             )
-            return {"id": r["id"], "session_id": r["session_id"],
-                    "agent_id": r["agent_id"], "retry_state": state}
+            return {
+                "id": r["id"],
+                "session_id": r["session_id"],
+                "agent_id": r["agent_id"],
+                "retry_state": state,
+            }
     finally:
         await conn.close()
 
@@ -2101,7 +2237,8 @@ async def list_proposals(status: str | None = None, *, due_only: bool = False) -
                          or coalesce(retry_state ->> 'not_before', '') = ''
                          or (retry_state ->> 'not_before')::timestamptz <= now())
                    order by created_at desc""",
-                status, due_only,
+                status,
+                due_only,
             )
         else:
             rows = await conn.fetch(
@@ -2124,7 +2261,12 @@ async def list_proposals(status: str | None = None, *, due_only: bool = False) -
 
 
 _DECIDED_STATUSES = (
-    "EXECUTED", "REJECTED", "FAILED", "WITHDRAWN", "APPROVED", "EXECUTING",
+    "EXECUTED",
+    "REJECTED",
+    "FAILED",
+    "WITHDRAWN",
+    "APPROVED",
+    "EXECUTING",
 )
 
 
@@ -2141,7 +2283,9 @@ async def list_decided_proposals(limit: int, offset: int) -> tuple[list[dict], b
                   from proposal p where p.status = any($1::text[])
                  order by coalesce(p.decided_at, p.created_at) desc
                  limit $2 offset $3""",
-            list(_DECIDED_STATUSES), limit + 1, offset,
+            list(_DECIDED_STATUSES),
+            limit + 1,
+            offset,
         )
         out = []
         for r in rows:
@@ -2156,7 +2300,8 @@ async def list_decided_proposals(limit: int, offset: int) -> tuple[list[dict], b
 
 
 async def list_open_proposals_with_capabilities(
-    agent_id: str, capabilities: list[str],
+    agent_id: str,
+    capabilities: list[str],
 ) -> list[dict]:
     """One agent's proposals still awaiting a decision (AWAITING_HUMAN or
     PROPOSED — the same pair `withdraw_proposals_for_session` treats as open)
@@ -2175,7 +2320,8 @@ async def list_open_proposals_with_capabilities(
                       select 1 from jsonb_array_elements(p.actions) a
                        where split_part(a ->> 'capability', '@', 1) = any($2::text[]))
                 order by p.created_at desc""",
-            agent_id, list(capabilities),
+            agent_id,
+            list(capabilities),
         )
         out = []
         for r in rows:
@@ -2247,7 +2393,10 @@ async def append_event(
             values ($1, $2, $3, $4::jsonb)
             returning id, kind, ref_id, actor, created_at
             """,
-            kind, ref_id, actor, json.dumps(payload),
+            kind,
+            ref_id,
+            actor,
+            json.dumps(payload),
         )
         d = dict(row)
         d["payload"] = payload
@@ -2294,8 +2443,8 @@ async def list_events(
             f"""
             select id, kind, ref_id, actor, payload, created_at
             from audit_event
-            where {' and '.join(clauses)}
-            order by id {'desc' if newest_first else ''}
+            where {" and ".join(clauses)}
+            order by id {"desc" if newest_first else ""}
             limit ${len(args)}
             """,
             *args,
@@ -2329,7 +2478,9 @@ async def count_events_since(kind: str, actor: str, since) -> int:
             select count(*) from audit_event
              where kind = $1 and actor = $2 and created_at >= $3
             """,
-            kind, actor, since,
+            kind,
+            actor,
+            since,
         )
     finally:
         await conn.close()
@@ -2347,7 +2498,8 @@ async def list_events_of_kinds(kinds: list[str], since_id: int = 0) -> list[dict
             where id > $1 and kind = any($2)
             order by id
             """,
-            since_id, kinds,
+            since_id,
+            kinds,
         )
         out = []
         for r in rows:
@@ -2380,8 +2532,7 @@ async def gaps_for_session(session_id: str | None) -> list[dict]:
             """,
             session_id,
         )
-        return [{**_payload(r["payload"]), "at": r["created_at"].isoformat()}
-                for r in rows]
+        return [{**_payload(r["payload"]), "at": r["created_at"].isoformat()} for r in rows]
     finally:
         await conn.close()
 
@@ -2399,8 +2550,10 @@ async def recent_gaps(limit: int = 100) -> list[dict]:
             """,
             limit,
         )
-        return [{**_payload(r["payload"]), "session_id": r["ref_id"],
-                 "at": r["created_at"].isoformat()} for r in rows]
+        return [
+            {**_payload(r["payload"]), "session_id": r["ref_id"], "at": r["created_at"].isoformat()}
+            for r in rows
+        ]
     finally:
         await conn.close()
 
@@ -2408,9 +2561,7 @@ async def recent_gaps(limit: int = 100) -> list[dict]:
 async def work_item_subjects(ids: list[str]) -> dict[str, str]:
     conn = await _conn()
     try:
-        rows = await conn.fetch(
-            "select id, subject from work_item where id = any($1)", ids
-        )
+        rows = await conn.fetch("select id, subject from work_item where id = any($1)", ids)
         return {r["id"]: r["subject"] for r in rows}
     finally:
         await conn.close()
@@ -2513,8 +2664,15 @@ async def enroll_work_item(
             on conflict (message_id) do nothing
             returning id
             """,
-            item_id, message_id, thread_id, feed, source, subject,
-            json.dumps(payload), received_at, kind,
+            item_id,
+            message_id,
+            thread_id,
+            feed,
+            source,
+            subject,
+            json.dumps(payload),
+            received_at,
+            kind,
         )
         return row is not None
     finally:
@@ -2681,7 +2839,8 @@ async def claim_specific_work_item(item_id: str, session_id: str | None = None) 
                       attempts, kind, transient_releases, embedding, entity_keys,
                       received_at
             """,
-            item_id, session_id,
+            item_id,
+            session_id,
         )
         if row is None:
             return None
@@ -2740,7 +2899,8 @@ async def set_work_item_embedding(item_id: str, vector: list[float]) -> None:
     try:
         await conn.execute(
             "update work_item set embedding = $2::jsonb where id = $1",
-            item_id, json.dumps(vector),
+            item_id,
+            json.dumps(vector),
         )
     finally:
         await conn.close()
@@ -2754,7 +2914,8 @@ async def set_work_item_entity_keys(item_id: str, keys: list[str]) -> None:
     try:
         await conn.execute(
             "update work_item set entity_keys = $2::text[] where id = $1",
-            item_id, list(keys),
+            item_id,
+            list(keys),
         )
     finally:
         await conn.close()
@@ -2807,8 +2968,11 @@ async def held_work_items(limit: int = 20) -> dict:
             "held": int(rows[0]["held_total"]) if rows else 0,
             "holders": [
                 {
-                    "item_id": r["id"], "subject": r["subject"], "state": r["state"],
-                    "session_id": r["session_id"], "session_status": r["session_status"],
+                    "item_id": r["id"],
+                    "subject": r["subject"],
+                    "state": r["state"],
+                    "session_id": r["session_id"],
+                    "session_status": r["session_status"],
                     "open_proposals": int(r["open_proposals"] or 0),
                     "holds": int(r["holds"]),
                     "since": r["claimed_at"].isoformat() if r["claimed_at"] else None,
@@ -2866,7 +3030,10 @@ async def finish_work_item(
                    terminal_at = now()
              where id = $1
             """,
-            item_id, state, session_id, error,
+            item_id,
+            state,
+            session_id,
+            error,
         )
     finally:
         await conn.close()
@@ -2930,7 +3097,10 @@ async def release_work_item(
                                         else failing_since end
              where id = $1 and state = 'CLAIMED'
             """,
-            item_id, error, count_attempt, not_before,
+            item_id,
+            error,
+            count_attempt,
+            not_before,
             None if dependencies is None else json.dumps(list(dependencies)),
             freeze,
         )
@@ -2986,7 +3156,9 @@ async def thread_siblings(thread_id: str, exclude_id: str, limit: int = 500) -> 
             order by received_at nulls last, enrolled_at
             limit $3
             """,
-            thread_id, exclude_id, limit,
+            thread_id,
+            exclude_id,
+            limit,
         )
         out = []
         for r in rows:
@@ -3012,7 +3184,8 @@ async def mark_fold_pending(message_ids: list[str], proposal_id: str) -> int:
                set state = 'FOLD_PENDING', folded_into = $2
              where message_id = any($1::text[]) and state = 'UNPROCESSED'
             """,
-            message_ids, proposal_id,
+            message_ids,
+            proposal_id,
         )
         return int(result.rsplit(" ", 1)[-1])
     finally:
@@ -3062,7 +3235,8 @@ async def work_items_for_session(session_id: str) -> list[dict]:
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            _rerun_chain("select $1::text") + """
+            _rerun_chain("select $1::text")
+            + """
                select id, message_id, subject, payload, received_at, state, kind
                from work_item where session_id in (select id from chain)
                order by enrolled_at""",
@@ -3123,7 +3297,8 @@ async def list_work_items(
             rows = await conn.fetch(
                 f"""select {cols} from work_item where state = $1
                     order by enrolled_at desc limit $2""",
-                state, limit,
+                state,
+                limit,
             )
         else:
             rows = await conn.fetch(
@@ -3151,8 +3326,8 @@ async def work_items_for_sessions(session_ids: list[str]) -> dict[str, dict]:
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            _rerun_chain("select asked, asked from unnest($1::text[]) as asked",
-                         origin=True) + """
+            _rerun_chain("select asked, asked from unnest($1::text[]) as asked", origin=True)
+            + """
                select w.id, w.message_id, w.thread_id, w.feed, w.source, w.kind, w.subject,
                       w.state, w.session_id, w.enrolled_at, w.payload, c.origin
                from work_item w join chain c on w.session_id = c.id""",
@@ -3209,9 +3384,7 @@ async def count_awaiting_human() -> int:
     """Proposals sitting in the Decisions Inbox — the approval-coupled throttle."""
     conn = await _conn()
     try:
-        return await conn.fetchval(
-            "select count(*) from proposal where status = 'AWAITING_HUMAN'"
-        )
+        return await conn.fetchval("select count(*) from proposal where status = 'AWAITING_HUMAN'")
     finally:
         await conn.close()
 
@@ -3295,7 +3468,9 @@ async def set_agent_model(agent_id: str, model: str, thinking: str) -> dict | No
     try:
         row = await conn.fetchrow(
             "update agent set model = $2, thinking = $3 where id = $1 returning id",
-            agent_id, model, thinking,
+            agent_id,
+            model,
+            thinking,
         )
     finally:
         await conn.close()
@@ -3330,8 +3505,7 @@ async def hire_agent(
         # description (runtime/roster.py:team_section) — a long one bloats
         # every teammate's charter, not just this agent's own.
         raise ValueError(
-            f"role must be a one-line routing description (<=140 chars, got "
-            f"{len(role)})"
+            f"role must be a one-line routing description (<=140 chars, got {len(role)})"
         )
     conn = await _conn()
     try:
@@ -3343,8 +3517,16 @@ async def hire_agent(
                                    deviations, template, hired_by, steward_group)
                 values ($1, $2, '', $3, $3, 'ACTIVE', $4, $5, $6, $7, $8, $9, $10)
                 """,
-                agent_id, name, role, taskable, consultable, conversational,
-                deviations, template, hired_by, steward_group,
+                agent_id,
+                name,
+                role,
+                taskable,
+                consultable,
+                conversational,
+                deviations,
+                template,
+                hired_by,
+                steward_group,
             )
             await conn.execute(
                 """
@@ -3352,13 +3534,17 @@ async def hire_agent(
                     (agent_id, version, content, status, rationale, created_by)
                 values ($1, 1, $2, 'CURRENT', $3, $4)
                 """,
-                agent_id, charter, f"hired from template {template!r}", hired_by,
+                agent_id,
+                charter,
+                f"hired from template {template!r}",
+                hired_by,
             )
             for pack in packs:
                 await conn.execute(
-                    "insert into agent_grant (agent_id, pack, granted_by)"
-                    " values ($1, $2, $3)",
-                    agent_id, pack, hired_by,
+                    "insert into agent_grant (agent_id, pack, granted_by) values ($1, $2, $3)",
+                    agent_id,
+                    pack,
+                    hired_by,
                 )
     except asyncpg.UniqueViolationError:
         raise ValueError(
@@ -3381,7 +3567,8 @@ async def retire_agent(agent_id: str, reason: str, retired_by: str = "operator")
             set status = 'RETIRED', retired_reason = $2, retired_at = now()
             where id = $1 and status = 'ACTIVE'
             """,
-            agent_id, reason,
+            agent_id,
+            reason,
         )
         return result.endswith(" 1")
     finally:
@@ -3436,7 +3623,7 @@ async def grant_pack(agent_id: str, pack: str, granted_by: str = "operator") -> 
     `mcp_server` row exists, so an operator cannot grant access to a server
     that was never even proposed."""
     if pack.startswith("mcp:"):
-        server_id = pack[len("mcp:"):]
+        server_id = pack[len("mcp:") :]
         if await get_mcp_server(server_id) is None:
             raise ValueError(f"unknown mcp_server {server_id!r} — cannot grant {pack!r}")
     conn = await _conn()
@@ -3449,7 +3636,9 @@ async def grant_pack(agent_id: str, pack: str, granted_by: str = "operator") -> 
                 set revoked_at = null, revoked_reason = null,
                     granted_by = excluded.granted_by, granted_at = now()
             """,
-            agent_id, pack, granted_by,
+            agent_id,
+            pack,
+            granted_by,
         )
     finally:
         await conn.close()
@@ -3466,7 +3655,9 @@ async def revoke_pack(agent_id: str, pack: str, reason: str | None = None) -> bo
             set revoked_at = now(), revoked_reason = $3
             where agent_id = $1 and pack = $2 and revoked_at is null
             """,
-            agent_id, pack, reason,
+            agent_id,
+            pack,
+            reason,
         )
         return result.endswith(" 1")
     finally:
@@ -3519,8 +3710,12 @@ class StaleCharter(Exception):
 
 
 async def save_charter_version(
-    agent_id: str, content: str, rationale: str | None, created_by: str = "operator",
-    proposal_id: str | None = None, expected_version: int | None = None,
+    agent_id: str,
+    content: str,
+    rationale: str | None,
+    created_by: str = "operator",
+    proposal_id: str | None = None,
+    expected_version: int | None = None,
     shown_session_id: str | None = None,
 ) -> dict:
     """Append a new CURRENT version, superseding the previous one — atomically,
@@ -3541,11 +3736,14 @@ async def save_charter_version(
     try:
         async with conn.transaction():
             if expected_version is not None:
-                current = await conn.fetchval(
-                    "select version from guidance_version"
-                    " where agent_id = $1 and status = 'CURRENT' for update",
-                    agent_id,
-                ) or 0
+                current = (
+                    await conn.fetchval(
+                        "select version from guidance_version"
+                        " where agent_id = $1 and status = 'CURRENT' for update",
+                        agent_id,
+                    )
+                    or 0
+                )
                 if current != expected_version:
                     raise StaleCharter(agent_id, expected_version, current)
             await conn.execute(
@@ -3564,7 +3762,11 @@ async def save_charter_version(
                 )
                 returning version, content, rationale, created_by, created_at, proposal_id
                 """,
-                agent_id, content, rationale, created_by, proposal_id,
+                agent_id,
+                content,
+                rationale,
+                created_by,
+                proposal_id,
             )
             if shown_session_id is not None:
                 await _record_charter_shown(conn, shown_session_id, agent_id, row["version"])
@@ -3596,7 +3798,9 @@ async def _record_charter_shown(conn, session_id: str, agent_id: str, version: i
             updated_at = now()
         where id = $1
         """,
-        session_id, agent_id, int(version),
+        session_id,
+        agent_id,
+        int(version),
     )
 
 
@@ -3628,13 +3832,18 @@ async def charter_base_version(session_id: str, agent_id: str) -> int:
                      where g.agent_id = $2 and g.created_at <= s.created_at) as at_start
             from session s where s.id = $1
             """,
-            session_id, agent_id,
+            session_id,
+            agent_id,
         )
         if row is None:
-            return await conn.fetchval(
-                "select version from guidance_version"
-                " where agent_id = $1 and status = 'CURRENT'", agent_id,
-            ) or 0
+            return (
+                await conn.fetchval(
+                    "select version from guidance_version"
+                    " where agent_id = $1 and status = 'CURRENT'",
+                    agent_id,
+                )
+                or 0
+            )
         if row["shown"] is not None:
             return int(row["shown"])
         return int(row["at_start"] or 0)
@@ -3648,7 +3857,8 @@ async def get_charter_version(agent_id: str, version: int) -> dict | None:
         row = await conn.fetchrow(
             "select version, content, rationale, created_by, created_at, proposal_id"
             " from guidance_version where agent_id = $1 and version = $2",
-            agent_id, version,
+            agent_id,
+            version,
         )
         return dict(row) if row else None
     finally:
@@ -3691,7 +3901,8 @@ async def set_feed_state(key: str, value: dict) -> None:
             insert into feed_state (key, value) values ($1, $2::jsonb)
             on conflict (key) do update set value = $2::jsonb, updated_at = now()
             """,
-            key, json.dumps(value),
+            key,
+            json.dumps(value),
         )
     finally:
         await conn.close()
@@ -3711,7 +3922,11 @@ def _loe_row(row) -> dict:
 
 
 async def create_loe(
-    loe_id: str, name: str, cadence: str, agent_id: str, semantic: dict,
+    loe_id: str,
+    name: str,
+    cadence: str,
+    agent_id: str,
+    semantic: dict,
     presentation: dict | None = None,
 ) -> dict:
     """Fails loud on a duplicate id — LOE ids are operator-facing names."""
@@ -3724,7 +3939,11 @@ async def create_loe(
             values ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
             returning *
             """,
-            loe_id, name, cadence, agent_id, json.dumps(semantic),
+            loe_id,
+            name,
+            cadence,
+            agent_id,
+            json.dumps(semantic),
             json.dumps(presentation or {}),
         )
         return _loe_row(row)
@@ -3735,9 +3954,7 @@ async def create_loe(
 async def get_loe(loe_id: str) -> dict | None:
     conn = await _conn()
     try:
-        row = await conn.fetchrow(
-            "select * from line_of_effort where id = $1", loe_id
-        )
+        row = await conn.fetchrow("select * from line_of_effort where id = $1", loe_id)
         return _loe_row(row) if row else None
     finally:
         await conn.close()
@@ -3757,8 +3974,12 @@ async def list_loes(include_retired: bool = False) -> list[dict]:
 
 
 async def update_loe(
-    loe_id: str, *, name: str | None = None, cadence: str | None = None,
-    semantic: dict | None = None, presentation: dict | None = None,
+    loe_id: str,
+    *,
+    name: str | None = None,
+    cadence: str | None = None,
+    semantic: dict | None = None,
+    presentation: dict | None = None,
 ) -> dict | None:
     """Patch an ACTIVE line of effort. Returns None if it does not exist.
 
@@ -3795,7 +4016,9 @@ async def update_loe(
             await conn.execute(
                 "insert into loe_semantic (loe_id, version, semantic) "
                 "values ($1, $2, $3::jsonb) on conflict do nothing",
-                loe_id, row["semantic_version"], json.dumps(row["semantic"]),
+                loe_id,
+                row["semantic_version"],
+                json.dumps(row["semantic"]),
             )
         # updated_at is always touched, even for an empty patch — the caller
         # asked for a write and "nothing changed" is still a fact about now.
@@ -3820,7 +4043,8 @@ async def retire_loe(loe_id: str, reason: str) -> bool:
             "update line_of_effort set status = 'RETIRED', retired_at = now(), "
             "retired_reason = $1, updated_at = now() "
             "where id = $2 and status = 'ACTIVE'",
-            reason, loe_id,
+            reason,
+            loe_id,
         )
         return result.endswith(" 1")
     finally:
@@ -3828,8 +4052,12 @@ async def retire_loe(loe_id: str, reason: str) -> bool:
 
 
 async def record_loe_checkin(
-    loe_id: str, light: str, confidence: int, summary: str,
-    proposal_id: str | None = None, action_key: str | None = None,
+    loe_id: str,
+    light: str,
+    confidence: int,
+    summary: str,
+    proposal_id: str | None = None,
+    action_key: str | None = None,
 ) -> dict:
     """Append one check-in, stamped with the LOE's CURRENT semantic version.
 
@@ -3864,7 +4092,12 @@ async def record_loe_checkin(
             on conflict (action_key) where action_key is not null do nothing
             returning *
             """,
-            loe_id, row["semantic_version"], light, confidence, summary, proposal_id,
+            loe_id,
+            row["semantic_version"],
+            light,
+            confidence,
+            summary,
+            proposal_id,
             action_key,
         )
     finally:
@@ -3886,7 +4119,8 @@ async def _loe_checkin_by_key(action_key: str) -> dict | None:
     conn = await _conn()
     try:
         out = await conn.fetchrow(
-            "select * from loe_checkin where action_key = $1", action_key,
+            "select * from loe_checkin where action_key = $1",
+            action_key,
         )
     finally:
         await conn.close()
@@ -3904,10 +4138,13 @@ async def list_loe_semantic_versions(loe_id: str) -> list[dict]:
             loe_id,
         )
         return [
-            {"version": r["version"],
-             "semantic": json.loads(r["semantic"]) if isinstance(r["semantic"], str)
-                         else r["semantic"],
-             "superseded_at": r["superseded_at"]}
+            {
+                "version": r["version"],
+                "semantic": json.loads(r["semantic"])
+                if isinstance(r["semantic"], str)
+                else r["semantic"],
+                "superseded_at": r["superseded_at"],
+            }
             for r in rows
         ]
     finally:
@@ -3920,7 +4157,8 @@ async def list_loe_checkins(loe_id: str, limit: int = 12) -> list[dict]:
         rows = await conn.fetch(
             "select * from loe_checkin where loe_id = $1 "
             "order by created_at desc, id desc limit $2",
-            loe_id, limit,
+            loe_id,
+            limit,
         )
         # `action_key` is control-plane (DL-219): agents read this list.
         return [{k: v for k, v in dict(r).items() if k != "action_key"} for r in rows]
@@ -3955,17 +4193,20 @@ async def list_heartbeat_schedules(enabled_only: bool = False) -> list[dict]:
 async def get_heartbeat_schedule(schedule_id: str) -> dict | None:
     conn = await _conn()
     try:
-        row = await conn.fetchrow(
-            "select * from heartbeat_schedule where id = $1", schedule_id
-        )
+        row = await conn.fetchrow("select * from heartbeat_schedule where id = $1", schedule_id)
         return _heartbeat_row(row) if row else None
     finally:
         await conn.close()
 
 
 async def create_heartbeat_schedule(
-    schedule_id: str, name: str, schedule_kind: str, schedule: dict,
-    action_kind: str, action_params: dict, created_by: str = "operator",
+    schedule_id: str,
+    name: str,
+    schedule_kind: str,
+    schedule: dict,
+    action_kind: str,
+    action_params: dict,
+    created_by: str = "operator",
 ) -> None:
     """Fails loud on a duplicate id — schedule ids are operator-facing names."""
     conn = await _conn()
@@ -3976,8 +4217,13 @@ async def create_heartbeat_schedule(
                 (id, name, schedule_kind, schedule, action_kind, action_params, created_by)
             values ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7)
             """,
-            schedule_id, name, schedule_kind, json.dumps(schedule),
-            action_kind, json.dumps(action_params), created_by,
+            schedule_id,
+            name,
+            schedule_kind,
+            json.dumps(schedule),
+            action_kind,
+            json.dumps(action_params),
+            created_by,
         )
     finally:
         await conn.close()
@@ -4014,7 +4260,8 @@ async def set_heartbeat_enabled(schedule_id: str, enabled: bool) -> bool:
     try:
         result = await conn.execute(
             "update heartbeat_schedule set enabled = $1, updated_at = now() where id = $2",
-            enabled, schedule_id,
+            enabled,
+            schedule_id,
         )
         return result.endswith(" 1")
     finally:
@@ -4045,9 +4292,7 @@ async def touch_heartbeat_fired(schedule_id: str) -> None:
         await conn.close()
 
 
-async def hydrate_work_item(
-    item_id: str, payload: dict, subject: str | None, received_at
-) -> None:
+async def hydrate_work_item(item_id: str, payload: dict, subject: str | None, received_at) -> None:
     """Fill in the content of a refs-only row at claim time (M13). Subject and
     received_at only fill blanks — enrollment-time facts are never overwritten."""
     conn = await _conn()
@@ -4060,7 +4305,10 @@ async def hydrate_work_item(
                    received_at = coalesce(received_at, $4)
              where id = $1
             """,
-            item_id, json.dumps(payload), subject, received_at,
+            item_id,
+            json.dumps(payload),
+            subject,
+            received_at,
         )
     finally:
         await conn.close()
@@ -4085,7 +4333,9 @@ async def mark_dismiss_pending(item_id: str, rationale: str, session_id: str | N
                    payload = payload || jsonb_build_object('dismissal_rationale', $2::text)
              where id = $1 and state = 'CLAIMED'
             """,
-            item_id, rationale, session_id,
+            item_id,
+            rationale,
+            session_id,
         )
     finally:
         await conn.close()
@@ -4102,7 +4352,8 @@ async def record_audit(item_id: str, audit: dict) -> None:
                set payload = payload || jsonb_build_object('audit', $2::jsonb)
              where id = $1
             """,
-            item_id, json.dumps(audit),
+            item_id,
+            json.dumps(audit),
         )
     finally:
         await conn.close()
@@ -4278,7 +4529,8 @@ async def bulk_dismiss_unprocessed(message_ids: list[str], rationale: str) -> in
                               || jsonb_build_object('dismissal_rationale', $2::text)
              where message_id = any($1::text[]) and state = 'UNPROCESSED'
             """,
-            message_ids, rationale,
+            message_ids,
+            rationale,
         )
         return int(result.rsplit(" ", 1)[-1])
     finally:
@@ -4315,7 +4567,8 @@ async def reopen_work_item(item_id: str, note: str | None = None) -> bool:
                                   else payload || jsonb_build_object('operator_note', $2::text) end
              where id = $1 and state = 'DISMISS_PENDING'
             """,
-            item_id, note,
+            item_id,
+            note,
         )
         return r.endswith(" 1")
     finally:
@@ -4325,9 +4578,7 @@ async def reopen_work_item(item_id: str, note: str | None = None) -> bool:
 async def count_dismiss_pending() -> int:
     conn = await _conn()
     try:
-        return await conn.fetchval(
-            "select count(*) from work_item where state = 'DISMISS_PENDING'"
-        )
+        return await conn.fetchval("select count(*) from work_item where state = 'DISMISS_PENDING'")
     finally:
         await conn.close()
 
@@ -4367,7 +4618,8 @@ async def fail_work_items_for_session(session_id: str, error: str) -> list[str]:
              where session_id = $1 and state = 'PROCESSED'
             returning id
             """,
-            session_id, error[:500],
+            session_id,
+            error[:500],
         )
         return [r["id"] for r in rows]
     finally:
@@ -4405,7 +4657,8 @@ async def requeue_failed_work_item(item_id: str, payload: dict | None = None) ->
                    payload = coalesce($2::jsonb, payload) - 'failure_ack'
              where id = $1 and state = 'FAILED'
             """,
-            item_id, json.dumps(payload) if payload is not None else None,
+            item_id,
+            json.dumps(payload) if payload is not None else None,
         )
         return r.endswith(" 1")
     finally:
@@ -4476,9 +4729,13 @@ TASK_TERMINAL = ("DONE", "FAILED", "CANCELLED")
 
 
 async def create_task(
-    task_id: str, title: str, instructions: str, agent_id: str | None,
+    task_id: str,
+    title: str,
+    instructions: str,
+    agent_id: str | None,
     parent_session_id: str | None = None,
-    created_by: str | None = None, approved_by: str | None = None,
+    created_by: str | None = None,
+    approved_by: str | None = None,
     parent_task_id: str | None = None,
     creator_chain: list[str] | None = None,
 ) -> None:
@@ -4491,9 +4748,15 @@ async def create_task(
                               parent_task_id, creator_chain)
             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
-            task_id, title, instructions, agent_id,
+            task_id,
+            title,
+            instructions,
+            agent_id,
             "ASSIGNED" if agent_id else "NEW",
-            parent_session_id, created_by, approved_by, parent_task_id,
+            parent_session_id,
+            created_by,
+            approved_by,
+            parent_task_id,
             list(creator_chain or []),
         )
     finally:
@@ -4521,15 +4784,17 @@ async def fanout_lock(ref: str):
     try:
         async with conn.transaction():
             await conn.execute(
-                "select pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"task-fanout:{ref}")
+                "select pg_advisory_xact_lock(hashtextextended($1, 0))", f"task-fanout:{ref}"
+            )
             yield
     finally:
         await conn.close()
 
 
 async def count_child_tasks(
-    *, parent_task_id: str | None = None, parent_session_id: str | None = None,
+    *,
+    parent_task_id: str | None = None,
+    parent_session_id: str | None = None,
 ) -> int:
     """How many tasks one creator has made: by `parent_task_id` when it has a
     task (the indexed column, so a new session for the same task continues the
@@ -4538,11 +4803,12 @@ async def count_child_tasks(
     try:
         if parent_task_id:
             return await conn.fetchval(
-                "select count(*) from task where parent_task_id = $1",
-                parent_task_id)
+                "select count(*) from task where parent_task_id = $1", parent_task_id
+            )
         return await conn.fetchval(
-            "select count(*) from task where parent_session_id = $1 "
-            "and parent_task_id is null", parent_session_id)
+            "select count(*) from task where parent_session_id = $1 and parent_task_id is null",
+            parent_session_id,
+        )
     finally:
         await conn.close()
 
@@ -4553,9 +4819,9 @@ async def assign_task(task_id: str, agent_id: str) -> bool:
     conn = await _conn()
     try:
         r = await conn.execute(
-            "update task set agent_id = $2, status = 'ASSIGNED' "
-            "where id = $1 and status = 'NEW'",
-            task_id, agent_id,
+            "update task set agent_id = $2, status = 'ASSIGNED' where id = $1 and status = 'NEW'",
+            task_id,
+            agent_id,
         )
         return r.endswith(" 1")
     finally:
@@ -4568,7 +4834,8 @@ async def start_task(task_id: str, session_id: str | None) -> None:
         await conn.execute(
             "update task set status = 'IN_PROGRESS', session_id = $2, "
             "started_at = coalesce(started_at, now()) where id = $1",
-            task_id, session_id,
+            task_id,
+            session_id,
         )
     finally:
         await conn.close()
@@ -4583,14 +4850,17 @@ async def park_task_review(task_id: str, session_id: str) -> None:
             "update task set status = 'REVIEW', session_id = $2, "
             "started_at = coalesce(started_at, now()) where id = $1 "
             "and status not in ('DONE', 'FAILED', 'CANCELLED')",
-            task_id, session_id,
+            task_id,
+            session_id,
         )
     finally:
         await conn.close()
 
 
 async def resolve_task(
-    task_id: str, status: str, outcome: str | None = None,
+    task_id: str,
+    status: str,
+    outcome: str | None = None,
     only_from: str | None = None,
 ) -> bool:
     """Move a task to a terminal state. Guarded: an already-terminal task is
@@ -4608,7 +4878,11 @@ async def resolve_task(
                and status != all($4::text[])
                and ($5::text is null or status = $5)
             """,
-            task_id, status, outcome, list(TASK_TERMINAL), only_from,
+            task_id,
+            status,
+            outcome,
+            list(TASK_TERMINAL),
+            only_from,
         )
         return r.endswith(" 1")
     finally:
@@ -4616,8 +4890,12 @@ async def resolve_task(
 
 
 async def claim_rerun(
-    session_id: str, new_session_id: str, task_id: str | None = None, *,
-    work_item_id: str | None = None, refuse_live_children: bool = False,
+    session_id: str,
+    new_session_id: str,
+    task_id: str | None = None,
+    *,
+    work_item_id: str | None = None,
+    refuse_live_children: bool = False,
 ) -> dict | None:
     """THE re-run claim, in one transaction: the old session closes naming the
     new one, its undecided work is withdrawn, and whatever carries its inputs goes
@@ -4655,7 +4933,8 @@ async def claim_rerun(
                                 where parent_session_id = $1
                                   and status != all($2::text[]))
                 """,
-                session_id, list(TASK_TERMINAL),
+                session_id,
+                list(TASK_TERMINAL),
             ):
                 return None
             claimed = await conn.fetchval(
@@ -4666,7 +4945,8 @@ async def claim_rerun(
                  where id = $1 and rerun_by is null and status != 'RUNNING'
                 returning id
                 """,
-                session_id, new_session_id,
+                session_id,
+                new_session_id,
             )
             if claimed is None:
                 return None
@@ -4681,7 +4961,8 @@ async def claim_rerun(
                      where id = $1 and session_id = $2
                     returning id
                     """,
-                    task_id, session_id,
+                    task_id,
+                    session_id,
                 )
                 if moved is None:
                     raise _RerunLost
@@ -4697,7 +4978,8 @@ async def claim_rerun(
                        and state not in ('CLAIMED', 'UNPROCESSED')
                     returning id
                     """,
-                    work_item_id, session_id,
+                    work_item_id,
+                    session_id,
                 )
                 if moved is None:
                     raise _RerunLost
@@ -4713,7 +4995,9 @@ class _RerunLost(Exception):
 
 
 async def claim_owed_rerun(
-    session_id: str | None = None, *, work_item_id: str | None = None,
+    session_id: str | None = None,
+    *,
+    work_item_id: str | None = None,
 ) -> dict | None:
     """What this start owes the rerun chain from the session its task or item names
     (`work_item_id` names the item whose run is owed, and its current session is
@@ -4728,7 +5012,8 @@ async def claim_owed_rerun(
         conn = await _conn()
         try:
             session_id = await conn.fetchval(
-                "select session_id from work_item where id = $1", work_item_id)
+                "select session_id from work_item where id = $1", work_item_id
+            )
         finally:
             await conn.close()
     if not session_id:
@@ -4758,7 +5043,8 @@ async def claim_owed_rerun(
         await conn.execute(
             "update session set rerun_by = $2, updated_at = now() "
             "where id = $1 and rerun_by is null",
-            tail["id"], next_id,
+            tail["id"],
+            next_id,
         )
         return {"rerun_of": tail["id"], "session_id": next_id}
     finally:
@@ -4785,7 +5071,8 @@ async def session_has_live_children(session_id: str) -> bool:
         return await conn.fetchval(
             "select exists (select 1 from task where parent_session_id = $1 "
             "and status != all($2::text[]))",
-            session_id, list(TASK_TERMINAL),
+            session_id,
+            list(TASK_TERMINAL),
         )
     finally:
         await conn.close()
@@ -4798,7 +5085,8 @@ async def session_has_landing_proposal(session_id: str) -> bool:
         return await conn.fetchval(
             "select exists (select 1 from proposal where session_id = $1 "
             "and status = any($2::text[]))",
-            session_id, list(LANDING_PROPOSAL_STATUSES),
+            session_id,
+            list(LANDING_PROPOSAL_STATUSES),
         )
     finally:
         await conn.close()
@@ -4812,9 +5100,7 @@ async def session_has_landing_proposal(session_id: str) -> bool:
 # unit-level replay the doctrine promises.
 
 
-async def park_task_retry(
-    task_id: str, retry_state: dict, hint: str | None = None
-) -> bool:
+async def park_task_retry(task_id: str, retry_state: dict, hint: str | None = None) -> bool:
     """Return a task to ASSIGNED carrying its retry bookkeeping.
 
     Guarded against a terminal task: a run that raised after the task was
@@ -4834,7 +5120,10 @@ async def park_task_retry(
              where id = $1
                and status != all($4::text[])
             """,
-            task_id, json.dumps(retry_state), hint, list(TASK_TERMINAL),
+            task_id,
+            json.dumps(retry_state),
+            hint,
+            list(TASK_TERMINAL),
         )
         return r.endswith(" 1")
     finally:
@@ -4936,8 +5225,7 @@ def _task_row(row) -> dict:
         n = d.pop("refusal_count")
         reason, at = d.pop("refusal_reason"), d.pop("refusal_at")
         d["refusals"] = (
-            {"count": n, "latest_reason": reason, "latest_at": at.isoformat()}
-            if n else None
+            {"count": n, "latest_reason": reason, "latest_at": at.isoformat()} if n else None
         )
     return d
 
@@ -5006,7 +5294,10 @@ async def list_tasks(
               and (t.status <> all($4::text[]) or t.id in (select id from recent_terminal))
             order by t.created_at desc
             """,
-            status, limit, agent_id, list(TASK_TERMINAL),
+            status,
+            limit,
+            agent_id,
+            list(TASK_TERMINAL),
         )
         return [_task_row(r) for r in rows]
     finally:
@@ -5111,16 +5402,27 @@ async def park_interrupted_executions() -> list[dict]:
                 prior = r["retry_state"]
                 prior = json.loads(prior) if isinstance(prior, str) else prior
                 state = await _interrupted_state(
-                    conn, r["id"], actions, prior, now=now,
+                    conn,
+                    r["id"],
+                    actions,
+                    prior,
+                    now=now,
                     last_error="execution interrupted by a process restart",
                 )
                 await conn.execute(
                     "update proposal set status = 'RETRY_PENDING', "
                     "retry_state = $2::jsonb where id = $1",
-                    r["id"], json.dumps(state),
+                    r["id"],
+                    json.dumps(state),
                 )
-                out.append({"id": r["id"], "session_id": r["session_id"],
-                            "agent_id": r["agent_id"], "retry_state": state})
+                out.append(
+                    {
+                        "id": r["id"],
+                        "session_id": r["session_id"],
+                        "agent_id": r["agent_id"],
+                        "retry_state": state,
+                    }
+                )
         return out
     finally:
         await conn.close()
@@ -5151,9 +5453,9 @@ async def count_nonterminal_tasks_with_title_prefix(prefix: str) -> int:
     conn = await _conn()
     try:
         return await conn.fetchval(
-            "select count(*) from task "
-            "where status != all($2::text[]) and title like $1 || '%'",
-            prefix, list(TASK_TERMINAL),
+            "select count(*) from task where status != all($2::text[]) and title like $1 || '%'",
+            prefix,
+            list(TASK_TERMINAL),
         )
     finally:
         await conn.close()
@@ -5165,7 +5467,8 @@ async def set_task_recommendation(task_id: str, recommendation: dict) -> None:
     try:
         await conn.execute(
             "update task set recommendation = $2::jsonb where id = $1",
-            task_id, json.dumps(recommendation),
+            task_id,
+            json.dumps(recommendation),
         )
     finally:
         await conn.close()
@@ -5186,7 +5489,8 @@ async def link_operator_item_discussion(item_id: str, session_id: str) -> None:
     try:
         await conn.execute(
             "update operator_item set discussion_session_id = $2 where id = $1",
-            item_id, session_id,
+            item_id,
+            session_id,
         )
     finally:
         await conn.close()
@@ -5250,9 +5554,7 @@ async def mark_discussion_stalled(item_id: str) -> None:
     updated_at, so a lane that moves and goes quiet again flags again."""
     conn = await _conn()
     try:
-        await conn.execute(
-            "update operator_item set stalled_at = now() where id = $1", item_id
-        )
+        await conn.execute("update operator_item set stalled_at = now() where id = $1", item_id)
     finally:
         await conn.close()
 
@@ -5262,9 +5564,7 @@ async def mark_discussion_nudged(item_id: str) -> None:
     as S2 that then flips to S1 must still be flagged."""
     conn = await _conn()
     try:
-        await conn.execute(
-            "update operator_item set nudged_at = now() where id = $1", item_id
-        )
+        await conn.execute("update operator_item set nudged_at = now() where id = $1", item_id)
     finally:
         await conn.close()
 
@@ -5283,7 +5583,9 @@ async def create_skill(skill_id: str, title: str, summary: str) -> None:
             insert into skill (id, title, summary) values ($1, $2, $3)
             on conflict (id) do update set title = $2, summary = $3
             """,
-            skill_id, title, summary,
+            skill_id,
+            title,
+            summary,
         )
     finally:
         await conn.close()
@@ -5412,15 +5714,20 @@ async def add_skill_doc(
                      where skill_id = $1 and doc_key = $2 and is_current
                      for update
                     """,
-                    skill_id, doc_key,
+                    skill_id,
+                    doc_key,
                 )
                 current = locked
                 if current is None:
-                    current = await conn.fetchval(
-                        "select max(version) from skill_doc"
-                        " where skill_id = $1 and doc_key = $2",
-                        skill_id, doc_key,
-                    ) or 0
+                    current = (
+                        await conn.fetchval(
+                            "select max(version) from skill_doc"
+                            " where skill_id = $1 and doc_key = $2",
+                            skill_id,
+                            doc_key,
+                        )
+                        or 0
+                    )
                     # No current row and nothing newer than the base: the key
                     # was RETIRED, which is not the base either.
                     if current == expected_version:
@@ -5428,10 +5735,19 @@ async def add_skill_doc(
                 if current != expected_version:
                     raise StaleSkillDoc(skill_id, doc_key, expected_version, current)
             row = await _insert_skill_doc(
-                conn, skill_id, doc_key, kind, title, content,
-                source_url=source_url, describes=describes, captured_at=captured_at,
-                added_by=added_by, bundled_release=bundled_release,
-                bundled_path=bundled_path, bundled_hash=bundled_hash,
+                conn,
+                skill_id,
+                doc_key,
+                kind,
+                title,
+                content,
+                source_url=source_url,
+                describes=describes,
+                captured_at=captured_at,
+                added_by=added_by,
+                bundled_release=bundled_release,
+                bundled_path=bundled_path,
+                bundled_hash=bundled_hash,
                 bundled_text=bundled_text,
             )
         return dict(row)
@@ -5449,9 +5765,21 @@ def _require_bundled_text_hash(bundled_hash: str | None, bundled_text: str | Non
 
 
 async def _insert_skill_doc(
-    conn, skill_id: str, doc_key: str, kind: str, title: str, content: str, *,
-    source_url, describes, captured_at, added_by, bundled_release, bundled_path,
-    bundled_hash, bundled_text,
+    conn,
+    skill_id: str,
+    doc_key: str,
+    kind: str,
+    title: str,
+    content: str,
+    *,
+    source_url,
+    describes,
+    captured_at,
+    added_by,
+    bundled_release,
+    bundled_path,
+    bundled_hash,
+    bundled_text,
 ):
     """The version, its supersede, its bundled text and its chunks, on the
     caller's connection and inside the caller's transaction."""
@@ -5462,7 +5790,8 @@ async def _insert_skill_doc(
         select max(version) from skill_doc
          where skill_id = $1 and doc_key = $2
         """,
-        skill_id, doc_key,
+        skill_id,
+        doc_key,
     )
     version = (prior or 0) + 1
     await conn.execute(
@@ -5470,7 +5799,8 @@ async def _insert_skill_doc(
         update skill_doc set is_current = false
          where skill_id = $1 and doc_key = $2 and is_current
         """,
-        skill_id, doc_key,
+        skill_id,
+        doc_key,
     )
     doc_id = f"doc_{uuid.uuid4().hex[:12]}"
     row = await conn.fetchrow(
@@ -5482,9 +5812,20 @@ async def _insert_skill_doc(
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         returning *
         """,
-        doc_id, skill_id, doc_key, kind, title, content, version,
-        source_url, describes, captured_at, added_by,
-        bundled_release, bundled_path, bundled_hash,
+        doc_id,
+        skill_id,
+        doc_key,
+        kind,
+        title,
+        content,
+        version,
+        source_url,
+        describes,
+        captured_at,
+        added_by,
+        bundled_release,
+        bundled_path,
+        bundled_hash,
     )
     if bundled_hash is not None:
         await conn.execute(
@@ -5493,7 +5834,9 @@ async def _insert_skill_doc(
             values ($1, $2, $3)
             on conflict (hash) do nothing
             """,
-            bundled_hash, content if bundled_text is None else bundled_text, bundled_release,
+            bundled_hash,
+            content if bundled_text is None else bundled_text,
+            bundled_release,
         )
     # Only reference docs are searchable — guidance arrives in context
     # whole when the capability loads, so indexing it would return the
@@ -5502,7 +5845,9 @@ async def _insert_skill_doc(
         for ord_, chunk in enumerate(split_markdown(content)):
             await conn.execute(
                 "insert into skill_chunk (doc_id, ord, content) values ($1, $2, $3)",
-                doc_id, ord_, chunk,
+                doc_id,
+                ord_,
+                chunk,
             )
     return row
 
@@ -5522,7 +5867,8 @@ async def list_skill_docs_added_by(added_by: str, limit: int = 200) -> list[dict
                 where d.added_by = $1
                 order by d.created_at desc, d.id
                 limit $2""",
-            added_by, limit,
+            added_by,
+            limit,
         )
         return [dict(r) for r in rows]
     finally:
@@ -5530,7 +5876,9 @@ async def list_skill_docs_added_by(added_by: str, limit: int = 200) -> list[dict
 
 
 async def list_skill_docs(
-    skill_id: str, current_only: bool = True, include_retired: bool = False,
+    skill_id: str,
+    current_only: bool = True,
+    include_retired: bool = False,
 ) -> list[dict]:
     """`include_retired` adds, for each doc_key with NO current version, its
     newest row (which carries `retired_at`) — the operator's click-target for
@@ -5549,7 +5897,8 @@ async def list_skill_docs(
                 skill_id,
             )
             return sorted(
-                (dict(r) for r in rows), key=lambda d: (d["kind"], d["doc_key"]),
+                (dict(r) for r in rows),
+                key=lambda d: (d["kind"], d["doc_key"]),
             )
         rows = await conn.fetch(
             """
@@ -5557,7 +5906,8 @@ async def list_skill_docs(
              where skill_id = $1 and ($2 = false or is_current)
              order by kind, doc_key, version desc
             """,
-            skill_id, current_only,
+            skill_id,
+            current_only,
         )
         return [dict(r) for r in rows]
     finally:
@@ -5650,9 +6000,15 @@ async def list_open_skill_doc_flags() -> list[dict]:
 
 
 async def apply_bundled_skill_doc(
-    skill_id: str, doc_key: str, *, ours_hash: str | None,
-    post: dict | None = None, retire_reason: str | None = None,
-    skill: dict | None = None, flag: dict | None = None, decision: str | None = None,
+    skill_id: str,
+    doc_key: str,
+    *,
+    ours_hash: str | None,
+    post: dict | None = None,
+    retire_reason: str | None = None,
+    skill: dict | None = None,
+    flag: dict | None = None,
+    decision: str | None = None,
 ) -> dict:
     """One bundled doc's write, in ONE transaction: what the release comparison
     does to a doc (`skills/refresh.py`), or what the operator decided on its flag.
@@ -5686,7 +6042,8 @@ async def apply_bundled_skill_doc(
                      where skill_id = $1 and doc_key = $2 and decision is null
                      for update
                     """,
-                    skill_id, doc_key,
+                    skill_id,
+                    doc_key,
                 )
                 if not open_flags:
                     raise SkillDocFlagClosed(f"{skill_id}/{doc_key} has no open flag")
@@ -5702,7 +6059,8 @@ async def apply_bundled_skill_doc(
                     select content from skill_doc
                      where skill_id = $1 and doc_key = $2 and is_current for update
                     """,
-                    skill_id, doc_key,
+                    skill_id,
+                    doc_key,
                 )
                 ours = bundled_text_hash(current) if current is not None else None
                 if ours != ours_hash:
@@ -5717,17 +6075,24 @@ async def apply_bundled_skill_doc(
                     insert into skill (id, title, summary) values ($1, $2, $3)
                     on conflict (id) do nothing returning id
                     """,
-                    skill_id, skill["title"], skill["summary"],
+                    skill_id,
+                    skill["title"],
+                    skill["summary"],
                 )
                 if created is not None:
                     out["created_skill"] = True
                     out["grants"] = await _seed_skill_grants(
-                        conn, skill_id, skill["default_agents"], "seed:skill",
+                        conn,
+                        skill_id,
+                        skill["default_agents"],
+                        "seed:skill",
                     )
                 elif skill["follow"]:
                     await conn.execute(
                         "update skill set title = $2, summary = $3 where id = $1",
-                        skill_id, skill["title"], skill["summary"],
+                        skill_id,
+                        skill["title"],
+                        skill["summary"],
                     )
 
             if post is not None:
@@ -5737,21 +6102,28 @@ async def apply_bundled_skill_doc(
                      where skill_id = $1 and doc_key = $2
                      order by is_current desc, version desc limit 1
                     """,
-                    skill_id, doc_key,
+                    skill_id,
+                    doc_key,
                 )
                 kind = post.get("kind") or (newest["kind"] if newest else None)
                 if kind is None:
-                    raise ValueError(f"{skill_id}/{doc_key}: no kind for a doc the library never held")
+                    raise ValueError(
+                        f"{skill_id}/{doc_key}: no kind for a doc the library never held"
+                    )
                 content = post["content"] if post["content"] is not None else current
                 if content is None:
                     raise ValueError(f"{skill_id}/{doc_key}: no text to keep")
                 doc = await _insert_skill_doc(
-                    conn, skill_id, doc_key, kind,
+                    conn,
+                    skill_id,
+                    doc_key,
+                    kind,
                     post.get("title") or (newest["title"] if newest else doc_key),
                     content,
                     source_url=newest["source_url"] if newest else None,
                     describes=newest["describes"] if newest else None,
-                    captured_at=post.get("captured_at"), added_by=post["added_by"],
+                    captured_at=post.get("captured_at"),
+                    added_by=post["added_by"],
                     bundled_release=post.get("bundled_release"),
                     bundled_path=post.get("bundled_path"),
                     bundled_hash=post.get("bundled_hash"),
@@ -5769,8 +6141,13 @@ async def apply_bundled_skill_doc(
                     values ($1, $2, $3, $4, $5, $6, $7)
                     on conflict (skill_id, doc_key, release) do nothing
                     """,
-                    skill_id, doc_key, flag["release"], flag["change"], flag["bundled_path"],
-                    flag["base_hash"], flag["release_hash"],
+                    skill_id,
+                    doc_key,
+                    flag["release"],
+                    flag["change"],
+                    flag["bundled_path"],
+                    flag["base_hash"],
+                    flag["release_hash"],
                 )
             if decision is not None:
                 await conn.execute(
@@ -5778,7 +6155,9 @@ async def apply_bundled_skill_doc(
                     update skill_doc_flag set decision = $3, decided_at = now()
                      where skill_id = $1 and doc_key = $2 and decision is null
                     """,
-                    skill_id, doc_key, decision,
+                    skill_id,
+                    doc_key,
+                    decision,
                 )
         return out
     finally:
@@ -5812,7 +6191,9 @@ async def _retire_skill_doc(conn, skill_id: str, doc_key: str, reason: str):
          where skill_id = $1 and doc_key = $2 and is_current
         returning *
         """,
-        skill_id, doc_key, reason,
+        skill_id,
+        doc_key,
+        reason,
     )
     if row is not None:
         await conn.execute("delete from skill_chunk where doc_id = $1", row["id"])
@@ -5837,7 +6218,8 @@ async def skill_doc_history(skill_id: str, doc_key: str) -> list[dict]:
              where skill_id = $1 and doc_key = $2
              order by version desc
             """,
-            skill_id, doc_key,
+            skill_id,
+            doc_key,
         )
         return [dict(r) for r in rows]
     finally:
@@ -5852,7 +6234,8 @@ async def retire_skill(skill_id: str, reason: str) -> bool:
             update skill set status = 'RETIRED', retired_reason = $2, retired_at = now()
              where id = $1 and status = 'ACTIVE'
             """,
-            skill_id, reason,
+            skill_id,
+            reason,
         )
         return result.endswith(" 1")
     finally:
@@ -5899,14 +6282,18 @@ async def grant_skill(agent_id: str, skill_id: str, granted_by: str = "operator"
               set revoked_at = null, revoked_reason = null,
                   granted_by = $3, granted_at = now()
             """,
-            agent_id, skill_id, granted_by,
+            agent_id,
+            skill_id,
+            granted_by,
         )
     finally:
         await conn.close()
 
 
 async def seed_skill_grants(
-    skill_id: str, agent_ids: list[str], granted_by: str = "seed:skill",
+    skill_id: str,
+    agent_ids: list[str],
+    granted_by: str = "seed:skill",
 ) -> dict:
     """Grant `skill_id` to each listed agent, CREATE-ONLY.
 
@@ -5941,7 +6328,9 @@ async def _seed_skill_grants(conn, skill_id: str, agent_ids: list[str], granted_
             values ($1, $2, $3)
             on conflict (agent_id, skill_id) do nothing
             """,
-            agent_id, skill_id, granted_by,
+            agent_id,
+            skill_id,
+            granted_by,
         )
         out["applied" if result.endswith(" 1") else "skipped"].append(agent_id)
     return out
@@ -5955,7 +6344,9 @@ async def revoke_skill(agent_id: str, skill_id: str, reason: str) -> bool:
             update agent_skill_grant set revoked_at = now(), revoked_reason = $3
              where agent_id = $1 and skill_id = $2 and revoked_at is null
             """,
-            agent_id, skill_id, reason,
+            agent_id,
+            skill_id,
+            reason,
         )
         return result.endswith(" 1")
     finally:
@@ -6000,7 +6391,8 @@ async def list_agent_skills(agent_id: str, include_revoked: bool = False) -> lis
                and ($2 or (g.revoked_at is null and s.status = 'ACTIVE'))
              order by g.skill_id
             """,
-            agent_id, include_revoked,
+            agent_id,
+            include_revoked,
         )
         return [dict(r) for r in rows]
     finally:
@@ -6074,11 +6466,16 @@ async def search_skill_chunks(skill_id: str, query: str, limit: int = 50) -> lis
     try:
         rows = await conn.fetch(
             _SKILL_CHUNK_SEARCH.format(q="websearch_to_tsquery('english', $2)"),
-            skill_id, query, limit,
+            skill_id,
+            query,
+            limit,
         )
         if not rows:
             rows = await conn.fetch(
-                _SKILL_CHUNK_SEARCH.format(q=_ANY_TERM), skill_id, query, limit,
+                _SKILL_CHUNK_SEARCH.format(q=_ANY_TERM),
+                skill_id,
+                query,
+                limit,
             )
         return [dict(r) for r in rows]
     finally:
@@ -6125,7 +6522,9 @@ async def grant_sandbox_source(
                 set revoked_at = null, granted_by = excluded.granted_by,
                     granted_at = now()
             """,
-            agent_id, source_path, granted_by,
+            agent_id,
+            source_path,
+            granted_by,
         )
     finally:
         await conn.close()
@@ -6141,7 +6540,8 @@ async def revoke_sandbox_source(agent_id: str, source_path: str) -> bool:
             set revoked_at = now()
             where agent_id = $1 and source_path = $2 and revoked_at is null
             """,
-            agent_id, source_path,
+            agent_id,
+            source_path,
         )
         return result.endswith(" 1")
     finally:
@@ -6162,7 +6562,8 @@ async def upsert_mcp_server_synced(server_id: str, created_by: str) -> None:
             values ($1, 'synced', $2)
             on conflict (id) do update set status = 'synced'
             """,
-            server_id, created_by,
+            server_id,
+            created_by,
         )
     finally:
         await conn.close()
@@ -6171,9 +6572,7 @@ async def upsert_mcp_server_synced(server_id: str, created_by: str) -> None:
 async def get_mcp_server(server_id: str) -> dict | None:
     conn = await _conn()
     try:
-        row = await conn.fetchrow(
-            "select * from mcp_server where id = $1", server_id
-        )
+        row = await conn.fetchrow("select * from mcp_server where id = $1", server_id)
         return dict(row) if row else None
     finally:
         await conn.close()
@@ -6198,9 +6597,10 @@ async def mark_mcp_server_built(server_id: str, image_ref: str, digest: str) -> 
     conn = await _conn()
     try:
         await conn.execute(
-            "update mcp_server set status = 'built', image_ref = $2, digest = $3"
-            " where id = $1",
-            server_id, image_ref, digest,
+            "update mcp_server set status = 'built', image_ref = $2, digest = $3 where id = $1",
+            server_id,
+            image_ref,
+            digest,
         )
     finally:
         await conn.close()
@@ -6213,7 +6613,8 @@ async def mark_mcp_server_deployed(server_id: str, namespace: str) -> None:
     try:
         await conn.execute(
             "update mcp_server set status = 'deployed', namespace = $2 where id = $1",
-            server_id, namespace,
+            server_id,
+            namespace,
         )
     finally:
         await conn.close()
@@ -6246,15 +6647,22 @@ async def mark_mcp_server_registered(server_id: str, litellm_id: str) -> None:
     try:
         await conn.execute(
             "update mcp_server set status = 'registered', litellm_alias = $2 where id = $1",
-            server_id, litellm_id,
+            server_id,
+            litellm_id,
         )
     finally:
         await conn.close()
 
 
 async def insert_mcp_server_registered_by_url(
-    server_id: str, *, url: str, transport: str, display_name: str,
-    description: str, litellm_id: str | None, created_by: str,
+    server_id: str,
+    *,
+    url: str,
+    transport: str,
+    display_name: str,
+    description: str,
+    litellm_id: str | None,
+    created_by: str,
 ) -> bool:
     """`mcp.server_register`'s write (DL-233), after the proxy accepted the
     registration: one new row, born 'registered' with source 'url'. An id names
@@ -6271,8 +6679,13 @@ async def insert_mcp_server_registered_by_url(
             values ($1, 'registered', 'url', $2, $3, $4, $5, $6, $7)
             on conflict (id) do nothing
             """,
-            server_id, url, transport, display_name, description or "",
-            litellm_id, created_by,
+            server_id,
+            url,
+            transport,
+            display_name,
+            description or "",
+            litellm_id,
+            created_by,
         )
         return result.endswith(" 1")
     finally:
@@ -6310,7 +6723,9 @@ async def upsert_mcp_tools(server_id: str, tools: list[dict]) -> None:
                     on conflict (server_id, tool_name) do update
                         set description = excluded.description
                     """,
-                    server_id, name, t.get("description") or "",
+                    server_id,
+                    name,
+                    t.get("description") or "",
                 )
     finally:
         await conn.close()
@@ -6341,7 +6756,9 @@ async def set_mcp_tool_default_gate(server_id: str, tool_name: str, gate: str) -
     try:
         result = await conn.execute(
             "update mcp_tool set default_gate = $3 where server_id = $1 and tool_name = $2",
-            server_id, tool_name, gate,
+            server_id,
+            tool_name,
+            gate,
         )
         return result.endswith(" 1")
     finally:
@@ -6349,7 +6766,11 @@ async def set_mcp_tool_default_gate(server_id: str, tool_name: str, gate: str) -
 
 
 async def set_agent_mcp_gate_override(
-    agent_id: str, server_id: str, tool_name: str, gate: str, granted_by: str = "operator",
+    agent_id: str,
+    server_id: str,
+    tool_name: str,
+    gate: str,
+    granted_by: str = "operator",
 ) -> None:
     """Upsert an operator override — re-granting after a revoke REACTIVATES the
     row (fresh granted_at, revoked_at cleared), mirroring `grant_pack`."""
@@ -6364,7 +6785,11 @@ async def set_agent_mcp_gate_override(
                 set gate = excluded.gate, granted_by = excluded.granted_by,
                     granted_at = now(), revoked_at = null
             """,
-            agent_id, server_id, tool_name, gate, granted_by,
+            agent_id,
+            server_id,
+            tool_name,
+            gate,
+            granted_by,
         )
     finally:
         await conn.close()
@@ -6381,7 +6806,9 @@ async def revoke_agent_mcp_gate_override(agent_id: str, server_id: str, tool_nam
             where agent_id = $1 and server_id = $2 and tool_name = $3
               and revoked_at is null
             """,
-            agent_id, server_id, tool_name,
+            agent_id,
+            server_id,
+            tool_name,
         )
         return result.endswith(" 1")
     finally:
@@ -6468,8 +6895,12 @@ def _override_row(row) -> dict:
 
 
 async def create_gate_override(
-    agent_id: str, capability: str, *, scope: dict | None = None,
-    granted_by: str = "operator", shadow_runs: int | None = None,
+    agent_id: str,
+    capability: str,
+    *,
+    scope: dict | None = None,
+    granted_by: str = "operator",
+    shadow_runs: int | None = None,
     acknowledged_irreversible: bool = False,
 ) -> dict:
     """Insert a new override row (always a NEW id — never an upsert, so a
@@ -6495,8 +6926,12 @@ async def create_gate_override(
                     case when $7 then now() end)
             returning {_OVERRIDE_COLS}
             """,
-            f"govr_{uuid.uuid4().hex[:12]}", agent_id, capability,
-            json.dumps(scope or {}), granted_by, shadow_runs,
+            f"govr_{uuid.uuid4().hex[:12]}",
+            agent_id,
+            capability,
+            json.dumps(scope or {}),
+            granted_by,
+            shadow_runs,
             acknowledged_irreversible,
         )
         return _override_row(row)
@@ -6515,7 +6950,8 @@ async def revoke_gate_override(override_id: str, reason: str | None = None) -> b
                set revoked_at = now(), revoked_reason = $2
              where id = $1 and revoked_at is null
             """,
-            override_id, reason,
+            override_id,
+            reason,
         )
         return result.endswith(" 1")
     finally:
@@ -6532,7 +6968,8 @@ async def live_gate_overrides(agent_id: str, capability: str) -> list[dict]:
              where agent_id = $1 and capability = $2 and revoked_at is null
              order by granted_at, id
             """,
-            agent_id, capability,
+            agent_id,
+            capability,
         )
         return [_override_row(r) for r in rows]
     finally:
@@ -6540,7 +6977,8 @@ async def live_gate_overrides(agent_id: str, capability: str) -> list[dict]:
 
 
 async def list_gate_overrides(
-    agent_id: str | None = None, capability: str | None = None,
+    agent_id: str | None = None,
+    capability: str | None = None,
 ) -> list[dict]:
     """Every override row of one agent or on one capability, revoked included
     (the history is the record), oldest first."""
@@ -6553,7 +6991,8 @@ async def list_gate_overrides(
                and ($2::text is null or capability = $2)
              order by granted_at, id
             """,
-            agent_id, capability,
+            agent_id,
+            capability,
         )
         return [_override_row(r) for r in rows]
     finally:
@@ -6561,7 +7000,10 @@ async def list_gate_overrides(
 
 
 async def override_match_candidates(
-    agent_id: str, capability: str, granted_at, revoked_at=None,
+    agent_id: str,
+    capability: str,
+    granted_at,
+    revoked_at=None,
 ) -> list[dict]:
     """The proposals an override of `agent_id` on `capability` may have
     matched while it was unrevoked: drafted by the agent, created after the
@@ -6583,7 +7025,10 @@ async def override_match_candidates(
                             where split_part(a ->> 'capability', '@', 1) = $2)
              order by p.created_at, p.id
             """,
-            agent_id, capability, granted_at, revoked_at,
+            agent_id,
+            capability,
+            granted_at,
+            revoked_at,
         )
         out = []
         for r in rows:
@@ -6611,7 +7056,9 @@ async def get_gate_override(override_id: str) -> dict | None:
 
 
 async def shadow_approval_candidates(
-    agent_id: str, capability: str, granted_at,
+    agent_id: str,
+    capability: str,
+    granted_at,
 ) -> list[dict]:
     """The proposals that may count as one shadow approval for an override of
     `agent_id` on `capability` granted at `granted_at` — the pinned window,
@@ -6635,7 +7082,9 @@ async def shadow_approval_candidates(
                             where split_part(a ->> 'capability', '@', 1) = $2)
              order by p.created_at, p.id
             """,
-            agent_id, capability, granted_at,
+            agent_id,
+            capability,
+            granted_at,
         )
         out = []
         for r in rows:
@@ -6654,10 +7103,13 @@ async def count_events(kind: str, ref_id: str) -> int:
     check for an event that must be emitted a single time)."""
     conn = await _conn()
     try:
-        return int(await conn.fetchval(
-            "select count(*) from audit_event where kind = $1 and ref_id = $2",
-            kind, ref_id,
-        ))
+        return int(
+            await conn.fetchval(
+                "select count(*) from audit_event where kind = $1 and ref_id = $2",
+                kind,
+                ref_id,
+            )
+        )
     finally:
         await conn.close()
 
@@ -6667,13 +7119,15 @@ async def session_has_operator_note(session_id: str) -> bool:
     The same test `unaudited_bulk_proposal_ids` makes for the auditor's hold."""
     conn = await _conn()
     try:
-        return bool(await conn.fetchval(
-            """
+        return bool(
+            await conn.fetchval(
+                """
             select exists (select 1 from work_item w
                             where w.session_id = $1 and w.payload ? 'operator_note')
             """,
-            session_id,
-        ))
+                session_id,
+            )
+        )
     finally:
         await conn.close()
 
@@ -6689,7 +7143,8 @@ async def record_override_eval(proposal_id: str, record: dict) -> bool:
             update proposal set override_eval = $2::jsonb
              where id = $1 and override_eval is null
             """,
-            proposal_id, json.dumps(record),
+            proposal_id,
+            json.dumps(record),
         )
         return result.endswith(" 1")
     finally:
@@ -6704,7 +7159,8 @@ async def amend_override_eval(proposal_id: str, record: dict) -> None:
     try:
         await conn.execute(
             "update proposal set override_eval = $2::jsonb where id = $1",
-            proposal_id, json.dumps(record),
+            proposal_id,
+            json.dumps(record),
         )
     finally:
         await conn.close()
@@ -6744,7 +7200,8 @@ async def get_app_setting(key: str, default: dict | list) -> dict | list:
     conn = await _conn()
     try:
         row = await conn.fetchrow(
-            "select value from app_setting where key = $1", key,
+            "select value from app_setting where key = $1",
+            key,
         )
         return json.loads(row["value"]) if row else default
     finally:
@@ -6761,7 +7218,8 @@ async def set_app_setting(key: str, value: dict) -> None:
             on conflict (key) do update
                 set value = $2::jsonb, updated_at = now()
             """,
-            key, json.dumps(value),
+            key,
+            json.dumps(value),
         )
     finally:
         await conn.close()
@@ -6807,7 +7265,12 @@ def _graph_verification_row(row) -> dict:
 
 
 async def create_graph_verification(
-    *, proposal_id: str, episode_name: str, group_id: str, scope: str, marker: str,
+    *,
+    proposal_id: str,
+    episode_name: str,
+    group_id: str,
+    scope: str,
+    marker: str,
     remediation_of: str | None = None,
 ) -> dict:
     conn = await _conn()
@@ -6820,7 +7283,12 @@ async def create_graph_verification(
             values ($1, $2, $3, $4, $5, $6, $7)
             returning *
             """,
-            str(uuid.uuid4()), proposal_id, episode_name, group_id, scope, marker,
+            str(uuid.uuid4()),
+            proposal_id,
+            episode_name,
+            group_id,
+            scope,
+            marker,
             remediation_of,
         )
         return _graph_verification_row(row)
@@ -6857,7 +7325,8 @@ async def due_graph_verifications(settle_minutes: int, limit: int = 20) -> list[
              order by created_at
              limit $2
             """,
-            settle_minutes, limit,
+            settle_minutes,
+            limit,
         )
         return [_graph_verification_row(r) for r in rows]
     finally:
@@ -6892,10 +7361,15 @@ async def finish_graph_verification(
                    closed_at = case when $9::text is null then null else now() end
              where id = $1 and status = 'PENDING'
             """,
-            verification_id, status, episode_uuid,
+            verification_id,
+            status,
+            episode_uuid,
             json.dumps(mechanical) if mechanical is not None else None,
             json.dumps(delta) if delta is not None else None,
-            verdict, verdict_rationale, has_invalidations, closed_by,
+            verdict,
+            verdict_rationale,
+            has_invalidations,
+            closed_by,
         )
         return r.endswith(" 1")
     finally:
@@ -6915,7 +7389,10 @@ async def close_graph_verification(
                set status = $2, closed_by = $3, problem_note = $4, closed_at = now()
              where id = $1 and status = 'AWAITING_OPERATOR'
             """,
-            verification_id, status, closed_by, problem_note,
+            verification_id,
+            status,
+            closed_by,
+            problem_note,
         )
         return r.endswith(" 1")
     finally:
@@ -6925,9 +7402,7 @@ async def close_graph_verification(
 async def get_graph_verification(verification_id: str) -> dict | None:
     conn = await _conn()
     try:
-        row = await conn.fetchrow(
-            "select * from graph_verification where id = $1", verification_id
-        )
+        row = await conn.fetchrow("select * from graph_verification where id = $1", verification_id)
         return _graph_verification_row(row) if row else None
     finally:
         await conn.close()
@@ -6940,7 +7415,8 @@ async def list_graph_verifications(status: str | None = None, limit: int = 100) 
             rows = await conn.fetch(
                 """select * from graph_verification where status = $1
                    order by created_at desc limit $2""",
-                status, limit,
+                status,
+                limit,
             )
         else:
             rows = await conn.fetch(
@@ -6957,9 +7433,7 @@ async def count_running_ingest_jobs() -> int:
     """How many ingest jobs are mid-flight: `graph_reembed run` waits on them."""
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        return await conn.fetchval(
-            "select count(*) from graph_ingest_job where status = 'RUNNING'"
-        )
+        return await conn.fetchval("select count(*) from graph_ingest_job where status = 'RUNNING'")
 
 
 # One `graph_ingest_job` per approved episode. The Executor writes it in the
@@ -6982,7 +7456,12 @@ def _ingest_job_row(row) -> dict:
 
 
 async def create_graph_verification_with_job(
-    *, proposal_id: str, episode_name: str, group_id: str, scope: str, marker: str,
+    *,
+    proposal_id: str,
+    episode_name: str,
+    group_id: str,
+    scope: str,
+    marker: str,
     payload: dict,
 ) -> tuple[dict, dict]:
     """The Executor's `graph.add_episode`: the verification row and the ingest
@@ -6999,7 +7478,12 @@ async def create_graph_verification_with_job(
                 values ($1, $2, $3, $4, $5, $6)
                 returning *
                 """,
-                str(uuid.uuid4()), proposal_id, episode_name, group_id, scope, marker,
+                str(uuid.uuid4()),
+                proposal_id,
+                episode_name,
+                group_id,
+                scope,
+                marker,
             )
             job = await conn.fetchrow(
                 """
@@ -7007,7 +7491,10 @@ async def create_graph_verification_with_job(
                 values ($1, $2, $3, $4::jsonb)
                 returning *
                 """,
-                ver["id"], proposal_id, group_id, json.dumps(payload),
+                ver["id"],
+                proposal_id,
+                group_id,
+                json.dumps(payload),
             )
         return _graph_verification_row(ver), _ingest_job_row(job)
     finally:
@@ -7015,7 +7502,11 @@ async def create_graph_verification_with_job(
 
 
 async def create_ingest_job(
-    *, verification_id: str | None, proposal_id: str | None, group_id: str, payload: dict,
+    *,
+    verification_id: str | None,
+    proposal_id: str | None,
+    group_id: str,
+    payload: dict,
     kind: str = "add_episode",
 ) -> dict:
     """One job outside the Executor's add-episode transaction: the cutover's
@@ -7029,7 +7520,11 @@ async def create_ingest_job(
             values ($1, $2, $3, $4::jsonb, $5)
             returning *
             """,
-            verification_id, proposal_id, group_id, json.dumps(payload), kind,
+            verification_id,
+            proposal_id,
+            group_id,
+            json.dumps(payload),
+            kind,
         )
         return _ingest_job_row(row)
     finally:
@@ -7072,7 +7567,8 @@ async def claim_ingest_jobs(
                    and ($2::text[] is null or h.kind = any($2::text[]))
                 returning j.*
                 """,
-                list(exclude_groups), None if kinds is None else list(kinds),
+                list(exclude_groups),
+                None if kinds is None else list(kinds),
             )
         return sorted((_ingest_job_row(r) for r in rows), key=lambda r: r["id"])
     finally:
@@ -7089,7 +7585,9 @@ async def finish_ingest_job(job_id: int, *, episode_uuid: str, result: dict) -> 
                    last_error = null, finished_at = now()
              where id = $1 and status = 'RUNNING'
             """,
-            job_id, episode_uuid, json.dumps(result),
+            job_id,
+            episode_uuid,
+            json.dumps(result),
         )
         return r.endswith(" 1")
     finally:
@@ -7097,7 +7595,10 @@ async def finish_ingest_job(job_id: int, *, episode_uuid: str, result: dict) -> 
 
 
 async def defer_ingest_job(
-    job_id: int, *, error: str, delay_seconds: int,
+    job_id: int,
+    *,
+    error: str,
+    delay_seconds: int,
     dependencies: tuple[str, ...] | list[str] | None = None,
 ) -> bool:
     """A transient failure: back to QUEUED, not eligible for `delay_seconds`.
@@ -7114,7 +7615,9 @@ async def defer_ingest_job(
                    dependencies = coalesce($4::jsonb, dependencies)
              where id = $1 and status = 'RUNNING'
             """,
-            job_id, error, float(delay_seconds),
+            job_id,
+            error,
+            float(delay_seconds),
             None if dependencies is None else json.dumps(list(dependencies)),
         )
         return r.endswith(" 1")
@@ -7131,7 +7634,8 @@ async def fail_ingest_job(job_id: int, *, error: str) -> bool:
                set status = 'FAILED', last_error = $2, finished_at = now()
              where id = $1 and status = 'RUNNING'
             """,
-            job_id, error,
+            job_id,
+            error,
         )
         return r.endswith(" 1")
     finally:
@@ -7168,7 +7672,8 @@ async def recover_ingest_job_done(job_id: int, *, episode_uuid: str) -> bool:
                    result = '{"recovered": true}'::jsonb, finished_at = now()
              where id = $1 and status = 'RUNNING'
             """,
-            job_id, episode_uuid,
+            job_id,
+            episode_uuid,
         )
         return r.endswith(" 1")
     finally:
@@ -7335,9 +7840,7 @@ def _source_row(row) -> dict:
     return d
 
 
-async def upsert_source(
-    id: str, kind: str, name: str, config: dict, enabled: bool = False
-) -> dict:
+async def upsert_source(id: str, kind: str, name: str, config: dict, enabled: bool = False) -> dict:
     """Insert or update the operator-owned fields — never `cursor`, which is
     the watcher's own progress record, not a lever the operator's edit form
     should be able to clobber."""
@@ -7352,7 +7855,11 @@ async def upsert_source(
                   updated_at = now()
             returning *
             """,
-            id, kind, name, json.dumps(config), enabled,
+            id,
+            kind,
+            name,
+            json.dumps(config),
+            enabled,
         )
         return _source_row(row)
     finally:
@@ -7382,7 +7889,8 @@ async def set_source_enabled(id: str, enabled: bool) -> bool:
     try:
         r = await conn.execute(
             "update source set enabled = $2, updated_at = now() where id = $1",
-            id, enabled,
+            id,
+            enabled,
         )
         return r.endswith(" 1")
     finally:
@@ -7394,7 +7902,8 @@ async def save_source_cursor(id: str, cursor: dict) -> None:
     try:
         await conn.execute(
             "update source set cursor = $2::jsonb, updated_at = now() where id = $1",
-            id, json.dumps(cursor),
+            id,
+            json.dumps(cursor),
         )
     finally:
         await conn.close()
@@ -7430,7 +7939,8 @@ async def record_observation(
         async with conn.transaction():
             doc = await conn.fetchrow(
                 "select id from catalog_document where source_id = $1 and lineage_key = $2",
-                source_id, lineage_key,
+                source_id,
+                lineage_key,
             )
             if doc is None and (meta or {}).get("extraction") == "ok":
                 twin = await conn.fetchval(
@@ -7454,11 +7964,17 @@ async def record_observation(
                         on conflict (source_id, uri) do update
                           set document_id = $3, last_seen = now(), missing_at = null
                         """,
-                        "loc_" + uuid.uuid4().hex[:12], source_id, twin, uri,
+                        "loc_" + uuid.uuid4().hex[:12],
+                        source_id,
+                        twin,
+                        uri,
                     )
                     return {
-                        "document_id": twin, "version_id": None,
-                        "new_lineage": False, "new_version": False, "deduped": True,
+                        "document_id": twin,
+                        "version_id": None,
+                        "new_lineage": False,
+                        "new_version": False,
+                        "deduped": True,
                     }
 
             new_lineage = doc is None
@@ -7469,14 +7985,18 @@ async def record_observation(
                     insert into catalog_document (id, source_id, lineage_key, title)
                     values ($1, $2, $3, $4)
                     """,
-                    document_id, source_id, lineage_key, title,
+                    document_id,
+                    source_id,
+                    lineage_key,
+                    title,
                 )
             else:
                 document_id = doc["id"]
                 if title:
                     await conn.execute(
                         "update catalog_document set title = $2, updated_at = now() where id = $1",
-                        document_id, title,
+                        document_id,
+                        title,
                     )
 
             latest = await conn.fetchrow(
@@ -7498,8 +8018,13 @@ async def record_observation(
                          extractor, meta)
                     values ($1, $2, $3, $4, $5, $6, $7::jsonb)
                     """,
-                    version_id, document_id, version_no, content_hash,
-                    extracted_text, extractor, json.dumps(meta),
+                    version_id,
+                    document_id,
+                    version_no,
+                    content_hash,
+                    extracted_text,
+                    extractor,
+                    json.dumps(meta),
                 )
 
             await conn.execute(
@@ -7509,7 +8034,10 @@ async def record_observation(
                 on conflict (source_id, uri) do update
                   set document_id = $3, last_seen = now(), missing_at = null
                 """,
-                "loc_" + uuid.uuid4().hex[:12], source_id, document_id, uri,
+                "loc_" + uuid.uuid4().hex[:12],
+                source_id,
+                document_id,
+                uri,
             )
 
         return {
@@ -7535,7 +8063,8 @@ async def mark_locations_missing(source_id: str, seen_uris: list[str]) -> list[s
              where source_id = $1 and missing_at is null and not (uri = any($2::text[]))
             returning uri
             """,
-            source_id, seen_uris,
+            source_id,
+            seen_uris,
         )
         return [r["uri"] for r in rows]
     finally:
@@ -7552,7 +8081,9 @@ async def rescind_document(document_id: str, reason: str, by: str) -> bool:
                    rescinded_at = now(), updated_at = now()
              where id = $1
             """,
-            document_id, reason, by,
+            document_id,
+            reason,
+            by,
         )
         return r.endswith(" 1")
     finally:
@@ -7602,9 +8133,9 @@ async def set_document_tags(
             else:
                 new = list(dict.fromkeys(tags))
             await conn.execute(
-                "update catalog_document set tags = $2::jsonb, updated_at = now()"
-                " where id = $1",
-                document_id, json.dumps(new),
+                "update catalog_document set tags = $2::jsonb, updated_at = now() where id = $1",
+                document_id,
+                json.dumps(new),
             )
         return new
     finally:
@@ -7723,9 +8254,7 @@ def _version_row(row) -> dict:
     return d
 
 
-async def unenrolled_catalog_versions(
-    source_id: str, limit: int | None = None
-) -> list[dict]:
+async def unenrolled_catalog_versions(source_id: str, limit: int | None = None) -> list[dict]:
     """This source's catalog versions still owed a work item, NEWEST FIRST.
 
     Newest-first is the governor (Decision 5): an older revision only enrolls
@@ -7746,27 +8275,27 @@ async def unenrolled_catalog_versions(
              order by v.seen_at desc, v.version_no desc
              limit $2
             """,
-            source_id, limit,
+            source_id,
+            limit,
         )
         return [_version_row(r) for r in rows]
     finally:
         await conn.close()
 
 
-async def catalog_sibling_version(
-    document_id: str, version_no: int, *, newer: bool
-) -> dict | None:
+async def catalog_sibling_version(document_id: str, version_no: int, *, newer: bool) -> dict | None:
     """The IMMEDIATELY newer (or older) version of the same lineage, or None."""
     conn = await _conn()
     try:
         row = await conn.fetchrow(
             f"""
             select id, version_no, seen_at, extracted_text from catalog_version
-             where document_id = $1 and version_no {'>' if newer else '<'} $2
-             order by version_no {'asc' if newer else 'desc'}
+             where document_id = $1 and version_no {">" if newer else "<"} $2
+             order by version_no {"asc" if newer else "desc"}
              limit 1
             """,
-            document_id, version_no,
+            document_id,
+            version_no,
         )
         return dict(row) if row else None
     finally:
@@ -7780,7 +8309,8 @@ async def update_version_meta(version_id: str, patch: dict) -> None:
     try:
         await conn.execute(
             "update catalog_version set meta = meta || $2::jsonb where id = $1",
-            version_id, json.dumps(patch),
+            version_id,
+            json.dumps(patch),
         )
     finally:
         await conn.close()
@@ -7873,8 +8403,7 @@ async def catalog_document_heads(document_ids: list[str]) -> dict[str, dict]:
             """,
             list(document_ids),
         )
-        return {r["id"]: {"status": r["status"], "head_version": r["head_version"]}
-                for r in rows}
+        return {r["id"]: {"status": r["status"], "head_version": r["head_version"]} for r in rows}
     finally:
         await conn.close()
 
@@ -7891,11 +8420,16 @@ async def insert_wiki_claims(rows: list[dict]) -> int:
             insert into wiki_claim (id, page_ref, proposal_id, statement, evidence)
             values ($1, $2, $3, $4, $5::jsonb)
             """,
-            [(
-                "clm_" + uuid.uuid4().hex[:12],
-                r.get("page_ref"), r.get("proposal_id"), r["statement"],
-                json.dumps(r.get("evidence") or []),
-            ) for r in rows],
+            [
+                (
+                    "clm_" + uuid.uuid4().hex[:12],
+                    r.get("page_ref"),
+                    r.get("proposal_id"),
+                    r["statement"],
+                    json.dumps(r.get("evidence") or []),
+                )
+                for r in rows
+            ],
         )
         return len(rows)
     finally:
@@ -7909,8 +8443,7 @@ async def retire_wiki_claims(page_ref: str) -> int:
     conn = await _conn()
     try:
         result = await conn.execute(
-            "update wiki_claim set retired_at = now() "
-            " where page_ref = $1 and retired_at is null",
+            "update wiki_claim set retired_at = now()  where page_ref = $1 and retired_at is null",
             page_ref,
         )
         return int(result.rsplit(" ", 1)[-1] or 0)
@@ -7918,9 +8451,7 @@ async def retire_wiki_claims(page_ref: str) -> int:
         await conn.close()
 
 
-async def list_wiki_claims(
-    page_ref: str | None = None, live_only: bool = True
-) -> list[dict]:
+async def list_wiki_claims(page_ref: str | None = None, live_only: bool = True) -> list[dict]:
     conn = await _conn()
     try:
         rows = await conn.fetch(
@@ -7932,7 +8463,8 @@ async def list_wiki_claims(
                and ($2::bool is false or retired_at is null)
              order by created_at
             """,
-            page_ref, live_only,
+            page_ref,
+            live_only,
         )
         out = []
         for r in rows:
@@ -7960,7 +8492,8 @@ async def wiki_claim_states(page_ref: str | None = None) -> list[dict]:
     claims = await list_wiki_claims(page_ref, live_only=True)
     doc_ids = {
         e.get("source_ref")
-        for c in claims for e in (c["evidence"] or [])
+        for c in claims
+        for e in (c["evidence"] or [])
         if e.get("kind") == "catalog" and e.get("source_ref")
     }
     heads = await catalog_document_heads(sorted(doc_ids))
@@ -7976,9 +8509,7 @@ async def wiki_claim_states(page_ref: str | None = None) -> list[dict]:
             if head is None:
                 continue
             if head["status"] == "RESCINDED":
-                unsupported.append(
-                    f"{e['source_ref']}: the catalog lineage is RESCINDED"
-                )
+                unsupported.append(f"{e['source_ref']}: the catalog lineage is RESCINDED")
             elif (head["head_version"] or 0) > (e.get("version") or 0):
                 stale.append(
                     f"{e['source_ref']}: head version {head['head_version']} "
@@ -7990,6 +8521,7 @@ async def wiki_claim_states(page_ref: str | None = None) -> list[dict]:
 
 
 # ── update hold (api/hold.py) ───────────────────────────────────────────────
+
 
 async def request_stop_for_update() -> int:
     """Ask every RUNNING run the hold can park to stop at its next boundary.
@@ -8054,8 +8586,7 @@ async def sessions_stopped_for_update() -> list[str]:
 # and sweeps (pinned to each other by tests/test_mail_rules.py).
 
 _RULE_ADDR = (
-    "btrim(lower(coalesce(substring(w.payload->>'from' from '<([^>]+)>'), "
-    "w.payload->>'from', '')))"
+    "btrim(lower(coalesce(substring(w.payload->>'from' from '<([^>]+)>'), w.payload->>'from', '')))"
 )
 _RULE_BODY = (
     # `text_body` once attachments are read (DL-216): `text` then also holds
@@ -8129,8 +8660,11 @@ async def mail_rule_matches(criteria: dict, exceptions: dict, samples: int = 5) 
     return {
         "queued_matches": int(count or 0),
         "samples": [
-            {"from": r["from"], "subject": r["subject"],
-             "date": r["received_at"].isoformat() if r["received_at"] else None}
+            {
+                "from": r["from"],
+                "subject": r["subject"],
+                "date": r["received_at"].isoformat() if r["received_at"] else None,
+            }
             for r in rows
         ],
     }
@@ -8145,7 +8679,11 @@ def _rule_row(r) -> dict:
 
 
 async def create_mail_rule(
-    criteria: dict, exceptions: dict, description: str, reason: str, created_by: str,
+    criteria: dict,
+    exceptions: dict,
+    description: str,
+    reason: str,
+    created_by: str,
 ) -> dict:
     conn = await _conn()
     try:
@@ -8157,8 +8695,12 @@ async def create_mail_rule(
                     $2::jsonb, $3::jsonb, $4, $5, $6)
             returning *
             """,
-            "rule_" + uuid.uuid4().hex[:12], json.dumps(criteria), json.dumps(exceptions),
-            description, reason, created_by,
+            "rule_" + uuid.uuid4().hex[:12],
+            json.dumps(criteria),
+            json.dumps(exceptions),
+            description,
+            reason,
+            created_by,
         )
         return _rule_row(row)
     finally:
@@ -8217,7 +8759,8 @@ async def revoke_mail_rule(rule_id: str, reason: str | None) -> bool:
             update mail_rule set revoked_at = now(), revoked_reason = $2
              where id = $1 and revoked_at is null
             """,
-            rule_id, reason,
+            rule_id,
+            reason,
         )
         return r.endswith(" 1")
     finally:
@@ -8245,7 +8788,9 @@ async def fold_by_mail_rule(item_ids: list[str], rule: dict, rationale: str) -> 
              where id = any($1::text[]) and state in ('UNPROCESSED', 'CLAIMED')
             returning id
             """,
-            item_ids, rationale, rule["id"],
+            item_ids,
+            rationale,
+            rule["id"],
         )
         moved = [r["id"] for r in rows]
         if moved:
@@ -8255,7 +8800,8 @@ async def fold_by_mail_rule(item_ids: list[str], rule: dict, rationale: str) -> 
                    set matched_count = matched_count + $2, last_matched_at = now()
                  where id = $1
                 """,
-                rule["id"], len(moved),
+                rule["id"],
+                len(moved),
             )
         return moved
     finally:
@@ -8296,7 +8842,8 @@ async def reopen_rule_folded(item_id: str, note: str | None) -> str | None:
              where id = $1 and state = 'FOLDED' and payload ? 'rule_id'
             returning payload->>'rule_id' as rule_id
             """,
-            item_id, note,
+            item_id,
+            note,
         )
         return row["rule_id"] if row else None
     finally:
@@ -8329,7 +8876,8 @@ async def record_dependency_probe(name: str, up: bool, error: str | None = None)
     try:
         before = await conn.fetchrow(
             "select name, state, checked_at, error, down_since "
-            "from dependency_probe where name = $1", name,
+            "from dependency_probe where name = $1",
+            name,
         )
         await conn.execute(
             """
@@ -8344,7 +8892,9 @@ async def record_dependency_probe(name: str, up: bool, error: str | None = None)
                          then coalesce(dependency_probe.down_since, now())
                        else null end
             """,
-            name, "up" if up else "down", None if up else (error or "")[:500] or None,
+            name,
+            "up" if up else "down",
+            None if up else (error or "")[:500] or None,
         )
         return dict(before) if before else None
     finally:
@@ -8446,11 +8996,16 @@ async def units_failing_despite_probe(n: int) -> list[dict]:
         out = []
         for r in rows:
             d = r["deps"]
-            out.append({"unit": r["unit"], "id": r["id"], "failures": r["failures"],
-                        "dependencies": json.loads(d) if isinstance(d, str) else d,
-                        "last_error": r["last_error"],
-                        "episode": (r["episode"].isoformat()
-                                    if r["episode"] is not None else None)})
+            out.append(
+                {
+                    "unit": r["unit"],
+                    "id": r["id"],
+                    "failures": r["failures"],
+                    "dependencies": json.loads(d) if isinstance(d, str) else d,
+                    "last_error": r["last_error"],
+                    "episode": (r["episode"].isoformat() if r["episode"] is not None else None),
+                }
+            )
         return out
     finally:
         await conn.close()
@@ -8469,8 +9024,9 @@ def _parked_units_sql(future_only: bool) -> str:
     item or ingest job only while its `not_before` is still ahead — what the
     outages surface counts as WAITING; the sweep's own probe set passes False,
     so an item whose backoff just elapsed still has its dependency probed."""
-    item_gate = "and not_before > now()" if future_only else (
-        "and not_before > now() - interval '1 day'")
+    item_gate = (
+        "and not_before > now()" if future_only else ("and not_before > now() - interval '1 day'")
+    )
     return f"""
         with parked as (
             select 'sessions' as kind, id,
@@ -8609,8 +9165,9 @@ _RECALL_ORIGIN_SQL = """
 """
 
 
-async def recall_pending_sessions(agent_id: str, first: str | None,
-                                  limit: int) -> tuple[list[dict], int, int]:
+async def recall_pending_sessions(
+    agent_id: str, first: str | None, limit: int
+) -> tuple[list[dict], int, int]:
     """`(sessions, pending, failed)`: the agent's sessions whose index is missing,
     behind the record or partway through (newest first, `first` — the caller's
     current session — ahead of all), how many there are in all, and how many
@@ -8633,7 +9190,9 @@ async def recall_pending_sessions(agent_id: str, first: str | None,
              order by (s.id = $2) desc, s.created_at desc, s.id desc
              limit $3
             """,
-            agent_id, first or "", limit,
+            agent_id,
+            first or "",
+            limit,
         )
         failed = await conn.fetchval(
             """
@@ -8648,8 +9207,9 @@ async def recall_pending_sessions(agent_id: str, first: str | None,
         await conn.close()
 
 
-async def recall_sync_session(session_id: str, extract, max_messages: int | None = None,
-                              max_chars: int | None = None) -> tuple[int, int, int, bool]:
+async def recall_sync_session(
+    session_id: str, extract, max_messages: int | None = None, max_chars: int | None = None
+) -> tuple[int, int, int, bool]:
     """Index ONE CHUNK of one session; returns `(parts written, indexed, total,
     done)`.
 
@@ -8669,22 +9229,22 @@ async def recall_sync_session(session_id: str, extract, max_messages: int | None
         async with conn.transaction():
             await conn.execute(
                 "select pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"session-recall:{session_id}")
+                f"session-recall:{session_id}",
+            )
             row = await conn.fetchrow(
-                "select agent_id, run_state, updated_at from session where id = $1",
-                session_id)
+                "select agent_id, run_state, updated_at from session where id = $1", session_id
+            )
             if row is None:
                 return 0, 0, 0, True
             rs = row["run_state"]
             run_state = (json.loads(rs) if isinstance(rs, str) else rs) or {}
             mark = await conn.fetchrow(
-                "select indexed_messages from session_recall_mark where session_id = $1",
-                session_id)
+                "select indexed_messages from session_recall_mark where session_id = $1", session_id
+            )
             start = mark["indexed_messages"] if mark else 0
             total, rows, end = extract(run_state, start, max_messages, max_chars)
             if total < start:
-                await conn.execute(
-                    "delete from session_recall where session_id = $1", session_id)
+                await conn.execute("delete from session_recall where session_id = $1", session_id)
                 total, rows, end = extract(run_state, 0, max_messages, max_chars)
             if rows:
                 await conn.executemany(
@@ -8694,8 +9254,11 @@ async def recall_sync_session(session_id: str, extract, max_messages: int | None
                     values ($1, $2, $3, $4, $5, $6, $7, $8)
                     on conflict (session_id, msg_idx, part_idx) do nothing
                     """,
-                    [(session_id, m, pi, row["agent_id"], k, tn, b, at)
-                     for (m, pi, k, tn, b, at) in rows])
+                    [
+                        (session_id, m, pi, row["agent_id"], k, tn, b, at)
+                        for (m, pi, k, tn, b, at) in rows
+                    ],
+                )
             done = end >= total
             await conn.execute(
                 """
@@ -8711,7 +9274,13 @@ async def recall_sync_session(session_id: str, extract, max_messages: int | None
                        failed_for = null, failed_error = null,
                        indexed_at = now()
                 """,
-                session_id, row["agent_id"], end, total, row["updated_at"], done)
+                session_id,
+                row["agent_id"],
+                end,
+                total,
+                row["updated_at"],
+                done,
+            )
             return len(rows), end, total, done
     finally:
         await conn.close()
@@ -8738,13 +9307,17 @@ async def recall_mark_failed(session_id: str, updated_at: datetime, error: str) 
             on conflict (session_id) do update
                set failed_for = excluded.failed_for, failed_error = excluded.failed_error
             """,
-            session_id, updated_at, error)
+            session_id,
+            updated_at,
+            error,
+        )
     finally:
         await conn.close()
 
 
-def _recall_tsquery(terms: list[tuple[str, bool]], joiner: str, first_arg: int
-                    ) -> tuple[str, str, list[str]]:
+def _recall_tsquery(
+    terms: list[tuple[str, bool]], joiner: str, first_arg: int
+) -> tuple[str, str, list[str]]:
     """`(query, positives, args)`: a tsquery expression over `terms` ((text,
     negated) pairs) and the same without its exclusions. Each term is a PHRASE
     over its normalised words (`DEMO-12` is `demo <-> 12`), positives joined by
@@ -8755,9 +9328,11 @@ def _recall_tsquery(terms: list[tuple[str, bool]], joiner: str, first_arg: int
 
     def frag(term: str) -> str:
         args.append(term)
-        return (f"phraseto_tsquery('simple', "
-                f"regexp_replace(${first_arg + len(args) - 1}::text, "
-                f"{RECALL_SEP_SQL}, ' ', 'g'))")
+        return (
+            f"phraseto_tsquery('simple', "
+            f"regexp_replace(${first_arg + len(args) - 1}::text, "
+            f"{RECALL_SEP_SQL}, ' ', 'g'))"
+        )
 
     pos = [frag(text) for text, negated in terms if not negated]
     excluded = [f"!!({frag(text)})" for text, negated in terms if negated]
@@ -8768,8 +9343,9 @@ def _recall_tsquery(terms: list[tuple[str, bool]], joiner: str, first_arg: int
     return expr, positives, args
 
 
-async def recall_search(agent_id: str, terms: list[tuple[str, bool]], joiner: str,
-                        heartbeat_weight: float, limit: int) -> list[dict]:
+async def recall_search(
+    agent_id: str, terms: list[tuple[str, bool]], joiner: str, heartbeat_weight: float, limit: int
+) -> list[dict]:
     """Matching parts of the agent's own sessions, best first. The score is
     `ts_rank_cd` times `heartbeat_weight` when a heartbeat schedule created the
     task that ran the session — a multiplier, so such a session still ranks
@@ -8796,7 +9372,10 @@ async def recall_search(agent_id: str, terms: list[tuple[str, bool]], joiner: st
              order by score desc, s.created_at desc, r.msg_idx
              limit $3
             """,
-            agent_id, heartbeat_weight, limit, *args,
+            agent_id,
+            heartbeat_weight,
+            limit,
+            *args,
         )
         return [dict(r) for r in rows]
     finally:
@@ -8819,7 +9398,8 @@ async def recall_browse(agent_id: str, limit: int) -> list[dict]:
              order by s.created_at desc, s.id desc
              limit $2
             """,
-            agent_id, limit,
+            agent_id,
+            limit,
         )
         return [dict(r) for r in rows]
     finally:
@@ -8840,7 +9420,8 @@ async def recall_session(agent_id: str, session_id: str) -> dict | None:
               from session s left join session_recall_mark m on m.session_id = s.id
              where s.id = $1 and s.agent_id = $2
             """,
-            session_id, agent_id,
+            session_id,
+            agent_id,
         )
         return dict(row) if row else None
     finally:
@@ -8852,8 +9433,9 @@ async def recall_message_indices(session_id: str) -> list[int]:
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            "select distinct msg_idx from session_recall where session_id = $1 "
-            "order by msg_idx", session_id)
+            "select distinct msg_idx from session_recall where session_id = $1 order by msg_idx",
+            session_id,
+        )
         return [r["msg_idx"] for r in rows]
     finally:
         await conn.close()
@@ -8866,7 +9448,10 @@ async def recall_parts(session_id: str, msg_indices: list[int]) -> list[dict]:
         rows = await conn.fetch(
             "select msg_idx, part_idx, kind, tool_name, body, at from session_recall "
             "where session_id = $1 and msg_idx = any($2::int[]) "
-            "order by msg_idx, part_idx", session_id, msg_indices)
+            "order by msg_idx, part_idx",
+            session_id,
+            msg_indices,
+        )
         return [dict(r) for r in rows]
     finally:
         await conn.close()
@@ -8888,8 +9473,9 @@ class NoteRefused(Exception):
     semantic failure, which sends the drafter to redraft."""
 
 
-async def list_agent_notes(agent_id: str | None = None, *, scope: str | None = None,
-                           active_only: bool = True) -> list[dict]:
+async def list_agent_notes(
+    agent_id: str | None = None, *, scope: str | None = None, active_only: bool = True
+) -> list[dict]:
     """Notes, oldest first. `agent_id` narrows to that drafter's rows; `scope`
     to one scope."""
     clauses, params = [], []
@@ -8904,8 +9490,7 @@ async def list_agent_notes(agent_id: str | None = None, *, scope: str | None = N
     where = (" where " + " and ".join(clauses)) if clauses else ""
     conn = await _conn()
     try:
-        rows = await conn.fetch(
-            f"select * from agent_note{where} order by created_at, id", *params)
+        rows = await conn.fetch(f"select * from agent_note{where} order by created_at, id", *params)
         return [dict(r) for r in rows]
     finally:
         await conn.close()
@@ -8937,8 +9522,10 @@ async def notes_for_prompt(agent_id: str) -> tuple[list[dict], list[dict]]:
     finally:
         await conn.close()
     notes = [dict(r) for r in rows]
-    return ([n for n in notes if n["scope"] == "operator"],
-            [n for n in notes if n["scope"] == "private"])
+    return (
+        [n for n in notes if n["scope"] == "operator"],
+        [n for n in notes if n["scope"] == "private"],
+    )
 
 
 def note_may_be_retired_by(note: dict, proposer: str) -> bool:
@@ -8960,8 +9547,8 @@ async def _lock_notes(conn) -> None:
 # here a text that still carries one is REFUSED, never cleaned — the Executor
 # writes what was approved, or nothing.
 NOTE_FORGERY_RE = re.compile(
-    r"\[note_[0-9a-f]|STANDING NOTES|THE OPERATOR'S PREFERENCES|YOUR PRIVATE NOTES",
-    re.IGNORECASE)
+    r"\[note_[0-9a-f]|STANDING NOTES|THE OPERATOR'S PREFERENCES|YOUR PRIVATE NOTES", re.IGNORECASE
+)
 
 
 def note_text_problem(text: str) -> str | None:
@@ -8971,16 +9558,21 @@ def note_text_problem(text: str) -> str | None:
 
     for ch in text:
         if note_forbidden_char(ch):
-            return ("the text carries a newline, a control character or an invisible "
-                    "character; a note is ONE line of visible text")
+            return (
+                "the text carries a newline, a control character or an invisible "
+                "character; a note is ONE line of visible text"
+            )
     if NOTE_FORGERY_RE.search(text):
-        return ("the text carries a note id or a notes-block header; a note states "
-                "one fact, never the block's own markup")
+        return (
+            "the text carries a note id or a notes-block header; a note states "
+            "one fact, never the block's own markup"
+        )
     return None
 
 
-async def _active_retirable(conn, retire_ids: list[str], proposer: str,
-                            scope: str | None = None) -> list[dict]:
+async def _active_retirable(
+    conn, retire_ids: list[str], proposer: str, scope: str | None = None
+) -> list[dict]:
     """The named notes, locked, each ACTIVE and one the proposer may retire.
     `scope` (an add's swap) also requires every one to be of that SAME scope:
     a private note may never retire an operator-scope note in passing."""
@@ -8999,19 +9591,27 @@ async def _active_retirable(conn, retire_ids: list[str], proposer: str,
         if not note_may_be_retired_by(r, proposer):
             raise NoteRefused(
                 f"note {nid} is another agent's private note; an agent retires only "
-                "its own private notes or an operator-scope note")
+                "its own private notes or an operator-scope note"
+            )
         if scope is not None and r["scope"] != scope:
             raise NoteRefused(
                 f"note {nid} is a {r['scope']}-scope note; a {scope}-scope note may "
-                f"retire only {scope}-scope notes")
+                f"retire only {scope}-scope notes"
+            )
         rows.append(r)
     return rows
 
 
 async def add_agent_note(
-    *, agent_id: str, scope: str, text: str, budget: int,
-    retire_ids: list[str] | None = None, proposal_id: str | None = None,
-    source_session_id: str | None = None, source_quote: str | None = None,
+    *,
+    agent_id: str,
+    scope: str,
+    text: str,
+    budget: int,
+    retire_ids: list[str] | None = None,
+    proposal_id: str | None = None,
+    source_session_id: str | None = None,
+    source_quote: str | None = None,
     origin: str = "agent",
 ) -> dict:
     """Retire `retire_ids` and insert the new note in ONE transaction, under the
@@ -9040,24 +9640,29 @@ async def add_agent_note(
             if proposal_id:
                 done = await conn.fetchrow(
                     "select * from agent_note where proposal_id = $1 and agent_id = $2 "
-                    "and scope = $3 and text = $4", proposal_id, agent_id, scope, text)
+                    "and scope = $3 and text = $4",
+                    proposal_id,
+                    agent_id,
+                    scope,
+                    text,
+                )
                 if done is not None:
                     retired = await conn.fetch(
-                        "select id from agent_note where retired_by = $1 order by id",
-                        proposal_id)
-                    return {**dict(done), "retired": [r["id"] for r in retired],
-                            "replayed": True}
-            retiring = await _active_retirable(conn, list(retire_ids or []), agent_id,
-                                               scope=scope)
+                        "select id from agent_note where retired_by = $1 order by id", proposal_id
+                    )
+                    return {**dict(done), "retired": [r["id"] for r in retired], "replayed": True}
+            retiring = await _active_retirable(conn, list(retire_ids or []), agent_id, scope=scope)
             if scope == "private":
                 used = await conn.fetchval(
                     "select coalesce(sum(length(text)), 0) from agent_note "
                     "where retired_at is null and scope = 'private' and agent_id = $1",
-                    agent_id)
+                    agent_id,
+                )
             else:
                 used = await conn.fetchval(
                     "select coalesce(sum(length(text)), 0) from agent_note "
-                    "where retired_at is null and scope = 'operator'")
+                    "where retired_at is null and scope = 'operator'"
+                )
             freed = sum(len(r["text"]) for r in retiring)
             after = int(used) - freed + len(text)
             if after > budget:
@@ -9069,11 +9674,15 @@ async def add_agent_note(
                     f"{budget}chars budget ({used}chars in use, {freed}chars "
                     f"retired by this proposal, {len(text)}chars added) - "
                     "nothing was written; retire a note in the same proposal "
-                    "(retire_ids) or shorten this one")
+                    "(retire_ids) or shorten this one"
+                )
             for r in retiring:
                 await conn.execute(
                     "update agent_note set retired_at = now(), retired_by = $2 "
-                    "where id = $1 and retired_at is null", r["id"], proposal_id)
+                    "where id = $1 and retired_at is null",
+                    r["id"],
+                    proposal_id,
+                )
             row = await conn.fetchrow(
                 """
                 insert into agent_note (id, agent_id, scope, text, origin, proposal_id,
@@ -9081,16 +9690,21 @@ async def add_agent_note(
                 values ($1, $2, $3, $4, $5, $6, $7, $8)
                 returning *
                 """,
-                note_id, agent_id, scope, text, origin, proposal_id,
-                source_session_id, source_quote,
+                note_id,
+                agent_id,
+                scope,
+                text,
+                origin,
+                proposal_id,
+                source_session_id,
+                source_quote,
             )
         return {**dict(row), "retired": [r["id"] for r in retiring], "replayed": False}
     finally:
         await conn.close()
 
 
-async def retire_agent_note(*, note_id: str, proposer: str,
-                            proposal_id: str | None = None) -> dict:
+async def retire_agent_note(*, note_id: str, proposer: str, proposal_id: str | None = None) -> dict:
     """Retire one ACTIVE note the proposer may retire — a timestamp and the
     retiring proposal, never a delete. `NoteRefused` otherwise. IDEMPOTENT on
     the proposal: a note already retired BY THIS SAME proposal is returned as
@@ -9102,14 +9716,19 @@ async def retire_agent_note(*, note_id: str, proposer: str,
             if proposal_id:
                 done = await conn.fetchrow(
                     "select * from agent_note where id = $1 and retired_by = $2 "
-                    "and retired_at is not null", note_id, proposal_id)
+                    "and retired_at is not null",
+                    note_id,
+                    proposal_id,
+                )
                 if done is not None:
                     return {**dict(done), "replayed": True}
             await _active_retirable(conn, [note_id], proposer)
             r = await conn.fetchrow(
                 "update agent_note set retired_at = now(), retired_by = $2 "
                 "where id = $1 and retired_at is null returning *",
-                note_id, proposal_id)
+                note_id,
+                proposal_id,
+            )
         return {**dict(r), "replayed": False}
     finally:
         await conn.close()
@@ -9119,7 +9738,8 @@ def _user_prompts(run_state: dict | None) -> list[str]:
     """Every user-prompt text of a stored transcript (archived + live window)."""
     out: list[str] = []
     for message in list((run_state or {}).get("archived") or []) + list(
-            (run_state or {}).get("messages") or []):
+        (run_state or {}).get("messages") or []
+    ):
         for part in message.get("parts", []) or []:
             if part.get("part_kind") != "user-prompt":
                 continue
@@ -9131,8 +9751,9 @@ def _user_prompts(run_state: dict | None) -> list[str]:
     return out
 
 
-async def operator_words_for_session(session_id: str, *,
-                                     live_prompts: list[str] | None = None) -> list[dict]:
+async def operator_words_for_session(
+    session_id: str, *, live_prompts: list[str] | None = None
+) -> list[dict]:
     """Every text the RECORD attributes to the operator in this session, one
     entry per source: `{source, ref, text}`. The authorship test for an
     operator-scope note and an operator-scope retirement (DL-217): each is
@@ -9215,7 +9836,8 @@ async def operator_words_for_session(session_id: str, *,
         if not text.strip():
             continue
         if r["source"] in ("chat", "lane") and not any(
-                text in p for p in await _prompts_of(r["sid"])):
+            text in p for p in await _prompts_of(r["sid"])
+        ):
             continue
         out.append({"source": r["source"], "ref": r["ref"], "text": text})
     return out
@@ -9245,8 +9867,14 @@ def _ledger_row(r) -> dict:
 
 
 async def record_calendar_plan_event(
-    *, event_id: str, calendar_id: str, kind: str, issue_key: str | None = None,
-    plan_date=None, proposal_id: str | None = None, issue_snapshot: dict | None = None,
+    *,
+    event_id: str,
+    calendar_id: str,
+    kind: str,
+    issue_key: str | None = None,
+    plan_date=None,
+    proposal_id: str | None = None,
+    issue_snapshot: dict | None = None,
 ) -> dict:
     """Write the ledger row for one event, idempotently: when the event already
     has an ACTIVE row (a retried create that read its own event back, a re-run
@@ -9273,14 +9901,22 @@ async def record_calendar_plan_event(
             on conflict (calendar_id, event_id) where retired_at is null do nothing
             returning *
             """,
-            event_id, calendar_id, kind, issue_key, plan_date, proposal_id,
+            event_id,
+            calendar_id,
+            kind,
+            issue_key,
+            plan_date,
+            proposal_id,
             json.dumps(issue_snapshot) if issue_snapshot is not None else None,
         )
         if row is not None:
             return {**_ledger_row(row), "created": True}
         existing = await conn.fetchrow(
             "select * from calendar_plan_event where calendar_id = $1 and event_id = $2 "
-            "and retired_at is null", calendar_id, event_id)
+            "and retired_at is null",
+            calendar_id,
+            event_id,
+        )
         return {**_ledger_row(existing), "created": False}
     finally:
         await conn.close()
@@ -9292,14 +9928,19 @@ async def get_calendar_plan_event(event_id: str, calendar_id: str = "primary") -
     try:
         r = await conn.fetchrow(
             "select * from calendar_plan_event where calendar_id = $1 and event_id = $2 "
-            "and retired_at is null", calendar_id, event_id)
+            "and retired_at is null",
+            calendar_id,
+            event_id,
+        )
         return _ledger_row(r) if r else None
     finally:
         await conn.close()
 
 
 async def list_calendar_plan_events(
-    *, event_ids: list[str] | None = None, plan_date=None,
+    *,
+    event_ids: list[str] | None = None,
+    plan_date=None,
     calendar_id: str = "primary",
 ) -> list[dict]:
     """ACTIVE ledger rows of one calendar: those whose event id is in
@@ -9321,15 +9962,21 @@ async def list_calendar_plan_events(
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            "select * from calendar_plan_event where " + " and ".join(clauses)
-            + " order by created_at, id", *params)
+            "select * from calendar_plan_event where "
+            + " and ".join(clauses)
+            + " order by created_at, id",
+            *params,
+        )
         return [_ledger_row(r) for r in rows]
     finally:
         await conn.close()
 
 
 async def retire_calendar_plan_event(
-    event_id: str, calendar_id: str = "primary", *, proposal_id: str | None = None,
+    event_id: str,
+    calendar_id: str = "primary",
+    *,
+    proposal_id: str | None = None,
 ) -> dict | None:
     """Retire the event's ACTIVE row (a timestamp and the retiring proposal);
     None when the ledger did not know the event."""
@@ -9341,14 +9988,20 @@ async def retire_calendar_plan_event(
              where calendar_id = $1 and event_id = $2 and retired_at is null
             returning *
             """,
-            calendar_id, event_id, proposal_id)
+            calendar_id,
+            event_id,
+            proposal_id,
+        )
         return _ledger_row(r) if r else None
     finally:
         await conn.close()
 
 
 async def move_calendar_plan_event_date(
-    event_id: str, calendar_id: str = "primary", *, plan_date,
+    event_id: str,
+    calendar_id: str = "primary",
+    *,
+    plan_date,
 ) -> dict | None:
     """Set an ACTIVE work block's local plan date (a moved block keeps its date
     right, DL-221 step 4a). None when the ledger holds no active work block for
@@ -9366,14 +10019,20 @@ async def move_calendar_plan_event_date(
                and kind = 'work_block'
             returning *
             """,
-            calendar_id, event_id, plan_date)
+            calendar_id,
+            event_id,
+            plan_date,
+        )
         return _ledger_row(r) if r else None
     finally:
         await conn.close()
 
 
 async def set_calendar_plan_event_snapshot(
-    event_id: str, calendar_id: str = "primary", *, issue_snapshot: dict | None,
+    event_id: str,
+    calendar_id: str = "primary",
+    *,
+    issue_snapshot: dict | None,
 ) -> dict | None:
     """Replace an ACTIVE work block's issue snapshot with one the Executor just
     read from the tracker (a moved block). None when the ledger holds no active
@@ -9387,8 +10046,10 @@ async def set_calendar_plan_event_snapshot(
                and kind = 'work_block'
             returning *
             """,
-            calendar_id, event_id,
-            json.dumps(issue_snapshot) if issue_snapshot is not None else None)
+            calendar_id,
+            event_id,
+            json.dumps(issue_snapshot) if issue_snapshot is not None else None,
+        )
         return _ledger_row(r) if r else None
     finally:
         await conn.close()
@@ -9413,30 +10074,38 @@ async def advance_calendar_plan_event_snapshots(advances: list[dict]) -> int:
                    and issue_snapshot is not distinct from $3::jsonb
                 returning 1
                 """,
-                a.get("calendar_id") or "primary", a["event_id"],
+                a.get("calendar_id") or "primary",
+                a["event_id"],
                 json.dumps(a["from"]) if a.get("from") is not None else None,
-                json.dumps(a["to"]))
+                json.dumps(a["to"]),
+            )
             moved += 1 if r else 0
     finally:
         await conn.close()
     return moved
 
 
-async def calendar_plan_event_retired_by(event_id: str, calendar_id: str,
-                                         proposal_id: str) -> bool:
+async def calendar_plan_event_retired_by(event_id: str, calendar_id: str, proposal_id: str) -> bool:
     """Did `proposal_id` retire a ledger row of this event? (A re-run of the
     same release is then a no-op, not a refusal.)"""
     conn = await _conn()
     try:
-        return bool(await conn.fetchval(
-            "select 1 from calendar_plan_event where calendar_id = $1 and event_id = $2 "
-            "and retired_by = $3 limit 1", calendar_id, event_id, proposal_id))
+        return bool(
+            await conn.fetchval(
+                "select 1 from calendar_plan_event where calendar_id = $1 and event_id = $2 "
+                "and retired_by = $3 limit 1",
+                calendar_id,
+                event_id,
+                proposal_id,
+            )
+        )
     finally:
         await conn.close()
 
 
-async def list_calendar_plan_events_for_date(plan_date, calendar_id: str | None = None,
-                                             *, include_retired: bool = True) -> list[dict]:
+async def list_calendar_plan_events_for_date(
+    plan_date, calendar_id: str | None = None, *, include_retired: bool = True
+) -> list[dict]:
     """Every ledger work block planned for `plan_date`, retired ones included
     by default: the evening review reports a block that was deleted as retired,
     not as never planned."""
@@ -9453,8 +10122,11 @@ async def list_calendar_plan_events_for_date(plan_date, calendar_id: str | None 
     conn = await _conn()
     try:
         rows = await conn.fetch(
-            "select * from calendar_plan_event where " + " and ".join(clauses)
-            + " order by created_at, id", *params)
+            "select * from calendar_plan_event where "
+            + " and ".join(clauses)
+            + " order by created_at, id",
+            *params,
+        )
         return [_ledger_row(r) for r in rows]
     finally:
         await conn.close()
@@ -9467,6 +10139,7 @@ async def list_calendar_plan_events_for_date(plan_date, calendar_id: str | None 
 # tests/test_day_plan.py pins that). Rows are never deleted: a later record
 # supersedes an earlier one by a timestamp.
 
+
 def _plan_row(r) -> dict:
     import json as _json
 
@@ -9476,8 +10149,9 @@ def _plan_row(r) -> dict:
     return out
 
 
-async def record_day_plan(*, plan_date, items: list[dict], proposal_id: str | None = None,
-                          action_key: str | None = None) -> dict:
+async def record_day_plan(
+    *, plan_date, items: list[dict], proposal_id: str | None = None, action_key: str | None = None
+) -> dict:
     """Store the day's plan and supersede the date's earlier ACTIVE plan, in one
     transaction under a per-date advisory lock. A repeat of the SAME action
     (`action_key`, DL-219) returns the plan its first attempt stored with
@@ -9490,28 +10164,40 @@ async def record_day_plan(*, plan_date, items: list[dict], proposal_id: str | No
     conn = await _conn()
     try:
         async with conn.transaction():
-            await conn.execute("select pg_advisory_xact_lock(hashtextextended($1, 0))",
-                               f"day_plan:{plan_date.isoformat()}")
+            await conn.execute(
+                "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"day_plan:{plan_date.isoformat()}",
+            )
             if action_key:
                 existing = await conn.fetchrow(
-                    "select * from day_plan where action_key = $1", action_key)
+                    "select * from day_plan where action_key = $1", action_key
+                )
                 if existing is not None:
-                    return {**_plan_row(existing), "already_existed": True,
-                            "superseded_id": None}
+                    return {**_plan_row(existing), "already_existed": True, "superseded_id": None}
             prior = await conn.fetchrow(
                 """
                 update day_plan set superseded_at = now()
                  where plan_date = $1 and superseded_at is null
                 returning id
-                """, plan_date)
+                """,
+                plan_date,
+            )
             row = await conn.fetchrow(
                 """
                 insert into day_plan (plan_date, proposal_id, action_key, items)
                 values ($1, $2, $3, $4::jsonb)
                 returning *
-                """, plan_date, proposal_id, action_key, _json.dumps(items, default=str))
-            return {**_plan_row(row), "already_existed": False,
-                    "superseded_id": prior["id"] if prior else None}
+                """,
+                plan_date,
+                proposal_id,
+                action_key,
+                _json.dumps(items, default=str),
+            )
+            return {
+                **_plan_row(row),
+                "already_existed": False,
+                "superseded_id": prior["id"] if prior else None,
+            }
     finally:
         await conn.close()
 
@@ -9535,15 +10221,20 @@ async def get_day_plan(plan_date) -> dict | None:
     conn = await _conn()
     try:
         r = await conn.fetchrow(
-            "select * from day_plan where plan_date = $1 and superseded_at is null", plan_date)
+            "select * from day_plan where plan_date = $1 and superseded_at is null", plan_date
+        )
         return _plan_row(r) if r else None
     finally:
         await conn.close()
 
 
-async def record_day_plan_outcomes(*, plan_date, outcomes: list[dict],
-                                   proposal_id: str | None = None,
-                                   action_key: str | None = None) -> dict:
+async def record_day_plan_outcomes(
+    *,
+    plan_date,
+    outcomes: list[dict],
+    proposal_id: str | None = None,
+    action_key: str | None = None,
+) -> dict:
     """Record the review's outcomes for one date, each replacing the ACTIVE row
     of its (date, issue) by timestamp. `planned` is computed HERE from the
     date's active stored plan, never taken from the caller. One transaction
@@ -9556,18 +10247,24 @@ async def record_day_plan_outcomes(*, plan_date, outcomes: list[dict],
     conn = await _conn()
     try:
         async with conn.transaction():
-            await conn.execute("select pg_advisory_xact_lock(hashtextextended($1, 0))",
-                               f"day_plan:{plan_date.isoformat()}")
+            await conn.execute(
+                "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"day_plan:{plan_date.isoformat()}",
+            )
             if action_key:
                 existing = await conn.fetch(
-                    "select * from day_plan_outcome where action_key = $1 order by id",
-                    action_key)
+                    "select * from day_plan_outcome where action_key = $1 order by id", action_key
+                )
                 if existing:
-                    return {"rows": [dict(r) for r in existing], "already_existed": True,
-                            "replaced": []}
+                    return {
+                        "rows": [dict(r) for r in existing],
+                        "already_existed": True,
+                        "replaced": [],
+                    }
             plan = await conn.fetchrow(
                 "select items from day_plan where plan_date = $1 and superseded_at is null",
-                plan_date)
+                plan_date,
+            )
             items = _plan_row(plan)["items"] if plan else []
             on_plan = {str(i.get("issue_key")) for i in items}
             rows, replaced = [], []
@@ -9578,7 +10275,10 @@ async def record_day_plan_outcomes(*, plan_date, outcomes: list[dict],
                     update day_plan_outcome set superseded_at = now()
                      where plan_date = $1 and issue_key = $2 and superseded_at is null
                     returning id
-                    """, plan_date, key)
+                    """,
+                    plan_date,
+                    key,
+                )
                 if old is not None:
                     replaced.append(key)
                 r = await conn.fetchrow(
@@ -9589,9 +10289,15 @@ async def record_day_plan_outcomes(*, plan_date, outcomes: list[dict],
                     values ($1, $2, $3, $4, $5, $6, $7, $8)
                     returning *
                     """,
-                    plan_date, key, bool(o["done"]),
+                    plan_date,
+                    key,
+                    bool(o["done"]),
                     (float(o["actual_hours"]) if o.get("actual_hours") is not None else None),
-                    o.get("note"), key in on_plan, proposal_id, action_key)
+                    o.get("note"),
+                    key in on_plan,
+                    proposal_id,
+                    action_key,
+                )
                 rows.append(dict(r))
             return {"rows": rows, "already_existed": False, "replaced": replaced}
     finally:
@@ -9608,7 +10314,9 @@ async def list_day_plan_outcomes(plan_date) -> list[dict]:
     try:
         rows = await conn.fetch(
             "select * from day_plan_outcome where plan_date = $1 and superseded_at is null "
-            "order by issue_key", plan_date)
+            "order by issue_key",
+            plan_date,
+        )
         return [dict(r) for r in rows]
     finally:
         await conn.close()
@@ -9628,7 +10336,9 @@ async def list_day_plans_between(since, until) -> list[dict]:
         rows = await conn.fetch(
             "select * from day_plan where superseded_at is null "
             "and plan_date between $1 and $2 order by plan_date",
-            _as_date_arg(since), _as_date_arg(until))
+            _as_date_arg(since),
+            _as_date_arg(until),
+        )
         return [_plan_row(r) for r in rows]
     finally:
         await conn.close()
@@ -9641,7 +10351,9 @@ async def list_day_plan_outcomes_between(since, until) -> list[dict]:
         rows = await conn.fetch(
             "select * from day_plan_outcome where superseded_at is null "
             "and plan_date between $1 and $2 order by plan_date, issue_key",
-            _as_date_arg(since), _as_date_arg(until))
+            _as_date_arg(since),
+            _as_date_arg(until),
+        )
         return [dict(r) for r in rows]
     finally:
         await conn.close()
@@ -9655,7 +10367,8 @@ async def list_active_work_blocks_from(first_date) -> list[dict]:
         rows = await conn.fetch(
             "select * from calendar_plan_event where kind = 'work_block' "
             "and retired_at is null and plan_date >= $1 order by plan_date, created_at, id",
-            _as_date_arg(first_date))
+            _as_date_arg(first_date),
+        )
         return [_ledger_row(r) for r in rows]
     finally:
         await conn.close()
@@ -9683,7 +10396,10 @@ async def list_work_blocks_created_between(start, end) -> list[dict]:
               from calendar_plan_event e
              where e.kind = 'work_block' and e.created_at >= $1 and e.created_at < $2
              order by e.created_at, e.id
-            """, start, end)
+            """,
+            start,
+            end,
+        )
         return [dict(r) for r in rows]
     finally:
         await conn.close()
@@ -9713,7 +10429,10 @@ async def plan_padding_samples(since, until) -> list[dict]:
              where o.superseded_at is null and o.actual_hours is not null
                and o.plan_date between $1 and $2
              order by o.plan_date, o.issue_key
-            """, since, until)
+            """,
+            since,
+            until,
+        )
         return [dict(r) for r in rows]
     finally:
         await conn.close()

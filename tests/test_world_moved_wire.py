@@ -29,8 +29,7 @@ from tests.fake_world import fake_world
 
 pytestmark = needs_pg
 
-LINK_FIELDS = {"id", "status", "verdict", "approver", "decided_at", "failure",
-               "chain_exhausted"}
+LINK_FIELDS = {"id", "status", "verdict", "approver", "decided_at", "failure", "chain_exhausted"}
 REDRAFT_FIELDS = {"of", "root", "cause", "world_moved_count"}
 
 
@@ -42,27 +41,59 @@ def pinned(monkeypatch):
 
 
 def _moved(n: int) -> dict:
-    return {"target": "confluence:page:42", "expected": f"v{n}", "actual": f"v{n + 1}",
-            "what_moved": f"page 42 moved from v{n} to v{n + 1}"}
+    return {
+        "target": "confluence:page:42",
+        "expected": f"v{n}",
+        "actual": f"v{n + 1}",
+        "what_moved": f"page 42 moved from v{n} to v{n + 1}",
+    }
 
 
-async def _proposal(sid: str, *, redraft: dict | None = None, status: str = "AWAITING_HUMAN",
-                    verdict: str | None = None, approver: str = "operator",
-                    failed: dict | None = None, exhausted: bool = False) -> str:
+async def _proposal(
+    sid: str,
+    *,
+    redraft: dict | None = None,
+    status: str = "AWAITING_HUMAN",
+    verdict: str | None = None,
+    approver: str = "operator",
+    failed: dict | None = None,
+    exhausted: bool = False,
+) -> str:
     pid = "prop_wm_" + uuid.uuid4().hex[:10]
     await repo.save_proposal(
-        pid, sid, "confluence-expert", "Update page 42",
-        [{"capability": "confluence.update_page", "arguments": {"page_id": "42"},
-          "target_ref": {"system": "confluence"}, "reversibility": "reversible"}],
-        [], "page 42 is updated", pid, redraft=redraft,
+        pid,
+        sid,
+        "confluence-expert",
+        "Update page 42",
+        [
+            {
+                "capability": "confluence.update_page",
+                "arguments": {"page_id": "42"},
+                "target_ref": {"system": "confluence"},
+                "reversibility": "reversible",
+            }
+        ],
+        [],
+        "page 42 is updated",
+        pid,
+        redraft=redraft,
     )
     if verdict:
-        await events.emit("proposal.decided", ref_id=pid,
-                          payload={"verdict": verdict, "session_id": sid}, actor=approver)
+        await events.emit(
+            "proposal.decided",
+            ref_id=pid,
+            payload={"verdict": verdict, "session_id": sid},
+            actor=approver,
+        )
     if failed is not None:
-        payload = {"failed_capability": "confluence.update_page",
-                   "error": "stale version", "transient": False,
-                   "completed_actions": [], "session_id": sid, "world_moved": failed}
+        payload = {
+            "failed_capability": "confluence.update_page",
+            "error": "stale version",
+            "transient": False,
+            "completed_actions": [],
+            "session_id": sid,
+            "world_moved": failed,
+        }
         if exhausted:
             payload["chain_exhausted"] = True
         await events.emit("proposal.failed", ref_id=pid, payload=payload, actor="system")
@@ -79,11 +110,21 @@ async def _exhausted_chain() -> dict:
     ids = [root]
     for n in (1, 2, 3):
         last = n == 3
-        ids.append(await _proposal(
-            sid, status="FAILED", verdict="approved", failed=_moved(n + 1), exhausted=last,
-            redraft={"of": ids[-1], "root": root, "cause": "world_moved",
-                     "world_moved_count": n},
-        ))
+        ids.append(
+            await _proposal(
+                sid,
+                status="FAILED",
+                verdict="approved",
+                failed=_moved(n + 1),
+                exhausted=last,
+                redraft={
+                    "of": ids[-1],
+                    "root": root,
+                    "cause": "world_moved",
+                    "world_moved_count": n,
+                },
+            )
+        )
     return {"sid": sid, "root": root, "ids": ids}
 
 
@@ -98,8 +139,12 @@ async def test_get_proposal_carries_the_link_and_the_chain_oldest_first():
     row = jsonable_encoder(await routes.get_proposal(a3))
 
     assert set(row["redraft"]) == REDRAFT_FIELDS
-    assert row["redraft"] == {"of": a2, "root": root, "cause": "world_moved",
-                              "world_moved_count": 3}
+    assert row["redraft"] == {
+        "of": a2,
+        "root": root,
+        "cause": "world_moved",
+        "world_moved_count": 3,
+    }
     assert row["redraft_limit"] == 3
     assert [l["id"] for l in row["chain"]] == [root, a1, a2], "oldest first, root to parent"
     for link in row["chain"]:
@@ -143,7 +188,8 @@ async def test_a_rejected_redraft_names_its_cause_and_the_rejection_in_the_chain
     await repo.create_running_session(sid, "confluence-expert")
     root = await _proposal(sid, status="REJECTED", verdict="rejected")
     redraft = await _proposal(
-        sid, redraft={"of": root, "root": root, "cause": "rejected", "world_moved_count": 0})
+        sid, redraft={"of": root, "root": root, "cause": "rejected", "world_moved_count": 0}
+    )
 
     row = jsonable_encoder(await routes.get_proposal(redraft))
 
@@ -158,8 +204,9 @@ async def test_a_link_deleted_mid_chain_ends_the_walk_without_failing_the_page()
     sid = "sess_wm_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(sid, "confluence-expert")
     pid = await _proposal(
-        sid, redraft={"of": "prop_gone", "root": "prop_gone", "cause": "failed",
-                      "world_moved_count": 0})
+        sid,
+        redraft={"of": "prop_gone", "root": "prop_gone", "cause": "failed", "world_moved_count": 0},
+    )
 
     row = jsonable_encoder(await routes.get_proposal(pid))
 

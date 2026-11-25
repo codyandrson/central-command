@@ -65,6 +65,7 @@ WHERE_BY_STEP = {
 
 # ── the manifest ─────────────────────────────────────────────────────────────
 
+
 def load_rows(path: Path = STEPS) -> list[dict[str, str]]:
     """Every manifest row, in run order. `-` (an empty field) reads as ''."""
     rows = []
@@ -75,8 +76,7 @@ def load_rows(path: Path = STEPS) -> list[dict[str, str]]:
         fields = line.split("\t")
         if len(fields) != len(COLUMNS):
             raise SystemExit(
-                f"{path}: expected {len(COLUMNS)} tab-separated fields, got "
-                f"{len(fields)}: {line!r}"
+                f"{path}: expected {len(COLUMNS)} tab-separated fields, got {len(fields)}: {line!r}"
             )
         rows.append({k: ("" if v == "-" else v) for k, v in zip(COLUMNS, fields)})
     if not rows:
@@ -106,6 +106,7 @@ def question_defaults(path: Path = QUESTIONS) -> dict[str, str]:
 
 
 # ── WHERE an operator acts ───────────────────────────────────────────────────
+
 
 def _port_url(defaults: dict[str, str], key: str, path: str) -> str:
     port = defaults.get(key) or f"<{key}>"
@@ -160,11 +161,11 @@ def md_inline(text: str) -> str:
     spans, and outside code spans `<`, `>` and `*` are escaped so a placeholder
     like `<CC_LITELLM_PORT>` or a glob like `skills/*/` survives rendering."""
     parts = text.split("`")
-    for i in range(0, len(parts), 2):          # even = outside an existing code span
+    for i in range(0, len(parts), 2):  # even = outside an existing code span
         seg = parts[i]
         out, last = [], 0
         for m in re.finditer(f"{_URL.pattern}|{_KEY.pattern}", seg):
-            out.append(_escape(seg[last:m.start()]))
+            out.append(_escape(seg[last : m.start()]))
             out.append(f"`{m.group(0)}`")
             last = m.end()
         out.append(_escape(seg[last:]))
@@ -219,8 +220,11 @@ def render() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--check", action="store_true",
-                    help="exit 1 with a diff when the committed CHECKLIST.md is stale")
+    ap.add_argument(
+        "--check",
+        action="store_true",
+        help="exit 1 with a diff when the committed CHECKLIST.md is stale",
+    )
     args = ap.parse_args(argv)
     fresh = render()
     if args.check:
@@ -228,12 +232,18 @@ def main(argv: list[str] | None = None) -> int:
         if current == fresh:
             print(f"{OUT.relative_to(ROOT)} is current")
             return 0
-        sys.stdout.writelines(difflib.unified_diff(
-            current.splitlines(keepends=True), fresh.splitlines(keepends=True),
-            fromfile=f"{OUT.relative_to(ROOT)} (committed)",
-            tofile=f"{OUT.relative_to(ROOT)} (fresh render)"))
-        print(f"\n{OUT.relative_to(ROOT)} is STALE — run: python scripts/render_checklist.py",
-              file=sys.stderr)
+        sys.stdout.writelines(
+            difflib.unified_diff(
+                current.splitlines(keepends=True),
+                fresh.splitlines(keepends=True),
+                fromfile=f"{OUT.relative_to(ROOT)} (committed)",
+                tofile=f"{OUT.relative_to(ROOT)} (fresh render)",
+            )
+        )
+        print(
+            f"\n{OUT.relative_to(ROOT)} is STALE — run: python scripts/render_checklist.py",
+            file=sys.stderr,
+        )
         return 1
     with open(OUT, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(fresh)

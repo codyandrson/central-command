@@ -54,8 +54,18 @@ MARK_WIKI = "MARKER-wiki-token-0007"
 MARK_EXCH = "MARKER-exchange-pw-0008"
 MARK_NEO = "MARKER-neo4j-pw-0009"
 MARK_AGENT = "MARKER-agent-key-0010"
-MARKERS = (MARK_LLM, MARK_ADMIN, MARK_DB, MARK_SBX, MARK_MAIL, MARK_JIRA, MARK_WIKI,
-           MARK_EXCH, MARK_NEO, MARK_AGENT)
+MARKERS = (
+    MARK_LLM,
+    MARK_ADMIN,
+    MARK_DB,
+    MARK_SBX,
+    MARK_MAIL,
+    MARK_JIRA,
+    MARK_WIKI,
+    MARK_EXCH,
+    MARK_NEO,
+    MARK_AGENT,
+)
 
 PROXY = "http://proxy.example.com:4000"
 RUNNER = "http://127.0.0.1:8090"
@@ -91,7 +101,9 @@ class Fakes:
 
     def __init__(self):
         self.responses: dict[str, object] = {
-            f"{PROXY}/v1/models": httpx.Response(200, json={"data": [{"id": ALIAS}, {"id": "cc-embedding"}]}),
+            f"{PROXY}/v1/models": httpx.Response(
+                200, json={"data": [{"id": ALIAS}, {"id": "cc-embedding"}]}
+            ),
             f"{RUNNER}/openapi.json": httpx.Response(200, json={}),
             f"{CRAWLER}/healthz": httpx.Response(200, json={"ok": True}),
             COCKPIT: httpx.Response(200, text="<html>"),
@@ -105,8 +117,10 @@ class Fakes:
         self.vector = [0.0] * DIM
         self.embed_error: Exception | None = None
         self.status: object = {"status": "ok", "message": "connected"}
-        self.patches = {"1729-invalidation-scope.patch": "patched",
-                        "1666-reasoning-first-dedupe.patch": "patched"}
+        self.patches = {
+            "1729-invalidation-scope.patch": "patched",
+            "1666-reasoning-first-dedupe.patch": "patched",
+        }
         self.refs: object = [{"uuid": "abc", "conversation_id": "t1"}]
         self.atlassian = {"checks": 9, "failures": 0, "fail_lines": []}
         self.rerank_error: Exception | None = None
@@ -317,8 +331,11 @@ def _break_proxy_key(f, mp):
 
 def _break_completion(f, mp):
     def refuse(messages, info):
-        raise ModelHTTPError(status_code=401, model_name=ALIAS,
-                             body={"error": {"message": f"Invalid key {MARK_LLM} sk-abcd1234"}})
+        raise ModelHTTPError(
+            status_code=401,
+            model_name=ALIAS,
+            body={"error": {"message": f"Invalid key {MARK_LLM} sk-abcd1234"}},
+        )
 
     f.completion = refuse
     return "CC_LLM_API_KEY"
@@ -331,26 +348,35 @@ def _break_embedding(f, mp):
 
 def _break_embedding_key(f, mp):
     request = httpx.Request("POST", f"{PROXY}/v1/embeddings")
-    f.embed_error = httpx.HTTPStatusError("401", request=request,
-                                          response=httpx.Response(401, request=request))
+    f.embed_error = httpx.HTTPStatusError(
+        "401", request=request, response=httpx.Response(401, request=request)
+    )
     return "CC_LLM_API_KEY"
 
 
 def _break_graph(f, mp):
-    f.status = {"status": "error", "error": "ServiceUnavailable",
-                "message": "ServiceUnavailable: Couldn't connect"}
+    f.status = {
+        "status": "error",
+        "error": "ServiceUnavailable",
+        "message": "ServiceUnavailable: Couldn't connect",
+    }
     return "CC_NEO4J_URL"
 
 
 def _break_graph_neo4j(f, mp):
-    f.status = {"status": "error", "error": "AuthError",
-                "message": f"AuthError: unauthorized ({MARK_NEO})"}
+    f.status = {
+        "status": "error",
+        "error": "AuthError",
+        "message": f"AuthError: unauthorized ({MARK_NEO})",
+    }
     return "CC_NEO4J_PASSWORD"
 
 
 def _break_graph_patches(f, mp):
-    f.patches = {"1729-invalidation-scope.patch": "pristine",
-                 "1666-reasoning-first-dedupe.patch": "pristine"}
+    f.patches = {
+        "1729-invalidation-scope.patch": "pristine",
+        "1666-reasoning-first-dedupe.patch": "pristine",
+    }
     return "python scripts/apply_graphiti_patches.py"
 
 
@@ -368,7 +394,8 @@ def _break_graph_embedder(f, mp):
 def _break_graph_rerank(f, mp):
     request = httpx.Request("POST", f"{PROXY}/rerank")
     f.rerank_error = graphiti_client.RerankHTTPError(
-        "HTTP 403", response=httpx.Response(403, request=request), body=None)
+        "HTTP 403", response=httpx.Response(403, request=request), body=None
+    )
     return "CC_GRAPH_RERANK_ALIAS"
 
 
@@ -395,7 +422,8 @@ def _break_crawler(f, mp):
 
 def _break_mail(f, mp):
     f.refs = email_facade.EmailFacadeError(
-        f"email façade list failed: HTTP 401 token {MARK_MAIL} rejected")
+        f"email façade list failed: HTTP 401 token {MARK_MAIL} rejected"
+    )
     return "CC_EMAIL_FACADE_TOKEN"
 
 
@@ -410,8 +438,11 @@ def _break_mail_exchange(f, mp):
 
 
 def _break_integrations(f, mp):
-    f.atlassian = {"checks": 9, "failures": 1,
-                   "fail_lines": ["FAIL jira GET /rest/api/3/myself — 401 Unauthorized"]}
+    f.atlassian = {
+        "checks": 9,
+        "failures": 1,
+        "fail_lines": ["FAIL jira GET /rest/api/3/myself — 401 Unauthorized"],
+    }
     return "python scripts/atlassian_probe.py"
 
 
@@ -431,19 +462,27 @@ def _break_links(f, mp):
 
 
 BREAKS = [
-    ("spine", _break_spine), ("spine", _break_spine_roster), ("spine", _break_spine_schema),
-    ("proxy-as-app", _break_proxy), ("proxy-as-app", _break_proxy_key),
+    ("spine", _break_spine),
+    ("spine", _break_spine_roster),
+    ("spine", _break_spine_schema),
+    ("proxy-as-app", _break_proxy),
+    ("proxy-as-app", _break_proxy_key),
     ("completion-as-app", _break_completion),
-    ("embedding-as-app", _break_embedding), ("embedding-as-app", _break_embedding_key),
-    ("graph", _break_graph), ("graph", _break_graph_neo4j),
+    ("embedding-as-app", _break_embedding),
+    ("embedding-as-app", _break_embedding_key),
+    ("graph", _break_graph),
+    ("graph", _break_graph_neo4j),
     ("graph-patches", _break_graph_patches),
     ("graph-embedder", _break_graph_embedder),
-    ("graph-rerank", _break_graph_rerank), ("graph-rerank", _break_graph_rerank_kind),
+    ("graph-rerank", _break_graph_rerank),
+    ("graph-rerank", _break_graph_rerank_kind),
     ("graph-rerank", _break_graph_rerank_malformed),
     ("sandbox", _break_sandbox),
     ("crawler", _break_crawler),
-    ("mail", _break_mail), ("mail", _break_mail_exchange),
-    ("integrations", _break_integrations), ("integrations", _break_integrations_creds),
+    ("mail", _break_mail),
+    ("mail", _break_mail_exchange),
+    ("integrations", _break_integrations),
+    ("integrations", _break_integrations_creds),
     ("cockpit", _break_cockpit),
     ("links", _break_links),
 ]
@@ -471,7 +510,9 @@ async def test_each_check_fails_by_name_and_names_its_remedy(fakes, monkeypatch,
     assert_no_marker(json.dumps(doc))
 
 
-async def test_graph_embedder_passes_on_an_empty_graph_and_skips_when_nothing_answers(fakes, monkeypatch):
+async def test_graph_embedder_passes_on_an_empty_graph_and_skips_when_nothing_answers(
+    fakes, monkeypatch
+):
     """A fresh install has no vectors and no record: it must pass the installer's
     verify. A check that cannot get an answer (Neo4j or the embedder down) is not
     this row's finding; the graph and embedding-as-app rows say it."""
@@ -511,7 +552,9 @@ async def test_graph_embedder_asks_afresh_and_its_row_sits_beside_graphiti(fakes
 
 
 @pytest.mark.parametrize("key", ["llm_api_key", "llm_base_url"])
-async def test_an_empty_agent_key_or_url_fails_proxy_and_completion_naming_it(fakes, monkeypatch, key):
+async def test_an_empty_agent_key_or_url_fails_proxy_and_completion_naming_it(
+    fakes, monkeypatch, key
+):
     monkeypatch.setattr(settings, key, "")
     env_key = f"CC_{key.upper()}"
     checks = by_name(await selfcheck.run(mode="cli"))
@@ -545,7 +588,8 @@ async def test_pre_boot_skips_the_cockpit_and_the_sandbox(fakes):
     for name in ("cockpit", "sandbox"):
         assert checks[name]["status"] == "skip"
         assert selfcheck.protocol_line(checks[name]) == (
-            f"PASS selfcheck-{name}: not checked before boot — boot starts it")
+            f"PASS selfcheck-{name}: not checked before boot — boot starts it"
+        )
     assert checks["links"]["status"] == "pass"
     assert "CC_SANDBOX_DOCS_URL not checked before boot" in checks["links"]["message"]
     assert not any(u.startswith(RUNNER) or u == COCKPIT for u, _ in fakes.calls)
@@ -627,11 +671,17 @@ def _all_broken(f, monkeypatch):
     """Every dependency fails, with exception text that tries to carry the
     credentials out — the worst case for a leak."""
     f.responses.clear()
-    f.pg_error = OSError(f"password authentication failed: {MARK_DB} postgresql://cc:{MARK_DB}@h/cc")
+    f.pg_error = OSError(
+        f"password authentication failed: {MARK_DB} postgresql://cc:{MARK_DB}@h/cc"
+    )
     f.embed_error = RuntimeError(f"Bearer {MARK_LLM} rejected")
     f.status = RuntimeError(f"neo4j auth {MARK_NEO}")
     f.refs = email_facade.EmailFacadeError(f"HTTP 500 {MARK_MAIL} op@example.com")
-    f.atlassian = {"checks": 2, "failures": 2, "fail_lines": [f"FAIL jira GET /x — 401 {MARK_JIRA}"]}
+    f.atlassian = {
+        "checks": 2,
+        "failures": 2,
+        "fail_lines": [f"FAIL jira GET /x — 401 {MARK_JIRA}"],
+    }
     monkeypatch.setattr(settings, "exchange_url", "https://mail.example.com/ews/exchange.asmx")
     monkeypatch.setattr(settings, "exchange_username", "EXAMPLE\\op")
     monkeypatch.setattr(settings, "exchange_password", MARK_EXCH)
@@ -643,8 +693,11 @@ def _all_broken(f, monkeypatch):
     monkeypatch.setattr(selfcheck, "_exchange_one_ref", exchange_boom)
 
     def refuse(messages, info):
-        raise ModelHTTPError(status_code=500, model_name=ALIAS,
-                             body={"error": {"message": f"{MARK_LLM} {MARK_AGENT} {MARK_SBX}"}})
+        raise ModelHTTPError(
+            status_code=500,
+            model_name=ALIAS,
+            body={"error": {"message": f"{MARK_LLM} {MARK_AGENT} {MARK_SBX}"}},
+        )
 
     f.completion = refuse
 
@@ -693,7 +746,8 @@ def _default_install_mail(monkeypatch):
 async def test_a_default_install_does_not_dial_a_facade_it_never_deployed(fakes, monkeypatch):
     _default_install_mail(monkeypatch)
     fakes.refs = email_facade.EmailFacadeError(
-        "email façade list unreachable at <url>: All connection attempts failed")
+        "email façade list unreachable at <url>: All connection attempts failed"
+    )
     doc = await selfcheck.run(mode="cli", pre_boot=True)
     mail = by_name(doc)["mail"]
     assert mail["status"] == "skip", mail
@@ -715,7 +769,8 @@ async def test_the_feed_on_with_the_facade_unreachable_fails_naming_its_url(fake
     _default_install_mail(monkeypatch)
     monkeypatch.setattr(settings, "feed_enabled", True)
     fakes.refs = email_facade.EmailFacadeError(
-        "email façade list unreachable at http://127.0.0.1:5678/x: All connection attempts failed")
+        "email façade list unreachable at http://127.0.0.1:5678/x: All connection attempts failed"
+    )
     mail = by_name(await selfcheck.run(mode="cli"))["mail"]
     assert mail["status"] == "fail", mail
     assert mail["remedy"] == "CC_EMAIL_FACADE_URL"
@@ -733,7 +788,9 @@ async def test_the_feed_on_with_no_facade_token_fails_naming_the_token(fakes, mo
 
 
 @pytest.mark.parametrize("schedule_on,expected", [(True, "pass"), (False, "skip")])
-async def test_the_heartbeat_mail_poll_counts_as_reading_mail(fakes, monkeypatch, schedule_on, expected):
+async def test_the_heartbeat_mail_poll_counts_as_reading_mail(
+    fakes, monkeypatch, schedule_on, expected
+):
     """The heartbeat's feed.poll action runs the same poll_once — with its loop
     on AND the mail-poll schedule enabled, the app reads mail with the feed's
     own loop off."""
@@ -751,7 +808,9 @@ async def test_the_heartbeat_mail_poll_counts_as_reading_mail(fakes, monkeypatch
 
 
 @pytest.mark.parametrize("feed", [True, False])
-async def test_exchange_configured_is_checked_whether_or_not_the_feed_is_on(fakes, monkeypatch, feed):
+async def test_exchange_configured_is_checked_whether_or_not_the_feed_is_on(
+    fakes, monkeypatch, feed
+):
     _default_install_mail(monkeypatch)
     monkeypatch.setattr(settings, "feed_enabled", feed)
     monkeypatch.setattr(exchange, "configured", lambda: True)
@@ -779,7 +838,9 @@ async def test_half_configured_exchange_fails_whether_or_not_the_feed_is_on(fake
 
 
 @pytest.mark.parametrize("accepts", [True, False])
-async def test_a_spine_connect_timeout_says_timed_out_and_which_half_stalled(fakes, monkeypatch, accepts):
+async def test_a_spine_connect_timeout_says_timed_out_and_which_half_stalled(
+    fakes, monkeypatch, accepts
+):
     fakes.pg_error = TimeoutError()
     probed = []
 
@@ -812,8 +873,14 @@ def test_the_checks_imports_happen_before_any_clock_starts(monkeypatch):
 
     async def one(check, ctx):
         order.append(check.name)
-        return {"name": check.name, "status": "pass", "message": "", "remedy": None,
-                "system": None, "duration_ms": 0}
+        return {
+            "name": check.name,
+            "status": "pass",
+            "message": "",
+            "remedy": None,
+            "system": None,
+            "duration_ms": 0,
+        }
 
     monkeypatch.setattr(selfcheck, "_run_one", one)
     asyncio.run(selfcheck.run(mode="cli"))
@@ -854,11 +921,13 @@ async def test_spine_against_the_test_database(monkeypatch):
 
 def test_the_module_docstring_carries_the_readiness_only_rule():
     doc = " ".join((selfcheck.__doc__ or "").split())
-    quote = ("Incorrect implementation of liveness probes can lead to cascading failures. "
-             "This results in restarting of container under high load; failed client "
-             "requests as your application became less scalable; and increased workload on "
-             "remaining pods due to some failed pods. Understand the difference between "
-             "liveness and readiness probes and when to apply them for your app.")
+    quote = (
+        "Incorrect implementation of liveness probes can lead to cascading failures. "
+        "This results in restarting of container under high load; failed client "
+        "requests as your application became less scalable; and increased workload on "
+        "remaining pods due to some failed pods. Understand the difference between "
+        "liveness and readiness probes and when to apply them for your app."
+    )
     assert quote in doc
     assert "kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/" in doc
     assert "READINESS" in doc and "LIVENESS" in doc
@@ -869,12 +938,18 @@ def test_selfcheck_restarts_nothing():
     """Readiness, never liveness — mechanically: the module shells out to
     nothing and calls no lifecycle verb."""
     tree = ast.parse((ROOT / "central_command/selfcheck.py").read_text(encoding="utf-8"))
-    imported = {a.name.split(".")[0] for n in ast.walk(tree)
-                if isinstance(n, (ast.Import, ast.ImportFrom))
-                for a in (n.names if isinstance(n, ast.Import) else [ast.alias(n.module or "")])}
+    imported = {
+        a.name.split(".")[0]
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.Import, ast.ImportFrom))
+        for a in (n.names if isinstance(n, ast.Import) else [ast.alias(n.module or "")])
+    }
     assert "subprocess" not in imported
-    calls = {n.func.attr for n in ast.walk(tree)
-             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    calls = {
+        n.func.attr
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    }
     assert not calls & {"restart", "stop", "kill", "terminate", "system", "Popen"}
 
 
@@ -900,13 +975,16 @@ async def test_the_probe_runs_the_configured_kind_with_one_relevant_and_one_irre
     assert fakes.rerank_calls == [(expected, "cc-rerank")]
 
 
-async def test_a_failed_chat_probe_says_search_will_error_and_names_the_three_causes(fakes, monkeypatch):
+async def test_a_failed_chat_probe_says_search_will_error_and_names_the_three_causes(
+    fakes, monkeypatch
+):
     monkeypatch.setattr(settings, "graph_rerank_kind", "chat")
     request = httpx.Request("POST", f"{PROXY}/v1/chat/completions")
     import openai
 
     fakes.rerank_error = openai.APIStatusError(
-        "bad", response=httpx.Response(400, request=request), body=None)
+        "bad", response=httpx.Response(400, request=request), body=None
+    )
     check = by_name(await selfcheck.run(mode="cli"))["graph-rerank"]
     assert check["status"] == "fail"
     msg = check["message"]
@@ -921,7 +999,9 @@ async def test_a_reranker_that_ranks_backwards_is_a_warning(fakes):
 
 
 def test_a_dev_default_database_password_does_not_mask_the_package_name(monkeypatch):
-    monkeypatch.setattr(settings, "database_url", "postgresql://cc:central_command@127.0.0.1:5442/x")
+    monkeypatch.setattr(
+        settings, "database_url", "postgresql://cc:central_command@127.0.0.1:5442/x"
+    )
     out = selfcheck._redact(
         "run: python -m central_command.graph_reembed status; "
         "dsn postgresql://cc:central_command@127.0.0.1:5442/x"
@@ -955,7 +1035,8 @@ def test_only_the_head_of_a_dotted_module_path_is_spared(monkeypatch):
 
 def test_the_dev_default_password_keeps_the_module_path_and_masks_the_dsn(monkeypatch):
     out = _redact_with(
-        monkeypatch, "central_command",
+        monkeypatch,
+        "central_command",
         "python -m central_command.graph_reembed status; postgresql://cc:central_command@h/x",
     )
     assert out == "python -m central_command.graph_reembed status; postgresql://cc:***@h/x"

@@ -29,10 +29,18 @@ async def test_it_is_hired_as_a_full_roster_member():
     assert first["consultable"] is True
     assert first["deviations"].strip()
 
-    grants = sorted(g["pack"] for g in await repo.list_grants(AGENT_ID)
-                    if g["revoked_at"] is None)
-    assert grants == ["ask-operator", "consult", "mcp-propose", "note-propose", "sandbox",
-                      "session-recall", "skill-propose", "task-create", "web-read"]
+    grants = sorted(g["pack"] for g in await repo.list_grants(AGENT_ID) if g["revoked_at"] is None)
+    assert grants == [
+        "ask-operator",
+        "consult",
+        "mcp-propose",
+        "note-propose",
+        "sandbox",
+        "session-recall",
+        "skill-propose",
+        "task-create",
+        "web-read",
+    ]
 
     current = await repo.current_charter(AGENT_ID)
     assert current and current["content"].strip()
@@ -51,7 +59,8 @@ async def test_it_holds_the_default_sandbox_source_grant():
     conventions."""
     await mcp_manager.ensure_registered()
     active = [
-        r["source_path"] for r in await repo.list_sandbox_sources(AGENT_ID)
+        r["source_path"]
+        for r in await repo.list_sandbox_sources(AGENT_ID)
         if r["revoked_at"] is None
     ]
     assert active == ["servers"]
@@ -59,7 +68,8 @@ async def test_it_holds_the_default_sandbox_source_grant():
     # Idempotent: calling again does not duplicate or error the grant.
     await mcp_manager.ensure_registered()
     active_again = [
-        r["source_path"] for r in await repo.list_sandbox_sources(AGENT_ID)
+        r["source_path"]
+        for r in await repo.list_sandbox_sources(AGENT_ID)
         if r["revoked_at"] is None
     ]
     assert active_again == ["servers"]
@@ -70,7 +80,9 @@ async def test_it_is_not_seeded_in_the_schema():
     schema.sql's founding-roster seeds and their `role = ''` guards."""
     from pathlib import Path
 
-    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
     assert f"'{AGENT_ID}'" not in schema
 
 

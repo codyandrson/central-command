@@ -48,8 +48,18 @@ from tests.installer_source import (
 ROOT = Path(__file__).resolve().parents[1]
 
 _DEBRIS = shutil.ignore_patterns(
-    "NUL", "nul", "CON", "con", "AUX", "aux", "PRN", "prn",
-    ".env", ".env.*", "__pycache__", "*.pyc",
+    "NUL",
+    "nul",
+    "CON",
+    "con",
+    "AUX",
+    "aux",
+    "PRN",
+    "prn",
+    ".env",
+    ".env.*",
+    "__pycache__",
+    "*.pyc",
 )
 
 ADMIN = "MARKER_ADMIN_aaaaaaaaaaaa"
@@ -98,8 +108,10 @@ def _get(path: Path, key: str) -> str:
 def _required(speech: str) -> list[str]:
     """The ONE list, asked of the one function — never re-typed here."""
     r = subprocess.run(
-        [_bash_exe(), "-c", '. ./deploy/env-lib.sh; cc_required_aliases'],
-        cwd=ROOT, capture_output=True, text=True,
+        [_bash_exe(), "-c", ". ./deploy/env-lib.sh; cc_required_aliases"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
         env={**os.environ, "CC_ENABLE_SPEECH": speech},
     )
     assert r.returncode == 0, r.stderr
@@ -144,17 +156,22 @@ def tree(tmp_path: Path) -> Path:
     shutil.copy2(ROOT / "VERSION", repo / "VERSION")
     shutil.copy2(ROOT / ".gitignore", repo / ".gitignore")
     (repo / "central_command" / "db").mkdir(parents=True)
-    shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
-                 repo / "central_command" / "db" / "schema.sql")
+    shutil.copy2(
+        ROOT / "central_command" / "db" / "schema.sql",
+        repo / "central_command" / "db" / "schema.sql",
+    )
     (tmp_path / "home").mkdir()
     state = tmp_path / "state"
     state.mkdir()
-    _set(repo / ".env", {
-        "CC_STATE_DIR": env_path(state),
-        "CC_LLM_PROXY_ADMIN_KEY": ADMIN,
-        "CC_LLM_API_KEY": "",
-        "CC_ENABLE_SPEECH": "1",
-    })
+    _set(
+        repo / ".env",
+        {
+            "CC_STATE_DIR": env_path(state),
+            "CC_LLM_PROXY_ADMIN_KEY": ADMIN,
+            "CC_LLM_API_KEY": "",
+            "CC_ENABLE_SPEECH": "1",
+        },
+    )
     # The install's venv: present, and anything asked of it succeeds.
     py = repo / ".venv" / "bin" / "python"
     py.parent.mkdir(parents=True)
@@ -172,8 +189,13 @@ def tree(tmp_path: Path) -> Path:
     # app's cross-phase prerequisites, recorded done.
     led = state / "ledger.tsv"
     rows = ["# ledger.tsv — prepared by the test"]
-    for step in ("check/tree-pristine", "fetch/venv", "fetch/cockpit",
-                 "llm/secrets", "llm/litellm-live"):
+    for step in (
+        "check/tree-pristine",
+        "fetch/venv",
+        "fetch/cockpit",
+        "llm/secrets",
+        "llm/litellm-live",
+    ):
         rows.append(f"{step}\tdone\t{_version()}\t2026-10-01T00:00:00Z\tnone\t")
     led.write_text("\n".join(rows) + "\n", encoding="utf-8")
     return repo
@@ -188,9 +210,13 @@ def _run_app(repo: Path):
     home = repo.parent / "home"
     env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"))
     env = with_stub_path(env, _stub(repo))
-    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH",
-                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
-                  "VIRTUAL_ENV"):
+    for stale in (
+        "CC_STATE_DIR",
+        "CC_ENABLE_SPEECH",
+        "CC_LLM_PROXY_ADMIN_KEY",
+        "CC_LLM_API_KEY",
+        "VIRTUAL_ENV",
+    ):
         env.pop(stale, None)
     return run_driver([_bash_exe(), "setup.sh", "app"], cwd=repo / "deploy" / "single", env=env)
 
@@ -201,8 +227,11 @@ def _endpoints(repo: Path) -> list[str]:
 
 
 def _mint_line(out: str) -> str:
-    lines = [l for l in out.splitlines()
-             if l.startswith(("PASS mint-key:", "WARN mint-key:", "FAIL mint-key:"))]
+    lines = [
+        l
+        for l in out.splitlines()
+        if l.startswith(("PASS mint-key:", "WARN mint-key:", "FAIL mint-key:"))
+    ]
     assert len(lines) == 1, out
     return lines[0]
 
@@ -269,8 +298,14 @@ def test_a_reranker_in_use_joins_the_scope(tree: Path):
     with THIS key: once CC_GRAPH_RERANK_ALIAS names one (the llm phase's probe
     wrote it, or the operator did), the mint's scope carries it too — and an
     install with no reranker is scoped to the required aliases alone (above)."""
-    _set(tree / ".env", {"CC_ENABLE_SPEECH": "0", "CC_GRAPH_RERANK_ALIAS": "cc-rerank",
-                         "CC_GRAPH_RERANK_KIND": "chat"})
+    _set(
+        tree / ".env",
+        {
+            "CC_ENABLE_SPEECH": "0",
+            "CC_GRAPH_RERANK_ALIAS": "cc-rerank",
+            "CC_GRAPH_RERANK_KIND": "chat",
+        },
+    )
 
     r = _run_app(tree)
 
@@ -292,10 +327,15 @@ def test_an_existing_narrow_key_gains_exactly_the_missing_aliases(tree: Path):
     added by hand: the three missing aliases are ADDED, the operator's model
     is kept, the key's value is untouched, and nothing is re-minted."""
     _set(tree / ".env", {"CC_LLM_API_KEY": SPINE})
-    (_stub(tree) / "info.json").write_text(json.dumps({
-        "key": SPINE,
-        "info": {"models": ["cc-default", "cc-tts", "cc-stt", "operator-extra"]},
-    }), encoding="utf-8")
+    (_stub(tree) / "info.json").write_text(
+        json.dumps(
+            {
+                "key": SPINE,
+                "info": {"models": ["cc-default", "cc-tts", "cc-stt", "operator-extra"]},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     r = _run_app(tree)
 
@@ -321,9 +361,15 @@ def test_an_existing_narrow_key_gains_exactly_the_missing_aliases(tree: Path):
 @drives_installer
 def test_an_existing_key_that_covers_the_list_is_not_updated(tree: Path):
     _set(tree / ".env", {"CC_LLM_API_KEY": SPINE})
-    (_stub(tree) / "info.json").write_text(json.dumps({
-        "key": SPINE, "info": {"models": _required("1") + ["operator-extra"]},
-    }), encoding="utf-8")
+    (_stub(tree) / "info.json").write_text(
+        json.dumps(
+            {
+                "key": SPINE,
+                "info": {"models": _required("1") + ["operator-extra"]},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     r = _run_app(tree)
 
@@ -339,9 +385,15 @@ def test_an_existing_key_with_an_empty_list_is_untouched(tree: Path):
     (docs/vendor/litellm/docs/proxy/key_auth_arch.md) — "fixing" it would
     NARROW the key."""
     _set(tree / ".env", {"CC_LLM_API_KEY": SPINE})
-    (_stub(tree) / "info.json").write_text(json.dumps({
-        "key": SPINE, "info": {"models": []},
-    }), encoding="utf-8")
+    (_stub(tree) / "info.json").write_text(
+        json.dumps(
+            {
+                "key": SPINE,
+                "info": {"models": []},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     r = _run_app(tree)
 
@@ -365,6 +417,8 @@ def test_an_unreachable_proxy_is_a_warn_not_a_fail(tree: Path):
     assert "update" not in _endpoints(tree)
     assert _get(tree / ".env", "CC_LLM_API_KEY") == SPINE
     # The phase went on past it: the derived keys after the mint were written.
-    assert any(l.startswith(("PASS app-llm-base-url:", "WARN app-llm-base-url:"))
-               for l in r.stdout.splitlines()), r.stdout
+    assert any(
+        l.startswith(("PASS app-llm-base-url:", "WARN app-llm-base-url:"))
+        for l in r.stdout.splitlines()
+    ), r.stdout
     _assert_no_secret_in_argv(tree)

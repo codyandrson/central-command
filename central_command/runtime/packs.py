@@ -35,12 +35,17 @@ def _operator_naming_rule() -> str:
     lands as a list with no subscriber (69 of 147 such episodes, 2026-09-16) —
     or spawns a bare 'operator' entity beside the real Person node."""
     name = _settings.operator_name
-    who = (f"'{name}'" if name and name != "the operator"
-           else "the operator's configured name (CC_OPERATOR_NAME)")
-    return (f"NAME THE OPERATOR: write {who} in the episode_body, never 'the "
-            "operator' — the graph types people by full name and drops a role "
-            "as a subject, so 'the operator is subscribed to X' records no "
-            "subscriber at all. ")
+    who = (
+        f"'{name}'"
+        if name and name != "the operator"
+        else "the operator's configured name (CC_OPERATOR_NAME)"
+    )
+    return (
+        f"NAME THE OPERATOR: write {who} in the episode_body, never 'the "
+        "operator' — the graph types people by full name and drops a role "
+        "as a subject, so 'the operator is subscribed to X' records no "
+        "subscriber at all. "
+    )
 
 
 # One person, one name in the graph (2026-11): a person who appears as "Jane",
@@ -49,7 +54,7 @@ def _operator_naming_rule() -> str:
 _PERSON_NAMING_RULE = (
     "NAME EACH PERSON THE WAY THE GRAPH DOES: when an entity search finds the "
     "person, write the name the graph already uses for them, and put any other "
-    "form the source uses in parentheses on first mention (\"Jane Doe (written "
+    'form the source uses in parentheses on first mention ("Jane Doe (written '
     "'Jane R. Doe' in the mail)\"). A role word ('Mom', 'my boss') is never a "
     "name: resolve it to the named person through a graph lookup, or ask. "
 )
@@ -131,9 +136,9 @@ class GatedCapability:
     update-vs-delete lessons), so any agent granted the pack inherits them.
     """
 
-    name: str          # the registry wire name the Action carries
-    arguments: str     # the args shape, as charter text
-    notes: str = ""    # usage guidance appended under the entry
+    name: str  # the registry wire name the Action carries
+    arguments: str  # the args shape, as charter text
+    notes: str = ""  # usage guidance appended under the entry
     # The Jira API flavors this capability exists on (Jira Data Center flavor
     # design, decision 3). Default: both. A capability whose endpoint has no
     # Data Center equivalent is WITHHELD there — never offered-to-fail — by
@@ -153,13 +158,15 @@ class GatedCapability:
 class Pack:
     name: str
     description: str
-    tool_names: tuple[str, ...] = ()             # attribute names in runtime.tools
+    tool_names: tuple[str, ...] = ()  # attribute names in runtime.tools
     capabilities: tuple[GatedCapability, ...] = ()
-    guidance: str = ""                           # pack-level charter text, once per grant
+    guidance: str = ""  # pack-level charter text, once per grant
 
 
-_JIRA_TARGET = ("target_ref = {'system': 'jira', 'id': '<the issue or project key>'}, "
-                "reversibility = 'reversible'")
+_JIRA_TARGET = (
+    "target_ref = {'system': 'jira', 'id': '<the issue or project key>'}, "
+    "reversibility = 'reversible'"
+)
 
 # The planning fields (the EA planning design, D3 and D8; DL-221 step 4b). ONE
 # capability in TWO packs, on purpose: `plan-propose` (the executive assistant,
@@ -171,30 +178,34 @@ _JIRA_TARGET = ("target_ref = {'system': 'jira', 'id': '<the issue or project ke
 # SAME object sits in both and an agent holding both packs reads it once.
 _SET_PLANNING_FIELDS = GatedCapability(
     name="jira.set_planning_fields",
-    arguments=("{'issue_key': '<KEY>', 'stakes'?: '<text>', 'value'?: <number >= 0>, "
-               "'lateness_loss'?: <number >= 0>, 'deadline_type'?: 'hard'|'soft', "
-               "'estimate_hours'?: <hours > 0>, 'due_date'?: 'YYYY-MM-DD'}"),
-    notes=("The PLANNING fields of one issue, and nothing else: name at least one "
-           "of the six, never null (it sets, it never clears). target_ref = "
-           "{'system': 'jira', 'id': '<KEY>'}, reversibility = 'reversible'. The "
-           "control plane writes the four custom fields under the names this "
-           "deployment configured, the estimate to Jira's own original estimate "
-           "and the due date to Jira's own due date, in one edit. Read the issue "
-           "or jira_planning_gaps first, and never propose a field "
-           "jira_planning_gaps lists under cannot_write: the tracker does not "
-           "declare it and the action is refused. People write the STAKES (what "
-           "doing it gets, what happens if it is late or never done): copy the "
-           "operator's or the filer's own words, and where no source gives any, "
-           "write one sentence that begins 'Agent's reading:' for the "
-           "operator to correct, never stakes presented as theirs. VALUE and "
-           "LATENESS LOSS are proposed FROM the stakes, on the deployment's unit "
-           "(jira_planning_gaps reports it; for points use only 1, 2, 3, 5 or 8): "
-           "value is what doing the work is worth, lateness loss what is lost if "
-           "it is done after its due date. DEADLINE TYPE: hard when the loss "
-           "lands once at the date, soft when it grows the longer it is late. "
-           "ESTIMATE is hours of real work. Several issues are ONE proposal with "
-           "one action per issue. A field you cannot reason to from a source is "
-           "left out, never guessed."),
+    arguments=(
+        "{'issue_key': '<KEY>', 'stakes'?: '<text>', 'value'?: <number >= 0>, "
+        "'lateness_loss'?: <number >= 0>, 'deadline_type'?: 'hard'|'soft', "
+        "'estimate_hours'?: <hours > 0>, 'due_date'?: 'YYYY-MM-DD'}"
+    ),
+    notes=(
+        "The PLANNING fields of one issue, and nothing else: name at least one "
+        "of the six, never null (it sets, it never clears). target_ref = "
+        "{'system': 'jira', 'id': '<KEY>'}, reversibility = 'reversible'. The "
+        "control plane writes the four custom fields under the names this "
+        "deployment configured, the estimate to Jira's own original estimate "
+        "and the due date to Jira's own due date, in one edit. Read the issue "
+        "or jira_planning_gaps first, and never propose a field "
+        "jira_planning_gaps lists under cannot_write: the tracker does not "
+        "declare it and the action is refused. People write the STAKES (what "
+        "doing it gets, what happens if it is late or never done): copy the "
+        "operator's or the filer's own words, and where no source gives any, "
+        "write one sentence that begins 'Agent's reading:' for the "
+        "operator to correct, never stakes presented as theirs. VALUE and "
+        "LATENESS LOSS are proposed FROM the stakes, on the deployment's unit "
+        "(jira_planning_gaps reports it; for points use only 1, 2, 3, 5 or 8): "
+        "value is what doing the work is worth, lateness loss what is lost if "
+        "it is done after its due date. DEADLINE TYPE: hard when the loss "
+        "lands once at the date, soft when it grows the longer it is late. "
+        "ESTIMATE is hours of real work. Several issues are ONE proposal with "
+        "one action per issue. A field you cannot reason to from a source is "
+        "left out, never guessed."
+    ),
 )
 
 # A comment on an issue. ONE capability in TWO packs, the planning fields'
@@ -206,27 +217,40 @@ _SET_PLANNING_FIELDS = GatedCapability(
 _ADD_COMMENT = GatedCapability(
     name="jira.add_comment",
     arguments="{'issue_key': '<KEY>', 'body': '<text>'}",
-    notes=("Append-only and visible to others — there is no delete. "
-           "Write comments you would sign. A comment says what the issue's "
-           "fields cannot: why it slipped or was deferred, what it is waiting "
-           "on, what the operator decided about it and when. Never a comment "
-           "that only restates a field (that it is past due, its status, its "
-           "due date): the field already says it."),
+    notes=(
+        "Append-only and visible to others — there is no delete. "
+        "Write comments you would sign. A comment says what the issue's "
+        "fields cannot: why it slipped or was deferred, what it is waiting "
+        "on, what the operator decided about it and when. Never a comment "
+        "that only restates a field (that it is past due, its status, its "
+        "due date): the field already says it."
+    ),
 )
 
 PACKS: dict[str, Pack] = {
     "jira-read": Pack(
         name="jira-read",
-        description=("Read live Jira state: projects, a project's issue types, one "
-                     "issue, its comments, JQL search, legal transitions, custom fields, the "
-                     "backlog's planning gaps, the team's load, users (filters, "
-                     "dashboards, gadgets on Cloud)."),
-        tool_names=("jira_get_issue", "jira_get_comments", "jira_search_issues",
-                    "jira_get_transitions",
-                    "jira_list_projects", "jira_list_issue_types", "jira_list_fields",
-                    "jira_planning_gaps", "jira_team_load", "jira_find_users",
-                    "jira_list_filters",
-                    "jira_list_dashboards", "jira_list_gadgets"),
+        description=(
+            "Read live Jira state: projects, a project's issue types, one "
+            "issue, its comments, JQL search, legal transitions, custom fields, the "
+            "backlog's planning gaps, the team's load, users (filters, "
+            "dashboards, gadgets on Cloud)."
+        ),
+        tool_names=(
+            "jira_get_issue",
+            "jira_get_comments",
+            "jira_search_issues",
+            "jira_get_transitions",
+            "jira_list_projects",
+            "jira_list_issue_types",
+            "jira_list_fields",
+            "jira_planning_gaps",
+            "jira_team_load",
+            "jira_find_users",
+            "jira_list_filters",
+            "jira_list_dashboards",
+            "jira_list_gadgets",
+        ),
     ),
     "jira-propose": Pack(
         name="jira-propose",
@@ -244,146 +268,169 @@ PACKS: dict[str, Pack] = {
             ),
             GatedCapability(
                 name="jira.create_issue",
-                arguments=("{'project_key': '<PROJ>', 'summary': '<title>', "
-                           "'description'?: '<text>', "
-                           "'issue_type': '<a type name from jira_list_issue_types>', "
-                           "'parent'?: '<KEY>', "
-                           "'due_date'?: 'YYYY-MM-DD', 'labels'?: [...], "
-                           "'custom_fields'?: {'<field name>': <value>, ...}, "
-                           "'assignee'?: '<user_id from jira_find_users>', "
-                           "'estimate_hours'?: <hours > 0>}"),
-                notes=("Only for genuinely not-yet-tracked work — search for an "
-                       "existing issue first when you hold a read tool. "
-                       "'project_key' MUST be a key you have seen in "
-                       "jira_list_projects — a plausible-sounding key you "
-                       "reasoned your way to (PERSONAL, SUPPORT, CS) fails the "
-                       "write outright; the real list is short, so read it. "
-                       "'issue_type' is REQUIRED and MUST be a name you have "
-                       "seen in jira_list_issue_types for THAT project — "
-                       "types differ per project and per instance, so never "
-                       "assume Task, Bug or Story exists. "
-                       "Hierarchy is expressed with 'parent': a Story or Task "
-                       "under an Epic names the Epic as parent, and a "
-                       "sub-task type (subtask: true in that read) REQUIRES a "
-                       "parent. Links (jira.link_issues) express "
-                       "dependency; parent expresses structure — do not "
-                       "conflate the two. 'custom_fields' follows the same "
-                       "rules as jira.set_fields (human names from "
-                       "jira_list_fields, shape-checked) and is how an issue "
-                       "is created COMPLETE in one approval — the executor "
-                       "passes no values between actions, so a follow-up "
-                       "set_fields can never name the key this create "
-                       "produces — the same reason 'assignee' rides the "
-                       "create rather than a follow-up jira.assign_issue. "
-                       "PLANNING FIELDS RIDE THE CREATE TOO: when the tracker "
-                       "declares them (jira_list_fields, or "
-                       "jira_planning_gaps' planning_fields), a new issue "
-                       "carries in the same action its stakes, value, lateness "
-                       "loss and deadline type in 'custom_fields' under the "
-                       "names the tracker declares, the due date, and "
-                       "'estimate_hours' (Jira's own original estimate, in "
-                       "hours of real work). The STAKES are the filer's or "
-                       "the operator's own words from the source (what doing "
-                       "it gets, what happens if it is late or never done); "
-                       "never invent stakes: where the source gives none, "
-                       "write one sentence that begins 'Agent's "
-                       "reading:' for the operator to correct, or leave the "
-                       "numbers out. Value and lateness loss are proposed "
-                       "from those stakes on the deployment's unit (for "
-                       "points only 1, 2, 3, 5 or 8); deadline type is hard "
-                       "when the loss lands once at the date, soft when it "
-                       "grows."),
+                arguments=(
+                    "{'project_key': '<PROJ>', 'summary': '<title>', "
+                    "'description'?: '<text>', "
+                    "'issue_type': '<a type name from jira_list_issue_types>', "
+                    "'parent'?: '<KEY>', "
+                    "'due_date'?: 'YYYY-MM-DD', 'labels'?: [...], "
+                    "'custom_fields'?: {'<field name>': <value>, ...}, "
+                    "'assignee'?: '<user_id from jira_find_users>', "
+                    "'estimate_hours'?: <hours > 0>}"
+                ),
+                notes=(
+                    "Only for genuinely not-yet-tracked work — search for an "
+                    "existing issue first when you hold a read tool. "
+                    "'project_key' MUST be a key you have seen in "
+                    "jira_list_projects — a plausible-sounding key you "
+                    "reasoned your way to (PERSONAL, SUPPORT, CS) fails the "
+                    "write outright; the real list is short, so read it. "
+                    "'issue_type' is REQUIRED and MUST be a name you have "
+                    "seen in jira_list_issue_types for THAT project — "
+                    "types differ per project and per instance, so never "
+                    "assume Task, Bug or Story exists. "
+                    "Hierarchy is expressed with 'parent': a Story or Task "
+                    "under an Epic names the Epic as parent, and a "
+                    "sub-task type (subtask: true in that read) REQUIRES a "
+                    "parent. Links (jira.link_issues) express "
+                    "dependency; parent expresses structure — do not "
+                    "conflate the two. 'custom_fields' follows the same "
+                    "rules as jira.set_fields (human names from "
+                    "jira_list_fields, shape-checked) and is how an issue "
+                    "is created COMPLETE in one approval — the executor "
+                    "passes no values between actions, so a follow-up "
+                    "set_fields can never name the key this create "
+                    "produces — the same reason 'assignee' rides the "
+                    "create rather than a follow-up jira.assign_issue. "
+                    "PLANNING FIELDS RIDE THE CREATE TOO: when the tracker "
+                    "declares them (jira_list_fields, or "
+                    "jira_planning_gaps' planning_fields), a new issue "
+                    "carries in the same action its stakes, value, lateness "
+                    "loss and deadline type in 'custom_fields' under the "
+                    "names the tracker declares, the due date, and "
+                    "'estimate_hours' (Jira's own original estimate, in "
+                    "hours of real work). The STAKES are the filer's or "
+                    "the operator's own words from the source (what doing "
+                    "it gets, what happens if it is late or never done); "
+                    "never invent stakes: where the source gives none, "
+                    "write one sentence that begins 'Agent's "
+                    "reading:' for the operator to correct, or leave the "
+                    "numbers out. Value and lateness loss are proposed "
+                    "from those stakes on the deployment's unit (for "
+                    "points only 1, 2, 3, 5 or 8); deadline type is hard "
+                    "when the loss lands once at the date, soft when it "
+                    "grows."
+                ),
             ),
             _ADD_COMMENT,
             GatedCapability(
                 name="jira.update_attributes",
-                arguments=("{'issue_key': '<KEY>', 'priority'?: '<name>', "
-                           "'due_date'?: 'YYYY-MM-DD' | null, 'labels'?: [...]}"),
-                notes=("A PARTIAL edit: name ONLY the attributes you mean to "
-                       "change (at least one) — an attribute you leave out is "
-                       "left exactly as it is, so never fill one in to satisfy "
-                       "the shape. `labels` is the FULL replacement list (read "
-                       "the issue's current labels first; [] clears them); "
-                       "`due_date: null` clears the date; priority can be "
-                       "changed but not cleared."),
+                arguments=(
+                    "{'issue_key': '<KEY>', 'priority'?: '<name>', "
+                    "'due_date'?: 'YYYY-MM-DD' | null, 'labels'?: [...]}"
+                ),
+                notes=(
+                    "A PARTIAL edit: name ONLY the attributes you mean to "
+                    "change (at least one) — an attribute you leave out is "
+                    "left exactly as it is, so never fill one in to satisfy "
+                    "the shape. `labels` is the FULL replacement list (read "
+                    "the issue's current labels first; [] clears them); "
+                    "`due_date: null` clears the date; priority can be "
+                    "changed but not cleared."
+                ),
             ),
             GatedCapability(
                 name="jira.set_fields",
-                arguments=("{'issue_key': '<KEY>', 'fields': {'<field name>': "
-                           "<value>, ...}}"),
-                notes=("Custom fields ONLY, addressed by their human name "
-                       "exactly as jira_list_fields reports it — never a "
-                       "`customfield_NNNNN` id, and never a name you have not "
-                       "seen in that list or in an issue's `custom_fields`. "
-                       "The value shape follows the field's declared type: a "
-                       "string for text and rich text, a number for numeric, "
-                       "'YYYY-MM-DD' for a date, the option name for a select, "
-                       "a list of names for a multi-select, null to clear. "
-                       "Fields Jira or a plugin manages (Rank, Development, "
-                       "Team, …) report writable: false and are refused. For "
-                       "priority, labels and due date use "
-                       "jira.update_attributes instead. For the PLANNING "
-                       "fields use jira.set_planning_fields."),
+                arguments=("{'issue_key': '<KEY>', 'fields': {'<field name>': <value>, ...}}"),
+                notes=(
+                    "Custom fields ONLY, addressed by their human name "
+                    "exactly as jira_list_fields reports it — never a "
+                    "`customfield_NNNNN` id, and never a name you have not "
+                    "seen in that list or in an issue's `custom_fields`. "
+                    "The value shape follows the field's declared type: a "
+                    "string for text and rich text, a number for numeric, "
+                    "'YYYY-MM-DD' for a date, the option name for a select, "
+                    "a list of names for a multi-select, null to clear. "
+                    "Fields Jira or a plugin manages (Rank, Development, "
+                    "Team, …) report writable: false and are refused. For "
+                    "priority, labels and due date use "
+                    "jira.update_attributes instead. For the PLANNING "
+                    "fields use jira.set_planning_fields."
+                ),
             ),
             _SET_PLANNING_FIELDS,
             GatedCapability(
                 name="jira.link_issues",
                 arguments="{'from_key': '<KEY>', 'to_key': '<KEY>', 'link_type': 'Blocks|Relates|Duplicate'}",
-                notes=("DIRECTION MATTERS: from_key is the OUTWARD side — for "
-                       "Blocks, from_key BLOCKS to_key (to_key shows 'is blocked "
-                       "by'). The prerequisite is from_key; the work that waits "
-                       "is to_key. Links express dependencies, never hierarchy. "
-                       "The Executor reads the stored link back and fails if "
-                       "Jira stored it the other way round — never 'fix' a "
-                       "direction by swapping the keys."),
+                notes=(
+                    "DIRECTION MATTERS: from_key is the OUTWARD side — for "
+                    "Blocks, from_key BLOCKS to_key (to_key shows 'is blocked "
+                    "by'). The prerequisite is from_key; the work that waits "
+                    "is to_key. Links express dependencies, never hierarchy. "
+                    "The Executor reads the stored link back and fails if "
+                    "Jira stored it the other way round — never 'fix' a "
+                    "direction by swapping the keys."
+                ),
             ),
             GatedCapability(
                 name="jira.delete_link",
                 arguments="{'from_key': '<KEY>', 'to_key': '<KEY>', 'link_type': 'Blocks|Relates|Duplicate'}",
-                notes=("Names the link exactly as you READ it: jira_get_issue "
-                       "on from_key shows it with direction 'outward' and "
-                       "issue_key = to_key. Only a link stored in that direction "
-                       "is removed. To correct an inverted link, propose "
-                       "delete_link for the link as it is stored AND "
-                       "link_issues for the one you mean, in one proposal."),
+                notes=(
+                    "Names the link exactly as you READ it: jira_get_issue "
+                    "on from_key shows it with direction 'outward' and "
+                    "issue_key = to_key. Only a link stored in that direction "
+                    "is removed. To correct an inverted link, propose "
+                    "delete_link for the link as it is stored AND "
+                    "link_issues for the one you mean, in one proposal."
+                ),
             ),
             GatedCapability(
                 name="jira.assign_issue",
                 arguments="{'issue_key': '<KEY>', 'assignee': '<user_id>' | null}",
-                notes=("The user_id MUST come from jira_find_users on this "
-                       "deployment (an account id on Jira Cloud, a username on "
-                       "Data Center) — never a display name, an email, or an id "
-                       "you reasoned your way to. null unassigns."),
+                notes=(
+                    "The user_id MUST come from jira_find_users on this "
+                    "deployment (an account id on Jira Cloud, a username on "
+                    "Data Center) — never a display name, an email, or an id "
+                    "you reasoned your way to. null unassigns."
+                ),
             ),
             GatedCapability(
                 name="jira.transition_issue",
                 arguments="{'issue_key': '<KEY>', 'transition': '<name>'}",
-                notes=("The transition NAME must come from the issue's actually-"
-                       "available transitions — ALWAYS call jira_get_transitions "
-                       "first and use a name from that list, never a guess."),
+                notes=(
+                    "The transition NAME must come from the issue's actually-"
+                    "available transitions — ALWAYS call jira_get_transitions "
+                    "first and use a name from that list, never a guess."
+                ),
             ),
             GatedCapability(
                 name="jira.create_filter",
                 arguments="{'name': '<name>', 'jql': '<jql>', 'description'?: '<text>'}",
-                notes=("Check jira_list_filters first when it is granted "
-                       "(Cloud); on Data Center no filter listing exists — "
-                       "say in the intent that you could not check for "
-                       "duplicates."),
+                notes=(
+                    "Check jira_list_filters first when it is granted "
+                    "(Cloud); on Data Center no filter listing exists — "
+                    "say in the intent that you could not check for "
+                    "duplicates."
+                ),
             ),
             GatedCapability(
                 name="jira.create_dashboard",
-                arguments=("{'name': '<name>', 'description'?: '<text>', "
-                           "'gadgets'?: [{'uri' | 'module_key': '<from jira_list_gadgets>', "
-                           "'title'?: ..., 'config'?: {...}}]}"),
-                notes=("Check jira_list_dashboards first. Gadget identifiers "
-                       "MUST come from jira_list_gadgets — a guessed uri "
-                       "creates an EMPTY dashboard. To show a saved filter, "
-                       "bind it in config: {'filterId': 'filter-<id>'} when "
-                       "you read the real id, or {'filterName': '<exact "
-                       "name>'} when the filter is created in this same "
-                       "proposal — the name is resolved to the id at "
-                       "execution time. Never write a placeholder id. "
-                       "String values, e.g. 'num': '10'."),
+                arguments=(
+                    "{'name': '<name>', 'description'?: '<text>', "
+                    "'gadgets'?: [{'uri' | 'module_key': '<from jira_list_gadgets>', "
+                    "'title'?: ..., 'config'?: {...}}]}"
+                ),
+                notes=(
+                    "Check jira_list_dashboards first. Gadget identifiers "
+                    "MUST come from jira_list_gadgets — a guessed uri "
+                    "creates an EMPTY dashboard. To show a saved filter, "
+                    "bind it in config: {'filterId': 'filter-<id>'} when "
+                    "you read the real id, or {'filterName': '<exact "
+                    "name>'} when the filter is created in this same "
+                    "proposal — the name is resolved to the id at "
+                    "execution time. Never write a placeholder id. "
+                    "String values, e.g. 'num': '10'."
+                ),
                 flavors=("cloud",),
             ),
         ),
@@ -395,8 +442,10 @@ PACKS: dict[str, Pack] = {
     # owner as a task (two approvals).
     "jira-comment-propose": Pack(
         name="jira-comment-propose",
-        description=("Propose a comment on a Jira issue (posted by the control "
-                     "plane after approval). No other tracker write."),
+        description=(
+            "Propose a comment on a Jira issue (posted by the control "
+            "plane after approval). No other tracker write."
+        ),
         tool_names=("propose_action",),
         guidance=(
             "A COMMENT (jira.add_comment) is the one thing this pack lets you "
@@ -430,17 +479,21 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="jira.create_project",
-                arguments=("{'key': '<2-10 char uppercase key>', 'name': "
-                           "'<project name>', 'project_type_key'?: 'software'}"),
-                notes=("Propose this ONLY when no existing project fits — read "
-                       "jira_list_projects first and say which ones you "
-                       "considered, never infer the project list from "
-                       "jira_search_issues (an empty search means no ISSUES, "
-                       "not no project). Deleting a project deletes its issues with it: "
-                       "reversibility = 'irreversible'. A single proposal MAY "
-                       "carry create_project followed by create_issue in ONE "
-                       "actions list — the executor runs actions in order, so "
-                       "the project exists by the time the issue is created."),
+                arguments=(
+                    "{'key': '<2-10 char uppercase key>', 'name': "
+                    "'<project name>', 'project_type_key'?: 'software'}"
+                ),
+                notes=(
+                    "Propose this ONLY when no existing project fits — read "
+                    "jira_list_projects first and say which ones you "
+                    "considered, never infer the project list from "
+                    "jira_search_issues (an empty search means no ISSUES, "
+                    "not no project). Deleting a project deletes its issues with it: "
+                    "reversibility = 'irreversible'. A single proposal MAY "
+                    "carry create_project followed by create_issue in ONE "
+                    "actions list — the executor runs actions in order, so "
+                    "the project exists by the time the issue is created."
+                ),
             ),
         ),
     ),
@@ -467,14 +520,16 @@ PACKS: dict[str, Pack] = {
             GatedCapability(
                 name="jira.delete_issue",
                 arguments="{'issue_key': '<KEY>', 'reason': '<why it should not exist>'}",
-                notes=("Propose this ONLY when the operator asked for the issue "
-                       "to be deleted, or it is a duplicate or was created in "
-                       "error — finished or abandoned work is TRANSITIONED "
-                       "(Done / Won't Do), which keeps its history. Read the "
-                       "issue first and say in the intent what it is. One "
-                       "action per issue: an issue with subtasks is refused, "
-                       "so list each subtask's delete before its parent's. "
-                       "reversibility = 'irreversible'."),
+                notes=(
+                    "Propose this ONLY when the operator asked for the issue "
+                    "to be deleted, or it is a duplicate or was created in "
+                    "error — finished or abandoned work is TRANSITIONED "
+                    "(Done / Won't Do), which keeps its history. Read the "
+                    "issue first and say in the intent what it is. One "
+                    "action per issue: an issue with subtasks is refused, "
+                    "so list each subtask's delete before its parent's. "
+                    "reversibility = 'irreversible'."
+                ),
             ),
         ),
     ),
@@ -486,10 +541,16 @@ PACKS: dict[str, Pack] = {
             "READ ONLY — no propose_* writes exist for this pack (gated forge "
             "writes wait for a real use case)."
         ),
-        tool_names=("forge_list_instances", "forge_search_repos", "forge_read_file",
-                    "forge_list_issues", "forge_get_issue",
-                    "forge_list_merge_requests", "forge_get_merge_request",
-                    "forge_list_commits"),
+        tool_names=(
+            "forge_list_instances",
+            "forge_search_repos",
+            "forge_read_file",
+            "forge_list_issues",
+            "forge_get_issue",
+            "forge_list_merge_requests",
+            "forge_get_merge_request",
+            "forge_list_commits",
+        ),
     ),
     "confluence-read": Pack(
         name="confluence-read",
@@ -500,9 +561,15 @@ PACKS: dict[str, Pack] = {
             "trash page, upload attachment, labels, create space) live in the "
             "separate confluence-propose / confluence-space-propose packs."
         ),
-        tool_names=("confluence_list_spaces", "confluence_get_page", "confluence_search",
-                    "confluence_list_children", "confluence_list_attachments",
-                    "confluence_list_labels", "confluence_page_versions"),
+        tool_names=(
+            "confluence_list_spaces",
+            "confluence_get_page",
+            "confluence_search",
+            "confluence_list_children",
+            "confluence_list_attachments",
+            "confluence_list_labels",
+            "confluence_page_versions",
+        ),
         guidance=(
             "Confluence pages: body is always STORAGE format (the HTML that "
             "carries macros, not rendered view HTML). Verify a space KEY via "
@@ -526,24 +593,32 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="confluence.create_page",
-                arguments=("{'space_id_or_key': '<space key or numeric id>', "
-                           "'title': '<title>', 'body_storage': "
-                           "'<storage-format HTML>', 'parent_id'?: '<page id>'}"),
-                notes=("Verify the space via confluence_list_spaces before "
-                       "citing a key — a guessed key fails the write outright."),
+                arguments=(
+                    "{'space_id_or_key': '<space key or numeric id>', "
+                    "'title': '<title>', 'body_storage': "
+                    "'<storage-format HTML>', 'parent_id'?: '<page id>'}"
+                ),
+                notes=(
+                    "Verify the space via confluence_list_spaces before "
+                    "citing a key — a guessed key fails the write outright."
+                ),
             ),
             GatedCapability(
                 name="confluence.update_page",
-                arguments=("{'page_id': '<id>', 'title': '<title>', "
-                           "'body_storage': '<storage-format HTML>', "
-                           "'expected_version': <int>}"),
-                notes=("'expected_version' MUST come from a confluence_get_page "
-                       "call made in THIS session, just before drafting — "
-                       "proposing without reading the current version first is "
-                       "a rejection magnet: the executor refuses to write over "
-                       "a version newer than the one you reviewed. Old content "
-                       "is recoverable from Confluence's version history "
-                       "regardless."),
+                arguments=(
+                    "{'page_id': '<id>', 'title': '<title>', "
+                    "'body_storage': '<storage-format HTML>', "
+                    "'expected_version': <int>}"
+                ),
+                notes=(
+                    "'expected_version' MUST come from a confluence_get_page "
+                    "call made in THIS session, just before drafting — "
+                    "proposing without reading the current version first is "
+                    "a rejection magnet: the executor refuses to write over "
+                    "a version newer than the one you reviewed. Old content "
+                    "is recoverable from Confluence's version history "
+                    "regardless."
+                ),
             ),
             GatedCapability(
                 name="confluence.move_page",
@@ -553,19 +628,25 @@ PACKS: dict[str, Pack] = {
             GatedCapability(
                 name="confluence.trash_page",
                 arguments="{'page_id': '<id>'}",
-                notes=("Recoverable — trashing moves the page to Confluence's "
-                       "trash, not a permanent delete."),
+                notes=(
+                    "Recoverable — trashing moves the page to Confluence's "
+                    "trash, not a permanent delete."
+                ),
             ),
             GatedCapability(
                 name="confluence.upload_attachment",
-                arguments=("{'page_id': '<id>', 'filename': '<name>', "
-                           "'content': '<text or base64>', 'encoding'?: "
-                           "'utf8|base64'}"),
-                notes=("'content' travels IN the proposal, captured at propose "
-                       "time — the executor writes exactly those bytes and "
-                       "never re-fetches from anywhere else. Use "
-                       "'encoding': 'base64' for binary files; omit it (or "
-                       "'utf8') for plain text."),
+                arguments=(
+                    "{'page_id': '<id>', 'filename': '<name>', "
+                    "'content': '<text or base64>', 'encoding'?: "
+                    "'utf8|base64'}"
+                ),
+                notes=(
+                    "'content' travels IN the proposal, captured at propose "
+                    "time — the executor writes exactly those bytes and "
+                    "never re-fetches from anywhere else. Use "
+                    "'encoding': 'base64' for binary files; omit it (or "
+                    "'utf8') for plain text."
+                ),
             ),
             GatedCapability(
                 name="confluence.set_labels",
@@ -593,12 +674,15 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="confluence.create_space",
-                arguments=("{'key': '<space key>', 'name': '<space name>', "
-                           "'description'?: '<text>'}"),
-                notes=("Propose this ONLY when no existing space fits — read "
-                       "confluence_list_spaces first. No delete-space "
-                       "capability exists here: reversibility = "
-                       "'irreversible'."),
+                arguments=(
+                    "{'key': '<space key>', 'name': '<space name>', 'description'?: '<text>'}"
+                ),
+                notes=(
+                    "Propose this ONLY when no existing space fits — read "
+                    "confluence_list_spaces first. No delete-space "
+                    "capability exists here: reversibility = "
+                    "'irreversible'."
+                ),
             ),
         ),
     ),
@@ -626,112 +710,118 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="graph.add_episode",
-                arguments=("{'name': '<short title>', 'episode_body': '<the "
-                           "distilled claim>', 'source_description': '<where it "
-                           "came from, e.g. email <id> or the operator>', "
-                           "'reference_time': '<REQUIRED — the ISO-8601 instant "
-                           "the source material is from: the mail's sent date, "
-                           "the issue event's timestamp, or the date the operator "
-                           "GIVES in an answer; e.g. 2026-05-12T09:30:00Z>', "
-                           "'scope': 'shared' | 'private', 'for_agent'?: "
-                           "'<roster agent id, private scope only>'}"),
-                notes=("target_ref = {'system': 'graphiti', 'id': 'central_command'}, "
-                       "reversibility = 'reversible'. "
-                       "reference_time is REQUIRED and is never 'now': the graph "
-                       "anchors every present-tense claim to it, so it must be "
-                       "the time of the SOURCE (when the mail was sent, when the "
-                       "event happened, the date the operator states), read from "
-                       "the material — the Executor refuses a proposal without "
-                       "it, and nothing downstream will fill it in. The operator "
-                       "CONFIRMING something is when you LEARNED it, never when "
-                       "it became true: a fact from an old mail the operator "
-                       "confirms keeps the mail's date, and a fact the operator "
-                       "dates takes the date they give. A claim that was true as "
-                       "of the source and may not be now says so in the body "
-                       "('as of <date>'); when you cannot place it in time, ask. "
-                       "The episode_body is a distilled claim of 1-3 sentences: "
-                       "self-contained, naming the people, things, issue keys "
-                       "and dates the claim is ABOUT — NEVER pasted source "
-                       "text. " + _operator_naming_rule() + _PERSON_NAMING_RULE +
-                       _EPISODE_ROUTING_RULE +
-                       _EPISODE_SHAPE_RULE +
-                       "RETENTION TEST — the graph's "
-                       "failure mode is over-inclusion (noise dilutes every "
-                       "future search), so when in doubt, do NOT propose the "
-                       "episode. Keep a fact only if BOTH hold: (1) a teammate "
-                       "acting months from now could act differently for "
-                       "knowing it, and (2) it stays true and useful past this "
-                       "one message — anything campaign-scoped or expiring (an "
-                       "offer, a price, a promo code, one newsletter's "
-                       "content) fails. Record the durable relationship at the "
-                       "altitude it is useful and DROP the incidental "
-                       "mechanics that rode in with it: which email address a "
-                       "subscription uses is delivery metadata, not a fact "
-                       "about the person. Worked example: a sandwich-chain "
-                       "promo email evidences at most '<operator name> is a "
-                       "rewards member there' — not the subscription address, "
-                       "not this week's offer — and if the membership is "
-                       "already in the graph at equal detail, it evidences "
-                       "NOTHING. A fact is new when it adds an attribute of "
-                       "the thing (an identifier, a start or an end, a "
-                       "decision, a changed status); a restatement, or the "
-                       "figures of one occurrence, is not. Second worked "
-                       "example: a bank confirms a $2,500 transfer to an "
-                       "account ending 7731, and the graph already holds "
-                       "<operator name>'s checking account at that bank — the "
-                       "mail evidences exactly one thing, '<operator name>'s "
-                       "checking account at <bank> ends in 7731': not the "
-                       "transfer, its amount or its date, and not the "
-                       "account's existence, which was already known. "
-                       "PROCESS STATE IS NEVER AN EPISODE, in any scope: "
-                       "where a run, a session or a conversation got to, what "
-                       "the next run should do, a commitment or question still "
-                       "open — these are state, not knowledge, and they go "
-                       "stale the moment the work moves on. The transcript, "
-                       "the open question and the tasks already hold them. "
-                       "EVERY CLAIM CARRIES ITS OWN WINDOW, IN WORDS: the "
-                       "graph reads each fact's start and end from the "
-                       "sentence that states it, and it keys on plain "
-                       "phrasings — write 'since <date>' for a start, 'until "
-                       "<date>' / 'through <date>' / 'ended on <date>' for an "
-                       "end, 'from <date> until <date>' for both, and for "
-                       "something that has stopped say so outright ('is no "
-                       "longer a member as of <date>'). Full dates "
-                       "(YYYY-MM-DD) beat month names; one sentence per "
-                       "claim, so each window binds to its own fact. A claim "
-                       "written in the present tense with no date is dated to "
-                       "the reference_time — right for 'X is true as of the "
-                       "source', wrong when the source says it started "
-                       "earlier. Never invent a date the source does not "
-                       "support — when the start (or end) of a fact that "
-                       "plainly has one (employment, ownership, residence, "
-                       "status changes) is not in the source, ask the operator "
-                       "for it BEFORE proposing if you hold ask_operator; "
-                       "without that tool, write the gap into the claim "
-                       "itself ('start date not stated in the source') so the "
-                       "record is honest rather than silently dated. "
-                       "Preferences and standing rules need no start date — "
-                       "do not ask about those. An episode stands alone, or "
-                       "rides in ONE proposal with other actions when the same "
-                       "source also teaches a lasting fact (ROUTE FIRST). `scope` "
-                       "is 'shared' for every fact about the WORLD — people, "
-                       "relationships, projects, systems, dates — no matter who "
-                       "learned it or whose role it touches. 'private' is RARE: "
-                       "only an operating rule about how YOU specifically should "
-                       "work (e.g. 'always dismiss email from sender X'), useless "
-                       "or wrong for a teammate to act on. If a teammate could "
-                       "ever benefit from knowing it, it is shared. A private "
-                       "rule about how a TEAMMATE should work (the operator "
-                       "telling you inbox-triage's triage policy) names that "
-                       "teammate in 'for_agent' so it lands in THEIR partition, "
-                       "not yours — omit it and 'private' means your own. The "
-                       "scope is an operator-visible routing decision on the "
-                       "proposal, not something you can change after approval. "
-                       "An approved episode is never edited in place — its "
-                       "text is what the operator approved. Correcting one "
-                       "whose TEXT was wrong is graph.delete_episode (the "
-                       "graph-curate pack) plus a fresh graph.add_episode "
-                       "with the corrected text."),
+                arguments=(
+                    "{'name': '<short title>', 'episode_body': '<the "
+                    "distilled claim>', 'source_description': '<where it "
+                    "came from, e.g. email <id> or the operator>', "
+                    "'reference_time': '<REQUIRED — the ISO-8601 instant "
+                    "the source material is from: the mail's sent date, "
+                    "the issue event's timestamp, or the date the operator "
+                    "GIVES in an answer; e.g. 2026-05-12T09:30:00Z>', "
+                    "'scope': 'shared' | 'private', 'for_agent'?: "
+                    "'<roster agent id, private scope only>'}"
+                ),
+                notes=(
+                    "target_ref = {'system': 'graphiti', 'id': 'central_command'}, "
+                    "reversibility = 'reversible'. "
+                    "reference_time is REQUIRED and is never 'now': the graph "
+                    "anchors every present-tense claim to it, so it must be "
+                    "the time of the SOURCE (when the mail was sent, when the "
+                    "event happened, the date the operator states), read from "
+                    "the material — the Executor refuses a proposal without "
+                    "it, and nothing downstream will fill it in. The operator "
+                    "CONFIRMING something is when you LEARNED it, never when "
+                    "it became true: a fact from an old mail the operator "
+                    "confirms keeps the mail's date, and a fact the operator "
+                    "dates takes the date they give. A claim that was true as "
+                    "of the source and may not be now says so in the body "
+                    "('as of <date>'); when you cannot place it in time, ask. "
+                    "The episode_body is a distilled claim of 1-3 sentences: "
+                    "self-contained, naming the people, things, issue keys "
+                    "and dates the claim is ABOUT — NEVER pasted source "
+                    "text. "
+                    + _operator_naming_rule()
+                    + _PERSON_NAMING_RULE
+                    + _EPISODE_ROUTING_RULE
+                    + _EPISODE_SHAPE_RULE
+                    + "RETENTION TEST — the graph's "
+                    "failure mode is over-inclusion (noise dilutes every "
+                    "future search), so when in doubt, do NOT propose the "
+                    "episode. Keep a fact only if BOTH hold: (1) a teammate "
+                    "acting months from now could act differently for "
+                    "knowing it, and (2) it stays true and useful past this "
+                    "one message — anything campaign-scoped or expiring (an "
+                    "offer, a price, a promo code, one newsletter's "
+                    "content) fails. Record the durable relationship at the "
+                    "altitude it is useful and DROP the incidental "
+                    "mechanics that rode in with it: which email address a "
+                    "subscription uses is delivery metadata, not a fact "
+                    "about the person. Worked example: a sandwich-chain "
+                    "promo email evidences at most '<operator name> is a "
+                    "rewards member there' — not the subscription address, "
+                    "not this week's offer — and if the membership is "
+                    "already in the graph at equal detail, it evidences "
+                    "NOTHING. A fact is new when it adds an attribute of "
+                    "the thing (an identifier, a start or an end, a "
+                    "decision, a changed status); a restatement, or the "
+                    "figures of one occurrence, is not. Second worked "
+                    "example: a bank confirms a $2,500 transfer to an "
+                    "account ending 7731, and the graph already holds "
+                    "<operator name>'s checking account at that bank — the "
+                    "mail evidences exactly one thing, '<operator name>'s "
+                    "checking account at <bank> ends in 7731': not the "
+                    "transfer, its amount or its date, and not the "
+                    "account's existence, which was already known. "
+                    "PROCESS STATE IS NEVER AN EPISODE, in any scope: "
+                    "where a run, a session or a conversation got to, what "
+                    "the next run should do, a commitment or question still "
+                    "open — these are state, not knowledge, and they go "
+                    "stale the moment the work moves on. The transcript, "
+                    "the open question and the tasks already hold them. "
+                    "EVERY CLAIM CARRIES ITS OWN WINDOW, IN WORDS: the "
+                    "graph reads each fact's start and end from the "
+                    "sentence that states it, and it keys on plain "
+                    "phrasings — write 'since <date>' for a start, 'until "
+                    "<date>' / 'through <date>' / 'ended on <date>' for an "
+                    "end, 'from <date> until <date>' for both, and for "
+                    "something that has stopped say so outright ('is no "
+                    "longer a member as of <date>'). Full dates "
+                    "(YYYY-MM-DD) beat month names; one sentence per "
+                    "claim, so each window binds to its own fact. A claim "
+                    "written in the present tense with no date is dated to "
+                    "the reference_time — right for 'X is true as of the "
+                    "source', wrong when the source says it started "
+                    "earlier. Never invent a date the source does not "
+                    "support — when the start (or end) of a fact that "
+                    "plainly has one (employment, ownership, residence, "
+                    "status changes) is not in the source, ask the operator "
+                    "for it BEFORE proposing if you hold ask_operator; "
+                    "without that tool, write the gap into the claim "
+                    "itself ('start date not stated in the source') so the "
+                    "record is honest rather than silently dated. "
+                    "Preferences and standing rules need no start date — "
+                    "do not ask about those. An episode stands alone, or "
+                    "rides in ONE proposal with other actions when the same "
+                    "source also teaches a lasting fact (ROUTE FIRST). `scope` "
+                    "is 'shared' for every fact about the WORLD — people, "
+                    "relationships, projects, systems, dates — no matter who "
+                    "learned it or whose role it touches. 'private' is RARE: "
+                    "only an operating rule about how YOU specifically should "
+                    "work (e.g. 'always dismiss email from sender X'), useless "
+                    "or wrong for a teammate to act on. If a teammate could "
+                    "ever benefit from knowing it, it is shared. A private "
+                    "rule about how a TEAMMATE should work (the operator "
+                    "telling you inbox-triage's triage policy) names that "
+                    "teammate in 'for_agent' so it lands in THEIR partition, "
+                    "not yours — omit it and 'private' means your own. The "
+                    "scope is an operator-visible routing decision on the "
+                    "proposal, not something you can change after approval. "
+                    "An approved episode is never edited in place — its "
+                    "text is what the operator approved. Correcting one "
+                    "whose TEXT was wrong is graph.delete_episode (the "
+                    "graph-curate pack) plus a fresh graph.add_episode "
+                    "with the corrected text."
+                ),
             ),
         ),
     ),
@@ -753,28 +843,32 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="catalog.tag",
-                arguments=("{'document_id': '<the catalog document id>', "
-                           "'tags': ['<tag>', …], "
-                           "'mode': 'replace' | 'add' | 'remove'}"),
-                notes=("target_ref = {'system': 'catalog', 'id': '<document_id>'}, "
-                       "reversibility = 'reversible'. "
-                       "`mode` is OPTIONAL and defaults to 'replace' (the whole "
-                       "tag list is rewritten) — use 'add' or 'remove' when you "
-                       "mean one tag and want the rest left alone. Tag from the "
-                       "document work you have actually done, never "
-                       "speculatively: when a version you read supersedes an "
-                       "earlier lineage, tag the OLD one 'superseded' and cite "
-                       "the newer document; when a document states its own "
-                       "currency, tag 'current as of <date>' in the source's "
-                       "own words; tag 'draft' when the document says it is "
-                       "one. 'rescinded' is the library saying it no longer "
-                       "trusts a source at all — propose it only on an explicit "
-                       "statement (the operator's, or the document's own "
-                       "withdrawal notice), never on a hunch that something "
-                       "looks old. Nothing is ever deleted: a tag is how the "
-                       "catalog records what WAS trusted and when. Cite the "
-                       "evidence for every tag exactly as you do for an "
-                       "episode."),
+                arguments=(
+                    "{'document_id': '<the catalog document id>', "
+                    "'tags': ['<tag>', …], "
+                    "'mode': 'replace' | 'add' | 'remove'}"
+                ),
+                notes=(
+                    "target_ref = {'system': 'catalog', 'id': '<document_id>'}, "
+                    "reversibility = 'reversible'. "
+                    "`mode` is OPTIONAL and defaults to 'replace' (the whole "
+                    "tag list is rewritten) — use 'add' or 'remove' when you "
+                    "mean one tag and want the rest left alone. Tag from the "
+                    "document work you have actually done, never "
+                    "speculatively: when a version you read supersedes an "
+                    "earlier lineage, tag the OLD one 'superseded' and cite "
+                    "the newer document; when a document states its own "
+                    "currency, tag 'current as of <date>' in the source's "
+                    "own words; tag 'draft' when the document says it is "
+                    "one. 'rescinded' is the library saying it no longer "
+                    "trusts a source at all — propose it only on an explicit "
+                    "statement (the operator's, or the document's own "
+                    "withdrawal notice), never on a hunch that something "
+                    "looks old. Nothing is ever deleted: a tag is how the "
+                    "catalog records what WAS trusted and when. Cite the "
+                    "evidence for every tag exactly as you do for an "
+                    "episode."
+                ),
             ),
         ),
     ),
@@ -792,8 +886,13 @@ PACKS: dict[str, Pack] = {
         # private ones included — the one deliberate exception to D11-r1's
         # "never reads another agent's partition", granted by holding THIS
         # pack: a curator that cannot see the patient cannot operate.
-        tool_names=("propose_action", "propose_delete_episode", "list_graph_groups",
-                    "list_graph_group_episodes", "search_graph_group"),
+        tool_names=(
+            "propose_action",
+            "propose_delete_episode",
+            "list_graph_groups",
+            "list_graph_group_episodes",
+            "search_graph_group",
+        ),
         guidance=(
             "SCOPE: every episode, entity and relationship carries a "
             "group_id. 'central_command' is the shared team graph, a "
@@ -817,129 +916,149 @@ PACKS: dict[str, Pack] = {
             GatedCapability(
                 name="graph.rescope_episode",
                 arguments="{'episode_uuid': '<episode>', 'group_id': "
-                          "'<target group, e.g. central_command_inbox-triage>', "
-                          "'verification_id'?: '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': "
-                       "'<episode_uuid>'}, "
-                       "reversibility = 'reversible'. Moves the episode and "
-                       "what extraction produced from it to another group: "
-                       "entities and facts only this episode produced move; "
-                       "ones shared with a staying episode are split into a "
-                       "copy in the target group. Nothing is deleted. Name the "
-                       "episode and both groups in your intent."),
+                "'<target group, e.g. central_command_inbox-triage>', "
+                "'verification_id'?: '<…>'}",
+                notes=(
+                    "target_ref = {'system': 'graphiti', 'id': "
+                    "'<episode_uuid>'}, "
+                    "reversibility = 'reversible'. Moves the episode and "
+                    "what extraction produced from it to another group: "
+                    "entities and facts only this episode produced move; "
+                    "ones shared with a staying episode are split into a "
+                    "copy in the target group. Nothing is deleted. Name the "
+                    "episode and both groups in your intent."
+                ),
             ),
             GatedCapability(
                 name="graph.delete_episode",
-                arguments=("{'episode_uuid': '<episode>', 'preview': <captured for "
-                           "you>} — propose ONLY through propose_delete_episode"),
-                notes=("reversibility = 'irreversible'. Deletes the episode, the "
-                       "facts it was FIRST to create, the entities no other "
-                       "episode mentions, and every fact still attached to those "
-                       "entities (shown as collateral); surviving facts stop "
-                       "citing it. propose_delete_episode reads that set and puts "
-                       "it in the proposal; the deletion is refused if the graph "
-                       "changes before it runs — re-propose then. For a doctrine "
-                       "in the wrong partition use graph.rescope_episode, which "
-                       "deletes nothing."),
+                arguments=(
+                    "{'episode_uuid': '<episode>', 'preview': <captured for "
+                    "you>} — propose ONLY through propose_delete_episode"
+                ),
+                notes=(
+                    "reversibility = 'irreversible'. Deletes the episode, the "
+                    "facts it was FIRST to create, the entities no other "
+                    "episode mentions, and every fact still attached to those "
+                    "entities (shown as collateral); surviving facts stop "
+                    "citing it. propose_delete_episode reads that set and puts "
+                    "it in the proposal; the deletion is refused if the graph "
+                    "changes before it runs — re-propose then. For a doctrine "
+                    "in the wrong partition use graph.rescope_episode, which "
+                    "deletes nothing."
+                ),
             ),
             GatedCapability(
                 name="graph.create_node",
                 arguments="{'name': '<entity name>', 'group_id': '<the "
-                          "verification row's graph group>', 'summary': "
-                          "'<one-line description>', 'labels': ['<Type>'], "
-                          "'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': 'central_command'}, "
-                       "reversibility = 'reversible'. "
-                       "For an entity the extraction DROPPED — state exactly what "
-                       "the approved text says, nothing inferred. `labels` is "
-                       "REQUIRED and every entry must be one of exactly these "
-                       "ten (the closed ontology; anything else is rejected at "
-                       "execution): Person, Preference, Requirement, Procedure, "
-                       "Location, Event, Organization, Document, Topic, Object. "
-                       "There is no Task, Email or EmailAddress type — an email "
-                       "address or a mailing list is an Object, a Jira issue is "
-                       "a Document."),
+                "verification row's graph group>', 'summary': "
+                "'<one-line description>', 'labels': ['<Type>'], "
+                "'verification_id': '<…>'}",
+                notes=(
+                    "target_ref = {'system': 'graphiti', 'id': 'central_command'}, "
+                    "reversibility = 'reversible'. "
+                    "For an entity the extraction DROPPED — state exactly what "
+                    "the approved text says, nothing inferred. `labels` is "
+                    "REQUIRED and every entry must be one of exactly these "
+                    "ten (the closed ontology; anything else is rejected at "
+                    "execution): Person, Preference, Requirement, Procedure, "
+                    "Location, Event, Organization, Document, Topic, Object. "
+                    "There is no Task, Email or EmailAddress type — an email "
+                    "address or a mailing list is an Object, a Jira issue is "
+                    "a Document."
+                ),
             ),
             GatedCapability(
                 name="graph.create_edge",
                 arguments="{'source_uuid': '<entity uuid>', 'target_uuid': "
-                          "'<entity uuid>', 'name': '<RELATION_NAME>', 'fact': "
-                          "'<the claim, in the approved text's words>', "
-                          "'valid_at': '<ISO datetime, or the word unbounded "
-                          "when the text gives no start>', 'invalid_at'?: "
-                          "'<ISO datetime, or unbounded>', "
-                          "'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': "
-                       "'<source_uuid>'}, "
-                       "reversibility = 'reversible'. For a relationship the "
-                       "extraction DROPPED. Both endpoints must be the uuids of "
-                       "entities that ALREADY exist in the graph — the Executor "
-                       "never resolves a name, an email address or any other "
-                       "label, and a node created earlier in the same proposal "
-                       "has no uuid until it executes. So never put a "
-                       "graph.create_node and an edge to that node in one "
-                       "proposal: create the nodes first, then read their uuids "
-                       "from the graph and propose the edges in a follow-up "
-                       "with the same verification_id. Set the validity window from the "
-                       "approved text's own dates: valid_at when it became "
-                       "true, invalid_at when it ceased. valid_at is REQUIRED "
-                       "— the date the text gives, or the literal word "
-                       "'unbounded' when it gives none (stored as no start; "
-                       "nothing is ever stamped 'today' for you). Omit "
-                       "invalid_at when the fact still holds."),
+                "'<entity uuid>', 'name': '<RELATION_NAME>', 'fact': "
+                "'<the claim, in the approved text's words>', "
+                "'valid_at': '<ISO datetime, or the word unbounded "
+                "when the text gives no start>', 'invalid_at'?: "
+                "'<ISO datetime, or unbounded>', "
+                "'verification_id': '<…>'}",
+                notes=(
+                    "target_ref = {'system': 'graphiti', 'id': "
+                    "'<source_uuid>'}, "
+                    "reversibility = 'reversible'. For a relationship the "
+                    "extraction DROPPED. Both endpoints must be the uuids of "
+                    "entities that ALREADY exist in the graph — the Executor "
+                    "never resolves a name, an email address or any other "
+                    "label, and a node created earlier in the same proposal "
+                    "has no uuid until it executes. So never put a "
+                    "graph.create_node and an edge to that node in one "
+                    "proposal: create the nodes first, then read their uuids "
+                    "from the graph and propose the edges in a follow-up "
+                    "with the same verification_id. Set the validity window from the "
+                    "approved text's own dates: valid_at when it became "
+                    "true, invalid_at when it ceased. valid_at is REQUIRED "
+                    "— the date the text gives, or the literal word "
+                    "'unbounded' when it gives none (stored as no start; "
+                    "nothing is ever stamped 'today' for you). Omit "
+                    "invalid_at when the fact still holds."
+                ),
             ),
             GatedCapability(
                 name="graph.merge_nodes",
                 arguments="{'keep_uuid': '<entity to keep>', 'drop_uuid': "
-                          "'<duplicate to fold in>', 'verification_id': "
-                          "'<the verification row being remediated>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<keep_uuid>'}, reversibility = "
-                       "'irreversible'. Folds a duplicate entity into the one "
-                       "kept — every edge and mention moves. Name BOTH nodes in "
-                       "the intent so the operator can tell them apart."),
+                "'<duplicate to fold in>', 'verification_id': "
+                "'<the verification row being remediated>'}",
+                notes=(
+                    "target_ref = {'system': 'graphiti', 'id': '<keep_uuid>'}, reversibility = "
+                    "'irreversible'. Folds a duplicate entity into the one "
+                    "kept — every edge and mention moves. Name BOTH nodes in "
+                    "the intent so the operator can tell them apart."
+                ),
             ),
             GatedCapability(
                 name="graph.update_node",
                 arguments="{'uuid': '<entity>', 'name': '<new name>'?, "
-                          "'summary': '<new summary>'?, 'labels': ['<Type>', …]?, "
-                          "'aliases': ['<other name>', …]?, 'birth_date': "
-                          "'<YYYY-MM-DD>'?, 'phone': '<as written>'?, "
-                          "'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>'}, "
-                       "reversibility = 'reversible'. "
-                       "Rename / re-summarise / re-type; omit fields you are not "
-                       "changing. aliases, birth_date and phone are a Person's only "
-                       "([] or '' clears one); a renamed Person keeps its old name "
-                       "as an alias unless you pass aliases."),
+                "'summary': '<new summary>'?, 'labels': ['<Type>', …]?, "
+                "'aliases': ['<other name>', …]?, 'birth_date': "
+                "'<YYYY-MM-DD>'?, 'phone': '<as written>'?, "
+                "'verification_id': '<…>'}",
+                notes=(
+                    "target_ref = {'system': 'graphiti', 'id': '<uuid>'}, "
+                    "reversibility = 'reversible'. "
+                    "Rename / re-summarise / re-type; omit fields you are not "
+                    "changing. aliases, birth_date and phone are a Person's only "
+                    "([] or '' clears one); a renamed Person keeps its old name "
+                    "as an alias unless you pass aliases."
+                ),
             ),
             GatedCapability(
                 name="graph.delete_node",
                 arguments="{'uuid': '<entity>', 'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>'}, reversibility = "
-                       "'irreversible'. DETACH DELETE — the node and every edge "
-                       "touching it. Only for a hallucinated entity; a merely "
-                       "mis-described one is an update or a merge."),
+                notes=(
+                    "target_ref = {'system': 'graphiti', 'id': '<uuid>'}, reversibility = "
+                    "'irreversible'. DETACH DELETE — the node and every edge "
+                    "touching it. Only for a hallucinated entity; a merely "
+                    "mis-described one is an update or a merge."
+                ),
             ),
             GatedCapability(
                 name="graph.update_edge",
                 arguments="{'uuid': '<relationship>', 'name'?: …, 'fact'?: …, "
-                          "'source_uuid'?/'target_uuid'?: '<repoint>', "
-                          "'valid_at'?/'invalid_at'?: '<ISO datetime>', "
-                          "'clear_valid'?/'clear_invalid'?/'clear_expired'?: true, "
-                          "'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>'}, "
-                       "reversibility = 'reversible'. "
-                       "Fix a fact's wording, endpoints (repoint), or validity "
-                       "window. RESTORING a wrongly-retired fact means "
-                       "clear_invalid AND clear_expired together — one without "
-                       "the other leaves it half-retired."),
+                "'source_uuid'?/'target_uuid'?: '<repoint>', "
+                "'valid_at'?/'invalid_at'?: '<ISO datetime>', "
+                "'clear_valid'?/'clear_invalid'?/'clear_expired'?: true, "
+                "'verification_id': '<…>'}",
+                notes=(
+                    "target_ref = {'system': 'graphiti', 'id': '<uuid>'}, "
+                    "reversibility = 'reversible'. "
+                    "Fix a fact's wording, endpoints (repoint), or validity "
+                    "window. RESTORING a wrongly-retired fact means "
+                    "clear_invalid AND clear_expired together — one without "
+                    "the other leaves it half-retired."
+                ),
             ),
             GatedCapability(
                 name="graph.delete_edge",
                 arguments="{'uuid': '<relationship>', 'verification_id': '<…>'}",
-                notes=("target_ref = {'system': 'graphiti', 'id': '<uuid>'}, reversibility = "
-                       "'irreversible'. For an invented relationship (a "
-                       "self-loop, a fact the approved text never said)."),
+                notes=(
+                    "target_ref = {'system': 'graphiti', 'id': '<uuid>'}, reversibility = "
+                    "'irreversible'. For an invented relationship (a "
+                    "self-loop, a fact the approved text never said)."
+                ),
             ),
         ),
     ),
@@ -1001,8 +1120,13 @@ PACKS: dict[str, Pack] = {
             "and version history, its decided proposals and the operator's "
             "feedback, and any event by id."
         ),
-        tool_names=("read_team_roster", "read_agent_charter", "read_charter_history",
-                    "read_agent_record", "read_record_event"),
+        tool_names=(
+            "read_team_roster",
+            "read_agent_charter",
+            "read_charter_history",
+            "read_agent_record",
+            "read_record_event",
+        ),
         guidance=(
             "READING THE RECORD: you have full read access to the team's "
             "record, and a selection you are given is context, not a fence — "
@@ -1124,45 +1248,57 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="loe.create",
-                arguments=("{'loe_id': '<kebab-case id>', 'name': '<what the "
-                           "operator called it>', 'agent_id': "
-                           "'accountability', 'semantic': {'questions': "
-                           "[...], 'thresholds': '<text>'}, 'cadence'?: "
-                           "'weekly'|'monthly', 'presentation'?: {...}}"),
-                notes=("A new line of effort, after INTERVIEWING the operator "
-                       "about it: what the goal is, what a good week looks "
-                       "like, how often to check in. The questions and "
-                       "thresholds are their answers, not ones you wrote for "
-                       "them. Call loe_list first — a goal they already have "
-                       "is a loe.update, and a colliding loe_id is refused."),
+                arguments=(
+                    "{'loe_id': '<kebab-case id>', 'name': '<what the "
+                    "operator called it>', 'agent_id': "
+                    "'accountability', 'semantic': {'questions': "
+                    "[...], 'thresholds': '<text>'}, 'cadence'?: "
+                    "'weekly'|'monthly', 'presentation'?: {...}}"
+                ),
+                notes=(
+                    "A new line of effort, after INTERVIEWING the operator "
+                    "about it: what the goal is, what a good week looks "
+                    "like, how often to check in. The questions and "
+                    "thresholds are their answers, not ones you wrote for "
+                    "them. Call loe_list first — a goal they already have "
+                    "is a loe.update, and a colliding loe_id is refused."
+                ),
             ),
             GatedCapability(
                 name="loe.record_checkin",
-                arguments=("{'loe_id': '<id>', 'light': 'green'|'yellow'|'red', "
-                           "'confidence': <0-100>, 'summary': '<what the "
-                           "operator said>'}"),
-                notes=("The outcome of a check-in conversation. The summary is "
-                       "the operator's answer, not your interpretation of it; "
-                       "confidence is how sure YOU are that the light is "
-                       "right given what they told you. Check-ins are "
-                       "append-only — a wrong one is corrected by the next "
-                       "check-in saying so, never rewritten."),
+                arguments=(
+                    "{'loe_id': '<id>', 'light': 'green'|'yellow'|'red', "
+                    "'confidence': <0-100>, 'summary': '<what the "
+                    "operator said>'}"
+                ),
+                notes=(
+                    "The outcome of a check-in conversation. The summary is "
+                    "the operator's answer, not your interpretation of it; "
+                    "confidence is how sure YOU are that the light is "
+                    "right given what they told you. Check-ins are "
+                    "append-only — a wrong one is corrected by the next "
+                    "check-in saying so, never rewritten."
+                ),
             ),
             GatedCapability(
                 name="loe.update",
-                arguments=("{'loe_id': '<id>', 'name'?: '<text>', 'cadence'?: "
-                           "'<text>', 'semantic'?: {'questions': [...], "
-                           "'thresholds': '<text>'}, 'presentation'?: {...}} "
-                           "OR {'loe_id': '<id>', 'retire': true, 'reason': "
-                           "'<why>'}"),
-                notes=("Recalibration. A changed `semantic` bumps the version, "
-                       "so past check-ins keep the targets they were scored "
-                       "against — that is what makes recalibrating honest. "
-                       "Propose it when the history says the target is wrong "
-                       "(three or more consecutive yellow/red), and CITE that "
-                       "pattern in the intent; do not quietly shrink a target "
-                       "to make a red go green. Retire is a status flip: the "
-                       "history is kept, nothing is deleted."),
+                arguments=(
+                    "{'loe_id': '<id>', 'name'?: '<text>', 'cadence'?: "
+                    "'<text>', 'semantic'?: {'questions': [...], "
+                    "'thresholds': '<text>'}, 'presentation'?: {...}} "
+                    "OR {'loe_id': '<id>', 'retire': true, 'reason': "
+                    "'<why>'}"
+                ),
+                notes=(
+                    "Recalibration. A changed `semantic` bumps the version, "
+                    "so past check-ins keep the targets they were scored "
+                    "against — that is what makes recalibrating honest. "
+                    "Propose it when the history says the target is wrong "
+                    "(three or more consecutive yellow/red), and CITE that "
+                    "pattern in the intent; do not quietly shrink a target "
+                    "to make a red go green. Retire is a status flip: the "
+                    "history is kept, nothing is deleted."
+                ),
             ),
         ),
     ),
@@ -1190,67 +1326,85 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="calendar.create_event",
-                arguments=("{'title': '<summary>', 'start': '<RFC3339>', 'end': "
-                           "'<RFC3339>', 'description'?: '<text>', 'attendees'?: "
-                           "['<email>', ...], 'calendar_id'?: 'primary', 'plan'?: "
-                           "{'kind': 'work_block', 'issue_key': '<KEY>', 'date': "
-                           "'YYYY-MM-DD'} or {'kind': 'placeholder'}}"),
-                notes=("Inviting an attendee sends mail to a real person — list "
-                       "them explicitly in the intent, or leave attendees off and "
-                       "let the operator invite. `plan` marks the event as YOUR "
-                       "OWN in the plan ledger: a work block (time for one issue, "
-                       "on its local plan date; issue_key and date required) or a "
-                       "placeholder (a shape of the operator's week; no issue_key, "
-                       "no date). It is never sent to the calendar, and the ledger "
-                       "row is written only once the create has executed. A plan "
-                       "of several blocks is ONE proposal with one create per "
-                       "block."),
+                arguments=(
+                    "{'title': '<summary>', 'start': '<RFC3339>', 'end': "
+                    "'<RFC3339>', 'description'?: '<text>', 'attendees'?: "
+                    "['<email>', ...], 'calendar_id'?: 'primary', 'plan'?: "
+                    "{'kind': 'work_block', 'issue_key': '<KEY>', 'date': "
+                    "'YYYY-MM-DD'} or {'kind': 'placeholder'}}"
+                ),
+                notes=(
+                    "Inviting an attendee sends mail to a real person — list "
+                    "them explicitly in the intent, or leave attendees off and "
+                    "let the operator invite. `plan` marks the event as YOUR "
+                    "OWN in the plan ledger: a work block (time for one issue, "
+                    "on its local plan date; issue_key and date required) or a "
+                    "placeholder (a shape of the operator's week; no issue_key, "
+                    "no date). It is never sent to the calendar, and the ledger "
+                    "row is written only once the create has executed. A plan "
+                    "of several blocks is ONE proposal with one create per "
+                    "block."
+                ),
             ),
             GatedCapability(
                 name="calendar.update_event",
-                arguments=("{'event_id': '<id from a read>'} plus any of 'title', "
-                           "'start', 'end', 'description', 'attendees', "
-                           "'calendar_id'"),
-                notes=("Partial merge: only the fields you send change, so send "
-                       "just what moves. Prefer this over cancel-and-recreate — "
-                       "recreating loses the attendees' responses."),
+                arguments=(
+                    "{'event_id': '<id from a read>'} plus any of 'title', "
+                    "'start', 'end', 'description', 'attendees', "
+                    "'calendar_id'"
+                ),
+                notes=(
+                    "Partial merge: only the fields you send change, so send "
+                    "just what moves. Prefer this over cancel-and-recreate — "
+                    "recreating loses the attendees' responses."
+                ),
             ),
             GatedCapability(
                 name="calendar.delete_event",
-                arguments=("{'event_id': '<id from a read>', 'reason': '<why this "
-                           "meeting should be cancelled>', 'calendar_id'?: "
-                           "'primary'}"),
-                notes=("IRREVERSIBLE in effect: the event's copy is recoverable "
-                       "from Deleted Items or as a cancelled event, but the "
-                       "notifications are not: attendees are told and recreating "
-                       "the event does not restore their acceptances. "
-                       "The reason is required and is what the operator reviews. "
-                       "Deleting an event the ledger knows retires its ledger row."),
+                arguments=(
+                    "{'event_id': '<id from a read>', 'reason': '<why this "
+                    "meeting should be cancelled>', 'calendar_id'?: "
+                    "'primary'}"
+                ),
+                notes=(
+                    "IRREVERSIBLE in effect: the event's copy is recoverable "
+                    "from Deleted Items or as a cancelled event, but the "
+                    "notifications are not: attendees are told and recreating "
+                    "the event does not restore their acceptances. "
+                    "The reason is required and is what the operator reviews. "
+                    "Deleting an event the ledger knows retires its ledger row."
+                ),
             ),
             GatedCapability(
                 name="calendar.adopt_event",
-                arguments=("{'event_id': '<id from a read>', 'kind': 'placeholder', "
-                           "'calendar_id'?: 'primary'}"),
-                notes=("Records an event the operator ALREADY keeps as one of your "
-                       "placeholders, so a structure that exists is not recreated. "
-                       "It changes nothing on the calendar; it only lets you propose "
-                       "moving that event later. Propose it only for an event the "
-                       "operator agreed is part of the week's shape, never for a "
-                       "meeting with other people. An event already in the ledger "
-                       "is refused. A wrong adoption is undone with "
-                       "calendar.release_event."),
+                arguments=(
+                    "{'event_id': '<id from a read>', 'kind': 'placeholder', "
+                    "'calendar_id'?: 'primary'}"
+                ),
+                notes=(
+                    "Records an event the operator ALREADY keeps as one of your "
+                    "placeholders, so a structure that exists is not recreated. "
+                    "It changes nothing on the calendar; it only lets you propose "
+                    "moving that event later. Propose it only for an event the "
+                    "operator agreed is part of the week's shape, never for a "
+                    "meeting with other people. An event already in the ledger "
+                    "is refused. A wrong adoption is undone with "
+                    "calendar.release_event."
+                ),
             ),
             GatedCapability(
                 name="calendar.release_event",
                 arguments="{'event_id': '<id from a read>', 'calendar_id'?: 'primary'}",
-                notes=("Releases one of YOUR events (a work block or a placeholder) "
-                       "from the plan ledger: the event stays on the calendar as an "
-                       "ordinary commitment, and you may no longer propose moving "
-                       "it. It changes nothing on the calendar. Use it for a wrong "
-                       "adoption, or when the operator wants to keep a block as an "
-                       "ordinary event; to remove the event itself, propose "
-                       "calendar.delete_event instead. Refused when the ledger has "
-                       "no active row for the event."),
+                notes=(
+                    "Releases one of YOUR events (a work block or a placeholder) "
+                    "from the plan ledger: the event stays on the calendar as an "
+                    "ordinary commitment, and you may no longer propose moving "
+                    "it. It changes nothing on the calendar. Use it for a wrong "
+                    "adoption, or when the operator wants to keep a block as an "
+                    "ordinary event; to remove the event itself, propose "
+                    "calendar.delete_event instead. Refused when the ledger has "
+                    "no active row for the event."
+                ),
             ),
         ),
     ),
@@ -1260,10 +1414,12 @@ PACKS: dict[str, Pack] = {
     # jira.set_planning_fields: an issue's planning fields and nothing else.
     "plan-propose": Pack(
         name="plan-propose",
-        description=("Propose storing the day's plan, recording the evening "
-                     "review's outcomes, removing a work block whose issue is "
-                     "finished and setting an issue's planning fields "
-                     "(written by the control plane after approval)."),
+        description=(
+            "Propose storing the day's plan, recording the evening "
+            "review's outcomes, removing a work block whose issue is "
+            "finished and setting an issue's planning fields "
+            "(written by the control plane after approval)."
+        ),
         tool_names=("propose_action",),
         guidance=(
             "THE STORED PLAN: target_ref = {'system': 'central_command', 'id': "
@@ -1289,45 +1445,55 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="plan.record_day",
-                arguments=("{'date': 'YYYY-MM-DD', 'items': [{'issue_key': '<KEY>', "
-                           "'reason': '<why it is on today\'s list>'}, ...]}"),
-                notes=("The day's ranked list, one to ten issues, in the order you "
-                       "propose them, each once, each with its reason. Do NOT send "
-                       "value, estimate or any other number: the control plane "
-                       "re-reads each issue's planning numbers from the tracker when "
-                       "the plan executes, and an item carrying other keys is "
-                       "refused. A later plan for the same date replaces this one "
-                       "as the day's record."),
+                arguments=(
+                    "{'date': 'YYYY-MM-DD', 'items': [{'issue_key': '<KEY>', "
+                    "'reason': '<why it is on today's list>'}, ...]}"
+                ),
+                notes=(
+                    "The day's ranked list, one to ten issues, in the order you "
+                    "propose them, each once, each with its reason. Do NOT send "
+                    "value, estimate or any other number: the control plane "
+                    "re-reads each issue's planning numbers from the tracker when "
+                    "the plan executes, and an item carrying other keys is "
+                    "refused. A later plan for the same date replaces this one "
+                    "as the day's record."
+                ),
             ),
             GatedCapability(
                 name="plan.record_review",
-                arguments=("{'date': 'YYYY-MM-DD', 'outcomes': [{'issue_key': '<KEY>', "
-                           "'done': true|false, 'actual_hours'?: <hours >= 0>, "
-                           "'note'?: '<text>'}, ...]}"),
-                notes=("The evening review's outcomes, ONE proposal once the "
-                       "conversation has settled them: per issue, whether it was "
-                       "done and how long it actually took, as the OPERATOR told "
-                       "you. Never mark work done on your own word or on the "
-                       "tracker's status alone; leave actual_hours off when the "
-                       "operator did not say. An issue that was not on that date's "
-                       "plan is accepted and stored as unplanned work. A later "
-                       "record for the same date and issue replaces the earlier "
-                       "one. The actual hours are what pads future estimates."),
+                arguments=(
+                    "{'date': 'YYYY-MM-DD', 'outcomes': [{'issue_key': '<KEY>', "
+                    "'done': true|false, 'actual_hours'?: <hours >= 0>, "
+                    "'note'?: '<text>'}, ...]}"
+                ),
+                notes=(
+                    "The evening review's outcomes, ONE proposal once the "
+                    "conversation has settled them: per issue, whether it was "
+                    "done and how long it actually took, as the OPERATOR told "
+                    "you. Never mark work done on your own word or on the "
+                    "tracker's status alone; leave actual_hours off when the "
+                    "operator did not say. An issue that was not on that date's "
+                    "plan is accepted and stored as unplanned work. A later "
+                    "record for the same date and issue replaces the earlier "
+                    "one. The actual hours are what pads future estimates."
+                ),
             ),
             GatedCapability(
                 name="plan.remove_finished_block",
                 arguments="{'event_id': '<id from a read>', 'calendar_id'?: 'primary'}",
-                notes=("Removes one of YOUR work blocks whose issue is FINISHED: "
-                       "listed under `blocks_to_review.finished` (closed, or no "
-                       "longer in the tracker). It deletes the event from the "
-                       "calendar, which cannot be undone, and retires its row in "
-                       "your ledger; calendar.release_event, by contrast, only "
-                       "drops the ledger row and leaves the event on the calendar. "
-                       "Propose it for a finished block straight away; the control "
-                       "plane checks at execution that the issue is closed or gone "
-                       "and that you created the block, and refuses otherwise. "
-                       "Never use it for a block whose issue is still open: that "
-                       "is calendar.delete_event, after the operator answers."),
+                notes=(
+                    "Removes one of YOUR work blocks whose issue is FINISHED: "
+                    "listed under `blocks_to_review.finished` (closed, or no "
+                    "longer in the tracker). It deletes the event from the "
+                    "calendar, which cannot be undone, and retires its row in "
+                    "your ledger; calendar.release_event, by contrast, only "
+                    "drops the ledger row and leaves the event on the calendar. "
+                    "Propose it for a finished block straight away; the control "
+                    "plane checks at execution that the issue is closed or gone "
+                    "and that you created the block, and refuses otherwise. "
+                    "Never use it for a block whose issue is still open: that "
+                    "is calendar.delete_event, after the operator answers."
+                ),
             ),
             # The planning fields (DL-221 step 4b): the one tracker write the
             # assistant holds. Also in jira-propose (see _SET_PLANNING_FIELDS).
@@ -1388,7 +1554,7 @@ PACKS: dict[str, Pack] = {
             "rationale)` asks the operator to clear the whole pattern in ONE "
             "decision instead of one email at a time. The query MUST be "
             "specific — name the sender (from:news@shop.example) or an exact "
-            "phrase (\"Your weekly digest\"), optionally narrowed with "
+            'phrase ("Your weekly digest"), optionally narrowed with '
             "before:/older_than:. A bare category:promotions is refused: it "
             "covers mail nobody has looked at. What the operator approves is a "
             "PINNED SET: the tool runs the search itself and covers only the "
@@ -1404,19 +1570,23 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="work.bulk_dismiss",
-                arguments=("{'query': '<the Gmail search>', 'unprocessed': "
-                           "<how many queue items it matched>, 'match_digest': "
-                           "'<fingerprint of exactly those items>', "
-                           "'provider_matches': <mailbox matches>, 'samples': "
-                           "[{from, subject, date}]}"),
-                notes=("target_ref = {'system': 'work_item', 'id': '<the "
-                       "query>'}, "
-                       "reversibility = 'reversible'. You do not write these "
-                       "arguments: you pass query + rationale to "
-                       "`propose_bulk_dismiss` and the tool resolves and pins "
-                       "the set. Nothing outside Central Command changes — no mail "
-                       "is deleted, marked read, or unsubscribed from; the "
-                       "emails simply stop waiting for a decision."),
+                arguments=(
+                    "{'query': '<the Gmail search>', 'unprocessed': "
+                    "<how many queue items it matched>, 'match_digest': "
+                    "'<fingerprint of exactly those items>', "
+                    "'provider_matches': <mailbox matches>, 'samples': "
+                    "[{from, subject, date}]}"
+                ),
+                notes=(
+                    "target_ref = {'system': 'work_item', 'id': '<the "
+                    "query>'}, "
+                    "reversibility = 'reversible'. You do not write these "
+                    "arguments: you pass query + rationale to "
+                    "`propose_bulk_dismiss` and the tool resolves and pins "
+                    "the set. Nothing outside Central Command changes — no mail "
+                    "is deleted, marked read, or unsubscribed from; the "
+                    "emails simply stop waiting for a decision."
+                ),
             ),
         ),
     ),
@@ -1478,11 +1648,15 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="mail.report_spam",
-                arguments=("{'provider_uuid': '<pinned by the tool>', "
-                           "'sender': '<pinned>', 'subject': '<pinned>'}"),
-                notes=("You do not write these arguments: the tool resolves the "
-                       "email and pins them. target_ref = {'system': 'mailbox', "
-                       "'id': '<uuid>'}, reversibility = 'reversible'."),
+                arguments=(
+                    "{'provider_uuid': '<pinned by the tool>', "
+                    "'sender': '<pinned>', 'subject': '<pinned>'}"
+                ),
+                notes=(
+                    "You do not write these arguments: the tool resolves the "
+                    "email and pins them. target_ref = {'system': 'mailbox', "
+                    "'id': '<uuid>'}, reversibility = 'reversible'."
+                ),
             ),
         ),
     ),
@@ -1506,12 +1680,16 @@ PACKS: dict[str, Pack] = {
             GatedCapability(
                 name="mail.unsubscribe",
                 providers=("gmail",),
-                arguments=("{'provider_uuid': '<pinned>', 'url': '<pinned from "
-                           "List-Unsubscribe>', 'sender': '<pinned>', "
-                           "'subject': '<pinned>'}"),
-                notes=("You do not write these arguments. target_ref = "
-                       "{'system': 'mailbox', 'id': '<uuid>'}, reversibility = "
-                       "'irreversible'."),
+                arguments=(
+                    "{'provider_uuid': '<pinned>', 'url': '<pinned from "
+                    "List-Unsubscribe>', 'sender': '<pinned>', "
+                    "'subject': '<pinned>'}"
+                ),
+                notes=(
+                    "You do not write these arguments. target_ref = "
+                    "{'system': 'mailbox', 'id': '<uuid>'}, reversibility = "
+                    "'irreversible'."
+                ),
             ),
         ),
     ),
@@ -1542,16 +1720,20 @@ PACKS: dict[str, Pack] = {
             GatedCapability(
                 name="mail.send",
                 providers=("exchange",),
-                arguments=("{'to': ['<address>'], 'cc': ['<address>'], "
-                           "'subject': '<subject>', 'body': '<the whole "
-                           "message>', 'reply_to_ref': '<pinned by the tool>'}"),
-                notes=("target_ref = {'system': 'mailbox', 'id': '<the "
-                       "recipients>'}, "
-                       "reversibility = 'irreversible'. You write `to`, "
-                       "`subject`, `body` and optionally `cc`; the tool "
-                       "resolves `reply_to_ref` to a message and the Executor "
-                       "takes In-Reply-To/References from that message's own "
-                       "headers."),
+                arguments=(
+                    "{'to': ['<address>'], 'cc': ['<address>'], "
+                    "'subject': '<subject>', 'body': '<the whole "
+                    "message>', 'reply_to_ref': '<pinned by the tool>'}"
+                ),
+                notes=(
+                    "target_ref = {'system': 'mailbox', 'id': '<the "
+                    "recipients>'}, "
+                    "reversibility = 'irreversible'. You write `to`, "
+                    "`subject`, `body` and optionally `cc`; the tool "
+                    "resolves `reply_to_ref` to a message and the Executor "
+                    "takes In-Reply-To/References from that message's own "
+                    "headers."
+                ),
             ),
         ),
     ),
@@ -1573,12 +1755,16 @@ PACKS: dict[str, Pack] = {
             GatedCapability(
                 name="mail.move",
                 providers=("exchange",),
-                arguments=("{'provider_uuid': '<pinned by the tool>', "
-                           "'folder': '<a folder mail_list_folders showed>', "
-                           "'sender': '<pinned>', 'subject': '<pinned>'}"),
-                notes=("You do not write the uuid: the tool resolves the email "
-                       "and pins it. target_ref = {'system': 'mailbox', 'id': "
-                       "'<uuid>'}, reversibility = 'reversible'."),
+                arguments=(
+                    "{'provider_uuid': '<pinned by the tool>', "
+                    "'folder': '<a folder mail_list_folders showed>', "
+                    "'sender': '<pinned>', 'subject': '<pinned>'}"
+                ),
+                notes=(
+                    "You do not write the uuid: the tool resolves the email "
+                    "and pins it. target_ref = {'system': 'mailbox', 'id': "
+                    "'<uuid>'}, reversibility = 'reversible'."
+                ),
             ),
         ),
     ),
@@ -1618,18 +1804,22 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="mail.create_rule",
-                arguments=("{'criteria': {'from_address'?, 'from_domain'?, "
-                           "'subject_contains'?, 'body_contains'?}, "
-                           "'exceptions'?: {same fields}, 'reason': '<why>', "
-                           "'description': '<pinned by the tool>', "
-                           "'apply_to_queued': true|false, "
-                           "'queued_matches': <pinned>, 'samples': <pinned>}"),
-                notes=("You do not write these arguments: the tool validates "
-                       "the criteria, previews the queue and pins the rest. "
-                       "target_ref = {'system': 'mail_rule', 'id': '<the "
-                       "description>'}, reversibility = 'reversible' (the "
-                       "operator can revoke the rule; folded mail is "
-                       "reopenable)."),
+                arguments=(
+                    "{'criteria': {'from_address'?, 'from_domain'?, "
+                    "'subject_contains'?, 'body_contains'?}, "
+                    "'exceptions'?: {same fields}, 'reason': '<why>', "
+                    "'description': '<pinned by the tool>', "
+                    "'apply_to_queued': true|false, "
+                    "'queued_matches': <pinned>, 'samples': <pinned>}"
+                ),
+                notes=(
+                    "You do not write these arguments: the tool validates "
+                    "the criteria, previews the queue and pins the rest. "
+                    "target_ref = {'system': 'mail_rule', 'id': '<the "
+                    "description>'}, reversibility = 'reversible' (the "
+                    "operator can revoke the rule; folded mail is "
+                    "reopenable)."
+                ),
             ),
         ),
     ),
@@ -1682,21 +1872,29 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="memory.note_add",
-                arguments=("built by propose_note(scope, text, source_quote, "
-                           "retire_ids=[]), which stamps source_quote, "
-                           "source_session_id and quote_source after checking "
-                           "the quote — never write this action yourself"),
-                notes=("The note's owner is you, set by the control plane; the "
-                       "budget is re-checked when the operator approves, and an "
-                       "over-budget note is refused and sent back to you."),
+                arguments=(
+                    "built by propose_note(scope, text, source_quote, "
+                    "retire_ids=[]), which stamps source_quote, "
+                    "source_session_id and quote_source after checking "
+                    "the quote — never write this action yourself"
+                ),
+                notes=(
+                    "The note's owner is you, set by the control plane; the "
+                    "budget is re-checked when the operator approves, and an "
+                    "over-budget note is refused and sent back to you."
+                ),
             ),
             GatedCapability(
                 name="memory.note_retire",
-                arguments=("built by propose_note_retire(note_id, reason, "
-                           "source_quote) — never write this action yourself"),
-                notes=("You may retire your own private notes, and an "
-                       "operator-scope note only when the operator asked for it: "
-                       "quote their words as source_quote."),
+                arguments=(
+                    "built by propose_note_retire(note_id, reason, "
+                    "source_quote) — never write this action yourself"
+                ),
+                notes=(
+                    "You may retire your own private notes, and an "
+                    "operator-scope note only when the operator asked for it: "
+                    "quote their words as source_quote."
+                ),
             ),
         ),
     ),
@@ -1707,8 +1905,7 @@ PACKS: dict[str, Pack] = {
             "more document on an existing one, or a correction to one you used, "
             "written to the library only after the operator approves it."
         ),
-        tool_names=("propose_skill_create", "propose_skill_doc",
-                    "propose_skill_correction"),
+        tool_names=("propose_skill_create", "propose_skill_doc", "propose_skill_correction"),
         guidance=(
             "SKILL AUTHORING: a skill is standing knowledge the team keeps — "
             "every agent granted it loads the guidance document in full, so "
@@ -1752,32 +1949,40 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="skill.create",
-                arguments=("{'title': '<the skill name>', 'summary': '<one line: "
-                           "when to reach for it>', 'guidance_content': '<the full "
-                           "guidance document>', 'describes'?: '<what it is about>'}"),
-                notes=("target_ref = {'system': 'central_command', 'id': 'skills'}, "
-                       "reversibility = 'reversible'. "
-                       "The skill id is derived from the title by the control "
-                       "plane — you do not choose it, and an id that already "
-                       "exists is REFUSED at execution."),
+                arguments=(
+                    "{'title': '<the skill name>', 'summary': '<one line: "
+                    "when to reach for it>', 'guidance_content': '<the full "
+                    "guidance document>', 'describes'?: '<what it is about>'}"
+                ),
+                notes=(
+                    "target_ref = {'system': 'central_command', 'id': 'skills'}, "
+                    "reversibility = 'reversible'. "
+                    "The skill id is derived from the title by the control "
+                    "plane — you do not choose it, and an id that already "
+                    "exists is REFUSED at execution."
+                ),
             ),
             GatedCapability(
                 name="skill.doc_add",
-                arguments=("{'skill_id': '<existing skill>', 'doc_key': '<stable "
-                           "document name>', 'title': '<document title>', "
-                           "'content': '<the text>', 'source_url'?: '<where it "
-                           "came from>', 'describes'?: '<what it is about>'}"),
-                notes=("Same target_ref shape with id = the skill_id. Give the "
-                       "TOOL either your own text or a source_url, never both — "
-                       "with a url the tool fetches and fills `content` for you "
-                       "at propose time, and the control plane writes exactly "
-                       "those bytes without re-fetching. doc_key 'guidance' "
-                       "replaces the skill's guidance document; any other key "
-                       "is a searchable reference. An unknown or retired skill "
-                       "is refused. `propose_skill_correction` drafts the same "
-                       "capability from an exact span: it fills `content`, "
-                       "`correction` and `base_version` for you, and the write "
-                       "is refused if the document moved past `base_version`."),
+                arguments=(
+                    "{'skill_id': '<existing skill>', 'doc_key': '<stable "
+                    "document name>', 'title': '<document title>', "
+                    "'content': '<the text>', 'source_url'?: '<where it "
+                    "came from>', 'describes'?: '<what it is about>'}"
+                ),
+                notes=(
+                    "Same target_ref shape with id = the skill_id. Give the "
+                    "TOOL either your own text or a source_url, never both — "
+                    "with a url the tool fetches and fills `content` for you "
+                    "at propose time, and the control plane writes exactly "
+                    "those bytes without re-fetching. doc_key 'guidance' "
+                    "replaces the skill's guidance document; any other key "
+                    "is a searchable reference. An unknown or retired skill "
+                    "is refused. `propose_skill_correction` drafts the same "
+                    "capability from an exact span: it fills `content`, "
+                    "`correction` and `base_version` for you, and the write "
+                    "is refused if the document moved past `base_version`."
+                ),
             ),
         ),
     ),
@@ -1808,23 +2013,25 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="charter.update",
-                arguments=("{'agent_id': '<the agent whose charter changes>', "
-                           "'content': '<the FULL revised charter text>', "
-                           "'rationale': '<1-2 sentences on what changed and why>'}"),
-                notes=("target_ref = {'system': 'central_command', 'id': '<agent_id>'}, "
-                       "reversibility = "
-                       "'reversible'. `agent_id` is the SUBJECT of the edit — the "
-                       "agent being coached, which may be another agent or "
-                       "yourself. You never state who drafted it: the control "
-                       "plane records that from the proposal itself."),
+                arguments=(
+                    "{'agent_id': '<the agent whose charter changes>', "
+                    "'content': '<the FULL revised charter text>', "
+                    "'rationale': '<1-2 sentences on what changed and why>'}"
+                ),
+                notes=(
+                    "target_ref = {'system': 'central_command', 'id': '<agent_id>'}, "
+                    "reversibility = "
+                    "'reversible'. `agent_id` is the SUBJECT of the edit — the "
+                    "agent being coached, which may be another agent or "
+                    "yourself. You never state who drafted it: the control "
+                    "plane records that from the proposal itself."
+                ),
             ),
         ),
     ),
     "consult": Pack(
         name="consult",
-        description=(
-            "Consult a consultable teammate mid-run (advice, never instructions)."
-        ),
+        description=("Consult a consultable teammate mid-run (advice, never instructions)."),
         tool_names=("consult_agent",),
         guidance=(
             "CONSULTING A TEAMMATE: when a question is another agent's "
@@ -1876,12 +2083,21 @@ PACKS: dict[str, Pack] = {
     "litellm-read": Pack(
         name="litellm-read",
         description="Read the LiteLLM proxy: models, credentials, keys, teams, routing, health, spend, MCP servers.",
-        tool_names=("litellm_list_models", "litellm_list_credentials",
-                    "litellm_list_keys", "litellm_list_teams", "litellm_get_routing",
-                    "litellm_get_health", "litellm_check_model_health",
-                    "litellm_get_spend", "litellm_list_mcp_servers",
-                    "litellm_read_config", "litellm_read_logs",
-                    "litellm_provider_catalog", "litellm_probe_model"),
+        tool_names=(
+            "litellm_list_models",
+            "litellm_list_credentials",
+            "litellm_list_keys",
+            "litellm_list_teams",
+            "litellm_get_routing",
+            "litellm_get_health",
+            "litellm_check_model_health",
+            "litellm_get_spend",
+            "litellm_list_mcp_servers",
+            "litellm_read_config",
+            "litellm_read_logs",
+            "litellm_provider_catalog",
+            "litellm_probe_model",
+        ),
         guidance=(
             "CAPABILITY IS MEASURED, NEVER GUESSED (2026-08-30): "
             "litellm_list_models shows each model's declared capabilities "
@@ -1926,76 +2142,96 @@ PACKS: dict[str, Pack] = {
         capabilities=(
             GatedCapability(
                 name="litellm.update_model",
-                arguments=("{'model_id': '<id from litellm_list_models>'} plus one or "
-                           "more of 'model_info' (metadata object — native fields like "
-                           "'created_at'/'created_by', or custom pricing), "
-                           "'litellm_params' (provider params: 'rpm', 'tpm', 'timeout', "
-                           "cost overrides, or 'model' to re-point the alias), "
-                           "'model_name' (a new alias — rename)"),
-                notes=("PREFER THIS FOR ANY EDIT TO AN EXISTING MODEL. In-place "
-                       "partial merge (PATCH): only the fields you send change; "
-                       "everything omitted — crucially the stored provider api_key — "
-                       "is preserved. A field cannot be nulled via update, only "
-                       "overwritten."),
+                arguments=(
+                    "{'model_id': '<id from litellm_list_models>'} plus one or "
+                    "more of 'model_info' (metadata object — native fields like "
+                    "'created_at'/'created_by', or custom pricing), "
+                    "'litellm_params' (provider params: 'rpm', 'tpm', 'timeout', "
+                    "cost overrides, or 'model' to re-point the alias), "
+                    "'model_name' (a new alias — rename)"
+                ),
+                notes=(
+                    "PREFER THIS FOR ANY EDIT TO AN EXISTING MODEL. In-place "
+                    "partial merge (PATCH): only the fields you send change; "
+                    "everything omitted — crucially the stored provider api_key — "
+                    "is preserved. A field cannot be nulled via update, only "
+                    "overwritten."
+                ),
             ),
             GatedCapability(
                 name="litellm.add_model",
-                arguments=("{'model_name': '<alias>', 'model': '<provider>/<model>'} "
-                           "plus optional 'model_info' (metadata — native names; NOT "
-                           "under 'extra') and 'extra' (extra litellm_params, e.g. "
-                           "{'rpm': 100}, or the PREFERRED auth reference "
-                           "'litellm_credential_name')"),
+                arguments=(
+                    "{'model_name': '<alias>', 'model': '<provider>/<model>'} "
+                    "plus optional 'model_info' (metadata — native names; NOT "
+                    "under 'extra') and 'extra' (extra litellm_params, e.g. "
+                    "{'rpm': 100}, or the PREFERRED auth reference "
+                    "'litellm_credential_name')"
+                ),
                 notes="ONLY to register a genuinely NEW alias.",
             ),
             GatedCapability(
                 name="litellm.delete_model",
                 arguments="{'model_id': '<id from litellm_list_models>'}",
-                notes=("ONLY to genuinely retire a model. Removes by proxy model_id, "
-                       "NOT alias — read the id first; guessing it is a wrong-target "
-                       "risk."),
+                notes=(
+                    "ONLY to genuinely retire a model. Removes by proxy model_id, "
+                    "NOT alias — read the id first; guessing it is a wrong-target "
+                    "risk."
+                ),
             ),
             GatedCapability(
                 name="autodiscovery.skip",
-                arguments=("{'credential_name': '<the discovering credential>', "
-                           "'vendors': ['<vendor prefix as written in the review "
-                           "brief>', ...], 'model_ids': ['<raw catalog id>', ...]} "
-                           "— at least one of the two lists — plus optional "
-                           "'reason'"),
-                notes=("Record the operator's NEVER-ADD decision for catalog ids "
-                       "under one credential (the `autodiscovery_decisions` skip "
-                       "list). Only from an autodiscovery REVIEW task, only for "
-                       "what the operator agreed to skip in that discussion — one "
-                       "proposal per credential. Name whole groups with 'vendors' "
-                       "(the Executor expands each to its exact ids; never "
-                       "enumerate them yourself) and individual ids with "
-                       "'model_ids'. Skipped ids are never offered again unless "
-                       "their catalog entry changes; nothing on the proxy is "
-                       "touched."),
+                arguments=(
+                    "{'credential_name': '<the discovering credential>', "
+                    "'vendors': ['<vendor prefix as written in the review "
+                    "brief>', ...], 'model_ids': ['<raw catalog id>', ...]} "
+                    "— at least one of the two lists — plus optional "
+                    "'reason'"
+                ),
+                notes=(
+                    "Record the operator's NEVER-ADD decision for catalog ids "
+                    "under one credential (the `autodiscovery_decisions` skip "
+                    "list). Only from an autodiscovery REVIEW task, only for "
+                    "what the operator agreed to skip in that discussion — one "
+                    "proposal per credential. Name whole groups with 'vendors' "
+                    "(the Executor expands each to its exact ids; never "
+                    "enumerate them yourself) and individual ids with "
+                    "'model_ids'. Skipped ids are never offered again unless "
+                    "their catalog entry changes; nothing on the proxy is "
+                    "touched."
+                ),
             ),
             GatedCapability(
                 name="litellm.create_key",
-                arguments=("{'key_alias': '<label>'} plus optional 'models' (list of "
-                           "aliases the key may call; omit = all), 'tags' (list — "
-                           "per-tag spend tracking), 'metadata' (object), 'duration' "
-                           "(lifetime, e.g. '30d')"),
-                notes=("Issue a VIRTUAL KEY for spend attribution / model scoping. Do "
-                       "NOT set budgets or rate limits (out of scope for now). The "
-                       "proxy returns the plaintext key ONCE; the control plane never "
-                       "retains or shows it."),
+                arguments=(
+                    "{'key_alias': '<label>'} plus optional 'models' (list of "
+                    "aliases the key may call; omit = all), 'tags' (list — "
+                    "per-tag spend tracking), 'metadata' (object), 'duration' "
+                    "(lifetime, e.g. '30d')"
+                ),
+                notes=(
+                    "Issue a VIRTUAL KEY for spend attribution / model scoping. Do "
+                    "NOT set budgets or rate limits (out of scope for now). The "
+                    "proxy returns the plaintext key ONCE; the control plane never "
+                    "retains or shows it."
+                ),
             ),
             GatedCapability(
                 name="litellm.update_key",
-                arguments=("{'key': '<token_id/hash from litellm_list_keys>'} plus any "
-                           "of 'models' (re-scope), 'metadata', 'tags', 'key_alias' "
-                           "(rename), 'duration'"),
+                arguments=(
+                    "{'key': '<token_id/hash from litellm_list_keys>'} plus any "
+                    "of 'models' (re-scope), 'metadata', 'tags', 'key_alias' "
+                    "(rename), 'duration'"
+                ),
                 notes="Patch semantics; addressed by the token hash. No budgets.",
             ),
             GatedCapability(
                 name="litellm.delete_key",
                 arguments="{'key_alias': '<alias from litellm_list_keys>'}",
-                notes=("Delete BY ALIAS (the control plane holds no plaintext keys). "
-                       "LIVE: deleting a key that carries real traffic breaks it until "
-                       "re-issued — say so in the intent if that's a risk."),
+                notes=(
+                    "Delete BY ALIAS (the control plane holds no plaintext keys). "
+                    "LIVE: deleting a key that carries real traffic breaks it until "
+                    "re-issued — say so in the intent if that's a risk."
+                ),
             ),
             GatedCapability(
                 name="litellm.create_team",
@@ -2008,13 +2244,17 @@ PACKS: dict[str, Pack] = {
             ),
             GatedCapability(
                 name="litellm.set_fallbacks",
-                arguments=("{'model': '<alias>', 'fallback_models': ['<alias>', ...]} "
-                           "plus optional 'fallback_type' ('general' = any error, "
-                           "default; 'context_window'; 'content_policy')"),
-                notes=("When a call to `model` fails after retries, the router tries "
-                       "the fallbacks in order. All are aliases from "
-                       "litellm_list_models. Read litellm_get_routing first. LIVE on "
-                       "approval."),
+                arguments=(
+                    "{'model': '<alias>', 'fallback_models': ['<alias>', ...]} "
+                    "plus optional 'fallback_type' ('general' = any error, "
+                    "default; 'context_window'; 'content_policy')"
+                ),
+                notes=(
+                    "When a call to `model` fails after retries, the router tries "
+                    "the fallbacks in order. All are aliases from "
+                    "litellm_list_models. Read litellm_get_routing first. LIVE on "
+                    "approval."
+                ),
             ),
             GatedCapability(
                 name="litellm.delete_fallbacks",
@@ -2031,8 +2271,11 @@ PACKS: dict[str, Pack] = {
             "so nothing it produces reaches anywhere durable."
         ),
         tool_names=(
-            "sandbox_exec", "sandbox_write_file", "sandbox_read_file",
-            "sandbox_copy_in", "sandbox_reset",
+            "sandbox_exec",
+            "sandbox_write_file",
+            "sandbox_read_file",
+            "sandbox_copy_in",
+            "sandbox_reset",
         ),
         guidance=(
             "SANDBOX: you have your own ephemeral Linux container "
@@ -2060,9 +2303,13 @@ PACKS: dict[str, Pack] = {
             "deploying a synced server's image."
         ),
         tool_names=(
-            "propose_mcp_sync_source", "propose_mcp_build", "propose_mcp_deploy",
-            "propose_mcp_register", "propose_mcp_remove",
-            "propose_mcp_server_register", "propose_mcp_server_unregister",
+            "propose_mcp_sync_source",
+            "propose_mcp_build",
+            "propose_mcp_deploy",
+            "propose_mcp_register",
+            "propose_mcp_remove",
+            "propose_mcp_server_register",
+            "propose_mcp_server_unregister",
             "mcp_list_servers",
         ),
         guidance=(
@@ -2206,47 +2453,99 @@ PACKS: dict[str, Pack] = {
 # grant rows at all (a not-yet-migrated database). Once any row exists for an
 # agent, the DB is the only truth — including "all revoked" = no tools.
 DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
-    "inbox-triage": ("jira-read", "jira-propose", "graph-read", "graph-propose",
-                     "consult", "task-create", "ask-operator",
-                     "bulk-dismiss-propose", "mail-read",
-                     "mail-spam-propose", "mail-unsubscribe-propose",
-                     "mail-rule-propose",
-                     # v2.51.0: the working set the charter assumes (seeded too)
-                     "web-read", "web-search", "calendar-read",
-                     "catalog-read", "catalog-propose", "confluence-read",
-                     # DL-213: a time on a day goes on the calendar (seeded too)
-                     "calendar-propose",
-                     # DL-214: episodic recall of its own sessions (migrated too)
-                     "session-recall",
-                     # DL-215: every roster agent but the auditors and the
-                     # editor proposes corrections to the skills it uses
-                     "skill-propose",
-                     # DL-217: ... and standing notes, through the gate
-                     "note-propose"),
-    "jira-expert": ("jira-read", "jira-propose", "jira-project-propose",
-                    "jira-delete-propose",
-                    "graph-read", "graph-propose",
-                    "consult", "task-create", "ask-operator", "web-read",
-                    "loe-read", "session-recall", "skill-propose", "note-propose"),
-    "litellm-manager": ("litellm-read", "litellm-admin-propose", "consult",
-                        "graph-read", "graph-propose", "task-create",
-                        "ask-operator", "web-read", "skill-propose",
-                        "session-recall", "note-propose"),
+    "inbox-triage": (
+        "jira-read",
+        "jira-propose",
+        "graph-read",
+        "graph-propose",
+        "consult",
+        "task-create",
+        "ask-operator",
+        "bulk-dismiss-propose",
+        "mail-read",
+        "mail-spam-propose",
+        "mail-unsubscribe-propose",
+        "mail-rule-propose",
+        # v2.51.0: the working set the charter assumes (seeded too)
+        "web-read",
+        "web-search",
+        "calendar-read",
+        "catalog-read",
+        "catalog-propose",
+        "confluence-read",
+        # DL-213: a time on a day goes on the calendar (seeded too)
+        "calendar-propose",
+        # DL-214: episodic recall of its own sessions (migrated too)
+        "session-recall",
+        # DL-215: every roster agent but the auditors and the
+        # editor proposes corrections to the skills it uses
+        "skill-propose",
+        # DL-217: ... and standing notes, through the gate
+        "note-propose",
+    ),
+    "jira-expert": (
+        "jira-read",
+        "jira-propose",
+        "jira-project-propose",
+        "jira-delete-propose",
+        "graph-read",
+        "graph-propose",
+        "consult",
+        "task-create",
+        "ask-operator",
+        "web-read",
+        "loe-read",
+        "session-recall",
+        "skill-propose",
+        "note-propose",
+    ),
+    "litellm-manager": (
+        "litellm-read",
+        "litellm-admin-propose",
+        "consult",
+        "graph-read",
+        "graph-propose",
+        "task-create",
+        "ask-operator",
+        "web-read",
+        "skill-propose",
+        "session-recall",
+        "note-propose",
+    ),
     # confluence-space-propose is the expert's ALONE (the jira-project-propose
     # precedent): wiki-agent also holds confluence-propose but must not gain
     # space creation.
-    "confluence-expert": ("confluence-read", "confluence-propose",
-                          "confluence-space-propose", "graph-read",
-                          "graph-propose", "task-create", "ask-operator",
-                          "consult", "web-read", "session-recall", "skill-propose",
-                          "note-propose"),
+    "confluence-expert": (
+        "confluence-read",
+        "confluence-propose",
+        "confluence-space-propose",
+        "graph-read",
+        "graph-propose",
+        "task-create",
+        "ask-operator",
+        "consult",
+        "web-read",
+        "session-recall",
+        "skill-propose",
+        "note-propose",
+    ),
     # catalog-read added 2026-08-30 (sources-catalog slice 7): the catalog is
     # the system of record and a Confluence index page is a rendered VIEW of
     # it (Decision 3) — the producer could not see the library it renders.
-    "wiki-agent": ("confluence-read", "confluence-propose", "jira-read",
-                   "graph-read", "graph-propose", "task-create",
-                   "ask-operator", "consult", "catalog-read", "session-recall", "skill-propose",
-                   "note-propose"),
+    "wiki-agent": (
+        "confluence-read",
+        "confluence-propose",
+        "jira-read",
+        "graph-read",
+        "graph-propose",
+        "task-create",
+        "ask-operator",
+        "consult",
+        "catalog-read",
+        "session-recall",
+        "skill-propose",
+        "note-propose",
+    ),
     # The orchestrator holds task-create like every active agent but the
     # auditor (the operator's 2026-10-22 ruling, story 4.9), and gains nothing
     # else: its PROJECT runs drop the pack (api/orchestration._build_agent) so
@@ -2263,9 +2562,17 @@ DEFAULT_PACKS: dict[str, tuple[str, ...]] = {
     # "consult a teammate" when it lacks a capability; the grant makes that
     # guidance a mechanism. Consult is advice, assign_work is work — the pack
     # guidance keeps them distinct in project runs.
-    "orchestrator": ("orchestrate", "graph-read", "loe-read", "record-read",
-                     "consult", "task-create", "session-recall", "skill-propose",
-                     "note-propose"),
+    "orchestrator": (
+        "orchestrate",
+        "graph-read",
+        "loe-read",
+        "record-read",
+        "consult",
+        "task-create",
+        "session-recall",
+        "skill-propose",
+        "note-propose",
+    ),
 }
 
 
@@ -2336,11 +2643,13 @@ def _offered(pack: Pack) -> tuple[tuple[str, ...], tuple[GatedCapability, ...]]:
     """
     flavor = _settings.jira_api_flavor or "cloud"
     provider = _provider()
-    tools = tuple(t for t in pack.tool_names
-                  if flavor in TOOL_FLAVORS.get(t, ("cloud", "server"))
-                  and provider in TOOL_PROVIDERS.get(t, ("gmail", "exchange")))
-    caps = tuple(c for c in pack.capabilities
-                 if flavor in c.flavors and provider in c.providers)
+    tools = tuple(
+        t
+        for t in pack.tool_names
+        if flavor in TOOL_FLAVORS.get(t, ("cloud", "server"))
+        and provider in TOOL_PROVIDERS.get(t, ("gmail", "exchange"))
+    )
+    caps = tuple(c for c in pack.capabilities if flavor in c.flavors and provider in c.providers)
     return tools, caps
 
 
@@ -2349,7 +2658,7 @@ def mcp_server_ids_from_grants(pack_names) -> list[str]:
     grant order. The one place both `mcp_toolsets_for` and
     `mcp_charter_section` parse the dynamic pack-name convention, so it can
     change in one place if it ever needs to."""
-    return [p[len("mcp:"):] for p in pack_names if p.startswith("mcp:")]
+    return [p[len("mcp:") :] for p in pack_names if p.startswith("mcp:")]
 
 
 def toolset_for(pack_names) -> FunctionToolset:
@@ -2404,107 +2713,111 @@ def toolset_for(pack_names) -> FunctionToolset:
 # `tests/test_consult.py` re-derives both sets from the tools' own source, so a
 # new deferral tool added to a pack fails the suite instead of surfacing as a
 # UserError mid-consult.
-NON_ADVISORY_TOOLS = frozenset({
-    # create_task is not a deferral at all — it is the one DIRECT trigger tool
-    # (story 4.7) — and it is here unconditionally: an advisory answer proposes
-    # nothing and starts nothing (FR-20). It sits alone in `task-create` so
-    # dropping that pack drops nothing else.
-    "create_task",
-    "submit_plan",
-    "assign_work",
-    "ask_operator",
-    "conclude_discussion",
-    # The mcp pipeline (D-sandbox slices 2-3): sync_source captures a
-    # SANDBOX's bytes at propose time — a consult specialist has no sandbox
-    # of the caller's, so there is nothing coherent for it to capture — and
-    # build/deploy only ever make sense proposed by the same agent that
-    # proposed the sync, never by a consulted specialist mid-answer. Barring
-    # the whole family drops the whole mcp-propose pack from advisory
-    # sub-runs (a pack is kept WHOLE or dropped whole), not just one tool.
-    "propose_mcp_sync_source",
-    "propose_mcp_build",
-    "propose_mcp_deploy",
-    "propose_mcp_register",
-    "propose_mcp_remove",
-    # Registering by URL (DL-233) is the MCP manager's own lifecycle step, and
-    # the family is barred whole for the same reason as its siblings.
-    "propose_mcp_server_register",
-    "propose_mcp_server_unregister",
-    # propose_mcp_tool_call (D-sandbox slice 5): same reasoning as its
-    # siblings above — a consult specialist has no coherent stand-in for
-    # "gated for THIS caller", since the effective gate is per-AGENT, and
-    # the whole family is barred from advisory sub-runs uniformly.
-    "propose_mcp_tool_call",
-    # propose_bulk_dismiss reserves its set through the HOST run: the tool
-    # records the covered ids on the run's deps, `ingest_and_propose` returns
-    # them, and the dispatcher marks them FOLD_PENDING against the parked
-    # proposal. A consult sub-run has none of that chain, so a specialist
-    # drafting one would park a proposal whose approval folds NOTHING — the
-    # review-theater failure mode, wearing an approval's clothes. The queue is
-    # inbox-triage's own surface anyway; nobody consults about it.
-    "propose_bulk_dismiss",
-    # A standing rule is queue policy for the same surface (2026-09-22).
-    "propose_mail_rule",
-    # The mail actions (2026-09-12) act on "the email this run is handling"
-    # by default — `deps.item_id`, which only the triage HOST run sets — and
-    # the mailbox is inbox-triage's own surface exactly as the queue is.
-    "propose_report_spam",
-    "propose_unsubscribe",
-    # Sending and filing (2026-09-25) are the same surface and the same
-    # default: `propose_mail_move` acts on "the email this run is handling"
-    # unless told otherwise, and a consulted specialist has no `deps.item_id`
-    # to mean. Sending rides along because a specialist drafting mail AS THE
-    # OPERATOR mid-answer is a deliberate grant, not a side effect of being
-    # asked a question.
-    "propose_mail_send",
-    "propose_mail_move",
-    # The note store (DL-217): a consulted specialist answers a question; it
-    # does not take standing notes mid-answer. Its session is the asker's
-    # sub-run, whose prompt is another agent's words, so a quote grounded there
-    # proves nothing about how the specialist works or what the operator said.
-    "propose_note",
-    "propose_note_retire",
-})
+NON_ADVISORY_TOOLS = frozenset(
+    {
+        # create_task is not a deferral at all — it is the one DIRECT trigger tool
+        # (story 4.7) — and it is here unconditionally: an advisory answer proposes
+        # nothing and starts nothing (FR-20). It sits alone in `task-create` so
+        # dropping that pack drops nothing else.
+        "create_task",
+        "submit_plan",
+        "assign_work",
+        "ask_operator",
+        "conclude_discussion",
+        # The mcp pipeline (D-sandbox slices 2-3): sync_source captures a
+        # SANDBOX's bytes at propose time — a consult specialist has no sandbox
+        # of the caller's, so there is nothing coherent for it to capture — and
+        # build/deploy only ever make sense proposed by the same agent that
+        # proposed the sync, never by a consulted specialist mid-answer. Barring
+        # the whole family drops the whole mcp-propose pack from advisory
+        # sub-runs (a pack is kept WHOLE or dropped whole), not just one tool.
+        "propose_mcp_sync_source",
+        "propose_mcp_build",
+        "propose_mcp_deploy",
+        "propose_mcp_register",
+        "propose_mcp_remove",
+        # Registering by URL (DL-233) is the MCP manager's own lifecycle step, and
+        # the family is barred whole for the same reason as its siblings.
+        "propose_mcp_server_register",
+        "propose_mcp_server_unregister",
+        # propose_mcp_tool_call (D-sandbox slice 5): same reasoning as its
+        # siblings above — a consult specialist has no coherent stand-in for
+        # "gated for THIS caller", since the effective gate is per-AGENT, and
+        # the whole family is barred from advisory sub-runs uniformly.
+        "propose_mcp_tool_call",
+        # propose_bulk_dismiss reserves its set through the HOST run: the tool
+        # records the covered ids on the run's deps, `ingest_and_propose` returns
+        # them, and the dispatcher marks them FOLD_PENDING against the parked
+        # proposal. A consult sub-run has none of that chain, so a specialist
+        # drafting one would park a proposal whose approval folds NOTHING — the
+        # review-theater failure mode, wearing an approval's clothes. The queue is
+        # inbox-triage's own surface anyway; nobody consults about it.
+        "propose_bulk_dismiss",
+        # A standing rule is queue policy for the same surface (2026-09-22).
+        "propose_mail_rule",
+        # The mail actions (2026-09-12) act on "the email this run is handling"
+        # by default — `deps.item_id`, which only the triage HOST run sets — and
+        # the mailbox is inbox-triage's own surface exactly as the queue is.
+        "propose_report_spam",
+        "propose_unsubscribe",
+        # Sending and filing (2026-09-25) are the same surface and the same
+        # default: `propose_mail_move` acts on "the email this run is handling"
+        # unless told otherwise, and a consulted specialist has no `deps.item_id`
+        # to mean. Sending rides along because a specialist drafting mail AS THE
+        # OPERATOR mid-answer is a deliberate grant, not a side effect of being
+        # asked a question.
+        "propose_mail_send",
+        "propose_mail_move",
+        # The note store (DL-217): a consulted specialist answers a question; it
+        # does not take standing notes mid-answer. Its session is the asker's
+        # sub-run, whose prompt is another agent's words, so a quote grounded there
+        # proves nothing about how the specialist works or what the operator said.
+        "propose_note",
+        "propose_note_retire",
+    }
+)
 
 # The deferral tools a consultation CAN drive — an explicit allowlist, never
 # "everything not excluded". A new propose tool is inert in consults until it
 # is named here, which is the safe direction.
-ADVISORY_DEFERRAL_TOOLS = frozenset({
-    "propose_action",
-    # An episode deletion (v2.61.0) is the skill-draft case: the preview of
-    # what goes is captured INTO the proposal at propose time and the
-    # Executor recomputes it — nothing in it is specific to the run that
-    # drafted it. A consulted curator may draft one; the operator decides.
-    "propose_delete_episode",
-    # propose_jira_update (dropped from every toolset 2026-08-21) was kept
-    # here and in tools.py only as a stand-in for pre-drop consult-parked
-    # proposals; the resume path is tool_call_id-based (see
-    # durable.py:PROPOSE_TOOLS) and never calls this name as a function, so
-    # the alias itself carried no behavior — removed 2026-09-20.
-    "propose_litellm_change",
-    # A calendar change parks like any other proposal and carries nothing
-    # caller-specific (unlike the mcp family, whose sandbox/gate context has no
-    # stand-in in a sub-run) — so a consulted specialist may draft one, and the
-    # operator still decides.
-    "propose_calendar_change",
-    # Skill drafts are the calendar case, not the mcp case: content is
-    # embedded in the proposal at propose time (URL capture included) and
-    # `added_by` comes from the gateway-passed proposer, so nothing in a
-    # consult sub-run lacks a stand-in. A consulted steward drafting a skill
-    # mid-answer parks like any other proposal; the operator still decides.
-    "propose_skill_create",
-    "propose_skill_doc",
-    # A correction is the same case: the span is applied and the corrected
-    # document captured at propose time, and its base version is stamped by
-    # the tool's code from the document it read, not by the run.
-    "propose_skill_correction",
-    # A line-of-effort proposal is the calendar case: everything it carries is
-    # in the proposal itself (the loe_id, the light, the summary), the semantic
-    # version is stamped by the Executor, and nothing about it is specific to
-    # the run that drafted it. A consulted specialist may draft one; the
-    # operator still decides.
-    "propose_loe",
-})
+ADVISORY_DEFERRAL_TOOLS = frozenset(
+    {
+        "propose_action",
+        # An episode deletion (v2.61.0) is the skill-draft case: the preview of
+        # what goes is captured INTO the proposal at propose time and the
+        # Executor recomputes it — nothing in it is specific to the run that
+        # drafted it. A consulted curator may draft one; the operator decides.
+        "propose_delete_episode",
+        # propose_jira_update (dropped from every toolset 2026-08-21) was kept
+        # here and in tools.py only as a stand-in for pre-drop consult-parked
+        # proposals; the resume path is tool_call_id-based (see
+        # durable.py:PROPOSE_TOOLS) and never calls this name as a function, so
+        # the alias itself carried no behavior — removed 2026-09-20.
+        "propose_litellm_change",
+        # A calendar change parks like any other proposal and carries nothing
+        # caller-specific (unlike the mcp family, whose sandbox/gate context has no
+        # stand-in in a sub-run) — so a consulted specialist may draft one, and the
+        # operator still decides.
+        "propose_calendar_change",
+        # Skill drafts are the calendar case, not the mcp case: content is
+        # embedded in the proposal at propose time (URL capture included) and
+        # `added_by` comes from the gateway-passed proposer, so nothing in a
+        # consult sub-run lacks a stand-in. A consulted steward drafting a skill
+        # mid-answer parks like any other proposal; the operator still decides.
+        "propose_skill_create",
+        "propose_skill_doc",
+        # A correction is the same case: the span is applied and the corrected
+        # document captured at propose time, and its base version is stamped by
+        # the tool's code from the document it read, not by the run.
+        "propose_skill_correction",
+        # A line-of-effort proposal is the calendar case: everything it carries is
+        # in the proposal itself (the loe_id, the light, the summary), the semantic
+        # version is stamped by the Executor, and nothing about it is specific to
+        # the run that drafted it. A consulted specialist may draft one; the
+        # operator still decides.
+        "propose_loe",
+    }
+)
 
 # The propose tools whose `proposal` the MODEL writes (a `ProposalArg`
 # parameter), as opposed to the ones that build the proposal server-side from
@@ -2512,12 +2825,14 @@ ADVISORY_DEFERRAL_TOOLS = frozenset({
 # (a confidence on every draft, GATE-067), and an agent offered one is told so
 # in its generated charter section. A parity test pins this set against the
 # tool signatures in `runtime/tools.py`.
-AGENT_AUTHORED_PROPOSE_TOOLS = frozenset({
-    "propose_action",
-    "propose_litellm_change",
-    "propose_calendar_change",
-    "propose_loe",
-})
+AGENT_AUTHORED_PROPOSE_TOOLS = frozenset(
+    {
+        "propose_action",
+        "propose_litellm_change",
+        "propose_calendar_change",
+        "propose_loe",
+    }
+)
 
 CONFIDENCE_GUIDANCE = (
     "CONFIDENCE: every proposal you write with "
@@ -2594,11 +2909,13 @@ def charter_section(pack_names) -> str:
     can (and did)."""
     packs = _packs(pack_names)
     lines = [
-        ("YOUR GRANTED CAPABILITIES — GENERATED from the control plane's "
-        "capability-pack grants. This list is the authority on what you may "
-        "propose: it SUPERSEDES any capability list written elsewhere in this "
-        "charter. If a task calls for a capability not listed here, say so in "
-        "plain text instead of proposing it."),
+        (
+            "YOUR GRANTED CAPABILITIES — GENERATED from the control plane's "
+            "capability-pack grants. This list is the authority on what you may "
+            "propose: it SUPERSEDES any capability list written elsewhere in this "
+            "charter. If a task calls for a capability not listed here, say so in "
+            "plain text instead of proposing it."
+        ),
     ]
     if any(t in AGENT_AUTHORED_PROPOSE_TOOLS for pack in packs for t in _offered(pack)[0]):
         lines.append("")
@@ -2619,8 +2936,7 @@ def charter_section(pack_names) -> str:
                 lines.append(f"  {cap.notes}")
     if not caps_seen:
         lines.append("")
-        lines.append("(No propose capabilities granted — you answer in text and "
-                      "read only.)")
+        lines.append("(No propose capabilities granted — you answer in text and read only.)")
     return "\n".join(lines)
 
 
@@ -2745,9 +3061,7 @@ def _mcp_live_toolset(agent_id: str, server_id: str, ungated_tool_names: list[st
     # `Authorization: Bearer`, not `x-litellm-api-key`: the proxy's
     # /{server}/mcp route 401s "Malformed API Key" on the latter (live,
     # 2026-08-05) even though LiteLLM's docs name it for MCP.
-    toolset = MCPToolset(
-        url, headers={"Authorization": f"Bearer {key}"}, id=f"mcp-{server_id}"
-    )
+    toolset = MCPToolset(url, headers={"Authorization": f"Bearer {key}"}, id=f"mcp-{server_id}")
     # LiteLLM's MCP gateway namespaces tool names as `{server_name}-{tool}`
     # (live-probed 2026-08-04: tools/list on /echo_demo/mcp returned
     # "echo_demo-echo"), while mcp_tool.tool_name stores the bare name the
@@ -2771,11 +3085,13 @@ async def mcp_charter_section(agent_id: str, pack_names) -> str:
 
     gates = await repo.effective_mcp_gates(agent_id)
     lines = [
-        ("YOUR MCP SERVER ACCESS — GENERATED from your mcp: grants. A GATED "
-        "tool is reachable ONLY via propose_mcp_tool_call(server_id, "
-        "tool_name, arguments, rationale) — reviewed and, once approved, "
-        "invoked for you. An UNGATED tool is a DIRECT callable, named after "
-        "the tool itself — call it yourself, do not propose it."),
+        (
+            "YOUR MCP SERVER ACCESS — GENERATED from your mcp: grants. A GATED "
+            "tool is reachable ONLY via propose_mcp_tool_call(server_id, "
+            "tool_name, arguments, rationale) — reviewed and, once approved, "
+            "invoked for you. An UNGATED tool is a DIRECT callable, named after "
+            "the tool itself — call it yourself, do not propose it."
+        ),
     ]
     for server_id in server_ids:
         tools = await repo.list_mcp_tools(server_id)

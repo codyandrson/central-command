@@ -54,13 +54,21 @@ def _transcript(turns: int = 4, payload: int = 1000):
     (request: tool return of `payload` chars), then a final text response."""
     msgs = [ModelRequest(parts=[SystemPromptPart("charter"), UserPromptPart("do the thing")])]
     for i in range(turns):
-        msgs.append(ModelResponse(parts=[
-            ThinkingPart(f"thinking {i} " + "t" * 500),
-            ToolCallPart("read_thing", {"n": i}, tool_call_id=f"call_{i}"),
-        ]))
-        msgs.append(ModelRequest(parts=[
-            ToolReturnPart("read_thing", "x" * payload, tool_call_id=f"call_{i}"),
-        ]))
+        msgs.append(
+            ModelResponse(
+                parts=[
+                    ThinkingPart(f"thinking {i} " + "t" * 500),
+                    ToolCallPart("read_thing", {"n": i}, tool_call_id=f"call_{i}"),
+                ]
+            )
+        )
+        msgs.append(
+            ModelRequest(
+                parts=[
+                    ToolReturnPart("read_thing", "x" * payload, tool_call_id=f"call_{i}"),
+                ]
+            )
+        )
     msgs.append(ModelResponse(parts=[ThinkingPart("final thoughts"), TextPart("done")]))
     return msgs
 
@@ -73,7 +81,9 @@ def _pairs_ok(msgs) -> bool:
             if not returns:
                 continue
             prev = msgs[i - 1] if i else None
-            calls = {p.tool_call_id for p in getattr(prev, "parts", []) if isinstance(p, ToolCallPart)}
+            calls = {
+                p.tool_call_id for p in getattr(prev, "parts", []) if isinstance(p, ToolCallPart)
+            }
             if not set(returns) <= calls:
                 return False
     return True
@@ -84,7 +94,13 @@ def _pairs_ok(msgs) -> bool:
 
 def test_drop_thinking_keeps_only_the_last_response_reasoning():
     out = context.drop_thinking(_transcript())
-    thinking = [p for m in out if isinstance(m, ModelResponse) for p in m.parts if isinstance(p, ThinkingPart)]
+    thinking = [
+        p
+        for m in out
+        if isinstance(m, ModelResponse)
+        for p in m.parts
+        if isinstance(p, ThinkingPart)
+    ]
     assert [p.content for p in thinking] == ["final thoughts"]
     assert len(out) == len(_transcript()), "responses that still carry a call are kept"
     assert _pairs_ok(out)
@@ -104,15 +120,31 @@ def test_drop_thinking_removes_a_response_left_empty():
 def test_clear_tool_results_protects_the_last_n_requests_and_keeps_the_call():
     msgs = _transcript(turns=4)
     out = context.clear_tool_results(msgs, keep_turns=2)
-    returns = [p for m in out if isinstance(m, ModelRequest) for p in m.parts if isinstance(p, ToolReturnPart)]
-    assert [r.content.startswith("[cleared from context") for r in returns] == [True, True, False, False]
+    returns = [
+        p
+        for m in out
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart)
+    ]
+    assert [r.content.startswith("[cleared from context") for r in returns] == [
+        True,
+        True,
+        False,
+        False,
+    ]
     assert "read_thing" in returns[0].content and "1000 chars" in returns[0].content
     assert returns[0].tool_call_id == "call_0", "the placeholder still answers its call"
     assert _pairs_ok(out)
     # Small results are not worth a placeholder that is nearly as long.
     small = context.clear_tool_results(_transcript(turns=2, payload=50), keep_turns=0)
-    assert all(not p.content.startswith("[cleared") for m in small if isinstance(m, ModelRequest)
-               for p in m.parts if isinstance(p, ToolReturnPart))
+    assert all(
+        not p.content.startswith("[cleared")
+        for m in small
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart)
+    )
 
 
 def test_pressure_note_rides_the_outgoing_request_only():
@@ -170,6 +202,7 @@ def _ctx(session_id=None, model_name="cc-default"):
 def _pin(monkeypatch, cfg: dict, window: int = 100_000):
     async def load():
         return {**context.DEFAULTS, **cfg}
+
     monkeypatch.setattr(context, "load_settings", load)
     context._windows["cc-default"] = window
 
@@ -180,8 +213,16 @@ async def test_the_test_model_and_all_off_send_the_raw_history(monkeypatch):
     assert await context.window_messages(_ctx(), msgs) is msgs
 
     monkeypatch.setattr(settings, "test_model", False)
-    _pin(monkeypatch, {"drop_thinking": False, "clear_tool_results": False,
-                       "pressure_warning": False, "output_headroom": False, "summarize": False})
+    _pin(
+        monkeypatch,
+        {
+            "drop_thinking": False,
+            "clear_tool_results": False,
+            "pressure_warning": False,
+            "output_headroom": False,
+            "summarize": False,
+        },
+    )
     assert await context.window_messages(_ctx(), msgs) is msgs
 
 
@@ -228,6 +269,7 @@ async def test_the_wrapper_sends_a_request_as_given_outside_a_windowed_step(monk
     def echo(messages, info):
         seen.append(messages)
         return ModelResponse(parts=[TextPart("ok")])
+
     msgs = _transcript(turns=8, payload=4000)
     model = context.WindowedModel(FunctionModel(echo))
     await model.request(msgs, None, ModelRequestParameters())
@@ -243,7 +285,9 @@ def test_clear_tool_results_leaves_typed_returns_alone():
     typed = LoadCapabilityReturnPart(content={"instructions": "x" * 3000}, tool_call_id="c0")
     msgs = [
         ModelRequest(parts=[UserPromptPart("go")]),
-        ModelResponse(parts=[ToolCallPart("load_capability", {"name": "graphiti"}, tool_call_id="c0")]),
+        ModelResponse(
+            parts=[ToolCallPart("load_capability", {"name": "graphiti"}, tool_call_id="c0")]
+        ),
         ModelRequest(parts=[typed]),
         ModelResponse(parts=[ToolCallPart("read_thing", {}, tool_call_id="c1")]),
         ModelRequest(parts=[ToolReturnPart("read_thing", "y" * 3000, tool_call_id="c1")]),
@@ -253,17 +297,29 @@ def test_clear_tool_results_leaves_typed_returns_alone():
     assert out[2].parts[0].content == typed.content
     assert str(out[4].parts[0].content).startswith("[cleared from context")
     from pydantic_ai.messages import ModelMessagesTypeAdapter
+
     ModelMessagesTypeAdapter.validate_python(ModelMessagesTypeAdapter.dump_python(out, mode="json"))
 
 
 def test_load_messages_repairs_a_typed_return_damaged_by_the_leak():
     from central_command.runtime.durable import load_messages
 
-    damaged = {"messages": [{"kind": "request", "parts": [{
-        "part_kind": "tool-return", "tool_kind": "capability-load",
-        "tool_name": "load_capability", "tool_call_id": "c0",
-        "content": "[cleared from context: 3224 chars of `load_capability` output from an earlier turn]",
-    }]}]}
+    damaged = {
+        "messages": [
+            {
+                "kind": "request",
+                "parts": [
+                    {
+                        "part_kind": "tool-return",
+                        "tool_kind": "capability-load",
+                        "tool_name": "load_capability",
+                        "tool_call_id": "c0",
+                        "content": "[cleared from context: 3224 chars of `load_capability` output from an earlier turn]",
+                    }
+                ],
+            }
+        ]
+    }
     msgs = load_messages(damaged)
     assert msgs[0].parts[0].content.startswith("[cleared from context")
     assert "tool_kind" not in damaged["messages"][0]["parts"][0]
@@ -277,6 +333,7 @@ async def test_a_broken_step_sends_the_clipped_history_not_the_raw_one(monkeypat
 
     def boom(*a, **k):
         raise RuntimeError("no")
+
     monkeypatch.setattr(context, "drop_thinking", boom)
     sent = await context.window_messages(_ctx(), msgs)
     assert sent is not msgs and sent == msgs, "nothing was over the clip size, so content is equal"
@@ -289,6 +346,7 @@ async def test_a_clip_that_itself_fails_sends_the_raw_history(monkeypatch, caplo
 
     def boom(*a, **k):
         raise RuntimeError("no")
+
     monkeypatch.setattr(context, "drop_thinking", boom)
     monkeypatch.setattr(context, "clip_tool_results", boom)
     assert await context.window_messages(_ctx(), msgs) is msgs
@@ -308,10 +366,19 @@ async def test_summary_spends_one_call_and_is_cached_in_run_state(monkeypatch):
     async def fake_summarize(model, region):
         calls.append(len(region))
         return "SUMMARY-TEXT"
+
     monkeypatch.setattr(context, "summarize", fake_summarize)
     # Trims off so the only thing that can bring the window down is the summary.
-    _pin(monkeypatch, {"drop_thinking": False, "clear_tool_results": False,
-                       "output_headroom": False, "summarize_threshold": 0.5}, window=13_500)
+    _pin(
+        monkeypatch,
+        {
+            "drop_thinking": False,
+            "clear_tool_results": False,
+            "output_headroom": False,
+            "summarize_threshold": 0.5,
+        },
+        window=13_500,
+    )
 
     # ~40k chars -> ~13k tokens at CHARS_PER_TOKEN=3, against a 13.5k window:
     # one summary brings it under the 0.5 threshold, so the second pass
@@ -320,14 +387,16 @@ async def test_summary_spends_one_call_and_is_cached_in_run_state(monkeypatch):
     out = await _window(_ctx(session_id=session_id), msgs)
 
     assert calls, "over the threshold, the summary step ran"
-    assert any(isinstance(p, UserPromptPart) and "SUMMARY-TEXT" in p.content
-               for p in out[1].parts)
+    assert any(isinstance(p, UserPromptPart) and "SUMMARY-TEXT" in p.content for p in out[1].parts)
     assert out[0] is msgs[0] and isinstance(out[2], ModelResponse) and _pairs_ok(out)
     rs = await repo.get_session_run_state(session_id)
     assert rs["context_summary"]["text"] == "SUMMARY-TEXT"
     assert rs["messages"] == [], "the processor never writes the transcript key"
-    events = [e for e in await repo.list_events_of_kinds(["session.context_compacted"])
-              if e["ref_id"] == session_id]
+    events = [
+        e
+        for e in await repo.list_events_of_kinds(["session.context_compacted"])
+        if e["ref_id"] == session_id
+    ]
     assert len(events) == 1 and events[0]["payload"]["after"] < events[0]["payload"]["before"]
 
     # Same history again: the cached summary applies, no second model call.
@@ -347,6 +416,7 @@ async def test_settings_round_trip_with_partial_put(monkeypatch):
 
     async def put(key, value):
         store[key] = value
+
     monkeypatch.setattr(repo, "get_app_setting", get)
     monkeypatch.setattr(repo, "set_app_setting", put)
 
@@ -416,10 +486,11 @@ async def test_the_summary_degrades_to_the_default_when_nothing_is_declared(monk
 
     monkeypatch.setattr(models_mod, "_thinking_body", boom)
     monkeypatch.setattr(settings, "test_model", False)
-    out = await context.summarize(context.WindowedModel(FunctionModel(fn)), _transcript(turns=2, payload=500))
+    out = await context.summarize(
+        context.WindowedModel(FunctionModel(fn)), _transcript(turns=2, payload=500)
+    )
     assert out == "SUMMARY"
     assert not (seen["settings"] or {}).get("extra_body")
-
 
 
 def test_the_carried_state_is_the_latest_per_capability_not_every_delta():
@@ -433,15 +504,23 @@ def test_the_carried_state_is_the_latest_per_capability_not_every_delta():
     def load(call_id, text):
         return [
             ModelResponse(parts=[LoadCapabilityCallPart(args={"id": "sk"}, tool_call_id=call_id)]),
-            ModelRequest(parts=[LoadCapabilityReturnPart(content={"message": "loaded"}, tool_call_id=call_id),
-                                ToolAvailabilityDeltaPart(tools_added=["sk_ref"], tool_call_id=call_id),
-                                InstructionDeltaPart(id="capability:sk", content=text)]),
+            ModelRequest(
+                parts=[
+                    LoadCapabilityReturnPart(content={"message": "loaded"}, tool_call_id=call_id),
+                    ToolAvailabilityDeltaPart(tools_added=["sk_ref"], tool_call_id=call_id),
+                    InstructionDeltaPart(id="capability:sk", content=text),
+                ]
+            ),
         ]
-    msgs = [ModelRequest(parts=[SystemPromptPart("charter"), UserPromptPart("go")]),
-            *load("l1", "guidance v1"), *load("l2", "guidance v2"),
-            ModelResponse(parts=[ToolCallPart("read_thing", {}, tool_call_id="r1")]),
-            ModelRequest(parts=[ToolReturnPart("read_thing", "x", tool_call_id="r1")]),
-            ModelResponse(parts=[TextPart("done")])]
+
+    msgs = [
+        ModelRequest(parts=[SystemPromptPart("charter"), UserPromptPart("go")]),
+        *load("l1", "guidance v1"),
+        *load("l2", "guidance v2"),
+        ModelResponse(parts=[ToolCallPart("read_thing", {}, tool_call_id="r1")]),
+        ModelRequest(parts=[ToolReturnPart("read_thing", "x", tool_call_id="r1")]),
+        ModelResponse(parts=[TextPart("done")]),
+    ]
     calls, returns, state = context._carried_state(msgs[1:7])
     assert [c.tool_call_id for c in calls] == ["l2"] and [r.tool_call_id for r in returns] == ["l2"]
     deltas = [p for p in state if isinstance(p, InstructionDeltaPart)]

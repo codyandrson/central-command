@@ -62,7 +62,7 @@ def parse_env_file(text: str) -> dict[str, str]:
         if not line or line.startswith("#"):
             continue
         if line.startswith("export "):
-            line = line[len("export "):].lstrip()
+            line = line[len("export ") :].lstrip()
         key, sep, value = line.partition("=")
         if not sep:
             continue
@@ -88,10 +88,20 @@ def main(argv: list[str] | None = None) -> int:
         prog="run_modes.py",
         description="Refuse any run-mode key (" + ", ".join(KEYS) + ").",
     )
-    ap.add_argument("--env-file", action="append", default=[], metavar="F",
-                    help="a dotenv file to check (repeatable)")
-    ap.add_argument("--environ", action="append", default=[], metavar="F",
-                    help="a NUL-separated process environ to check (repeatable)")
+    ap.add_argument(
+        "--env-file",
+        action="append",
+        default=[],
+        metavar="F",
+        help="a dotenv file to check (repeatable)",
+    )
+    ap.add_argument(
+        "--environ",
+        action="append",
+        default=[],
+        metavar="F",
+        help="a NUL-separated process environ to check (repeatable)",
+    )
     args = ap.parse_args(argv)
     if not args.env_file and not args.environ:
         ap.error("give at least one --env-file or --environ")

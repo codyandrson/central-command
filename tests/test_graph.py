@@ -64,6 +64,7 @@ async def test_read_tool_stamps_steward_attribution_on_facts_from_a_domain_group
     domain group is stamped with who stewards it, at fact granularity — the
     search result carries group_id per fact (graphiti_core's EntityEdge), so
     that is the finest attribution actually available."""
+
     async def fake_search(query, max_facts=8, agent_id=None):
         return [
             {"fact": "TASKS-12 is a Jira issue.", "group_id": "domain_jira"},
@@ -98,6 +99,7 @@ async def test_read_tools_lead_every_line_with_the_uuid(monkeypatch):
     """graph.create_edge endpoints and every node/edge edit take a uuid; a
     holder who cannot read one asks the operator or guesses (2026-08-31,
     2026-09-14). The uuid leads the line on BOTH graph-read tools."""
+
     async def fake_nodes(query, max_nodes=8, agent_id=None):
         return [{"uuid": "node-1", "name": "DUSK", "summary": "an org"}]
 
@@ -111,13 +113,16 @@ async def test_read_tools_lead_every_line_with_the_uuid(monkeypatch):
     monkeypatch.setattr(graphiti, "search_facts", fake_facts)
     monkeypatch.setattr(graphiti, "steward_map", no_stewards)
     assert "- node-1 | DUSK: an org" in await tools.search_knowledge_graph_entities(None, "DUSK")
-    assert "- edge-1 | DUSK is an org (IS_ORGANIZATION_FOR)" in await tools.search_knowledge_graph(None, "DUSK")
+    assert "- edge-1 | DUSK is an org (IS_ORGANIZATION_FOR)" in await tools.search_knowledge_graph(
+        None, "DUSK"
+    )
 
 
 async def test_read_tool_degrades_when_graph_is_down(monkeypatch):
     """A DOWN graph no longer degrades into "proceed without it" (FR-40): with
     no landing tail the outage re-raises; under one it parks the run
     (`tests/test_outage_doctrine.py`). A NO still degrades honestly."""
+
     async def _no_wait(delay):
         return None
 
@@ -163,8 +168,18 @@ _GRAPH_ACTION = Action(
 def _fake_enqueue(calls: list):
     """Mirrors `graphiti_ingest.enqueue`'s REAL signature (keyword-only
     reference_time with no default — DL-057)."""
-    async def fake_enqueue(name, episode_body, source_description, group_id, *,
-                           reference_time, proposal_id, scope, marker):
+
+    async def fake_enqueue(
+        name,
+        episode_body,
+        source_description,
+        group_id,
+        *,
+        reference_time,
+        proposal_id,
+        scope,
+        marker,
+    ):
         calls.append((name, episode_body, source_description))
         return {"verification": {"id": "v-1"}, "job": {"id": 7}}
 
@@ -211,9 +226,7 @@ async def test_sc1_one_approval_commits_jira_and_graph(monkeypatch):
         "graph.add_episode",
     ]
 
-    result = await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model
-    )
+    result = await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
     assert jira_calls == [("DEMO-1", "2026-08-03")]
     assert "queued for extraction" in result["result_text"]
     assert await repo.session_status(run["session_id"]) == "DONE"

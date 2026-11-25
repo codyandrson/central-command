@@ -45,8 +45,11 @@ async def poll_once() -> dict:
             await events.emit(
                 "work.enrolled",
                 ref_id=result["message_id"],
-                payload={"feed": "live", "source": ledger.provider_source(),
-                         "subject": (msg.get("subject") or "")[:120]},
+                payload={
+                    "feed": "live",
+                    "source": ledger.provider_source(),
+                    "subject": (msg.get("subject") or "")[:120],
+                },
                 actor="feed",
             )
     return {"refs": len(refs), "new": len(fresh), "enrolled": enrolled}
@@ -81,8 +84,7 @@ class FeedPoller:
         self._task = asyncio.create_task(self._loop())
         await events.emit(
             "feed.started",
-            payload={"query": settings.feed_query,
-                     "poll_seconds": settings.feed_poll_seconds},
+            payload={"query": settings.feed_query, "poll_seconds": settings.feed_poll_seconds},
             actor="feed",
         )
 
@@ -115,9 +117,7 @@ class FeedPoller:
                     actor="feed",
                 )
             try:
-                await asyncio.wait_for(
-                    self._stopping.wait(), timeout=settings.feed_poll_seconds
-                )
+                await asyncio.wait_for(self._stopping.wait(), timeout=settings.feed_poll_seconds)
             except TimeoutError:
                 pass
 
@@ -195,8 +195,11 @@ class BacklogSweeper:
         self._task = asyncio.create_task(self._run())
         await events.emit(
             "backlog.started",
-            payload={"query": state["query"], "before": state["before"],
-                     "horizon": state["horizon"]},
+            payload={
+                "query": state["query"],
+                "before": state["before"],
+                "horizon": state["horizon"],
+            },
             actor="feed",
         )
         return self.status()
@@ -232,12 +235,14 @@ class BacklogSweeper:
                     log.info(
                         "backlog: list failed (%s) — bisecting to %d day(s) in "
                         "case the window is over the provider cap",
-                        e, window_days,
+                        e,
+                        window_days,
                     )
                     continue
                 self.last_error = str(e)
                 await events.emit(
-                    "backlog.error", payload={"error": str(e)[:300], "query": query},
+                    "backlog.error",
+                    payload={"error": str(e)[:300], "query": query},
                     actor="feed",
                 )
                 return  # stop; a restart resumes from the cursor
@@ -258,8 +263,12 @@ class BacklogSweeper:
             await repo.set_feed_state(_SWEEP_KEY, state)
             await events.emit(
                 "backlog.window",
-                payload={"refs": len(refs), "enrolled": enrolled,
-                         "swept_back_to": start, "windows": state["windows"]},
+                payload={
+                    "refs": len(refs),
+                    "enrolled": enrolled,
+                    "swept_back_to": start,
+                    "windows": state["windows"],
+                },
                 actor="feed",
             )
             window_days = settings.backlog_window_days  # reset after success
@@ -270,8 +279,7 @@ class BacklogSweeper:
             await repo.set_feed_state(_SWEEP_KEY, state)
             await events.emit(
                 "backlog.completed",
-                payload={"enrolled_total": state["enrolled_total"],
-                         "windows": state["windows"]},
+                payload={"enrolled_total": state["enrolled_total"], "windows": state["windows"]},
                 actor="feed",
             )
 

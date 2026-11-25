@@ -93,8 +93,9 @@ def openai_client(api_key: str, base_url: str):
 
     kwargs = client_kwargs()
     extra = {"http_client": DefaultAsyncHttpxClient(**kwargs)} if kwargs else {}
-    return AsyncOpenAI(api_key=api_key, base_url=base_url,
-                       timeout=llm_timeout(), max_retries=0, **extra)
+    return AsyncOpenAI(
+        api_key=api_key, base_url=base_url, timeout=llm_timeout(), max_retries=0, **extra
+    )
 
 
 def client_kwargs() -> dict:

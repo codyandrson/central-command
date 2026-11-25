@@ -233,7 +233,9 @@ def _clean_gates():
         assert gate.free == 1
 
 
-async def test_concurrent_read_aloud_calls_reach_the_proxy_one_at_a_time_in_order(client, monkeypatch):
+async def test_concurrent_read_aloud_calls_reach_the_proxy_one_at_a_time_in_order(
+    client, monkeypatch
+):
     inside = 0
     peak = 0
     arrived: list[str] = []
@@ -278,7 +280,9 @@ async def test_concurrent_transcriptions_are_serialised_too(client, monkeypatch)
     _stub_upstream(monkeypatch, handler)
 
     async def hear(c: httpx.AsyncClient) -> httpx.Response:
-        return await c.post("/api/transcribe", files={"file": ("a.webm", b"RIFFxxxx", "audio/webm")})
+        return await c.post(
+            "/api/transcribe", files={"file": ("a.webm", b"RIFFxxxx", "audio/webm")}
+        )
 
     async with client:
         results = await asyncio.gather(*(hear(client) for _ in range(3)))
@@ -302,14 +306,17 @@ async def test_speech_and_transcription_are_separate_lines(client, monkeypatch):
         speaking = asyncio.create_task(client.post("/api/tts", json={"text": "long"}))
         await _settle(20)
         heard = await asyncio.wait_for(
-            client.post("/api/transcribe", files={"file": ("a.webm", b"RIFFxxxx", "audio/webm")}), timeout=2
+            client.post("/api/transcribe", files={"file": ("a.webm", b"RIFFxxxx", "audio/webm")}),
+            timeout=2,
         )
         assert heard.json() == {"text": "heard"}
         release.set()
         assert (await speaking).status_code == 200
 
 
-async def test_a_proxy_429_surfaces_as_the_routes_existing_502_and_frees_the_line(client, monkeypatch):
+async def test_a_proxy_429_surfaces_as_the_routes_existing_502_and_frees_the_line(
+    client, monkeypatch
+):
     body = (
         '{"error":{"message":"litellm.RateLimitError: Deployment has all max_parallel_requests '
         'slots in use.","type":"throttling_error","code":"429"}}'
@@ -337,7 +344,9 @@ async def test_a_client_that_leaves_the_line_never_reaches_the_proxy(monkeypatch
     monkeypatch.setattr(speech.settings, "llm_api_key", "sk-virtual")
     monkeypatch.setattr(TTS_GATE, "_poll", 0.01)
     reached: list[str] = []
-    _stub_upstream(monkeypatch, lambda req: reached.append("hit") or httpx.Response(200, content=b"x"))
+    _stub_upstream(
+        monkeypatch, lambda req: reached.append("hit") or httpx.Response(200, content=b"x")
+    )
 
     class GoneRequest:
         async def is_disconnected(self) -> bool:
@@ -369,11 +378,18 @@ async def test_the_model_probe_takes_its_place_in_the_same_line(monkeypatch):
 
     async def fake_call(method, path, json_body=None, auth_key=None, timeout=30, files=None):
         if method == "GET":
-            return httpx.Response(200, json={"data": [{
-                "model_name": "cc-tts",
-                "model_info": {"mode": "audio_speech"},
-                "litellm_params": {"model": "openai/kokoro"},
-            }]})
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "model_name": "cc-tts",
+                            "model_info": {"mode": "audio_speech"},
+                            "litellm_params": {"model": "openai/kokoro"},
+                        }
+                    ]
+                },
+            )
         posted.append(path)
         return httpx.Response(200, content=b"ID3")
 

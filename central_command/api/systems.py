@@ -278,23 +278,27 @@ def _entries() -> list[dict]:
     # applicable to this install", not "misconfigured", unlike the internal
     # services above which the operator wants to SEE as unconfigured.
     if settings.jira_base_url:
-        entries.append({
-            "id": "jira",
-            "name": "Jira",
-            "kind": "external",
-            "url": settings.jira_base_url,
-            "health": _unknown(),
-            "credential": {"label": "API token", "location": "CC_JIRA_API_TOKEN"},
-        })
+        entries.append(
+            {
+                "id": "jira",
+                "name": "Jira",
+                "kind": "external",
+                "url": settings.jira_base_url,
+                "health": _unknown(),
+                "credential": {"label": "API token", "location": "CC_JIRA_API_TOKEN"},
+            }
+        )
     if settings.confluence_base_url:
-        entries.append({
-            "id": "confluence",
-            "name": "Confluence",
-            "kind": "external",
-            "url": settings.confluence_base_url,
-            "health": _unknown(),
-            "credential": {"label": "API token", "location": "CC_CONFLUENCE_API_TOKEN"},
-        })
+        entries.append(
+            {
+                "id": "confluence",
+                "name": "Confluence",
+                "kind": "external",
+                "url": settings.confluence_base_url,
+                "health": _unknown(),
+                "credential": {"label": "API token", "location": "CC_CONFLUENCE_API_TOKEN"},
+            }
+        )
     return entries
 
 
@@ -399,8 +403,10 @@ async def _embedder_line() -> str | None:
     if not record or not record.get("alias"):
         line = "embedder: record missing"
     else:
-        line = (f"embedder: {record['alias']} {record.get('dimensions')} "
-                f"epoch {record.get('epoch')} ({record.get('state')})")
+        line = (
+            f"embedder: {record['alias']} {record.get('dimensions')} "
+            f"epoch {record.get('epoch')} ({record.get('state')})"
+        )
     held = embedder_record.cached_verdict()
     if held is not None and not held.open:
         line += f" — MISMATCH: {held.reason}"
@@ -420,10 +426,7 @@ async def _graph_queue_detail() -> str | None:
 async def list_systems() -> dict:
     entries = _entries()
     healths = await asyncio.gather(
-        *[
-            (e["health"] if e["health"] is not None else _unknown())
-            for e in entries
-        ]
+        *[(e["health"] if e["health"] is not None else _unknown()) for e in entries]
     )
     out = []
     for entry, (status, latency_ms) in zip(entries, healths):

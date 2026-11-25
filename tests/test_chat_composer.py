@@ -37,27 +37,30 @@ def pinned(monkeypatch):
 
 def test_the_rule_names_every_state_the_operator_can_act_on():
     """`why_not_sendable` is THE statement of who may be sent a message."""
-    assert why_not_sendable(
-        {"id": "sess_1", "mode": "conversation", "status": "AWAITING_OPERATOR"}
-    ) is None
+    assert (
+        why_not_sendable({"id": "sess_1", "mode": "conversation", "status": "AWAITING_OPERATOR"})
+        is None
+    )
     # A closed conversation reopens by simply being written to (M15: closing is
     # a status flip, and history stays) — so DONE is sendable, not blocked.
-    assert why_not_sendable(
-        {"id": "sess_1", "mode": "conversation", "status": "DONE"}
-    ) is None
+    assert why_not_sendable({"id": "sess_1", "mode": "conversation", "status": "DONE"}) is None
 
-    assert why_not_sendable(
-        {"id": "sess_2", "mode": "oneshot", "status": "AWAITING_HUMAN"}
-    )[0] == "not_a_conversation"
-    assert why_not_sendable(
-        {"id": "sess_3", "mode": "conversation", "status": "AWAITING_HUMAN"}
-    )[0] == "pending_proposal"
-    assert why_not_sendable(
-        {"id": "sess_4", "mode": "conversation", "status": "FAILED"}
-    )[0] == "failed"
-    assert why_not_sendable(
-        {"id": "sess_5", "mode": "conversation", "status": "RUNNING"}
-    )[0] == "turn_in_progress"
+    assert (
+        why_not_sendable({"id": "sess_2", "mode": "oneshot", "status": "AWAITING_HUMAN"})[0]
+        == "not_a_conversation"
+    )
+    assert (
+        why_not_sendable({"id": "sess_3", "mode": "conversation", "status": "AWAITING_HUMAN"})[0]
+        == "pending_proposal"
+    )
+    assert (
+        why_not_sendable({"id": "sess_4", "mode": "conversation", "status": "FAILED"})[0]
+        == "failed"
+    )
+    assert (
+        why_not_sendable({"id": "sess_5", "mode": "conversation", "status": "RUNNING"})[0]
+        == "turn_in_progress"
+    )
     # A conversation parked AWAITING_RESUME is a turn the control plane still
     # owes — the sweep re-sends it once the dependency is back. Rewritten for
     # outage doctrine story 6: the catch-all's "wait for the turn to finish"
@@ -65,8 +68,7 @@ def test_the_rule_names_every_state_the_operator_can_act_on():
     # code NAMES the park (`awaiting_resume`, and what it waits on) and the
     # composer is disabled by it.
     code, message = why_not_sendable(
-        {"id": "sess_6", "mode": "conversation", "status": "AWAITING_RESUME",
-         "parked_on": "llm"}
+        {"id": "sess_6", "mode": "conversation", "status": "AWAITING_RESUME", "parked_on": "llm"}
     )
     assert code == "awaiting_resume" and "llm is down" in message
     from central_command.api.nerve_gateway import _COMPOSER_DISABLING
@@ -80,8 +82,7 @@ async def test_conversation_turn_enforces_exactly_that_rule(monkeypatch):
     from central_command.runtime import converse
 
     for status in ("AWAITING_HUMAN", "FAILED", "RUNNING"):
-        row = {"id": "sess_x", "agent_id": "a", "mode": "conversation",
-               "status": status}
+        row = {"id": "sess_x", "agent_id": "a", "mode": "conversation", "status": status}
 
         async def fake_get(_sid, _row=row):
             return _row
@@ -104,8 +105,12 @@ def test_chat_send_has_no_resolution_of_its_own():
 
     src = inspect.getsource(nerve_gateway._chat_send)
     assert "_send_target(" in src, "the send must use the shared resolution"
-    for forked in ("repo.get_session", "_latest_conversation",
-                   "conversational_agent_ids", 'mode") != "conversation"'):
+    for forked in (
+        "repo.get_session",
+        "_latest_conversation",
+        "conversational_agent_ids",
+        'mode") != "conversation"',
+    ):
         assert forked not in src, (
             f"_chat_send re-derives session resolution ({forked!r}) instead of "
             "using _send_target — the composer would stop agreeing with it"
@@ -123,8 +128,7 @@ async def test_a_mid_turn_conversation_keeps_its_message_box(monkeypatch):
     """
     from central_command.api import nerve_gateway
 
-    row = {"id": "sess_mid", "agent_id": "a", "mode": "conversation",
-           "status": "RUNNING"}
+    row = {"id": "sess_mid", "agent_id": "a", "mode": "conversation", "status": "RUNNING"}
 
     async def fake_get(_sid):
         return row
@@ -143,7 +147,9 @@ async def test_chat_history_carries_the_lanes_source_email(monkeypatch):
     from central_command.api import nerve_gateway
 
     email = {
-        "id": "wi_1", "kind": "email", "session_id": "sess_email",
+        "id": "wi_1",
+        "kind": "email",
+        "session_id": "sess_email",
         "subject": "Reminder: Budget Ratification Meeting",
         "payload": {"from": "hoa@example.com", "text": "please attend"},
     }
@@ -168,15 +174,9 @@ async def test_chat_history_carries_the_lanes_source_email(monkeypatch):
     monkeypatch.setattr(repo, "get_session_run_state", fake_run_state)
     monkeypatch.setattr(repo, "work_items_for_sessions", fake_work_items)
 
-    payload = await nerve_gateway._chat_history(
-        {"sessionKey": "agent:inbox-triage:sess_email"}
-    )
-    assert captured["ids"] == ["sess_email"], (
-        "must resolve keyed by the resolved session id"
-    )
-    assert payload["sourceEmail"] == email, (
-        "the header cannot show an email the server never sends"
-    )
+    payload = await nerve_gateway._chat_history({"sessionKey": "agent:inbox-triage:sess_email"})
+    assert captured["ids"] == ["sess_email"], "must resolve keyed by the resolved session id"
+    assert payload["sourceEmail"] == email, "the header cannot show an email the server never sends"
 
 
 # ── the live shape: a paused task run ──────────────────────────────────────
@@ -193,8 +193,12 @@ async def _fixture_paused_run() -> tuple[str, str, str]:
     await repo.park_task_review(tid, sid)
     await repo.mark_session_awaiting_operator(sid, {"messages": []})
     await repo.create_operator_item(
-        iid, "question", sid, "jira-expert",
-        "Which epic would you like restructured?", task_id=tid,
+        iid,
+        "question",
+        sid,
+        "jira-expert",
+        "Which epic would you like restructured?",
+        task_id=tid,
     )
     return sid, tid, iid
 
@@ -252,10 +256,17 @@ async def test_the_read_only_run_still_renders_its_transcript():
 
     sid, tid, iid = await _fixture_paused_run()
     try:
-        await repo.update_session_run_state(sid, {"messages": [{
-            "kind": "request",
-            "parts": [{"part_kind": "user-prompt", "content": "restructure the epic"}],
-        }]})
+        await repo.update_session_run_state(
+            sid,
+            {
+                "messages": [
+                    {
+                        "kind": "request",
+                        "parts": [{"part_kind": "user-prompt", "content": "restructure the epic"}],
+                    }
+                ]
+            },
+        )
         payload = await _chat_history({"sessionKey": f"agent:jira-expert:{sid}"})
         assert payload["composer"]["enabled"] is False
         assert [m["content"] for m in payload["messages"]] == ["restructure the epic"]
@@ -296,9 +307,14 @@ async def test_a_lane_is_sendable_until_it_holds_an_undecided_proposal():
     agent_id = "composer-fixture-agent"
     await _drop_agent(agent_id)
     try:
-        await repo.hire_agent(agent_id, "Composer fixture", "test fixture",
-                              "You are a fixture.", ["graph-read"],
-                              template="analyst")
+        await repo.hire_agent(
+            agent_id,
+            "Composer fixture",
+            "test fixture",
+            "You are a fixture.",
+            ["graph-read"],
+            template="analyst",
+        )
         key = f"agent:{agent_id}:main"
         assert (await _composer_state(key))["enabled"] is True
 
@@ -332,8 +348,7 @@ async def _noop_notify(_payload: dict) -> None:
 async def _drop_agent(agent_id: str) -> None:
     conn = await repo._conn()
     try:
-        await conn.execute(
-            "delete from session where agent_id = $1", agent_id)
+        await conn.execute("delete from session where agent_id = $1", agent_id)
         await conn.execute("delete from agent_grant where agent_id = $1", agent_id)
         await conn.execute("delete from guidance_version where agent_id = $1", agent_id)
         await conn.execute("delete from agent where id = $1", agent_id)

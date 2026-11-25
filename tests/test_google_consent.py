@@ -62,17 +62,25 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):  # the authorization endpoint
         q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
         s = self.server
-        want = {"client_id": CLIENT_ID, "response_type": "code", "access_type": "offline",
-                "prompt": "consent", "code_challenge_method": "S256",
-                "scope": " ".join(google.SCOPES)}
+        want = {
+            "client_id": CLIENT_ID,
+            "response_type": "code",
+            "access_type": "offline",
+            "prompt": "consent",
+            "code_challenge_method": "S256",
+            "scope": " ".join(google.SCOPES),
+        }
         for k, v in want.items():
             if q.get(k) != v:
                 s.problems.append(f"auth {k}={q.get(k)!r}")
         if not (q.get("redirect_uri") or "").startswith("http://127.0.0.1:"):
             s.problems.append("redirect_uri is not the loopback address")
         s.challenge, s.redirect_uri = q.get("code_challenge"), q.get("redirect_uri")
-        answer = ({"error": "access_denied", "state": q.get("state")} if s.deny else
-                  {"code": CODE, "state": q.get("state"), "scope": " ".join(s.scopes)})
+        answer = (
+            {"error": "access_denied", "state": q.get("state")}
+            if s.deny
+            else {"code": CODE, "state": q.get("state"), "scope": " ".join(s.scopes)}
+        )
         self.send_response(302)
         self.send_header("location", f"{q['redirect_uri']}?{urlencode(answer)}")
         self.end_headers()
@@ -83,7 +91,11 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode()).items()}
         s.token_form = form
         verifier = form.get("code_verifier", "")
-        derived = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+        derived = (
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+            .decode()
+            .rstrip("=")
+        )
         # Client authentication in the body or as HTTP Basic (RFC 6749 §2.3.1;
         # requests-oauthlib sends Basic, Google accepts both).
         basic = self.headers.get("authorization", "")
@@ -91,14 +103,26 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
             cid, _, secret = base64.b64decode(basic[6:]).decode().partition(":")
             form.setdefault("client_id", cid)
             form.setdefault("client_secret", secret)
-        ok = (form.get("grant_type") == "authorization_code" and form.get("code") == CODE
-              and form.get("client_id") == CLIENT_ID and form.get("client_secret") == CLIENT_SECRET
-              and form.get("redirect_uri") == s.redirect_uri and derived == s.challenge
-              and 43 <= len(verifier) <= 128)
+        ok = (
+            form.get("grant_type") == "authorization_code"
+            and form.get("code") == CODE
+            and form.get("client_id") == CLIENT_ID
+            and form.get("client_secret") == CLIENT_SECRET
+            and form.get("redirect_uri") == s.redirect_uri
+            and derived == s.challenge
+            and 43 <= len(verifier) <= 128
+        )
         body = (
-            {"access_token": "ya29.fake-access", "expires_in": 3599, "refresh_token": s.refresh_token,
-             "scope": " ".join(s.scopes), "token_type": "Bearer"}
-            if ok else {"error": "invalid_grant", "error_description": "Bad Request"})
+            {
+                "access_token": "ya29.fake-access",
+                "expires_in": 3599,
+                "refresh_token": s.refresh_token,
+                "scope": " ".join(s.scopes),
+                "token_type": "Bearer",
+            }
+            if ok
+            else {"error": "invalid_grant", "error_description": "Bad Request"}
+        )
         raw = json.dumps(body).encode()
         self.send_response(200 if ok else 400)
         self.send_header("content-type", "application/json")
@@ -110,7 +134,7 @@ class _StubHandler(http.server.BaseHTTPRequestHandler):
 ENV = (
     "# Central Command\n"
     "CC_FOO=bar\n"
-    "CC_FEED_QUERY=\"in:inbox newer_than:1d\"\n"
+    'CC_FEED_QUERY="in:inbox newer_than:1d"\n'
     "\n"
     "# google\n"
     f"CC_GOOGLE_CLIENT_ID={CLIENT_ID}\n"
@@ -131,8 +155,12 @@ def _oauthlib_env(monkeypatch):
 def _start(env: Path, auth_uri: str, token_uri: str):
     """Run the command in a thread; return (worker, out, err, rc, consent URL)."""
     out, err, rc = io.StringIO(), io.StringIO(), []
-    worker = threading.Thread(target=lambda: rc.append(consent.run(
-        env, 0, out=out, err=err, auth_uri=auth_uri, token_uri=token_uri)), daemon=True)
+    worker = threading.Thread(
+        target=lambda: rc.append(
+            consent.run(env, 0, out=out, err=err, auth_uri=auth_uri, token_uri=token_uri)
+        ),
+        daemon=True,
+    )
     worker.start()
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
@@ -177,7 +205,9 @@ def test_first_run_writes_the_token_keeps_every_other_line_and_the_mode(tmp_path
     assert "Wrote CC_GOOGLE_REFRESH_TOKEN" in out
     fd = capfd.readouterr()
     _secrets_absent(out, err, fd.out, fd.err, extra=(rt,))
-    assert stub.token_form["client_secret"] == CLIENT_SECRET, "the secret went to the token endpoint only"
+    assert stub.token_form["client_secret"] == CLIENT_SECRET, (
+        "the secret went to the token endpoint only"
+    )
 
 
 def test_a_rerun_replaces_the_one_key_and_nothing_else(tmp_path, capfd):
@@ -236,7 +266,9 @@ def test_a_redirect_with_another_state_ends_the_run_and_writes_nothing(tmp_path,
 @pytest.mark.parametrize("drop", ["CC_GOOGLE_CLIENT_ID", "CC_GOOGLE_CLIENT_SECRET"])
 def test_without_the_client_settings_it_refuses_before_listening(tmp_path, drop):
     env = tmp_path / ".env"
-    env.write_text("\n".join(ln for ln in ENV.splitlines() if not ln.startswith(drop)), encoding="utf-8")
+    env.write_text(
+        "\n".join(ln for ln in ENV.splitlines() if not ln.startswith(drop)), encoding="utf-8"
+    )
     err = io.StringIO()
     assert consent.run(env, 0, out=io.StringIO(), err=err) == 2
     assert drop in err.getvalue() and CLIENT_SECRET not in err.getvalue()

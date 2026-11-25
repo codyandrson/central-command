@@ -107,8 +107,7 @@ def _with_operator_note(prompt: str, note: str | None) -> str:
     if not note:
         return prompt
     return (
-        "OPERATOR NOTE (from your team lead — trusted, needs no "
-        f"corroboration): {note}\n\n{prompt}"
+        f"OPERATOR NOTE (from your team lead — trusted, needs no corroboration): {note}\n\n{prompt}"
     )
 
 
@@ -152,10 +151,7 @@ def email_age_line(item: dict, today: date | None = None) -> str | None:
         age = f"{days} day{'s' if days != 1 else ''} before today"
     else:
         age = f"{-days} day{'s' if days != -1 else ''} AFTER today (a clock disagrees)"
-    return (
-        f"This email was received on {sent.isoformat()}, "
-        f"{age} ({today.isoformat()})."
-    )
+    return f"This email was received on {sent.isoformat()}, {age} ({today.isoformat()})."
 
 
 def _with_age_context(prompt: str, item: dict, today: date | None = None) -> str:
@@ -207,8 +203,7 @@ async def _item_vector(item: dict) -> list[float] | None:
     from central_command.integrations.neo4j_writer import embed
 
     text = (
-        f"{item.get('subject') or ''}\n"
-        f"{(((item.get('payload') or {}).get('text')) or '')[:1500]}"
+        f"{item.get('subject') or ''}\n{(((item.get('payload') or {}).get('text')) or '')[:1500]}"
     )
     vector = await embed(text)
     if vector:
@@ -340,8 +335,7 @@ async def _handle_email(item, siblings, siblings_capped, note, model) -> dict:
         source_texts=[
             t for i in (item, *siblings) for t in mail_attachments.source_texts(i["payload"])
         ],
-        **({"session_id": rerun["session_id"], "rerun_of": rerun["rerun_of"]}
-           if rerun else {}),
+        **({"session_id": rerun["session_id"], "rerun_of": rerun["rerun_of"]} if rerun else {}),
         # `proposal.created` is emitted by the one park path now; the email
         # path's extra context rides along so the log keeps naming the work
         # item a proposal came from.
@@ -387,7 +381,10 @@ class _KindHandler:
     __slots__ = ("actor", "audits_bulk_dismissals", "audits_dismissals", "run")
 
     def __init__(
-        self, run, actor: str, audits_dismissals: bool,
+        self,
+        run,
+        actor: str,
+        audits_dismissals: bool,
         audits_bulk_dismissals: bool = False,
     ) -> None:
         self.run = run
@@ -447,13 +444,16 @@ async def _fold_under_rule(item: dict, rule: dict) -> dict:
     await events.emit(
         "work.rule_dismissed",
         ref_id=item["id"],
-        payload={"rule_id": rule["id"], "description": rule["description"],
-                 "subject": item.get("subject"), "rationale": rationale},
+        payload={
+            "rule_id": rule["id"],
+            "description": rule["description"],
+            "subject": item.get("subject"),
+            "rationale": rationale,
+        },
         actor=f"rule:{rule['id']}",
     )
     log.info("dispatch: %s folded under mail rule %s", item["id"], rule["id"])
-    return {"item_id": item["id"], "ok": True, "rule_dismissed": True,
-            "rule_id": rule["id"]}
+    return {"item_id": item["id"], "ok": True, "rule_dismissed": True, "rule_id": rule["id"]}
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -463,7 +463,9 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na and nb else 0.0
 
 
-async def _entity_keys_for(item: dict, agent_id: str = entities.EXTRACTOR_AGENT) -> list[str] | None:
+async def _entity_keys_for(
+    item: dict, agent_id: str = entities.EXTRACTOR_AGENT
+) -> list[str] | None:
     """The lock's fourth key for a claimed, hydrated item — extracted once and
     stored, so a frozen item re-claimed later pays nothing. None means "do not
     store": the test model, or the layer switched off. A model that is DOWN
@@ -586,9 +588,13 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
     await events.emit(
         "work.claimed",
         ref_id=item["id"],
-        payload={"subject": item.get("subject"), "feed": item.get("feed"),
-                 "thread_id": item.get("thread_id"), "attempt": item["attempts"],
-                 "kind": kind},
+        payload={
+            "subject": item.get("subject"),
+            "feed": item.get("feed"),
+            "thread_id": item.get("thread_id"),
+            "attempt": item["attempts"],
+            "kind": kind,
+        },
         actor=actor,
     )
 
@@ -597,10 +603,7 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
         # Not transient: retrying an unroutable row would burn every attempt
         # and end in the same place. Park it FAILED now, loudly, with the kind
         # named — a human adds the handler or fixes the row.
-        error = (
-            f"no handler for work-item kind {kind!r} "
-            f"(known: {', '.join(sorted(HANDLERS))})"
-        )
+        error = f"no handler for work-item kind {kind!r} (known: {', '.join(sorted(HANDLERS))})"
         log.error("dispatch: item %s — %s", item["id"], error)
         await repo.finish_work_item(item["id"], "FAILED", error=error)
         await events.emit(
@@ -671,15 +674,21 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             releases = int(item.get("transient_releases") or 0)
             backoff, not_before = retry_not_before(releases)
             await repo.release_work_item(
-                item["id"], error=freeze["reason"], count_attempt=False,
-                not_before=not_before, freeze=True,
+                item["id"],
+                error=freeze["reason"],
+                count_attempt=False,
+                not_before=not_before,
+                freeze=True,
             )
             await events.emit(
                 "work.frozen",
                 ref_id=item["id"],
-                payload={**freeze, "subject": item.get("subject"),
-                         "backoff_seconds": backoff,
-                         "not_before": not_before.isoformat()},
+                payload={
+                    **freeze,
+                    "subject": item.get("subject"),
+                    "backoff_seconds": backoff,
+                    "not_before": not_before.isoformat(),
+                },
                 actor="dispatcher",
             )
             log.info("dispatch: froze %s — %s", item["id"], freeze["reason"])
@@ -696,7 +705,10 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             # fold decision can see that a sibling carries something unread.
             listed = mail_attachments.listed_only(s.get("payload") or {})
             if listed:
-                s["payload"] = {**s["payload"], "text": f"{s['payload']['text'].rstrip()}\n\n{listed}"}
+                s["payload"] = {
+                    **s["payload"],
+                    "text": f"{s['payload']['text'].rstrip()}\n\n{listed}",
+                }
 
         # A reopened item carries the operator's note — trusted input, same
         # standing as rejection feedback.
@@ -715,8 +727,12 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
         await events.emit(
             "work.released",
             ref_id=item["id"],
-            payload={"error": "run cancelled (shutdown)", "attempt": item["attempts"],
-                     "transient": True, "cancelled": True},
+            payload={
+                "error": "run cancelled (shutdown)",
+                "attempt": item["attempts"],
+                "transient": True,
+                "cancelled": True,
+            },
             actor="dispatcher",
         )
         raise
@@ -734,18 +750,24 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             # to the graph (story 7).
             waits_on = (EMBEDDER,) if isinstance(e, EmbedderDown) else failed_dependencies(e)
             await repo.release_work_item(
-                item["id"], error=str(e), count_attempt=False,
-                not_before=not_before, dependencies=waits_on,
+                item["id"],
+                error=str(e),
+                count_attempt=False,
+                not_before=not_before,
+                dependencies=waits_on,
             )
             await events.emit(
                 "work.released",
                 ref_id=item["id"],
-                payload={"error": str(e), "attempt": item["attempts"],
-                         "max_attempts": settings.dispatch_max_attempts,
-                         "transient": True,
-                         "transient_releases": releases + 1,
-                         "backoff_seconds": backoff,
-                         "not_before": not_before.isoformat()},
+                payload={
+                    "error": str(e),
+                    "attempt": item["attempts"],
+                    "max_attempts": settings.dispatch_max_attempts,
+                    "transient": True,
+                    "transient_releases": releases + 1,
+                    "backoff_seconds": backoff,
+                    "not_before": not_before.isoformat(),
+                },
                 actor="dispatcher",
             )
         elif item["attempts"] >= settings.dispatch_max_attempts or is_context_overflow(e):
@@ -755,8 +777,7 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             await events.emit(
                 "work.failed",
                 ref_id=item["id"],
-                payload={"error": str(e), "attempts": item["attempts"],
-                         "transient": False},
+                payload={"error": str(e), "attempts": item["attempts"], "transient": False},
                 actor="dispatcher",
             )
         else:
@@ -764,13 +785,15 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
             await events.emit(
                 "work.released",
                 ref_id=item["id"],
-                payload={"error": str(e), "attempt": item["attempts"],
-                         "max_attempts": settings.dispatch_max_attempts,
-                         "transient": False},
+                payload={
+                    "error": str(e),
+                    "attempt": item["attempts"],
+                    "max_attempts": settings.dispatch_max_attempts,
+                    "transient": False,
+                },
                 actor="dispatcher",
             )
-        return {"item_id": item["id"], "ok": False, "error": str(e),
-                "transient": transient}
+        return {"item_id": item["id"], "ok": False, "error": str(e), "transient": transient}
 
     if not result.get("deferred"):
         # "No action needed" is a CLAIM, not an outcome (M14) — the same rule
@@ -781,8 +804,7 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
         await events.emit(
             "work.dismiss_pending",
             ref_id=item["id"],
-            payload={"subject": item.get("subject"), "rationale": rationale[:300],
-                     "kind": kind},
+            payload={"subject": item.get("subject"), "rationale": rationale[:300], "kind": kind},
             actor=handler.actor,
         )
         # Phase 4: the independent auditor re-derives the no-action claim from
@@ -816,9 +838,7 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
     # naming: a parked run holds NO claim, so `count_in_flight` — which counts
     # CLAIMED — never sees it. The valve that actually paces review is
     # `dispatch_approval_limit`, not `dispatch_concurrency`.)
-    await repo.finish_work_item(
-        item["id"], "PROCESSED", session_id=result.get("session_id")
-    )
+    await repo.finish_work_item(item["id"], "PROCESSED", session_id=result.get("session_id"))
 
     # ponytail: a turn that ended in a CONSULT WAIT carries no
     # `folded_message_ids`, so its siblings are not reserved here — the
@@ -838,9 +858,12 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
         await events.emit(
             "work.fold_pending",
             ref_id=result["proposal_id"],
-            payload={"message_ids": folded, "reserved": reserved,
-                     "rationale": result.get("fold_rationale"),
-                     "thread_id": item.get("thread_id")},
+            payload={
+                "message_ids": folded,
+                "reserved": reserved,
+                "rationale": result.get("fold_rationale"),
+                "thread_id": item.get("thread_id"),
+            },
             actor=handler.actor,
         )
 
@@ -865,7 +888,8 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
                 )
             except Exception as e:  # noqa: BLE001 — an auditor crash never fails the turn
                 await events.emit(
-                    "audit.error", ref_id=result["proposal_id"],
+                    "audit.error",
+                    ref_id=result["proposal_id"],
                     payload={"error": str(e), "action_class": "work.bulk_dismiss"},
                     actor="auditor",
                 )
@@ -888,9 +912,11 @@ async def process_claimed(item: dict, model=None, actor: str = "dispatcher") -> 
     await events.emit(
         "work.processed",
         ref_id=item["id"],
-        payload={"deferred": bool(result.get("deferred")),
-                 "session_id": result.get("session_id"),
-                 "tokens": result.get("tokens", 0)},
+        payload={
+            "deferred": bool(result.get("deferred")),
+            "session_id": result.get("session_id"),
+            "tokens": result.get("tokens", 0),
+        },
         actor="dispatcher",
     )
     return {"item_id": item["id"], "ok": True, **result}
@@ -939,9 +965,7 @@ class Dispatcher:
         if self._lease_conn is None:
             return
         try:
-            await self._lease_conn.execute(
-                "select pg_advisory_unlock($1)", DISPATCH_LEASE_KEY
-            )
+            await self._lease_conn.execute("select pg_advisory_unlock($1)", DISPATCH_LEASE_KEY)
         finally:
             await self._lease_conn.close()
             self._lease_conn = None
@@ -980,9 +1004,11 @@ class Dispatcher:
         self._task = asyncio.create_task(self._loop())
         await events.emit(
             "dispatch.started",
-            payload={"reclaimed_stale": recovered,
-                     "concurrency": settings.dispatch_concurrency,
-                     "approval_limit": settings.dispatch_approval_limit},
+            payload={
+                "reclaimed_stale": recovered,
+                "concurrency": settings.dispatch_concurrency,
+                "approval_limit": settings.dispatch_approval_limit,
+            },
             actor="dispatcher",
         )
 
@@ -1013,8 +1039,11 @@ class Dispatcher:
             log.exception("dispatch: item %s failed outside its handler", item["id"])
 
     async def _loop(self) -> None:
-        log.info("dispatch: loop started (concurrency=%d, approval limit=%d)",
-                 settings.dispatch_concurrency, settings.dispatch_approval_limit)
+        log.info(
+            "dispatch: loop started (concurrency=%d, approval limit=%d)",
+            settings.dispatch_concurrency,
+            settings.dispatch_approval_limit,
+        )
         stalled_on: str | None = None
         held_on: tuple[str, ...] = ()
         while not self._stopping.is_set():
@@ -1060,9 +1089,7 @@ class Dispatcher:
                         )
                     if holders != held_on:
                         held_on = holders
-                        await events.emit(
-                            "dispatch.held", payload=held, actor="dispatcher"
-                        )
+                        await events.emit("dispatch.held", payload=held, actor="dispatcher")
             except Exception:  # the loop outlives any single error
                 log.exception("dispatch: loop iteration failed")
                 self.last_reason = "error (see logs)"

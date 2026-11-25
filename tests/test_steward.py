@@ -33,14 +33,11 @@ DOC = (
 
 
 def _ev(kind: str, claim: str) -> Evidence:
-    return Evidence(kind=kind, source_ref="doc", locator="work item payload",
-                    claim=claim)
+    return Evidence(kind=kind, source_ref="doc", locator="work item payload", claim=claim)
 
 
 def test_a_verbatim_quote_verifies():
-    out = steward.verified_evidence(
-        [_ev("document", "standardised on Postgres 17")], DOC
-    )
+    out = steward.verified_evidence([_ev("document", "standardised on Postgres 17")], DOC)
     assert out[0]["claim_matches_source"] is True
 
 
@@ -117,8 +114,7 @@ async def test_ensure_registered_is_idempotent_and_hires_a_full_roster_member():
     # management rule; tests/test_governance.py enforces it roster-wide).
     assert first["deviations"].strip()
 
-    grants = [g["pack"] for g in await repo.list_grants(AGENT_ID)
-              if g["revoked_at"] is None]
+    grants = [g["pack"] for g in await repo.list_grants(AGENT_ID) if g["revoked_at"] is None]
     # web-read added 2026-08-06 (operator-approved sweep): corroborate URLs
     # cited by ingested documents before proposing graph facts. skill-propose
     # + web-search added 2026-08-07 (agent-proposed skill authoring) — this
@@ -130,10 +126,19 @@ async def test_ensure_registered_is_idempotent_and_hires_a_full_roster_member():
     # reads every catalog version off the ledger, so it is the agent that KNOWS
     # which lineage a new one supersedes — gated like everything else.
     # task-create added at story 4.9 (every active agent but the auditor).
-    assert sorted(grants) == ["ask-operator", "catalog-propose", "consult",
-                              "graph-propose", "graph-read", "note-propose",
-                              "session-recall", "skill-propose", "task-create", "web-read",
-                              "web-search"]
+    assert sorted(grants) == [
+        "ask-operator",
+        "catalog-propose",
+        "consult",
+        "graph-propose",
+        "graph-read",
+        "note-propose",
+        "session-recall",
+        "skill-propose",
+        "task-create",
+        "web-read",
+        "web-search",
+    ]
     # Slice 1 grants no task-propose and no jira packs.
     assert "task-propose" not in grants
 
@@ -161,9 +166,11 @@ async def test_the_charter_writes_no_capability_list_of_its_own():
 
     from central_command.runtime.agent import build_charter
 
-    assembled = build_charter(CHARTER, await repo.list_grants(AGENT_ID) and
-                              [g["pack"] for g in await repo.list_grants(AGENT_ID)
-                               if g["revoked_at"] is None])
+    assembled = build_charter(
+        CHARTER,
+        await repo.list_grants(AGENT_ID)
+        and [g["pack"] for g in await repo.list_grants(AGENT_ID) if g["revoked_at"] is None],
+    )
     assert assembled.count("YOUR GRANTED CAPABILITIES") == 1
     assert "capability = 'graph.add_episode'" in assembled
 
@@ -173,9 +180,12 @@ async def test_the_steward_is_not_seeded_in_the_schema():
     schema.sql's founding-roster seeds and their `role = ''` guards."""
     from pathlib import Path
 
-    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
     seeding = [
-        line for line in schema.splitlines()
+        line
+        for line in schema.splitlines()
         if AGENT_ID in line and not line.lstrip().startswith("--")
     ]
     assert seeding == [], f"the steward is seeded in schema.sql: {seeding}"
@@ -185,9 +195,7 @@ async def test_the_steward_is_not_seeded_in_the_schema():
 
 
 async def test_one_document_yields_one_proposal_with_one_episode():
-    result = await steward.run_document(
-        DOC, source_text=DOC, model=make_steward_model()
-    )
+    result = await steward.run_document(DOC, source_text=DOC, model=make_steward_model())
     assert result["deferred"] is True
     row = await repo.load_proposal(result["proposal_id"])
     assert row["agent_id"] == AGENT_ID
@@ -202,12 +210,12 @@ async def test_the_run_loads_the_governed_charter_not_the_triage_one():
     """`build_agent_for` is the RESUME factory and passes no charter, so a fresh
     run built through it wears the inbox-triage charter. The steward's system
     prompt must be its own."""
-    result = await steward.run_document(
-        DOC, source_text=DOC, model=make_steward_model()
-    )
+    result = await steward.run_document(DOC, source_text=DOC, model=make_steward_model())
     run_state = await repo.get_session_run_state(result["session_id"])
     system = next(
-        p for m in run_state["messages"] for p in m["parts"]
+        p
+        for m in run_state["messages"]
+        for p in m["parts"]
         if p.get("part_kind") == "system-prompt"
     )
     assert "knowledge steward" in str(system["content"])
@@ -228,9 +236,11 @@ async def test_an_ask_parks_an_operator_item_instead_of_exploding():
     `Proposal.model_validate` raises inside the parser, 500s the caller, and
     leaves the session RUNNING forever — classify before parking."""
     result = await steward.run_document(
-        DOC, source_text=DOC,
+        DOC,
+        source_text=DOC,
         model=make_deferred_tool_model(
-            "ask_operator", {"searched": "no tool I hold records this", "question": "Which Postgres 17 minor?"}
+            "ask_operator",
+            {"searched": "no tool I hold records this", "question": "Which Postgres 17 minor?"},
         ),
     )
     assert result["asked"] is True
@@ -241,7 +251,8 @@ async def test_an_ask_parks_an_operator_item_instead_of_exploding():
 
 async def test_a_paraphrased_citation_reaches_the_inbox_flagged():
     result = await steward.run_document(
-        DOC, source_text=DOC,
+        DOC,
+        source_text=DOC,
         model=make_steward_model(claim="the team went with Postgres, broadly"),
     )
     row = await repo.load_proposal(result["proposal_id"])
@@ -269,9 +280,7 @@ async def test_follow_on_proposals_drain_a_rich_document_one_decision_at_a_time(
     session_id = result["session_id"]
 
     # Approve fact 1 → the follow-on parks; the session does NOT land.
-    out = await gateway.approve_and_execute(
-        session_id, result["proposal_id"], model=model
-    )
+    out = await gateway.approve_and_execute(session_id, result["proposal_id"], model=model)
     follow_id = out.get("follow_on_proposal_id")
     assert follow_id, f"no follow-on parked: {out}"
     assert out["final_output"] is None

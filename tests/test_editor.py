@@ -30,12 +30,17 @@ async def test_it_is_hired_as_a_full_roster_member():
     assert first["consultable"] is True
     assert first["deviations"].strip()
 
-    grants = sorted(g["pack"] for g in await repo.list_grants(AGENT_ID)
-                    if g["revoked_at"] is None)
+    grants = sorted(g["pack"] for g in await repo.list_grants(AGENT_ID) if g["revoked_at"] is None)
     # No propose packs, no consult, no web-read — a read-only critic (design
     # doc 2026-08-06).
-    assert grants == ["ask-operator", "graph-read", "jira-read", "record-read",
-                      "session-recall", "task-create"]
+    assert grants == [
+        "ask-operator",
+        "graph-read",
+        "jira-read",
+        "record-read",
+        "session-recall",
+        "task-create",
+    ]
 
     current = await repo.current_charter(AGENT_ID)
     assert current and current["content"].strip()
@@ -53,7 +58,9 @@ async def test_it_is_not_seeded_in_the_schema():
     schema.sql's founding-roster seeds and their `role = ''` guards."""
     from pathlib import Path
 
-    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
     # The only mentions allowed are EXCLUSIONS, not seeds: DL-215's
     # skill-propose and DL-217's note-propose widenings leave the editor out by
     # name (it holds no propose pack by design), which writes nothing about the

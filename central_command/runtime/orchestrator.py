@@ -50,8 +50,12 @@ def build_orchestrator(model, charter: str | None = None):
 
 
 async def build_project_orchestrator(
-    model=None, charter: str | None = None, packs=(),
-    capabilities=None, skills_catalog: str = "", team_section: str = "",
+    model=None,
+    charter: str | None = None,
+    packs=(),
+    capabilities=None,
+    skills_catalog: str = "",
+    team_section: str = "",
 ):
     """The ORCHESTRATION-mode agent (D7 phase 2): governed charter (or the
     built-in) + the generated pack section, the deferred assign/ask tools from
@@ -72,11 +76,8 @@ async def build_project_orchestrator(
     return Agent(
         await _resolve_model(model),
         name=AGENT_ID,
-        system_prompt=build_charter(
-            charter or render_v0(CHARTER), packs, team_section=team_section
-        ) + (
-            "\n\n" + skills_catalog if skills_catalog else ""
-        ),
+        system_prompt=build_charter(charter or render_v0(CHARTER), packs, team_section=team_section)
+        + ("\n\n" + skills_catalog if skills_catalog else ""),
         deps_type=TriageDeps,
         output_type=[str, DeferredToolRequests],
         # declare_gap is agent PROCESS, not a grantable capability — same
@@ -103,7 +104,9 @@ async def _resolve_model(model=None):
 
 async def ensure_registered() -> None:
     await repo.upsert_agent(
-        AGENT_ID, "Orchestrator", "",
+        AGENT_ID,
+        "Orchestrator",
+        "",
         "routes unassigned tasks to the right agent; recommends, never assigns",
     )
 
@@ -139,9 +142,12 @@ async def recommend(task: dict, model=None) -> dict | None:
         )
         session_id = "sess_" + uuid.uuid4().hex[:12]
         result = await _run_live(
-            agent, _briefing(task, candidates), model=None,
+            agent,
+            _briefing(task, candidates),
+            model=None,
             deps=TriageDeps(agent_id=AGENT_ID, session_id=session_id),
-            agent_id=AGENT_ID, session_id=session_id,
+            agent_id=AGENT_ID,
+            session_id=session_id,
         )
         from central_command.runtime.converse import land_session
 
@@ -149,7 +155,9 @@ async def recommend(task: dict, model=None) -> dict | None:
         rec: RouteRecommendation = result.output
     except Exception as e:  # noqa: BLE001 — a down orchestrator degrades to the operator
         await events.emit(
-            "task.route_error", ref_id=task["id"], payload={"error": str(e)},
+            "task.route_error",
+            ref_id=task["id"],
+            payload={"error": str(e)},
             actor=f"agent:{AGENT_ID}",
         )
         return None
@@ -173,8 +181,12 @@ async def recommend(task: dict, model=None) -> dict | None:
     await events.emit(
         "task.recommended",
         ref_id=task["id"],
-        payload={"agent_id": agent_id, "rationale": rec.rationale[:300],
-                 "session_id": session_id, "sanitized": sanitized},
+        payload={
+            "agent_id": agent_id,
+            "rationale": rec.rationale[:300],
+            "session_id": session_id,
+            "sanitized": sanitized,
+        },
         actor=f"agent:{AGENT_ID}",
     )
     return stored
@@ -192,7 +204,7 @@ def pair_routes(rows: list[dict]) -> dict:
     for a task pairs with the task's next outcome. Operator assignments made
     with no standing recommendation are tallied separately — they say nothing
     about the orchestrator's judgment."""
-    standing: dict[str, dict] = {}   # task_id -> latest recommendation event
+    standing: dict[str, dict] = {}  # task_id -> latest recommendation event
     accepted: list[dict] = []
     overridden: list[dict] = []
     cancelled_after_rec = 0
@@ -245,24 +257,24 @@ def signals_from_routes(report: dict, titles: dict[str, str] | None = None) -> l
     for p in report.get("overridden", []):
         title = titles.get(p["task_id"]) or p.get("title") or p["task_id"]
         rec = p["recommended"] or "no one (no fit)"
-        signals.append({
-            "kind": "route-override",
-            "event_id": p["outcome_event"],
-            "feedback": (
-                f"for task “{title}” you recommended {rec} "
-                f"(“{p['rationale']}”) — the team lead assigned "
-                f"{p['assigned']} instead"
-            ),
-        })
+        signals.append(
+            {
+                "kind": "route-override",
+                "event_id": p["outcome_event"],
+                "feedback": (
+                    f"for task “{title}” you recommended {rec} "
+                    f"(“{p['rationale']}”) — the team lead assigned "
+                    f"{p['assigned']} instead"
+                ),
+            }
+        )
     return signals
 
 
 async def routing_report() -> dict:
     """The recommendation-vs-operator record, computed fresh from the event
     log every call — the log is the truth, nothing cached or re-stated."""
-    rows = await repo.list_events_of_kinds(
-        ["task.recommended", "task.assigned", "task.cancelled"]
-    )
+    rows = await repo.list_events_of_kinds(["task.recommended", "task.assigned", "task.cancelled"])
     report = pair_routes(rows)
     ids = [p["task_id"] for p in report["overridden"]]
     titles = await repo.task_titles(ids) if ids else {}

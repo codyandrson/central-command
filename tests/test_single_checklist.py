@@ -78,8 +78,7 @@ def test_operator_rows_are_bold_and_say_where():
     defaults = R.question_defaults()
     operator_rows = [r for r in ROWS if r["kind"] in R.OPERATOR_KINDS]
     assert operator_rows, "the manifest declares no human/gate rows — D1 says it must"
-    missing = [f"{r['phase']}/{r['step']}" for r in operator_rows
-               if not R.where_for(r, defaults)]
+    missing = [f"{r['phase']}/{r['step']}" for r in operator_rows if not R.where_for(r, defaults)]
     assert not missing, (
         f"human/gate row(s) with no WHERE: {missing}. Name the place in the "
         "row's reads/doc, or add it to WHERE_BY_STEP in scripts/render_checklist.py"
@@ -110,8 +109,16 @@ def test_the_checklist_says_it_is_generated():
 def test_an_unmapped_operator_row_still_renders_without_a_where():
     """A new human row the renderer cannot place renders with its sentence (the
     test above is what fails), rather than crashing the render."""
-    row = {"phase": "boot", "step": "zz-new", "kind": "human", "requires": "", "reads": "",
-               "writes": "", "probe": "p_always", "doc": "Do a thing nobody located."}
+    row = {
+        "phase": "boot",
+        "step": "zz-new",
+        "kind": "human",
+        "requires": "",
+        "reads": "",
+        "writes": "",
+        "probe": "p_always",
+        "doc": "Do a thing nobody located.",
+    }
     out = R.render_steps([row], R.question_defaults())
     assert "**`boot/zz-new` (yours): Do a thing nobody located.**" in out
     assert "Where:" not in out
@@ -122,10 +129,25 @@ def test_where_is_derived_for_the_rows_the_record_names():
     """D1's operator rows that P4 adds (the CA on disk, the n8n credential)
     derive their place from what they read, so their names need no mapping."""
     d = R.question_defaults()
-    ca = {"phase": "machine", "step": "ca-on-disk", "kind": "human", "requires": "",
-              "reads": "CC_CA_BUNDLE", "writes": "", "probe": "p_always", "doc": "Place the CA."}
-    n8n = {"phase": "boot", "step": "n8n-credential", "kind": "human", "requires": "",
-               "reads": "CC_ENABLE_N8N", "writes": "", "probe": "p_always",
-               "doc": "Create the Gmail account credential in n8n, when CC_ENABLE_N8N=1."}
+    ca = {
+        "phase": "machine",
+        "step": "ca-on-disk",
+        "kind": "human",
+        "requires": "",
+        "reads": "CC_CA_BUNDLE",
+        "writes": "",
+        "probe": "p_always",
+        "doc": "Place the CA.",
+    }
+    n8n = {
+        "phase": "boot",
+        "step": "n8n-credential",
+        "kind": "human",
+        "requires": "",
+        "reads": "CC_ENABLE_N8N",
+        "writes": "",
+        "probe": "p_always",
+        "doc": "Create the Gmail account credential in n8n, when CC_ENABLE_N8N=1.",
+    }
     assert "CC_CA_BUNDLE" in R.where_for(ca, d)
     assert "n8n UI" in R.where_for(n8n, d)

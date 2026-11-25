@@ -102,7 +102,7 @@ class ExecutionCursorError(ExecutorError):
 
 @dataclass
 class ExecutionOutcome:
-    result_text: str          # what the agent is told on resume
+    result_text: str  # what the agent is told on resume
     provenance: Provenance
 
 
@@ -113,10 +113,15 @@ async def _jira_set_due_date(args: dict, approver: str, proposer: str | None) ->
 
 async def _jira_create_issue(args: dict, approver: str, proposer: str | None) -> str:
     out = await jira.create_issue(
-        args["project_key"], args["summary"], args["issue_type"],
-        args.get("description"), args.get("due_date"),
-        args.get("labels") or [], parent=args.get("parent"),
-        custom_fields=args.get("custom_fields"), assignee=args.get("assignee"),
+        args["project_key"],
+        args["summary"],
+        args["issue_type"],
+        args.get("description"),
+        args.get("due_date"),
+        args.get("labels") or [],
+        parent=args.get("parent"),
+        custom_fields=args.get("custom_fields"),
+        assignee=args.get("assignee"),
         estimate_hours=args.get("estimate_hours"),
     )
     key = (out.get("issue") or {}).get("issue_key")
@@ -132,7 +137,9 @@ async def _jira_create_filter(args: dict, approver: str, proposer: str | None) -
 
 async def _jira_create_dashboard(args: dict, approver: str, proposer: str | None) -> str:
     out = await jira.create_dashboard(
-        args["name"], args.get("description"), args.get("gadgets"),
+        args["name"],
+        args.get("description"),
+        args.get("gadgets"),
     )
     d = out["dashboard"]
     msg = f"dashboard {d['id']} '{d['name']}' created: {d['url']}"
@@ -145,7 +152,9 @@ async def _jira_create_dashboard(args: dict, approver: str, proposer: str | None
 
 async def _jira_create_project(args: dict, approver: str, proposer: str | None) -> str:
     out = await jira.create_project(
-        args["key"], args["name"], args.get("project_type_key", "software"),
+        args["key"],
+        args["name"],
+        args.get("project_type_key", "software"),
     )
     p = out["project"]
     # The result text names the key explicitly — a consult-and-wait asker
@@ -175,9 +184,12 @@ async def _jira_set_fields(args: dict, approver: str, proposer: str | None) -> s
 # The planning fields (the EA planning design, D3/D8; DL-221 step 4b): the
 # argument each custom planning field is written from, and the setting that
 # NAMES that field in the tracker. The estimate and the due date are native.
-_PLANNING_CUSTOM_ARGS = {"stakes": "plan_field_stakes", "value": "plan_field_value",
-                         "lateness_loss": "plan_field_lateness",
-                         "deadline_type": "plan_field_deadline_type"}
+_PLANNING_CUSTOM_ARGS = {
+    "stakes": "plan_field_stakes",
+    "value": "plan_field_value",
+    "lateness_loss": "plan_field_lateness",
+    "deadline_type": "plan_field_deadline_type",
+}
 
 
 async def _jira_set_planning_fields(args: dict, approver: str, proposer: str | None) -> str:
@@ -198,15 +210,20 @@ async def _jira_set_planning_fields(args: dict, approver: str, proposer: str | N
             raise jira.JiraError(
                 f"jira.set_planning_fields for {args['issue_key']}: the tracker does not "
                 "declare the planning field(s) "
-                + ", ".join(f"{names[a]!r} ({a}, setting {_PLANNING_CUSTOM_ARGS[a]})"
-                            for a in missing)
+                + ", ".join(
+                    f"{names[a]!r} ({a}, setting {_PLANNING_CUSTOM_ARGS[a]})" for a in missing
+                )
                 + "; nothing was written. Create the field in Jira, or point the "
-                "setting at the field the tracker has.")
+                "setting at the field the tracker has."
+            )
         names.update(found)
         custom = {names[arg]: args[arg] for arg in wanted}
     out = await jira.set_planning_fields(
-        args["issue_key"], custom_fields=custom or None,
-        estimate_hours=args.get("estimate_hours"), due_date=args.get("due_date"))
+        args["issue_key"],
+        custom_fields=custom or None,
+        estimate_hours=args.get("estimate_hours"),
+        due_date=args.get("due_date"),
+    )
     by_name = {v: k for k, v in names.items()}
     written = [by_name.get(k, k) for k in (out.get("issue") or {}).get("fields") or {}]
     return f"{args['issue_key']} planning fields set: {', '.join(written)}"
@@ -239,8 +256,7 @@ async def _calendar_create_event(args: dict, approver: str, proposer: str | None
     # The client id only on the Google path: Exchange has no client-chosen item
     # id, and its create stays exactly what it was (a later step, DL-219).
     key = action_key()
-    client_event_id = (google_event_id(key)
-                       if key and calendar_facade._exchange() is None else None)
+    client_event_id = google_event_id(key) if key and calendar_facade._exchange() is None else None
     extra = {"client_event_id": client_event_id} if client_event_id else {}
     calendar_id = args.get("calendar_id", "primary")
     plan = args.get("plan")
@@ -252,21 +268,34 @@ async def _calendar_create_event(args: dict, approver: str, proposer: str | None
     # `plan` is control-plane metadata (the EA planning design, D5): it is never
     # passed to the façade, which sends exactly the event's own fields.
     ev = await calendar_facade.create_event(
-        args["title"], args["start"], args["end"],
-        description=args.get("description"), attendees=args.get("attendees"),
-        calendar_id=calendar_id, **extra,
+        args["title"],
+        args["start"],
+        args["end"],
+        description=args.get("description"),
+        attendees=args.get("attendees"),
+        calendar_id=calendar_id,
+        **extra,
     )
     earlier = " (already created by an earlier attempt)" if ev.get("already_existed") else ""
-    line = (f"calendar event '{args['title']}' created {args['start']} → "
-            f"{args['end']} (id {ev.get('event_id')}){earlier}")
+    line = (
+        f"calendar event '{args['title']}' created {args['start']} → "
+        f"{args['end']} (id {ev.get('event_id')}){earlier}"
+    )
     if plan:
-        line += await _record_plan_event(ev.get("event_id"), calendar_id, plan, line,
-                                         issue_snapshot=snapshot)
+        line += await _record_plan_event(
+            ev.get("event_id"), calendar_id, plan, line, issue_snapshot=snapshot
+        )
     return line
 
 
-async def _tracker_issue_state(issue_key: str, capability: str, consequence: str, *,
-                               full: bool = True, missing_ok: bool = False) -> dict:
+async def _tracker_issue_state(
+    issue_key: str,
+    capability: str,
+    consequence: str,
+    *,
+    full: bool = True,
+    missing_ok: bool = False,
+) -> dict:
     """`ea_plan.issue_state` for the ledger paths: an outage raises stamped `jira`
     (the action parks), and a 404 (the tracker has no such issue) is a refusal
     naming `consequence`, or with `missing_ok` the answer `{missing: True}`."""
@@ -279,8 +308,8 @@ async def _tracker_issue_state(issue_key: str, capability: str, consequence: str
             if missing_ok:
                 return {"status_category": None, "snapshot": None, "missing": True}
             raise ExecutorError(
-                f"{capability}: the tracker has no issue {issue_key} (not found), "
-                f"{consequence}") from e
+                f"{capability}: the tracker has no issue {issue_key} (not found), {consequence}"
+            ) from e
         raise
 
 
@@ -294,13 +323,18 @@ async def _work_block_snapshot(plan: dict):
     if plan.get("kind") != "work_block" or not jira.configured():
         return None
     issue_key = str(plan.get("issue_key") or "").strip()
-    return (await _tracker_issue_state(
-        issue_key, "calendar.create_event",
-        "so no work block was created; plan the block for an issue that exists"))["snapshot"]
+    return (
+        await _tracker_issue_state(
+            issue_key,
+            "calendar.create_event",
+            "so no work block was created; plan the block for an issue that exists",
+        )
+    )["snapshot"]
 
 
-async def _record_plan_event(event_id, calendar_id: str, plan: dict, created: str,
-                             issue_snapshot=None) -> str:
+async def _record_plan_event(
+    event_id, calendar_id: str, plan: dict, created: str, issue_snapshot=None
+) -> str:
     """The plan-ledger row for an event this action just created, from the id
     IN THE RESULT, never one an agent wrote. After the create on purpose: a
     ledger write that fails raises, the action is retried, and on Google the
@@ -311,21 +345,31 @@ async def _record_plan_event(event_id, calendar_id: str, plan: dict, created: st
     if not event_id:
         raise ExecutorError(
             f"calendar.create_event: the provider returned no event id, so the plan "
-            f"ledger row could not be written ({created})")
+            f"ledger row could not be written ({created})"
+        )
     row = await repo.record_calendar_plan_event(
-        event_id=str(event_id), calendar_id=calendar_id, kind=plan["kind"],
-        issue_key=plan.get("issue_key"), plan_date=plan.get("date"),
-        proposal_id=_current_proposal_id.get(), issue_snapshot=issue_snapshot,
+        event_id=str(event_id),
+        calendar_id=calendar_id,
+        kind=plan["kind"],
+        issue_key=plan.get("issue_key"),
+        plan_date=plan.get("date"),
+        proposal_id=_current_proposal_id.get(),
+        issue_snapshot=issue_snapshot,
     )
-    what = (f"work block for {row['issue_key']} on {row['plan_date']}"
-            if row["kind"] == "work_block" else "placeholder")
-    return (f" — ledger: {what}" if row["created"]
-            else f" — ledger: already recorded as {what}")
+    what = (
+        f"work block for {row['issue_key']} on {row['plan_date']}"
+        if row["kind"] == "work_block"
+        else "placeholder"
+    )
+    return f" — ledger: {what}" if row["created"] else f" — ledger: already recorded as {what}"
 
 
 async def _calendar_update_event(args: dict, approver: str, proposer: str | None) -> str:
-    changed = {k: args[k] for k in ("title", "start", "end", "description", "attendees")
-               if args.get(k) is not None}
+    changed = {
+        k: args[k]
+        for k in ("title", "start", "end", "description", "attendees")
+        if args.get(k) is not None
+    }
     if not changed:
         raise ExecutorError("calendar.update_event: no field to change was supplied")
     calendar_id = args.get("calendar_id", "primary")
@@ -341,18 +385,24 @@ async def _calendar_update_event(args: dict, approver: str, proposer: str | None
     refresh = block is not None and block["kind"] == "work_block" and jira.configured()
     snapshot = None
     if refresh:
-        snapshot = (await _tracker_issue_state(
-            block["issue_key"], "calendar.update_event",
-            "so the event was not changed; remove the block "
-            "(calendar.delete_event) instead"))["snapshot"]
+        snapshot = (
+            await _tracker_issue_state(
+                block["issue_key"],
+                "calendar.update_event",
+                "so the event was not changed; remove the block (calendar.delete_event) instead",
+            )
+        )["snapshot"]
     ev = await calendar_facade.update_event(args["event_id"], calendar_id=calendar_id, **changed)
-    line = (f"calendar event {ev.get('event_id') or args['event_id']} updated "
-            f"({', '.join(sorted(changed))})")
+    line = (
+        f"calendar event {ev.get('event_id') or args['event_id']} updated "
+        f"({', '.join(sorted(changed))})"
+    )
     if "start" in changed:
         line += await _move_plan_date(str(args["event_id"]), calendar_id, changed["start"])
     if refresh:
         await repo.set_calendar_plan_event_snapshot(
-            str(args["event_id"]), calendar_id, issue_snapshot=snapshot)
+            str(args["event_id"]), calendar_id, issue_snapshot=snapshot
+        )
         line += f" — ledger: {block['issue_key']}'s issue snapshot refreshed from the tracker"
     return line
 
@@ -373,9 +423,12 @@ async def _move_plan_date(event_id: str, calendar_id: str, start: str) -> str:
     try:
         moved = datetime.fromisoformat(str(start))
     except ValueError:
-        return f" — ledger: the new start {start!r} did not parse; plan date left {row['plan_date']}"
-    local = (moved.astimezone(ZoneInfo(settings.ea_timezone)).date()
-             if moved.tzinfo else moved.date())
+        return (
+            f" — ledger: the new start {start!r} did not parse; plan date left {row['plan_date']}"
+        )
+    local = (
+        moved.astimezone(ZoneInfo(settings.ea_timezone)).date() if moved.tzinfo else moved.date()
+    )
     if local == row["plan_date"]:
         return ""
     await repo.move_calendar_plan_event_date(event_id, calendar_id, plan_date=local)
@@ -393,21 +446,27 @@ async def _calendar_release_event(args: dict, approver: str, proposer: str | Non
     calendar_id = args.get("calendar_id", "primary")
     event_id = str(args["event_id"])
     retired = await repo.retire_calendar_plan_event(
-        event_id, calendar_id, proposal_id=_current_proposal_id.get())
+        event_id, calendar_id, proposal_id=_current_proposal_id.get()
+    )
     if retired is None:
         pid = _current_proposal_id.get()
         if pid and await repo.calendar_plan_event_retired_by(event_id, calendar_id, pid):
-            return (f"calendar event {event_id} already released from the plan ledger "
-                    "by this proposal — calendar unchanged")
+            return (
+                f"calendar event {event_id} already released from the plan ledger "
+                "by this proposal — calendar unchanged"
+            )
         raise ExecutorError(
             f"calendar.release_event: event {event_id} has no active row in the plan "
             "ledger (it is not a work block or placeholder of the assistant's); nothing "
-            "was written")
+            "was written"
+        )
     what = retired["kind"].replace("_", " ")
     if retired["kind"] == "work_block":
         what += f" for {retired['issue_key']} on {retired['plan_date']}"
-    return (f"calendar event {event_id} released from the plan ledger (was a {what}) — "
-            "ledger row retired, calendar unchanged")
+    return (
+        f"calendar event {event_id} released from the plan ledger (was a {what}) — "
+        "ledger row retired, calendar unchanged"
+    )
 
 
 async def _plan_remove_finished_block(args: dict, approver: str, proposer: str | None) -> str:
@@ -432,25 +491,31 @@ async def _plan_remove_finished_block(args: dict, approver: str, proposer: str |
     if row is None or row["kind"] != "work_block":
         pid = _current_proposal_id.get()
         if pid and await repo.calendar_plan_event_retired_by(event_id, calendar_id, pid):
-            return (f"calendar event {event_id} already removed by this proposal "
-                    "(its ledger row is retired)")
+            return (
+                f"calendar event {event_id} already removed by this proposal "
+                "(its ledger row is retired)"
+            )
         raise ExecutorError(
             f"plan.remove_finished_block: event {event_id} has no active work block in "
             "the plan ledger (it is not one of the assistant's work blocks, or it was "
-            "already removed or released); nothing was deleted")
+            "already removed or released); nothing was deleted"
+        )
     creator = await repo.load_proposal(row["proposal_id"]) if row.get("proposal_id") else None
     if creator is None or not proposer or creator["agent_id"] != proposer:
         raise ExecutorError(
             f"plan.remove_finished_block: event {event_id} is a work block "
             f"{'this agent did not create' if creator else 'whose creating proposal is not on record'}; "
-            "only the agent that created a block may remove it this way; nothing was deleted")
+            "only the agent that created a block may remove it this way; nothing was deleted"
+        )
     if not jira.configured():
         raise ExecutorError(
             "plan.remove_finished_block: no tracker is configured, so it cannot be "
-            "checked that the issue is finished; nothing was deleted")
+            "checked that the issue is finished; nothing was deleted"
+        )
     key = row["issue_key"]
     state = await _tracker_issue_state(
-        key, "plan.remove_finished_block", "", full=False, missing_ok=True)
+        key, "plan.remove_finished_block", "", full=False, missing_ok=True
+    )
     if state.get("missing"):
         why = "does not exist in the tracker"
     elif state["status_category"] == "done":
@@ -459,11 +524,17 @@ async def _plan_remove_finished_block(args: dict, approver: str, proposer: str |
         raise ExecutorError(
             f"plan.remove_finished_block: {key} is not closed (its status category is "
             f"{state['status_category'] or 'unknown'}), so its block on {row['plan_date']} "
-            "is not removed this way; nothing was deleted")
+            "is not removed this way; nothing was deleted"
+        )
     deleted = await _calendar_delete_event(
-        {"event_id": event_id, "calendar_id": calendar_id,
-         "reason": f"the work block for {key} on {row['plan_date']}: the issue {why}"},
-        approver, proposer)
+        {
+            "event_id": event_id,
+            "calendar_id": calendar_id,
+            "reason": f"the work block for {key} on {row['plan_date']}: the issue {why}",
+        },
+        approver,
+        proposer,
+    )
     return f"work block for {key} on {row['plan_date']} removed, its issue {why} — {deleted}"
 
 
@@ -486,8 +557,10 @@ async def _plan_record_day(args: dict, approver: str, proposer: str | None) -> s
         earlier = await repo.day_plan_by_action_key(key)
         if earlier is not None:
             keys = ", ".join(str(i.get("issue_key")) for i in earlier["items"])
-            return (f"day plan for {earlier['plan_date']} already stored by an earlier "
-                    f"attempt: {len(earlier['items'])} item(s) ({keys})")
+            return (
+                f"day plan for {earlier['plan_date']} already stored by an earlier "
+                f"attempt: {len(earlier['items'])} item(s) ({keys})"
+            )
     asked = [str(i["issue_key"]).strip() for i in args["items"]]
     numbers = await ea_plan.planning_numbers(asked)
     # An issue past a hard deadline is a decision the operator owes (close it, or
@@ -500,21 +573,33 @@ async def _plan_record_day(args: dict, approver: str, proposer: str | None) -> s
             f"plan.record_day: {', '.join(past_hard)} "
             f"{'is' if len(past_hard) == 1 else 'are'} past a hard deadline "
             "and cannot be on a day's plan — decide it first: close it or set a "
-            "new due date; nothing was stored")
+            "new due date; nothing was stored"
+        )
     items = []
     for rank, (raw, issue_key) in enumerate(zip(args["items"], asked), start=1):
-        items.append({"issue_key": issue_key, "rank": rank,
-                      "reason": str(raw.get("reason") or "").strip()[:1000],
-                      **numbers[issue_key]})
-    row = await repo.record_day_plan(plan_date=plan_date, items=items,
-                                     proposal_id=_current_proposal_id.get(), action_key=key)
+        items.append(
+            {
+                "issue_key": issue_key,
+                "rank": rank,
+                "reason": str(raw.get("reason") or "").strip()[:1000],
+                **numbers[issue_key],
+            }
+        )
+    row = await repo.record_day_plan(
+        plan_date=plan_date, items=items, proposal_id=_current_proposal_id.get(), action_key=key
+    )
     if row["already_existed"]:
-        return (f"day plan for {row['plan_date']} already stored by an earlier attempt: "
-                f"{len(row['items'])} item(s)")
-    line = (f"day plan for {row['plan_date']} stored: {len(items)} item(s) "
-            f"({', '.join(asked)}); planning numbers re-read from the tracker")
-    unreadable = [f"{i['issue_key']} ({i.get('unreadable_reason')})"
-                  for i in items if not i.get("readable")]
+        return (
+            f"day plan for {row['plan_date']} already stored by an earlier attempt: "
+            f"{len(row['items'])} item(s)"
+        )
+    line = (
+        f"day plan for {row['plan_date']} stored: {len(items)} item(s) "
+        f"({', '.join(asked)}); planning numbers re-read from the tracker"
+    )
+    unreadable = [
+        f"{i['issue_key']} ({i.get('unreadable_reason')})" for i in items if not i.get("readable")
+    ]
     if unreadable:
         line += f"; stored without numbers, unreadable: {'; '.join(unreadable)}"
     if row.get("superseded_id"):
@@ -529,22 +614,34 @@ async def _plan_record_review(args: dict, approver: str, proposer: str | None) -
     plan is accepted and stored as unplanned. Idempotent on `action_key()`."""
     from central_command.db import repo
 
-    outcomes = [{"issue_key": str(o["issue_key"]).strip(), "done": o["done"],
-                 "actual_hours": o.get("actual_hours"),
-                 "note": (str(o["note"]).strip() or None) if o.get("note") else None}
-                for o in args["outcomes"]]
+    outcomes = [
+        {
+            "issue_key": str(o["issue_key"]).strip(),
+            "done": o["done"],
+            "actual_hours": o.get("actual_hours"),
+            "note": (str(o["note"]).strip() or None) if o.get("note") else None,
+        }
+        for o in args["outcomes"]
+    ]
     out = await repo.record_day_plan_outcomes(
-        plan_date=str(args["date"]), outcomes=outcomes,
-        proposal_id=_current_proposal_id.get(), action_key=action_key())
+        plan_date=str(args["date"]),
+        outcomes=outcomes,
+        proposal_id=_current_proposal_id.get(),
+        action_key=action_key(),
+    )
     rows = out["rows"]
     if out["already_existed"]:
-        return (f"review for {args['date']} already recorded by an earlier attempt: "
-                f"{len(rows)} outcome(s)")
+        return (
+            f"review for {args['date']} already recorded by an earlier attempt: "
+            f"{len(rows)} outcome(s)"
+        )
     done = [r["issue_key"] for r in rows if r["done"]]
     open_ = [r["issue_key"] for r in rows if not r["done"]]
     unplanned = [r["issue_key"] for r in rows if not r["planned"]]
-    line = (f"review for {args['date']} recorded: {len(rows)} outcome(s); done: "
-            f"{', '.join(done) or 'none'}; not done: {', '.join(open_) or 'none'}")
+    line = (
+        f"review for {args['date']} recorded: {len(rows)} outcome(s); done: "
+        f"{', '.join(done) or 'none'}; not done: {', '.join(open_) or 'none'}"
+    )
     if unplanned:
         line += f"; not on the stored plan (recorded as unplanned): {', '.join(unplanned)}"
     if out["replaced"]:
@@ -567,15 +664,18 @@ async def _calendar_delete_event(args: dict, approver: str, proposer: str | None
     # A title and an organiser are written by whoever sent the invitation, and this
     # line goes back to the drafter: quoted and capped, so they stay visibly data.
     title, organiser = (repr(str(ev.get(k) or "")[:200]) for k in ("summary", "organizer"))
-    line = (f"calendar event {deleted} deleted — reason: {reason} — restore record: "
-            f"title {title}, {ev.get('start')} → {ev.get('end')}, "
-            f"{ev.get('attendee_count')} attendee(s), organiser {organiser}")
+    line = (
+        f"calendar event {deleted} deleted — reason: {reason} — restore record: "
+        f"title {title}, {ev.get('start')} → {ev.get('end')}, "
+        f"{ev.get('attendee_count')} attendee(s), organiser {organiser}"
+    )
     # AFTER the delete succeeded: an event the plan ledger knows is no longer
     # the assistant's to move. Retirement is a timestamp, never a delete.
     from central_command.db import repo
 
     retired = await repo.retire_calendar_plan_event(
-        args["event_id"], calendar_id, proposal_id=_current_proposal_id.get())
+        args["event_id"], calendar_id, proposal_id=_current_proposal_id.get()
+    )
     if retired is not None:
         line += f" — ledger: {retired['kind'].replace('_', ' ')} row retired"
     return line
@@ -595,9 +695,12 @@ async def _calendar_adopt_event(args: dict, approver: str, proposer: str | None)
     if ev.get("event_id") and str(ev["event_id"]) != event_id:
         raise ExecutorError(
             f"calendar.adopt_event: the read of {event_id} answered event "
-            f"{ev['event_id']}; nothing was adopted")
+            f"{ev['event_id']}; nothing was adopted"
+        )
     row = await repo.record_calendar_plan_event(
-        event_id=event_id, calendar_id=calendar_id, kind="placeholder",
+        event_id=event_id,
+        calendar_id=calendar_id,
+        kind="placeholder",
         proposal_id=_current_proposal_id.get(),
     )
     title = repr(str(ev.get("summary") or "")[:200])
@@ -607,9 +710,12 @@ async def _calendar_adopt_event(args: dict, approver: str, proposer: str | None)
         raise ExecutorError(
             f"calendar.adopt_event: event {event_id} is already in the plan ledger as "
             f"a {row['kind'].replace('_', ' ')} (recorded by {row['proposal_id'] or 'an unrecorded proposal'}); "
-            "nothing was written")
-    return (f"calendar event {event_id} {title} ({ev.get('start')} → {ev.get('end')}) "
-            "adopted as a placeholder — ledger row written, calendar unchanged")
+            "nothing was written"
+        )
+    return (
+        f"calendar event {event_id} {title} ({ev.get('start')} → {ev.get('end')}) "
+        "adopted as a placeholder — ledger row written, calendar unchanged"
+    )
 
 
 async def _mail_report_spam(args: dict, approver: str, proposer: str | None) -> str:
@@ -618,8 +724,10 @@ async def _mail_report_spam(args: dict, approver: str, proposer: str | None) -> 
     # it landed in. Report whichever the provider gave rather than asserting a
     # shape — the result line is the record of what actually happened.
     where = ", ".join(out.get("label_ids") or []) or out.get("folder") or "unknown"
-    return (f"reported as spam: {args.get('sender') or '?'} — "
-            f"{args.get('subject') or '?'} (now in {where})")
+    return (
+        f"reported as spam: {args.get('sender') or '?'} — "
+        f"{args.get('subject') or '?'} (now in {where})"
+    )
 
 
 async def _mail_send(args: dict, approver: str, proposer: str | None) -> str:
@@ -639,10 +747,12 @@ async def _mail_send(args: dict, approver: str, proposer: str | None) -> str:
         reply_to_ref=(args.get("reply_to_ref") or "") or None,
     )
     threaded = out.get("in_reply_to")
-    return (f"mail sent to {', '.join(recipients)}"
-            + (f" (cc {', '.join(args.get('cc') or [])})" if args.get("cc") else "")
-            + f" — subject {args['subject']!r}"
-            + (f", in reply to {threaded}" if threaded else ""))
+    return (
+        f"mail sent to {', '.join(recipients)}"
+        + (f" (cc {', '.join(args.get('cc') or [])})" if args.get("cc") else "")
+        + f" — subject {args['subject']!r}"
+        + (f", in reply to {threaded}" if threaded else "")
+    )
 
 
 async def _mail_move(args: dict, approver: str, proposer: str | None) -> str:
@@ -650,8 +760,10 @@ async def _mail_move(args: dict, approver: str, proposer: str | None) -> str:
     # written: a proposal can arrive by API naming a folder that does not
     # exist, and the client refuses with the list of what does.
     out = await email_facade.move(args["provider_uuid"], args["folder"])
-    return (f"filed {args.get('sender') or '?'} — {args.get('subject') or '?'} "
-            f"into {out.get('folder') or args['folder']}")
+    return (
+        f"filed {args.get('sender') or '?'} — {args.get('subject') or '?'} "
+        f"into {out.get('folder') or args['folder']}"
+    )
 
 
 async def _mail_unsubscribe(args: dict, approver: str, proposer: str | None) -> str:
@@ -676,7 +788,8 @@ async def _mail_unsubscribe(args: dict, approver: str, proposer: str | None) -> 
     # is a sender error, never something to follow.
     async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
         resp = await client.post(
-            url, content=b"List-Unsubscribe=One-Click",
+            url,
+            content=b"List-Unsubscribe=One-Click",
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
     if not 200 <= resp.status_code < 300:
@@ -806,9 +919,8 @@ async def _graph_add_episode(args: dict, approver: str, proposer: str | None) ->
         marker=marker,
     )
     job = (queued or {}).get("job") or {}
-    return (
-        f"graph episode '{args['name']}' queued for extraction"
-        + (f" (ingest job {job['id']})" if job.get("id") is not None else "")
+    return f"graph episode '{args['name']}' queued for extraction" + (
+        f" (ingest job {job['id']})" if job.get("id") is not None else ""
     )
 
 
@@ -910,8 +1022,11 @@ async def _graph_delete_episode(args: dict, approver: str, proposer: str | None)
 
     current = await _check_graph_delete_episode(args)
     job = await graphiti_ingest.enqueue_delete(
-        args["episode_uuid"], current["episode"]["group_id"], preview=current,
-        requested_by=approver, proposal_id=_current_proposal_id.get(),
+        args["episode_uuid"],
+        current["episode"]["group_id"],
+        preview=current,
+        requested_by=approver,
+        proposal_id=_current_proposal_id.get(),
     )
     return (
         f"episode '{current['episode']['name']}' queued for deletion (ingest job {job['id']}): "
@@ -953,16 +1068,20 @@ async def _check_graph_delete_episode(args: dict) -> dict:
         raise WorldMoved(
             f"graph.delete_episode: no episode with uuid {episode_uuid} — it is already "
             "gone; nothing to delete",
-            target=f"graph:episode:{episode_uuid}", expected=expected_digest,
-            actual=None, what_moved=f"episode {episode_uuid} no longer exists",
+            target=f"graph:episode:{episode_uuid}",
+            expected=expected_digest,
+            actual=None,
+            what_moved=f"episode {episode_uuid} no longer exists",
         )
     changes = neo4j_reader.preview_changes(approved, current)
     if changes:
         raise WorldMoved(
             "graph.delete_episode: the graph changed since this deletion was proposed — "
             "nothing was deleted; re-propose to see the current set: " + "; ".join(changes),
-            target=f"graph:episode:{episode_uuid}", expected=expected_digest,
-            actual=current.get("digest"), what_moved="; ".join(changes),
+            target=f"graph:episode:{episode_uuid}",
+            expected=expected_digest,
+            actual=current.get("digest"),
+            what_moved="; ".join(changes),
         )
     return current
 
@@ -970,8 +1089,9 @@ async def _check_graph_delete_episode(args: dict) -> dict:
 UNBOUNDED = "unbounded"
 
 
-def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, ...],
-                            keyed: bool = False):
+def _graph_curation_handler(
+    capability: str, fn_name: str, optional: tuple[str, ...], keyed: bool = False
+):
     """One handler per writer primitive, built from the same recipe: the
     required args come from `contract.ARG_SPECS` (already enforced by
     `execute()` before any action runs, and by the runtime at propose time),
@@ -1009,8 +1129,9 @@ def _graph_curation_handler(capability: str, fn_name: str, optional: tuple[str, 
         await _reverify_after_curation(args)
         if isinstance(result, dict) and result.get("already_existed"):
             shown = {k: v for k, v in result.items() if k != "already_existed"}
-            return (f"graph curation {fn_name} applied: {shown} "
-                    "(already created by an earlier attempt)")
+            return (
+                f"graph curation {fn_name} applied: {shown} (already created by an earlier attempt)"
+            )
         return f"graph curation {fn_name} applied: {result}"
 
     return handler
@@ -1025,27 +1146,39 @@ _GRAPH_CURATION_HANDLERS = {
     # words, not a re-ingestion. The writer records its own provenance episode
     # for every created node/edge, so pedigree stays queryable.
     "graph.create_node": _graph_curation_handler(
-        "graph.create_node", "create_node", optional=("labels",), keyed=True),
+        "graph.create_node", "create_node", optional=("labels",), keyed=True
+    ),
     "graph.create_edge": _graph_curation_handler(
-        "graph.create_edge", "create_edge", optional=("valid_at", "invalid_at"),
-        keyed=True),
-    "graph.merge_nodes": _graph_curation_handler(
-        "graph.merge_nodes", "merge_nodes", optional=()),
+        "graph.create_edge", "create_edge", optional=("valid_at", "invalid_at"), keyed=True
+    ),
+    "graph.merge_nodes": _graph_curation_handler("graph.merge_nodes", "merge_nodes", optional=()),
     "graph.update_node": _graph_curation_handler(
-        "graph.update_node", "update_node",
-        optional=("name", "summary", "labels", "aliases", "birth_date", "phone")),
-    "graph.delete_node": _graph_curation_handler(
-        "graph.delete_node", "delete_node", optional=()),
+        "graph.update_node",
+        "update_node",
+        optional=("name", "summary", "labels", "aliases", "birth_date", "phone"),
+    ),
+    "graph.delete_node": _graph_curation_handler("graph.delete_node", "delete_node", optional=()),
     "graph.update_edge": _graph_curation_handler(
-        "graph.update_edge", "update_edge",
-        optional=("name", "fact", "source_uuid", "target_uuid", "valid_at",
-                  "invalid_at", "clear_invalid", "clear_valid", "clear_expired")),
-    "graph.delete_edge": _graph_curation_handler(
-        "graph.delete_edge", "delete_edge", optional=()),
+        "graph.update_edge",
+        "update_edge",
+        optional=(
+            "name",
+            "fact",
+            "source_uuid",
+            "target_uuid",
+            "valid_at",
+            "invalid_at",
+            "clear_invalid",
+            "clear_valid",
+            "clear_expired",
+        ),
+    ),
+    "graph.delete_edge": _graph_curation_handler("graph.delete_edge", "delete_edge", optional=()),
     # rescope (2026-09-01): the episode is the unit of scope — see
     # neo4j_writer.rescope_episode for why a node cannot follow one episode.
     "graph.rescope_episode": _graph_curation_handler(
-        "graph.rescope_episode", "rescope_episode", optional=()),
+        "graph.rescope_episode", "rescope_episode", optional=()
+    ),
 }
 
 
@@ -1067,7 +1200,11 @@ async def _loe_record_checkin(args: dict, approver: str, proposer: str | None) -
         )
     confidence = args.get("confidence")
     # bool is an int in Python; a True confidence is a mistake, not a 1.
-    if isinstance(confidence, bool) or not isinstance(confidence, int) or not 0 <= confidence <= 100:
+    if (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, int)
+        or not 0 <= confidence <= 100
+    ):
         raise ExecutorError(
             f"loe.record_checkin: confidence must be an int 0-100, got {confidence!r}"
         )
@@ -1076,8 +1213,12 @@ async def _loe_record_checkin(args: dict, approver: str, proposer: str | None) -
         raise ExecutorError("loe.record_checkin: a summary is required (it IS the record)")
     try:
         row = await repo.record_loe_checkin(
-            loe_id, light, confidence, summary,
-            proposal_id=_current_proposal_id.get(), action_key=action_key(),
+            loe_id,
+            light,
+            confidence,
+            summary,
+            proposal_id=_current_proposal_id.get(),
+            action_key=action_key(),
         )
     except ValueError as e:
         raise ExecutorError(f"loe.record_checkin: {e}") from e
@@ -1122,13 +1263,11 @@ async def _work_bulk_dismiss(args: dict, approver: str, proposer: str | None) ->
     rows = await repo.work_items_folded_into(proposal_id)
     actual = sum(1 for r in rows if r["state"] == "FOLD_PENDING")
     drift = (
-        "" if actual == pinned
+        ""
+        if actual == pinned
         else f" ({pinned} were pinned at propose time; the rest moved on since)"
     )
-    return (
-        f"bulk dismissal approved — {actual} items fold on this decision "
-        f"for {query!r}{drift}"
-    )
+    return f"bulk dismissal approved — {actual} items fold on this decision for {query!r}{drift}"
 
 
 async def _mail_create_rule(args: dict, approver: str, proposer: str | None) -> str:
@@ -1151,9 +1290,9 @@ async def _mail_create_rule(args: dict, approver: str, proposer: str | None) -> 
     if not reason:
         raise RuntimeError("mail.create_rule: reason must not be empty")
     proposal_id = _current_proposal_id.get()
-    created_by = (
-        f"proposal:{proposal_id}" if proposal_id else "executor"
-    ) + (f" ({proposer})" if proposer else "")
+    created_by = (f"proposal:{proposal_id}" if proposal_id else "executor") + (
+        f" ({proposer})" if proposer else ""
+    )
     rule = await repo.create_mail_rule(criteria, exceptions, description, reason, created_by)
     swept = 0
     if bool(args.get("apply_to_queued", True)):
@@ -1161,9 +1300,15 @@ async def _mail_create_rule(args: dict, approver: str, proposer: str | None) -> 
     # After the write: the rule's creation is authorised by the approval
     # already on the log; this records what the sweep did.
     await events.emit(
-        "mail.rule_created", ref_id=rule["id"],
-        payload={"description": description, "reason": reason, "swept": swept,
-                 "proposal_id": proposal_id, "proposer": proposer},
+        "mail.rule_created",
+        ref_id=rule["id"],
+        payload={
+            "description": description,
+            "reason": reason,
+            "swept": swept,
+            "proposal_id": proposal_id,
+            "proposer": proposer,
+        },
         actor=approver,
     )
     tail = (
@@ -1187,28 +1332,25 @@ async def _catalog_tag(args: dict, approver: str, proposer: str | None) -> str:
 
     document_id = args["document_id"]
     tags = args["tags"]
-    if not isinstance(tags, list) or not all(
-        isinstance(t, str) and t.strip() for t in tags
-    ):
+    if not isinstance(tags, list) or not all(isinstance(t, str) and t.strip() for t in tags):
         raise ExecutorError("tags must be a list of non-empty strings")
     mode = args.get("mode") or "replace"
 
-    applied = await repo.set_document_tags(
-        document_id, [t.strip() for t in tags], mode
-    )
+    applied = await repo.set_document_tags(document_id, [t.strip() for t in tags], mode)
     if applied is None:
         raise ExecutorError(f"unknown catalog document: {document_id}")
 
     await events.emit(
-        "catalog.document.tagged", ref_id=document_id,
-        payload={"tags": applied, "mode": mode,
-                 "proposer": f"agent:{proposer}" if proposer else None},
+        "catalog.document.tagged",
+        ref_id=document_id,
+        payload={
+            "tags": applied,
+            "mode": mode,
+            "proposer": f"agent:{proposer}" if proposer else None,
+        },
         actor=approver,
     )
-    return (
-        f"catalog document {document_id} tags ({mode}): "
-        f"{', '.join(applied) or '(none)'}"
-    )
+    return f"catalog document {document_id} tags ({mode}): {', '.join(applied) or '(none)'}"
 
 
 async def _loe_create(args: dict, approver: str, proposer: str | None) -> str:
@@ -1231,8 +1373,11 @@ async def _loe_create(args: dict, approver: str, proposer: str | None) -> str:
         raise ExecutorError("loe.create: a name is required")
     if not agent_id:
         raise ExecutorError("loe.create: agent_id (the owning agent) is required")
-    if (not isinstance(semantic, dict) or not semantic.get("questions")
-            or not str(semantic.get("thresholds") or "").strip()):
+    if (
+        not isinstance(semantic, dict)
+        or not semantic.get("questions")
+        or not str(semantic.get("thresholds") or "").strip()
+    ):
         raise ExecutorError(
             "loe.create: semantic must carry the check-in questions and the "
             "thresholds a light is judged against "
@@ -1242,7 +1387,11 @@ async def _loe_create(args: dict, approver: str, proposer: str | None) -> str:
         raise ExecutorError(f"loe.create: line of effort {loe_id!r} already exists")
     try:
         row = await repo.create_loe(
-            loe_id, name, args.get("cadence") or "weekly", agent_id, semantic,
+            loe_id,
+            name,
+            args.get("cadence") or "weekly",
+            agent_id,
+            semantic,
             args.get("presentation") or {},
         )
     except Exception as e:  # a racing duplicate, or a bad column — never a traceback
@@ -1250,9 +1399,12 @@ async def _loe_create(args: dict, approver: str, proposer: str | None) -> str:
     await events.emit(
         "loe.created",
         ref_id=loe_id,
-        payload={"name": row["name"], "cadence": row["cadence"],
-                 "agent_id": row["agent_id"],
-                 "proposed_by": f"agent:{proposer}" if proposer else None},
+        payload={
+            "name": row["name"],
+            "cadence": row["cadence"],
+            "agent_id": row["agent_id"],
+            "proposed_by": f"agent:{proposer}" if proposer else None,
+        },
         actor=approver,
     )
     return f"{loe_id} created: {name} ({row['cadence']}, owned by {agent_id})"
@@ -1275,12 +1427,14 @@ async def _loe_update(args: dict, approver: str, proposer: str | None) -> str:
             raise ExecutorError(f"loe.update: no ACTIVE line of effort {loe_id!r}")
         return f"{loe_id} retired: {reason}"
 
-    fields = {k: args[k] for k in ("name", "cadence", "semantic", "presentation")
-              if args.get(k) is not None}
+    fields = {
+        k: args[k]
+        for k in ("name", "cadence", "semantic", "presentation")
+        if args.get(k) is not None
+    }
     if not fields:
         raise ExecutorError(
-            "loe.update: nothing to change (name/cadence/semantic/presentation, "
-            "or retire + reason)"
+            "loe.update: nothing to change (name/cadence/semantic/presentation, or retire + reason)"
         )
     try:
         row = await repo.update_loe(loe_id, **fields)
@@ -1288,10 +1442,7 @@ async def _loe_update(args: dict, approver: str, proposer: str | None) -> str:
         raise ExecutorError(f"loe.update: {e}") from e
     if row is None:
         raise ExecutorError(f"loe.update: no such line of effort {loe_id!r}")
-    return (
-        f"{loe_id} updated ({', '.join(sorted(fields))}); "
-        f"semantic v{row['semantic_version']}"
-    )
+    return f"{loe_id} updated ({', '.join(sorted(fields))}); semantic v{row['semantic_version']}"
 
 
 async def _charter_update(args: dict, approver: str, proposer: str | None) -> str:
@@ -1309,9 +1460,10 @@ async def _charter_update(args: dict, approver: str, proposer: str | None) -> st
     from central_command.db import repo
 
     target = args["agent_id"]
-    drafter = proposer or target        # a self-proposed edit reads as it always did
+    drafter = proposer or target  # a self-proposed edit reads as it always did
     pedigree = (
-        f"agent:{drafter} (approved {approver})" if drafter == target
+        f"agent:{drafter} (approved {approver})"
+        if drafter == target
         else f"agent:{drafter} for {target} (approved {approver})"
     )
     # The world re-check (R24): the version the drafter was shown, stamped at
@@ -1326,7 +1478,10 @@ async def _charter_update(args: dict, approver: str, proposer: str | None) -> st
         shown_session = ((await repo.load_proposal(proposal_id)) or {}).get("session_id")
     try:
         row = await repo.save_charter_version(
-            target, args["content"], args.get("rationale"), created_by=pedigree,
+            target,
+            args["content"],
+            args.get("rationale"),
+            created_by=pedigree,
             proposal_id=proposal_id,
             expected_version=int(base) if base is not None else None,
             shown_session_id=shown_session,
@@ -1336,8 +1491,12 @@ async def _charter_update(args: dict, approver: str, proposer: str | None) -> st
     await events.emit(
         "charter.updated",
         ref_id=target,
-        payload={"version": row["version"], "rationale": args.get("rationale"),
-                 "proposed_by": f"agent:{drafter}", "target": target},
+        payload={
+            "version": row["version"],
+            "rationale": args.get("rationale"),
+            "proposed_by": f"agent:{drafter}",
+            "target": target,
+        },
         actor=approver,
     )
     return f"charter for {target} updated to v{row['version']}"
@@ -1350,7 +1509,9 @@ def _charter_moved(target: str, expected: int, actual: int) -> WorldMoved:
     return WorldMoved(
         f"charter.update: {target}'s charter moved from v{expected} (the version "
         f"this edit was drafted against) to v{actual} — nothing was written",
-        target=f"charter:{target}", expected=expected, actual=actual,
+        target=f"charter:{target}",
+        expected=expected,
+        actual=actual,
         what_moved=f"{target}'s charter moved v{expected} -> v{actual}",
     )
 
@@ -1390,15 +1551,21 @@ def _captured_at(value) -> datetime:
     return datetime.now(UTC)
 
 
-async def _skill_doc_added(skill_id: str, doc: dict, describes, approver: str,
-                           source_url: str | None = None) -> None:
+async def _skill_doc_added(
+    skill_id: str, doc: dict, describes, approver: str, source_url: str | None = None
+) -> None:
     from central_command import events
 
     await events.emit(
-        "skill.doc_added", ref_id=skill_id,
-        payload={"doc_key": doc["doc_key"], "kind": doc["kind"],
-                 "version": doc["version"], "describes": describes,
-                 "source_url": source_url},
+        "skill.doc_added",
+        ref_id=skill_id,
+        payload={
+            "doc_key": doc["doc_key"],
+            "kind": doc["kind"],
+            "version": doc["version"],
+            "describes": describes,
+            "source_url": source_url,
+        },
         actor=approver,
     )
 
@@ -1435,13 +1602,21 @@ async def _skill_create(args: dict, approver: str, proposer: str | None) -> str:
     summary = args.get("summary") or ""
     await repo.create_skill(skill_id, title, summary)
     await events.emit(
-        "skill.created", ref_id=skill_id,
-        payload={"title": title, "summary": summary,
-                 "proposed_by": f"agent:{proposer}" if proposer else None},
+        "skill.created",
+        ref_id=skill_id,
+        payload={
+            "title": title,
+            "summary": summary,
+            "proposed_by": f"agent:{proposer}" if proposer else None,
+        },
         actor=approver,
     )
     doc = await repo.add_skill_doc(
-        skill_id, "guidance", "guidance", title, guidance,
+        skill_id,
+        "guidance",
+        "guidance",
+        title,
+        guidance,
         describes=args.get("describes"),
         captured_at=datetime.now(UTC),
         added_by=f"agent:{proposer}" if proposer else approver,
@@ -1457,7 +1632,9 @@ def _skill_doc_moved(skill_id: str, doc_key: str, expected: int, actual: int) ->
     return WorldMoved(
         f"skill.doc_add: {skill_id}/{doc_key} moved from v{expected} (the version "
         f"this correction was applied to) to v{actual} — nothing was written",
-        target=f"skill_doc:{skill_id}/{doc_key}", expected=expected, actual=actual,
+        target=f"skill_doc:{skill_id}/{doc_key}",
+        expected=expected,
+        actual=actual,
         what_moved=f"{skill_id}/{doc_key} moved v{expected} -> v{actual}",
     )
 
@@ -1504,8 +1681,7 @@ async def _skill_doc_add(args: dict, approver: str, proposer: str | None) -> str
         raise ExecutorError(f"skill.doc_add: unknown skill {skill_id!r}")
     if skill.get("status") == "RETIRED":
         raise ExecutorError(
-            f"skill.doc_add: skill {skill_id!r} is RETIRED — reactivate it "
-            "before adding documents"
+            f"skill.doc_add: skill {skill_id!r} is RETIRED — reactivate it before adding documents"
         )
     doc_key = (args.get("doc_key") or "").strip()
     if not doc_key:
@@ -1518,8 +1694,13 @@ async def _skill_doc_add(args: dict, approver: str, proposer: str | None) -> str
     base = args.get("base_version")
     try:
         doc = await repo.add_skill_doc(
-            skill_id, doc_key, kind, args.get("title") or doc_key, args.get("content") or "",
-            source_url=args.get("source_url"), describes=args.get("describes"),
+            skill_id,
+            doc_key,
+            kind,
+            args.get("title") or doc_key,
+            args.get("content") or "",
+            source_url=args.get("source_url"),
+            describes=args.get("describes"),
             # `captured_at` is when the CONTENT was taken, which for a URL-sourced
             # document is propose time (the tool fetched it then and embedded the
             # text) — not now. Falling back to now covers agent-authored text.
@@ -1530,7 +1711,11 @@ async def _skill_doc_add(args: dict, approver: str, proposer: str | None) -> str
     except repo.StaleSkillDoc as e:
         raise _skill_doc_moved(skill_id, doc_key, e.expected, e.actual) from e
     await _skill_doc_added(
-        skill_id, doc, args.get("describes"), approver, args.get("source_url"),
+        skill_id,
+        doc,
+        args.get("describes"),
+        approver,
+        args.get("source_url"),
     )
     return f"skill {skill_id} document '{doc_key}' added as v{doc['version']}"
 
@@ -1550,7 +1735,8 @@ async def _memory_note_add(args: dict, approver: str, proposer: str | None) -> s
     if not proposer:
         raise ExecutorError(
             "memory.note_add: the proposal names no drafting agent - a note "
-            "belongs to the agent that proposed it")
+            "belongs to the agent that proposed it"
+        )
     scope = args["scope"]
     # The provenance `propose_note` stamps after checking the quote; the park
     # seam strips it from any model-authored draft (`proposals.
@@ -1559,13 +1745,20 @@ async def _memory_note_add(args: dict, approver: str, proposer: str | None) -> s
     if not (args.get("source_quote") and args.get("source_session_id")):
         raise ExecutorError(
             "memory.note_add: this note was not drafted through propose_note, "
-            "so its quote was never checked - nothing was written")
+            "so its quote was never checked - nothing was written"
+        )
     settings_now = await context.load_settings()
-    budget = int(settings_now["note_budget_operator_chars"] if scope == "operator"
-                 else settings_now["note_budget_private_chars"])
+    budget = int(
+        settings_now["note_budget_operator_chars"]
+        if scope == "operator"
+        else settings_now["note_budget_private_chars"]
+    )
     try:
         note = await repo.add_agent_note(
-            agent_id=proposer, scope=scope, text=args["text"], budget=budget,
+            agent_id=proposer,
+            scope=scope,
+            text=args["text"],
+            budget=budget,
             retire_ids=list(args.get("retire_ids") or []),
             proposal_id=_current_proposal_id.get(),
             source_session_id=args.get("source_session_id"),
@@ -1578,20 +1771,29 @@ async def _memory_note_add(args: dict, approver: str, proposer: str | None) -> s
     # execution may have died before them, and they say so.
     for retired in note["retired"]:
         await events.emit(
-            "note.retired", ref_id=retired,
-            payload={"agent_id": proposer, "by": note["proposal_id"],
-                     "replaced_by": note["id"],
-                     **({"replayed": True} if note.get("replayed") else {})},
+            "note.retired",
+            ref_id=retired,
+            payload={
+                "agent_id": proposer,
+                "by": note["proposal_id"],
+                "replaced_by": note["id"],
+                **({"replayed": True} if note.get("replayed") else {}),
+            },
             actor=approver,
         )
     await events.emit(
-        "note.added", ref_id=note["id"],
-        payload={"agent_id": proposer, "scope": scope,
-                 "proposal_id": note["proposal_id"], "retired": note["retired"],
-                 **({"replayed": True} if note.get("replayed") else {})},
+        "note.added",
+        ref_id=note["id"],
+        payload={
+            "agent_id": proposer,
+            "scope": scope,
+            "proposal_id": note["proposal_id"],
+            "retired": note["retired"],
+            **({"replayed": True} if note.get("replayed") else {}),
+        },
         actor=approver,
     )
-    swapped = (f", retiring {', '.join(note['retired'])}" if note["retired"] else "")
+    swapped = f", retiring {', '.join(note['retired'])}" if note["retired"] else ""
     return f"{scope} note {note['id']} added for {proposer}{swapped}"
 
 
@@ -1600,29 +1802,37 @@ async def _memory_note_retire(args: dict, approver: str, proposer: str | None) -
     from central_command.db import repo
 
     if not proposer:
-        raise ExecutorError(
-            "memory.note_retire: the proposal names no drafting agent")
+        raise ExecutorError("memory.note_retire: the proposal names no drafting agent")
     note_id = str(args["note_id"]).strip()
     # Retiring an OPERATOR-scope note needs the operator's own words, checked
     # by `propose_note_retire` and stamped; the park seam strips a stamp the
     # model wrote itself, so an unstamped one was never checked (DL-217).
     target = await repo.get_agent_note(note_id)
-    if target is not None and target["scope"] == "operator" and not (
-            args.get("source_quote") and args.get("source_session_id")):
+    if (
+        target is not None
+        and target["scope"] == "operator"
+        and not (args.get("source_quote") and args.get("source_session_id"))
+    ):
         raise ExecutorError(
             "memory.note_retire: this operator-scope retirement was not drafted "
             "through propose_note_retire with the operator's own words, so it was "
-            "never checked - nothing was retired")
+            "never checked - nothing was retired"
+        )
     try:
         row = await repo.retire_agent_note(
-            note_id=note_id, proposer=proposer, proposal_id=_current_proposal_id.get())
+            note_id=note_id, proposer=proposer, proposal_id=_current_proposal_id.get()
+        )
     except repo.NoteRefused as e:
         raise ExecutorError(f"memory.note_retire: {e}") from e
     await events.emit(
-        "note.retired", ref_id=note_id,
-        payload={"agent_id": proposer, "by": row.get("retired_by"),
-                 "reason": args.get("reason"),
-                 **({"replayed": True} if row.get("replayed") else {})},
+        "note.retired",
+        ref_id=note_id,
+        payload={
+            "agent_id": proposer,
+            "by": row.get("retired_by"),
+            "reason": args.get("reason"),
+            **({"replayed": True} if row.get("replayed") else {}),
+        },
         actor=approver,
     )
     return f"{row['scope']} note {note_id} retired"
@@ -1630,21 +1840,28 @@ async def _memory_note_retire(args: dict, approver: str, proposer: str | None) -
 
 async def _jira_link_issues(args: dict, approver: str, proposer: str | None) -> str:
     out = await jira.link_issues(args["from_key"], args["to_key"], args["link_type"])
-    checked = ("direction verified" if out["link"]["direction_verified"]
-               else "created; direction NOT read back")
+    checked = (
+        "direction verified"
+        if out["link"]["direction_verified"]
+        else "created; direction NOT read back"
+    )
     return f"{args['from_key']} {args['link_type']} {args['to_key']} (link {checked})"
 
 
 async def _jira_delete_link(args: dict, approver: str, proposer: str | None) -> str:
     out = await jira.delete_link(args["from_key"], args["to_key"], args["link_type"])
-    return (f"link removed: {args['from_key']} {args['link_type']} {args['to_key']}"
-            + (f" ({out['link']['removed']} matching)" if out["link"]["removed"] > 1 else ""))
+    return f"link removed: {args['from_key']} {args['link_type']} {args['to_key']}" + (
+        f" ({out['link']['removed']} matching)" if out["link"]["removed"] > 1 else ""
+    )
 
 
 async def _jira_assign_issue(args: dict, approver: str, proposer: str | None) -> str:
     await jira.assign_issue(args["issue_key"], args["assignee"])
-    return (f"{args['issue_key']} assigned to {args['assignee']}" if args["assignee"]
-            else f"{args['issue_key']} unassigned")
+    return (
+        f"{args['issue_key']} assigned to {args['assignee']}"
+        if args["assignee"]
+        else f"{args['issue_key']} unassigned"
+    )
 
 
 async def _jira_delete_issue(args: dict, approver: str, proposer: str | None) -> str:
@@ -1657,8 +1874,9 @@ async def _jira_delete_issue(args: dict, approver: str, proposer: str | None) ->
     if not reason:
         raise ExecutorError("jira.delete_issue: a reason is required")
     snap = (await jira.delete_issue(args["issue_key"]))["issue"]
-    facts = "; ".join(f"{k}={v!r}" for k, v in snap.items()
-                      if k != "issue_key" and v not in (None, [], ""))
+    facts = "; ".join(
+        f"{k}={v!r}" for k, v in snap.items() if k != "issue_key" and v not in (None, [], "")
+    )
     return f"{snap['issue_key']} DELETED — reason: {reason} — was: {facts}"
 
 
@@ -1724,19 +1942,26 @@ _JIRA_KEY_ARGS = ("issue_key", "from_key", "to_key", "parent")
 def _jira_keys_of(action_like) -> set[str]:
     """The Jira issues an action names (upper-cased, as `_key` writes them).
     `action_like` is an `Action` or a stored action dict."""
-    cap = (action_like.capability if hasattr(action_like, "capability")
-           else action_like.get("capability")) or ""
-    args = (action_like.arguments if hasattr(action_like, "arguments")
-            else action_like.get("arguments")) or {}
+    cap = (
+        action_like.capability
+        if hasattr(action_like, "capability")
+        else action_like.get("capability")
+    ) or ""
+    args = (
+        action_like.arguments if hasattr(action_like, "arguments") else action_like.get("arguments")
+    ) or {}
     if not cap.startswith("jira."):
         return set()
-    return {v.strip().upper() for k in _JIRA_KEY_ARGS
-            if isinstance(v := args.get(k), str) and v.strip()}
+    return {
+        v.strip().upper() for k in _JIRA_KEY_ARGS if isinstance(v := args.get(k), str) and v.strip()
+    }
 
 
 async def _confluence_create_page(args: dict, approver: str, proposer: str | None) -> str:
     out = await confluence.create_page(
-        args["space_id_or_key"], args["title"], args["body_storage"],
+        args["space_id_or_key"],
+        args["title"],
+        args["body_storage"],
         parent_id=args.get("parent_id"),
     )
     p = out["page"]
@@ -1745,7 +1970,10 @@ async def _confluence_create_page(args: dict, approver: str, proposer: str | Non
 
 async def _confluence_update_page(args: dict, approver: str, proposer: str | None) -> str:
     out = await confluence.update_page(
-        args["page_id"], args["title"], args["body_storage"], args["expected_version"],
+        args["page_id"],
+        args["title"],
+        args["body_storage"],
+        args["expected_version"],
     )
     p = out["page"]
     return f"page {p['id']} '{p['title']}' updated to version {p['version']}"
@@ -1826,8 +2054,9 @@ def _agent_costs(*dicts: dict | None) -> dict:
     return out
 
 
-async def _catalog_prices(credential_name: str | None, provider_model: str,
-                          proposed: dict) -> tuple[dict, str]:
+async def _catalog_prices(
+    credential_name: str | None, provider_model: str, proposed: dict
+) -> tuple[dict, str]:
     """The per-token prices a deployment gets, and one line saying where they
     came from. A PRICE IS CATALOG DATA, NEVER AN AGENT'S CLAIM (2026-09-13:
     nine gateway models registered with the card's per-million price as the
@@ -1840,22 +2069,41 @@ async def _catalog_prices(credential_name: str | None, provider_model: str,
     ledger until the next discovery pass, a mispriced one costs $80k."""
     dropped = f" — dropped the proposal's {sorted(proposed)}" if proposed else ""
     if not credential_name:
-        return {}, "no stored credential, so no catalog to price from; LiteLLM's cost map decides" + dropped
+        return (
+            {},
+            "no stored credential, so no catalog to price from; LiteLLM's cost map decides"
+            + dropped,
+        )
     try:
         entry = await litellm_client.catalog_entry_for(credential_name, provider_model)
     except Exception as e:  # noqa: BLE001 — the add still happens; the price gap is reported
-        return {}, f"catalog for {credential_name!r} unreadable ({type(e).__name__}: {str(e)[:120]}); unpriced" + dropped
+        return (
+            {},
+            f"catalog for {credential_name!r} unreadable ({type(e).__name__}: {str(e)[:120]}); unpriced"
+            + dropped,
+        )
     prices = litellm_client.pricing_from_catalog(entry)
     if entry is None:
-        return {}, f"{provider_model!r} is not in the {credential_name!r} catalog; unpriced" + dropped
+        return (
+            {},
+            f"{provider_model!r} is not in the {credential_name!r} catalog; unpriced" + dropped,
+        )
     if not prices:
-        return {}, f"the {credential_name!r} catalog carries no pricing; LiteLLM's cost map decides" + dropped
-    same = proposed and all(
-        _close(proposed.get(k), v) for k, v in prices.items()) and set(proposed) <= set(prices)
-    return prices, (f"priced from the {credential_name!r} catalog: "
-                    + ", ".join(f"{k}={v:g}" for k, v in prices.items())
-                    + ("" if same or not proposed else
-                       f" (replacing the proposal's {proposed})"))
+        return (
+            {},
+            f"the {credential_name!r} catalog carries no pricing; LiteLLM's cost map decides"
+            + dropped,
+        )
+    same = (
+        proposed
+        and all(_close(proposed.get(k), v) for k, v in prices.items())
+        and set(proposed) <= set(prices)
+    )
+    return prices, (
+        f"priced from the {credential_name!r} catalog: "
+        + ", ".join(f"{k}={v:g}" for k, v in prices.items())
+        + ("" if same or not proposed else f" (replacing the proposal's {proposed})")
+    )
 
 
 def _close(a, b) -> bool:
@@ -1888,8 +2136,11 @@ async def _litellm_add_model(args: dict, approver: str, proposer: str | None) ->
     prices, pricing_note = await _catalog_prices(credential, args["model"], proposed_costs)
     model_info.update(prices)
     out = await litellm_client.add_model(
-        args["model_name"], args["model"], api_key=api_key,
-        model_info=model_info, extra=extra,
+        args["model_name"],
+        args["model"],
+        api_key=api_key,
+        model_info=model_info,
+        extra=extra,
     )
     m = out.get("model") or {}
     # Test-on-add (the autodiscovery contract, FULL PROBE since v2.4.0 by
@@ -1907,20 +2158,32 @@ async def _litellm_add_model(args: dict, approver: str, proposer: str | None) ->
         # declared mode — reported as such, never as unhealthy.
         if probe.get("ok"):
             diff = probe.get("suggested_model_info") or {}
-            health = ("probed OK — suggested model_info diff: "
-                      f"{json.dumps(diff, default=str)[:400]}" if diff
-                      else "probed OK — declarations match what was measured")
+            health = (
+                f"probed OK — suggested model_info diff: {json.dumps(diff, default=str)[:400]}"
+                if diff
+                else "probed OK — declarations match what was measured"
+            )
         elif probe.get("ok") is None:
-            health = ("not probed: "
-                      + ("; ".join(probe.get("notes") or []) or "no battery for this mode")[:300])
+            health = (
+                "not probed: "
+                + ("; ".join(probe.get("notes") or []) or "no battery for this mode")[:300]
+            )
         else:
-            bad = next((v for v in (probe.get("observed") or {}).values()
-                        if isinstance(v, dict) and v.get("ok") is False), {})
+            bad = next(
+                (
+                    v
+                    for v in (probe.get("observed") or {}).values()
+                    if isinstance(v, dict) and v.get("ok") is False
+                ),
+                {},
+            )
             health = f"UNHEALTHY: {str(bad.get('detail'))[:200]}"
     except Exception as e:  # noqa: BLE001
         health = f"probe errored: {type(e).__name__}: {str(e)[:200]}"
-    return (f"litellm model '{m.get('model_name')}' → {m.get('provider_model')} "
-            f"added (id {m.get('model_id')}) — {pricing_note} — tested on add: {health}")
+    return (
+        f"litellm model '{m.get('model_name')}' → {m.get('provider_model')} "
+        f"added (id {m.get('model_id')}) — {pricing_note} — tested on add: {health}"
+    )
 
 
 async def _litellm_update_model(args: dict, approver: str, proposer: str | None) -> str:
@@ -1931,8 +2194,12 @@ async def _litellm_update_model(args: dict, approver: str, proposer: str | None)
     (charter-correct), the Executor injects the credential — same defense as
     add_model, so an update can never leave an anthropic model unauthenticated."""
     params = args.get("litellm_params")
-    if isinstance(params, dict) and isinstance(params.get("model"), str) \
-            and not params.get("api_key") and not _uses_named_credential(params):
+    if (
+        isinstance(params, dict)
+        and isinstance(params.get("model"), str)
+        and not params.get("api_key")
+        and not _uses_named_credential(params)
+    ):
         key = _provider_key(params["model"])
         if key:
             params = {**params, "api_key": key}
@@ -1950,18 +2217,28 @@ async def _litellm_update_model(args: dict, approver: str, proposer: str | None)
         # as an add is; the deployment's credential and provider model are
         # read from the proxy, never from the proposal. An edit that leaves
         # prices alone makes no catalog call.
-        d = next((x for x in (await litellm_client.list_models())["models"]
-                  if x.get("model_id") == args["model_id"]), {})
+        d = next(
+            (
+                x
+                for x in (await litellm_client.list_models())["models"]
+                if x.get("model_id") == args["model_id"]
+            ),
+            {},
+        )
         prices, pricing_note = await _catalog_prices(
-            d.get("credential_name"), str(d.get("provider_model") or ""), proposed_costs)
+            d.get("credential_name"), str(d.get("provider_model") or ""), proposed_costs
+        )
         model_info.update(prices)
     out = await litellm_client.update_model(
-        args["model_id"], model_info=model_info,
-        litellm_params=params, model_name=args.get("model_name"),
+        args["model_id"],
+        model_info=model_info,
+        litellm_params=params,
+        model_name=args.get("model_name"),
     )
     m = out.get("model") or {}
-    return (f"litellm model {m.get('model_id')} updated ({', '.join(m.get('updated') or [])})"
-            + (f" — {pricing_note}" if pricing_note else ""))
+    return f"litellm model {m.get('model_id')} updated ({', '.join(m.get('updated') or [])})" + (
+        f" — {pricing_note}" if pricing_note else ""
+    )
 
 
 async def _litellm_delete_model(args: dict, approver: str, proposer: str | None) -> str:
@@ -1989,17 +2266,23 @@ async def _autodiscovery_skip(args: dict, approver: str, proposer: str | None) -
     vendors = {str(v).strip() for v in (args.get("vendors") or []) if str(v).strip()}
     if vendors:
         snapshot = (await repo.get_app_setting(SNAPSHOT_SETTING, {})).get(name) or {}
-        expanded = {cid for cid, e in snapshot.items()
-                    if vendor_of(cid) in vendors and e.get("disposition") != "registered"}
+        expanded = {
+            cid
+            for cid, e in snapshot.items()
+            if vendor_of(cid) in vendors and e.get("disposition") != "registered"
+        }
         unknown = vendors - {vendor_of(cid) for cid in snapshot}
         if unknown:
             raise ExecutorError(
                 f"refusing autodiscovery.skip: no catalog id under credential {name!r} "
-                f"has vendor {', '.join(sorted(unknown))}")
+                f"has vendor {', '.join(sorted(unknown))}"
+            )
         ids |= expanded
     ids = sorted(ids)
     if not ids:
-        raise ExecutorError("refusing autodiscovery.skip: nothing to skip (model_ids and vendors empty)")
+        raise ExecutorError(
+            "refusing autodiscovery.skip: nothing to skip (model_ids and vendors empty)"
+        )
     decisions = dict(await repo.get_app_setting("autodiscovery_decisions", {"skip": []}))
     by_cred = dict(decisions.get("skip_by_credential") or {})
     merged = sorted(set(by_cred.get(name) or []) | set(ids))
@@ -2007,8 +2290,10 @@ async def _autodiscovery_skip(args: dict, approver: str, proposer: str | None) -
     decisions["skip_by_credential"] = by_cred
     await repo.set_app_setting("autodiscovery_decisions", decisions)
     via = f" ({len(vendors)} vendor group(s) expanded)" if vendors else ""
-    return (f"autodiscovery: {len(ids)} catalog id(s) under credential {name!r}{via} "
-            f"will never be offered again ({len(merged)} skipped for it in total)")
+    return (
+        f"autodiscovery: {len(ids)} catalog id(s) under credential {name!r}{via} "
+        f"will never be offered again ({len(merged)} skipped for it in total)"
+    )
 
 
 async def _litellm_create_key(args: dict, approver: str, proposer: str | None) -> str:
@@ -2017,27 +2302,34 @@ async def _litellm_create_key(args: dict, approver: str, proposer: str | None) -
     resumed agent, or the append-only log. (Per-agent key USE, which needs the
     plaintext captured at creation, is Phase 5.)"""
     out = await litellm_client.create_key(
-        args["key_alias"], models=args.get("models"),
-        metadata=args.get("metadata"), tags=args.get("tags"),
+        args["key_alias"],
+        models=args.get("models"),
+        metadata=args.get("metadata"),
+        tags=args.get("tags"),
         duration=args.get("duration"),
     )
     k = out.get("key") or {}
     scope = f" scoped to {k.get('models')}" if k.get("models") else " (all models)"
-    return (f"litellm virtual key '{k.get('key_alias')}' created{scope} "
-            f"(id {k.get('token_id')}, preview {k.get('key_preview')})")
+    return (
+        f"litellm virtual key '{k.get('key_alias')}' created{scope} "
+        f"(id {k.get('token_id')}, preview {k.get('key_preview')})"
+    )
 
 
 async def _litellm_delete_key(args: dict, approver: str, proposer: str | None) -> str:
-    out = await litellm_client.delete_key(
-        key_alias=args.get("key_alias"), key=args.get("key"))
+    out = await litellm_client.delete_key(key_alias=args.get("key_alias"), key=args.get("key"))
     return f"litellm virtual key '{out.get('deleted')}' deleted"
 
 
 async def _litellm_update_key(args: dict, approver: str, proposer: str | None) -> str:
     out = await litellm_client.update_key(
-        args["key"], models=args.get("models"), metadata=args.get("metadata"),
-        tags=args.get("tags"), key_alias=args.get("key_alias"),
-        duration=args.get("duration"))
+        args["key"],
+        models=args.get("models"),
+        metadata=args.get("metadata"),
+        tags=args.get("tags"),
+        key_alias=args.get("key_alias"),
+        duration=args.get("duration"),
+    )
     return f"litellm virtual key updated ({', '.join(out.get('updated') or [])})"
 
 
@@ -2054,15 +2346,18 @@ async def _litellm_delete_team(args: dict, approver: str, proposer: str | None) 
 
 async def _litellm_set_fallbacks(args: dict, approver: str, proposer: str | None) -> str:
     out = await litellm_client.set_fallbacks(
-        args["model"], args["fallback_models"],
-        fallback_type=args.get("fallback_type", "general"))
-    return (f"litellm {out['fallback_type']} fallbacks for '{out['model']}' set → "
-            f"{out['fallback_models']}")
+        args["model"], args["fallback_models"], fallback_type=args.get("fallback_type", "general")
+    )
+    return (
+        f"litellm {out['fallback_type']} fallbacks for '{out['model']}' set → "
+        f"{out['fallback_models']}"
+    )
 
 
 async def _litellm_delete_fallbacks(args: dict, approver: str, proposer: str | None) -> str:
     out = await litellm_client.delete_fallbacks(
-        args["model"], fallback_type=args.get("fallback_type", "general"))
+        args["model"], fallback_type=args.get("fallback_type", "general")
+    )
     return f"litellm {out['fallback_type']} fallbacks for '{out['model']}' removed"
 
 
@@ -2088,7 +2383,8 @@ _current_proposal_id: contextvars.ContextVar[str | None] = contextvars.ContextVa
 # transition on an issue the proposal itself edited is never read as the world
 # moving (Jira's `updated` moves on any edit). Same lifetime as the id above.
 _touched_issues: contextvars.ContextVar[set[str]] = contextvars.ContextVar(
-    "_touched_issues", default=frozenset()  # type: ignore[arg-type]
+    "_touched_issues",
+    default=frozenset(),  # type: ignore[arg-type]
 )
 # The ABSOLUTE index (`action_offset + n`) of the action `execute()` is running,
 # set around each handler call and reset in the same finally discipline as the
@@ -2149,8 +2445,11 @@ def _mcp_bad_path(path: str) -> bool:
 
 async def _git(*args: str, cwd: Path) -> tuple[int, str, str]:
     proc = await asyncio.create_subprocess_exec(
-        "git", *args, cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        "git",
+        *args,
+        cwd=str(cwd),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
     out, err = await proc.communicate()
     return proc.returncode, out.decode(errors="replace"), err.decode(errors="replace")
@@ -2245,8 +2544,12 @@ _MCP_DEPLOY_RESOURCES = {
 
 
 async def _run(
-    cmd: list[str] | None = None, *, shell_cmd: str | None = None,
-    stdin: str | None = None, cwd: Path | None = None, timeout: float = 600.0,
+    cmd: list[str] | None = None,
+    *,
+    shell_cmd: str | None = None,
+    stdin: str | None = None,
+    cwd: Path | None = None,
+    timeout: float = 600.0,
 ) -> tuple[int, str, str]:
     """The ONE subprocess seam for slice 3 — build/deploy tests monkeypatch
     THIS, never asyncio's primitives directly, so a fake never drifts from a
@@ -2256,15 +2559,21 @@ async def _run(
     shell at all)."""
     if shell_cmd is not None:
         proc = await asyncio.create_subprocess_exec(
-            "bash", "-c", shell_cmd, cwd=str(cwd) if cwd else None,
+            "bash",
+            "-c",
+            shell_cmd,
+            cwd=str(cwd) if cwd else None,
             stdin=asyncio.subprocess.PIPE if stdin is not None else None,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
     else:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, cwd=str(cwd) if cwd else None,
+            *cmd,
+            cwd=str(cwd) if cwd else None,
             stdin=asyncio.subprocess.PIPE if stdin is not None else None,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
     try:
         out, err = await asyncio.wait_for(
@@ -2307,8 +2616,7 @@ async def _mcp_build_image(args: dict, approver: str, proposer: str | None) -> s
     host = settings.mcp_build_host
     if not host:
         raise ExecutorError(
-            "refusing mcp.build_image: no build host configured "
-            "(settings.mcp_build_host is empty)"
+            "refusing mcp.build_image: no build host configured (settings.mcp_build_host is empty)"
         )
 
     server_dir = _mcp_servers_root() / server_id
@@ -2342,13 +2650,14 @@ async def _mcp_build_image(args: dict, approver: str, proposer: str | None) -> s
     # tar|ssh|podman idiom above; -n k8s.io is what makes the image visible
     # to the kubelet (build-sandbox-image.sh, build-crawler-image.sh).
     import_inner = (
-        "podman save --format oci-archive " + ref
-        + " | sudo k3s ctr -n k8s.io images import -"
+        "podman save --format oci-archive " + ref + " | sudo k3s ctr -n k8s.io images import -"
     )
     import_cmd = f"ssh {shlex.quote(host)} {shlex.quote(import_inner)}"
     rc, imp_out, imp_err = await _run(shell_cmd=import_cmd, timeout=_MCP_BUILD_TIMEOUT)
     if rc != 0:
-        raise ExecutorError(f"mcp.build_image: containerd import failed: {(imp_err or imp_out)[-2000:]}")
+        raise ExecutorError(
+            f"mcp.build_image: containerd import failed: {(imp_err or imp_out)[-2000:]}"
+        )
 
     # Exact-match verify, captured into a variable FIRST — `ctr ... | grep -q`
     # under pipefail SIGKILLs ctr on grep's early exit and reports failure
@@ -2357,8 +2666,7 @@ async def _mcp_build_image(args: dict, approver: str, proposer: str | None) -> s
     rc, ls_out, ls_err = await _run(shell_cmd=verify_cmd, timeout=60.0)
     if rc != 0 or ref not in ls_out.splitlines():
         raise ExecutorError(
-            f"mcp.build_image: image {ref!r} not found on {host} after "
-            f"import (ls_err={ls_err!r})"
+            f"mcp.build_image: image {ref!r} not found on {host} after import (ls_err={ls_err!r})"
         )
 
     await db_repo.mark_mcp_server_built(server_id, ref, digest)
@@ -2374,12 +2682,15 @@ def _mcp_deployment_manifest(server_id: str, image_ref: str) -> dict:
     if not resources.get("limits") or not resources.get("requests"):
         # Refuses even its OWN manifest without limits (design §8) — asserted
         # before every apply, not trusted as a constant that can't drift.
-        raise ExecutorError("refusing mcp.server_deploy: manifest carries no resources.limits/requests")
+        raise ExecutorError(
+            "refusing mcp.server_deploy: manifest carries no resources.limits/requests"
+        )
     return {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {
-            "name": server_id, "namespace": "cc-mcp",
+            "name": server_id,
+            "namespace": "cc-mcp",
             "labels": {"app": "cc-mcp", "server": server_id},
         },
         "spec": {
@@ -2395,21 +2706,35 @@ def _mcp_deployment_manifest(server_id: str, image_ref: str) -> dict:
                     # fallback node to prefer instead. Role label, not hostname
                     # (mirrors runner.py's sandbox Job affinity): gVisor and the
                     # image live on whichever node carries cc-role/compute.
-                    "affinity": {"nodeAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": {
-                        "nodeSelectorTerms": [{"matchExpressions": [
-                            {"key": "cc-role/compute", "operator": "In", "values": ["true"]}
-                        ]}],
-                    }}},
-                    "containers": [{
-                        "name": server_id,
-                        "image": image_ref,
-                        "imagePullPolicy": "IfNotPresent",
-                        # Convention (documented in the mcp-propose pack and
-                        # the mcp.server_deploy capability): every agent-built
-                        # MCP server listens on 8000.
-                        "ports": [{"containerPort": 8000}],
-                        "resources": resources,
-                    }],
+                    "affinity": {
+                        "nodeAffinity": {
+                            "requiredDuringSchedulingIgnoredDuringExecution": {
+                                "nodeSelectorTerms": [
+                                    {
+                                        "matchExpressions": [
+                                            {
+                                                "key": "cc-role/compute",
+                                                "operator": "In",
+                                                "values": ["true"],
+                                            }
+                                        ]
+                                    }
+                                ],
+                            }
+                        }
+                    },
+                    "containers": [
+                        {
+                            "name": server_id,
+                            "image": image_ref,
+                            "imagePullPolicy": "IfNotPresent",
+                            # Convention (documented in the mcp-propose pack and
+                            # the mcp.server_deploy capability): every agent-built
+                            # MCP server listens on 8000.
+                            "ports": [{"containerPort": 8000}],
+                            "resources": resources,
+                        }
+                    ],
                 },
             },
         },
@@ -2421,7 +2746,8 @@ def _mcp_service_manifest(server_id: str) -> dict:
         "apiVersion": "v1",
         "kind": "Service",
         "metadata": {
-            "name": server_id, "namespace": "cc-mcp",
+            "name": server_id,
+            "namespace": "cc-mcp",
             "labels": {"app": "cc-mcp", "server": server_id},
         },
         "spec": {
@@ -2441,8 +2767,10 @@ async def _mcp_server_deploy(args: dict, approver: str, proposer: str | None) ->
 
     row = await db_repo.get_mcp_server(server_id)
     if (
-        row is None or row["status"] not in ("built", "deployed", "registered")
-        or not row.get("image_ref") or not row.get("digest")
+        row is None
+        or row["status"] not in ("built", "deployed", "registered")
+        or not row.get("image_ref")
+        or not row.get("digest")
     ):
         status = row["status"] if row else "no row"
         raise ExecutorError(
@@ -2468,8 +2796,15 @@ async def _mcp_server_deploy(args: dict, approver: str, proposer: str | None) ->
         raise ExecutorError(f"mcp.server_deploy: kubectl apply failed: {err or out}")
 
     rollout_cmd = [
-        "kubectl", "--kubeconfig", kubeconfig, "-n", "cc-mcp",
-        "rollout", "status", f"deployment/{server_id}", "--timeout=90s",
+        "kubectl",
+        "--kubeconfig",
+        kubeconfig,
+        "-n",
+        "cc-mcp",
+        "rollout",
+        "status",
+        f"deployment/{server_id}",
+        "--timeout=90s",
     ]
     rc, rout, rerr = await _run(cmd=rollout_cmd, timeout=100.0)
     if rc != 0:
@@ -2511,13 +2846,11 @@ async def _deregister_from_proxy(existing_id: str | None) -> tuple[str, str]:
     # LOUDLY on failure, because nothing downstream will and a dangling
     # id would otherwise sit silently in the shared key's permission list.
     try:
-        removed = await litellm_client.remove_mcp_server_from_key(
-            settings.llm_api_key, existing_id
-        )
+        removed = await litellm_client.remove_mcp_server_from_key(settings.llm_api_key, existing_id)
         key_note = (
             " key permission: removed from shared key"
-            if removed.get("changed") else
-            " key permission: shared key already lacked access"
+            if removed.get("changed")
+            else " key permission: shared key already lacked access"
         )
     except Exception as e:  # noqa: BLE001 — removal stands; say so loudly
         err = str(e).replace(settings.llm_api_key, "<redacted>") if settings.llm_api_key else str(e)
@@ -2558,8 +2891,15 @@ async def _mcp_server_remove(args: dict, approver: str, proposer: str | None) ->
         )
 
     delete_cmd = [
-        "kubectl", "--kubeconfig", kubeconfig, "-n", "cc-mcp", "delete",
-        f"deployment/{server_id}", f"service/{server_id}", "--ignore-not-found",
+        "kubectl",
+        "--kubeconfig",
+        kubeconfig,
+        "-n",
+        "cc-mcp",
+        "delete",
+        f"deployment/{server_id}",
+        f"service/{server_id}",
+        "--ignore-not-found",
     ]
     rc, out, err = await _run(cmd=delete_cmd, timeout=60.0)
     if rc != 0:
@@ -2593,10 +2933,7 @@ async def _litellm_register_mcp_server(args: dict, approver: str, proposer: str 
         raise ExecutorError(f"refusing litellm.register_mcp_server: bad server_id {server_id!r}")
 
     row = await db_repo.get_mcp_server(server_id)
-    if (
-        row is None or row["status"] not in ("deployed", "registered")
-        or not row.get("namespace")
-    ):
+    if row is None or row["status"] not in ("deployed", "registered") or not row.get("namespace"):
         status = row["status"] if row else "no row"
         raise ExecutorError(
             f"refusing litellm.register_mcp_server: mcp_server {server_id!r} "
@@ -2634,7 +2971,11 @@ async def _litellm_register_mcp_server(args: dict, approver: str, proposer: str 
         f"(drafted by {proposer or 'unknown'}, approved by {approver})"
     )
     out = await litellm_client.register_mcp_server(
-        litellm_name, litellm_name, url, transport=transport, description=description,
+        litellm_name,
+        litellm_name,
+        url,
+        transport=transport,
+        description=description,
     )
     litellm_id = _registered_server_id("litellm.register_mcp_server", server_id, litellm_name, out)
 
@@ -2696,13 +3037,11 @@ async def _after_proxy_registration(server_id: str, litellm_id: str) -> tuple[st
     # registration stands either way — but the outcome string says LOUDLY
     # when it failed, because nothing downstream will.
     try:
-        granted = await litellm_client.add_mcp_server_to_key(
-            settings.llm_api_key, litellm_id
-        )
+        granted = await litellm_client.add_mcp_server_to_key(settings.llm_api_key, litellm_id)
         key_note = (
             "key permission: shared key granted access"
-            if granted.get("changed") else
-            "key permission: shared key already had access"
+            if granted.get("changed")
+            else "key permission: shared key already had access"
         )
     except Exception as e:  # noqa: BLE001 — registration stands; say so loudly
         # belt-and-braces: this note lands in the stored proposal outcome, so
@@ -2750,8 +3089,9 @@ async def _mcp_server_register(args: dict, approver: str, proposer: str | None) 
     litellm_name = _litellm_server_name(server_id)
     on_proxy = await litellm_client.list_mcp_servers()
     clash = [
-        srv for srv in on_proxy if isinstance(srv, dict)
-        and litellm_name in (srv.get("server_name"), srv.get("alias"))
+        srv
+        for srv in on_proxy
+        if isinstance(srv, dict) and litellm_name in (srv.get("server_name"), srv.get("alias"))
     ]
     if clash:
         raise ExecutorError(
@@ -2767,13 +3107,21 @@ async def _mcp_server_register(args: dict, approver: str, proposer: str | None) 
         f"(drafted by {proposer or 'unknown'}, approved by {approver})"
     )
     out = await litellm_client.register_mcp_server(
-        litellm_name, litellm_name, url, transport=transport, description=description,
+        litellm_name,
+        litellm_name,
+        url,
+        transport=transport,
+        description=description,
     )
     litellm_id = _registered_server_id("mcp.server_register", server_id, litellm_name, out)
 
     recorded = await db_repo.insert_mcp_server_registered_by_url(
-        server_id, url=url, transport=transport, display_name=display_name,
-        description=args.get("description") or "", litellm_id=litellm_id,
+        server_id,
+        url=url,
+        transport=transport,
+        display_name=display_name,
+        description=args.get("description") or "",
+        litellm_id=litellm_id,
         created_by=proposer or approver,
     )
     if not recorded:
@@ -2849,8 +3197,7 @@ async def _mcp_tool_call(args: dict, approver: str, proposer: str | None) -> str
     tools = await db_repo.list_mcp_tools(server_id)
     if not any(t["tool_name"] == tool_name for t in tools):
         raise ExecutorError(
-            f"refusing mcp.tool_call: {tool_name!r} is not a known tool of "
-            f"mcp_server {server_id!r}"
+            f"refusing mcp.tool_call: {tool_name!r} is not a known tool of mcp_server {server_id!r}"
         )
 
     # The proxy addresses servers by the name it was REGISTERED under — the
@@ -2982,8 +3329,10 @@ def _targets_of(action: Action) -> set[tuple[str, str]]:
         sid, key = args.get("skill_id"), args.get("doc_key")
         if isinstance(sid, str) and sid.strip() and isinstance(key, str) and key.strip():
             out.add(("skill_doc", f"{sid.strip()}/{key.strip()}"))
-    for prefix, system, key in (("confluence.", "confluence", "page_id"),
-                                ("graph.", "graph", "episode_uuid")):
+    for prefix, system, key in (
+        ("confluence.", "confluence", "page_id"),
+        ("graph.", "graph", "episode_uuid"),
+    ):
         v = args.get(key)
         if capability.startswith(prefix) and isinstance(v, str) and v.strip():
             out.add((system, v.strip()))
@@ -3025,15 +3374,22 @@ def _execution_failed(action: Action, e: Exception, completed: list[str]) -> Exe
     """The honest record of `e` raised by `action`'s handler or world check."""
     moved = is_world_moved(e)
     return ExecutionFailed(
-        action.capability, str(e), completed,
+        action.capability,
+        str(e),
+        completed,
         transient=(not moved) and classify_failure(e) == TRANSIENT,
-        dependencies=(stamped_dependencies(e)
-                      or dependencies_for_capability(action.capability)),
-        world_moved=({
-            "capability": action.capability, "target": e.target,
-            "expected": e.expected, "actual": e.actual,
-            "what_moved": e.what_moved,
-        } if moved else None),
+        dependencies=(stamped_dependencies(e) or dependencies_for_capability(action.capability)),
+        world_moved=(
+            {
+                "capability": action.capability,
+                "target": e.target,
+                "expected": e.expected,
+                "actual": e.actual,
+                "what_moved": e.what_moved,
+            }
+            if moved
+            else None
+        ),
     )
 
 
@@ -3047,17 +3403,20 @@ async def _cursor_started(proposal_id: str, index: int, capability: str) -> None
     except Exception as e:  # raised as the cursor's own error
         raise ExecutionCursorError(
             f"could not record that action {index + 1} ({capability}) is starting, "
-            f"so it was not started: {e}", index=index, landed=False,
+            f"so it was not started: {e}",
+            index=index,
+            landed=False,
         ) from e
     if not written:
         raise ExecutionCursorError(
             f"proposal {proposal_id} is no longer EXECUTING; action {index + 1} "
-            f"({capability}) was not started", index=index, landed=False,
+            f"({capability}) was not started",
+            index=index,
+            landed=False,
         )
 
 
-async def _cursor_completed(proposal_id: str, index: int, capability: str,
-                            result: str) -> None:
+async def _cursor_completed(proposal_id: str, index: int, capability: str, result: str) -> None:
     """Record action `index`'s result AFTER it returned; raise if that cannot be
     recorded. The action stays marked in flight in the stored cursor, and the
     message says it returned and with what."""
@@ -3068,20 +3427,28 @@ async def _cursor_completed(proposal_id: str, index: int, capability: str,
     except Exception as e:  # raised as the cursor's own error
         raise ExecutionCursorError(
             f"action {index + 1} ({capability}) returned ({result[:200]}) but its "
-            f"completion could not be recorded: {e}", index=index, landed=True,
+            f"completion could not be recorded: {e}",
+            index=index,
+            landed=True,
         ) from e
     if not written:
         raise ExecutionCursorError(
             f"action {index + 1} ({capability}) returned ({result[:200]}) but "
             f"proposal {proposal_id} is no longer EXECUTING; nothing further runs",
-            index=index, landed=True,
+            index=index,
+            landed=True,
         )
 
 
 async def execute(
-    actions: list[Action], approver: str, source_refs: list[str],
-    proposer: str | None = None, proposal_id: str | None = None,
-    action_offset: int = 0, *, record_progress: bool = False,
+    actions: list[Action],
+    approver: str,
+    source_refs: list[str],
+    proposer: str | None = None,
+    proposal_id: str | None = None,
+    action_offset: int = 0,
+    *,
+    record_progress: bool = False,
 ) -> ExecutionOutcome:
     """Execute a proposal's actions in order. Provenance is stamped from the
     approver and the evidence source refs. A failing action raises
@@ -3160,8 +3527,11 @@ async def execute(
 
         row = await repo.load_proposal(proposal_id) if proposal_id else None
         await overrides.check_override_approval(
-            approver, [a.model_dump(mode="json") for a in actions],
-            proposer=proposer, proposal_row=row, offset=action_offset,
+            approver,
+            [a.model_dump(mode="json") for a in actions],
+            proposer=proposer,
+            proposal_row=row,
+            offset=action_offset,
         )
     # Per-action approver: under several overrides each write is stamped with
     # the override that covered THAT action (the stored action map, read here,
@@ -3204,8 +3574,7 @@ async def execute(
                 await _cursor_started(proposal_id, index, a.capability)
             index_token = _current_action_index.set(index)
             try:
-                result = await _execute_action(
-                    a, covering.get(index, approver), proposer)
+                result = await _execute_action(a, covering.get(index, approver), proposer)
                 touched |= _jira_keys_of(a)
             except Exception as e:  # every failure becomes the honest record
                 raise _execution_failed(a, e, results) from e
@@ -3224,5 +3593,6 @@ async def execute(
         action_approvers={str(i): v for i, v in sorted(covering.items())},
     )
     return ExecutionOutcome(
-        result_text="; ".join(results), provenance=provenance,
+        result_text="; ".join(results),
+        provenance=provenance,
     )

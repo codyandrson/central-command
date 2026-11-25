@@ -25,20 +25,38 @@ from central_command.integrations import jira
 # "string" and its VALUE is an ADF document — which is why the write shape comes
 # from `schema.custom`, never from `schema.type`.
 FIELD_DEFS = [
-    {"id": "customfield_10075", "name": "Accomplishment Benefit", "custom": True,
-     "schema": {"type": "string",
-                "custom": "com.atlassian.jira.plugin.system.customfieldtypes:textarea"}},
-    {"id": "customfield_10015", "name": "Start date", "custom": True,
-     "schema": {"type": "date",
-                "custom": "com.atlassian.jira.plugin.system.customfieldtypes:datepicker"}},
-    {"id": "customfield_10019", "name": "Rank", "custom": True,
-     "schema": {"type": "any", "custom": "com.pyxis.greenhopper.jira:gh-lexo-rank"}},
+    {
+        "id": "customfield_10075",
+        "name": "Accomplishment Benefit",
+        "custom": True,
+        "schema": {
+            "type": "string",
+            "custom": "com.atlassian.jira.plugin.system.customfieldtypes:textarea",
+        },
+    },
+    {
+        "id": "customfield_10015",
+        "name": "Start date",
+        "custom": True,
+        "schema": {
+            "type": "date",
+            "custom": "com.atlassian.jira.plugin.system.customfieldtypes:datepicker",
+        },
+    },
+    {
+        "id": "customfield_10019",
+        "name": "Rank",
+        "custom": True,
+        "schema": {"type": "any", "custom": "com.pyxis.greenhopper.jira:gh-lexo-rank"},
+    },
     {"id": "summary", "name": "Summary", "custom": False, "schema": {"type": "string"}},
 ]
 
-ADF_TEST = {"type": "doc", "version": 1,
-            "content": [{"type": "paragraph",
-                         "content": [{"type": "text", "text": "Saves 3h/week"}]}]}
+ADF_TEST = {
+    "type": "doc",
+    "version": 1,
+    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Saves 3h/week"}]}],
+}
 
 
 class FakeResponse:
@@ -72,14 +90,33 @@ def _fake_call(monkeypatch, responses):
 
 def _seed(monkeypatch):
     """Skip the discovery round-trip when the test is about something else."""
-    monkeypatch.setattr(jira, "_custom_fields_cache", (float("inf"), [
-        {"id": "customfield_10075", "name": "Accomplishment Benefit",
-         "type": "textarea", "writable": True},
-        {"id": "customfield_10015", "name": "Start date",
-         "type": "datepicker", "writable": True},
-        {"id": "customfield_10019", "name": "Rank",
-         "type": "gh-lexo-rank", "writable": False},
-    ]))
+    monkeypatch.setattr(
+        jira,
+        "_custom_fields_cache",
+        (
+            float("inf"),
+            [
+                {
+                    "id": "customfield_10075",
+                    "name": "Accomplishment Benefit",
+                    "type": "textarea",
+                    "writable": True,
+                },
+                {
+                    "id": "customfield_10015",
+                    "name": "Start date",
+                    "type": "datepicker",
+                    "writable": True,
+                },
+                {
+                    "id": "customfield_10019",
+                    "name": "Rank",
+                    "type": "gh-lexo-rank",
+                    "writable": False,
+                },
+            ],
+        ),
+    )
 
 
 # --- discovery ----------------------------------------------------------------
@@ -89,7 +126,7 @@ async def test_only_custom_fields_are_declared_and_writability_is_derived(monkey
     _fake_call(monkeypatch, [FakeResponse(body=FIELD_DEFS)])
     out = await jira.list_fields()
     by_name = {f["name"]: f for f in out["fields"]}
-    assert "Summary" not in by_name            # a system field is not a custom field
+    assert "Summary" not in by_name  # a system field is not a custom field
     assert by_name["Accomplishment Benefit"]["writable"] is True
     # Jira/plugin-managed: refused rather than mangled.
     assert by_name["Rank"]["writable"] is False
@@ -101,7 +138,7 @@ async def test_discovery_is_cached_but_expires(monkeypatch):
     calls = _fake_call(monkeypatch, [FakeResponse(body=FIELD_DEFS)] * 2)
     await jira.list_fields()
     await jira.list_fields()
-    assert len(calls) == 1                     # cached — every issue read consults it
+    assert len(calls) == 1  # cached — every issue read consults it
     clock[0] += jira.CUSTOM_FIELDS_TTL + 1
     await jira.list_fields()
     # A field the operator adds in the UI must appear WITHOUT a cc-uvicorn
@@ -114,16 +151,27 @@ async def test_discovery_is_cached_but_expires(monkeypatch):
 
 async def test_get_issue_asks_for_the_custom_fields_and_names_them(monkeypatch):
     _seed(monkeypatch)
-    calls = _fake_call(monkeypatch, [FakeResponse(body={
-        "key": "TASKS-43",
-        "fields": {"summary": "Test 1", "customfield_10075": ADF_TEST,
-                   "customfield_10015": None, "customfield_10019": "0|i0037n:"},
-    })])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                body={
+                    "key": "TASKS-43",
+                    "fields": {
+                        "summary": "Test 1",
+                        "customfield_10075": ADF_TEST,
+                        "customfield_10015": None,
+                        "customfield_10019": "0|i0037n:",
+                    },
+                }
+            )
+        ],
+    )
     out = await jira.get_issue("TASKS-43")
     # The bug was here: the request never asked for them.
     assert "customfield_10075" in calls[0][1]
     cf = out["issue"]["custom_fields"]
-    assert cf["Accomplishment Benefit"] == "Saves 3h/week"    # ADF → text
+    assert cf["Accomplishment Benefit"] == "Saves 3h/week"  # ADF → text
     # Declared but unset reads as null on a single issue — "the field exists and
     # is empty" is the answer to a real question, and omitting it is
     # indistinguishable from the field not existing.
@@ -132,19 +180,36 @@ async def test_get_issue_asks_for_the_custom_fields_and_names_them(monkeypatch):
 
 async def test_search_rows_carry_only_set_writable_fields(monkeypatch):
     _seed(monkeypatch)
-    calls = _fake_call(monkeypatch, [FakeResponse(body={"isLast": True, "issues": [
-        {"key": "TASKS-43", "fields": {"customfield_10075": ADF_TEST,
-                                       "customfield_10015": None,
-                                       "customfield_10019": "0|i0037n:"}},
-        {"key": "TASKS-42", "fields": {"customfield_10075": None,
-                                       "customfield_10015": None}},
-    ]})])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(
+                body={
+                    "isLast": True,
+                    "issues": [
+                        {
+                            "key": "TASKS-43",
+                            "fields": {
+                                "customfield_10075": ADF_TEST,
+                                "customfield_10015": None,
+                                "customfield_10019": "0|i0037n:",
+                            },
+                        },
+                        {
+                            "key": "TASKS-42",
+                            "fields": {"customfield_10075": None, "customfield_10015": None},
+                        },
+                    ],
+                }
+            )
+        ],
+    )
     rows = (await jira.search_issues("project = TASKS"))["issues"]
     # Rank is set on every issue in the instance and is pure lexorank noise on a
     # sweep — it is not even asked for.
     assert "customfield_10019" not in calls[0][2]["fields"]
     assert rows[0]["custom_fields"] == {"Accomplishment Benefit": "Saves 3h/week"}
-    assert "custom_fields" not in rows[1]      # a sweep pays nothing for empties
+    assert "custom_fields" not in rows[1]  # a sweep pays nothing for empties
 
 
 async def test_a_failed_discovery_is_reported_not_swallowed(monkeypatch):
@@ -162,10 +227,14 @@ async def test_a_failed_discovery_is_reported_not_swallowed(monkeypatch):
 
 async def test_a_long_value_is_clipped_and_says_so(monkeypatch):
     _seed(monkeypatch)
-    long = {"type": "doc", "version": 1, "content": [
-        {"type": "paragraph", "content": [{"type": "text", "text": "x" * 2000}]}]}
-    _fake_call(monkeypatch, [FakeResponse(body={
-        "key": "TASKS-43", "fields": {"customfield_10075": long}})])
+    long = {
+        "type": "doc",
+        "version": 1,
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": "x" * 2000}]}],
+    }
+    _fake_call(
+        monkeypatch, [FakeResponse(body={"key": "TASKS-43", "fields": {"customfield_10075": long}})]
+    )
     value = (await jira.get_issue("TASKS-43"))["issue"]["custom_fields"]["Accomplishment Benefit"]
     assert "clipped" in value and len(value) < 700
 
@@ -176,8 +245,9 @@ async def test_a_long_value_is_clipped_and_says_so(monkeypatch):
 async def test_set_fields_resolves_by_name_and_wraps_rich_text_in_adf(monkeypatch):
     _seed(monkeypatch)
     calls = _fake_call(monkeypatch, [FakeResponse(body={})])
-    await jira.set_fields("TASKS-43", {"accomplishment benefit": "Saves 3h/week",
-                                       "Start date": "2026-09-01"})
+    await jira.set_fields(
+        "TASKS-43", {"accomplishment benefit": "Saves 3h/week", "Start date": "2026-09-01"}
+    )
     sent = calls[0][2]["fields"]
     assert sent["customfield_10075"] == jira._adf("Saves 3h/week")
     assert sent["customfield_10015"] == "2026-09-01"
@@ -229,11 +299,13 @@ async def test_create_issue_resolves_and_merges_custom_fields(monkeypatch):
     _seed(monkeypatch)
     calls = _fake_call(monkeypatch, [FakeResponse(201, {"key": "TASKS-100"})])
     out = await jira.create_issue(
-        "TASKS", "New work", "Example Type",
+        "TASKS",
+        "New work",
+        "Example Type",
         custom_fields={"Accomplishment Benefit": "Saves 3h/week"},
     )
     body = calls[0][2]["fields"]
-    assert body["customfield_10075"]["type"] == "doc"     # textarea → ADF
+    assert body["customfield_10075"]["type"] == "doc"  # textarea → ADF
     assert out["issue"]["custom_fields"] == {"Accomplishment Benefit": "Saves 3h/week"}
 
 

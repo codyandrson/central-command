@@ -93,44 +93,63 @@ def native(monkeypatch):
 
 
 def _set(**args) -> Action:
-    return Action(capability="jira.set_planning_fields", arguments={"issue_key": "DOE-7", **args},
-                  target_ref={"system": "jira", "id": "DOE-7"},
-                  reversibility=Reversibility.reversible)
+    return Action(
+        capability="jira.set_planning_fields",
+        arguments={"issue_key": "DOE-7", **args},
+        target_ref={"system": "jira", "id": "DOE-7"},
+        reversibility=Reversibility.reversible,
+    )
 
 
 def _proposal(*actions: Action) -> Proposal:
-    return Proposal(intent="Score DOE-7", expected_effect="DOE-7 is ranked", evidence=[],
-                    confidence={"level": "high", "rationale": "The operator stated the stakes."},
-                    actions=list(actions))
+    return Proposal(
+        intent="Score DOE-7",
+        expected_effect="DOE-7 is ranked",
+        evidence=[],
+        confidence={"level": "high", "rationale": "The operator stated the stakes."},
+        actions=list(actions),
+    )
 
 
 # --- 1. the shape, in both tiers ------------------------------------------------------
 
 
-@pytest.mark.parametrize("args, problem", [
-    ({"stakes": "Unblocks the audit."}, None),
-    ({"value": 0}, None),                                   # zero is a value
-    ({"lateness_loss": 5.5}, None),
-    ({"deadline_type": "hard"}, None),
-    ({"estimate_hours": 0.5}, None),
-    ({"due_date": "2026-12-01"}, None),
-    ({"stakes": "s", "value": 3, "lateness_loss": 8, "deadline_type": "soft",
-      "estimate_hours": 4, "due_date": "2026-12-01"}, None),
-    ({}, "name at least one of"),
-    ({"value": None}, "never clears"),
-    ({"stakes": ""}, "stakes must be non-empty text"),
-    ({"stakes": "x" * 2001}, "at most 2000"),
-    ({"value": -1}, "value must be a number >= 0"),
-    ({"value": "5"}, "value must be a number >= 0"),
-    ({"value": True}, "value must be a number >= 0"),
-    ({"lateness_loss": float("nan")}, "lateness_loss must be a number >= 0"),
-    ({"deadline_type": "Hard"}, "is not one of hard, soft"),
-    ({"estimate_hours": 0}, "estimate_hours must be"),
-    ({"estimate_hours": 5000}, "estimate_hours must be"),
-    ({"due_date": "12/01/2026"}, "due_date must be YYYY-MM-DD"),
-    ({"value": 3, "priority": "High"}, "unknown argument(s) priority"),
-    ({"value": 3, "fields": {"Value": 3}}, "unknown argument(s) fields"),
-])
+@pytest.mark.parametrize(
+    "args, problem",
+    [
+        ({"stakes": "Unblocks the audit."}, None),
+        ({"value": 0}, None),  # zero is a value
+        ({"lateness_loss": 5.5}, None),
+        ({"deadline_type": "hard"}, None),
+        ({"estimate_hours": 0.5}, None),
+        ({"due_date": "2026-12-01"}, None),
+        (
+            {
+                "stakes": "s",
+                "value": 3,
+                "lateness_loss": 8,
+                "deadline_type": "soft",
+                "estimate_hours": 4,
+                "due_date": "2026-12-01",
+            },
+            None,
+        ),
+        ({}, "name at least one of"),
+        ({"value": None}, "never clears"),
+        ({"stakes": ""}, "stakes must be non-empty text"),
+        ({"stakes": "x" * 2001}, "at most 2000"),
+        ({"value": -1}, "value must be a number >= 0"),
+        ({"value": "5"}, "value must be a number >= 0"),
+        ({"value": True}, "value must be a number >= 0"),
+        ({"lateness_loss": float("nan")}, "lateness_loss must be a number >= 0"),
+        ({"deadline_type": "Hard"}, "is not one of hard, soft"),
+        ({"estimate_hours": 0}, "estimate_hours must be"),
+        ({"estimate_hours": 5000}, "estimate_hours must be"),
+        ({"due_date": "12/01/2026"}, "due_date must be YYYY-MM-DD"),
+        ({"value": 3, "priority": "High"}, "unknown argument(s) priority"),
+        ({"value": 3, "fields": {"Value": 3}}, "unknown argument(s) fields"),
+    ],
+)
 def test_the_planning_fields_shape(args, problem):
     problems = validate_action_args("jira.set_planning_fields", {"issue_key": "DOE-7", **args})
     if problem is None:
@@ -140,12 +159,15 @@ def test_the_planning_fields_shape(args, problem):
 
 
 def test_the_issue_key_is_required():
-    assert any("issue_key" in p for p in validate_action_args("jira.set_planning_fields",
-                                                              {"value": 3}))
+    assert any(
+        "issue_key" in p for p in validate_action_args("jira.set_planning_fields", {"value": 3})
+    )
 
 
-@pytest.mark.parametrize("estimate, ok", [(None, True), (1.5, True), (0, False), (-2, False),
-                                          ("2h", False), (True, False)])
+@pytest.mark.parametrize(
+    "estimate, ok",
+    [(None, True), (1.5, True), (0, False), (-2, False), ("2h", False), (True, False)],
+)
 def test_create_issue_checks_its_estimate(estimate, ok):
     args = {"project_key": "DOE", "summary": "s", "issue_type": "Task"}
     if estimate is not None:
@@ -165,8 +187,9 @@ async def test_the_runtime_hands_a_bad_draft_back_to_the_model():
 async def test_the_executor_refuses_a_bad_shape_before_anything_runs(monkeypatch):
     log = fake_world(monkeypatch)
     with pytest.raises(executor.ExecutionFailed, match="value must be a number") as exc:
-        await executor.execute([_set(stakes="fine"), _set(value=-3)], "human:lee", [],
-                               proposal_id="prop_pf_shape")
+        await executor.execute(
+            [_set(stakes="fine"), _set(value=-3)], "human:lee", [], proposal_id="prop_pf_shape"
+        )
     assert exc.value.completed == [] and log == [], "nothing ran"
 
 
@@ -177,23 +200,31 @@ _HANDLER = executor.HANDLERS["jira.set_planning_fields"]
 
 
 @pytest.mark.parametrize("flavor", ["cloud", "server"])
-async def test_every_field_together_is_one_edit_in_the_flavours_shapes(
-        monkeypatch, native, flavor):
+async def test_every_field_together_is_one_edit_in_the_flavours_shapes(monkeypatch, native, flavor):
     monkeypatch.setattr(settings, "jira_api_flavor", flavor)
     calls = native([_Resp(status_code=204)])
-    out = await _HANDLER({"issue_key": "DOE-7", "stakes": "Unblocks the audit.", "value": 5,
-                          "lateness_loss": 8, "deadline_type": "hard",
-                          "estimate_hours": 1.5, "due_date": "2026-12-01"},
-                         "human:lee", "ea")
+    out = await _HANDLER(
+        {
+            "issue_key": "DOE-7",
+            "stakes": "Unblocks the audit.",
+            "value": 5,
+            "lateness_loss": 8,
+            "deadline_type": "hard",
+            "estimate_hours": 1.5,
+            "due_date": "2026-12-01",
+        },
+        "human:lee",
+        "ea",
+    )
     assert len(calls) == 1, "one tracker call"
     method, path, body = calls[0]
     assert method == "PUT"
-    assert path == ("/rest/api/2/issue/DOE-7" if flavor == "server"
-                    else "/rest/api/3/issue/DOE-7")
+    assert path == ("/rest/api/2/issue/DOE-7" if flavor == "server" else "/rest/api/3/issue/DOE-7")
     fields = body["fields"]
     # A textarea is wiki-markup text on Data Center and an ADF document on Cloud.
-    assert fields["customfield_201"] == ("Unblocks the audit." if flavor == "server"
-                                         else jira._adf("Unblocks the audit."))
+    assert fields["customfield_201"] == (
+        "Unblocks the audit." if flavor == "server" else jira._adf("Unblocks the audit.")
+    )
     assert fields["customfield_202"] == 5 and fields["customfield_203"] == 8
     # A single select takes its option as {"value": ...} on both flavours.
     assert fields["customfield_204"] == {"value": "hard"}
@@ -201,20 +232,32 @@ async def test_every_field_together_is_one_edit_in_the_flavours_shapes(
     # The original estimate is a timetracking EDIT, in whole minutes, on both.
     assert body["update"] == {"timetracking": [{"edit": {"originalEstimate": "90m"}}]}
     assert not set(body["fields"]) & set(body["update"]), "never a field in both"
-    for word in ("stakes", "value", "lateness_loss", "deadline_type", "estimate_hours",
-                 "due_date"):
+    for word in ("stakes", "value", "lateness_loss", "deadline_type", "estimate_hours", "due_date"):
         assert word in out
 
 
-@pytest.mark.parametrize("arg, value, check", [
-    ("stakes", "Keeps the grant.", lambda b: b["fields"] == {"customfield_201": jira._adf("Keeps the grant.")}),
-    ("value", 3, lambda b: b["fields"] == {"customfield_202": 3}),
-    ("lateness_loss", 2, lambda b: b["fields"] == {"customfield_203": 2}),
-    ("deadline_type", "soft", lambda b: b["fields"] == {"customfield_204": {"value": "soft"}}),
-    ("due_date", "2026-12-24", lambda b: b["fields"] == {"duedate": "2026-12-24"}),
-    ("estimate_hours", 2, lambda b: "fields" not in b
-     and b["update"]["timetracking"][0]["edit"]["originalEstimate"] == "120m"),
-])
+@pytest.mark.parametrize(
+    "arg, value, check",
+    [
+        (
+            "stakes",
+            "Keeps the grant.",
+            lambda b: b["fields"] == {"customfield_201": jira._adf("Keeps the grant.")},
+        ),
+        ("value", 3, lambda b: b["fields"] == {"customfield_202": 3}),
+        ("lateness_loss", 2, lambda b: b["fields"] == {"customfield_203": 2}),
+        ("deadline_type", "soft", lambda b: b["fields"] == {"customfield_204": {"value": "soft"}}),
+        ("due_date", "2026-12-24", lambda b: b["fields"] == {"duedate": "2026-12-24"}),
+        (
+            "estimate_hours",
+            2,
+            lambda b: (
+                "fields" not in b
+                and b["update"]["timetracking"][0]["edit"]["originalEstimate"] == "120m"
+            ),
+        ),
+    ],
+)
 async def test_each_field_alone_sends_only_that_field(monkeypatch, native, arg, value, check):
     monkeypatch.setattr(settings, "jira_api_flavor", "cloud")
     calls = native([_Resp(status_code=204)])
@@ -228,8 +271,9 @@ async def test_each_field_alone_sends_only_that_field(monkeypatch, native, arg, 
 async def test_the_custom_fields_are_the_configured_names_not_the_defaults(monkeypatch, native):
     monkeypatch.setattr(settings, "jira_api_flavor", "cloud")
     monkeypatch.setattr(settings, "plan_field_value", "Worth")
-    declared = DECLARED + [{"id": "customfield_299", "name": "Worth", "type": "float",
-                            "writable": True}]
+    declared = DECLARED + [
+        {"id": "customfield_299", "name": "Worth", "type": "float", "writable": True}
+    ]
     calls = native([_Resp(status_code=204)], declared=declared)
     await _HANDLER({"issue_key": "DOE-7", "value": 8}, "human:lee", "ea")
     assert calls[0][2]["fields"] == {"customfield_299": 8}
@@ -238,7 +282,8 @@ async def test_the_custom_fields_are_the_configured_names_not_the_defaults(monke
 async def test_a_field_named_in_another_case_is_written(monkeypatch, native):
     monkeypatch.setattr(settings, "jira_api_flavor", "cloud")
     declared = [f for f in DECLARED if f["name"] != "Deadline type"] + [
-        {"id": "customfield_399", "name": "Deadline Type", "type": "select", "writable": True}]
+        {"id": "customfield_399", "name": "Deadline Type", "type": "select", "writable": True}
+    ]
     calls = native([_Resp(status_code=204)], declared=declared)
     out = await _HANDLER({"issue_key": "DOE-7", "deadline_type": "hard"}, "human:lee", "ea")
     assert calls[0][2]["fields"] == {"customfield_399": {"value": "hard"}}
@@ -246,13 +291,15 @@ async def test_a_field_named_in_another_case_is_written(monkeypatch, native):
 
 
 async def test_an_undeclared_planning_field_is_refused_by_name_and_nothing_is_written(
-        monkeypatch, native):
+    monkeypatch, native
+):
     monkeypatch.setattr(settings, "jira_api_flavor", "cloud")
     no_deadline = [f for f in DECLARED if f["name"] != "Deadline type"]
     calls = native([], declared=no_deadline)
     with pytest.raises(jira.JiraError) as exc:
-        await _HANDLER({"issue_key": "DOE-7", "value": 3, "deadline_type": "hard"},
-                       "human:lee", "ea")
+        await _HANDLER(
+            {"issue_key": "DOE-7", "value": 3, "deadline_type": "hard"}, "human:lee", "ea"
+        )
     msg = str(exc.value)
     assert "'Deadline type'" in msg and "plan_field_deadline_type" in msg
     assert "'Value'" not in msg, "only the missing field is named"
@@ -267,8 +314,9 @@ async def test_an_undeclared_planning_field_is_refused_by_name_and_nothing_is_wr
 async def test_the_native_fields_need_no_custom_field_declared(monkeypatch, native):
     monkeypatch.setattr(settings, "jira_api_flavor", "server")
     calls = native([_Resp(status_code=204)], declared=[])
-    await _HANDLER({"issue_key": "DOE-7", "estimate_hours": 3, "due_date": "2026-12-01"},
-                   "human:lee", "ea")
+    await _HANDLER(
+        {"issue_key": "DOE-7", "estimate_hours": 3, "due_date": "2026-12-01"}, "human:lee", "ea"
+    )
     body = calls[0][2]
     assert body["fields"] == {"duedate": "2026-12-01"}
     assert body["update"]["timetracking"][0]["edit"]["originalEstimate"] == "180m"
@@ -276,8 +324,9 @@ async def test_the_native_fields_need_no_custom_field_declared(monkeypatch, nati
 
 async def test_a_tracker_refusal_of_the_edit_is_loud(monkeypatch, native):
     monkeypatch.setattr(settings, "jira_api_flavor", "server")
-    native([_Resp({"errors": {"customfield_204": "not on the appropriate screen"}},
-                  status_code=400)])
+    native(
+        [_Resp({"errors": {"customfield_204": "not on the appropriate screen"}}, status_code=400)]
+    )
     with pytest.raises(jira.JiraError, match="appropriate screen"):
         await _HANDLER({"issue_key": "DOE-7", "deadline_type": "soft"}, "human:lee", "ea")
 
@@ -287,12 +336,15 @@ async def test_one_approval_runs_one_action_per_issue(monkeypatch, native):
     monkeypatch.setattr(settings, "jira_api_flavor", "cloud")
     fake_world(monkeypatch, real=("jira.set_planning_fields",))
     calls = native([_Resp(status_code=204), _Resp(status_code=204)])
-    other = Action(capability="jira.set_planning_fields",
-                   arguments={"issue_key": "DOE-8", "value": 2, "lateness_loss": 1},
-                   target_ref={"system": "jira", "id": "DOE-8"},
-                   reversibility=Reversibility.reversible)
-    out = await executor.execute([_set(value=5, estimate_hours=1), other], "human:lee", [],
-                                 proposal_id="prop_pf_two")
+    other = Action(
+        capability="jira.set_planning_fields",
+        arguments={"issue_key": "DOE-8", "value": 2, "lateness_loss": 1},
+        target_ref={"system": "jira", "id": "DOE-8"},
+        reversibility=Reversibility.reversible,
+    )
+    out = await executor.execute(
+        [_set(value=5, estimate_hours=1), other], "human:lee", [], proposal_id="prop_pf_two"
+    )
     assert [c[1] for c in calls] == ["/rest/api/3/issue/DOE-7", "/rest/api/3/issue/DOE-8"]
     assert "DOE-7 planning fields set" in out.result_text
     assert "DOE-8 planning fields set" in out.result_text
@@ -303,15 +355,27 @@ async def test_one_approval_runs_one_action_per_issue(monkeypatch, native):
 
 @pytest.mark.parametrize("flavor", ["cloud", "server"])
 async def test_create_issue_carries_the_planning_fields_and_the_estimate(
-        monkeypatch, native, flavor):
+    monkeypatch, native, flavor
+):
     monkeypatch.setattr(settings, "jira_api_flavor", flavor)
     calls = native([_Resp({"key": "DOE-9"}, status_code=201)])
     out = await executor.HANDLERS["jira.create_issue"](
-        {"project_key": "DOE", "summary": "Renew the permit", "issue_type": "Task",
-         "due_date": "2026-12-15", "estimate_hours": 2.25,
-         "custom_fields": {"Stakes": "Agent's reading: the permit lapses without it.",
-                           "Value": 5, "Lateness loss": 8, "Deadline type": "hard"}},
-        "human:lee", "jira-expert")
+        {
+            "project_key": "DOE",
+            "summary": "Renew the permit",
+            "issue_type": "Task",
+            "due_date": "2026-12-15",
+            "estimate_hours": 2.25,
+            "custom_fields": {
+                "Stakes": "Agent's reading: the permit lapses without it.",
+                "Value": 5,
+                "Lateness loss": 8,
+                "Deadline type": "hard",
+            },
+        },
+        "human:lee",
+        "jira-expert",
+    )
     (call,) = calls
     assert call[0] == "POST"
     fields = call[2]["fields"]
@@ -334,8 +398,13 @@ async def test_create_issue_without_an_estimate_sends_no_timetracking(monkeypatc
 def test_the_create_issue_notes_say_the_planning_fields_ride_the_create():
     cap = next(c for c in packs.PACKS["jira-propose"].capabilities if c.name == "jira.create_issue")
     assert "'estimate_hours'?" in cap.arguments
-    for phrase in ("PLANNING FIELDS RIDE THE CREATE TOO", "never invent stakes",
-                   "Agent's reading:", "or leave the numbers out", "1, 2, 3, 5 or 8"):
+    for phrase in (
+        "PLANNING FIELDS RIDE THE CREATE TOO",
+        "never invent stakes",
+        "Agent's reading:",
+        "or leave the numbers out",
+        "1, 2, 3, 5 or 8",
+    ):
         assert phrase in cap.notes, phrase
     row = next(c for c in capabilities.REGISTRY if c.name == "jira.create_issue")
     assert any(a.startswith("estimate_hours?") for a in row.arguments)
@@ -345,9 +414,16 @@ def test_the_create_issue_notes_say_the_planning_fields_ride_the_create():
 
 
 def _row(key, custom=None, **kw):
-    row = {"issue_key": key, "summary": f"S {key}", "status": "To Do", "priority": "High",
-           "assignee": "Jo Doe", "due_date": None, "estimate_hours": 2.0,
-           "url": f"https://jira.example.com/browse/{key}"}
+    row = {
+        "issue_key": key,
+        "summary": f"S {key}",
+        "status": "To Do",
+        "priority": "High",
+        "assignee": "Jo Doe",
+        "due_date": None,
+        "estimate_hours": 2.0,
+        "url": f"https://jira.example.com/browse/{key}",
+    }
     row.update(kw)
     if custom:
         row["custom_fields"] = custom
@@ -376,8 +452,7 @@ def gaps_read(monkeypatch):
             return {"ok": True, "fields": list(declared), "count": len(declared)}
 
         async def search(jql, limit=None):
-            return {"ok": True, "issues": list(rows), "count": len(rows),
-                    "truncated": truncated}
+            return {"ok": True, "issues": list(rows), "count": len(rows), "truncated": truncated}
 
         monkeypatch.setattr(jira, "list_fields", list_fields)
         monkeypatch.setattr(jira, "search_issues", search)
@@ -391,11 +466,11 @@ def _due(days: int) -> str:
 
 async def test_gaps_lists_what_needs_enriching_soonest_due_first(gaps_read):
     rows = [
-        _row("G-1", dict(_FULL), due_date=_due(5)),                     # complete: not listed
+        _row("G-1", dict(_FULL), due_date=_due(5)),  # complete: not listed
         _row("G-2", {"Stakes": "Keeps the grant"}, due_date=_due(9)),  # unscored
-        _row("G-3", {"Value": 3}),                       # scored, no due date: listed last
+        _row("G-3", {"Value": 3}),  # scored, no due date: listed last
         _row("G-4", {**_FULL, "Deadline type": None}, due_date=_due(2)),  # scored, lacks type
-        _row("G-5", None, due_date=_due(2), estimate_hours=None),        # nothing at all
+        _row("G-5", None, due_date=_due(2), estimate_hours=None),  # nothing at all
     ]
     gaps_read(rows)
     out = await ea_backlog.planning_gaps()
@@ -405,27 +480,63 @@ async def test_gaps_lists_what_needs_enriching_soonest_due_first(gaps_read):
     assert by_key["G-4"]["missing"] == ["deadline_type"] and by_key["G-4"]["tier"] != "unscored"
     assert by_key["G-5"]["missing"] == [i for i in ea_backlog.PLANNING_INPUTS if i != "due_date"]
     assert by_key["G-2"]["stakes"] == "Keeps the grant" and by_key["G-2"]["value"] is None
-    assert out["totals"] == {"read": 5, "needing_enrichment": 4, "unscored": 2,
-                             "returned": 4, "omitted": 0}
+    assert out["totals"] == {
+        "read": 5,
+        "needing_enrichment": 4,
+        "unscored": 2,
+        "returned": 4,
+        "omitted": 0,
+    }
     assert out["unit"] == "points" and out["scale"] == [1, 2, 3, 5, 8]
     assert out["set_argument"]["estimate"] == "estimate_hours"
     assert out["planning_fields"]["missing"] == [] and out["planning_fields"]["cannot_write"] == []
 
 
 async def test_the_missing_lists_are_the_rankings_own(gaps_read):
-    rows = [_row(f"M-{n}", c, due_date=d) for n, (c, d) in enumerate([
-        ({"Value": 2}, _due(1)), ({"Stakes": "x", "Lateness loss": 4}, None),
-        (None, _due(3)), ({**_FULL, "Stakes": None}, _due(4)), (dict(_FULL), None)])]
+    rows = [
+        _row(f"M-{n}", c, due_date=d)
+        for n, (c, d) in enumerate(
+            [
+                ({"Value": 2}, _due(1)),
+                ({"Stakes": "x", "Lateness loss": 4}, None),
+                (None, _due(3)),
+                ({**_FULL, "Stakes": None}, _due(4)),
+                (dict(_FULL), None),
+            ]
+        )
+    ]
     gaps_read(rows)
     out = await ea_backlog.planning_gaps()
     # The same rows through the ranking, read the way `backlog()` reads them.
-    backlog_rows = [{**{k: r.get(k) for k in ("issue_key", "summary", "status", "priority",
-                                              "assignee", "due_date", "estimate_hours", "url")},
-                     **{f: (r.get("custom_fields") or {}).get(n)
-                        for f, n in ea_backlog._field_names().items()}} for r in rows]
+    backlog_rows = [
+        {
+            **{
+                k: r.get(k)
+                for k in (
+                    "issue_key",
+                    "summary",
+                    "status",
+                    "priority",
+                    "assignee",
+                    "due_date",
+                    "estimate_hours",
+                    "url",
+                )
+            },
+            **{
+                f: (r.get("custom_fields") or {}).get(n)
+                for f, n in ea_backlog._field_names().items()
+            },
+        }
+        for r in rows
+    ]
     ranked = ea_backlog.rank(backlog_rows, TODAY, 6.0)
-    expected = {r["issue_key"]: (r["missing"], r["tier"])
-                for t in ranked["tiers"].values() for r in t if r["missing"]}
+    expected = {
+        r["issue_key"]: (r["missing"], r["tier"])
+        for t in ranked["tiers"].values()
+        for r in t
+        if r["missing"]
+    }
     assert {i["issue_key"]: (i["missing"], i["tier"]) for i in out["issues"]} == expected
 
 
@@ -460,8 +571,9 @@ def test_the_gaps_setting_defaults_to_ten():
 
 async def test_the_tool_returns_the_gaps_as_json(gaps_read):
     gaps_read([_row("T-1", {"Value": 1})])
-    out = json.loads(await tools.jira_planning_gaps(SimpleNamespace(deps=TriageDeps(
-        agent_id="jira-expert"))))
+    out = json.loads(
+        await tools.jira_planning_gaps(SimpleNamespace(deps=TriageDeps(agent_id="jira-expert")))
+    )
     assert [i["issue_key"] for i in out["issues"]] == ["T-1"]
 
 
@@ -475,8 +587,9 @@ async def test_a_tracker_outage_parks_the_run(gaps_read, monkeypatch):
     monkeypatch.setattr(jira, "list_fields", down)
     monkeypatch.setattr(tools, "_sleep", no_wait)
     with pytest.raises(CallDeferred) as paused:
-        await tools.jira_planning_gaps(SimpleNamespace(deps=TriageDeps(
-            agent_id="jira-expert", park_reads=True)))
+        await tools.jira_planning_gaps(
+            SimpleNamespace(deps=TriageDeps(agent_id="jira-expert", park_reads=True))
+        )
     meta = paused.value.metadata
     assert meta["kind"] == "read" and meta["tool"] == "jira_planning_gaps"
     assert meta["dependencies"] == ["jira"]
@@ -484,12 +597,14 @@ async def test_a_tracker_outage_parks_the_run(gaps_read, monkeypatch):
 
 async def test_a_tracker_no_is_honest_text(gaps_read, monkeypatch):
     async def no(jql, limit=None):
-        raise jira.JiraError("searchIssues — provider rejected the request (400): bad JQL",
-                             status_code=400)
+        raise jira.JiraError(
+            "searchIssues — provider rejected the request (400): bad JQL", status_code=400
+        )
 
     monkeypatch.setattr(jira, "search_issues", no)
-    out = await tools.jira_planning_gaps(SimpleNamespace(deps=TriageDeps(
-        agent_id="jira-expert", park_reads=True)))
+    out = await tools.jira_planning_gaps(
+        SimpleNamespace(deps=TriageDeps(agent_id="jira-expert", park_reads=True))
+    )
     assert "planning gaps read failed" in out and "bad JQL" in out
 
 
@@ -509,7 +624,11 @@ def test_the_tool_is_a_parkable_jira_read_in_jira_read():
 def test_the_registry_row():
     row = next(c for c in capabilities.REGISTRY if c.name == "jira.set_planning_fields")
     assert (row.kind, row.gate, row.default_gate, row.reversibility) == (
-        "write", "human approval", "human", "reversible")
+        "write",
+        "human approval",
+        "human",
+        "reversible",
+    )
     assert row.target_args == ("issue_key",)
     assert CAPABILITY_DEPENDENCY["jira.set_planning_fields"] == ("jira",)
     assert "jira.set_planning_fields" in capabilities.gated_write_names()
@@ -517,10 +636,12 @@ def test_the_registry_row():
 
 
 def test_one_capability_sits_in_both_packs_and_is_listed_once():
-    in_plan = [c for c in packs.PACKS["plan-propose"].capabilities
-               if c.name == "jira.set_planning_fields"]
-    in_jira = [c for c in packs.PACKS["jira-propose"].capabilities
-               if c.name == "jira.set_planning_fields"]
+    in_plan = [
+        c for c in packs.PACKS["plan-propose"].capabilities if c.name == "jira.set_planning_fields"
+    ]
+    in_jira = [
+        c for c in packs.PACKS["jira-propose"].capabilities if c.name == "jira.set_planning_fields"
+    ]
     assert len(in_plan) == len(in_jira) == 1 and in_plan[0] is in_jira[0]
     for grants in (("plan-propose",), ("jira-propose",), ("plan-propose", "jira-propose")):
         assert "jira.set_planning_fields" in packs.granted_capability_names(grants)
@@ -534,11 +655,18 @@ def test_one_capability_sits_in_both_packs_and_is_listed_once():
 
 
 def test_the_pack_notes_carry_the_enrichment_rules():
-    cap = next(c for c in packs.PACKS["plan-propose"].capabilities
-               if c.name == "jira.set_planning_fields")
-    for phrase in ("nothing else", "never null", "cannot_write", "Agent's reading:",
-                   "1, 2, 3, 5 or 8", "ONE proposal with one action per issue",
-                   "never guessed"):
+    cap = next(
+        c for c in packs.PACKS["plan-propose"].capabilities if c.name == "jira.set_planning_fields"
+    )
+    for phrase in (
+        "nothing else",
+        "never null",
+        "cannot_write",
+        "Agent's reading:",
+        "1, 2, 3, 5 or 8",
+        "ONE proposal with one action per issue",
+        "never guessed",
+    ):
         assert phrase in cap.notes, phrase
 
 
@@ -558,17 +686,25 @@ def _seeded_hygiene() -> str:
 
 def test_the_seeded_hygiene_sweep_carries_the_enrichment_checklist():
     text = _seeded_hygiene()
-    for phrase in ("call jira_planning_gaps", "jira.set_planning_fields",
-                   "and only those", "on the unit the tool reports",
-                   "only 1, 2, 3, 5 or 8", "begins Agent's reading:",
-                   "ONE proposal with one jira.set_planning_fields action per issue",
-                   "never more issues than the tool returned", "cannot_write",
-                   # the old sweep is still there
-                   "past-due or missing due dates", "say so plainly"):
+    for phrase in (
+        "call jira_planning_gaps",
+        "jira.set_planning_fields",
+        "and only those",
+        "on the unit the tool reports",
+        "only 1, 2, 3, 5 or 8",
+        "begins Agent's reading:",
+        "ONE proposal with one jira.set_planning_fields action per issue",
+        "never more issues than the tool returned",
+        "cannot_write",
+        # the old sweep is still there
+        "past-due or missing due dates",
+        "say so plainly",
+    ):
         assert phrase in text, phrase
     # The params are JSON and still parse with the instructions intact.
-    m = re.search(r"\('jira-hygiene'.*?'task\.create',\s*'(\{.*?\})',\s*'seed:heartbeat'\)",
-                  SCHEMA, re.DOTALL)
+    m = re.search(
+        r"\('jira-hygiene'.*?'task\.create',\s*'(\{.*?\})',\s*'seed:heartbeat'\)", SCHEMA, re.DOTALL
+    )
     params = json.loads(m.group(1).replace("''", "'"))
     assert params["instructions"] == text and params["agent_id"] == "jira-expert"
 
@@ -595,25 +731,30 @@ async def test_a_fresh_database_gets_the_checklist_and_an_existing_row_is_kept()
     conn = await repo._conn()
     try:
         row = await conn.fetchrow(
-            "select action_params from heartbeat_schedule where id = 'jira-hygiene'")
+            "select action_params from heartbeat_schedule where id = 'jira-hygiene'"
+        )
         params = row["action_params"]
         params = json.loads(params) if isinstance(params, str) else params
         # The suite's database is built from schema.sql: a fresh database.
         assert params["instructions"] == _seeded_hygiene()
         original = row["action_params"]
         mine = {**params, "instructions": "The operator's own sweep."}
-        await conn.execute("update heartbeat_schedule set action_params = $1::jsonb "
-                           "where id = 'jira-hygiene'", json.dumps(mine))
+        await conn.execute(
+            "update heartbeat_schedule set action_params = $1::jsonb where id = 'jira-hygiene'",
+            json.dumps(mine),
+        )
         try:
-            await conn.execute(seed_sql)          # what the updater re-runs at release
+            await conn.execute(seed_sql)  # what the updater re-runs at release
             kept = await conn.fetchval(
                 "select action_params->>'instructions' from heartbeat_schedule "
-                "where id = 'jira-hygiene'")
+                "where id = 'jira-hygiene'"
+            )
             assert kept == "The operator's own sweep."
         finally:
-            await conn.execute("update heartbeat_schedule set action_params = $1::jsonb "
-                               "where id = 'jira-hygiene'",
-                               original if isinstance(original, str) else json.dumps(original))
+            await conn.execute(
+                "update heartbeat_schedule set action_params = $1::jsonb where id = 'jira-hygiene'",
+                original if isinstance(original, str) else json.dumps(original),
+            )
     finally:
         await conn.close()
 
@@ -623,13 +764,17 @@ async def test_a_fresh_database_gets_the_checklist_and_an_existing_row_is_kept()
 
 def test_the_evening_framing_enriches_unscored_issues():
     text = hb_actions._EA_FRAMING["digest"]
-    for phrase in (("propose its value and lateness loss from the stakes the conversation "
-                   "gives you"), "ASK the operator for them", "never invent stakes or numbers",
-                   "A due date the operator settles may be set the same way",
-                   "ONE `jira.set_planning_fields` proposal",
-                   "one action per issue, separate from the `plan.record_review` proposal",
-                   "after you conclude", "It changes no other field of an issue",
-                   "goes to the agent that owns the tracker, as a task"):
+    for phrase in (
+        ("propose its value and lateness loss from the stakes the conversation gives you"),
+        "ASK the operator for them",
+        "never invent stakes or numbers",
+        "A due date the operator settles may be set the same way",
+        "ONE `jira.set_planning_fields` proposal",
+        "one action per issue, separate from the `plan.record_review` proposal",
+        "after you conclude",
+        "It changes no other field of an issue",
+        "goes to the agent that owns the tracker, as a task",
+    ):
         assert phrase in text, phrase
 
 
@@ -637,12 +782,16 @@ def test_the_charter_makes_the_planning_fields_a_tracker_exception():
     # ONE exception until 2026-11-20; a comment on an issue is the second
     # (DL-222, `tests/test_tracker_vs_graph.py`).
     charter = ea_profile.CHARTER
-    for phrase in (("Every other change to the tracker goes to that teammate as a task too, "
-                   "with TWO exceptions: an issue's PLANNING FIELDS"),
-                   "jira.set_planning_fields",
-                   "AN UNSCORED ISSUE IS SCORED FROM ITS STAKES",
-                   "ask for the stakes where there are none: never invent them",
-                   "ONE planning-fields proposal, one action per issue"):
+    for phrase in (
+        (
+            "Every other change to the tracker goes to that teammate as a task too, "
+            "with TWO exceptions: an issue's PLANNING FIELDS"
+        ),
+        "jira.set_planning_fields",
+        "AN UNSCORED ISSUE IS SCORED FROM ITS STAKES",
+        "ask for the stakes where there are none: never invent them",
+        "ONE planning-fields proposal, one action per issue",
+    ):
         assert phrase in charter, phrase
     from central_command.gateway import policy
 

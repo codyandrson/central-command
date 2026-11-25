@@ -25,13 +25,18 @@ from tests.fake_world import fake_world
 
 _CORE = {
     "intent": "Record the platform decision.",
-    "actions": [{
-        "capability": "graph.add_episode",
-        "arguments": {"name": "n", "episode_body": "b", "source_description": "s"},
-        "target_ref": {"system": "graphiti", "id": "central_command",
-                       "read_version": "unknown"},
-        "reversibility": "reversible",
-    }],
+    "actions": [
+        {
+            "capability": "graph.add_episode",
+            "arguments": {"name": "n", "episode_body": "b", "source_description": "s"},
+            "target_ref": {
+                "system": "graphiti",
+                "id": "central_command",
+                "read_version": "unknown",
+            },
+            "reversibility": "reversible",
+        }
+    ],
     "evidence": [],
     "expected_effect": "the graph records it",
 }
@@ -49,7 +54,8 @@ def test_an_agent_authored_draft_without_confidence_is_handed_back():
     (problem,) = validate_proposal_shape(p)
     assert problem.startswith("confidence:")
     stated = Proposal.model_validate(
-        {**_CORE, "confidence": {"level": "medium", "rationale": "partly stated"}})
+        {**_CORE, "confidence": {"level": "medium", "rationale": "partly stated"}}
+    )
     assert validate_proposal_shape(stated) == []
 
 
@@ -84,8 +90,7 @@ def test_proposal_from_call_tolerates_confidence_nested():
     """The test model's shape: a single-model tool param, nested."""
     call = ToolCallPart(
         tool_name="propose_action",
-        args={"proposal": {**_CORE,
-                           "confidence": {"level": "low", "rationale": "inferred"}}},
+        args={"proposal": {**_CORE, "confidence": {"level": "low", "rationale": "inferred"}}},
     )
     assert proposal_from_call(call).confidence.level.value == "low"
 
@@ -106,8 +111,7 @@ def test_proposal_from_call_tolerates_a_json_string_of_the_flattened_shape():
 
     call = ToolCallPart(
         tool_name="propose_action",
-        args=json.dumps({**_CORE,
-                         "confidence": {"level": "medium", "rationale": "partly"}}),
+        args=json.dumps({**_CORE, "confidence": {"level": "medium", "rationale": "partly"}}),
     )
     assert proposal_from_call(call).confidence.level.value == "medium"
 
@@ -116,24 +120,34 @@ def test_proposal_from_call_tolerates_a_json_string_of_the_flattened_shape():
 
 
 def _p(pid: str, level: str | None) -> dict:
-    return {"id": pid, "intent": pid,
-            "confidence": {"level": level, "rationale": "r"} if level else None}
+    return {
+        "id": pid,
+        "intent": pid,
+        "confidence": {"level": level, "rationale": "r"} if level else None,
+    }
 
 
 def _d(pid: str, verdict: str, eid: int) -> dict:
-    return {"id": eid, "ref_id": pid, "kind": "proposal.decided",
-            "payload": {"verdict": verdict}}
+    return {"id": eid, "ref_id": pid, "kind": "proposal.decided", "payload": {"verdict": verdict}}
 
 
 def test_confidence_pairs_with_the_operators_verdict():
     report = pair_confidence(
         [_p("a", "high"), _p("b", "high"), _p("c", "low"), _p("d", "low")],
-        [_d("a", "approved", 1), _d("b", "rejected", 2),
-         _d("c", "approved", 3), _d("d", "rejected", 4)],
+        [
+            _d("a", "approved", 1),
+            _d("b", "rejected", 2),
+            _d("c", "approved", 3),
+            _d("d", "rejected", 4),
+        ],
     )
     assert report["total_paired"] == 4
-    assert report["by_level"]["high"] == {"approved": 1, "rejected": 1,
-                                          "total": 2, "approval_rate": 0.5}
+    assert report["by_level"]["high"] == {
+        "approved": 1,
+        "rejected": 1,
+        "total": 2,
+        "approval_rate": 0.5,
+    }
     assert [x["proposal_id"] for x in report["overconfident"]] == ["b"]
     assert [x["proposal_id"] for x in report["under_confident"]] == ["c"]
 
@@ -173,11 +187,17 @@ async def test_proposal_detail_carries_confidence_to_the_cockpit(monkeypatch):
 
     monkeypatch.setattr(settings, "test_model", True)
     row = {
-        "id": "prop_x", "session_id": "sess_x", "agent_id": "knowledge-steward",
-        "intent": "Record it.", "status": "AWAITING_HUMAN",
-        "actions": _CORE["actions"], "evidence": [],
-        "expected_effect": "recorded", "provenance": None,
-        "created_at": None, "decided_at": None,
+        "id": "prop_x",
+        "session_id": "sess_x",
+        "agent_id": "knowledge-steward",
+        "intent": "Record it.",
+        "status": "AWAITING_HUMAN",
+        "actions": _CORE["actions"],
+        "evidence": [],
+        "expected_effect": "recorded",
+        "provenance": None,
+        "created_at": None,
+        "decided_at": None,
         "confidence": {"level": "medium", "rationale": "one relation inferred"},
     }
     monkeypatch.setattr(repo, "load_proposal", lambda pid: _async(row))
@@ -185,8 +205,7 @@ async def test_proposal_detail_carries_confidence_to_the_cockpit(monkeypatch):
     monkeypatch.setattr(repo, "work_items_folded_into", lambda pid: _async([]))
 
     detail = await routes.get_proposal("prop_x")
-    assert detail["confidence"] == {"level": "medium",
-                                    "rationale": "one relation inferred"}
+    assert detail["confidence"] == {"level": "medium", "rationale": "one relation inferred"}
 
 
 async def test_work_items_carry_kind_to_the_reviewer_pane(monkeypatch):
@@ -195,15 +214,34 @@ async def test_work_items_carry_kind_to_the_reviewer_pane(monkeypatch):
     from central_command.api import routes
 
     monkeypatch.setattr(settings, "test_model", True)
-    item = {"id": "wi_1", "message_id": "<cc-doc-1@central_command.local>",
-            "subject": "A doc", "payload": {"text": "body"}, "state": "PROCESSED",
-            "kind": "document"}
-    monkeypatch.setattr(repo, "load_proposal", lambda pid: _async({
-        "id": "prop_y", "session_id": "sess_y", "agent_id": "knowledge-steward",
-        "intent": "i", "status": "EXECUTED", "actions": [], "evidence": [],
-        "expected_effect": "", "provenance": None, "created_at": None,
-        "decided_at": None, "confidence": None,
-    }))
+    item = {
+        "id": "wi_1",
+        "message_id": "<cc-doc-1@central_command.local>",
+        "subject": "A doc",
+        "payload": {"text": "body"},
+        "state": "PROCESSED",
+        "kind": "document",
+    }
+    monkeypatch.setattr(
+        repo,
+        "load_proposal",
+        lambda pid: _async(
+            {
+                "id": "prop_y",
+                "session_id": "sess_y",
+                "agent_id": "knowledge-steward",
+                "intent": "i",
+                "status": "EXECUTED",
+                "actions": [],
+                "evidence": [],
+                "expected_effect": "",
+                "provenance": None,
+                "created_at": None,
+                "decided_at": None,
+                "confidence": None,
+            }
+        ),
+    )
     monkeypatch.setattr(repo, "work_items_for_session", lambda sid: _async([item]))
     monkeypatch.setattr(repo, "work_items_folded_into", lambda pid: _async([]))
 
@@ -258,5 +296,7 @@ def test_proposal_from_call_tolerates_a_stringified_nested_proposal():
     body = {**_CORE, "confidence": {"level": "low", "rationale": "inferred"}}
     nested = ToolCallPart(tool_name="propose_action", args={"proposal": json.dumps(body)})
     assert proposal_from_call(nested).confidence.level.value == "low"
-    whole = ToolCallPart(tool_name="propose_action", args=json.dumps({"proposal": json.dumps(body)}))
+    whole = ToolCallPart(
+        tool_name="propose_action", args=json.dumps({"proposal": json.dumps(body)})
+    )
     assert proposal_from_call(whole).confidence.level.value == "low"

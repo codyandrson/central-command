@@ -38,9 +38,7 @@ def _text_model(text: str):
     from pydantic_ai.messages import ModelResponse, TextPart
     from pydantic_ai.models.function import FunctionModel
 
-    return FunctionModel(
-        lambda messages, info: ModelResponse(parts=[TextPart(content=text)])
-    )
+    return FunctionModel(lambda messages, info: ModelResponse(parts=[TextPart(content=text)]))
 
 
 async def _settle(cond, timeout: float = 5.0):
@@ -55,27 +53,30 @@ async def _park_taskless_orchestration() -> str:
     """An AWAITING_AGENTS orchestration whose state cannot name its task."""
     sid = "sess_" + uuid.uuid4().hex[:12]
     await repo.create_running_session(sid, "orchestrator")
-    await repo.park_session_awaiting_agents(
-        sid, {"messages": [], "orch": {"pending": {}}})
+    await repo.park_session_awaiting_agents(sid, {"messages": [], "orch": {"pending": {}}})
     return sid
 
 
 async def _events(kind: str, ref_id: str) -> list[dict]:
-    return [e for e in await repo.list_events_of_kinds([kind])
-            if e["ref_id"] == ref_id]
+    return [e for e in await repo.list_events_of_kinds([kind]) if e["ref_id"] == ref_id]
 
 
-async def test_a_task_less_row_is_failed_loudly_and_the_good_row_still_resumes(
-        monkeypatch):
-    monkeypatch.setattr(
-        routes, "resolve_model", aresolve(lambda *a, **k: _text_model("Done.")))
+async def test_a_task_less_row_is_failed_loudly_and_the_good_row_still_resumes(monkeypatch):
+    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _text_model("Done.")))
     # The good row: a real project parked on its plan review, then approved.
     project = await routes.create_and_run_task(
-        "Demo project: review TASKS-12.", "Demo project", "orchestrator",
-        actor="operator", background=False)
+        "Demo project: review TASKS-12.",
+        "Demo project",
+        "orchestrator",
+        actor="operator",
+        background=False,
+    )
     good = project["session_id"]
-    (plan,) = [i for i in await repo.list_operator_items("OPEN")
-               if i["session_id"] == good and i["kind"] == "plan_review"]
+    (plan,) = [
+        i
+        for i in await repo.list_operator_items("OPEN")
+        if i["session_id"] == good and i["kind"] == "plan_review"
+    ]
     await repo.answer_operator_item(plan["id"], "", "approved")
     bad = await _park_taskless_orchestration()
 
@@ -98,6 +99,7 @@ async def test_a_task_less_row_is_failed_loudly_and_the_good_row_still_resumes(
 
     async def done():
         return (await repo.get_task(project["task_id"]))["status"] == "DONE"
+
     await _settle(done)
 
     # A second sweep finds nothing left to say about the failed row.
@@ -106,8 +108,7 @@ async def test_a_task_less_row_is_failed_loudly_and_the_good_row_still_resumes(
     assert len(await _events("session.resume_failed", bad)) == 1
 
 
-async def test_a_raising_unit_in_any_worklist_is_recorded_and_the_rest_run(
-        monkeypatch):
+async def test_a_raising_unit_in_any_worklist_is_recorded_and_the_rest_run(monkeypatch):
     ids = ["sess_" + uuid.uuid4().hex[:12] for _ in range(3)]
     monkeypatch.setattr(repo, "sessions_awaiting_agents", _no_sessions)
     monkeypatch.setattr(repo, "sessions_awaiting_resume", _sessions(ids))
@@ -126,8 +127,7 @@ async def test_a_raising_unit_in_any_worklist_is_recorded_and_the_rest_run(
     assert driven == ids[1:]
     assert [s for s in ids[1:] if s in out["resumed"]] == ids[1:]
     (err,) = [e for e in out["errors"] if e["id"] == ids[0]]
-    assert err == {"unit": "session", "id": ids[0],
-                   "error": "the first row is unreadable"}
+    assert err == {"unit": "session", "id": ids[0], "error": "the first row is unreadable"}
     (rec,) = await _events("session.resume_failed", ids[0])
     assert rec["payload"]["after"] == "sweep"
 
@@ -155,4 +155,5 @@ async def _no_sessions() -> list[str]:
 def _sessions(ids: list[str]):
     async def _list(*a, **k) -> list[str]:
         return list(ids)
+
     return _list

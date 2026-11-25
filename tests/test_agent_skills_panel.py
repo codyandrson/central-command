@@ -44,9 +44,7 @@ async def _held(skill_id: str) -> dict:
 @needs_pg
 async def test_has_guidance_is_true_with_a_current_guidance_document(clean_skills):
     await repo.create_skill("cc-test-panel-full", "Full", "Has guidance")
-    await repo.add_skill_doc(
-        "cc-test-panel-full", "guidance", "guidance", "How we run it", "body"
-    )
+    await repo.add_skill_doc("cc-test-panel-full", "guidance", "guidance", "How we run it", "body")
     await repo.grant_skill(AGENT, "cc-test-panel-full")
 
     assert (await _held("cc-test-panel-full"))["has_guidance"] is True
@@ -107,9 +105,7 @@ async def test_panel_flag_agrees_with_what_the_runtime_delivers(clean_skills):
     from central_command.runtime import skills as skills_mod
 
     await repo.create_skill("cc-test-panel-full", "Full", "Has guidance")
-    await repo.add_skill_doc(
-        "cc-test-panel-full", "guidance", "guidance", "How we run it", "body"
-    )
+    await repo.add_skill_doc("cc-test-panel-full", "guidance", "guidance", "How we run it", "body")
     await repo.create_skill("cc-test-panel-bare", "Bare", "No guidance")
     await repo.add_skill_doc(
         "cc-test-panel-bare", "keys", "reference", "Key management", "# Keys\nbody"
@@ -154,8 +150,15 @@ async def test_detail_carries_skill_grants_and_an_active_only_catalog(clean_skil
     assert "cc-test-panel-full" in held
 
     row = next(s for s in detail["skills"] if s["skill_id"] == "cc-test-panel-full")
-    for field in ("title", "summary", "status", "has_guidance",
-                  "reference_count", "granted_by", "granted_at"):
+    for field in (
+        "title",
+        "summary",
+        "status",
+        "has_guidance",
+        "reference_count",
+        "granted_by",
+        "granted_at",
+    ):
         assert field in row, f"the panel renders {field!r} and the payload lacks it"
 
     catalog_ids = {s["id"] for s in detail["skill_catalog"]}
@@ -177,9 +180,7 @@ async def test_detail_keeps_revoked_skill_grants_on_the_record(clean_skills):
     assert await repo.revoke_skill(AGENT, "cc-test-panel-gone", "not needed")
 
     detail = await _agents_detail(AGENT)
-    row = next(
-        (s for s in detail["skills"] if s["skill_id"] == "cc-test-panel-gone"), None
-    )
+    row = next((s for s in detail["skills"] if s["skill_id"] == "cc-test-panel-gone"), None)
     assert row is not None, "a revoked grant vanished from the payload"
     assert row["revoked_at"] is not None
     assert row["revoked_reason"] == "not needed"
@@ -194,9 +195,7 @@ async def test_detail_shows_a_retired_skill_the_agent_still_holds(clean_skills):
     from central_command.runtime import skills as skills_mod
 
     await repo.create_skill("cc-test-panel-old", "Old", "Superseded subject")
-    await repo.add_skill_doc(
-        "cc-test-panel-old", "guidance", "guidance", "G", "body"
-    )
+    await repo.add_skill_doc("cc-test-panel-old", "guidance", "guidance", "G", "body")
     await repo.grant_skill(AGENT, "cc-test-panel-old")
     assert await repo.retire_skill("cc-test-panel-old", "superseded")
 
@@ -231,9 +230,7 @@ async def test_grant_from_the_agent_page_is_the_same_write_the_skills_page_makes
     noop = lambda *a, **k: None
 
     await repo.create_skill("cc-test-panel-full", "Full", "Has guidance")
-    await repo.add_skill_doc(
-        "cc-test-panel-full", "guidance", "guidance", "G", "body"
-    )
+    await repo.add_skill_doc("cc-test-panel-full", "guidance", "guidance", "G", "body")
 
     # The event log is append-only and never cleaned; scope every read to the
     # boundary, the dev database is shared.
@@ -256,9 +253,9 @@ async def test_grant_from_the_agent_page_is_the_same_write_the_skills_page_makes
 
     granted = await repo.list_events_of_kinds(["skill.granted"], since_id=since_id)
     assert [
-        e for e in granted
-        if e["ref_id"] == AGENT
-        and e["payload"].get("skill_id") == "cc-test-panel-full"
+        e
+        for e in granted
+        if e["ref_id"] == AGENT and e["payload"].get("skill_id") == "cc-test-panel-full"
     ], "granting from the agent page emitted no skill.granted"
 
     # …and revoking from here unwinds it on both sides.
@@ -276,15 +273,13 @@ async def test_grant_from_the_agent_page_is_the_same_write_the_skills_page_makes
     assert row["holder_count"] == 0
 
     detail = await nerve_gateway._agents_detail(AGENT)
-    revoked_row = next(
-        s for s in detail["skills"] if s["skill_id"] == "cc-test-panel-full"
-    )
+    revoked_row = next(s for s in detail["skills"] if s["skill_id"] == "cc-test-panel-full")
     assert revoked_row["revoked_at"] is not None
     assert revoked_row["revoked_reason"] == "done"
 
     revoked = await repo.list_events_of_kinds(["skill.revoked"], since_id=before_revoke)
     assert [
-        e for e in revoked
-        if e["ref_id"] == AGENT
-        and e["payload"].get("skill_id") == "cc-test-panel-full"
+        e
+        for e in revoked
+        if e["ref_id"] == AGENT and e["payload"].get("skill_id") == "cc-test-panel-full"
     ], "revoking from the agent page emitted no skill.revoked"

@@ -122,15 +122,24 @@ def _model() -> FunctionModel:
         ret = _graph_return(messages)
         if ret is not None:
             return ModelResponse(parts=[TextPart(content=f"Answer: {ret.content}")])
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="search_knowledge_graph",
-                         args={"query": "contract renewal"},
-                         tool_call_id="call_graph"),
-            ToolCallPart(tool_name="declare_gap",
-                         args={"kind": "missing_tool", "subject": "renewals",
-                               "need": "a renewals calendar"},
-                         tool_call_id="call_sibling"),
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="search_knowledge_graph",
+                    args={"query": "contract renewal"},
+                    tool_call_id="call_graph",
+                ),
+                ToolCallPart(
+                    tool_name="declare_gap",
+                    args={
+                        "kind": "missing_tool",
+                        "subject": "renewals",
+                        "need": "a renewals calendar",
+                    },
+                    tool_call_id="call_sibling",
+                ),
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -159,8 +168,7 @@ class _Probes:
 
 async def _task(title: str = "Renewal check") -> dict:
     task_id = "task_" + uuid.uuid4().hex[:12]
-    await repo.create_task(task_id, title, "When is the contract renewal due?",
-                           "jira-expert")
+    await repo.create_task(task_id, title, "When is the contract renewal due?", "jira-expert")
     return await repo.get_task(task_id)
 
 
@@ -180,8 +188,9 @@ async def _events(ref_id: str, kind: str) -> list[dict]:
 
 def test_dependency_down_is_transient_by_type():
     """One classifier: the typed error is the verdict, whatever its text."""
-    down = DependencyDown(("graph", "embedder"), "search_knowledge_graph",
-                          ValueError("no marker in this text"))
+    down = DependencyDown(
+        ("graph", "embedder"), "search_knowledge_graph", ValueError("no marker in this text")
+    )
     assert classify_failure(down) == TRANSIENT
     assert down.dependencies == ("graph", "embedder")
 
@@ -247,7 +256,8 @@ async def test_run_read_by_name_re_validates_the_stored_arguments(graph):
 
     deps = TriageDeps(agent_id="jira-expert", park_reads=True)
     out = await tools.run_read_by_name(
-        "search_knowledge_graph", {"query": "contract renewal"}, deps)
+        "search_knowledge_graph", {"query": "contract renewal"}, deps
+    )
     assert FACT in out
     with pytest.raises(Exception):  # noqa: B017 — kept as written; any refusal of the bad argument
         await tools.run_read_by_name("search_knowledge_graph", {"querry": "x"}, deps)
@@ -255,8 +265,7 @@ async def test_run_read_by_name_re_validates_the_stored_arguments(graph):
         await tools.run_read_by_name("propose_action", {}, deps)
     graph.down = True
     with pytest.raises(DependencyDown):
-        await tools.run_read_by_name(
-            "search_knowledge_graph", {"query": "contract renewal"}, deps)
+        await tools.run_read_by_name("search_knowledge_graph", {"query": "contract renewal"}, deps)
 
 
 # ── the task run parks mid-turn ──────────────────────────────────────────────
@@ -289,8 +298,13 @@ async def test_a_down_graph_search_parks_the_task_run_mid_turn(monkeypatch, grap
     # The history is persisted up to the tool-call request, the sibling's
     # result with it — and nothing told the agent to proceed without the read.
     messages = durable.load_messages(rs)
-    sibling = [p for m in messages if isinstance(m, ModelRequest) for p in m.parts
-               if isinstance(p, ToolReturnPart) and p.tool_call_id == "call_sibling"]
+    sibling = [
+        p
+        for m in messages
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart) and p.tool_call_id == "call_sibling"
+    ]
     assert len(sibling) == 1
     assert [c.tool_call_id for c in durable.unanswered_calls(messages)] == ["call_graph"]
     assert DEGRADED not in json.dumps(rs["messages"])
@@ -341,9 +355,7 @@ async def test_the_sweep_skips_a_read_park_while_the_llm_is_down(monkeypatch, gr
 
 
 @needs_pg
-async def test_with_the_probes_up_the_read_resumes_in_place_and_the_task_lands(
-    monkeypatch, graph
-):
+async def test_with_the_probes_up_the_read_resumes_in_place_and_the_task_lands(monkeypatch, graph):
     task, out = await _parked_task_run(monkeypatch)
     session_id = out["session_id"]
 
@@ -365,9 +377,13 @@ async def test_with_the_probes_up_the_read_resumes_in_place_and_the_task_lands(
     # return for the parked call id.
     assert await repo.session_status(session_id) == "DONE"
     rs = await repo.get_session_run_state(session_id)
-    ret = [p for m in durable.load_messages(rs) if isinstance(m, ModelRequest)
-           for p in m.parts if isinstance(p, ToolReturnPart)
-           and p.tool_call_id == "call_graph"]
+    ret = [
+        p
+        for m in durable.load_messages(rs)
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart) and p.tool_call_id == "call_graph"
+    ]
     assert len(ret) == 1 and FACT in str(ret[0].content)
     assert DEGRADED not in json.dumps(rs["messages"])
 
@@ -385,9 +401,7 @@ async def test_with_the_probes_up_the_read_resumes_in_place_and_the_task_lands(
 
 
 @needs_pg
-async def test_a_read_still_down_on_re_execution_re_parks_with_one_more_attempt(
-    monkeypatch, graph
-):
+async def test_a_read_still_down_on_re_execution_re_parks_with_one_more_attempt(monkeypatch, graph):
     """The probe said up and the read still failed DOWN: back to
     AWAITING_RESUME with `attempts + 1`, the task untouched. No limit."""
     task, out = await _parked_task_run(monkeypatch)
@@ -423,9 +437,7 @@ async def clean_ledger():
     async def wipe():
         conn = await repo._conn()
         try:
-            await conn.execute(
-                "delete from work_item where message_id like '<cc-doctrine-%'"
-            )
+            await conn.execute("delete from work_item where message_id like '<cc-doctrine-%'")
         finally:
             await conn.close()
 
@@ -441,9 +453,15 @@ async def test_an_ingest_runs_down_read_re_raises_and_the_item_releases(
     from central_command.ingest import dispatcher, ledger
 
     def _respond(messages, info) -> ModelResponse:
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="search_knowledge_graph", args={"query": "sender history"},
-            tool_call_id="call_graph")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="search_knowledge_graph",
+                    args={"query": "sender history"},
+                    tool_call_id="call_graph",
+                )
+            ]
+        )
 
     await ledger.enroll_email(
         "Message-ID: <cc-doctrine-1@example.com>\n"
@@ -458,8 +476,9 @@ async def test_an_ingest_runs_down_read_re_raises_and_the_item_releases(
     out = await dispatcher.process_claimed(item, model=FunctionModel(_respond))
 
     assert out["ok"] is False and out["transient"] is True
-    released = [e for e in await repo.list_events(ref_id=item["id"])
-                if e["kind"] == "work.released"]
+    released = [
+        e for e in await repo.list_events(ref_id=item["id"]) if e["kind"] == "work.released"
+    ]
     assert released and released[-1]["payload"]["transient"] is True
     # The ORIGINAL Neo4j failure reached the dispatcher, not a wrapper.
     assert "Couldn't connect to graph:7687" in released[-1]["payload"]["error"]
@@ -503,8 +522,9 @@ def _outage() -> Exception:
 
 def _facade_outage() -> Exception:
     try:
-        raise email_facade.EmailFacadeError("email façade list unreachable at x: ") \
-            from httpx.ConnectTimeout("")
+        raise email_facade.EmailFacadeError(
+            "email façade list unreachable at x: "
+        ) from httpx.ConnectTimeout("")
     except email_facade.EmailFacadeError as e:
         return e
 
@@ -590,22 +610,35 @@ def _sandbox(mp, exc):
 
 
 _CASES = {
-    "graph": (tools.search_knowledge_graph, ("contract renewal",), _graph, _outage,
-              ValueError, ["graph", "embedder"]),
-    "jira": (tools.jira_get_issue, ("TASKS-1",), _jira, _outage,
-             ValueError, ["jira"]),
-    "confluence": (tools.confluence_get_page, ("1001",), _confluence, _outage,
-                   ValueError, ["confluence"]),
-    "forge": (tools.forge_list_instances, (), _forge, _outage,
-              ValueError, ["forge"]),
-    "calendar": (tools.read_calendar, (1,), _calendar, _outage,
-                 ValueError, ["calendar"]),
-    "n8n": (tools.mail_search, ("from:jane.doe@example.com",), _mail, _facade_outage,
-            _facade_no, ["n8n"]),
-    "litellm": (tools.litellm_list_models, (), _litellm, _outage,
-                ValueError, ["litellm"]),
-    "sandbox": (tools.sandbox_exec, ("ls",), _sandbox, _outage,
-                ValueError, ["sandbox"]),
+    "graph": (
+        tools.search_knowledge_graph,
+        ("contract renewal",),
+        _graph,
+        _outage,
+        ValueError,
+        ["graph", "embedder"],
+    ),
+    "jira": (tools.jira_get_issue, ("TASKS-1",), _jira, _outage, ValueError, ["jira"]),
+    "confluence": (
+        tools.confluence_get_page,
+        ("1001",),
+        _confluence,
+        _outage,
+        ValueError,
+        ["confluence"],
+    ),
+    "forge": (tools.forge_list_instances, (), _forge, _outage, ValueError, ["forge"]),
+    "calendar": (tools.read_calendar, (1,), _calendar, _outage, ValueError, ["calendar"]),
+    "n8n": (
+        tools.mail_search,
+        ("from:jane.doe@example.com",),
+        _mail,
+        _facade_outage,
+        _facade_no,
+        ["n8n"],
+    ),
+    "litellm": (tools.litellm_list_models, (), _litellm, _outage, ValueError, ["litellm"]),
+    "sandbox": (tools.sandbox_exec, ("ls",), _sandbox, _outage, ValueError, ["sandbox"]),
 }
 
 
@@ -648,21 +681,28 @@ async def test_a_calendar_that_is_not_configured_stays_text(monkeypatch):
     from central_command.reports import ea_calendar
 
     out = await tools.read_calendar(_park_ctx(), 0)
-    assert out == (f"availability UNKNOWN for {ea_calendar.day_name(0)}: not configured; "
-                   "do not treat it as free")
+    assert out == (
+        f"availability UNKNOWN for {ea_calendar.day_name(0)}: not configured; "
+        "do not treat it as free"
+    )
 
 
-@pytest.mark.parametrize("failure", [
-    httpx.ConnectTimeout(""),  # no marker in its text: only the cause chain says so
-    httpx.ConnectError("All connection attempts failed"),
-])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.ConnectTimeout(""),  # no marker in its text: only the cause chain says so
+        httpx.ConnectError("All connection attempts failed"),
+    ],
+)
 async def test_a_calendar_outage_through_the_real_read_parks_and_never_answers(
-    monkeypatch, failure,
+    monkeypatch,
+    failure,
 ):
     """Through `ea_calendar.day` and the façade, not a patched `day`: the report
     answers a NO itself now, and an outage must not be taken for one."""
-    monkeypatch.setattr(settings, "calendar_facade_url",
-                        "http://n8n.example.com:5678/webhook/cc-calendar-facade")
+    monkeypatch.setattr(
+        settings, "calendar_facade_url", "http://n8n.example.com:5678/webhook/cc-calendar-facade"
+    )
     monkeypatch.setattr(settings, "calendar_facade_token", "token")
 
     async def down(self, *a, **k):
@@ -715,8 +755,9 @@ def test_every_read_tool_reachable_from_a_pack_has_a_dependency_entry():
     """The map cannot fall behind the tools: every non-propose tool a pack
     offers is a key of TOOL_DEPENDENCY or a named non-read, and so is every
     tool the capability registry's read rows name as their holder."""
-    pack_tools = {t for p in packs_mod.PACKS.values() for t in p.tool_names
-                  if not t.startswith("propose_")}
+    pack_tools = {
+        t for p in packs_mod.PACKS.values() for t in p.tool_names if not t.startswith("propose_")
+    }
     missing = sorted(pack_tools - set(TOOL_DEPENDENCY) - NOT_READS)
     assert not missing, f"read tools with no TOOL_DEPENDENCY entry: {missing}"
 
@@ -765,10 +806,12 @@ async def test_two_pausing_reads_in_one_turn_tell_the_second_to_call_again():
     received is about the other call"."""
     messages = [
         ModelRequest(parts=[]),
-        ModelResponse(parts=[
-            ToolCallPart(tool_name="search_knowledge_graph", args={}, tool_call_id="a"),
-            ToolCallPart(tool_name="jira_get_issue", args={}, tool_call_id="b"),
-        ]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="search_knowledge_graph", args={}, tool_call_id="a"),
+                ToolCallPart(tool_name="jira_get_issue", args={}, tool_call_id="b"),
+            ]
+        ),
     ]
     results = await durable.deferred_results(messages, "a", "the result")
     assert results.calls["a"] == "the result"
@@ -795,11 +838,15 @@ def _asker_model() -> FunctionModel:
                 for p in m.parts:
                     if isinstance(p, ToolReturnPart) and p.tool_name == "consult_agent":
                         return ModelResponse(parts=[TextPart(content=f"Advice: {p.content}")])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="consult_agent",
-            args={"agent_id": "jira-expert", "question": "When is the renewal due?"},
-            tool_call_id="call_consult",
-        )])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="consult_agent",
+                    args={"agent_id": "jira-expert", "question": "When is the renewal due?"},
+                    tool_call_id="call_consult",
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -809,17 +856,21 @@ def _specialist_model() -> FunctionModel:
         ret = _graph_return(messages)
         if ret is not None:
             return ModelResponse(parts=[TextPart(content=f"Specialist: {ret.content}")])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="search_knowledge_graph", args={"query": "renewal"},
-            tool_call_id="call_inner")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="search_knowledge_graph",
+                    args={"query": "renewal"},
+                    tool_call_id="call_inner",
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
 
 @needs_pg
-async def test_a_consult_whose_specialist_hits_a_graph_outage_parks_the_asker(
-    monkeypatch, graph
-):
+async def test_a_consult_whose_specialist_hits_a_graph_outage_parks_the_asker(monkeypatch, graph):
     real = consult_mod.consult
 
     async def with_specialist_model(*a, **kw):
@@ -828,8 +879,9 @@ async def test_a_consult_whose_specialist_hits_a_graph_outage_parks_the_asker(
     monkeypatch.setattr(consult_mod, "consult", with_specialist_model)
     monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _asker_model()))
     task_id = "task_" + uuid.uuid4().hex[:12]
-    await repo.create_task(task_id, "Ask the Jira specialist", "Consult jira-expert.",
-                           "litellm-manager")
+    await repo.create_task(
+        task_id, "Ask the Jira specialist", "Consult jira-expert.", "litellm-manager"
+    )
 
     out = await routes._run_assigned_task(await repo.get_task(task_id))
 
@@ -839,8 +891,7 @@ async def test_a_consult_whose_specialist_hits_a_graph_outage_parks_the_asker(
     assert pending["kind"] == "read" and pending["tool"] == "consult_agent"
     assert pending["tool_call_id"] == "call_consult"
     assert pending["dependencies"] == ["graph", "embedder"]
-    assert pending["args"] == {"agent_id": "jira-expert",
-                               "question": "When is the renewal due?"}
+    assert pending["args"] == {"agent_id": "jira-expert", "question": "When is the renewal due?"}
     assert (await repo.get_task(task_id))["status"] == "IN_PROGRESS"
     assert await repo.session_status(session_id) == "AWAITING_RESUME"
 
@@ -875,8 +926,11 @@ async def test_a_consult_whose_specialist_hits_a_graph_outage_parks_the_asker(
 
 PREVIEW = {
     "episode": {"uuid": "ep-1", "name": "wrong renewal date", "group_id": "central_command"},
-    "facts": [{"uuid": "f-1"}], "entities": [], "collateral_facts": [],
-    "provenance_facts": [], "digest": "d1g3st",
+    "facts": [{"uuid": "f-1"}],
+    "entities": [],
+    "collateral_facts": [],
+    "provenance_facts": [],
+    "digest": "d1g3st",
 }
 
 
@@ -934,18 +988,23 @@ def _deleting_model() -> FunctionModel:
         got = _retry_or_return(messages, "call_del")
         if got is not None:
             return ModelResponse(parts=[TextPart(content=f"Answer: {got.content}")])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="propose_delete_episode",
-            args={"episode_uuid": "ep-1", "rationale": "the renewal date is wrong"},
-            tool_call_id="call_del",
-        )])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="propose_delete_episode",
+                    args={"episode_uuid": "ep-1", "rationale": "the renewal date is wrong"},
+                    tool_call_id="call_del",
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
 
 async def _session_proposals(session_id: str) -> list[dict]:
-    return [p for p in await repo.list_proposals_for("jira-expert")
-            if p["session_id"] == session_id]
+    return [
+        p for p in await repo.list_proposals_for("jira-expert") if p["session_id"] == session_id
+    ]
 
 
 async def _parked_deletion_task(monkeypatch) -> tuple[dict, str]:
@@ -962,11 +1021,11 @@ async def _assert_parked_on_the_graph(session_id: str, after: str) -> None:
     assert pending["kind"] == "read" and pending["tool"] == "propose_delete_episode"
     assert pending["dependencies"] == ["graph"]
     assert pending["after"] == after
-    assert pending["args"] == {"episode_uuid": "ep-1",
-                               "rationale": "the renewal date is wrong"}
+    assert pending["args"] == {"episode_uuid": "ep-1", "rationale": "the renewal date is wrong"}
     assert session_id in await repo.sessions_awaiting_resume()
-    graph_row = next(d for d in (await outages_mod.list_outages())["dependencies"]
-                     if d["name"] == "graph")
+    graph_row = next(
+        d for d in (await outages_mod.list_outages())["dependencies"] if d["name"] == "graph"
+    )
     assert graph_row["waiting"]["sessions"] >= 1, "on the outages banner"
     assert not await _session_proposals(session_id), "nothing proposed while down"
 
@@ -1048,10 +1107,13 @@ async def _chat(session_id: str, message: str) -> list[dict]:
         frames.append(frame)
 
     await nerve_gateway._chat_send(
-        {"sessionKey": f"agent:jira-expert:{session_id}", "message": message}, notify)
+        {"sessionKey": f"agent:jira-expert:{session_id}", "message": message}, notify
+    )
     for _ in range(200):
-        if any(f.get("event") == "agent"
-               and f["payload"]["data"]["phase"] in ("end", "error") for f in frames):
+        if any(
+            f.get("event") == "agent" and f["payload"]["data"]["phase"] in ("end", "error")
+            for f in frames
+        ):
             break
         await asyncio.sleep(0.05)
     return frames
@@ -1090,7 +1152,8 @@ async def _repark(session_id: str, **changes) -> None:
     tail no read parks under) would have left."""
     rs = await repo.get_session_run_state(session_id)
     await repo.update_session_run_state(
-        session_id, {"pending_resume": {**rs["pending_resume"], **changes}})
+        session_id, {"pending_resume": {**rs["pending_resume"], **changes}}
+    )
     await make_parks_due()
 
 
@@ -1101,8 +1164,14 @@ async def test_an_orchestrator_round_rejects_the_resumed_deletion_as_it_would_li
     """The orchestrator round holds no proposal landing: a stranger deferred
     call is a batch rejection with no outage, and so it is after one."""
     task, session_id = await _parked_deletion_task(monkeypatch)
-    state = {"task_id": task["id"], "round": 0, "stalls": 0, "assigns": 0,
-             "retries": 0, "plan_approved": False}
+    state = {
+        "task_id": task["id"],
+        "round": 0,
+        "stalls": 0,
+        "assigns": 0,
+        "retries": 0,
+        "plan_approved": False,
+    }
     await _repark(session_id, after="orchestrator", state=state)
     rejected: list[list[str]] = []
 

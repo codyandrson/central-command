@@ -36,7 +36,7 @@ def test_preamble_before_the_first_heading_is_kept():
 
 
 def test_oversized_section_splits_on_paragraphs():
-    body = "\n\n".join(["word " * 100] * 10)   # ~5000 chars in one section
+    body = "\n\n".join(["word " * 100] * 10)  # ~5000 chars in one section
     chunks = split_markdown("# Big\n" + body, max_chars=2000)
     assert len(chunks) > 1
     assert all(len(c) <= 2000 for c in chunks)
@@ -55,7 +55,10 @@ def test_empty_content_yields_no_chunks():
 async def test_search_finds_the_matching_chunk_with_its_citation(clean_skills):
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
     await repo.add_skill_doc(
-        "cc-test-lite", "keys", "reference", "Key management",
+        "cc-test-lite",
+        "keys",
+        "reference",
+        "Key management",
         "# Generate a key\nPOST /key/generate accepts budget_duration and max_budget.\n\n"
         "# Delete a key\nPOST /key/delete takes a list of keys.",
         source_url="https://docs.litellm.ai/keys",
@@ -77,13 +80,19 @@ async def test_superseded_versions_are_not_searchable(clean_skills):
     agent as fact — that is the whole point of versioning it."""
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
     await repo.add_skill_doc(
-        "cc-test-lite", "keys", "reference", "Key management",
+        "cc-test-lite",
+        "keys",
+        "reference",
+        "Key management",
         "# Keys\nThe zzzuniquetoken endpoint is current.",
     )
     assert await repo.search_skill_chunks("cc-test-lite", "zzzuniquetoken")
 
     await repo.add_skill_doc(
-        "cc-test-lite", "keys", "reference", "Key management",
+        "cc-test-lite",
+        "keys",
+        "reference",
+        "Key management",
         "# Keys\nThat endpoint was removed.",
     )
     assert await repo.search_skill_chunks("cc-test-lite", "zzzuniquetoken") == []
@@ -97,7 +106,10 @@ async def test_search_is_scoped_to_one_skill(clean_skills):
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
     await repo.create_skill("cc-test-jira", "Jira", "Issue tracking")
     await repo.add_skill_doc(
-        "cc-test-jira", "api", "reference", "Jira API",
+        "cc-test-jira",
+        "api",
+        "reference",
+        "Jira API",
         "# Transitions\nzzzuniquetoken lists legal transitions.",
     )
     assert await repo.search_skill_chunks("cc-test-lite", "zzzuniquetoken") == []
@@ -155,7 +167,10 @@ async def test_a_long_natural_language_query_falls_back_to_any_term(clean_skills
     """
     await repo.create_skill("cc-test-pai", "Pydantic AI", "Agent framework")
     await repo.add_skill_doc(
-        "cc-test-pai", "capabilities", "reference", "Capabilities",
+        "cc-test-pai",
+        "capabilities",
+        "reference",
+        "Capabilities",
         "# Deferred capabilities\n"
         "A Capability with defer_loading=True is announced to the model as a "
         "single catalog line. The model calls load_capability to pull its "
@@ -188,12 +203,16 @@ async def test_a_genuine_absence_still_returns_nothing(clean_skills):
     would never fire and every subject would look documented."""
     await repo.create_skill("cc-test-pai", "Pydantic AI", "Agent framework")
     await repo.add_skill_doc(
-        "cc-test-pai", "capabilities", "reference", "Capabilities",
+        "cc-test-pai",
+        "capabilities",
+        "reference",
+        "Capabilities",
         "# Deferred capabilities\nload_capability pulls instructions into context.",
     )
-    assert await repo.search_skill_chunks(
-        "cc-test-pai", "kubernetes ingress certificate rotation"
-    ) == []
+    assert (
+        await repo.search_skill_chunks("cc-test-pai", "kubernetes ingress certificate rotation")
+        == []
+    )
 
 
 @pytestmark_db
@@ -205,9 +224,10 @@ async def test_a_negated_term_is_not_widened_into_noise(clean_skills):
     returns the honest empty result."""
     await repo.create_skill("cc-test-pai", "Pydantic AI", "Agent framework")
     await repo.add_skill_doc(
-        "cc-test-pai", "capabilities", "reference", "Capabilities",
+        "cc-test-pai",
+        "capabilities",
+        "reference",
+        "Capabilities",
         "# Deferred capabilities\nload_capability pulls instructions into context.",
     )
-    assert await repo.search_skill_chunks(
-        "cc-test-pai", "zzzabsenttoken -context"
-    ) == []
+    assert await repo.search_skill_chunks("cc-test-pai", "zzzabsenttoken -context") == []

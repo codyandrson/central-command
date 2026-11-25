@@ -22,7 +22,9 @@ import pytest
 UNIT = Path(__file__).resolve().parents[1] / "deploy/k3s/cc-graph-bolt.service"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="a systemd unit's /bin/sh line — no sh on Windows")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="a systemd unit's /bin/sh line — no sh on Windows"
+)
 def test_both_relays_get_the_cluster_ip(tmp_path):
     line = next(l for l in UNIT.read_text().splitlines() if l.startswith("ExecStart="))
     m = re.fullmatch(r"ExecStart=/bin/sh -c '(.*)'", line)
@@ -31,13 +33,15 @@ def test_both_relays_get_the_cluster_ip(tmp_path):
     log = tmp_path / "calls"
     for name, script in {
         "k3s": "#!/bin/sh\necho 10.43.0.9\n",
-        "socat": f"#!/bin/sh\necho \"$*\" >> {log}\n",
+        "socat": f'#!/bin/sh\necho "$*" >> {log}\n',
     }.items():
         p = tmp_path / name
         p.write_text(script)
         p.chmod(p.stat().st_mode | stat.S_IEXEC)
     env = dict(os.environ, PATH=f"{tmp_path}:{os.environ['PATH']}")
-    out = subprocess.run(["/bin/sh", "-c", body], env=env, capture_output=True, text=True, timeout=10)
+    out = subprocess.run(
+        ["/bin/sh", "-c", body], env=env, capture_output=True, text=True, timeout=10
+    )
     assert out.returncode == 0, out.stderr
     calls = sorted(log.read_text().splitlines())
     assert calls == [

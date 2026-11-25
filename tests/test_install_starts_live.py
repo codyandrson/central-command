@@ -32,10 +32,10 @@ _KEY = "|".join(run_modes.KEYS)
 
 # A write or a set of one of the keys, in the shapes a deploy file uses.
 _WRITES = [
-    re.compile(rf"\bset_kv\w*\s+\S+\s+[\"']?(?:{_KEY})\b"),   # set_kv / set_kv_if_unset
-    re.compile(rf"^\s*Environment=[\"']?(?:{_KEY})\b"),       # a systemd unit
-    re.compile(rf"\bexport\s+(?:{_KEY})\b"),                  # export KEY=...
-    re.compile(rf"^\s*(?:{_KEY})\s*="),                       # a KEY=value line
+    re.compile(rf"\bset_kv\w*\s+\S+\s+[\"']?(?:{_KEY})\b"),  # set_kv / set_kv_if_unset
+    re.compile(rf"^\s*Environment=[\"']?(?:{_KEY})\b"),  # a systemd unit
+    re.compile(rf"\bexport\s+(?:{_KEY})\b"),  # export KEY=...
+    re.compile(rf"^\s*(?:{_KEY})\s*="),  # a KEY=value line
 ]
 
 
@@ -111,8 +111,9 @@ def test_check_fails_an_empty_run_mode_key_too(tree: Path):
     r = _check(tree, CC_TEST_MODEL="")
 
     assert r.returncode == 1, r.stdout + r.stderr
-    assert any(l.startswith("FAIL run-modes:") and "CC_TEST_MODEL" in l
-               for l in _protocol(r.stdout)), r.stdout
+    assert any(
+        l.startswith("FAIL run-modes:") and "CC_TEST_MODEL" in l for l in _protocol(r.stdout)
+    ), r.stdout
 
 
 @drives_installer

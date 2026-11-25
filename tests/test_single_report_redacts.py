@@ -52,8 +52,18 @@ from tests.installer_source import (
 ROOT = Path(__file__).resolve().parents[1]
 
 _DEBRIS = shutil.ignore_patterns(
-    "NUL", "nul", "CON", "con", "AUX", "aux", "PRN", "prn",
-    ".env", ".env.*", "__pycache__", "*.pyc",
+    "NUL",
+    "nul",
+    "CON",
+    "con",
+    "AUX",
+    "aux",
+    "PRN",
+    "prn",
+    ".env",
+    ".env.*",
+    "__pycache__",
+    "*.pyc",
 )
 
 # One marker per source the scan has to cover. Each is long enough that the
@@ -105,8 +115,10 @@ def _make_tree(tmp_path: Path) -> Path:
     shutil.copy2(ROOT / ".env.example", repo / ".env")
     shutil.copy2(ROOT / "VERSION", repo / "VERSION")
     (repo / "central_command" / "db").mkdir(parents=True)
-    shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
-                 repo / "central_command" / "db" / "schema.sql")
+    shutil.copy2(
+        ROOT / "central_command" / "db" / "schema.sql",
+        repo / "central_command" / "db" / "schema.sql",
+    )
     (tmp_path / "home").mkdir()
     state = tmp_path / "state"
     state.mkdir()
@@ -121,9 +133,11 @@ def tree(tmp_path: Path) -> Path:
 
 def _run(repo: Path, *args: str, path_prefix: Path | None = None):
     env = dict(os.environ)
-    env.update(HOME=str(repo.parent / "home"),
-               XDG_STATE_HOME=str(repo.parent / "home" / "state"),
-               CC_VERIFY_MAX_WAIT="1")
+    env.update(
+        HOME=str(repo.parent / "home"),
+        XDG_STATE_HOME=str(repo.parent / "home" / "state"),
+        CC_VERIFY_MAX_WAIT="1",
+    )
     if path_prefix is not None:
         env = with_stub_path(env, path_prefix)
     for stale in ("CC_STATE_DIR", *MARKERS):
@@ -242,8 +256,10 @@ def test_a_value_in_the_logs_is_redacted_in_process_and_the_report_is_written(pl
     assert "REDACTED IN PROCESS" in head and "second check" in head, head
     # ...and states its own BOUND (D8): capped at the last run, naming that
     # run's `run start:` line — its stamp and its command.
-    assert ("CAPPED AT THE LAST RUN" in body.splitlines()[3]
-            and '"2026-10-01T00:00:00Z run run start: ./setup.sh llm"' in body.splitlines()[4]), body[:600]
+    assert (
+        "CAPPED AT THE LAST RUN" in body.splitlines()[3]
+        and '"2026-10-01T00:00:00Z run run start: ./setup.sh llm"' in body.splitlines()[4]
+    ), body[:600]
 
 
 @drives_installer
@@ -264,9 +280,9 @@ def test_container_logs_go_through_the_filter_too(planted):
     """diagnose_sections — the compose, podman and container-log half — is the
     likeliest place for a credential of all. A stub podman prints one."""
     _tree, _r, body = planted
-    assert "litellm: master key [REDACTED:CC_LLM_PROXY_ADMIN_KEY] loaded" in body, (
-        body.split("== last 100 log lines", 1)[-1][:600]
-    )
+    assert "litellm: master key [REDACTED:CC_LLM_PROXY_ADMIN_KEY] loaded" in body, body.split(
+        "== last 100 log lines", 1
+    )[-1][:600]
     assert "MARKER_SECRET" not in body
 
 
@@ -343,7 +359,9 @@ def test_redact_tsv_parses_and_every_row_is_well_formed(tmp_path: Path):
         assert doc not in ("", "-") and doc.endswith("."), f"one plain sentence: {f!r}"
         assert "\x01" not in pattern, "\\001 is the filter's sed delimiter"
         if kind == "key":
-            assert re.fullmatch(r"[A-Z0-9_*]+", pattern), f"a key row is a glob over KEY NAMES: {f!r}"
+            assert re.fullmatch(r"[A-Z0-9_*]+", pattern), (
+                f"a key row is a glob over KEY NAMES: {f!r}"
+            )
             assert replace == "-", f"a key row's replacement is always [REDACTED:<KEY>]: {f!r}"
         else:
             assert replace not in ("", "-") and "[REDACTED:" in replace, f
@@ -354,15 +372,25 @@ def test_redact_tsv_parses_and_every_row_is_well_formed(tmp_path: Path):
             # F15), which the filter itself never meets: it runs sed from bash.
             script = tmp_path / f"redact-{len(pattern)}.sed"
             script.write_bytes(f"s\x01{pattern}\x01{replace}\x01g\n".encode())
-            r = subprocess.run(["sed", "-E", "-f", script.as_posix()],
-                               input="probe\n", capture_output=True, text=True)
+            r = subprocess.run(
+                ["sed", "-E", "-f", script.as_posix()],
+                input="probe\n",
+                capture_output=True,
+                text=True,
+            )
             assert r.returncode == 0, f"{pattern!r}: {r.stderr}"
 
 
 def test_redact_tsv_declares_the_default_set():
     keys = {f[1] for f in _redact_rows() if f[0] == "key"}
-    for glob in ("*_PASSWORD", "*_TOKEN", "*_KEY", "*_SECRET",
-                 "CC_LLM_API_KEY", "CC_LLM_PROXY_ADMIN_KEY"):
+    for glob in (
+        "*_PASSWORD",
+        "*_TOKEN",
+        "*_KEY",
+        "*_SECRET",
+        "CC_LLM_API_KEY",
+        "CC_LLM_PROXY_ADMIN_KEY",
+    ):
         assert glob in keys, f"redact.tsv must declare the key row {glob}"
     shapes = [f for f in _redact_rows() if f[0] == "shape"]
     labels = " ".join(f[2] for f in shapes)
@@ -406,5 +434,5 @@ def test_the_report_names_the_state_dir_first(tree: Path):
     body = _reports(tree)[0].read_text(encoding="utf-8", errors="replace")
     head = body.split("== ", 2)
     assert "state directory" in head[1], body[:600]
-    assert env_path(tree.parent / "state") in head[1]   # the spelling .env carries
+    assert env_path(tree.parent / "state") in head[1]  # the spelling .env carries
     assert "WHOLE last run" in body.splitlines()[3], body[:400]

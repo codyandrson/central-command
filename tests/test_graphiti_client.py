@@ -28,12 +28,23 @@ from central_command.integrations import graphiti, graphiti_client, graphiti_pat
 
 ROOT = Path(__file__).resolve().parents[1]
 
-FACT_KEYS = {"uuid", "group_id", "source_node_uuid", "target_node_uuid", "created_at", "name",
-             "fact", "episodes", "expired_at", "valid_at", "invalid_at", "reference_time",
-             "attributes"}
+FACT_KEYS = {
+    "uuid",
+    "group_id",
+    "source_node_uuid",
+    "target_node_uuid",
+    "created_at",
+    "name",
+    "fact",
+    "episodes",
+    "expired_at",
+    "valid_at",
+    "invalid_at",
+    "reference_time",
+    "attributes",
+}
 NODE_KEYS = {"uuid", "name", "labels", "created_at", "summary", "group_id", "attributes"}
-EPISODE_KEYS = {"uuid", "name", "content", "created_at", "source", "source_description",
-                "group_id"}
+EPISODE_KEYS = {"uuid", "name", "content", "created_at", "source", "source_description", "group_id"}
 
 
 def _lib():
@@ -50,7 +61,8 @@ def _lib():
 
 def test_the_pyproject_pin_is_the_patches_version():
     deps = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
-        "dependencies"]
+        "dependencies"
+    ]
     pins = [d for d in deps if d.replace(" ", "").startswith("graphiti-core")]
     assert pins == [f"graphiti-core=={graphiti_patches.PINNED_VERSION}"]
 
@@ -82,9 +94,14 @@ def configured(monkeypatch):
         monkeypatch.setattr(settings, name, value)
 
 
-@pytest.mark.parametrize("key,env", [("llm_api_key", "CC_LLM_API_KEY"),
-                                     ("neo4j_password", "CC_NEO4J_PASSWORD"),
-                                     ("llm_base_url", "CC_LLM_BASE_URL")])
+@pytest.mark.parametrize(
+    "key,env",
+    [
+        ("llm_api_key", "CC_LLM_API_KEY"),
+        ("neo4j_password", "CC_NEO4J_PASSWORD"),
+        ("llm_base_url", "CC_LLM_BASE_URL"),
+    ],
+)
 def test_missing_configuration_is_refused_by_name(configured, monkeypatch, key, env):
     monkeypatch.setattr(settings, key, "")
     with pytest.raises(graphiti_client.GraphitiNotConfigured, match=env):
@@ -138,12 +155,16 @@ async def test_the_llm_client_tells_the_model_to_answer_in_json(configured, monk
         monkeypatch.setattr(llm, "_generate_response_with_retry", capture)
         msgs = [Message(role="system", content="sys"), Message(role="user", content="text")]
         assert await llm.generate_response(msgs, response_model=Out) == {"extracted_entities": []}
-        tail = "\n\nRespond with a JSON object in the following format:\n\n" + json.dumps(Out.model_json_schema())
+        tail = "\n\nRespond with a JSON object in the following format:\n\n" + json.dumps(
+            Out.model_json_schema()
+        )
         assert seen[-1][-1] == "text" + tail
         assert llm.structured_output_mode == "json_schema"
         assert llm._build_response_format(Out)["type"] == "json_schema"
         # Without a response model nothing is appended.
-        await llm.generate_response([Message(role="system", content="s"), Message(role="user", content="plain")])
+        await llm.generate_response(
+            [Message(role="system", content="s"), Message(role="user", content="plain")]
+        )
         assert seen[-1][-1] == "plain"
     finally:
         await g.driver.close()
@@ -198,11 +219,16 @@ async def test_rerank_posts_documents_and_sorts_by_relevance(monkeypatch):
         seen["url"] = str(request.url)
         seen["auth"] = request.headers["authorization"]
         seen["body"] = json.loads(request.content)
-        return httpx.Response(200, json={"results": [
-            {"index": 0, "relevance_score": 0.1},
-            {"index": 2, "relevance_score": 0.9},
-            {"index": 1, "relevance_score": 0.5},
-        ]})
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"index": 0, "relevance_score": 0.1},
+                    {"index": 2, "relevance_score": 0.9},
+                    {"index": 1, "relevance_score": 0.5},
+                ]
+            },
+        )
 
     _mock_httpx(monkeypatch, handler)
     client = graphiti_client.RerankClient("http://proxy.example.com:4000/v1", "sk-x", "cc-rerank")
@@ -210,14 +236,21 @@ async def test_rerank_posts_documents_and_sorts_by_relevance(monkeypatch):
     assert out == [("c", 0.9), ("b", 0.5), ("a", 0.1)]
     assert seen["url"] == "http://proxy.example.com:4000/rerank"
     assert seen["auth"] == "Bearer sk-x"
-    assert seen["body"] == {"model": "cc-rerank", "query": "who leads", "documents": ["a", "b", "c"]}
+    assert seen["body"] == {
+        "model": "cc-rerank",
+        "query": "who leads",
+        "documents": ["a", "b", "c"],
+    }
 
 
-@pytest.mark.parametrize("handler,raised", [
-    (lambda r: httpx.Response(503, json={"error": "down"}), graphiti_client.RerankHTTPError),
-    (lambda r: httpx.Response(200, json={"unexpected": True}), graphiti_client.RerankError),
-    (lambda r: (_ for _ in ()).throw(httpx.ConnectError("refused")), httpx.ConnectError),
-])
+@pytest.mark.parametrize(
+    "handler,raised",
+    [
+        (lambda r: httpx.Response(503, json={"error": "down"}), graphiti_client.RerankHTTPError),
+        (lambda r: httpx.Response(200, json={"unexpected": True}), graphiti_client.RerankError),
+        (lambda r: (_ for _ in ()).throw(httpx.ConnectError("refused")), httpx.ConnectError),
+    ],
+)
 async def test_rerank_raises_instead_of_falling_back_to_input_order(monkeypatch, handler, raised):
     """The retired fail-soft (input order with placeholder scores) hid a
     reranker outage as worse ordering; the operator's rule (2026-10-05) is that
@@ -249,17 +282,31 @@ class _FakeGraphiti:
 
 def _edge(i: int):
     EntityEdge, _, _ = _lib()
-    return EntityEdge(uuid=f"e{i}", group_id="central_command", source_node_uuid="a",
-                      target_node_uuid="b", created_at=datetime(2026, 1, 1, tzinfo=UTC),
-                      name="LEADS", fact=f"fact {i}", episodes=["ep"], fact_embedding=[0.1, 0.2])
+    return EntityEdge(
+        uuid=f"e{i}",
+        group_id="central_command",
+        source_node_uuid="a",
+        target_node_uuid="b",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        name="LEADS",
+        fact=f"fact {i}",
+        episodes=["ep"],
+        fact_embedding=[0.1, 0.2],
+    )
 
 
 def _node(i: int):
     _, EntityNode, _ = _lib()
-    return EntityNode(uuid=f"n{i}", name=f"Ada {i}", group_id="central_command",
-                      labels=["Entity", "Person"], summary="leads the probe team",
-                      created_at=datetime(2026, 1, 1, tzinfo=UTC),
-                      name_embedding=[0.1], attributes={"role": "lead", "name_embedding": [1.0]})
+    return EntityNode(
+        uuid=f"n{i}",
+        name=f"Ada {i}",
+        group_id="central_command",
+        labels=["Entity", "Person"],
+        summary="leads the probe team",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        name_embedding=[0.1],
+        attributes={"role": "lead", "name_embedding": [1.0]},
+    )
 
 
 async def _no_exact(*a, **k):
@@ -267,13 +314,26 @@ async def _no_exact(*a, **k):
     return []
 
 
-@pytest.mark.parametrize("rerank,kind,edge_recipe,node_recipe", [
-    ("", "", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
-    ("", "chat", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
-    ("cc-rerank", "", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
-    ("cc-rerank", "rerank", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
-    ("cc-rerank", "chat", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
-])
+@pytest.mark.parametrize(
+    "rerank,kind,edge_recipe,node_recipe",
+    [
+        ("", "", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
+        ("", "chat", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
+        ("cc-rerank", "", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
+        (
+            "cc-rerank",
+            "rerank",
+            "EDGE_HYBRID_SEARCH_CROSS_ENCODER",
+            "NODE_HYBRID_SEARCH_CROSS_ENCODER",
+        ),
+        (
+            "cc-rerank",
+            "chat",
+            "EDGE_HYBRID_SEARCH_CROSS_ENCODER",
+            "NODE_HYBRID_SEARCH_CROSS_ENCODER",
+        ),
+    ],
+)
 async def test_search_uses_a_deep_copy_with_the_requested_limit(
     monkeypatch, rerank, kind, edge_recipe, node_recipe
 ):
@@ -295,7 +355,8 @@ async def test_search_uses_a_deep_copy_with_the_requested_limit(
     assert node_cfg is not getattr(recipes, node_recipe)
     assert edge_cfg.limit == 25 and node_cfg.limit == 15
     assert edge_cfg.model_dump(exclude={"limit"}) == getattr(recipes, edge_recipe).model_dump(
-        exclude={"limit"})
+        exclude={"limit"}
+    )
     assert edge_groups == ["central_command"]
     # Ask for N, get up to N (the server sliced a ten-result recipe).
     assert len(facts) == 25 and len(nodes) == 15
@@ -323,13 +384,25 @@ async def test_a_persons_values_reach_the_agent_as_attributes(monkeypatch):
     """graphiti stores Person's three Optional fields as node properties and its
     reader returns them as `attributes`; node_result passes them through."""
     _, EntityNode, _ = _lib()
-    node = EntityNode(uuid="p", name="Jane Rivers Doe", group_id="central_command",
-                      labels=["Entity", "Person"], summary="s",
-                      created_at=datetime(2026, 1, 1, tzinfo=UTC),
-                      attributes={"aliases": ["Jane", "JRD"], "birth_date": "1980-02-29",
-                                  "phone": "+1 555 0100", "cc_action_key": "k"})
+    node = EntityNode(
+        uuid="p",
+        name="Jane Rivers Doe",
+        group_id="central_command",
+        labels=["Entity", "Person"],
+        summary="s",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        attributes={
+            "aliases": ["Jane", "JRD"],
+            "birth_date": "1980-02-29",
+            "phone": "+1 555 0100",
+            "cc_action_key": "k",
+        },
+    )
     assert graphiti.node_result(node)["attributes"] == {
-        "aliases": ["Jane", "JRD"], "birth_date": "1980-02-29", "phone": "+1 555 0100"}
+        "aliases": ["Jane", "JRD"],
+        "birth_date": "1980-02-29",
+        "phone": "+1 555 0100",
+    }
 
 
 async def test_an_exact_alias_match_is_unioned_ahead_of_the_hybrid_hits(monkeypatch):
@@ -342,21 +415,41 @@ async def test_an_exact_alias_match_is_unioned_ahead_of_the_hybrid_hits(monkeypa
 
     async def exact(name, group_ids, entity_types, limit):
         seen.update(name=name, group_ids=group_ids, entity_types=entity_types, limit=limit)
-        return [{"uuid": "p", "name": "Jane Rivers Doe", "labels": ["Entity", "Person"],
-                 "created_at": None, "summary": "s", "group_id": "central_command",
-                 "attributes": {"aliases": ["JRD"], "cc_action_key": "k"}},
-                {"uuid": "n2", "name": "Ada 2", "labels": [], "created_at": None,
-                 "summary": "", "group_id": "central_command", "attributes": {}}]
+        return [
+            {
+                "uuid": "p",
+                "name": "Jane Rivers Doe",
+                "labels": ["Entity", "Person"],
+                "created_at": None,
+                "summary": "s",
+                "group_id": "central_command",
+                "attributes": {"aliases": ["JRD"], "cc_action_key": "k"},
+            },
+            {
+                "uuid": "n2",
+                "name": "Ada 2",
+                "labels": [],
+                "created_at": None,
+                "summary": "",
+                "group_id": "central_command",
+                "attributes": {},
+            },
+        ]
 
     monkeypatch.setattr(neo4j_reader, "entities_by_exact_name", exact)
     monkeypatch.setattr(graphiti, "node_filters", lambda types: None)
-    nodes = await graphiti.search_nodes("JRD", max_nodes=2, group_ids=["central_command"],
-                                        entity_types=["Person"])
+    nodes = await graphiti.search_nodes(
+        "JRD", max_nodes=2, group_ids=["central_command"], entity_types=["Person"]
+    )
     assert [n["uuid"] for n in nodes] == ["p", "n2"]
     assert nodes[0]["attributes"] == {"aliases": ["JRD"]}, "control-plane keys stripped"
     assert set(nodes[0]) == NODE_KEYS
-    assert seen == {"name": "JRD", "group_ids": ["central_command"],
-                    "entity_types": ["Person"], "limit": 2}
+    assert seen == {
+        "name": "JRD",
+        "group_ids": ["central_command"],
+        "entity_types": ["Person"],
+        "limit": 2,
+    }
 
 
 async def test_the_exact_lane_matches_name_or_alias_in_the_groups(monkeypatch):
@@ -365,11 +458,18 @@ async def test_the_exact_lane_matches_name_or_alias_in_the_groups(monkeypatch):
     async def fake_read(query, **params):
         seen.update(query=query, **params)
         from neo4j.time import DateTime
-        return [{"uuid": "p", "name": "Jane Rivers Doe",
-                 "labels": ["Entity", "Person", "Entity_centralcommand"],
-                 "created_at": DateTime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
-                 "summary": "s", "group_id": "central_command",
-                 "attributes": [["aliases", ["JRD"]], ["phone", "555"]]}]
+
+        return [
+            {
+                "uuid": "p",
+                "name": "Jane Rivers Doe",
+                "labels": ["Entity", "Person", "Entity_centralcommand"],
+                "created_at": DateTime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
+                "summary": "s",
+                "group_id": "central_command",
+                "attributes": [["aliases", ["JRD"]], ["phone", "555"]],
+            }
+        ]
 
     monkeypatch.setattr(neo4j_reader, "_read", fake_read)
     (row,) = await neo4j_reader.entities_by_exact_name("  jrd ", ["central_command"], None, 5)
@@ -391,9 +491,17 @@ async def test_episode_listing_keeps_the_servers_keys_and_orders_by_time(monkeyp
         seen["query"], seen["params"] = query, params
         from neo4j.time import DateTime
 
-        return [{"uuid": "ep2", "name": "two", "content": "b",
-                 "created_at": DateTime(2026, 2, 1, 0, 0, 0, tzinfo=UTC),
-                 "source": "text", "source_description": "s", "group_id": "central_command"}]
+        return [
+            {
+                "uuid": "ep2",
+                "name": "two",
+                "content": "b",
+                "created_at": DateTime(2026, 2, 1, 0, 0, 0, tzinfo=UTC),
+                "source": "text",
+                "source_description": "s",
+                "group_id": "central_command",
+            }
+        ]
 
     monkeypatch.setattr(neo4j_reader, "_read", fake_read)
     (ep,) = await graphiti.get_group_episodes(["central_command"], last_n=7)
@@ -443,10 +551,10 @@ def test_the_failure_taxonomy_classifies_the_graph_libraries():
     cases = {
         openai.APIConnectionError(request=req): TRANSIENT,
         openai.APITimeoutError(request=req): TRANSIENT,
-        openai.InternalServerError("x", response=httpx.Response(503, request=req), body=None):
-            TRANSIENT,
-        openai.BadRequestError("x", response=httpx.Response(400, request=req), body=None):
-            SEMANTIC,
+        openai.InternalServerError(
+            "x", response=httpx.Response(503, request=req), body=None
+        ): TRANSIENT,
+        openai.BadRequestError("x", response=httpx.Response(400, request=req), body=None): SEMANTIC,
         ServiceUnavailable("Couldn't connect"): TRANSIENT,
         TransientError("busy"): TRANSIENT,
         json.JSONDecodeError("Unterminated string", '{"a": "', 6): SEMANTIC,

@@ -16,8 +16,8 @@ GVISOR = (ROOT / "deploy" / "k3s" / "install-gvisor.sh").read_text(encoding="utf
 
 
 def test_a_failed_mint_is_captured_before_anything_is_written():
-    ensure = MINT[MINT.index("ensure_key() {"):]
-    ensure = ensure[:ensure.index("\n}\n")]
+    ensure = MINT[MINT.index("ensure_key() {") :]
+    ensure = ensure[: ensure.index("\n}\n")]
     assert re.search(r'key="\$\(mint "\$alias" "\$models"\)" \|\| exit 1', ensure)
     assert 'set_var "$f" "$var" "$key"' in ensure
     assert 'set_var "$f" "$var" "$(mint' not in MINT, "the swallowed-failure shape is back"
@@ -25,10 +25,12 @@ def test_a_failed_mint_is_captured_before_anything_is_written():
 
 
 def test_a_colliding_alias_is_revoked_by_alias_and_minted_again():
-    mint = MINT[MINT.index("mint() {"):MINT.index("ensure_key() {")]
+    mint = MINT[MINT.index("mint() {") : MINT.index("ensure_key() {")]
     assert "already exists" in mint
-    assert '/key/delete' in mint and 'key_aliases' in mint
-    assert "return 1" in mint and "exit 1" not in mint, "mint reports failure to its caller, it never exits a subshell"
+    assert "/key/delete" in mint and "key_aliases" in mint
+    assert "return 1" in mint and "exit 1" not in mint, (
+        "mint reports failure to its caller, it never exits a subshell"
+    )
 
 
 def test_the_gvisor_proof_waits_long_enough_for_a_cold_image_pull():

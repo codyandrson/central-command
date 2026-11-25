@@ -25,7 +25,10 @@ CANARY_TEXTS = (
 
 
 def embedding_text(
-    kind: str, name: str | None = None, summary: str | None = None, fact: str | None = None,
+    kind: str,
+    name: str | None = None,
+    summary: str | None = None,
+    fact: str | None = None,
 ) -> str:
     """The text to embed for one element. `kind` is `entity`, `edge` or
     `community`. An entity is its name, a newline and its summary, verbatim and

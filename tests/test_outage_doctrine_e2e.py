@@ -128,9 +128,11 @@ class _Health:
 
 
 def _item_raw() -> str:
-    return (f"Message-ID: <cc-e2e-{uuid.uuid4().hex[:8]}@example.com>\n"
-            "From: sender@example.com\nSubject: End to end\n"
-            "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n")
+    return (
+        f"Message-ID: <cc-e2e-{uuid.uuid4().hex[:8]}@example.com>\n"
+        "From: sender@example.com\nSubject: End to end\n"
+        "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n"
+    )
 
 
 async def _queue_job(dependency: str = "graph") -> int:
@@ -142,7 +144,9 @@ async def _queue_job(dependency: str = "graph") -> int:
                values ('central_command', '{"e2e": "1"}'::jsonb, 'QUEUED',
                        now() + interval '30 minutes', $1, $2::jsonb)
                returning id""",
-            f"{dependency} down", json.dumps([dependency]))
+            f"{dependency} down",
+            json.dumps([dependency]),
+        )
     finally:
         await conn.close()
 
@@ -163,17 +167,23 @@ async def _rpc(method: str, params: dict | None = None) -> dict:
 
 
 async def _payloads(ref_id: str, kind: str) -> list[dict]:
-    return [e["payload"] for e in await repo.list_events(ref_id=ref_id, limit=1000)
-            if e["kind"] == kind]
+    return [
+        e["payload"] for e in await repo.list_events(ref_id=ref_id, limit=1000) if e["kind"] == kind
+    ]
 
 
 def _gap(record: dict) -> int:
-    return round((datetime.fromisoformat(record["not_before"])
-                  - datetime.fromisoformat(record["parked_at"])).total_seconds())
+    return round(
+        (
+            datetime.fromisoformat(record["not_before"])
+            - datetime.fromisoformat(record["parked_at"])
+        ).total_seconds()
+    )
 
 
-async def _graph_proposal(spy: list[str], landed: list[str], monkeypatch,
-                          health: _Health) -> tuple[str, str, object]:
+async def _graph_proposal(
+    spy: list[str], landed: list[str], monkeypatch, health: _Health
+) -> tuple[str, str, object]:
     """An approved-to-be `graph.create_node` proposal drafted by a REAL task run
     (so its drafter is paused on it and resumes after the write), with the bolt
     writer standing in for the graph: it raises the real driver's outage while
@@ -192,12 +202,26 @@ async def _graph_proposal(spy: list[str], landed: list[str], monkeypatch,
     monkeypatch.setattr(neo4j_writer, "create_node", create_node)
     proposal = {
         "intent": "Record Jane Doe in the graph",
-        "actions": [{"capability": "graph.create_node",
-                     "arguments": {"name": "Jane Doe", "group_id": "central_command",
-                                   "summary": "Works at Example Co"},
-                     "target_ref": {"system": "graphiti"}, "reversibility": "reversible"}],
-        "evidence": [{"kind": "operator", "source_ref": "operator:task",
-                      "locator": "test task", "claim": "Jane Doe works at Example Co"}],
+        "actions": [
+            {
+                "capability": "graph.create_node",
+                "arguments": {
+                    "name": "Jane Doe",
+                    "group_id": "central_command",
+                    "summary": "Works at Example Co",
+                },
+                "target_ref": {"system": "graphiti"},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "test task",
+                "claim": "Jane Doe works at Example Co",
+            }
+        ],
         "expected_effect": "the graph knows Jane Doe",
         "confidence": {"level": "high", "rationale": "The test states it."},
     }
@@ -210,14 +234,15 @@ async def _graph_proposal(spy: list[str], landed: list[str], monkeypatch,
 
 
 async def test_a_graph_outage_parks_everything_and_retry_now_converges_it(
-    monkeypatch, graph,
+    monkeypatch,
+    graph,
 ):
     start = await repo.latest_event_id()
     health = _Health(monkeypatch, up=False)
-    await orchestration.probe_and_record(["graph"])        # the sweep's first sight
+    await orchestration.probe_and_record(["graph"])  # the sweep's first sight
 
     # -- 1. every surface parks -----------------------------------------------------
-    task, out = await _parked_task_run(monkeypatch)        # a read parks mid-turn
+    task, out = await _parked_task_run(monkeypatch)  # a read parks mid-turn
     read_sid = out["session_id"]
     assert out["parked"] is True
     assert await repo.session_status(read_sid) == "AWAITING_RESUME"
@@ -241,7 +266,8 @@ async def test_a_graph_outage_parks_everything_and_retry_now_converges_it(
     conn = await repo._conn()
     try:
         row = await conn.fetchrow(
-            "select state, attempts, dependencies from work_item where id = $1", item["id"])
+            "select state, attempts, dependencies from work_item where id = $1", item["id"]
+        )
     finally:
         await conn.close()
     assert row["state"] == "UNPROCESSED" and json.loads(row["dependencies"]) == ["graph"]
@@ -263,9 +289,13 @@ async def test_a_graph_outage_parks_everything_and_retry_now_converges_it(
     assert prop["status"] != "FAILED"
     rs = await repo.get_session_run_state(read_sid)
     assert DEGRADED not in json.dumps(rs["messages"])
-    sibling = [p for m in durable.load_messages(rs) if isinstance(m, ModelRequest)
-               for p in m.parts if isinstance(p, ToolReturnPart)
-               and p.tool_call_id == "call_sibling"]
+    sibling = [
+        p
+        for m in durable.load_messages(rs)
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart) and p.tool_call_id == "call_sibling"
+    ]
     assert len(sibling) == 1, "the sibling call's result is kept in the record"
     assert not await _payloads(task["id"], "task.run_failed")
 
@@ -274,14 +304,23 @@ async def test_a_graph_outage_parks_everything_and_retry_now_converges_it(
     assert listed == jsonable_encoder(await _rpc("outages.list"))
     g = _by_name(listed)["graph"]
     assert g["state"] == "down" and g["down_since"]
-    assert g["waiting"] == {"sessions": 1, "proposals": 1, "tasks": 0,
-                            "work_items": 1, "ingest_jobs": 1}
+    assert g["waiting"] == {
+        "sessions": 1,
+        "proposals": 1,
+        "tasks": 0,
+        "work_items": 1,
+        "ingest_jobs": 1,
+    }
     assert g["total"] == 4 and g["interrupted"] == 0 and g["failing"] == []
     emb = _by_name(listed)["embedder"]
-    assert emb["state"] == "up" and emb["waiting"]["proposals"] == 1, \
+    assert emb["state"] == "up" and emb["waiting"]["proposals"] == 1, (
         "the curation waits on the embedder too (it embeds before it writes)"
-    downs = [e for e in await repo.list_events(kind="dependency.down", since_id=start, limit=500)
-             if e["ref_id"] == "graph"]
+    )
+    downs = [
+        e
+        for e in await repo.list_events(kind="dependency.down", since_id=start, limit=500)
+        if e["ref_id"] == "graph"
+    ]
     assert len(downs) == 1
 
     # -- 3a. sweeps with the probe down spend nothing ---------------------------------
@@ -298,14 +337,24 @@ async def test_a_graph_outage_parks_everything_and_retry_now_converges_it(
     assert (await repo.get_session_run_state(read_sid))["pending_resume"]["attempts"] == 0
     assert (await repo.load_proposal(pid))["retry_state"]["attempts"] == prop_attempts
     assert await worker.tick() == [] and claimed_jobs == []
-    assert len([e for e in await repo.list_events(kind="dependency.down", since_id=start,
-                                                  limit=500) if e["ref_id"] == "graph"]) == 1
+    assert (
+        len(
+            [
+                e
+                for e in await repo.list_events(kind="dependency.down", since_id=start, limit=500)
+                if e["ref_id"] == "graph"
+            ]
+        )
+        == 1
+    )
 
     # -- 4. retry-now with the probe still down ---------------------------------------
     pre = jsonable_encoder(await outages.list_outages())
     rejected = await outages.post_outage_retry("graph")
-    assert rejected == {"probe": "down", "driven": {
-        "sessions": 0, "proposals": 0, "tasks": 0, "work_items": 0, "ingest_jobs": 0}}
+    assert rejected == {
+        "probe": "down",
+        "driven": {"sessions": 0, "proposals": 0, "tasks": 0, "work_items": 0, "ingest_jobs": 0},
+    }
     assert jsonable_encoder(await outages.list_outages()) == pre
     assert len(await _payloads("graph", "outage.retry_requested")) >= 1
 
@@ -319,24 +368,43 @@ async def test_a_graph_outage_parks_everything_and_retry_now_converges_it(
     driven = await outages.post_outage_retry("graph")
     await orchestration.sweep_settle()
     assert driven["probe"] == "up"
-    assert driven["driven"] == {"sessions": 1, "proposals": 1, "tasks": 0,
-                                "work_items": 1, "ingest_jobs": 1}
+    assert driven["driven"] == {
+        "sessions": 1,
+        "proposals": 1,
+        "tasks": 0,
+        "work_items": 1,
+        "ingest_jobs": 1,
+    }
 
     new = await repo.list_events(since_id=mark, limit=2000)
     kinds = [e["kind"] for e in new]
     assert kinds.count("dependency.up") == 1
-    assert len([e for e in await repo.list_events(kind="dependency.up", since_id=start,
-                                                  limit=500) if e["ref_id"] == "graph"]) == 1
+    assert (
+        len(
+            [
+                e
+                for e in await repo.list_events(kind="dependency.up", since_id=start, limit=500)
+                if e["ref_id"] == "graph"
+            ]
+        )
+        == 1
+    )
     requested = next(e["id"] for e in new if e["kind"] == "outage.retry_requested")
     retried = [e["id"] for e in new if e["kind"].endswith("_retried")]
-    assert retried and all(requested < r for r in retried), \
+    assert retried and all(requested < r for r in retried), (
         "the request is on the log before anything it authorises"
+    )
 
     # The session resumed in place with the read's real result, sibling intact.
     assert await repo.session_status(read_sid) == "DONE"
     rs = await repo.get_session_run_state(read_sid)
-    returns = [p for m in durable.load_messages(rs) if isinstance(m, ModelRequest)
-               for p in m.parts if isinstance(p, ToolReturnPart)]
+    returns = [
+        p
+        for m in durable.load_messages(rs)
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart)
+    ]
     by_call = {p.tool_call_id: p for p in returns}
     assert FACT in str(by_call["call_graph"].content)
     assert "call_sibling" in by_call
@@ -383,7 +451,8 @@ async def test_a_graph_outage_parks_everything_and_retry_now_converges_it(
 
 
 async def test_with_the_probe_up_a_failing_unit_waits_twice_as_long_each_time(
-    monkeypatch, graph,
+    monkeypatch,
+    graph,
 ):
     """The probe says up but the call still fails (the doctrine's `failing despite
     the probe` case, which spends attempts): the gap before the next try doubles.
@@ -393,7 +462,7 @@ async def test_with_the_probe_up_a_failing_unit_waits_twice_as_long_each_time(
     sid = out["session_id"]
     calls = graph.calls
 
-    result = await orchestration.retry_sweep()                # not due: nothing offered
+    result = await orchestration.retry_sweep()  # not due: nothing offered
     await orchestration.sweep_settle()
     assert sid not in result["resumed"] and graph.calls == calls
 
@@ -433,9 +502,13 @@ def test_retry_not_before_conventions_and_the_first_failure_waits_a_minute():
         "ledger item (transient_releases)": lambda releases: releases,
         "ingest job (attempts - 1, seconds to SQL)": lambda attempts: attempts - 1,
     }
-    first = {"session resume (pending_resume.attempts)": 0, "proposal (attempts - 1)": 1,
-             "task (attempts - 1)": 1, "ledger item (transient_releases)": 0,
-             "ingest job (attempts - 1, seconds to SQL)": 1}
+    first = {
+        "session resume (pending_resume.attempts)": 0,
+        "proposal (attempts - 1)": 1,
+        "task (attempts - 1)": 1,
+        "ledger item (transient_releases)": 0,
+        "ingest job (attempts - 1, seconds to SQL)": 1,
+    }
     for name, translate in surfaces.items():
         for failure, want in enumerate([60, 120, 240, 480]):
             counter = first[name] + failure
@@ -475,10 +548,10 @@ async def test_a_kill_between_park_and_resume_loses_nothing(monkeypatch):
     task_run, task_session = await _running_task_run()
     resumed = await _claimed_resume(monkeypatch)
     with_cursor = await _executing_with_cursor(monkeypatch)
-    jira_calls = _jira_spy(monkeypatch)                       # fresh: counts replays only
+    jira_calls = _jira_spy(monkeypatch)  # fresh: counts replays only
     graph_calls = _graph_spy(monkeypatch)
 
-    await _lifespan_sweeps(monkeypatch)                       # the simulated restart
+    await _lifespan_sweeps(monkeypatch)  # the simulated restart
     # (land_orphans_at_startup, startup_task_sweep, reclaim_stale_work_items(0))
 
     # An EXECUTING proposal with its cursor at 1 comes back interrupted at 1.
@@ -493,14 +566,20 @@ async def test_a_kill_between_park_and_resume_loses_nothing(monkeypatch):
     assert task["status"] == "ASSIGNED" and task["retry_state"]["kind"] == "restart"
     assert await repo.session_status(task_session) == "STOPPED"
     assert task_run in (await repo.get_session(task_session))["closed_reason"]
-    stopped = [e for e in await repo.list_events(ref_id=task_session)
-               if e["kind"] == "session.stopped"][-1]
+    stopped = [
+        e for e in await repo.list_events(ref_id=task_session) if e["kind"] == "session.stopped"
+    ][-1]
     assert stopped["payload"]["task_id"] == task_run
     # Nothing FAILED.
-    for kinds in (await event_kinds(task_run), await event_kinds(with_cursor),
-                  await event_kinds(resumed), await event_kinds(task_session)):
-        assert not [k for k in kinds if k in ("task.run_failed", "proposal.failed",
-                                              "session.failed")], kinds
+    for kinds in (
+        await event_kinds(task_run),
+        await event_kinds(with_cursor),
+        await event_kinds(resumed),
+        await event_kinds(task_session),
+    ):
+        assert not [
+            k for k in kinds if k in ("task.run_failed", "proposal.failed", "session.failed")
+        ], kinds
     # The background catch-up re-drives the owed resume, and never the interrupted write.
     swept = await orchestration.resume_sweep()
     await orchestration.sweep_settle()
@@ -593,8 +672,7 @@ async def test_a_no_from_a_read_returns_honest_text_and_the_task_lands(monkeypat
     monkeypatch.setattr(graphiti, "search_facts", _no)
     _, out = await _parked_task_run(monkeypatch)
     assert out.get("parked") is not True
-    ret = _graph_return(durable.load_messages(
-        await repo.get_session_run_state(out["session_id"])))
+    ret = _graph_return(durable.load_messages(await repo.get_session_run_state(out["session_id"])))
     assert ret is not None and "knowledge graph search failed (ValueError)" in str(ret.content)
     assert await repo.session_status(out["session_id"]) != "AWAITING_RESUME"
 
@@ -618,7 +696,8 @@ async def test_a_no_on_every_other_surface_is_terminal_at_once(monkeypatch):
     try:
         r = await conn.fetchrow(
             "select attempts, transient_releases, not_before from work_item where id = $1",
-            item["id"])
+            item["id"],
+        )
     finally:
         await conn.close()
     assert (r["attempts"], r["transient_releases"], r["not_before"]) == (1, 0, None)
@@ -652,6 +731,5 @@ async def test_dismissing_a_waiting_proposal_withdraws_it_and_fails_the_task(mon
     assert kinds.count("proposal.decided") == 1
     task = await repo.get_task(task_id)
     assert task["status"] == "FAILED"
-    assert task["outcome"] == (
-        "operator withdrew the waiting execution; 1 of 2 actions had landed")
+    assert task["outcome"] == ("operator withdrew the waiting execution; 1 of 2 actions had landed")
     assert pid not in {p["id"] for p in (await _rpc("decisions.list"))["waiting"]}

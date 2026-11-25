@@ -54,8 +54,11 @@ def test_the_module_loads_neither_the_gateway_nor_the_runtime():
         "('central_command.gateway', 'central_command.executor', 'central_command.runtime'))])"
     )
     done = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True,
-        env={**os.environ, "PYTHONPATH": str(ROOT)}, cwd=ROOT,
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(ROOT)},
+        cwd=ROOT,
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "[]"
@@ -89,11 +92,16 @@ def test_the_tables_are_created_idempotently(table: str):
 # ── no apply is gated on the bundled docs (DL-232) ──────────────────────────
 
 
-@pytest.mark.parametrize("path", [
-    "deploy/k3s/cc-update.sh", "deploy/single/update.sh",
-    "web/server/routes/cc-update.ts", "central_command/api/update.py",
-    "web/src/components/UpdateBadge.tsx",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "deploy/k3s/cc-update.sh",
+        "deploy/single/update.sh",
+        "web/server/routes/cc-update.ts",
+        "central_command/api/update.py",
+        "web/src/components/UpdateBadge.tsx",
+    ],
+)
 def test_nothing_refuses_an_update_over_the_bundled_docs(path: str):
     text = _text(path)
     assert "skills-unresolved" not in text
@@ -185,20 +193,30 @@ def test_the_old_updaters_argv_is_what_v2_126_0_shipped():
         pytest.skip("git needed")
     have = subprocess.run(
         ["git", "rev-parse", "--verify", "--quiet", "refs/tags/v2.126.0"],
-        cwd=ROOT, capture_output=True,
+        cwd=ROOT,
+        capture_output=True,
     )
     if have.returncode != 0:
         pytest.skip("tag v2.126.0 is absent here")
 
     def old(path: str) -> str:
         return subprocess.run(
-            ["git", "show", f"v2.126.0:{path}"], cwd=ROOT, capture_output=True, text=True, check=True,
+            ["git", "show", f"v2.126.0:{path}"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout
 
     k3s = old("deploy/k3s/cc-update.sh")
     single = old("deploy/single/update.sh")
-    assert 'skills_refresh_cli apply --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" --actor updater' in k3s
-    assert '-m central_command.skills.refresh "$sub" --target "$target" --ref upstream "$@"' in single
+    assert (
+        'skills_refresh_cli apply --target "$TARGET_VERSION" --ref "v$TARGET_VERSION" --actor updater'
+        in k3s
+    )
+    assert (
+        '-m central_command.skills.refresh "$sub" --target "$target" --ref upstream "$@"' in single
+    )
     assert 'skills_refresh_cli apply "$target" --actor updater' in single
 
 
@@ -208,7 +226,7 @@ def test_the_old_updaters_argv_is_what_v2_126_0_shipped():
 def _verify_fn() -> str:
     text = VERIFY.read_text(encoding="utf-8")
     start = text.index("\nskill_review_store() {") + 1
-    return text[start:text.index("\n}\n", start) + 3]
+    return text[start : text.index("\n}\n", start) + 3]
 
 
 @pytest.mark.parametrize("answer,passes", [("5", True), ("4", False), ("", False), ("15", False)])

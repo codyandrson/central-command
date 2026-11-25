@@ -38,7 +38,8 @@ def pinned(monkeypatch):
 
 def test_tool_result_ceiling_follows_the_smallest_discovered_window():
     assert context.tool_result_ceiling() == int(
-        settings.context_window * context.TOOL_RESULT_SHARE * context.CHARS_PER_TOKEN)
+        settings.context_window * context.TOOL_RESULT_SHARE * context.CHARS_PER_TOKEN
+    )
     context._windows["cc-default"] = 81920
     context._windows["big-model"] = 400000
     assert context.tool_result_ceiling() == int(81920 * 0.10 * 3)
@@ -56,14 +57,26 @@ def test_clip_default_is_the_input_window_share_not_the_output_cap():
 def test_clip_tool_results_keeps_the_head_of_every_result_and_the_pairing():
     msgs = _transcript(turns=3, payload=5000)
     out = context.clip_tool_results(msgs, 1000)
-    returns = [p for m in out if isinstance(m, ModelRequest)
-               for p in m.parts if isinstance(p, ToolReturnPart)]
-    assert all(r.content.startswith("x" * 1000) and "[CLIPPED at 1000" in r.content for r in returns)
+    returns = [
+        p
+        for m in out
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart)
+    ]
+    assert all(
+        r.content.startswith("x" * 1000) and "[CLIPPED at 1000" in r.content for r in returns
+    )
     assert _pairs_ok(out)
     assert context.clip_tool_results(out, 1000) == out, "idempotent — no double marker"
     small = context.clip_tool_results(_transcript(turns=2, payload=50), 1000)
-    assert not any("[CLIPPED" in p.content for m in small if isinstance(m, ModelRequest)
-                   for p in m.parts if isinstance(p, ToolReturnPart))
+    assert not any(
+        "[CLIPPED" in p.content
+        for m in small
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart)
+    )
 
 
 async def test_a_request_that_would_not_fit_is_clipped_not_sent(monkeypatch):
@@ -72,13 +85,16 @@ async def test_a_request_that_would_not_fit_is_clipped_not_sent(monkeypatch):
     msgs = _transcript(turns=1, payload=60_000)
     msgs[2].parts = [ToolReturnPart("read_thing", "m" * 60_000, tool_call_id="call_0")] * 4
     msgs[1].parts = msgs[1].parts[:1] + [
-        type(msgs[1].parts[1])("read_thing", {"n": i}, tool_call_id="call_0") for i in range(4)]
+        type(msgs[1].parts[1])("read_thing", {"n": i}, tool_call_id="call_0") for i in range(4)
+    ]
     _pin(monkeypatch, {"summarize": False, "pressure_warning": False}, window=30_000)
     emitted = []
 
     async def fake_emit(kind, **kw):
         emitted.append((kind, kw["payload"]))
+
     from central_command import events
+
     monkeypatch.setattr(events, "emit", fake_emit)
 
     out = await _window(_ctx(session_id="sess_over"), msgs)
@@ -95,18 +111,28 @@ async def test_a_dead_summarizer_still_ends_in_the_clip_not_raw_history(monkeypa
     record, which the proxy refused. Losing the summary must fall through to
     the trimmed window and the overflow clip."""
     msgs = _transcript(turns=6, payload=20_000)
-    _pin(monkeypatch, {"summarize": True, "summarize_threshold": 0.5,
-                       "pressure_warning": False, "tool_results_keep_turns": 6},
-         window=30_000)
+    _pin(
+        monkeypatch,
+        {
+            "summarize": True,
+            "summarize_threshold": 0.5,
+            "pressure_warning": False,
+            "tool_results_keep_turns": 6,
+        },
+        window=30_000,
+    )
 
     async def dead_summarizer(model, region):
         raise RuntimeError("Model token limit (10000) exceeded before any response was generated")
+
     monkeypatch.setattr(context, "summarize", dead_summarizer)
     emitted = []
 
     async def fake_emit(kind, **kw):
         emitted.append(kind)
+
     from central_command import events
+
     monkeypatch.setattr(events, "emit", fake_emit)
 
     out = await _window(_ctx(session_id="sess_deadsum"), msgs)
@@ -128,20 +154,35 @@ async def test_a_step_that_raises_still_sends_a_clipped_window(monkeypatch, capl
 
     async def aboom(*a, **k):
         raise RuntimeError("settings died")
+
     monkeypatch.setattr(context, breaks, aboom if breaks == "load_settings" else boom)
     monkeypatch.setattr(settings, "context_window", 30_000)
 
     out = await _window(_ctx(session_id="sess_brokenstep"), msgs)
     size = int(30_000 * context.OVERFLOW_CLIP_SHARE * context.density_for("cc-default"))
-    returns = [p for m in out if isinstance(m, ModelRequest)
-               for p in m.parts if isinstance(p, ToolReturnPart)]
-    assert returns and all(len(r.content) <= size + len(context.CLIPPED.format(n=size))
-                           for r in returns)
+    returns = [
+        p
+        for m in out
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart)
+    ]
+    assert returns and all(
+        len(r.content) <= size + len(context.CLIPPED.format(n=size)) for r in returns
+    )
     assert all("[CLIPPED at" in r.content for r in returns)
     assert out is not msgs and _pairs_ok(out)
     assert "sending the clipped history" in caplog.text
-    assert max(len(p.content) for m in msgs if isinstance(m, ModelRequest)
-               for p in m.parts if isinstance(p, ToolReturnPart)) == 20_000, "the record is untouched"
+    assert (
+        max(
+            len(p.content)
+            for m in msgs
+            if isinstance(m, ModelRequest)
+            for p in m.parts
+            if isinstance(p, ToolReturnPart)
+        )
+        == 20_000
+    ), "the record is untouched"
 
 
 async def test_a_request_that_fits_is_not_clipped(monkeypatch):
@@ -151,12 +192,19 @@ async def test_a_request_that_fits_is_not_clipped(monkeypatch):
 
     async def fake_emit(kind, **kw):
         emitted.append(kind)
+
     from central_command import events
+
     monkeypatch.setattr(events, "emit", fake_emit)
     out = await _window(_ctx(session_id="sess_fit"), msgs)
     assert "session.context_overflow_clipped" not in emitted
-    assert not any("[CLIPPED" in p.content for m in out if isinstance(m, ModelRequest)
-                   for p in m.parts if isinstance(p, ToolReturnPart))
+    assert not any(
+        "[CLIPPED" in p.content
+        for m in out
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart)
+    )
 
 
 async def test_density_is_measured_from_what_the_proxy_counted(monkeypatch):
@@ -168,15 +216,27 @@ async def test_density_is_measured_from_what_the_proxy_counted(monkeypatch):
     from pydantic_ai.usage import RequestUsage
 
     msgs = _transcript(turns=2, payload=3000)
-    chars = len(__import__("pydantic_ai.messages", fromlist=["x"]).ModelMessagesTypeAdapter.dump_json(msgs))
+    chars = len(
+        __import__("pydantic_ai.messages", fromlist=["x"]).ModelMessagesTypeAdapter.dump_json(msgs)
+    )
     counted = chars // 2  # the proxy says ~2 chars/token, not 3
 
     def echo(messages, info):
         return ModelResponse(parts=[TextPart("ok")], usage=RequestUsage(input_tokens=counted))
+
     # Trims off: the density is measured on the bytes actually SENT, and the
     # count below was taken over the raw transcript.
-    _pin(monkeypatch, {"summarize": False, "pressure_warning": False, "drop_thinking": False,
-                       "clear_tool_results": False, "output_headroom": False}, window=100_000)
+    _pin(
+        monkeypatch,
+        {
+            "summarize": False,
+            "pressure_warning": False,
+            "drop_thinking": False,
+            "clear_tool_results": False,
+            "output_headroom": False,
+        },
+        window=100_000,
+    )
     model = context.WindowedModel(FunctionModel(echo))
     name = model.wrapped.model_name
     before = context.estimate_messages(msgs, name)
@@ -198,12 +258,21 @@ async def test_density_counts_the_prompt_once(monkeypatch):
     from pydantic_ai.usage import RequestUsage
 
     msgs = _transcript(turns=2, payload=3000)
-    chars = len(__import__("pydantic_ai.messages", fromlist=["x"]).ModelMessagesTypeAdapter.dump_json(msgs))
+    chars = len(
+        __import__("pydantic_ai.messages", fromlist=["x"]).ModelMessagesTypeAdapter.dump_json(msgs)
+    )
     counted = chars // 2
     name = "density-once-" + uuid.uuid4().hex[:6]
-    context.record_density(name, msgs, RequestUsage(input_tokens=counted, cache_read_tokens=counted // 2,
-                                                    cache_write_tokens=counted // 4))
-    assert abs(context.density_for(name) - 2.0) < 0.05, "cached tokens are a subset of the prompt, not extra"
+    context.record_density(
+        name,
+        msgs,
+        RequestUsage(
+            input_tokens=counted, cache_read_tokens=counted // 2, cache_write_tokens=counted // 4
+        ),
+    )
+    assert abs(context.density_for(name) - 2.0) < 0.05, (
+        "cached tokens are a subset of the prompt, not extra"
+    )
 
 
 async def test_the_guard_trips_on_the_measured_density(monkeypatch):
@@ -211,13 +280,18 @@ async def test_the_guard_trips_on_the_measured_density(monkeypatch):
     chars/token and were rejected by the proxy. At the measured density the
     same request is over the line and gets clipped."""
     msgs = _transcript(turns=1, payload=20_000)
-    _pin(monkeypatch, {"summarize": False, "pressure_warning": False, "output_headroom": False},
-         window=12_000)
+    _pin(
+        monkeypatch,
+        {"summarize": False, "pressure_warning": False, "output_headroom": False},
+        window=12_000,
+    )
     emitted = []
 
     async def fake_emit(kind, **kw):
         emitted.append(kind)
+
     from central_command import events
+
     monkeypatch.setattr(events, "emit", fake_emit)
     assert context.estimate_messages(msgs, "cc-default") < 12_000 * context.OVERFLOW_FRACTION
     await _window(_ctx(session_id="sess_d1"), msgs)
@@ -231,15 +305,20 @@ def test_context_overflow_is_semantic_so_the_attempt_cap_holds():
     """Waiting never shrinks a request. A 400 that says the window was
     exceeded must spend an attempt and park FAILED at the cap, not release
     with backoff forever."""
-    body = ("litellm.ContextWindowExceededError: litellm.BadRequestError: "
-            "ContextWindowExceededError: OpenAIException - request (94740 tokens) "
-            "exceeds the maximum context length (81920 tokens)")
+    body = (
+        "litellm.ContextWindowExceededError: litellm.BadRequestError: "
+        "ContextWindowExceededError: OpenAIException - request (94740 tokens) "
+        "exceeds the maximum context length (81920 tokens)"
+    )
     assert failures.classify_failure_text(body) == failures.SEMANTIC
 
 
 def test_graph_propose_notes_tell_the_agent_to_name_the_operator():
     from central_command.runtime import packs
-    cap = next(c for c in packs.PACKS["graph-propose"].capabilities if c.name == "graph.add_episode")
+
+    cap = next(
+        c for c in packs.PACKS["graph-propose"].capabilities if c.name == "graph.add_episode"
+    )
     assert "NAME THE OPERATOR" in cap.notes
     assert "'the operator is a rewards member there'" not in cap.notes
 
@@ -248,7 +327,10 @@ def test_graph_propose_notes_name_each_person_the_way_the_graph_does():
     """One person, one name (2026-11): the graph's name first, the source's other
     form in parentheses, and a role word resolved or asked about, never written."""
     from central_command.runtime import packs
-    cap = next(c for c in packs.PACKS["graph-propose"].capabilities if c.name == "graph.add_episode")
+
+    cap = next(
+        c for c in packs.PACKS["graph-propose"].capabilities if c.name == "graph.add_episode"
+    )
     assert "NAME EACH PERSON THE WAY THE GRAPH DOES" in cap.notes
     assert "Jane Doe (written 'Jane R. Doe' in the mail)" in cap.notes
     assert "A role word ('Mom', 'my boss') is never a name" in cap.notes

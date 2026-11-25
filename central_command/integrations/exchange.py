@@ -107,11 +107,7 @@ def configured() -> bool:
     """True when this deployment has an Exchange mailbox — the ONE switch the
     façades route on. URL, username and password; `CC_EXCHANGE_EMAIL` is
     optional (the username serves when it is a UPN)."""
-    return bool(
-        settings.exchange_url
-        and settings.exchange_username
-        and settings.exchange_password
-    )
+    return bool(settings.exchange_url and settings.exchange_username and settings.exchange_password)
 
 
 def _trust() -> tuple[object, object]:
@@ -142,13 +138,19 @@ def _adapter_cls():
     class _CCTrustAdapter(requests.adapters.HTTPAdapter):
         def cert_verify(self, conn, url, verify, cert):
             our_cert, our_verify = _trust()
-            super().cert_verify(conn=conn, url=url, verify=our_verify,
-                                cert=our_cert if our_cert is not None else cert)
+            super().cert_verify(
+                conn=conn,
+                url=url,
+                verify=our_verify,
+                cert=our_cert if our_cert is not None else cert,
+            )
 
         def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
             our_cert, our_verify = _trust()
             return super().get_connection_with_tls_context(
-                request=request, verify=our_verify, proxies=proxies,
+                request=request,
+                verify=our_verify,
+                proxies=proxies,
                 cert=our_cert if our_cert is not None else cert,
             )
 
@@ -249,6 +251,7 @@ async def _thread(fn, *args, **kwargs):
     caller's `except EmailFacadeError` must not be bypassed by an
     `ErrorItemNotFound` from three layers down.
     """
+
     def run():
         try:
             return fn(*args, **kwargs)
@@ -268,8 +271,9 @@ async def _thread(fn, *args, **kwargs):
 # works unchanged, and the backlog sweeper's `after:<epoch> before:<epoch>`
 # does too.
 
-_TOKEN = re.compile(r"^(from|to|subject|after|before|newer_than|older_than|in):(.*)$",
-                    re.IGNORECASE)
+_TOKEN = re.compile(
+    r"^(from|to|subject|after|before|newer_than|older_than|in):(.*)$", re.IGNORECASE
+)
 
 
 def _as_datetime(value: str, *, end_of_day: bool = False) -> datetime:
@@ -418,8 +422,10 @@ def _resolve_folder(acct, name: str):
     normalized = wanted.lower().lstrip("/")
     for candidates in (by_path, by_name):
         for candidate_key, folder in candidates.items():
-            if candidate_key.lstrip("/").removeprefix("root").lstrip("/") == normalized \
-               or candidate_key == wanted.lower():
+            if (
+                candidate_key.lstrip("/").removeprefix("root").lstrip("/") == normalized
+                or candidate_key == wanted.lower()
+            ):
                 return folder
     raise ExchangeError(
         f"no folder named {wanted!r} in this mailbox — "
@@ -431,16 +437,19 @@ async def list_folders() -> list[dict]:
     """The mailbox's folder tree with item counts — `[{name, path, total,
     unread}]`. The read behind `mail_list_folders`: a folder name is an
     argument, so something has to be able to answer "which folders exist"."""
+
     def run():
         acct = account()
         out = []
         for folder in acct.msg_folder_root.walk():
-            out.append({
-                "name": getattr(folder, "name", "") or "",
-                "path": getattr(folder, "absolute", "") or "",
-                "total": getattr(folder, "total_count", None) or 0,
-                "unread": getattr(folder, "unread_count", None) or 0,
-            })
+            out.append(
+                {
+                    "name": getattr(folder, "name", "") or "",
+                    "path": getattr(folder, "absolute", "") or "",
+                    "total": getattr(folder, "total_count", None) or 0,
+                    "unread": getattr(folder, "unread_count", None) or 0,
+                }
+            )
         return out
 
     return await _thread(run)
@@ -676,8 +685,9 @@ def _record(item) -> dict:
         "conversation_id": (getattr(conversation, "id", "") or "") if conversation else "",
         "from": f"{name} <{address}>".strip() if name else address,
         "subject": getattr(item, "subject", "") or "",
-        "date": _iso(getattr(item, "datetime_received", None)
-                     or getattr(item, "datetime_sent", None)),
+        "date": _iso(
+            getattr(item, "datetime_received", None) or getattr(item, "datetime_sent", None)
+        ),
         "body_text": text,
         "body_html": html,
         "snippet": (text or "")[:200],
@@ -707,12 +717,21 @@ async def list_refs(scope_query: str) -> list[dict]:
     façade's refs carry no such field, so enrollment synthesises one from the
     uuid there and keeps the real one here.
     """
+
     def run():
         acct = account()
         filters, aqs, folder_name = translate_query(scope_query)
         folder = _resolve_folder(acct, folder_name) if folder_name else acct.inbox
-        fields = ("id", "changekey", "message_id", "conversation_id", "datetime_received",
-                  "sender", "subject", "to_recipients")
+        fields = (
+            "id",
+            "changekey",
+            "message_id",
+            "conversation_id",
+            "datetime_received",
+            "sender",
+            "subject",
+            "to_recipients",
+        )
         if aqs:
             # EWS refuses a QueryString beside field restrictions, so the AQS
             # goes to the server and the tokens are applied here.
@@ -754,6 +773,7 @@ async def get_message(uuid: str) -> dict:
     them for a model (`tests/test_mailtext.py` walks the source for any other
     reader).
     """
+
     def run():
         return _record(_fetch(account(), uuid))
 
@@ -779,6 +799,7 @@ async def get_attachment(uuid: str, attachment_id: str) -> bytes:
     (`contract.failures.classify_failure_text`): an unknown id is a NO, not an
     outage.
     """
+
     def run():
         from exchangelib.attachments import ItemAttachment
 
@@ -811,6 +832,7 @@ async def report_spam(uuid: str) -> dict:
     """Move one message to the Junk folder — the Exchange spelling of Gmail's
     +SPAM/−INBOX. Returns `{ok, folder}`; the Executor's result line reads it
     the way it reads the façade's `label_ids`."""
+
     def run():
         acct = account()
         item = _fetch(acct, uuid)
@@ -830,6 +852,7 @@ async def move(uuid: str, folder: str) -> dict:
     this handle (D4). The new uuid is returned so the Executor's result line
     can state it.
     """
+
     def run():
         acct = account()
         item = _fetch(acct, uuid)
@@ -844,8 +867,13 @@ async def move(uuid: str, folder: str) -> dict:
     return await _thread(run)
 
 
-async def send(to: list[str], subject: str, body: str, cc: list[str] | None = None,
-               reply_to_ref: str | None = None) -> dict:
+async def send(
+    to: list[str],
+    subject: str,
+    body: str,
+    cc: list[str] | None = None,
+    reply_to_ref: str | None = None,
+) -> dict:
     """Send one plain-text message as the configured mailbox. Executor-only,
     after approval — sending is external and irreversible.
 
@@ -855,6 +883,7 @@ async def send(to: list[str], subject: str, body: str, cc: list[str] | None = No
     own References chain plus that id. Same rule as the unsubscribe URL — an
     id an agent can write into its own arguments is an agent-authored claim.
     """
+
     def run():
         from exchangelib import Message
 
@@ -908,8 +937,9 @@ def _organizer_address(item) -> str:
 
 def _event(item, self_address: str) -> dict:
     organizer_address = _organizer_address(item)
-    attendees = list(getattr(item, "required_attendees", None) or []) + \
-        list(getattr(item, "optional_attendees", None) or [])
+    attendees = list(getattr(item, "required_attendees", None) or []) + list(
+        getattr(item, "optional_attendees", None) or []
+    )
     body = getattr(item, "body", None)
     return {
         "event_id": getattr(getattr(item, "id", None), "id", None) or getattr(item, "id", "") or "",
@@ -953,10 +983,12 @@ async def list_events(time_min: str, time_max: str, calendar_id: str = "primary"
     is what expands recurrences — `filter` would return only the master item of
     a recurring meeting, which is how a daily standup vanishes from a brief.
     """
+
     def run():
         acct = account()
-        calendar = acct.calendar if calendar_id in ("", "primary") else \
-            _resolve_folder(acct, calendar_id)
+        calendar = (
+            acct.calendar if calendar_id in ("", "primary") else _resolve_folder(acct, calendar_id)
+        )
         start = _ews_datetime(time_min, "time_min")
         end = _ews_datetime(time_max, "time_max")
         items = list(calendar.view(start=start, end=end)[: MAX_EVENTS + 1])
@@ -970,18 +1002,25 @@ async def list_events(time_min: str, time_max: str, calendar_id: str = "primary"
     return await _thread(run)
 
 
-async def create_event(title: str, start: str, end: str, description: str | None = None,
-                       attendees: list[str] | None = None,
-                       calendar_id: str = "primary") -> dict:
+async def create_event(
+    title: str,
+    start: str,
+    end: str,
+    description: str | None = None,
+    attendees: list[str] | None = None,
+    calendar_id: str = "primary",
+) -> dict:
     """Create an event. Executor-only. `start`/`end` are RFC3339 with an
     explicit offset or Z — instants, compared as instants."""
+
     def run():
         from exchangelib import CalendarItem
         from exchangelib.items import SEND_ONLY_TO_ALL
 
         acct = account()
-        calendar = acct.calendar if calendar_id in ("", "primary") else \
-            _resolve_folder(acct, calendar_id)
+        calendar = (
+            acct.calendar if calendar_id in ("", "primary") else _resolve_folder(acct, calendar_id)
+        )
         item = CalendarItem(
             account=acct,
             folder=calendar,
@@ -997,13 +1036,19 @@ async def create_event(title: str, start: str, end: str, description: str | None
     return await _thread(run)
 
 
-async def update_event(event_id: str, title: str | None = None, start: str | None = None,
-                       end: str | None = None, description: str | None = None,
-                       attendees: list[str] | None = None,
-                       calendar_id: str = "primary") -> dict:
+async def update_event(
+    event_id: str,
+    title: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    description: str | None = None,
+    attendees: list[str] | None = None,
+    calendar_id: str = "primary",
+) -> dict:
     """Patch an existing event. Executor-only. Only the fields supplied change —
     moving a meeting is an update, never a delete-and-recreate, because
     recreating loses the attendees' responses."""
+
     def run():
         from exchangelib.items import SEND_TO_ALL_AND_SAVE_COPY
 
@@ -1027,8 +1072,7 @@ async def update_event(event_id: str, title: str | None = None, start: str | Non
             changed.append("required_attendees")
         if not changed:
             raise ExchangeError("update_event: no field to change was supplied")
-        item.save(update_fields=changed,
-                  send_meeting_invitations=SEND_TO_ALL_AND_SAVE_COPY)
+        item.save(update_fields=changed, send_meeting_invitations=SEND_TO_ALL_AND_SAVE_COPY)
         return _event(item, _email_address())
 
     return await _thread(run)
@@ -1037,6 +1081,7 @@ async def update_event(event_id: str, title: str | None = None, start: str | Non
 async def get_event(event_id: str, calendar_id: str = "primary") -> dict:
     """One event by id: the normalised shape plus its `organizer` address. The
     id says where the item is, so `calendar_id` is accepted and not needed."""
+
     def run():
         item = _fetch(account(), event_id)
         return {**_event(item, _email_address()), "organizer": _organizer_address(item)}
@@ -1066,13 +1111,17 @@ async def delete_event(event_id: str, calendar_id: str = "primary") -> str:
     registry still calls this irreversible and the proposal must carry a reason;
     a meeting someone else organises only leaves this calendar, and its
     attendees hear nothing. A provider error raises through `_thread`."""
+
     def run():
         from exchangelib.items import SEND_TO_ALL_AND_SAVE_COPY, SEND_TO_NONE
 
         acct = account()
         item = _fetch(acct, event_id)
-        item.move_to_trash(send_meeting_cancellations=(
-            SEND_TO_ALL_AND_SAVE_COPY if _is_organizer(item, acct) else SEND_TO_NONE))
+        item.move_to_trash(
+            send_meeting_cancellations=(
+                SEND_TO_ALL_AND_SAVE_COPY if _is_organizer(item, acct) else SEND_TO_NONE
+            )
+        )
         return event_id
 
     return await _thread(run)

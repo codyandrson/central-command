@@ -55,7 +55,9 @@ def test_render_inserts_the_value_and_removes_the_marker():
 
 
 def test_the_retired_long_form_is_malformed():
-    long = "<!-- overlay: layout — moved to the instance overlay by epic-instance-facts-relocation -->"
+    long = (
+        "<!-- overlay: layout — moved to the instance overlay by epic-instance-facts-relocation -->"
+    )
     with pytest.raises(ValueError) as exc:
         overlay.render(f"x {long}.\n", {"layout": VALUE}, source="a.md")
     assert "a.md:1" in str(exc.value)
@@ -69,7 +71,8 @@ def test_trailing_newline_of_the_value_is_trimmed_by_load(tmp_path):
 def test_absent_field_removes_an_inline_marker_and_lists_it_unresolved():
     out, resolved, unresolved = overlay.render(
         "caps users <!-- overlay: limits --> and storage\nend <!-- overlay: limits -->.\n",
-        {}, source="a.md",
+        {},
+        source="a.md",
     )
     assert out == "caps users and storage\nend.\n"
     assert resolved == [] and unresolved == ["limits"]
@@ -92,21 +95,24 @@ def test_a_multi_line_value_takes_the_markers_indentation_on_every_line():
 
 
 def test_an_inline_marker_mid_sentence_inside_an_indented_item():
-    text = "  not exist\". <!-- overlay: apps --> Next.\n"
+    text = '  not exist". <!-- overlay: apps --> Next.\n'
     out, _, _ = overlay.render(text, {"apps": "Two apps installed."}, source="a.md")
-    assert out == "  not exist\". Two apps installed. Next.\n"
+    assert out == '  not exist". Two apps installed. Next.\n'
     gone, _, _ = overlay.render(text, {}, source="a.md")
-    assert gone == "  not exist\". Next.\n"
+    assert gone == '  not exist". Next.\n'
 
 
-@pytest.mark.parametrize("marker", [
-    "<!-- overlay -->",
-    "<!-- overlay: Bad-Field -->",
-    "<!-- overlay: layout",
-    "<!-- overlay: layout - moved -->",
-    "<!--overlay: layout -->",
-    "<!-- overlay: layout — moved to the instance overlay by epic-instance-facts-relocation -->",
-])
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "<!-- overlay -->",
+        "<!-- overlay: Bad-Field -->",
+        "<!-- overlay: layout",
+        "<!-- overlay: layout - moved -->",
+        "<!--overlay: layout -->",
+        "<!-- overlay: layout — moved to the instance overlay by epic-instance-facts-relocation -->",
+    ],
+)
 def test_a_malformed_marker_raises_naming_file_and_line(marker):
     with pytest.raises(ValueError) as exc:
         overlay.render(f"one\ntwo\ntext {marker}\n", {"layout": VALUE}, source="/x/SKILL.md")
@@ -189,7 +195,9 @@ def test_every_field_has_a_marker_and_the_count_matches_the_tree():
     total = sum(len(v) for v in found.values())
     grep = subprocess.run(
         ["git", "grep", "-h", "-o", "<!-- overlay:", "--", "skills"],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     )
     if grep.returncode in (0, 1):  # outside a git checkout there is nothing to compare
         assert len(grep.stdout.splitlines()) == total
@@ -199,7 +207,8 @@ def test_no_marker_under_the_claude_directory():
     offenders = [
         str(f.relative_to(ROOT))
         for f in (ROOT / ".claude").rglob("*")
-        if f.is_file() and re.search(r"<!--\s*overlay", f.read_text(encoding="utf-8", errors="ignore"))
+        if f.is_file()
+        and re.search(r"<!--\s*overlay", f.read_text(encoding="utf-8", errors="ignore"))
     ]
     assert offenders == []
 
@@ -209,7 +218,8 @@ def test_no_planning_tail_survives_in_the_skills_or_claude_trees():
         str(f.relative_to(ROOT))
         for top in ("skills", ".claude")
         for f in (ROOT / top).rglob("*")
-        if f.is_file() and "moved to the instance overlay" in f.read_text(encoding="utf-8", errors="ignore")
+        if f.is_file()
+        and "moved to the instance overlay" in f.read_text(encoding="utf-8", errors="ignore")
     ]
     assert offenders == []
 
@@ -220,7 +230,9 @@ def test_no_planning_tail_survives_in_the_skills_or_claude_trees():
 def _run_check(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, "-m", "central_command.skills.overlay", "check", *args],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -247,7 +259,9 @@ def test_check_against_a_dir_with_every_field_exits_0(tmp_path):
     r = _run_check("--dir", str(tmp_path))
     assert r.returncode == 0, r.stdout + r.stderr
     assert "UNRESOLVED" not in r.stdout and "UNUSED" not in r.stdout
-    assert len([l for l in r.stdout.splitlines() if l.startswith("RESOLVED")]) == len(overlay.FIELDS)
+    assert len([l for l in r.stdout.splitlines() if l.startswith("RESOLVED")]) == len(
+        overlay.FIELDS
+    )
     assert planted not in r.stdout and planted not in r.stderr
 
 
@@ -293,18 +307,21 @@ def test_check_defaults_to_the_resolved_overlay_dir(tmp_path):
     env = {**os.environ, "CC_STATE_DIR": str(state), "CC_SKILL_OVERLAY_DIR": ""}
     r = subprocess.run(
         [sys.executable, "-m", "central_command.skills.overlay", "check"],
-        cwd=ROOT, capture_output=True, text=True, env=env,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert r.returncode == 1
     assert str(state / "skill-overlay") in r.stdout
-    assert any(l.startswith("RESOLVED") and "model_server_layout" in l for l in r.stdout.splitlines())
+    assert any(
+        l.startswith("RESOLVED") and "model_server_layout" in l for l in r.stdout.splitlines()
+    )
 
 
 # --- through the import route (needs Postgres) -------------------------------
 
-_CLEAN = (
-    "delete from skill where id like 'cc-test-%' or id like 'cc!_test!_%' escape '!'"
-)
+_CLEAN = "delete from skill where id like 'cc-test-%' or id like 'cc!_test!_%' escape '!'"
 
 
 # Its own fixture, not the conftest one: this file also uses ids in the
@@ -342,9 +359,7 @@ def _overlay(tmp_path: Path, monkeypatch, **fields: str) -> Path:
 
 
 async def _import(folder: Path, sid: str = "cc-test-ovl") -> dict:
-    return await routes.import_skill_route(
-        routes.SkillImportIn(path=str(folder), skill_id=sid)
-    )
+    return await routes.import_skill_route(routes.SkillImportIn(path=str(folder), skill_id=sid))
 
 
 @pytestmark_db
@@ -358,7 +373,7 @@ async def test_import_writes_the_value_and_reports_names_never_the_value(
         "---\nname: ovl\ndescription: d\n---\n# G\nHost: <!-- overlay: layout -->\n",
         "# R\n- item\n  <!-- overlay: layout -->\n- other <!-- overlay: missing_field -->.\n",
     )
-    before = (await repo.list_events_of_kinds(["skill.imported"]))
+    before = await repo.list_events_of_kinds(["skill.imported"])
     since = before[-1]["id"] if before else 0
 
     result = await _import(folder)
@@ -370,7 +385,8 @@ async def test_import_writes_the_value_and_reports_names_never_the_value(
     assert "- other." in docs["routing"]
 
     events = [
-        e for e in await repo.list_events_of_kinds(["skill.imported"], since_id=since)
+        e
+        for e in await repo.list_events_of_kinds(["skill.imported"], since_id=since)
         if e["ref_id"] == "cc-test-ovl"
     ]
     assert len(events) == 1
@@ -390,7 +406,9 @@ async def test_import_without_an_overlay_removes_the_markers_and_lists_the_field
     result = await _import(folder)
 
     assert result["overlay"] == {"resolved": [], "unresolved": ["layout"]}
-    (guidance,) = [d for d in await repo.list_skill_docs("cc-test-ovl") if d["doc_key"] == "guidance"]
+    (guidance,) = [
+        d for d in await repo.list_skill_docs("cc-test-ovl") if d["doc_key"] == "guidance"
+    ]
     assert guidance["content"] == "# G\nbody\nend\n"
 
 
@@ -401,7 +419,8 @@ async def test_a_malformed_marker_is_422_naming_file_and_line_and_writes_nothing
 ):
     _overlay(tmp_path, monkeypatch, layout=VALUE)
     folder = _folder(
-        tmp_path, "# G\nfine <!-- overlay: layout -->\n",
+        tmp_path,
+        "# G\nfine <!-- overlay: layout -->\n",
         "# R\nok\n<!-- overlay: Not-A-Field -->\n",
     )
 
@@ -424,7 +443,9 @@ async def test_a_marker_in_the_frontmatter_is_refused_and_a_body_line_is_the_fil
     after the frontmatter is named by its line in the FILE, not in the body."""
     _overlay(tmp_path, monkeypatch, layout=VALUE)
     bad_front = _folder(
-        tmp_path, "---\nname: ovl\ndescription: runs on <!-- overlay: layout -->\n---\n# G\n", "# R\n"
+        tmp_path,
+        "---\nname: ovl\ndescription: runs on <!-- overlay: layout -->\n---\n# G\n",
+        "# R\n",
     )
     with pytest.raises(HTTPException) as exc:
         await _import(bad_front)

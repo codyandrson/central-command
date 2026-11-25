@@ -52,7 +52,9 @@ def sh(script: str, cwd: pathlib.Path = SINGLE) -> subprocess.CompletedProcess:
     prelude = f". '{(ROOT / 'deploy' / 'env-lib.sh').as_posix()}'\n. '{(SINGLE / 'ledger-lib.sh').as_posix()}'\n"
     return subprocess.run(
         [bash(), "-c", prelude + textwrap.dedent(script)],
-        cwd=cwd, capture_output=True, text=True,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
     )
 
 
@@ -106,7 +108,7 @@ TRICKY_ENV = (
     "\n"
     "CC_A=first\n"
     "CC_AB=prefix-of-nothing\n"
-    "CC_A=second\n"                       # defined twice: the last one wins
+    "CC_A=second\n"  # defined twice: the last one wins
     'CC_QUOTED="Jane Doe"\n'
     "CC_SINGLE='single quoted'\n"
     "CC_EQ=a=b=c\n"
@@ -119,9 +121,23 @@ TRICKY_ENV = (
     "=no-key\n"
     "CC_LAST=no-trailing-newline"
 )
-TRICKY_KEYS = ["CC_A", "CC_AB", "CC_QUOTED", "CC_SINGLE", "CC_EQ", "CC_CRLF", "CC_EMPTY",
-               "CC_INDENTED", "CC_EXPORTED", "CC_SPACES", "CC.DOTTED", "CC_LAST",
-               "CC_MISSING", "CC", "A"]
+TRICKY_KEYS = [
+    "CC_A",
+    "CC_AB",
+    "CC_QUOTED",
+    "CC_SINGLE",
+    "CC_EQ",
+    "CC_CRLF",
+    "CC_EMPTY",
+    "CC_INDENTED",
+    "CC_EXPORTED",
+    "CC_SPACES",
+    "CC.DOTTED",
+    "CC_LAST",
+    "CC_MISSING",
+    "CC",
+    "A",
+]
 
 
 # ── the answer-file cache ───────────────────────────────────────────────────
@@ -174,13 +190,16 @@ def test_the_cache_follows_every_writer_of_the_file(tmp_path):
 # ── the manifest split ──────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("row", [
-    "a\tb\tc\td\te\tf\tg\th",
-    "a\t\tc\t-\te\t\t\th",          # empty fields stay empty, as with cut
-    "\tb\tc\td\te\tf\tg\th",        # an empty FIRST field
-    "a\tb\tc\td\te\tf\tg\t",        # an empty LAST field
-    "a doc with spaces\tb\tc",      # fewer columns than asked for
-])
+@pytest.mark.parametrize(
+    "row",
+    [
+        "a\tb\tc\td\te\tf\tg\th",
+        "a\t\tc\t-\te\t\t\th",  # empty fields stay empty, as with cut
+        "\tb\tc\td\te\tf\tg\th",  # an empty FIRST field
+        "a\tb\tc\td\te\tf\tg\t",  # an empty LAST field
+        "a doc with spaces\tb\tc",  # fewer columns than asked for
+    ],
+)
 def test_a_manifest_column_is_what_cut_prints(row):
     q = row.replace("\t", "\\t")
     out = ok(f"""
@@ -215,7 +234,7 @@ def test_the_shipped_manifest_loads_without_running_a_single_program():
 def _env_with_values(tmp_path: pathlib.Path) -> pathlib.Path:
     env = tmp_path / ".env"
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
-    text += "\nCC_LITELLM_PORT=4111\nCC_API_PORT=8181\nCC_CA_BUNDLE=\"/a path/ca.pem\"\nCC_EMBED_DIM=1024\r\n"
+    text += '\nCC_LITELLM_PORT=4111\nCC_API_PORT=8181\nCC_CA_BUNDLE="/a path/ca.pem"\nCC_EMBED_DIM=1024\r\n'
     env.write_bytes(text.encode())
     return env
 
@@ -247,7 +266,13 @@ def test_every_shipped_row_fingerprints_exactly_as_before(tmp_path):
     rows = [l.split("|") for l in out.splitlines()]
     assert len(rows) > 50, out
     for step, old, single, primed, public in rows:
-        assert single == old and primed == old and public == old, (step, old, single, primed, public)
+        assert single == old and primed == old and public == old, (
+            step,
+            old,
+            single,
+            primed,
+            public,
+        )
     # The tree inputs are among them, so the tree path is covered too.
     assert any(r[0] == "boot/skills-imported" for r in rows)
 
@@ -358,8 +383,8 @@ def test_the_ledger_readers_answer_as_cut_did(tmp_path):
     led.write_bytes(
         b"# header\tdone\n"
         b"app/install\tfailed\t1.0\t2026-10-01T00:00:00Z\tfp\tbroke\n"
-        b"app/install\tdone\t1.0\t2026-10-02T00:00:00Z\tfp2\t\r\n"   # twice: the last wins
-        b"app/venv\n"                                                   # no tab at all
+        b"app/install\tdone\t1.0\t2026-10-02T00:00:00Z\tfp2\t\r\n"  # twice: the last wins
+        b"app/venv\n"  # no tab at all
         b"\n"
         b"stack/up-core\tgate\t1.0\t2026-10-01T00:00:00Z\tfp\twaiting on you"
     )
@@ -400,23 +425,33 @@ def test_blocked_reads_the_last_row_and_names_the_first_require(tmp_path):
 
 
 def test_the_timestamp_is_dates_and_needs_no_date(tmp_path):
-    out = ok("""
+    out = ok(
+        """
       a="$(date -u +%FT%TZ)"
       PATH_SAVED="$PATH"; PATH=/nonexistent-cc-no-programs
       cc_now_utc; n="$NOW_UTC"
       PATH="$PATH_SAVED"
       b="$(date -u +%FT%TZ)"
       printf '%s %s %s' "$a" "$n" "$b"
-    """, cwd=tmp_path)
+    """,
+        cwd=tmp_path,
+    )
     a, n, b = out.split()
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", n)
     assert a <= n <= b
 
 
-@pytest.mark.parametrize("path", [
-    "/home/jane/central-command", "/home/jane/central-command/", "C:/Users/Jane Doe/cc",
-    "/", "relative/dir", "plain",
-])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/home/jane/central-command",
+        "/home/jane/central-command/",
+        "C:/Users/Jane Doe/cc",
+        "/",
+        "relative/dir",
+        "plain",
+    ],
+)
 def test_the_install_id_is_what_the_pipeline_printed(path):
     out = ok(f"""
       {OLD_REFERENCE}
@@ -435,21 +470,33 @@ def test_the_hasher_prints_what_sha256sum_and_cut_printed():
     assert new == old == hashlib.sha256(b"abc\n").hexdigest()
 
 
-@pytest.mark.parametrize("text, expected", [
-    ("version=2.58.0\n", "2.58.0"),
-    ("# x\nversion= 2.58.1 \r\nversion=9\n", "2.58.1"),
-    ("version=3.0.0", "3.0.0"),
-    ("nothing here\n", "unknown"),
-])
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("version=2.58.0\n", "2.58.0"),
+        ("# x\nversion= 2.58.1 \r\nversion=9\n", "2.58.1"),
+        ("version=3.0.0", "3.0.0"),
+        ("nothing here\n", "unknown"),
+    ],
+)
 def test_installed_version_reads_version_as_the_sed_pipeline_did(tmp_path, text, expected):
     (tmp_path / "VERSION").write_bytes(text.encode())
     fns = functions_in(SETUP.read_text(encoding="utf-8"))
-    body = "".join(f"{n}() {{{fns[n]}\n}}\n" for n in ("installed_version_load", "installed_version"))
+    body = "".join(
+        f"{n}() {{{fns[n]}\n}}\n" for n in ("installed_version_load", "installed_version")
+    )
     r = subprocess.run(
-        [bash(), "-c", (f"REPO_ROOT='{tmp_path.as_posix()}'\nINSTALLED_VERSION=''\n{body}"
-         "old=\"$(sed -n 's/^version=//p' \"$REPO_ROOT/VERSION\" 2>/dev/null | head -1 | tr -d ' \\r')\"\n"
-         "printf '%s|%s' \"${old:-unknown}\" \"$(installed_version)\"")],
-        capture_output=True, text=True,
+        [
+            bash(),
+            "-c",
+            (
+                f"REPO_ROOT='{tmp_path.as_posix()}'\nINSTALLED_VERSION=''\n{body}"
+                "old=\"$(sed -n 's/^version=//p' \"$REPO_ROOT/VERSION\" 2>/dev/null | head -1 | tr -d ' \\r')\"\n"
+                'printf \'%s|%s\' "${old:-unknown}" "$(installed_version)"'
+            ),
+        ],
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stderr
     old, new = r.stdout.split("|")
@@ -467,14 +514,31 @@ def test_the_utc_calendar_is_arithmetic_and_right_across_leap_days_and_centuries
 
     epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
 
-    epochs = [0, 1, 59, 86399, 86400, 951_782_399, 951_782_400, 951_868_800,
-              1_709_164_800, 1_740_787_199, 4_102_444_799, 4_107_542_400,
-              1_759_460_000, 253_402_300_799]
+    epochs = [
+        0,
+        1,
+        59,
+        86399,
+        86400,
+        951_782_399,
+        951_782_400,
+        951_868_800,
+        1_709_164_800,
+        1_740_787_199,
+        4_102_444_799,
+        4_107_542_400,
+        1_759_460_000,
+        253_402_300_799,
+    ]
     epochs += list(range(1_700_000_000, 1_700_000_000 + 400 * 86_400 * 3, 86_400 * 3 + 3_607))
-    out = ok("for t in " + " ".join(map(str, epochs)) + "; do cc__utc_from_epoch $t; echo $NOW_UTC; done")
+    out = ok(
+        "for t in " + " ".join(map(str, epochs)) + "; do cc__utc_from_epoch $t; echo $NOW_UTC; done"
+    )
     got = out.split()
-    want = [f"{d.year:04d}-{d.month:02d}-{d.day:02d}T{d.hour:02d}:{d.minute:02d}:{d.second:02d}Z"
-            for d in (epoch + datetime.timedelta(seconds=t) for t in epochs)]
+    want = [
+        f"{d.year:04d}-{d.month:02d}-{d.day:02d}T{d.hour:02d}:{d.minute:02d}:{d.second:02d}Z"
+        for d in (epoch + datetime.timedelta(seconds=t) for t in epochs)
+    ]
     assert got == want
 
 

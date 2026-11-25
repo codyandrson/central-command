@@ -32,14 +32,34 @@ def pinned(monkeypatch):
 
 def test_pairs_carry_outcome_event_and_reopen_note():
     rows = [
-        {"id": 1, "kind": "audit.verdict", "ref_id": "wi_a", "actor": "auditor",
-         "payload": {"verdict": "concur", "rationale": "newsletter", "mode": "shadow"}},
-        {"id": 2, "kind": "work.reopened", "ref_id": "wi_a", "actor": "operator",
-         "payload": {"note": "this was actionable"}},
-        {"id": 3, "kind": "audit.verdict", "ref_id": "wi_b", "actor": "auditor",
-         "payload": {"verdict": "challenge", "rationale": "looks actionable", "mode": "shadow"}},
-        {"id": 4, "kind": "work.dismissal_confirmed", "ref_id": "wi_b", "actor": "operator",
-         "payload": {}},
+        {
+            "id": 1,
+            "kind": "audit.verdict",
+            "ref_id": "wi_a",
+            "actor": "auditor",
+            "payload": {"verdict": "concur", "rationale": "newsletter", "mode": "shadow"},
+        },
+        {
+            "id": 2,
+            "kind": "work.reopened",
+            "ref_id": "wi_a",
+            "actor": "operator",
+            "payload": {"note": "this was actionable"},
+        },
+        {
+            "id": 3,
+            "kind": "audit.verdict",
+            "ref_id": "wi_b",
+            "actor": "auditor",
+            "payload": {"verdict": "challenge", "rationale": "looks actionable", "mode": "shadow"},
+        },
+        {
+            "id": 4,
+            "kind": "work.dismissal_confirmed",
+            "ref_id": "wi_b",
+            "actor": "operator",
+            "payload": {},
+        },
     ]
     report = auditor.pair_verdicts(rows)
     miss = report["auditor_misses"][0]
@@ -50,10 +70,15 @@ def test_pairs_carry_outcome_event_and_reopen_note():
 
 def test_signals_derive_from_the_disagreement_quadrants():
     report = {
-        "over_cautious": [{"item_id": "wi_b", "verdict_event": 3,
-                           "rationale": "looks actionable"}],
-        "auditor_misses": [{"item_id": "wi_a", "verdict_event": 1,
-                            "rationale": "newsletter", "note": "this was actionable"}],
+        "over_cautious": [{"item_id": "wi_b", "verdict_event": 3, "rationale": "looks actionable"}],
+        "auditor_misses": [
+            {
+                "item_id": "wi_a",
+                "verdict_event": 1,
+                "rationale": "newsletter",
+                "note": "this was actionable",
+            }
+        ],
     }
     signals = auditor.signals_from_report(report, {"wi_a": "Renewal notice", "wi_b": "Promo"})
     kinds = {s["kind"]: s for s in signals}
@@ -120,7 +145,8 @@ async def test_coach_loop_for_the_auditor_closes_end_to_end(monkeypatch):
     monkeypatch.setattr(settings, "operator_name", "lee")
 
     v = await events.emit(
-        "audit.verdict", ref_id="wi_coach_test",
+        "audit.verdict",
+        ref_id="wi_coach_test",
         payload={"verdict": "challenge", "rationale": "seems actionable", "mode": "shadow"},
         actor="auditor",
     )
@@ -136,7 +162,8 @@ async def test_coach_loop_for_the_auditor_closes_end_to_end(monkeypatch):
     # result. The wire always backgrounds it behind a task record (a coach run
     # takes minutes); this test is about the coaching LOOP, not the launch.
     out = await routes.coach_agent(
-        "auditor", routes.CoachIn(signal_ids=[v["id"]], note=None),
+        "auditor",
+        routes.CoachIn(signal_ids=[v["id"]], note=None),
         background=False,
     )
     assert out["deferred"] is True

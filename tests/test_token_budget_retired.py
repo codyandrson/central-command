@@ -24,8 +24,10 @@ def test_no_token_budget_setting_remains_under_central_command():
     hits = []
     for p in (ROOT / "central_command").rglob("*.py"):
         for i, line in enumerate(p.read_text(errors="ignore").splitlines(), 1):
-            if pattern.search(line) and "RETIRED_ENV_KEYS" not in line and not (
-                p.name == "config.py" and f'"{KEY}"' in line
+            if (
+                pattern.search(line)
+                and "RETIRED_ENV_KEYS" not in line
+                and not (p.name == "config.py" and f'"{KEY}"' in line)
             ):
                 hits.append(f"{p.relative_to(ROOT)}:{i}")
     assert hits == []
@@ -43,7 +45,9 @@ def test_the_retired_key_warns_once_with_its_own_reason(monkeypatch, caplog):
     monkeypatch.setenv(KEY, "0")
     with caplog.at_level(logging.WARNING):
         app_module._warn_retired_settings()
-    warnings = [r.getMessage() for r in caplog.records if "ignored retired setting" in r.getMessage()]
+    warnings = [
+        r.getMessage() for r in caplog.records if "ignored retired setting" in r.getMessage()
+    ]
     assert len(warnings) == 1
     assert KEY in warnings[0]
     assert RETIRED_ENV_KEYS[KEY] in warnings[0]

@@ -25,8 +25,7 @@ pytestmark_db = needs_pg
 # have leaked a row into the shared dev database. `!` is the escape character
 # here purely because it needs no backslash quoting in either language.
 _CLEAN_TEST_SKILLS = (
-    "delete from skill "
-    " where id like 'cc-test-%' or id like 'cc!_test!_%' escape '!'"
+    "delete from skill  where id like 'cc-test-%' or id like 'cc!_test!_%' escape '!'"
 )
 
 
@@ -136,10 +135,9 @@ async def test_search_tool_schema_exposes_no_skill_selector(clean_skills):
     await agent.run("hi")
 
     assert not [t for t in offered[0] if t.name == "search_cc_test_lite_reference"], (
-        "an unloaded skill's tool is not on the wire")
-    search_tools = [
-        t for t in offered[1] if t.name == "search_cc_test_lite_reference"
-    ]
+        "an unloaded skill's tool is not on the wire"
+    )
+    search_tools = [t for t in offered[1] if t.name == "search_cc_test_lite_reference"]
     assert len(search_tools) == 1
     schema = search_tools[0].parameters_json_schema
     assert set(schema["properties"].keys()) == {"query", "limit"}
@@ -155,7 +153,10 @@ async def test_two_granted_skills_each_search_their_own_content(clean_skills):
         "cc-test-lite", "guidance", "guidance", "How we run it", "guidance body"
     )
     await repo.add_skill_doc(
-        "cc-test-lite", "ref1", "reference", "Lite ref",
+        "cc-test-lite",
+        "ref1",
+        "reference",
+        "Lite ref",
         "The budgetduration parameter controls key spend windows.",
     )
     await repo.create_skill("cc-test-conf", "Confluence", "Publishing reports")
@@ -163,7 +164,10 @@ async def test_two_granted_skills_each_search_their_own_content(clean_skills):
         "cc-test-conf", "guidance", "guidance", "How we publish", "guidance body"
     )
     await repo.add_skill_doc(
-        "cc-test-conf", "ref1", "reference", "Conf ref",
+        "cc-test-conf",
+        "ref1",
+        "reference",
+        "Conf ref",
         "The publish endpoint requires a spacekey.",
     )
     await repo.grant_skill("inbox-triage", "cc-test-lite")
@@ -190,12 +194,18 @@ async def test_two_granted_skills_each_search_their_own_content(clean_skills):
 
 
 def test_hits_are_formatted_with_their_citation():
-    hits = [{
-        "content": "POST /key/generate accepts budget_duration.",
-        "title": "Key management", "doc_key": "keys",
-        "source_url": "https://docs.litellm.ai/keys",
-        "describes": "LiteLLM proxy v1.55", "captured_at": None, "ord": 0, "rank": 0.9,
-    }]
+    hits = [
+        {
+            "content": "POST /key/generate accepts budget_duration.",
+            "title": "Key management",
+            "doc_key": "keys",
+            "source_url": "https://docs.litellm.ai/keys",
+            "describes": "LiteLLM proxy v1.55",
+            "captured_at": None,
+            "ord": 0,
+            "rank": 0.9,
+        }
+    ]
     out = skills_mod.format_hits(hits)
     assert "budget_duration" in out
     assert "Key management" in out
@@ -221,7 +231,10 @@ async def test_unloaded_skill_costs_no_context(clean_skills, monkeypatch):
     secret = "ZZZGUIDANCEBODYZZZ"
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
     await repo.add_skill_doc(
-        "cc-test-lite", "guidance", "guidance", "How we run it",
+        "cc-test-lite",
+        "guidance",
+        "guidance",
+        "How we run it",
         f"# Running LiteLLM\n{secret}",
     )
     await repo.grant_skill("inbox-triage", "cc-test-lite")
@@ -277,7 +290,8 @@ async def test_first_run_task_carries_granted_skills(clean_skills, monkeypatch):
         return ModelResponse(parts=[TextPart("no change needed")])
 
     out = await run_task(
-        "litellm-manager", "Just checking in, no change needed.",
+        "litellm-manager",
+        "Just checking in, no change needed.",
         model=FunctionModel(capture),
     )
     assert out["deferred"] is False
@@ -296,9 +310,7 @@ async def test_gateway_detail_and_list_agree(clean_skills):
     from central_command.api import nerve_gateway
 
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
-    await repo.add_skill_doc(
-        "cc-test-lite", "keys", "reference", "Key management", "# Keys\nbody"
-    )
+    await repo.add_skill_doc("cc-test-lite", "keys", "reference", "Key management", "# Keys\nbody")
 
     listed = await nerve_gateway._dispatch("skills.list", {}, notify=lambda *a, **k: None)
     row = next(s for s in listed["skills"] if s["id"] == "cc-test-lite")
@@ -307,9 +319,7 @@ async def test_gateway_detail_and_list_agree(clean_skills):
         "skills.detail", {"skill_id": "cc-test-lite"}, notify=lambda *a, **k: None
     )
     assert detail["skill"]["title"] == row["title"]
-    assert row["reference_count"] == len(
-        [d for d in detail["docs"] if d["kind"] == "reference"]
-    )
+    assert row["reference_count"] == len([d for d in detail["docs"] if d["kind"] == "reference"])
     # No grants yet, so both paths must say zero — a `holder_count` that
     # defaulted to something truthy would sail past the assertions below.
     assert row["holder_count"] == 0 == len(detail["agents"])
@@ -349,9 +359,7 @@ async def test_holder_count_excludes_non_roster_agents(clean_skills):
     await repo.grant_skill("cc-test-nonroster", "cc-test-lite")
 
     try:
-        listed = await nerve_gateway._dispatch(
-            "skills.list", {}, notify=lambda *a, **k: None
-        )
+        listed = await nerve_gateway._dispatch("skills.list", {}, notify=lambda *a, **k: None)
         row = next(s for s in listed["skills"] if s["id"] == "cc-test-lite")
         detail = await nerve_gateway._dispatch(
             "skills.detail", {"skill_id": "cc-test-lite"}, notify=lambda *a, **k: None
@@ -366,9 +374,7 @@ async def test_holder_count_excludes_non_roster_agents(clean_skills):
         # The grant cascades away with the skill; the agent row does not.
         conn = await repo._conn()
         try:
-            await conn.execute(
-                "delete from agent_skill_grant where agent_id = 'cc-test-nonroster'"
-            )
+            await conn.execute("delete from agent_skill_grant where agent_id = 'cc-test-nonroster'")
             await conn.execute("delete from agent where id = 'cc-test-nonroster'")
         finally:
             await conn.close()
@@ -391,18 +397,14 @@ async def test_holder_count_is_zero_for_a_retired_skill(clean_skills):
     await repo.grant_skill("inbox-triage", "cc-test-lite")
     assert await repo.retire_skill("cc-test-lite", "test")
 
-    row = next(
-        s for s in await repo.list_skills(include_retired=True)
-        if s["id"] == "cc-test-lite"
-    )
+    row = next(s for s in await repo.list_skills(include_retired=True) if s["id"] == "cc-test-lite")
     # The grant row survives retirement — this is what makes the count a trap.
     assert any(
         g["skill_id"] == "cc-test-lite"
         for g in await repo.list_agent_skills("inbox-triage", include_revoked=True)
     )
     assert [
-        g for g in await repo.list_agent_skills("inbox-triage")
-        if g["skill_id"] == "cc-test-lite"
+        g for g in await repo.list_agent_skills("inbox-triage") if g["skill_id"] == "cc-test-lite"
     ] == []
     assert row["holder_count"] == 0
 
@@ -423,8 +425,11 @@ async def test_gateway_add_doc_mutates_the_params_it_is_given(clean_skills):
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
 
     params = {
-        "skill_id": "cc-test-lite", "doc_key": "keys", "kind": "reference",
-        "title": "Key management", "content": "# Keys\nbody",
+        "skill_id": "cc-test-lite",
+        "doc_key": "keys",
+        "kind": "reference",
+        "title": "Key management",
+        "content": "# Keys\nbody",
     }
     original = dict(params)
     await nerve_gateway._dispatch("skills.add_doc", params, notify=lambda *a, **k: None)
@@ -461,8 +466,11 @@ async def test_gateway_emits_are_not_silent(clean_skills):
     await nerve_gateway._dispatch(
         "skills.add_doc",
         {
-            "skill_id": "cc-test-emit", "doc_key": "keys", "kind": "reference",
-            "title": "Key management", "content": "# Keys\nbody",
+            "skill_id": "cc-test-emit",
+            "doc_key": "keys",
+            "kind": "reference",
+            "title": "Key management",
+            "content": "# Keys\nbody",
         },
         notify=noop,
     )
@@ -487,25 +495,33 @@ async def test_gateway_emits_are_not_silent(clean_skills):
         since_id=since_id,
     )
 
-    doc_added = [e for e in events if e["kind"] == "skill.doc_added"
-                 and e["ref_id"] == "cc-test-emit"]
+    doc_added = [
+        e for e in events if e["kind"] == "skill.doc_added" and e["ref_id"] == "cc-test-emit"
+    ]
     assert len(doc_added) == 1, "skill.doc_added did not fire for cc-test-emit"
     assert doc_added[0]["payload"]["doc_key"] == "keys"
     assert doc_added[0]["payload"]["kind"] == "reference"
 
-    granted = [e for e in events if e["kind"] == "skill.granted"
-               and e["ref_id"] == "inbox-triage"
-               and e["payload"].get("skill_id") == "cc-test-emit"]
+    granted = [
+        e
+        for e in events
+        if e["kind"] == "skill.granted"
+        and e["ref_id"] == "inbox-triage"
+        and e["payload"].get("skill_id") == "cc-test-emit"
+    ]
     assert len(granted) == 1, "skill.granted did not fire for the test grant"
 
-    revoked = [e for e in events if e["kind"] == "skill.revoked"
-               and e["ref_id"] == "inbox-triage"
-               and e["payload"].get("skill_id") == "cc-test-emit"]
+    revoked = [
+        e
+        for e in events
+        if e["kind"] == "skill.revoked"
+        and e["ref_id"] == "inbox-triage"
+        and e["payload"].get("skill_id") == "cc-test-emit"
+    ]
     assert len(revoked) == 1, "skill.revoked did not fire for the test revoke"
     assert revoked[0]["payload"]["reason"] == "test done"
 
-    retired = [e for e in events if e["kind"] == "skill.retired"
-               and e["ref_id"] == "cc-test-emit"]
+    retired = [e for e in events if e["kind"] == "skill.retired" and e["ref_id"] == "cc-test-emit"]
     assert len(retired) == 1, "skill.retired did not fire for the test retire"
     assert retired[0]["payload"]["reason"] == "test cleanup"
 
@@ -555,7 +571,8 @@ async def test_colliding_tool_names_do_not_brick_the_agent(clean_skills, caplog)
 @pytestmark_db
 @pytest.mark.asyncio
 async def test_an_all_punctuation_id_cannot_take_another_skills_tool_name(
-    clean_skills, caplog,
+    clean_skills,
+    caplog,
 ):
     """`_tool_name` collapses everything outside `[a-z0-9_]`, so an id that is
     pure punctuation slugs to nothing and yields `search__reference` — a name
@@ -569,11 +586,15 @@ async def test_an_all_punctuation_id_cannot_take_another_skills_tool_name(
         # that predates it. Named so the `cc-test-%` cleanup still removes it.
         await conn.execute(
             "insert into skill (id, title, summary) values ($1, $2, $3)",
-            "cc-test---", "Punctuation one", "s",
+            "cc-test---",
+            "Punctuation one",
+            "s",
         )
         await conn.execute(
             "insert into skill (id, title, summary) values ($1, $2, $3)",
-            "cc-test-..", "Punctuation two", "s",
+            "cc-test-..",
+            "Punctuation two",
+            "s",
         )
     finally:
         await conn.close()
@@ -605,7 +626,9 @@ async def test_reactivate_emits_and_is_reachable_through_the_gateway(clean_skill
 
     since_id = await repo.latest_event_id()
     assert await nerve_gateway._dispatch(
-        "skills.reactivate", {"skill_id": "cc-test-emitback"}, notify=noop,
+        "skills.reactivate",
+        {"skill_id": "cc-test-emitback"},
+        notify=noop,
     ) == {"ok": True}
 
     assert (await repo.get_skill("cc-test-emitback"))["status"] == "ACTIVE"
@@ -643,24 +666,33 @@ async def test_a_loaded_skill_works_and_survives_a_resume_and_search_tools_never
 
     def script(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         offered.append([t.name for t in info.function_tools])
-        returned.extend(str(p.content) for m in messages[-1:] if isinstance(m, ModelRequest)
-                        for p in m.parts if isinstance(p, ToolReturnPart)
-                        and p.tool_name == "search_cc_test_deferred_reference")
+        returned.extend(
+            str(p.content)
+            for m in messages[-1:]
+            if isinstance(m, ModelRequest)
+            for p in m.parts
+            if isinstance(p, ToolReturnPart) and p.tool_name == "search_cc_test_deferred_reference"
+        )
         step = len(offered)
         if step == 1:
-            return ModelResponse(parts=[ToolCallPart("load_capability", {"id": "cc-test-deferred"})])
+            return ModelResponse(
+                parts=[ToolCallPart("load_capability", {"id": "cc-test-deferred"})]
+            )
         if step in (2, 4):
-            return ModelResponse(parts=[ToolCallPart(
-                "search_cc_test_deferred_reference", {"query": f"q{step}"})])
+            return ModelResponse(
+                parts=[ToolCallPart("search_cc_test_deferred_reference", {"query": f"q{step}"})]
+            )
         return ModelResponse(parts=[TextPart("ok")])
 
     def build():
-        cap = Capability(id="cc-test-deferred", description="x", instructions="y",
-                         defer_loading=True)
+        cap = Capability(
+            id="cc-test-deferred", description="x", instructions="y", defer_loading=True
+        )
 
         def search_cc_test_deferred_reference(query: str) -> str:
             """Search the test skill."""
             return f"hit for {query}"
+
         cap.tool_plain(name="search_cc_test_deferred_reference")(search_cc_test_deferred_reference)
         return agent_mod.build_agent(model=FunctionModel(script), capabilities=[cap])
 
@@ -672,8 +704,9 @@ async def test_a_loaded_skill_works_and_survives_a_resume_and_search_tools_never
     # A fresh process: the record is dumped and loaded, the agent rebuilt.
     stored = ModelMessagesTypeAdapter.dump_python(first.all_messages(), mode="json")
     history = ModelMessagesTypeAdapter.validate_python(stored)
-    await (await build()).run("again", message_history=history,
-                              deps=TriageDeps(agent_id="inbox-triage"))
+    await (await build()).run(
+        "again", message_history=history, deps=TriageDeps(agent_id="inbox-triage")
+    )
     assert "search_cc_test_deferred_reference" in offered[3], "still loaded after the resume"
     assert returned == ["hit for q2", "hit for q4"]
     assert not any("search_tools" in names for names in offered)
@@ -697,11 +730,16 @@ async def test_calling_a_skill_tool_before_loading_it_is_handed_back_not_fatal(c
     def script(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         last = messages[-1]
         if isinstance(last, ModelRequest):
-            refusals.extend(str(p.content) for p in last.parts
-                            if isinstance(p, ToolReturnPart) and p.outcome == "retried")
+            refusals.extend(
+                str(p.content)
+                for p in last.parts
+                if isinstance(p, ToolReturnPart) and p.outcome == "retried"
+            )
         step = sum(isinstance(m, ModelResponse) for m in messages) + 1
         if step in (1, 2, 3, 5):
-            return ModelResponse(parts=[ToolCallPart("search_cc_test_lite_reference", {"query": "x"})])
+            return ModelResponse(
+                parts=[ToolCallPart("search_cc_test_lite_reference", {"query": "x"})]
+            )
         if step == 4:
             return ModelResponse(parts=[ToolCallPart("load_capability", {"id": "cc-test-lite"})])
         return ModelResponse(parts=[TextPart("ok")])

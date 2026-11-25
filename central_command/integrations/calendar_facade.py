@@ -115,14 +115,18 @@ async def _call_google(google, payload: dict) -> dict:
     missing = google.missing_settings()
     if missing:
         # Semantic, like the n8n path's "not configured": FAILED, never parked.
-        raise CalendarFacadeError(f"calendar façade {mode} not configured — set {', '.join(missing)}")
+        raise CalendarFacadeError(
+            f"calendar façade {mode} not configured — set {', '.join(missing)}"
+        )
     try:
         return await google.calendar_request(payload)
     except google.GoogleError as e:
-        raise google.stamp(CalendarFacadeError(
-            f"calendar façade {mode} failed: HTTP {e.status_code} {google.answer_text(e)[:200]}",
-            status_code=e.status_code,
-        )) from e
+        raise google.stamp(
+            CalendarFacadeError(
+                f"calendar façade {mode} failed: HTTP {e.status_code} {google.answer_text(e)[:200]}",
+                status_code=e.status_code,
+            )
+        ) from e
 
 
 async def _call_n8n(payload: dict, timeout: float) -> dict:
@@ -158,9 +162,7 @@ async def _call_n8n(payload: dict, timeout: float) -> dict:
     return resp.json()
 
 
-async def list_events(
-    time_min: str, time_max: str, calendar_id: str = "primary"
-) -> dict:
+async def list_events(time_min: str, time_max: str, calendar_id: str = "primary") -> dict:
     """Events in an RFC3339 window: {"events": [...], "truncated": bool}.
 
     Returns the envelope rather than a bare list ONLY because `truncated` is a
@@ -181,12 +183,14 @@ async def list_events(
             return await provider.list_events(time_min, time_max, calendar_id)
         except provider.ExchangeError as e:
             raise CalendarFacadeError(str(e)) from e
-    out = await _call({
-        "mode": "list",
-        "time_min": time_min,
-        "time_max": time_max,
-        "calendar_id": calendar_id,
-    })
+    out = await _call(
+        {
+            "mode": "list",
+            "time_min": time_min,
+            "time_max": time_max,
+            "calendar_id": calendar_id,
+        }
+    )
     events = out.get("events")
     if not isinstance(events, list):
         raise CalendarFacadeError("provider answered without an events list")
@@ -203,11 +207,13 @@ async def get_event(event_id: str, calendar_id: str = "primary") -> dict:
             return await provider.get_event(event_id, calendar_id)
         except provider.ExchangeError as e:
             raise CalendarFacadeError(str(e)) from e
-    out = await _call({
-        "mode": "get_event",
-        "event_id": event_id,
-        "calendar_id": calendar_id,
-    })
+    out = await _call(
+        {
+            "mode": "get_event",
+            "event_id": event_id,
+            "calendar_id": calendar_id,
+        }
+    )
     event = out.get("event")
     if not isinstance(event, dict) or not event:
         raise CalendarFacadeError("provider answered without an event")
@@ -243,8 +249,13 @@ async def create_event(
     if provider is not None:
         try:
             return await provider.create_event(
-                title, start, end, description=description, attendees=attendees,
-                calendar_id=calendar_id)
+                title,
+                start,
+                end,
+                description=description,
+                attendees=attendees,
+                calendar_id=calendar_id,
+            )
         except provider.ExchangeError as e:
             raise CalendarFacadeError(str(e)) from e
     payload = {
@@ -287,14 +298,24 @@ async def update_event(
     if provider is not None:
         try:
             return await provider.update_event(
-                event_id, title=title, start=start, end=end,
-                description=description, attendees=attendees,
-                calendar_id=calendar_id)
+                event_id,
+                title=title,
+                start=start,
+                end=end,
+                description=description,
+                attendees=attendees,
+                calendar_id=calendar_id,
+            )
         except provider.ExchangeError as e:
             raise CalendarFacadeError(str(e)) from e
     payload = {"mode": "update_event", "event_id": event_id, "calendar_id": calendar_id}
-    for key, value in (("title", title), ("start", start), ("end", end),
-                       ("description", description), ("attendees", attendees)):
+    for key, value in (
+        ("title", title),
+        ("start", start),
+        ("end", end),
+        ("description", description),
+        ("attendees", attendees),
+    ):
         if value is not None:
             payload[key] = value
     out = await _call(payload)
@@ -312,9 +333,11 @@ async def delete_event(event_id: str, calendar_id: str = "primary") -> str:
             return await provider.delete_event(event_id, calendar_id=calendar_id)
         except provider.ExchangeError as e:
             raise CalendarFacadeError(str(e)) from e
-    out = await _call({
-        "mode": "delete_event",
-        "event_id": event_id,
-        "calendar_id": calendar_id,
-    })
+    out = await _call(
+        {
+            "mode": "delete_event",
+            "event_id": event_id,
+            "calendar_id": calendar_id,
+        }
+    )
     return str(out.get("deleted") or event_id)

@@ -14,6 +14,7 @@ Also here: the orphan test for a resume is "armed before this process
 started", not an age — a resume dies only with its process, and a queued one
 must never be re-driven as dead (it was, twice, the same night).
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -28,9 +29,16 @@ from tests.conftest import needs_pg
 
 def _assert_waits_forever(timeout) -> None:
     # The SDK normalises an httpx.Timeout into its own; read it back by field.
-    t = timeout.as_dict() if hasattr(timeout, "as_dict") else {
-        "connect": timeout.connect, "read": timeout.read,
-        "write": timeout.write, "pool": timeout.pool}
+    t = (
+        timeout.as_dict()
+        if hasattr(timeout, "as_dict")
+        else {
+            "connect": timeout.connect,
+            "read": timeout.read,
+            "write": timeout.write,
+            "pool": timeout.pool,
+        }
+    )
     assert t["read"] is None, f"a read timeout caps queue time: {t}"
     assert t["connect"] == http_client.LLM_CONNECT_TIMEOUT_SECONDS
 
@@ -132,7 +140,9 @@ async def test_a_queued_resume_is_not_an_orphan_and_a_dead_one_is(monkeypatch):
     assert await repo.session_status(sid) == "AWAITING_HUMAN"
 
     now = datetime.now(UTC)
-    in_flight = [r["id"] for r in await repo.sessions_with_orphaned_resume(now - timedelta(hours=1))]
+    in_flight = [
+        r["id"] for r in await repo.sessions_with_orphaned_resume(now - timedelta(hours=1))
+    ]
     assert sid not in in_flight, "armed after the process started: queued, not dead"
     dead = [r["id"] for r in await repo.sessions_with_orphaned_resume(now + timedelta(days=1))]
     assert sid in dead, "armed before a later process started: dead"

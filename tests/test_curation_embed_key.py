@@ -38,8 +38,9 @@ class _Capture:
 
     async def post(self, url, headers=None, json=None):
         self._calls.append((url, headers, json))
-        return httpx.Response(200, json={"data": [{"embedding": [0.25, 0.5]}]},
-                              request=httpx.Request("POST", url))
+        return httpx.Response(
+            200, json={"data": [{"embedding": [0.25, 0.5]}]}, request=httpx.Request("POST", url)
+        )
 
 
 @pytest.fixture
@@ -52,13 +53,20 @@ def captured(monkeypatch):
     return calls
 
 
-@pytest.mark.parametrize("base", ["http://proxy.example.com", "http://proxy.example.com/",
-                                  "http://proxy.example.com/v1", "http://proxy.example.com/v1/"])
+@pytest.mark.parametrize(
+    "base",
+    [
+        "http://proxy.example.com",
+        "http://proxy.example.com/",
+        "http://proxy.example.com/v1",
+        "http://proxy.example.com/v1/",
+    ],
+)
 async def test_the_request_goes_to_the_data_plane_with_the_scoped_key(monkeypatch, captured, base):
     monkeypatch.setattr(settings, "llm_base_url", base)
     vector = await neo4j_writer.request_embedding("hello")
     assert vector == [0.25, 0.5]
-    (url, headers, body), = captured
+    ((url, headers, body),) = captured
     assert url == "http://proxy.example.com/v1/embeddings"
     assert headers == {"Authorization": f"Bearer {KEY}"}
     assert ADMIN not in str(headers)

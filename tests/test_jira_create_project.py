@@ -61,14 +61,24 @@ def test_capability_is_registered_conservatively():
 
 async def test_executor_dispatches_and_names_the_key(monkeypatch):
     async def fake_create_project(key, name, project_type_key="software"):
-        return {"ok": True, "kind": "jira", "operation": "createProject",
-                "project": {"key": key, "id": "10099", "name": name,
-                            "url": "https://example.atlassian.net/projects/" + key}}
+        return {
+            "ok": True,
+            "kind": "jira",
+            "operation": "createProject",
+            "project": {
+                "key": key,
+                "id": "10099",
+                "name": name,
+                "url": "https://example.atlassian.net/projects/" + key,
+            },
+        }
 
     monkeypatch.setattr(jira, "create_project", fake_create_project)
     assert "jira.create_project" in executor.HANDLERS
     text = await executor.HANDLERS["jira.create_project"](
-        {"key": "CS", "name": "Customer Service"}, "lee", "jira-expert",
+        {"key": "CS", "name": "Customer Service"},
+        "lee",
+        "jira-expert",
     )
     assert "CS" in text
     assert "Customer Service" in text
@@ -86,10 +96,13 @@ async def test_bad_new_project_key_never_reaches_the_provider(monkeypatch):
 
 
 async def test_valid_key_resolves_lead_and_creates(monkeypatch):
-    calls = _fake_call(monkeypatch, [
-        FakeResponse(200, {"accountId": "abc123"}),
-        FakeResponse(201, {"key": "CS", "id": "10099"}),
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            FakeResponse(200, {"accountId": "abc123"}),
+            FakeResponse(201, {"key": "CS", "id": "10099"}),
+        ],
+    )
     out = await jira.create_project("CS", "Customer Service")
     assert out["project"]["key"] == "CS"
     assert calls[0][1] == "/rest/api/3/myself"
@@ -141,8 +154,12 @@ def test_proposal_may_carry_create_project_then_create_issue():
             ),
         ],
         evidence=[
-            Evidence(kind="operator", source_ref="lee", locator="operator instruction",
-                      claim="No existing project covers customer-service work."),
+            Evidence(
+                kind="operator",
+                source_ref="lee",
+                locator="operator instruction",
+                claim="No existing project covers customer-service work.",
+            ),
         ],
         expected_effect="Project CS exists with one issue filed in it.",
     )

@@ -22,7 +22,10 @@ SCRIPT = ROOT / "scripts" / "gen_data_model_diagram.py"
 def test_the_data_model_page_matches_the_schema():
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--check"],
-        cwd=ROOT, capture_output=True, text=True, timeout=60,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0, (
         "docs/diagrams/data-model.md is stale or schema.sql has a table the "

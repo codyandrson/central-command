@@ -76,7 +76,7 @@ LAYER0 = (
     "control plane re-checks quotes and flags drift.\n\n"
     "When you lack a capability, a fact, or a clear reading of the task, say so: "
     "declare the gap, consult a teammate, or ask the operator. A good question or "
-    "an honest \"I cannot determine this\" beats a guess, every time.\n\n"
+    'an honest "I cannot determine this" beats a guess, every time.\n\n'
     "Resolve relative dates against current_time; a due date never lands in the "
     "past — an unstated year means the next occurrence."
 )
@@ -123,7 +123,9 @@ GOAL_PREVIEW_MARKERS = (
 
 
 def build_charter(
-    content: str | None = None, packs=None, mcp_section: str = "",
+    content: str | None = None,
+    packs=None,
+    mcp_section: str = "",
     team_section: str = "",
 ) -> str:
     """The charter, plus the GENERATED capability section (D25), plus today's
@@ -238,9 +240,14 @@ async def load_charter(agent_id: str = "inbox-triage") -> str | None:
 
 
 async def build_agent(
-    model=None, charter: str | None = None, packs=None,
-    capabilities=None, skills_catalog: str = "",
-    extra_toolsets=(), mcp_section: str = "", team_section: str = "",
+    model=None,
+    charter: str | None = None,
+    packs=None,
+    capabilities=None,
+    skills_catalog: str = "",
+    extra_toolsets=(),
+    mcp_section: str = "",
+    team_section: str = "",
 ) -> Agent:
     """The inbox-triage builder. `packs=None` falls back to DEFAULT_PACKS —
     production callers load the real grants first (packs_mod.granted_packs).
@@ -260,9 +267,8 @@ async def build_agent(
     return Agent(
         await resolve_model(model, agent_id="inbox-triage"),
         name="inbox-triage",  # unique name — required once DBOS wraps it
-        system_prompt=build_charter(charter, packs, mcp_section, team_section) + (
-            "\n\n" + skills_catalog if skills_catalog else ""
-        ),
+        system_prompt=build_charter(charter, packs, mcp_section, team_section)
+        + ("\n\n" + skills_catalog if skills_catalog else ""),
         deps_type=TriageDeps,
         output_type=[str, DeferredToolRequests],
         # record_thread_decision, declare_gap and current_time are agent
@@ -275,9 +281,15 @@ async def build_agent(
 
 
 async def build_hired_agent(
-    agent_id: str, model=None, charter: str | None = None, packs=(),
-    capabilities=None, skills_catalog: str = "",
-    extra_toolsets=(), mcp_section: str = "", team_section: str = "",
+    agent_id: str,
+    model=None,
+    charter: str | None = None,
+    packs=(),
+    capabilities=None,
+    skills_catalog: str = "",
+    extra_toolsets=(),
+    mcp_section: str = "",
+    team_section: str = "",
 ) -> Agent:
     """The generic builder for D24-hired agents: governed charter + granted
     packs + granted skills, nothing else. Founders keep their special
@@ -285,9 +297,8 @@ async def build_hired_agent(
     return Agent(
         await resolve_model(model, agent_id=agent_id),
         name=agent_id,
-        system_prompt=build_charter(charter or "", packs, mcp_section, team_section) + (
-            "\n\n" + skills_catalog if skills_catalog else ""
-        ),
+        system_prompt=build_charter(charter or "", packs, mcp_section, team_section)
+        + ("\n\n" + skills_catalog if skills_catalog else ""),
         deps_type=TriageDeps,
         output_type=[str, DeferredToolRequests],
         # declare_gap and current_time are agent PROCESS, not grantable
@@ -320,29 +331,45 @@ async def build_agent_for(agent_id: str, model=None) -> Agent:
         from central_command.runtime.jira_expert import build_jira_expert
 
         return await build_jira_expert(
-            model=model, packs=packs, capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section,
+            model=model,
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
         )
     if agent_id == "confluence-expert":
         from central_command.runtime.confluence_expert import build_confluence_expert
 
         return await build_confluence_expert(
-            model=model, packs=packs, capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section,
+            model=model,
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
         )
     if agent_id == "wiki-agent":
         from central_command.runtime.wiki_agent import build_wiki_agent
 
         return await build_wiki_agent(
-            model=model, packs=packs, capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section,
+            model=model,
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
         )
     if agent_id == "litellm-manager":
         from central_command.runtime.litellm_manager import build_litellm_manager
 
         return await build_litellm_manager(
-            model=model, packs=packs, capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section,
+            model=model,
+            packs=packs,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
         )
     # "auditor" deliberately excluded: the real audit agent is built in
     # gateway/auditor.py (build_auditor), which is never resumed through this
@@ -350,10 +377,19 @@ async def build_agent_for(agent_id: str, model=None) -> Agent:
     # packs since the auditor's own grants are empty (falsy `packs or None`).
     if agent_id in ("inbox-triage", "orchestrator"):
         return await build_agent(
-            model=model, packs=packs or None, capabilities=caps, skills_catalog=catalog,
-            extra_toolsets=mcp_toolsets, mcp_section=mcp_section,
+            model=model,
+            packs=packs or None,
+            capabilities=caps,
+            skills_catalog=catalog,
+            extra_toolsets=mcp_toolsets,
+            mcp_section=mcp_section,
         )
     return await build_hired_agent(
-        agent_id, model=model, packs=packs, capabilities=caps, skills_catalog=catalog,
-        extra_toolsets=mcp_toolsets, mcp_section=mcp_section,
+        agent_id,
+        model=model,
+        packs=packs,
+        capabilities=caps,
+        skills_catalog=catalog,
+        extra_toolsets=mcp_toolsets,
+        mcp_section=mcp_section,
     )

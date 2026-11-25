@@ -292,14 +292,21 @@ async def test_parked_proposal_holds_related_items(clean_ledger):
         await conn.execute(
             "insert into session (id, agent_id, status) values ($1, $2, 'AWAITING_HUMAN')"
             " on conflict (id) do nothing",
-            sess_id, agent_id,
+            sess_id,
+            agent_id,
         )
     finally:
         await conn.close()
     try:
         await repo.save_proposal(
-            prop_id, sess_id, agent_id, "test intent", [], [],
-            "no effect", "cc-test-lock-idem",
+            prop_id,
+            sess_id,
+            agent_id,
+            "test intent",
+            [],
+            [],
+            "no effect",
+            "cc-test-lock-idem",
         )
         await repo.finish_work_item(first["id"], "PROCESSED", session_id=sess_id)
 
@@ -385,9 +392,7 @@ async def test_generic_domains_lock_on_full_address_only(clean_ledger):
     a = await repo.claim_next_work_item("sess_a")
     b = await repo.claim_next_work_item("sess_b")
     assert a is not None and b is not None, "different gmail senders must not lock"
-    assert await repo.claim_next_work_item("sess_c") is None, (
-        "the SAME gmail address must lock"
-    )
+    assert await repo.claim_next_work_item("sess_c") is None, "the SAME gmail address must lock"
 
 
 @pytestmark_db
@@ -412,7 +417,8 @@ async def test_post_hydration_recheck_sees_keys_the_claim_could_not(clean_ledger
     try:
         await conn.execute(
             "update work_item set subject = $2 where id = $1",
-            second["id"], "Re: Kaiser physical therapy referral",
+            second["id"],
+            "Re: Kaiser physical therapy referral",
         )
     finally:
         await conn.close()
@@ -514,9 +520,7 @@ async def test_backlog_enrollment_is_resumable(clean_ledger):
 
 @pytestmark_db
 @pytest.mark.asyncio
-async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(
-    clean_ledger, monkeypatch
-):
+async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(clean_ledger, monkeypatch):
     """R33: an item with an old transient record that is then frozen (twice)
     with its dependency probing up is absent from `units_failing_despite_probe`
     and from the outages 'failing' list, while `transient_releases` and
@@ -538,8 +542,9 @@ async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(
     async def claim():
         conn = await repo._conn()
         try:
-            await conn.execute("update work_item set not_before = null "
-                               "where message_id like '<cc-test-801@%'")
+            await conn.execute(
+                "update work_item set not_before = null where message_id like '<cc-test-801@%'"
+            )
         finally:
             await conn.close()
         return await repo.claim_next_work_item("sess_freeze")
@@ -547,22 +552,28 @@ async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(
     async def row(item_id):
         conn = await repo._conn()
         try:
-            return dict(await conn.fetchrow(
-                "select transient_releases, transient_failures, failing_since, "
-                "dependencies, not_before from work_item where id = $1", item_id))
+            return dict(
+                await conn.fetchrow(
+                    "select transient_releases, transient_failures, failing_since, "
+                    "dependencies, not_before from work_item where id = $1",
+                    item_id,
+                )
+            )
         finally:
             await conn.close()
 
     async def failing(item_id):
-        return [u for u in await repo.units_failing_despite_probe(3)
-                if u["id"] == item_id]
+        return [u for u in await repo.units_failing_despite_probe(3) if u["id"] == item_id]
 
     async def transient_failure(item_id):
         # What the dispatcher's except-branch does for a transient failure.
         await repo.release_work_item(
-            item_id, error="embedder timeout", count_attempt=False,
+            item_id,
+            error="embedder timeout",
+            count_attempt=False,
             not_before=datetime.now(UTC) + timedelta(seconds=60),
-            dependencies=("embedder",))
+            dependencies=("embedder",),
+        )
 
     item = await claim()
     for n in range(3):
@@ -587,8 +598,9 @@ async def test_a_freeze_is_not_a_failure_but_its_backoff_still_grows(
     after = await row(item["id"])
 
     assert await failing(item["id"]) == []
-    listed_by_dep = [e["id"] for d in (await outages.list_outages())["dependencies"]
-                     for e in d["failing"]]
+    listed_by_dep = [
+        e["id"] for d in (await outages.list_outages())["dependencies"] for e in d["failing"]
+    ]
     assert item["id"] not in listed_by_dep
     assert after["transient_releases"] == before["transient_releases"] + 2
     assert after["not_before"] > datetime.now(UTC)

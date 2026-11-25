@@ -69,11 +69,15 @@ class _Ctx:
     deps exactly as a real run does."""
 
     def __init__(
-        self, agent_id: str | None = None, session_id: str | None = None,
+        self,
+        agent_id: str | None = None,
+        session_id: str | None = None,
         consult_chain: tuple[str, ...] = (),
     ):
         self.deps = TriageDeps(
-            agent_id=agent_id, session_id=session_id, consult_chain=consult_chain,
+            agent_id=agent_id,
+            session_id=session_id,
+            consult_chain=consult_chain,
         )
 
 
@@ -101,17 +105,13 @@ async def test_refusal_for_a_target_that_is_not_consultable():
 
 
 async def test_refusal_for_an_unknown_target():
-    refusal = await consult_agent(
-        _Ctx(agent_id="inbox-triage"), "no-such-agent", "hello?"
-    )
+    refusal = await consult_agent(_Ctx(agent_id="inbox-triage"), "no-such-agent", "hello?")
     assert "not on the team's roster" in refusal
     assert "jira-expert" in refusal
 
 
 async def test_refusal_for_consulting_yourself():
-    refusal = await consult_agent(
-        _Ctx(agent_id="jira-expert"), "jira-expert", "what do I think?"
-    )
+    refusal = await consult_agent(_Ctx(agent_id="jira-expert"), "jira-expert", "what do I think?")
     assert "you ARE jira-expert" in refusal
 
 
@@ -123,8 +123,13 @@ async def test_refusal_for_a_retired_target_says_it_is_retired():
     agent_id = "consulttest-retired"
     try:
         await repo.hire_agent(
-            agent_id, "Retired Specialist", "test specialist", "You are a specialist.",
-            ["jira-read"], template="analyst", consultable=True,
+            agent_id,
+            "Retired Specialist",
+            "test specialist",
+            "You are a specialist.",
+            ["jira-read"],
+            template="analyst",
+            consultable=True,
         )
         assert agent_id in await consult_mod.consultable_ids()
         assert await repo.retire_agent(agent_id, "test over")
@@ -135,8 +140,7 @@ async def test_refusal_for_a_retired_target_says_it_is_retired():
         conn = await repo._conn()
         try:
             await conn.execute("delete from agent_grant where agent_id = $1", agent_id)
-            await conn.execute(
-                "delete from guidance_version where agent_id = $1", agent_id)
+            await conn.execute("delete from guidance_version where agent_id = $1", agent_id)
             await conn.execute("delete from agent where id = $1", agent_id)
         finally:
             await conn.close()
@@ -160,21 +164,40 @@ def test_advisory_packs_keep_the_propose_packs_and_the_consult_pack():
     consult of its own. What still goes is every deferral the sub-run cannot
     host — an operator question, a project tool — and the one direct trigger,
     task creation: an advisory answer starts no work (FR-20)."""
-    granted = ("jira-read", "jira-propose", "graph-read", "graph-propose",
-               "consult", "task-create", "ask-operator")
+    granted = (
+        "jira-read",
+        "jira-propose",
+        "graph-read",
+        "graph-propose",
+        "consult",
+        "task-create",
+        "ask-operator",
+    )
     assert packs_mod.advisory_packs(granted) == (
-        "jira-read", "jira-propose", "graph-read", "graph-propose",
+        "jira-read",
+        "jira-propose",
+        "graph-read",
+        "graph-propose",
         "consult",
     )
     assert packs_mod.advisory_packs(("orchestrate", "graph-read")) == ("graph-read",)
 
 
 async def test_the_advisory_toolset_holds_propose_and_consult_but_never_ask():
-    granted = ("jira-read", "jira-propose", "graph-read", "graph-propose",
-               "consult", "task-create", "ask-operator")
+    granted = (
+        "jira-read",
+        "jira-propose",
+        "graph-read",
+        "graph-propose",
+        "consult",
+        "task-create",
+        "ask-operator",
+    )
     advisory = packs_mod.advisory_packs(granted)
     agent = await consult_mod.build_advisory_agent(
-        "jira-expert", "You are the Jira expert.", packs=advisory,
+        "jira-expert",
+        "You are the Jira expert.",
+        packs=advisory,
     )
     names = _tool_names(agent)
     assert names, "could not introspect agent tools"
@@ -189,8 +212,7 @@ async def test_the_advisory_toolset_holds_propose_and_consult_but_never_ask():
     assert "create_task" not in names, (
         "a consulted specialist answers; it never starts work (FR-20)"
     )
-    for deferring in ("ask_operator", "conclude_discussion", "submit_plan",
-                      "assign_work"):
+    for deferring in ("ask_operator", "conclude_discussion", "submit_plan", "assign_work"):
         assert deferring not in names, (
             f"{deferring} raises CallDeferred and a consultation is not its "
             "host — there is no operator loop and no plan here"
@@ -210,7 +232,9 @@ async def test_a_read_only_advisory_agent_still_answers_in_plain_text():
     advisory = packs_mod.advisory_packs(("jira-read", "graph-read", "record-read"))
     assert not packs_mod.has_advisory_deferral(advisory)
     agent = await consult_mod.build_advisory_agent(
-        "jira-expert", "You are the Jira expert.", packs=advisory,
+        "jira-expert",
+        "You are the Jira expert.",
+        packs=advisory,
     )
     assert agent.output_type is str
 
@@ -227,12 +251,12 @@ def test_every_deferral_tool_is_classified_from_the_tools_source():
             if "CallDeferred" in src:
                 defers.add(tool_name)
     unclassified = (
-        defers - packs_mod.NON_ADVISORY_TOOLS - packs_mod.ADVISORY_DEFERRAL_TOOLS
+        defers
+        - packs_mod.NON_ADVISORY_TOOLS
+        - packs_mod.ADVISORY_DEFERRAL_TOOLS
         - packs_mod.ADVISORY_GRACEFUL_TOOLS
     )
-    assert not unclassified, (
-        f"deferral tools classified neither way: {unclassified}"
-    )
+    assert not unclassified, f"deferral tools classified neither way: {unclassified}"
     # The three sets are pairwise disjoint — a tool cannot be barred, driven
     # AS A PROPOSAL, and degraded gracefully all at once.
     assert not (packs_mod.NON_ADVISORY_TOOLS & packs_mod.ADVISORY_DEFERRAL_TOOLS)
@@ -240,7 +264,8 @@ def test_every_deferral_tool_is_classified_from_the_tools_source():
     assert not (packs_mod.ADVISORY_DEFERRAL_TOOLS & packs_mod.ADVISORY_GRACEFUL_TOOLS)
     # And every listed name is real (a typo would silently exclude nothing).
     for name in (
-        packs_mod.NON_ADVISORY_TOOLS | packs_mod.ADVISORY_DEFERRAL_TOOLS
+        packs_mod.NON_ADVISORY_TOOLS
+        | packs_mod.ADVISORY_DEFERRAL_TOOLS
         | packs_mod.ADVISORY_GRACEFUL_TOOLS
     ):
         assert getattr(tools_mod, name, None) is not None, f"no such tool: {name}"
@@ -291,12 +316,19 @@ async def test_the_sub_run_loads_the_targets_governed_charter():
     agent_id = "consulttest-charter"
     try:
         await repo.hire_agent(
-            agent_id, "Charter Specialist", "test specialist",
-            "You are the SPECIALIST-UNDER-TEST.", ["jira-read"],
-            template="analyst", consultable=True,
+            agent_id,
+            "Charter Specialist",
+            "test specialist",
+            "You are the SPECIALIST-UNDER-TEST.",
+            ["jira-read"],
+            template="analyst",
+            consultable=True,
         )
         out = await consult_mod.consult(
-            agent_id, "how?", model=FunctionModel(_respond), caller_id="inbox-triage",
+            agent_id,
+            "how?",
+            model=FunctionModel(_respond),
+            caller_id="inbox-triage",
         )
         assert out == "advice"
         prompt = "\n".join(seen)
@@ -311,8 +343,7 @@ async def test_the_sub_run_loads_the_targets_governed_charter():
         conn = await repo._conn()
         try:
             await conn.execute("delete from agent_grant where agent_id = $1", agent_id)
-            await conn.execute(
-                "delete from guidance_version where agent_id = $1", agent_id)
+            await conn.execute("delete from guidance_version where agent_id = $1", agent_id)
             await conn.execute("delete from agent where id = $1", agent_id)
         finally:
             await conn.close()
@@ -325,7 +356,8 @@ async def test_the_sub_run_loads_the_targets_governed_charter():
 async def test_consult_returns_advice_and_lands_on_the_log():
     since = await repo.latest_event_id()
     advice = await consult_agent(
-        _Ctx(agent_id="inbox-triage"), "jira-expert",
+        _Ctx(agent_id="inbox-triage"),
+        "jira-expert",
         "How should I record TASKS-12 blocking TASKS-13?",
     )
     assert "blocks" in advice  # the deterministic advisor's content
@@ -345,8 +377,10 @@ async def test_a_spendy_caller_does_not_starve_the_specialist():
 
     spent = RunUsage(requests=consult_mod.REQUEST_LIMIT + 5)
     advice = await consult_mod.consult(
-        "jira-expert", "How should I record TASKS-12 blocking TASKS-13?",
-        usage=spent, caller_id="inbox-triage",
+        "jira-expert",
+        "How should I record TASKS-12 blocking TASKS-13?",
+        usage=spent,
+        caller_id="inbox-triage",
     )
     assert "blocks" in advice
 
@@ -360,10 +394,12 @@ async def test_the_consulted_event_names_the_real_caller_as_actor():
     session_id = "sess_consult_" + uuid.uuid4().hex[:8]
     await consult_agent(
         _Ctx(agent_id="litellm-manager", session_id=session_id),
-        "jira-expert", "How do I link two issues?",
+        "jira-expert",
+        "How do I link two issues?",
     )
     rows = [
-        r for r in await repo.list_events(since_id=since, kind="agent.consulted")
+        r
+        for r in await repo.list_events(since_id=since, kind="agent.consulted")
         if (r["payload"] or {}).get("session_id") == session_id
     ]
     assert len(rows) == 1
@@ -400,7 +436,10 @@ async def test_a_runaway_answer_is_cut_honestly(monkeypatch):
 
     monkeypatch.setattr(consult_mod, "ANSWER_CEILING", 100)
     answer = await consult_mod.consult(
-        "jira-expert", "how?", model=FunctionModel(_respond), caller_id="inbox-triage",
+        "jira-expert",
+        "how?",
+        model=FunctionModel(_respond),
+        caller_id="inbox-triage",
     )
     assert answer.startswith("x" * 100)
     assert "TRUNCATED at 100 chars" in answer
@@ -424,15 +463,26 @@ async def test_a_gap_declared_during_consultation_is_escalatable():
             for part in getattr(message, "parts", []):
                 if isinstance(part, ToolReturnPart) and part.tool_name == "declare_gap":
                     return ModelResponse(parts=[TextPart(content="noted")])
-        return ModelResponse(parts=[ToolCallPart(tool_name="declare_gap", args={
-            "kind": "missing_knowledge", "subject": "confluence",
-            "need": "a Confluence Cloud REST reference",
-        })])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="declare_gap",
+                    args={
+                        "kind": "missing_knowledge",
+                        "subject": "confluence",
+                        "need": "a Confluence Cloud REST reference",
+                    },
+                )
+            ]
+        )
 
     session_id = "sess_consult_" + uuid.uuid4().hex[:8]
     advice = await consult_mod.consult(
-        "jira-expert", "How do I link this?", model=FunctionModel(_respond),
-        session_id=session_id, caller_id="inbox-triage",
+        "jira-expert",
+        "How do I link this?",
+        model=FunctionModel(_respond),
+        session_id=session_id,
+        caller_id="inbox-triage",
     )
     assert advice == "noted"
 
@@ -446,19 +496,22 @@ async def test_a_gap_declared_during_consultation_is_escalatable():
 
 _DRAFT = {
     "intent": "Link TASKS-12 as blocking TASKS-13 — the dependency is real.",
-    "actions": [{
-        "capability": "jira.link_issues",
-        "arguments": {"from_key": "TASKS-12", "to_key": "TASKS-13",
-                      "link_type": "Blocks"},
-        "target_ref": {"system": "jira", "id": "TASKS-12", "read_version": "unknown"},
-        "reversibility": "reversible",
-    }],
-    "evidence": [{
-        "kind": "jira",
-        "source_ref": "jira:TASKS-12",
-        "locator": "jira_get_issue(TASKS-12)",
-        "claim": "TASKS-12 has no outward link to TASKS-13.",
-    }],
+    "actions": [
+        {
+            "capability": "jira.link_issues",
+            "arguments": {"from_key": "TASKS-12", "to_key": "TASKS-13", "link_type": "Blocks"},
+            "target_ref": {"system": "jira", "id": "TASKS-12", "read_version": "unknown"},
+            "reversibility": "reversible",
+        }
+    ],
+    "evidence": [
+        {
+            "kind": "jira",
+            "source_ref": "jira:TASKS-12",
+            "locator": "jira_get_issue(TASKS-12)",
+            "claim": "TASKS-12 has no outward link to TASKS-13.",
+        }
+    ],
     "expected_effect": "TASKS-12 blocks TASKS-13",
     "confidence": {"level": "high", "rationale": "The test states it."},
 }
@@ -470,9 +523,11 @@ def _drafting_model():
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="propose_action", args={"proposal": _DRAFT}),
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="propose_action", args={"proposal": _DRAFT}),
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -492,7 +547,8 @@ async def test_a_consulted_specialist_parks_its_own_proposal(monkeypatch):
     SPECIALIST owns — its own fresh session, its own agent_id, the consult chain
     in `origin` and on the creation event."""
     monkeypatch.setattr(
-        consult_mod, "_consult_model",
+        consult_mod,
+        "_consult_model",
         aresolve(lambda agent_id, model=None: _drafting_model()),
     )
     since = await repo.latest_event_id()
@@ -500,7 +556,8 @@ async def test_a_consulted_specialist_parks_its_own_proposal(monkeypatch):
 
     proposal_id, wait = await _consult_expecting_a_draft(
         _Ctx(agent_id="inbox-triage", session_id=caller_session),
-        "jira-expert", "Should TASKS-12 block TASKS-13?",
+        "jira-expert",
+        "Should TASKS-12 block TASKS-13?",
     )
 
     row = await repo.load_proposal(proposal_id)
@@ -511,7 +568,8 @@ async def test_a_consulted_specialist_parks_its_own_proposal(monkeypatch):
         assert row["agent_id"] == "jira-expert"
         assert row["status"] == "AWAITING_HUMAN"
         assert row["origin"] == {
-            "consulted_by": "inbox-triage", "caller_session_id": caller_session,
+            "consulted_by": "inbox-triage",
+            "caller_session_id": caller_session,
         }
         # A FRESH session of the specialist's own, never the caller's.
         assert row["session_id"] != caller_session
@@ -526,7 +584,8 @@ async def test_a_consulted_specialist_parks_its_own_proposal(monkeypatch):
         assert await repo.load_paused_session(row["session_id"]) is not None
 
         created = [
-            e for e in await repo.list_events(since_id=since, kind="proposal.created")
+            e
+            for e in await repo.list_events(since_id=since, kind="proposal.created")
             if e["ref_id"] == proposal_id
         ]
         assert len(created) == 1
@@ -535,7 +594,8 @@ async def test_a_consulted_specialist_parks_its_own_proposal(monkeypatch):
         assert created[0]["payload"]["caller_session_id"] == caller_session
 
         consulted = [
-            e for e in await repo.list_events(since_id=since, kind="agent.consulted")
+            e
+            for e in await repo.list_events(since_id=since, kind="agent.consulted")
             if (e["payload"] or {}).get("session_id") == caller_session
         ]
         assert len(consulted) == 1
@@ -553,17 +613,17 @@ async def test_a_pure_advice_consult_still_opens_no_session_and_no_proposal():
     caller_session = "sess_consult_" + uuid.uuid4().hex[:8]
     await consult_agent(
         _Ctx(agent_id="inbox-triage", session_id=caller_session),
-        "jira-expert", "How should I record TASKS-12 blocking TASKS-13?",
+        "jira-expert",
+        "How should I record TASKS-12 blocking TASKS-13?",
     )
     consulted = [
-        e for e in await repo.list_events(since_id=since, kind="agent.consulted")
+        e
+        for e in await repo.list_events(since_id=since, kind="agent.consulted")
         if (e["payload"] or {}).get("session_id") == caller_session
     ]
     assert len(consulted) == 1
     assert consulted[0]["payload"]["proposal_id"] is None
-    assert not [
-        e for e in await repo.list_events(since_id=since, kind="proposal.created")
-    ]
+    assert not [e for e in await repo.list_events(since_id=since, kind="proposal.created")]
 
 
 @needs_pg
@@ -574,19 +634,22 @@ async def test_rejecting_a_consult_proposal_coaches_the_drafter(monkeypatch):
     from central_command.gateway import gateway
 
     monkeypatch.setattr(
-        consult_mod, "_consult_model",
+        consult_mod,
+        "_consult_model",
         aresolve(lambda agent_id, model=None: _drafting_model()),
     )
     caller_session = "sess_consult_" + uuid.uuid4().hex[:8]
     proposal_id, wait = await _consult_expecting_a_draft(
         _Ctx(agent_id="inbox-triage", session_id=caller_session),
-        "jira-expert", "Should TASKS-12 block TASKS-13?",
+        "jira-expert",
+        "Should TASKS-12 block TASKS-13?",
     )
     row = await repo.load_proposal(proposal_id)
     redraft_row = None
     try:
         out = await gateway.reject_with_feedback(
-            row["session_id"], proposal_id,
+            row["session_id"],
+            proposal_id,
             "Other way round — TASKS-13 blocks TASKS-12.",
             model=_drafting_model(),
         )
@@ -608,8 +671,7 @@ async def test_rejecting_a_consult_proposal_coaches_the_drafter(monkeypatch):
         if redraft_row is not None:
             conn = await repo._conn()
             try:
-                await conn.execute(
-                    "delete from proposal where id = $1", redraft_row["id"])
+                await conn.execute("delete from proposal where id = $1", redraft_row["id"])
             finally:
                 await conn.close()
         if row is not None:
@@ -625,13 +687,15 @@ async def test_the_decisions_wire_carries_the_consult_origin(monkeypatch):
     from central_command.api import nerve_gateway
 
     monkeypatch.setattr(
-        consult_mod, "_consult_model",
+        consult_mod,
+        "_consult_model",
         aresolve(lambda agent_id, model=None: _drafting_model()),
     )
     caller_session = "sess_consult_" + uuid.uuid4().hex[:8]
     proposal_id, _wait = await _consult_expecting_a_draft(
         _Ctx(agent_id="inbox-triage", session_id=caller_session),
-        "jira-expert", "Should TASKS-12 block TASKS-13?",
+        "jira-expert",
+        "Should TASKS-12 block TASKS-13?",
     )
     row = await repo.load_proposal(proposal_id)
     try:
@@ -639,7 +703,8 @@ async def test_the_decisions_wire_carries_the_consult_origin(monkeypatch):
         mine = [p for p in payload["proposals"] if p["id"] == proposal_id]
         assert len(mine) == 1, "the parked proposal is not in the inbox payload"
         assert mine[0]["origin"] == {
-            "consulted_by": "inbox-triage", "caller_session_id": caller_session,
+            "consulted_by": "inbox-triage",
+            "caller_session_id": caller_session,
         }
         # The detail pane reads the same field off the same row.
         detail = await repo.load_proposal(proposal_id)
@@ -670,27 +735,39 @@ async def test_a_consulted_specialist_may_open_one_consult_of_its_own():
         for message in reversed(messages):
             for part in getattr(message, "parts", []):
                 if isinstance(part, ToolReturnPart) and part.tool_name == "consult_agent":
-                    return ModelResponse(
-                        parts=[TextPart(content=f"B synthesized: {part.content}")]
-                    )
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="consult_agent",
-            args={"agent_id": c_id, "question": "what do you know about this?"},
-        )])
+                    return ModelResponse(parts=[TextPart(content=f"B synthesized: {part.content}")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="consult_agent",
+                    args={"agent_id": c_id, "question": "what do you know about this?"},
+                )
+            ]
+        )
 
     try:
         await repo.hire_agent(
-            b_id, "Consult Test B", "test specialist B",
-            "You are SPECIALIST B, consulted by another agent.", ["consult"],
-            template="analyst", consultable=True,
+            b_id,
+            "Consult Test B",
+            "test specialist B",
+            "You are SPECIALIST B, consulted by another agent.",
+            ["consult"],
+            template="analyst",
+            consultable=True,
         )
         await repo.hire_agent(
-            c_id, "Consult Test C", "test specialist C",
-            "You are SPECIALIST C, the leaf of this chain.", ["jira-read"],
-            template="analyst", consultable=True,
+            c_id,
+            "Consult Test C",
+            "test specialist C",
+            "You are SPECIALIST C, the leaf of this chain.",
+            ["jira-read"],
+            template="analyst",
+            consultable=True,
         )
         answer = await consult_mod.consult(
-            b_id, "please advise", model=FunctionModel(_b_responds),
+            b_id,
+            "please advise",
+            model=FunctionModel(_b_responds),
             caller_id="inbox-triage",
         )
         assert answer.startswith("B synthesized:"), (
@@ -700,10 +777,8 @@ async def test_a_consulted_specialist_may_open_one_consult_of_its_own():
         for agent_id in (b_id, c_id):
             conn = await repo._conn()
             try:
-                await conn.execute(
-                    "delete from agent_grant where agent_id = $1", agent_id)
-                await conn.execute(
-                    "delete from guidance_version where agent_id = $1", agent_id)
+                await conn.execute("delete from agent_grant where agent_id = $1", agent_id)
+                await conn.execute("delete from guidance_version where agent_id = $1", agent_id)
                 await conn.execute("delete from agent where id = $1", agent_id)
             finally:
                 await conn.close()
@@ -781,11 +856,11 @@ async def test_a_replayed_consult_reuses_the_surviving_draft():
             session_id=specialist_session,
             agent_id="jira-expert",
             intent="create the tracking issue",
-            actions=[], evidence=[],
+            actions=[],
+            evidence=[],
             expected_effect="one issue exists in TASKS",
             idempotency_key=f"{prop_id}:0",
-            origin={"consulted_by": "inbox-triage",
-                    "caller_session_id": caller_session},
+            origin={"consulted_by": "inbox-triage", "caller_session_id": caller_session},
         )
         since = await repo.latest_event_id()
 
@@ -794,15 +869,18 @@ async def test_a_replayed_consult_reuses_the_surviving_draft():
 
         outcome: dict = {}
         answer = await consult_mod.consult(
-            "jira-expert", "ensure the task is tracked in Jira",
-            model=FunctionModel(_explode), caller_id="inbox-triage",
-            session_id=caller_session, outcome=outcome,
+            "jira-expert",
+            "ensure the task is tracked in Jira",
+            model=FunctionModel(_explode),
+            caller_id="inbox-triage",
+            session_id=caller_session,
+            outcome=outcome,
         )
         assert prop_id in answer and "AWAITING THE OPERATOR'S REVIEW" in answer
         assert outcome == {"proposal_id": prop_id, "session_id": specialist_session}
         reused = [
-            r for r in await repo.list_events(
-                since_id=since, kind="agent.consult_draft_reused")
+            r
+            for r in await repo.list_events(since_id=since, kind="agent.consult_draft_reused")
             if r["ref_id"] == caller_session
         ]
         assert len(reused) == 1
@@ -816,8 +894,10 @@ async def test_a_replayed_consult_reuses_the_surviving_draft():
             return ModelResponse(parts=[TextPart(content="fresh advice")])
 
         answer = await consult_mod.consult(
-            "jira-expert", "and how do I link it?",
-            model=FunctionModel(_advise), caller_id="inbox-triage",
+            "jira-expert",
+            "and how do I link it?",
+            model=FunctionModel(_advise),
+            caller_id="inbox-triage",
             session_id=caller_session,
         )
         assert answer == "fresh advice"
@@ -825,7 +905,6 @@ async def test_a_replayed_consult_reuses_the_surviving_draft():
         conn = await repo._conn()
         try:
             await conn.execute("delete from proposal where id = $1", prop_id)
-            await conn.execute(
-                "delete from session where id = $1", specialist_session)
+            await conn.execute("delete from session where id = $1", specialist_session)
         finally:
             await conn.close()

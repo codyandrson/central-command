@@ -54,14 +54,16 @@ from tests.world_moved_helpers import (  # noqa: F401 — pinned, confluence_gra
 
 def test_the_verdict_is_the_type_never_the_text():
     stale = confluence.ConfluenceStale(
-        "updatePage — connection timeout 429", page_id="42", expected=4, actual=6,
+        "updatePage — connection timeout 429",
+        page_id="42",
+        expected=4,
+        actual=6,
         status_code=409,
     )
     assert is_world_moved(stale) and isinstance(stale, confluence.ConfluenceError)
     assert stale.status_code == 409
     assert classify_failure(stale) == "semantic"
-    moved = WorldMoved("x", target="t", expected=1, actual=2,
-                       what_moved="timeout connection 503")
+    moved = WorldMoved("x", target="t", expected=1, actual=2, what_moved="timeout connection 503")
     assert classify_failure(moved) == "semantic"
     # The same words on an untyped error ARE an outage: text is not the verdict.
     assert not is_world_moved(RuntimeError("page 42 version 4 -> 6"))
@@ -77,16 +79,24 @@ async def test_a_stale_version_raises_the_typed_verdict(monkeypatch):
 
 
 async def test_a_409_naming_a_version_conflict_is_world_moved(monkeypatch):
-    _confluence_answers(monkeypatch, version=4, put=httpx.Response(
-        409, text="Version must be incremented on update. Current version is: 7"))
+    _confluence_answers(
+        monkeypatch,
+        version=4,
+        put=httpx.Response(
+            409, text="Version must be incremented on update. Current version is: 7"
+        ),
+    )
     with pytest.raises(confluence.ConfluenceStale) as ei:
         await confluence.update_page("42", "Roadmap", "<p>new</p>", expected_version=4)
     assert (ei.value.expected, ei.value.actual, ei.value.status_code) == (4, None, 409)
 
 
 async def test_a_409_that_is_not_a_version_conflict_stays_generic(monkeypatch):
-    _confluence_answers(monkeypatch, version=4, put=httpx.Response(
-        409, text="A page with this title already exists in this space"))
+    _confluence_answers(
+        monkeypatch,
+        version=4,
+        put=httpx.Response(409, text="A page with this title already exists in this space"),
+    )
     with pytest.raises(confluence.ConfluenceError, match=r"provider rejected") as ei:
         await confluence.update_page("42", "Roadmap", "<p>new</p>", expected_version=4)
     assert not is_world_moved(ei.value)
@@ -109,18 +119,22 @@ async def test_a_stale_version_lands_failed_resumes_the_drafter_and_links_the_re
     saved = await repo.save_charter_version(AGENT, f"You are new.\n\n{marker}", "r17 test")
     try:
         _confluence_answers(monkeypatch, version=6)
-        out = await gateway.approve_and_execute(row["session_id"], row["id"],
-                                                model=drafter.model)
+        out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
     finally:
         conn = await repo._conn()
         try:
             await conn.execute(
                 "delete from guidance_version where agent_id = $1 and version = $2",
-                AGENT, saved["version"])
+                AGENT,
+                saved["version"],
+            )
             if before is not None:
                 await conn.execute(
                     "update guidance_version set status = 'CURRENT' "
-                    "where agent_id = $1 and version = $2", AGENT, before["version"])
+                    "where agent_id = $1 and version = $2",
+                    AGENT,
+                    before["version"],
+                )
         finally:
             await conn.close()
 
@@ -132,7 +146,8 @@ async def test_a_stale_version_lands_failed_resumes_the_drafter_and_links_the_re
     assert payload["world_moved"]["actual"] == 6
     assert payload["world_moved"]["capability"] == "confluence.update_page"
     assert "proposal.execution_parked" not in {
-        e["kind"] for e in await repo.list_events(ref_id=row["id"])}
+        e["kind"] for e in await repo.list_events(ref_id=row["id"])
+    }
 
     # The resumed run got the world-moved report as its propose call's return …
     report = drafter.seen[-1]["returns"][-1]
@@ -147,8 +162,7 @@ async def test_a_stale_version_lands_failed_resumes_the_drafter_and_links_the_re
     rid = out["redraft_proposal_id"]
     redraft = await repo.load_proposal(rid)
     assert redraft["status"] == "AWAITING_HUMAN"
-    link = {"of": row["id"], "root": row["id"], "cause": "world_moved",
-            "world_moved_count": 1}
+    link = {"of": row["id"], "root": row["id"], "cause": "world_moved", "world_moved_count": 1}
     assert redraft["redraft"] == link
     assert (await _event("proposal.created", rid))["payload"]["redraft"] == link
     assert redraft["override_eval"]["reason"] == "redraft"
@@ -168,28 +182,34 @@ async def test_a_swept_resume_links_the_redraft_the_same_way(monkeypatch):
     drafter = _Drafter(_page_update(4), _page_update(6), down_on_resume=1)
     row = await _draft(monkeypatch, drafter)
     _confluence_answers(monkeypatch, version=6)
-    out = await gateway.approve_and_execute(row["session_id"], row["id"],
-                                            model=drafter.model)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
     assert out.get("resume_parked") is True
     assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
     pending = (await repo.get_session_run_state(row["session_id"]))["pending_resume"]
     assert pending["redraft_cause"] == "world_moved"
 
-    swept = await orchestration.resume_parked_session(row["session_id"],
-                                                      model=drafter.model)
+    swept = await orchestration.resume_parked_session(row["session_id"], model=drafter.model)
     redraft = await repo.load_proposal(swept["redraft_proposal_id"])
-    assert redraft["redraft"] == {"of": row["id"], "root": row["id"],
-                                  "cause": "world_moved", "world_moved_count": 1}
+    assert redraft["redraft"] == {
+        "of": row["id"],
+        "root": row["id"],
+        "cause": "world_moved",
+        "world_moved_count": 1,
+    }
 
 
 @pytest.mark.usefixtures("confluence_grant")
 async def test_a_409_version_conflict_takes_the_same_path(monkeypatch):
     drafter = _Drafter(_page_update(4), _page_update(7))
     row = await _draft(monkeypatch, drafter)
-    _confluence_answers(monkeypatch, version=4, put=httpx.Response(
-        409, text="Version must be incremented on update. Current version is: 7"))
-    out = await gateway.approve_and_execute(row["session_id"], row["id"],
-                                            model=drafter.model)
+    _confluence_answers(
+        monkeypatch,
+        version=4,
+        put=httpx.Response(
+            409, text="Version must be incremented on update. Current version is: 7"
+        ),
+    )
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
 
     assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
     payload = (await _event("proposal.failed", row["id"]))["payload"]
@@ -205,8 +225,13 @@ async def test_world_moved_text_saying_timeout_still_lands_failed(monkeypatch):
     row = await _draft(monkeypatch, drafter)
 
     async def moved(*a, **k):
-        raise WorldMoved("connection timeout", target="confluence:page:42",
-                         expected=4, actual=6, what_moved="timeout 503 connection")
+        raise WorldMoved(
+            "connection timeout",
+            target="confluence:page:42",
+            expected=4,
+            actual=6,
+            what_moved="timeout 503 connection",
+        )
 
     monkeypatch.setattr(executor.confluence, "update_page", moved)
     await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
@@ -224,15 +249,20 @@ async def test_a_plain_semantic_failure_keeps_todays_resume_with_cause_failed(mo
     second = {**_PROPOSAL, "intent": "Redraft after the 400."}
     drafter = _Drafter(_PROPOSAL, second)
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=drafter.model)
-    out = await gateway.approve_and_execute(run["session_id"], run["proposal_id"],
-                                            model=drafter.model)
+    out = await gateway.approve_and_execute(
+        run["session_id"], run["proposal_id"], model=drafter.model
+    )
 
     payload = (await _event("proposal.failed", run["proposal_id"]))["payload"]
     assert payload["world_moved"] is None
     assert "world moved" not in drafter.seen[-1]["returns"][-1]
     redraft = await repo.load_proposal(out["redraft_proposal_id"])
-    assert redraft["redraft"] == {"of": run["proposal_id"], "root": run["proposal_id"],
-                                  "cause": "failed", "world_moved_count": 0}
+    assert redraft["redraft"] == {
+        "of": run["proposal_id"],
+        "root": run["proposal_id"],
+        "cause": "failed",
+        "world_moved_count": 0,
+    }
 
 
 async def test_a_reject_redraft_carries_cause_rejected(monkeypatch):
@@ -243,11 +273,18 @@ async def test_a_reject_redraft_carries_cause_rejected(monkeypatch):
     model = make_redraft_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
     out = await gateway.reject_with_feedback(
-        run["session_id"], run["proposal_id"],
-        "Wrong — I spoke to Dana, make it 2026-08-10.", model=model)
+        run["session_id"],
+        run["proposal_id"],
+        "Wrong — I spoke to Dana, make it 2026-08-10.",
+        model=model,
+    )
     redraft = await repo.load_proposal(out["redraft_proposal_id"])
-    assert redraft["redraft"] == {"of": run["proposal_id"], "root": run["proposal_id"],
-                                  "cause": "rejected", "world_moved_count": 0}
+    assert redraft["redraft"] == {
+        "of": run["proposal_id"],
+        "root": run["proposal_id"],
+        "cause": "rejected",
+        "world_moved_count": 0,
+    }
 
 
 async def test_the_link_carries_root_and_count_down_a_chain(monkeypatch):
@@ -255,8 +292,14 @@ async def test_the_link_carries_root_and_count_down_a_chain(monkeypatch):
     a Reject or a plain failure keeps the count."""
     rows = {
         "prop_root": {"redraft": None},
-        "prop_mid": {"redraft": {"of": "prop_root", "root": "prop_root",
-                                 "cause": "world_moved", "world_moved_count": 1}},
+        "prop_mid": {
+            "redraft": {
+                "of": "prop_root",
+                "root": "prop_root",
+                "cause": "world_moved",
+                "world_moved_count": 1,
+            }
+        },
     }
 
     async def load(pid):
@@ -264,11 +307,17 @@ async def test_the_link_carries_root_and_count_down_a_chain(monkeypatch):
 
     monkeypatch.setattr(gateway.repo, "load_proposal", load)
     assert await gateway.redraft_link("prop_root", "world_moved") == {
-        "of": "prop_root", "root": "prop_root", "cause": "world_moved",
-        "world_moved_count": 1}
+        "of": "prop_root",
+        "root": "prop_root",
+        "cause": "world_moved",
+        "world_moved_count": 1,
+    }
     assert await gateway.redraft_link("prop_mid", "world_moved") == {
-        "of": "prop_mid", "root": "prop_root", "cause": "world_moved",
-        "world_moved_count": 2}
+        "of": "prop_mid",
+        "root": "prop_root",
+        "cause": "world_moved",
+        "world_moved_count": 2,
+    }
     assert (await gateway.redraft_link("prop_mid", "rejected"))["world_moved_count"] == 1
     assert (await gateway.redraft_link("prop_mid", "failed"))["world_moved_count"] == 1
     with pytest.raises(ValueError):
@@ -280,9 +329,17 @@ async def test_the_link_carries_root_and_count_down_a_chain(monkeypatch):
 
 def test_the_gateway_never_reads_world_moved_as_transient():
     f = executor.ExecutionFailed(
-        "confluence.update_page", "connection timeout", [], transient=True,
-        world_moved={"target": "confluence:page:42", "expected": 4, "actual": 6,
-                     "what_moved": "x", "capability": "confluence.update_page"},
+        "confluence.update_page",
+        "connection timeout",
+        [],
+        transient=True,
+        world_moved={
+            "target": "confluence:page:42",
+            "expected": 4,
+            "actual": 6,
+            "what_moved": "x",
+            "capability": "confluence.update_page",
+        },
     )
     assert gateway._execution_transient(f) is False
 
@@ -323,8 +380,9 @@ def _stamp(delta_hours: float) -> str:
     return at.strftime("%Y-%m-%dT%H:%M:%S.000+0000")
 
 
-def _jira_answers(monkeypatch, *, updated: str | None, available=("Resolve",),
-                  status: str = "In Review") -> list[tuple[str, str]]:
+def _jira_answers(
+    monkeypatch, *, updated: str | None, available=("Resolve",), status: str = "In Review"
+) -> list[tuple[str, str]]:
     """A fake Jira under the REAL `transition_issue`/`add_comment`: the
     transitions list holds `available`, the narrow issue read answers
     `status`/`updated`, and every write succeeds. Returns the calls made."""
@@ -335,12 +393,17 @@ def _jira_answers(monkeypatch, *, updated: str | None, available=("Resolve",),
     async def fake(method, path, json_body=None):
         calls.append((method, path))
         if method == "GET" and path.endswith("/transitions"):
-            return FakeResponse(200, {"transitions": [
-                {"id": str(i), "name": n, "to": {"name": n}}
-                for i, n in enumerate(available, start=11)]})
+            return FakeResponse(
+                200,
+                {
+                    "transitions": [
+                        {"id": str(i), "name": n, "to": {"name": n}}
+                        for i, n in enumerate(available, start=11)
+                    ]
+                },
+            )
         if method == "GET" and "fields=status,updated" in path:
-            return FakeResponse(200, {"fields": {"status": {"name": status},
-                                                 "updated": updated}})
+            return FakeResponse(200, {"fields": {"status": {"name": status}, "updated": updated}})
         if method == "POST" and path.endswith("/comment"):
             return FakeResponse(201, {"id": "9"})
         if method == "POST" and path.endswith("/transitions"):
@@ -352,23 +415,31 @@ def _jira_answers(monkeypatch, *, updated: str | None, available=("Resolve",),
 
 
 def _jira_action(capability: str, **arguments) -> dict:
-    return {"capability": capability, "arguments": arguments,
-            "target_ref": {"system": "jira", "id": arguments["issue_key"],
-                           "read_version": "etag:1"},
-            "reversibility": "reversible"}
+    return {
+        "capability": capability,
+        "arguments": arguments,
+        "target_ref": {"system": "jira", "id": arguments["issue_key"], "read_version": "etag:1"},
+        "reversibility": "reversible",
+    }
 
 
 def _jira_proposal(*, comment_first: bool = False, transition: str = "Done") -> dict:
-    actions = [_jira_action("jira.transition_issue", issue_key="DEMO-7",
-                            transition=transition)]
+    actions = [_jira_action("jira.transition_issue", issue_key="DEMO-7", transition=transition)]
     if comment_first:
-        actions.insert(0, _jira_action("jira.add_comment", issue_key="DEMO-7",
-                                       body="Closing this out."))
+        actions.insert(
+            0, _jira_action("jira.add_comment", issue_key="DEMO-7", body="Closing this out.")
+        )
     return {
         "intent": "Close DEMO-7",
         "actions": actions,
-        "evidence": [{"kind": "operator", "source_ref": "operator:task",
-                      "locator": "test task", "claim": "Operator tasked a close."}],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "test task",
+                "claim": "Operator tasked a close.",
+            }
+        ],
         "expected_effect": "DEMO-7 is Done",
         "confidence": {"level": "high", "rationale": "The test states it."},
     }
@@ -376,9 +447,13 @@ def _jira_proposal(*, comment_first: bool = False, transition: str = "Done") -> 
 
 def test_transition_unavailable_is_plain_and_transition_moved_is_the_typed_verdict():
     plain = jira.TransitionUnavailable(
-        "transition 'Done' is not available (available: Resolve)", issue_key="DEMO-7",
-        transition="Done", available=["Resolve"], status="In Review",
-        updated="2026-10-28T12:00:00.000+0000")
+        "transition 'Done' is not available (available: Resolve)",
+        issue_key="DEMO-7",
+        transition="Done",
+        available=["Resolve"],
+        status="In Review",
+        updated="2026-10-28T12:00:00.000+0000",
+    )
     assert isinstance(plain, jira.JiraError) and not is_world_moved(plain)
     moved = jira.TransitionMoved(plain)
     assert is_world_moved(moved) and isinstance(moved, jira.JiraError)
@@ -395,17 +470,18 @@ async def test_an_issue_updated_after_the_draft_lands_failed_world_moved_and_res
     drafter = _Drafter(first, second)
     row = await _draft(monkeypatch, drafter)
     _jira_answers(monkeypatch, updated=_stamp(+1))
-    out = await gateway.approve_and_execute(row["session_id"], row["id"],
-                                            model=drafter.model)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
 
     assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
     payload = (await _event("proposal.failed", row["id"]))["payload"]
     assert payload["transient"] is False
     assert payload["world_moved"] == {
-        "capability": "jira.transition_issue", "target": "jira:issue:DEMO-7",
+        "capability": "jira.transition_issue",
+        "target": "jira:issue:DEMO-7",
         "expected": "Done",
         "actual": {"available": ["Resolve"], "status": "In Review"},
-        "what_moved": payload["world_moved"]["what_moved"]}
+        "what_moved": payload["world_moved"]["what_moved"],
+    }
     report = drafter.seen[-1]["returns"][-1]
     assert "world moved" in report and "Resolve" in report and "In Review" in report
     redraft = await repo.load_proposal(out["redraft_proposal_id"])
@@ -418,8 +494,7 @@ async def test_the_same_unavailable_name_on_an_untouched_issue_stays_plain_seman
     drafter = _Drafter(_jira_proposal(), _jira_proposal(transition="Resolve"))
     row = await _draft(monkeypatch, drafter)
     _jira_answers(monkeypatch, updated=_stamp(-1))  # updated BEFORE the draft
-    out = await gateway.approve_and_execute(row["session_id"], row["id"],
-                                            model=drafter.model)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
 
     assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
     payload = (await _event("proposal.failed", row["id"]))["payload"]
@@ -459,14 +534,16 @@ async def test_a_retry_after_a_completed_prefix_still_knows_the_issue_was_touche
     actions = [Action(**a) for a in row["actions"]]
 
     with pytest.raises(executor.ExecutionFailed) as resumed:
-        await executor.execute(actions[1:], "human:doe", [], proposer=AGENT,
-                               proposal_id=row["id"], action_offset=1)
+        await executor.execute(
+            actions[1:], "human:doe", [], proposer=AGENT, proposal_id=row["id"], action_offset=1
+        )
     assert resumed.value.world_moved is None
     # The same transition run from the start of a list that does NOT include
     # the comment (offset 0) has nothing touching the issue: world-moved.
     with pytest.raises(executor.ExecutionFailed) as fresh:
-        await executor.execute(actions[1:], "human:doe", [], proposer=AGENT,
-                               proposal_id=row["id"], action_offset=0)
+        await executor.execute(
+            actions[1:], "human:doe", [], proposer=AGENT, proposal_id=row["id"], action_offset=0
+        )
     assert fresh.value.world_moved["target"] == "jira:issue:DEMO-7"
 
 
@@ -477,17 +554,28 @@ async def test_an_updated_that_cannot_be_compared_is_plain_semantic(monkeypatch,
     row = await _draft(monkeypatch, drafter)
     _jira_answers(monkeypatch, updated=updated)
     with pytest.raises(executor.ExecutionFailed) as ei:
-        await executor.execute([Action(**a) for a in row["actions"]], "human:doe", [],
-                               proposer=AGENT, proposal_id=row["id"])
+        await executor.execute(
+            [Action(**a) for a in row["actions"]],
+            "human:doe",
+            [],
+            proposer=AGENT,
+            proposal_id=row["id"],
+        )
     assert ei.value.world_moved is None
 
 
 async def test_no_proposal_id_is_plain_semantic(monkeypatch):
     _jira_answers(monkeypatch, updated=_stamp(+1))
     with pytest.raises(executor.ExecutionFailed) as ei:
-        await executor.execute([Action(**_jira_action(
-            "jira.transition_issue", issue_key="DEMO-7", transition="Done"))],
-            "human:doe", [])
+        await executor.execute(
+            [
+                Action(
+                    **_jira_action("jira.transition_issue", issue_key="DEMO-7", transition="Done")
+                )
+            ],
+            "human:doe",
+            [],
+        )
     assert ei.value.world_moved is None
 
 
@@ -525,9 +613,12 @@ async def test_a_vanished_episode_lands_world_moved_and_deletes_nothing(graph_wo
 
 
 async def test_a_deletion_with_no_preview_is_still_a_drafting_error(graph_world):
-    action = Action(capability="graph.delete_episode", arguments={"episode_uuid": "X"},
-                    target_ref={"system": "graph", "id": "X", "read_version": "d"},
-                    reversibility="irreversible")
+    action = Action(
+        capability="graph.delete_episode",
+        arguments={"episode_uuid": "X"},
+        target_ref={"system": "graph", "id": "X", "read_version": "d"},
+        reversibility="irreversible",
+    )
     with pytest.raises(executor.ExecutionFailed, match="no preview") as ei:
         await executor.execute([action], "human:doe", [])
     assert ei.value.world_moved is None
@@ -539,11 +630,15 @@ async def test_a_deletion_with_no_preview_is_still_a_drafting_error(graph_world)
 def _mixed_proposal(expected_version: int) -> dict:
     """jira.add_comment, jira.set_due_date, then the page update."""
     page = _page_update(expected_version)
-    return {**page, "intent": "Comment, date and update the page",
-            "actions": [
-                _jira_action("jira.add_comment", issue_key="DEMO-7", body="Noted."),
-                _jira_action("jira.set_due_date", issue_key="DEMO-7", due_date="2026-11-30"),
-                *page["actions"]]}
+    return {
+        **page,
+        "intent": "Comment, date and update the page",
+        "actions": [
+            _jira_action("jira.add_comment", issue_key="DEMO-7", body="Noted."),
+            _jira_action("jira.set_due_date", issue_key="DEMO-7", due_date="2026-11-30"),
+            *page["actions"],
+        ],
+    }
 
 
 def _jira_spy(monkeypatch) -> list[tuple[str, str]]:
@@ -566,8 +661,7 @@ async def test_a_moved_page_third_in_line_stops_the_first_two_from_running(monke
     row = await _draft(monkeypatch, drafter)
     jira_calls = _jira_spy(monkeypatch)
     _counting_confluence(monkeypatch, version=6)
-    out = await gateway.approve_and_execute(row["session_id"], row["id"],
-                                            model=drafter.model)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
 
     assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
     payload = (await _event("proposal.failed", row["id"]))["payload"]
@@ -596,12 +690,12 @@ async def test_a_moved_transition_is_caught_before_an_earlier_untouched_write(mo
     drafter = _Drafter(_jira_proposal(), _jira_proposal(transition="Resolve"))
     row = await _draft(monkeypatch, drafter)
     calls = _jira_answers(monkeypatch, updated=_stamp(+1))
-    actions = [Action(**_jira_action("jira.set_due_date", issue_key="DEMO-8",
-                                     due_date="2026-11-30")),
-               *[Action(**a) for a in row["actions"]]]
+    actions = [
+        Action(**_jira_action("jira.set_due_date", issue_key="DEMO-8", due_date="2026-11-30")),
+        *[Action(**a) for a in row["actions"]],
+    ]
     with pytest.raises(executor.ExecutionFailed) as ei:
-        await executor.execute(actions, "human:doe", [], proposer=AGENT,
-                               proposal_id=row["id"])
+        await executor.execute(actions, "human:doe", [], proposer=AGENT, proposal_id=row["id"])
     assert ei.value.completed == []
     assert ei.value.world_moved["target"] == "jira:issue:DEMO-7"
     assert all(method == "GET" for method, _ in calls)
@@ -629,15 +723,18 @@ async def test_a_parked_update_whose_page_moved_in_the_outage_fails_world_moved_
     from tests.conftest import make_parks_due
     from tests.test_execution_retry import _Up
 
-    proposal = {**_page_update(4), "actions": [
-        _jira_action("jira.add_comment", issue_key="DEMO-7", body="Updating the page."),
-        *_page_update(4)["actions"]]}
+    proposal = {
+        **_page_update(4),
+        "actions": [
+            _jira_action("jira.add_comment", issue_key="DEMO-7", body="Updating the page."),
+            *_page_update(4)["actions"],
+        ],
+    }
     drafter = _Drafter(proposal, _page_update(6))
     row = await _draft(monkeypatch, drafter)
     jira_calls = _jira_spy(monkeypatch)
     _counting_confluence(monkeypatch, version=4, down_after_gets=1)
-    out = await gateway.approve_and_execute(row["session_id"], row["id"],
-                                            model=drafter.model)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
     assert out["execution"] == "parked"
     parked = await repo.load_proposal(row["id"])
     assert parked["status"] == "RETRY_PENDING"
@@ -656,15 +753,19 @@ async def test_a_parked_update_whose_page_moved_in_the_outage_fails_world_moved_
     assert payload["world_moved"]["actual"] == 6
     assert payload["completed_actions"] == prefix
     assert len(jira_calls) == 1, "the comment is never replayed"
-    redrafts = [e for e in await repo.list_events(kind="proposal.created", newest_first=True)
-                if (e["payload"].get("redraft") or {}).get("of") == row["id"]]
+    redrafts = [
+        e
+        for e in await repo.list_events(kind="proposal.created", newest_first=True)
+        if (e["payload"].get("redraft") or {}).get("of") == row["id"]
+    ]
     assert redrafts and redrafts[0]["payload"]["redraft"]["cause"] == "world_moved"
 
 
 @pytest.mark.usefixtures("confluence_grant")
 @pytest.mark.parametrize("down", ["transport", "503"])
 async def test_a_down_confluence_on_the_re_check_parks_again_with_an_attempt_spent(
-    monkeypatch, down,
+    monkeypatch,
+    down,
 ):
     from central_command.api import orchestration
     from tests.conftest import make_parks_due
@@ -673,8 +774,7 @@ async def test_a_down_confluence_on_the_re_check_parks_again_with_an_attempt_spe
     drafter = _Drafter(_page_update(4), _page_update(6))
     row = await _draft(monkeypatch, drafter)
     _confluence_down(monkeypatch)
-    out = await gateway.approve_and_execute(row["session_id"], row["id"],
-                                            model=drafter.model)
+    out = await gateway.approve_and_execute(row["session_id"], row["id"], model=drafter.model)
     assert out["execution"] == "parked"
     attempts = (await repo.load_proposal(row["id"]))["retry_state"]["attempts"]
 
@@ -682,6 +782,7 @@ async def test_a_down_confluence_on_the_re_check_parks_again_with_an_attempt_spe
     if down == "transport":
         _confluence_down(monkeypatch, calls)
     else:
+
         async def unavailable(method, path, **_kw):
             calls.append((method, path))
             return httpx.Response(503, text="<html>Service Unavailable</html>")
@@ -697,8 +798,7 @@ async def test_a_down_confluence_on_the_re_check_parks_again_with_an_attempt_spe
     assert again["retry_state"]["attempts"] == attempts + 1
     assert again["retry_state"]["dependencies"] == ["confluence"]
     assert calls and all(c[0] == "GET" for c in calls), "only the re-check's read"
-    assert "proposal.failed" not in {
-        e["kind"] for e in await repo.list_events(ref_id=row["id"])}
+    assert "proposal.failed" not in {e["kind"] for e in await repo.list_events(ref_id=row["id"])}
 
 
 @pytest.mark.usefixtures("confluence_grant")
@@ -715,10 +815,11 @@ async def test_an_interrupted_proposal_retried_now_re_checks_first_and_names_the
     conn = await repo._conn()
     try:
         await conn.execute(
-            "update proposal set status = 'EXECUTING', retry_state = $2::jsonb "
-            "where id = $1", row["id"],
+            "update proposal set status = 'EXECUTING', retry_state = $2::jsonb where id = $1",
+            row["id"],
             '{"next_action_index": 1, "completed_results": ["comment added to DEMO-7"], '
-            '"attempts": 1, "approver": "human:doe"}')
+            '"attempts": 1, "approver": "human:doe"}',
+        )
     finally:
         await conn.close()
     await repo.park_interrupted_executions()
@@ -727,8 +828,9 @@ async def test_an_interrupted_proposal_retried_now_re_checks_first_and_names_the
     jira_calls = _jira_spy(monkeypatch)
     _counting_confluence(monkeypatch, version=6)
     _drafting_model(monkeypatch, drafter)
-    await orchestration.retry_sweep(cache=_Up(), only="jira", ignore_not_before=True,
-                                    include_interrupted=True)
+    await orchestration.retry_sweep(
+        cache=_Up(), only="jira", ignore_not_before=True, include_interrupted=True
+    )
     await orchestration.sweep_settle()
 
     assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
@@ -743,8 +845,9 @@ async def test_an_interrupted_proposal_retried_now_re_checks_first_and_names_the
 
 @pytest.mark.usefixtures("confluence_grant")
 async def test_an_override_decided_world_moved_redraft_parks_for_the_operator(monkeypatch):
-    row = await repo.create_gate_override(AGENT, "confluence.update_page", shadow_runs=0,
-                                          acknowledged_irreversible=True)
+    row = await repo.create_gate_override(
+        AGENT, "confluence.update_page", shadow_runs=0, acknowledged_irreversible=True
+    )
     try:
         _counting_confluence(monkeypatch, version=6)
         drafter = _Drafter(_page_update(4), _page_update(6))
@@ -758,8 +861,11 @@ async def test_an_override_decided_world_moved_redraft_parks_for_the_operator(mo
         assert decided["actor"].startswith("override:")
         payload = (await _event("proposal.failed", failed["id"]))["payload"]
         assert payload["world_moved"]["actual"] == 6
-        redrafts = [e for e in await repo.list_events(kind="proposal.created", newest_first=True)
-                    if (e["payload"].get("redraft") or {}).get("of") == failed["id"]]
+        redrafts = [
+            e
+            for e in await repo.list_events(kind="proposal.created", newest_first=True)
+            if (e["payload"].get("redraft") or {}).get("of") == failed["id"]
+        ]
         assert redrafts, "the drafter redrafted"
         redraft = await repo.load_proposal(redrafts[0]["ref_id"])
         assert redraft["status"] == "AWAITING_HUMAN"
@@ -778,8 +884,7 @@ async def test_an_override_decided_world_moved_redraft_parks_for_the_operator(mo
 async def _coach_draft(coach: _Coach) -> dict:
     from central_command.runtime.run import run_coach
 
-    out = await run_coach(coach.target, model=coach.model, note="Answer briefly.",
-                          note_event_id=0)
+    out = await run_coach(coach.target, model=coach.model, note="Answer briefly.", note_event_id=0)
     assert out["deferred"] is True, out
     return await repo.load_proposal(out["proposal_id"])
 
@@ -806,9 +911,13 @@ async def test_a_charter_moved_since_the_draft_lands_failed_world_moved_and_the_
     assert out["ok"] is False
     assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
     moved = (await _event("proposal.failed", row["id"]))["payload"]["world_moved"]
-    assert moved == {"capability": "charter.update", "target": f"charter:{target}",
-                     "expected": 1, "actual": 2,
-                     "what_moved": f"{target}'s charter moved v1 -> v2"}
+    assert moved == {
+        "capability": "charter.update",
+        "target": f"charter:{target}",
+        "expected": 1,
+        "actual": 2,
+        "what_moved": f"{target}'s charter moved v1 -> v2",
+    }
     current = await repo.current_charter(target)
     assert current["version"] == 2 and marker in current["content"], "the operator's edit stands"
 
@@ -842,10 +951,12 @@ async def test_an_unchanged_charter_executes(monkeypatch):
 
 
 def _charter_action(target: str, **extra) -> Action:
-    return Action(capability="charter.update",
-                  arguments={"agent_id": target, "content": "NEW", "rationale": "r", **extra},
-                  target_ref={"system": "central_command", "id": target},
-                  reversibility="reversible")
+    return Action(
+        capability="charter.update",
+        arguments={"agent_id": target, "content": "NEW", "rationale": "r", **extra},
+        target_ref={"system": "central_command", "id": target},
+        reversibility="reversible",
+    )
 
 
 async def test_an_unstamped_charter_update_is_not_checked(monkeypatch):
@@ -905,8 +1016,7 @@ async def test_a_session_never_shown_the_charter_is_stamped_with_the_version_at_
 
 
 async def test_a_page_deleted_before_execution_is_world_moved_with_actual_none(monkeypatch):
-    calls = _confluence_answers(monkeypatch, version=4,
-                                get=httpx.Response(404, text="not found"))
+    calls = _confluence_answers(monkeypatch, version=4, get=httpx.Response(404, text="not found"))
     action = Action(**_page_update(4)["actions"][0])
     with pytest.raises(executor.ExecutionFailed) as ei:
         await executor.execute([action], "human:doe", [])
@@ -940,8 +1050,7 @@ async def test_a_jira_404_stays_a_plain_failure(monkeypatch):
         return FakeResponse(404, {"errorMessages": ["Issue does not exist"]})
 
     monkeypatch.setattr(jira, "_call", gone)
-    action = Action(**_jira_action("jira.transition_issue", issue_key="DEMO-7",
-                                   transition="Done"))
+    action = Action(**_jira_action("jira.transition_issue", issue_key="DEMO-7", transition="Done"))
     with pytest.raises(executor.ExecutionFailed) as ei:
         await executor.execute([action], "human:doe", [], proposal_id="prop_wm_jira404")
     assert ei.value.world_moved is None and ei.value.transient is False

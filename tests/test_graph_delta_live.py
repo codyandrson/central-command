@@ -36,9 +36,12 @@ async def _add_episode(name: str, body: str, source_description: str, reference_
     """The same call the ingest worker makes, against the REAL client (the
     conftest guard lets it through only under CC_LIVE_GRAPH_TESTS=1)."""
     return await graphiti_client.get_graphiti().add_episode(
-        name=name, episode_body=body, source_description=source_description,
+        name=name,
+        episode_body=body,
+        source_description=source_description,
         reference_time=datetime.fromisoformat(reference_time),
-        source=graphiti_client.text_source(), group_id=GROUP,
+        source=graphiti_client.text_source(),
+        group_id=GROUP,
         entity_types=graph_ontology.ENTITY_TYPES,
     )
 
@@ -114,8 +117,7 @@ async def test_invalidation_attribution_live():
         )
         result2 = await _poll_for_invalidation(marker2)
         assert result2 is not None, (
-            f"episode 2 (marker={marker2}) never appeared within "
-            f"{POLL_TIMEOUT_SECONDS}s."
+            f"episode 2 (marker={marker2}) never appeared within {POLL_TIMEOUT_SECONDS}s."
         )
         episode2, delta2 = result2
 
@@ -139,9 +141,7 @@ async def test_invalidation_attribution_live():
             )
         print("=" * 70)
     finally:
-        await neo4j_writer._write(
-            "MATCH (n) WHERE n.group_id = $g DETACH DELETE n", g=GROUP
-        )
+        await neo4j_writer._write("MATCH (n) WHERE n.group_id = $g DETACH DELETE n", g=GROUP)
         remaining = await neo4j_reader._read(
             "MATCH (n) WHERE n.group_id = $g RETURN count(n) AS c", g=GROUP
         )

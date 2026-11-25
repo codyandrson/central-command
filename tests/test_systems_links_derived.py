@@ -43,7 +43,9 @@ def link_settings() -> set[str]:
 def test_every_link_setting_has_an_env_example_line():
     example = ENV_EXAMPLE.read_text()
     for key in sorted(link_settings()):
-        assert re.search(rf"^{key}=", example, flags=re.MULTILINE), f"{key} missing from .env.example"
+        assert re.search(rf"^{key}=", example, flags=re.MULTILINE), (
+            f"{key} missing from .env.example"
+        )
 
 
 def test_k3s_driver_derives_every_link():
@@ -54,7 +56,7 @@ def test_k3s_driver_derives_every_link():
 
 
 def test_single_driver_derives_every_link_it_deploys():
-    src = installer_source()   # setup.sh + phases/*.sh — phase_app is in phases/app.sh
+    src = installer_source()  # setup.sh + phases/*.sh — phase_app is in phases/app.sh
     for key in sorted(link_settings() - NOT_DERIVABLE - NOT_ON_SINGLE):
         assert re.search(rf'set_kv_if_unset\s+"\$ENV_FILE"\s+{key}\b', src), (
             f"deploy/single/setup.sh never derives {key}"
@@ -64,7 +66,9 @@ def test_single_driver_derives_every_link_it_deploys():
 def test_links_never_overwrite_an_operator_value():
     """Every link write goes through set_kv_if_unset — a URL the operator typed
     (a reverse proxy, a different tailnet name) survives every app re-run."""
-    pattern = re.compile(r'^\s*set_kv\s+"\$(?:APP_ENV|ENV_FILE)"\s+(CC_\w+_(?:UI|DOCS|BROWSER)_URL)\b', re.MULTILINE)
+    pattern = re.compile(
+        r'^\s*set_kv\s+"\$(?:APP_ENV|ENV_FILE)"\s+(CC_\w+_(?:UI|DOCS|BROWSER)_URL)\b', re.MULTILINE
+    )
     for path, src in ((K3S, K3S.read_text()), (SINGLE, installer_source())):
         hits = pattern.findall(src)
         assert not hits, f"{path.relative_to(ROOT)} overwrites {hits} with a bare set_kv"
@@ -78,8 +82,11 @@ def _loadbalancer_ports() -> set[int]:
     ports: set[int] = set()
     for path in sorted((ROOT / "deploy/k3s").glob("*.yaml")):
         for doc in yaml.safe_load_all(path.read_text()):
-            if isinstance(doc, dict) and doc.get("kind") == "Service" \
-                    and (doc.get("spec") or {}).get("type") == "LoadBalancer":
+            if (
+                isinstance(doc, dict)
+                and doc.get("kind") == "Service"
+                and (doc.get("spec") or {}).get("type") == "LoadBalancer"
+            ):
                 ports.update(int(p["port"]) for p in doc["spec"]["ports"])
     assert ports, "no LoadBalancer Service found under deploy/k3s/"
     return ports

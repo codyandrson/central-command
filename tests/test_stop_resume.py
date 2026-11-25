@@ -60,11 +60,18 @@ def _looping_model(stop_after: int | None = None) -> FunctionModel:
         calls["n"] += 1
         if stop_after is not None and calls["n"] > stop_after:
             return ModelResponse(parts=[TextPart(content="done after the resume")])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="declare_gap",
-            args={"kind": "missing_tool", "subject": "looping",
-                  "need": "a tool I do not have"},
-        )])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="declare_gap",
+                    args={
+                        "kind": "missing_tool",
+                        "subject": "looping",
+                        "need": "a tool I do not have",
+                    },
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -118,13 +125,13 @@ async def test_stop_parks_at_a_node_boundary_with_the_tail_persisted(monkeypatch
     tail = rs["messages"][-1]
     assert tail["kind"] == "request", "the unsent ModelRequest must be persisted"
     assert any(p["part_kind"] == "tool-return" for p in tail["parts"]), (
-        "the tail must carry the last batch's tool returns — otherwise re-entry "
-        "re-executes them"
+        "the tail must carry the last batch's tool returns — otherwise re-entry re-executes them"
     )
     assert rs["pending_stop"]["after"] == "task"
 
-    stopped = [e for e in await repo.list_events_of_kinds(["session.stopped"])
-               if e["ref_id"] == session_id]
+    stopped = [
+        e for e in await repo.list_events_of_kinds(["session.stopped"]) if e["ref_id"] == session_id
+    ]
     assert len(stopped) == 1 and stopped[0]["actor"] == "operator"
 
 
@@ -138,8 +145,7 @@ async def test_the_park_clears_the_flag_and_creates_no_inbox_item(monkeypatch):
     row = await repo.get_session(session_id)
     assert row["stop_requested"] is False
 
-    items = [i for i in await repo.list_operator_items("OPEN")
-             if i["session_id"] == session_id]
+    items = [i for i in await repo.list_operator_items("OPEN") if i["session_id"] == session_id]
     assert items == [], "a stop asks the operator nothing"
 
 
@@ -193,8 +199,9 @@ async def test_resume_re_enters_the_same_session_and_lands_normally(monkeypatch)
     assert "done after the resume" in landed["output"]
     assert await repo.session_status(session_id) == "DONE"
 
-    resumed = [e for e in await repo.list_events_of_kinds(["session.resumed"])
-               if e["ref_id"] == session_id]
+    resumed = [
+        e for e in await repo.list_events_of_kinds(["session.resumed"]) if e["ref_id"] == session_id
+    ]
     assert len(resumed) == 1 and resumed[0]["actor"] == "operator"
 
 
@@ -203,9 +210,7 @@ async def test_the_claim_is_the_lock_so_a_second_resume_finds_nothing(monkeypatc
     out = await _stopped_task_run(monkeypatch)
     session_id = out["session_id"]
 
-    await orchestration.resume_stopped_session(
-        session_id, model=_looping_model(stop_after=0)
-    )
+    await orchestration.resume_stopped_session(session_id, model=_looping_model(stop_after=0))
     assert await orchestration.resume_stopped_session(session_id) is None
     # And a session that was never stopped cannot be resumed either.
     assert await orchestration.resume_stopped_session("sess_nope") is None
@@ -242,15 +247,16 @@ async def test_a_stopped_conversation_refuses_sends_with_its_own_code(monkeypatc
     assert composer["session"]["status"] == "STOPPED"
 
     # And it resumes back into a normal, writable lane.
-    await orchestration.resume_stopped_session(
-        session_id, model=_looping_model(stop_after=0)
-    )
+    await orchestration.resume_stopped_session(session_id, model=_looping_model(stop_after=0))
     assert await repo.session_status(session_id) == "AWAITING_OPERATOR"
     reopened = await nerve_gateway._composer_state(f"agent:jira-expert:{session_id}")
     assert reopened["enabled"] is True
 
     await converse.close_session(
-        session_id, agent_id="jira-expert", reason="operator", actor="test",
+        session_id,
+        agent_id="jira-expert",
+        reason="operator",
+        actor="test",
     )
 
 
@@ -258,9 +264,10 @@ def test_the_rule_names_stopped_before_the_catch_all():
     """Offline: STOPPED must not fall through to `turn_in_progress` — "wait for
     the turn to finish" is a lie the operator would wait on forever, since
     nothing is running."""
-    assert converse.why_not_sendable(
-        {"id": "sess_s", "mode": "conversation", "status": "STOPPED"}
-    )[0] == "stopped"
+    assert (
+        converse.why_not_sendable({"id": "sess_s", "mode": "conversation", "status": "STOPPED"})[0]
+        == "stopped"
+    )
 
 
 async def test_chat_abort_pushes_the_frames_the_frontend_understands():
@@ -326,14 +333,23 @@ async def _task_with_open_work() -> tuple[str, str, str, str]:
     await repo.create_running_session(session_id, "jira-expert")
     await repo.start_task(task_id, session_id)
     await repo.create_operator_item(
-        item_id, "question", session_id, "jira-expert", "which project?",
+        item_id,
+        "question",
+        session_id,
+        "jira-expert",
+        "which project?",
         task_id=task_id,
     )
     await repo.save_proposal(
-        proposal_id=proposal_id, session_id=session_id, agent_id="jira-expert",
-        intent="cancel-test", actions=[], evidence=[],
+        proposal_id=proposal_id,
+        session_id=session_id,
+        agent_id="jira-expert",
+        intent="cancel-test",
+        actions=[],
+        evidence=[],
         expected_effect="nothing — this proposal exists to be withdrawn",
-        idempotency_key=f"idem_{suffix}", status="AWAITING_HUMAN",
+        idempotency_key=f"idem_{suffix}",
+        status="AWAITING_HUMAN",
     )
     await repo.park_session_stopped(session_id, {"after": "task", "task_id": task_id})
     return task_id, session_id, item_id, proposal_id
@@ -357,14 +373,18 @@ async def test_cancel_for_good_winds_down_the_whole_record():
     # the close seam's own event so the cockpit's panel refetches.
     session = await repo.get_session(session_id)
     assert session["status"] == "DONE" and session["closed_reason"] == "cancelled"
-    ended = [e for e in await repo.list_events_of_kinds(["conversation.ended"])
-             if e["ref_id"] == session_id]
+    ended = [
+        e
+        for e in await repo.list_events_of_kinds(["conversation.ended"])
+        if e["ref_id"] == session_id
+    ]
     assert len(ended) == 1
 
     task = await repo.get_task(task_id)
     assert task["status"] == "CANCELLED"
-    cancelled = [e for e in await repo.list_events_of_kinds(["task.cancelled"])
-                 if e["ref_id"] == task_id]
+    cancelled = [
+        e for e in await repo.list_events_of_kinds(["task.cancelled"]) if e["ref_id"] == task_id
+    ]
     assert len(cancelled) == 1
     assert cancelled[0]["payload"]["prior_status"] == "IN_PROGRESS"
 
@@ -383,7 +403,9 @@ async def test_cancel_releases_the_folded_siblings():
     suffix = uuid.uuid4().hex[:8]
     item_id, message_id = f"work_{suffix}", f"<fold-{suffix}@example.test>"
     await repo.enroll_work_item(
-        item_id, message_id, {"subject": "folded sibling", "body": "body"},
+        item_id,
+        message_id,
+        {"subject": "folded sibling", "body": "body"},
         subject="folded sibling",
     )
     assert await repo.mark_fold_pending([message_id], proposal_id) == 1
@@ -392,8 +414,11 @@ async def test_cancel_releases_the_folded_siblings():
 
     row = await repo.get_work_item(item_id)
     assert row["state"] == "UNPROCESSED" and row["folded_into"] is None
-    released = [e for e in await repo.list_events_of_kinds(["work.fold_released"])
-                if e["ref_id"] == proposal_id]
+    released = [
+        e
+        for e in await repo.list_events_of_kinds(["work.fold_released"])
+        if e["ref_id"] == proposal_id
+    ]
     assert len(released) == 1 and released[0]["payload"]["count"] == 1
 
 
@@ -464,8 +489,7 @@ async def test_the_task_wire_carries_the_stopped_indicator_and_session_id():
     await repo.start_task(task_id, session_id)
     await repo.park_session_stopped(session_id, {"after": "task", "task_id": task_id})
 
-    listed = next(t for t in (await routes.list_tasks())["tasks"]
-                  if t["id"] == task_id)
+    listed = next(t for t in (await routes.list_tasks())["tasks"] if t["id"] == task_id)
     assert listed["stopped"] is True
     assert listed["session_status"] == "STOPPED"
     assert listed["session_id"] == session_id, "the resume lever needs the id"
@@ -473,8 +497,7 @@ async def test_the_task_wire_carries_the_stopped_indicator_and_session_id():
     # A task with no run at all must not claim to be stopped.
     other_id = "task_" + uuid.uuid4().hex[:12]
     await repo.create_task(other_id, "No run", "x", None)
-    other = next(t for t in (await routes.list_tasks())["tasks"]
-                 if t["id"] == other_id)
+    other = next(t for t in (await routes.list_tasks())["tasks"] if t["id"] == other_id)
     assert other["stopped"] is False and other["session_status"] is None
 
 
@@ -490,8 +513,7 @@ async def test_the_task_wire_says_when_a_run_is_working_right_now():
     await repo.create_running_session(session_id, "jira-expert")
     await repo.start_task(task_id, session_id)
 
-    listed = next(t for t in (await routes.list_tasks())["tasks"]
-                  if t["id"] == task_id)
+    listed = next(t for t in (await routes.list_tasks())["tasks"] if t["id"] == task_id)
     assert listed["session_status"] == "RUNNING"
     assert listed["stopped"] is False
     assert listed["session_id"] == session_id and listed["agent_id"]
@@ -513,9 +535,12 @@ async def test_run_stopped_is_never_reported_as_a_failure():
 
     with pytest.raises(RunStopped):
         await run_mod._run_live(
-            agent, "Loop.", model=_looping_model(),
+            agent,
+            "Loop.",
+            model=_looping_model(),
             deps=TriageDeps(agent_id="jira-expert", session_id=session_id),
-            agent_id="jira-expert", session_id=session_id,
+            agent_id="jira-expert",
+            session_id=session_id,
         )
     assert await repo.session_status(session_id) == "STOPPED"
 
@@ -539,6 +564,7 @@ async def test_stop_click_leaves_the_session_sweepable():
     assert (await repo.get_session(session_id))["updated_at"] == before
 
     from central_command.api import orchestration
+
     await orchestration.land_orphans_at_startup()
     assert (await repo.get_session(session_id))["status"] == "STOPPED"
 
@@ -555,6 +581,7 @@ async def test_stop_click_leaves_the_session_sweepable():
 def _dying_model(message: str) -> FunctionModel:
     def _respond(messages, info) -> ModelResponse:
         raise RuntimeError(message)
+
     return FunctionModel(_respond)
 
 
@@ -594,9 +621,7 @@ async def test_a_semantic_death_on_resume_fails_the_task_with_its_reason(monkeyp
     task_id, session_id = await _stopped_task(monkeypatch)
 
     with pytest.raises(RuntimeError, match="schema"):
-        await orchestration.resume_stopped_session(
-            session_id, model=_dying_model("invalid schema")
-        )
+        await orchestration.resume_stopped_session(session_id, model=_dying_model("invalid schema"))
 
     row = await repo.get_task(task_id)
     assert row["status"] == "FAILED"
@@ -630,8 +655,7 @@ async def test_a_stop_during_the_last_model_call_does_not_stop_the_next_run(monk
     # After the first snapshot: the outgoing request is persisted and the one
     # model call is in flight.
     _press_stop_mid_run(monkeypatch, after=1)
-    out = await run_task("jira-expert", "Answer in one line.",
-                         model=_looping_model(stop_after=0))
+    out = await run_task("jira-expert", "Answer in one line.", model=_looping_model(stop_after=0))
 
     assert out.get("stopped") is not True, "there was no boundary to stop on"
     session_id = out["session_id"]
@@ -646,10 +670,10 @@ async def test_a_fresh_turn_starts_with_no_stop_request():
     await repo.create_conversation_session(session_id, "jira-expert")  # RUNNING
     try:
         assert await repo.request_session_stop(session_id) is True
-        await repo.mark_session_awaiting_operator(session_id)   # the turn ended
+        await repo.mark_session_awaiting_operator(session_id)  # the turn ended
         assert (await repo.get_session(session_id))["stop_requested"] is True
 
-        await repo.mark_session_running(session_id)             # the next turn
+        await repo.mark_session_running(session_id)  # the next turn
         assert (await repo.get_session(session_id))["stop_requested"] is False
 
         await repo.request_session_stop(session_id)

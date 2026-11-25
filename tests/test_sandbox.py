@@ -38,8 +38,11 @@ class _Ctx:
 def test_sandbox_capabilities_are_registered_and_ungated():
     names = {c.name for c in REGISTRY if c.name.startswith("sandbox.")}
     assert names == {
-        "sandbox.exec", "sandbox.write_file", "sandbox.read_file",
-        "sandbox.copy_in", "sandbox.reset",
+        "sandbox.exec",
+        "sandbox.write_file",
+        "sandbox.read_file",
+        "sandbox.copy_in",
+        "sandbox.reset",
     }
     for c in REGISTRY:
         if c.name.startswith("sandbox."):
@@ -59,8 +62,11 @@ def test_sandbox_capabilities_have_no_executor_handler():
 def test_sandbox_pack_holds_only_the_five_ungated_tools():
     pack = packs.PACKS["sandbox"]
     assert set(pack.tool_names) == {
-        "sandbox_exec", "sandbox_write_file", "sandbox_read_file",
-        "sandbox_copy_in", "sandbox_reset",
+        "sandbox_exec",
+        "sandbox_write_file",
+        "sandbox_read_file",
+        "sandbox_copy_in",
+        "sandbox_reset",
     }
     assert pack.capabilities == ()  # no propose_* deferral — nothing gated rides it
     for agent_defaults in packs.DEFAULT_PACKS.values():
@@ -76,9 +82,9 @@ def test_job_manifest_shape():
     assert manifest["kind"] == "Job"
     assert spec["runtimeClassName"] == "gvisor"
     assert spec["automountServiceAccountToken"] is False
-    node_terms = spec["affinity"]["nodeAffinity"][
-        "requiredDuringSchedulingIgnoredDuringExecution"
-    ]["nodeSelectorTerms"]
+    node_terms = spec["affinity"]["nodeAffinity"]["requiredDuringSchedulingIgnoredDuringExecution"][
+        "nodeSelectorTerms"
+    ]
     expr = node_terms[0]["matchExpressions"][0]
     assert expr["key"] == "cc-role/compute"
     assert expr["values"] == ["true"]
@@ -148,11 +154,13 @@ def _fake_kubectl(script):
 
 
 async def test_create_session_applies_manifest_then_waits_for_ready(monkeypatch):
-    fake, calls = _fake_kubectl([
-        (lambda a: a[:2] == ["get", "job"], (1, "", "not found")),
-        (lambda a: a[:2] == ["apply", "-f"], (0, "job.batch/cc-sbx-x created", "")),
-        (lambda a: a[0] == "wait", (0, "pod/cc-sbx-x-abcde condition met", "")),
-    ])
+    fake, calls = _fake_kubectl(
+        [
+            (lambda a: a[:2] == ["get", "job"], (1, "", "not found")),
+            (lambda a: a[:2] == ["apply", "-f"], (0, "job.batch/cc-sbx-x created", "")),
+            (lambda a: a[0] == "wait", (0, "pod/cc-sbx-x-abcde condition met", "")),
+        ]
+    )
     monkeypatch.setattr(runner, "_run_kubectl", fake)
     out = await runner.create_session(runner.SessionCreate(agent_id="a1", session_id="s1"))
     assert out["sandbox_id"] == runner._sandbox_id("a1", "s1")
@@ -163,10 +171,12 @@ async def test_create_session_applies_manifest_then_waits_for_ready(monkeypatch)
 
 
 async def test_create_session_surfaces_apply_failure(monkeypatch):
-    fake, _calls = _fake_kubectl([
-        (lambda a: a[:2] == ["get", "job"], (1, "", "not found")),
-        (lambda a: a[:2] == ["apply", "-f"], (1, "", "admission denied")),
-    ])
+    fake, _calls = _fake_kubectl(
+        [
+            (lambda a: a[:2] == ["get", "job"], (1, "", "not found")),
+            (lambda a: a[:2] == ["apply", "-f"], (1, "", "admission denied")),
+        ]
+    )
     monkeypatch.setattr(runner, "_run_kubectl", fake)
     from fastapi import HTTPException
 
@@ -437,32 +447,62 @@ async def test_podman_delete_removes_and_ignores_missing(podman):
 # unix seconds and turns `CreatedAt` into a human duration. Fields trimmed to
 # the ones the reaper reads plus enough neighbours to keep the shape honest.
 def _podman_ps_json(now: float):
-    return json.dumps([
-        {
-            "AutoRemove": False, "Command": ["sleep", "3600"],
-            "Created": int(now - 7200), "CreatedAt": "2 hours ago",
-            "Exited": True, "ExitCode": 0, "ExitedAt": int(now - 3600),
-            "Id": "9f0c" + "a" * 60, "Image": "localhost/cc-sandbox:1",
-            "ImageID": "b1" * 32, "IsInfra": False,
-            "Labels": {"app": "cc-sandbox", "cc-agent": "a1"},
-            "Mounts": [], "Names": ["cc-sbx-old"], "Networks": ["podman"],
-            "Pid": 0, "Pod": "", "PodName": "", "Ports": None, "Restarts": 0,
-            "Size": None, "StartedAt": int(now - 7200), "State": "exited",
-            "Status": "Exited (0) 1 hour ago",
-        },
-        {
-            "AutoRemove": False, "Command": ["sleep", "3600"],
-            "Created": int(now - 5), "CreatedAt": "5 seconds ago",
-            "Exited": False, "ExitCode": 0, "ExitedAt": -1,
-            "Id": "3d21" + "c" * 60, "Image": "localhost/cc-sandbox:1",
-            "ImageID": "b1" * 32, "IsInfra": False,
-            "Labels": {"app": "cc-sandbox", "cc-agent": "a1"},
-            "Mounts": [], "Names": ["cc-sbx-fresh"], "Networks": ["podman"],
-            "Pid": 4242, "Pod": "", "PodName": "", "Ports": None, "Restarts": 0,
-            "Size": None, "StartedAt": int(now - 5), "State": "running",
-            "Status": "Up 5 seconds",
-        },
-    ])
+    return json.dumps(
+        [
+            {
+                "AutoRemove": False,
+                "Command": ["sleep", "3600"],
+                "Created": int(now - 7200),
+                "CreatedAt": "2 hours ago",
+                "Exited": True,
+                "ExitCode": 0,
+                "ExitedAt": int(now - 3600),
+                "Id": "9f0c" + "a" * 60,
+                "Image": "localhost/cc-sandbox:1",
+                "ImageID": "b1" * 32,
+                "IsInfra": False,
+                "Labels": {"app": "cc-sandbox", "cc-agent": "a1"},
+                "Mounts": [],
+                "Names": ["cc-sbx-old"],
+                "Networks": ["podman"],
+                "Pid": 0,
+                "Pod": "",
+                "PodName": "",
+                "Ports": None,
+                "Restarts": 0,
+                "Size": None,
+                "StartedAt": int(now - 7200),
+                "State": "exited",
+                "Status": "Exited (0) 1 hour ago",
+            },
+            {
+                "AutoRemove": False,
+                "Command": ["sleep", "3600"],
+                "Created": int(now - 5),
+                "CreatedAt": "5 seconds ago",
+                "Exited": False,
+                "ExitCode": 0,
+                "ExitedAt": -1,
+                "Id": "3d21" + "c" * 60,
+                "Image": "localhost/cc-sandbox:1",
+                "ImageID": "b1" * 32,
+                "IsInfra": False,
+                "Labels": {"app": "cc-sandbox", "cc-agent": "a1"},
+                "Mounts": [],
+                "Names": ["cc-sbx-fresh"],
+                "Networks": ["podman"],
+                "Pid": 4242,
+                "Pod": "",
+                "PodName": "",
+                "Ports": None,
+                "Restarts": 0,
+                "Size": None,
+                "StartedAt": int(now - 5),
+                "State": "running",
+                "Status": "Up 5 seconds",
+            },
+        ]
+    )
 
 
 async def test_podman_reap_deletes_only_past_ttl_including_exited(podman, monkeypatch):
@@ -663,7 +703,9 @@ async def test_sandbox_copy_in_allow_deny_revoked_and_prefix(monkeypatch):
         # A directory grant covers a file under it (prefix match).
         await repo.grant_sandbox_source(agent_id, "central_command/integrations")
         _patch_runner_http(monkeypatch, handler)
-        under_prefix = await tools_mod.sandbox_copy_in(ctx, "central_command/integrations/webfetch.py")
+        under_prefix = await tools_mod.sandbox_copy_in(
+            ctx, "central_command/integrations/webfetch.py"
+        )
         assert "copied" in under_prefix.lower()
 
         # Revoke the exact grant: refused again.
@@ -675,9 +717,7 @@ async def test_sandbox_copy_in_allow_deny_revoked_and_prefix(monkeypatch):
     finally:
         conn = await repo._conn()
         try:
-            await conn.execute(
-                "delete from agent_sandbox_source where agent_id = $1", agent_id
-            )
+            await conn.execute("delete from agent_sandbox_source where agent_id = $1", agent_id)
             await conn.execute("delete from agent where id = $1", agent_id)
         finally:
             await conn.close()
@@ -687,7 +727,9 @@ async def test_sandbox_copy_in_allow_deny_revoked_and_prefix(monkeypatch):
 # symlink grant bypass, unbounded timeout -------------------------------------
 
 
-@pytest.mark.parametrize("bad_id", ["--all", "-l app=cc-sandbox", "cc-sbx-UPPER", "x", "cc-sbx-" + "a" * 19])
+@pytest.mark.parametrize(
+    "bad_id", ["--all", "-l app=cc-sandbox", "cc-sbx-UPPER", "x", "cc-sbx-" + "a" * 19]
+)
 async def test_routes_refuse_malformed_sandbox_ids_before_kubectl(monkeypatch, bad_id):
     """A raw '--all' as {sandbox_id} must 404 at validation, never reach a
     kubectl argv where it would parse as a flag (delete job --all)."""
@@ -744,10 +786,10 @@ async def test_runner_requires_bearer_token_when_configured(monkeypatch):
     monkeypatch.setenv("CC_SANDBOX_RUNNER_TOKEN", "sekret")
     transport = httpx.ASGITransport(app=runner.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.delete(f"/sessions/{runner._sandbox_id('a','s')}")
+        r = await c.delete(f"/sessions/{runner._sandbox_id('a', 's')}")
         assert r.status_code == 401
         r = await c.delete(
-            f"/sessions/{runner._sandbox_id('a','s')}",
+            f"/sessions/{runner._sandbox_id('a', 's')}",
             headers={"authorization": "Bearer wrong"},
         )
         assert r.status_code == 401
@@ -758,7 +800,7 @@ async def test_runner_requires_bearer_token_when_configured(monkeypatch):
     monkeypatch.setattr(runner, "_run_kubectl", _fake)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         r = await c.delete(
-            f"/sessions/{runner._sandbox_id('a','s')}",
+            f"/sessions/{runner._sandbox_id('a', 's')}",
             headers={"authorization": "Bearer sekret"},
         )
         assert r.status_code == 200
@@ -768,10 +810,12 @@ async def test_create_session_skips_apply_when_job_exists(monkeypatch):
     """Re-applying an existing Job trips the controller's immutable template
     fields (hit live 2026-08-04) — an existing Job must go straight to the
     readiness wait, no apply."""
-    fake, calls = _fake_kubectl([
-        (lambda a: a[:2] == ["get", "job"], (0, "job.batch/cc-sbx-x", "")),
-        (lambda a: a[0] == "wait", (0, "condition met", "")),
-    ])
+    fake, calls = _fake_kubectl(
+        [
+            (lambda a: a[:2] == ["get", "job"], (0, "job.batch/cc-sbx-x", "")),
+            (lambda a: a[0] == "wait", (0, "condition met", "")),
+        ]
+    )
     monkeypatch.setattr(runner, "_run_kubectl", fake)
     out = await runner.create_session(runner.SessionCreate(agent_id="a1", session_id="s1"))
     assert out["sandbox_id"] == runner._sandbox_id("a1", "s1")

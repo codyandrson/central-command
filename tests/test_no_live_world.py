@@ -68,11 +68,17 @@ def _one_action_model(capability: str, arguments: dict) -> FunctionModel:
     tool return (the resume after a failed execution included)."""
     proposal = {
         "intent": f"test {capability}",
-        "actions": [{"capability": capability, "arguments": arguments,
-                     "target_ref": {"system": capability.split(".")[0], "id": "new"},
-                     "reversibility": "irreversible"}],
-        "evidence": [{"kind": "email", "source_ref": "email:test",
-                      "locator": "body", "claim": "Dana"}],
+        "actions": [
+            {
+                "capability": capability,
+                "arguments": arguments,
+                "target_ref": {"system": capability.split(".")[0], "id": "new"},
+                "reversibility": "irreversible",
+            }
+        ],
+        "evidence": [
+            {"kind": "email", "source_ref": "email:test", "locator": "body", "claim": "Dana"}
+        ],
         "expected_effect": f"{capability} performed",
         "confidence": {"level": "high", "rationale": "The test states it."},
     }
@@ -80,8 +86,9 @@ def _one_action_model(capability: str, arguments: dict) -> FunctionModel:
     def respond(messages, info: AgentInfo) -> ModelResponse:
         if any(isinstance(p, ToolReturnPart) for m in messages for p in getattr(m, "parts", [])):
             return ModelResponse(parts=[TextPart(content="Closing out.")])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="propose_action", args={"proposal": proposal})])
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
+        )
 
     return FunctionModel(respond)
 
@@ -148,13 +155,20 @@ async def test_an_unfaked_jira_approval_lands_failed_as_unconfigured(connects):
 
 
 @needs_pg
-@pytest.mark.parametrize("capability, arguments", [
-    ("mail.send", {"to": "dana@example.com", "subject": "Hi", "body": "Hello"}),
-    ("calendar.create_event", {"title": "Sync", "start": "2026-11-02T10:00:00Z",
-                               "end": "2026-11-02T10:30:00Z"}),
-])
+@pytest.mark.parametrize(
+    "capability, arguments",
+    [
+        ("mail.send", {"to": "dana@example.com", "subject": "Hi", "body": "Hello"}),
+        (
+            "calendar.create_event",
+            {"title": "Sync", "start": "2026-11-02T10:00:00Z", "end": "2026-11-02T10:30:00Z"},
+        ),
+    ],
+)
 async def test_an_unfaked_facade_approval_lands_failed_never_retry_pending(
-    connects, capability, arguments,
+    connects,
+    capability,
+    arguments,
 ):
     out, row = await _approve(_one_action_model(capability, arguments))
     assert out["ok"] is False and out["failed_capability"] == capability
@@ -170,7 +184,8 @@ async def test_with_fake_world_the_same_approval_executes(monkeypatch):
     log = fake_world(monkeypatch)
     run = await ingest_and_propose(EMAIL, model=make_spike_model())
     out = await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=make_spike_model())
+        run["session_id"], run["proposal_id"], model=make_spike_model()
+    )
 
     assert out["ok"] is True
     assert (await repo.load_proposal(run["proposal_id"]))["status"] == "EXECUTED"
@@ -178,8 +193,11 @@ async def test_with_fake_world_the_same_approval_executes(monkeypatch):
     assert capability == "jira.set_due_date"
     assert arguments["issue_key"] == "DEMO-1"
     assert approver
-    executed = next(e for e in await repo.list_events(ref_id=run["proposal_id"])
-                    if e["kind"] == "proposal.executed")
+    executed = next(
+        e
+        for e in await repo.list_events(ref_id=run["proposal_id"])
+        if e["kind"] == "proposal.executed"
+    )
     assert executed["payload"]["result_text"] == "[fake] jira.set_due_date"
 
 
@@ -187,11 +205,13 @@ async def test_fake_world_real_runs_the_named_handler_and_fakes_the_rest(monkeyp
     real_charter = executor.HANDLERS["charter.update"]
     log = fake_world(monkeypatch, real=("charter.update",))
     assert executor.HANDLERS["charter.update"] is real_charter
-    assert all(executor.HANDLERS[c] is not real_charter for c in executor.HANDLERS
-               if c != "charter.update")
+    assert all(
+        executor.HANDLERS[c] is not real_charter for c in executor.HANDLERS if c != "charter.update"
+    )
 
-    assert await executor.HANDLERS["mail.send"]({"to": "x"}, "human:test", None) \
-        == "[fake] mail.send"
+    assert (
+        await executor.HANDLERS["mail.send"]({"to": "x"}, "human:test", None) == "[fake] mail.send"
+    )
     assert log == [("mail.send", {"to": "x"}, "human:test")]
 
 
@@ -201,13 +221,24 @@ async def test_fake_world_fakes_the_world_checks(monkeypatch):
     from central_command.contract import Action
 
     log = fake_world(monkeypatch)
-    args = {"page_id": "42", "title": "Roadmap", "body_storage": "<p>new</p>",
-            "expected_version": 3}
+    args = {
+        "page_id": "42",
+        "title": "Roadmap",
+        "body_storage": "<p>new</p>",
+        "expected_version": 3,
+    }
     outcome = await executor.execute(
-        [Action(capability="confluence.update_page", arguments=args,
+        [
+            Action(
+                capability="confluence.update_page",
+                arguments=args,
                 target_ref={"system": "confluence", "id": "42"},
-                reversibility="reversible")],
-        approver="human:test", source_refs=[])
+                reversibility="reversible",
+            )
+        ],
+        approver="human:test",
+        source_refs=[],
+    )
     assert log.checks == [("confluence.update_page", args)]
     assert log == [("confluence.update_page", args, "human:test")]
     assert "[fake] confluence.update_page" in str(outcome)
@@ -221,5 +252,4 @@ def test_fake_world_refuses_an_unknown_real_name(monkeypatch):
 async def test_fake_world_is_undone_with_the_test():
     """Runs after the fake_world tests above: the real handlers are back."""
     assert executor.HANDLERS["jira.set_due_date"] is executor._jira_set_due_date
-    assert executor.WORLD_CHECKS["confluence.update_page"] \
-        is executor._check_confluence_update_page
+    assert executor.WORLD_CHECKS["confluence.update_page"] is executor._check_confluence_update_page

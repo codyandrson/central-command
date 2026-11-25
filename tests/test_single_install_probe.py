@@ -22,9 +22,14 @@ from tests.test_single_driver_ledger import _bash_exe
 
 def _probe(repo: Path) -> int:
     funcs = installer_functions()
-    defs = "\n".join(f"{n}() {{\n{funcs[n]}\n}}" for n in ("venv_python", "venv_uvicorn", "p_install"))
-    r = subprocess.run([_bash_exe(), "-c", f'REPO_ROOT="{repo.as_posix()}"\n{defs}\np_install'],
-                       capture_output=True, text=True)
+    defs = "\n".join(
+        f"{n}() {{\n{funcs[n]}\n}}" for n in ("venv_python", "venv_uvicorn", "p_install")
+    )
+    r = subprocess.run(
+        [_bash_exe(), "-c", f'REPO_ROOT="{repo.as_posix()}"\n{defs}\np_install'],
+        capture_output=True,
+        text=True,
+    )
     return r.returncode
 
 

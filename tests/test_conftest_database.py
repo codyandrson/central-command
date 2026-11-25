@@ -42,7 +42,9 @@ async def test_planted_a_parked_orchestrator_and_left_it():
     try:
         await conn.execute(
             "insert into session (id, agent_id, status) values ($1, $2, 'AWAITING_AGENTS')",
-            _PLANTED, _AGENT)
+            _PLANTED,
+            _AGENT,
+        )
     finally:
         await conn.close()
 
@@ -83,7 +85,9 @@ async def test_an_eager_test_keeps_a_row_planted_over_its_own_connection():
     try:
         await conn.execute(
             "insert into session (id, agent_id, status) values ($1, $2, 'AWAITING_AGENTS')",
-            sid, _AGENT)
+            sid,
+            _AGENT,
+        )
     finally:
         await conn.close()
     assert (await repo.get_session(sid))["status"] == "AWAITING_AGENTS"
@@ -113,22 +117,24 @@ def test_the_sweep_selects_only_idle_aged_databases_of_other_checkouts():
     old, fresh = now - timedelta(hours=7), now - timedelta(hours=5)
     own = "central_command_test_aaaaaaaa"
     rows = [
-        (own, 0, old),                                   # this checkout's own
-        (own + "_gw0", 0, old),                          # ...and its xdist workers
-        ("central_command_test_bbbbbbbb", 0, old),       # another checkout, idle, aged
+        (own, 0, old),  # this checkout's own
+        (own + "_gw0", 0, old),  # ...and its xdist workers
+        ("central_command_test_bbbbbbbb", 0, old),  # another checkout, idle, aged
         ("central_command_test_bbbbbbbb_gw3", 0, old),
         ("central_command_test_0123abcd_gw12", 0, old),
-        ("central_command_test_cccccccc", 2, old),       # connected
-        ("central_command_test_dddddddd", 0, fresh),     # younger than 6 hours
-        ("central_command_test_eeeeeeee", 0, None),      # age unreadable: leave it
+        ("central_command_test_cccccccc", 2, old),  # connected
+        ("central_command_test_dddddddd", 0, fresh),  # younger than 6 hours
+        ("central_command_test_eeeeeeee", 0, None),  # age unreadable: leave it
         ("central_command_test_ffffffff", 0, now - timedelta(hours=6)),  # not MORE than 6
-        ("central_command", 0, old),                     # the live database, never
-        ("central_command_testing_x", 0, old),           # not the test prefix
+        ("central_command", 0, old),  # the live database, never
+        ("central_command_testing_x", 0, old),  # not the test prefix
         ("postgres", 0, old),
     ]
     assert sweepable_test_databases(rows, now=now, own=own) == [
-        "central_command_test_bbbbbbbb", "central_command_test_bbbbbbbb_gw3",
-        "central_command_test_0123abcd_gw12"]
+        "central_command_test_bbbbbbbb",
+        "central_command_test_bbbbbbbb_gw3",
+        "central_command_test_0123abcd_gw12",
+    ]
 
 
 def test_the_sweep_drops_only_names_the_harness_builds():
@@ -140,16 +146,24 @@ def test_the_sweep_drops_only_names_the_harness_builds():
 
     now = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
     old = now - timedelta(days=30)
-    for name in ("central_command_test_staging", "central_command_test_",
-                 "central_command_test_ABCDEF01", "central_command_test_abcdef0",
-                 "central_command_test_abcdef012", "central_command_test_abcdef01_gw",
-                 "central_command_test_abcdef01_gwx", "central_command_test_abcdef01_w1",
-                 "central_command_test_abcdef01_gw1_x", "x_central_command_test_abcdef01"):
+    for name in (
+        "central_command_test_staging",
+        "central_command_test_",
+        "central_command_test_ABCDEF01",
+        "central_command_test_abcdef0",
+        "central_command_test_abcdef012",
+        "central_command_test_abcdef01_gw",
+        "central_command_test_abcdef01_gwx",
+        "central_command_test_abcdef01_w1",
+        "central_command_test_abcdef01_gw1_x",
+        "x_central_command_test_abcdef01",
+    ):
         assert sweepable_test_databases([(name, 0, old)], now=now, own="other") == [], name
     # ...and the shapes `TEST_DB` itself is built in (a checkout hash, with or
     # without the xdist worker suffix) are exactly what it selects.
     assert sweepable_test_databases(
-        [(TEST_DB, 0, old)], now=now, own="central_command_test_00000000") == [TEST_DB]
+        [(TEST_DB, 0, old)], now=now, own="central_command_test_00000000"
+    ) == [TEST_DB]
 
 
 def test_the_sweep_does_not_connect_at_all_in_a_worker_and_never_raises(monkeypatch):
@@ -162,8 +176,7 @@ def test_the_sweep_does_not_connect_at_all_in_a_worker_and_never_raises(monkeypa
         raise OSError("no server")
 
     monkeypatch.setattr(conftest.asyncpg, "connect", refuse)
-    monkeypatch.setattr(conftest.settings, "database_url",
-                        "postgresql://nobody@127.0.0.1:1/x")
+    monkeypatch.setattr(conftest.settings, "database_url", "postgresql://nobody@127.0.0.1:1/x")
     # An xdist worker returns before touching the database: no connect at all.
     monkeypatch.setattr(conftest, "_WORKER", "gw1")
     conftest._sweep_idle_test_databases()

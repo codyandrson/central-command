@@ -44,7 +44,7 @@ def litellm_decrypt(stored_value: str, salt_key: str) -> str:
     if stored_value.startswith("v2:gcm:"):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-        raw = base64.urlsafe_b64decode(stored_value[len("v2:gcm:"):])
+        raw = base64.urlsafe_b64decode(stored_value[len("v2:gcm:") :])
         nonce, blob = raw[:12], raw[12:]
         return AESGCM(key).decrypt(nonce, blob, None).decode()
 
@@ -75,7 +75,7 @@ async def list_provider_credentials() -> list[dict]:
     conn = await asyncpg.connect(settings.litellm_db_url)
     try:
         rows = await conn.fetch(
-            'SELECT credential_name, credential_values, credential_info '
+            "SELECT credential_name, credential_values, credential_info "
             'FROM "LiteLLM_CredentialsTable"'
         )
     finally:
@@ -114,9 +114,11 @@ async def list_provider_credentials() -> list[dict]:
         # the "provider/" model-string prefix — is lowercase. A case mismatch
         # here made a whole credential undiscoverable (2026-08-21).
         provider = (info.get("custom_llm_provider") or "").strip().lower() or None
-        out.append({
-            "credential_name": row["credential_name"],
-            "provider": provider,
-            "values": decrypted,
-        })
+        out.append(
+            {
+                "credential_name": row["credential_name"],
+                "provider": provider,
+                "values": decrypted,
+            }
+        )
     return out

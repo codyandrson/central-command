@@ -30,7 +30,9 @@ async def test_two_open_handles_are_two_backends():
     """The ledger's `skip locked` tests race two connections on purpose."""
     a, b = await repo._conn(), await repo._conn()
     try:
-        assert await a.fetchval("select pg_backend_pid()") != await b.fetchval("select pg_backend_pid()")
+        assert await a.fetchval("select pg_backend_pid()") != await b.fetchval(
+            "select pg_backend_pid()"
+        )
     finally:
         await a.close()
         await b.close()

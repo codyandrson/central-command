@@ -146,8 +146,9 @@ async def _patched_probes(monkeypatch):
     monkeypatch.setattr(systems, "_tcp_check", up)
     monkeypatch.setattr(systems, "_neo4j_status", up)
     monkeypatch.setattr(systems, "_graphiti_status", up)
-    await _patched_record(monkeypatch, {"alias": "cc-embedding", "dimensions": 1024,
-                                        "epoch": 3, "state": "stable"})
+    await _patched_record(
+        monkeypatch, {"alias": "cc-embedding", "dimensions": 1024, "epoch": 3, "state": "stable"}
+    )
 
 
 async def _patched_record(monkeypatch, record):
@@ -172,14 +173,20 @@ async def test_the_graph_row_carries_the_ingest_queue_line_and_no_other_row_does
     await _patched_probes(monkeypatch)
 
     async def summary():
-        return {"QUEUED": 3, "RUNNING": 1, "FAILED": 2,
-                "retry_error": "Error code: 403 - key not allowed to access model " + "x" * 400}
+        return {
+            "QUEUED": 3,
+            "RUNNING": 1,
+            "FAILED": 2,
+            "retry_error": "Error code: 403 - key not allowed to access model " + "x" * 400,
+        }
 
     monkeypatch.setattr(repo, "ingest_queue_summary", summary)
 
     rows = {r["id"]: r for r in (await systems.list_systems())["systems"]}
     detail = rows["graphiti"]["detail"]
-    assert detail.startswith("ingest queue: 3 queued, 1 running, 2 failed — retrying after: Error code: 403")
+    assert detail.startswith(
+        "ingest queue: 3 queued, 1 running, 2 failed — retrying after: Error code: 403"
+    )
     queue_part = detail.split(" · embedder:")[0]
     assert len(queue_part) < 300 and queue_part.endswith("…")  # the error is clipped
     assert [i for i, r in rows.items() if "detail" in r] == ["graphiti"]
@@ -200,7 +207,8 @@ async def test_a_quiet_queue_says_only_its_counts(monkeypatch):
     assert rows["graphiti"]["detail"] == (
         "ingest queue: 0 queued, 0 running, 0 failed · "
         "embedder: cc-embedding 1024 epoch 3 (stable) · "
-        "reranker: none — rank fusion only (map cc-rerank to enable)")
+        "reranker: none — rank fusion only (map cc-rerank to enable)"
+    )
 
 
 async def test_an_unreadable_queue_drops_only_the_queue_line(monkeypatch):
@@ -234,14 +242,23 @@ async def test_the_graph_row_names_the_reranker_and_its_last_failure(monkeypatch
     monkeypatch.setattr(repo, "ingest_queue_summary", summary)
     monkeypatch.setattr(settings, "graph_rerank_alias", "cc-rerank")
     monkeypatch.setattr(settings, "graph_rerank_kind", "chat")
-    monkeypatch.setattr(graphiti_client, "rerank_stats", lambda: {
-        "calls": 12, "failures": 2, "malformed": 1, "median_latency_s": 6.1,
-        "last_error": "RerankError: the chat reranker 'cc-rerank' answered 'We'",
-        "last_error_at": "2026-10-05T12:00:00Z"})
+    monkeypatch.setattr(
+        graphiti_client,
+        "rerank_stats",
+        lambda: {
+            "calls": 12,
+            "failures": 2,
+            "malformed": 1,
+            "median_latency_s": 6.1,
+            "last_error": "RerankError: the chat reranker 'cc-rerank' answered 'We'",
+            "last_error_at": "2026-10-05T12:00:00Z",
+        },
+    )
     detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
     assert detail.endswith(
         "reranker: chat via 'cc-rerank' (12 calls, median 6.1 s) — 2 failed, 1 malformed; "
-        "last: RerankError: the chat reranker 'cc-rerank' answered 'We'")
+        "last: RerankError: the chat reranker 'cc-rerank' answered 'We'"
+    )
 
     monkeypatch.setattr(settings, "graph_rerank_kind", "bogus")
     detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
@@ -270,9 +287,13 @@ async def test_the_graph_row_names_the_command_when_the_check_found_a_mismatch(m
 
     await _patched_probes(monkeypatch)
     embedder_record._cached = (
-        1e18, embedder_record._mismatch("iv", "the model behind cc-embedding has changed"))
+        1e18,
+        embedder_record._mismatch("iv", "the model behind cc-embedding has changed"),
+    )
     try:
-        detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"]["detail"]
+        detail = {r["id"]: r for r in (await systems.list_systems())["systems"]}["graphiti"][
+            "detail"
+        ]
     finally:
         embedder_record.clear_cache()
     assert "embedder: cc-embedding 1024 epoch 3 (stable) — MISMATCH: " in detail

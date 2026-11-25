@@ -188,7 +188,7 @@ def _naming(message: str, remedy: str) -> str:
 
 @dataclass
 class Context:
-    mode: str                  # "cli" | "api"
+    mode: str  # "cli" | "api"
     pre_boot: bool
     completion_timeout: float
 
@@ -238,8 +238,11 @@ def _redact_secret(text: str, secret: str) -> str:
     ident = re.fullmatch(r"[A-Za-z_]\w*", secret) is not None
 
     def mask(m: re.Match) -> str:
-        if ident and (m.start() == 0 or not re.match(r"[\w.]", text[m.start() - 1])) \
-                and re.match(r"\.\w", text[m.end():m.end() + 2]):
+        if (
+            ident
+            and (m.start() == 0 or not re.match(r"[\w.]", text[m.start() - 1]))
+            and re.match(r"\.\w", text[m.end() : m.end() + 2])
+        ):
             return m.group(0)
         return "***"
 
@@ -356,13 +359,17 @@ async def _spine_timed_out(elapsed: float) -> str:
     except ValueError:
         host, port = None, None
     accepts = await _tcp_accepts(host, port) if host else False
-    where = ("the port ACCEPTS a TCP connection, so the server (or the port forwarder "
-             "in front of it) took the connection but did not answer in time"
-             if accepts else
-             "nothing accepted a TCP connection on its host:port in time either")
-    return (f"cannot connect with CC_DATABASE_URL: the connect TIMED OUT after "
-            f"{elapsed:.1f} s (limit {_SHORT:g} s) — {where}; re-run to see whether it "
-            "persists")
+    where = (
+        "the port ACCEPTS a TCP connection, so the server (or the port forwarder "
+        "in front of it) took the connection but did not answer in time"
+        if accepts
+        else "nothing accepted a TCP connection on its host:port in time either"
+    )
+    return (
+        f"cannot connect with CC_DATABASE_URL: the connect TIMED OUT after "
+        f"{elapsed:.1f} s (limit {_SHORT:g} s) — {where}; re-run to see whether it "
+        "persists"
+    )
 
 
 async def check_spine(ctx: Context) -> Outcome:
@@ -374,9 +381,11 @@ async def check_spine(ctx: Context) -> Outcome:
     except TimeoutError:
         return fail(await _spine_timed_out(time.monotonic() - started), "CC_DATABASE_URL")
     except ConnectionRefusedError as exc:
-        return fail(f"cannot connect with CC_DATABASE_URL: connection REFUSED — nothing "
-                    f"listens on its host:port; is postgres running? ({_describe(exc)})",
-                    "CC_DATABASE_URL")
+        return fail(
+            f"cannot connect with CC_DATABASE_URL: connection REFUSED — nothing "
+            f"listens on its host:port; is postgres running? ({_describe(exc)})",
+            "CC_DATABASE_URL",
+        )
     except Exception as exc:  # noqa: BLE001 — every failure is reported, never raised
         return fail(f"cannot connect with CC_DATABASE_URL ({_describe(exc)})", "CC_DATABASE_URL")
     try:
@@ -390,7 +399,9 @@ async def check_spine(ctx: Context) -> Outcome:
             return fail(
                 f"connected, but the core schema table(s) {', '.join(missing_core)} are "
                 "missing — this database was not initialised from "
-                "central_command/db/schema.sql; re-run ./setup.sh", "./setup.sh")
+                "central_command/db/schema.sql; re-run ./setup.sh",
+                "./setup.sh",
+            )
         # Roster membership = a non-empty role (AGENTS.md). schema.sql SEEDS
         # the founding roster, so it exists before the API's first boot: an
         # empty roster is a FAIL with or without --pre-boot.
@@ -399,7 +410,9 @@ async def check_spine(ctx: Context) -> Outcome:
             return fail(
                 "connected, but the roster is empty (no agent has a role) — "
                 "schema.sql seeds the founding roster on a fresh database, so this "
-                "one was not created from it; re-run ./setup.sh", "./setup.sh")
+                "one was not created from it; re-run ./setup.sh",
+                "./setup.sh",
+            )
         missing_other = [t for t in _schema_tables() if t not in present and t not in CORE_TABLES]
         if missing_other:
             shown = ", ".join(missing_other[:5]) + (" …" if len(missing_other) > 5 else "")
@@ -407,7 +420,8 @@ async def check_spine(ctx: Context) -> Outcome:
                 f"connected; roster of {roster}; but {len(missing_other)} table(s) "
                 f"schema.sql declares are missing ({shown}) — apply "
                 "central_command/db/schema.sql to this database (it is idempotent)",
-                "central_command/db/schema.sql")
+                "central_command/db/schema.sql",
+            )
         return ok(f"CC_DATABASE_URL connects; schema present; roster of {roster}")
     except Exception as exc:  # noqa: BLE001
         return fail(f"connected, but the schema query failed ({_describe(exc)})", "CC_DATABASE_URL")
@@ -417,8 +431,14 @@ async def check_spine(ctx: Context) -> Outcome:
 
 
 def _llm_missing() -> list[str]:
-    return [name for name, value in (("CC_LLM_BASE_URL", settings.llm_base_url),
-                                     ("CC_LLM_API_KEY", settings.llm_api_key)) if not value]
+    return [
+        name
+        for name, value in (
+            ("CC_LLM_BASE_URL", settings.llm_base_url),
+            ("CC_LLM_API_KEY", settings.llm_api_key),
+        )
+        if not value
+    ]
 
 
 def _llm_missing_fail(what: str) -> Outcome:
@@ -427,7 +447,9 @@ def _llm_missing_fail(what: str) -> Outcome:
     return fail(
         f"{' and '.join(missing)} {verb} empty — {what}; run ./setup.sh (its app "
         f"phase writes {'it' if len(missing) == 1 else 'them'}) or set "
-        f"{missing[0]} in .env", missing[0])
+        f"{missing[0]} in .env",
+        missing[0],
+    )
 
 
 def _default_alias() -> str:
@@ -437,8 +459,9 @@ def _default_alias() -> str:
 
 
 def _test_model_skip() -> Outcome:
-    return not_applicable("the test model is on — agents run on the deterministic "
-                          "model and never call the provider")
+    return not_applicable(
+        "the test model is on — agents run on the deterministic model and never call the provider"
+    )
 
 
 async def check_proxy_as_app(ctx: Context) -> Outcome:
@@ -453,29 +476,42 @@ async def check_proxy_as_app(ctx: Context) -> Outcome:
     if not base.endswith("/v1"):
         base += "/v1"
     try:
-        resp = await _get(f"{base}/models",
-                          headers={"Authorization": f"Bearer {settings.llm_api_key}"})
+        resp = await _get(
+            f"{base}/models", headers={"Authorization": f"Bearer {settings.llm_api_key}"}
+        )
     except Exception as exc:  # noqa: BLE001
-        return fail(f"no answer from the proxy at CC_LLM_BASE_URL ({_describe(exc)})",
-                    "CC_LLM_BASE_URL")
+        return fail(
+            f"no answer from the proxy at CC_LLM_BASE_URL ({_describe(exc)})", "CC_LLM_BASE_URL"
+        )
     if resp.status_code in (401, 403):
-        return fail(f"the proxy refused CC_LLM_API_KEY (HTTP {resp.status_code}) — the key "
-                    "is wrong, expired or revoked; re-run ./setup.sh to mint one",
-                    "CC_LLM_API_KEY")
+        return fail(
+            f"the proxy refused CC_LLM_API_KEY (HTTP {resp.status_code}) — the key "
+            "is wrong, expired or revoked; re-run ./setup.sh to mint one",
+            "CC_LLM_API_KEY",
+        )
     if resp.status_code != 200:
-        return fail(f"GET /v1/models at CC_LLM_BASE_URL answered HTTP {resp.status_code}",
-                    "CC_LLM_BASE_URL")
+        return fail(
+            f"GET /v1/models at CC_LLM_BASE_URL answered HTTP {resp.status_code}", "CC_LLM_BASE_URL"
+        )
     try:
         ids = {str(m.get("id")) for m in resp.json().get("data", []) if isinstance(m, dict)}
     except Exception:  # noqa: BLE001
-        return fail("GET /v1/models at CC_LLM_BASE_URL did not answer an OpenAI-shaped model "
-                    "list — is it the model proxy?", "CC_LLM_BASE_URL")
+        return fail(
+            "GET /v1/models at CC_LLM_BASE_URL did not answer an OpenAI-shaped model "
+            "list — is it the model proxy?",
+            "CC_LLM_BASE_URL",
+        )
     if alias not in ids:
-        return fail(f"the default model {alias!r} (CC_DEFAULT_MODEL) is not among the "
-                    f"{len(ids)} model(s) CC_LLM_API_KEY may use — register the alias in "
-                    "the proxy, or scope the key to it", "CC_DEFAULT_MODEL")
-    return ok(f"CC_LLM_API_KEY sees {len(ids)} model(s) at CC_LLM_BASE_URL, including "
-              f"the default {alias!r}")
+        return fail(
+            f"the default model {alias!r} (CC_DEFAULT_MODEL) is not among the "
+            f"{len(ids)} model(s) CC_LLM_API_KEY may use — register the alias in "
+            "the proxy, or scope the key to it",
+            "CC_DEFAULT_MODEL",
+        )
+    return ok(
+        f"CC_LLM_API_KEY sees {len(ids)} model(s) at CC_LLM_BASE_URL, including "
+        f"the default {alias!r}"
+    )
 
 
 async def check_completion_as_app(ctx: Context) -> Outcome:
@@ -502,7 +538,8 @@ async def check_completion_as_app(ctx: Context) -> Outcome:
         # gets an answer. A reasoning model may spend its one token thinking
         # and return no text — still an answer, so the response is not judged.
         await model_request(
-            model, [ModelRequest.user_text_prompt(COMPLETION_PROBE_PROMPT)],
+            model,
+            [ModelRequest.user_text_prompt(COMPLETION_PROBE_PROMPT)],
             model_settings={"max_tokens": 1},
         )
     except ModelHTTPError as exc:
@@ -512,21 +549,28 @@ async def check_completion_as_app(ctx: Context) -> Outcome:
             body = body.get("message") or body
         detail = f"HTTP {status}: {_clip(body or '', 120)}"
         if status in (401, 403):
-            return fail(f"the completion was refused ({detail}) — CC_LLM_API_KEY may not "
-                        f"call {alias!r}; re-run ./setup.sh", "CC_LLM_API_KEY")
+            return fail(
+                f"the completion was refused ({detail}) — CC_LLM_API_KEY may not "
+                f"call {alias!r}; re-run ./setup.sh",
+                "CC_LLM_API_KEY",
+            )
         if status in (400, 404):
-            return fail(f"the completion for {alias!r} failed ({detail}) — check "
-                        "CC_DEFAULT_MODEL and the alias's backend in the proxy",
-                        "CC_DEFAULT_MODEL")
-        return fail(f"the completion for {alias!r} failed ({detail}) — the proxy answered "
-                    "but its backend did not; check the alias's deployment in the proxy",
-                    "CC_DEFAULT_MODEL")
+            return fail(
+                f"the completion for {alias!r} failed ({detail}) — check "
+                "CC_DEFAULT_MODEL and the alias's backend in the proxy",
+                "CC_DEFAULT_MODEL",
+            )
+        return fail(
+            f"the completion for {alias!r} failed ({detail}) — the proxy answered "
+            "but its backend did not; check the alias's deployment in the proxy",
+            "CC_DEFAULT_MODEL",
+        )
     except ModelAPIError as exc:
-        return fail(f"the completion could not reach CC_LLM_BASE_URL ({_describe(exc)})",
-                    "CC_LLM_BASE_URL")
+        return fail(
+            f"the completion could not reach CC_LLM_BASE_URL ({_describe(exc)})", "CC_LLM_BASE_URL"
+        )
     except Exception as exc:  # noqa: BLE001
-        return fail(f"the completion for {alias!r} failed ({_describe(exc)})",
-                    "CC_DEFAULT_MODEL")
+        return fail(f"the completion for {alias!r} failed ({_describe(exc)})", "CC_DEFAULT_MODEL")
     ms = int((time.monotonic() - started) * 1000)
     return ok(f"one 1-token completion through resolve_model({alias!r}) answered in {ms} ms")
 
@@ -536,36 +580,55 @@ async def check_embedding_as_app(ctx: Context) -> Outcome:
 
     # The graph writer embeds with the scoped key at the data-plane base
     # (neo4j_writer.request_embedding; R14) — what Graphiti's own embedder uses.
-    for key, value in (("CC_LLM_BASE_URL", settings.llm_base_url),
-                       ("CC_LLM_API_KEY", settings.llm_api_key),
-                       ("CC_EMBED_ALIAS", settings.embed_alias)):
+    for key, value in (
+        ("CC_LLM_BASE_URL", settings.llm_base_url),
+        ("CC_LLM_API_KEY", settings.llm_api_key),
+        ("CC_EMBED_ALIAS", settings.embed_alias),
+    ):
         if not value:
-            return fail(f"{key} is empty — the graph writer cannot embed; run ./setup.sh "
-                        f"or set {key} in .env", key)
+            return fail(
+                f"{key} is empty — the graph writer cannot embed; run ./setup.sh "
+                f"or set {key} in .env",
+                key,
+            )
     alias = neo4j_writer._EMBED_MODEL
     try:
         vector = await neo4j_writer.request_embedding(EMBED_PROBE_TEXT, timeout=_EMBED_TIMEOUT)
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status in (401, 403):
-            return fail(f"the proxy refused the graph writer's key (HTTP {status}) — "
-                        "check CC_LLM_API_KEY (its scope must include CC_EMBED_ALIAS)",
-                        "CC_LLM_API_KEY")
-        return fail(f"embedding via {alias!r} failed (HTTP {status}) — check "
-                    "CC_EMBED_ALIAS and the alias's backend in the proxy", "CC_EMBED_ALIAS")
+            return fail(
+                f"the proxy refused the graph writer's key (HTTP {status}) — "
+                "check CC_LLM_API_KEY (its scope must include CC_EMBED_ALIAS)",
+                "CC_LLM_API_KEY",
+            )
+        return fail(
+            f"embedding via {alias!r} failed (HTTP {status}) — check "
+            "CC_EMBED_ALIAS and the alias's backend in the proxy",
+            "CC_EMBED_ALIAS",
+        )
     except (KeyError, IndexError, TypeError, ValueError) as exc:
-        return fail(f"embedding via {alias!r} answered without a vector ({_describe(exc)}) — "
-                    "check CC_EMBED_ALIAS", "CC_EMBED_ALIAS")
+        return fail(
+            f"embedding via {alias!r} answered without a vector ({_describe(exc)}) — "
+            "check CC_EMBED_ALIAS",
+            "CC_EMBED_ALIAS",
+        )
     except Exception as exc:  # noqa: BLE001
-        return fail(f"no answer from the proxy at CC_LLM_BASE_URL ({_describe(exc)})",
-                    "CC_LLM_BASE_URL")
+        return fail(
+            f"no answer from the proxy at CC_LLM_BASE_URL ({_describe(exc)})", "CC_LLM_BASE_URL"
+        )
     width = len(vector) if isinstance(vector, list) else 0
     if width != settings.embed_dim:
-        return fail(f"{alias!r} returned {width} dimensions but CC_EMBED_DIM is "
-                    f"{settings.embed_dim} — the graph writer drops every mis-sized vector; "
-                    "fix CC_EMBED_DIM (or CC_EMBED_ALIAS)", "CC_EMBED_DIM")
-    return ok(f"{alias!r} embeds with the graph writer's key (CC_LLM_API_KEY at CC_LLM_BASE_URL, "
-              f"alias CC_EMBED_ALIAS): {width} dimensions = CC_EMBED_DIM")
+        return fail(
+            f"{alias!r} returned {width} dimensions but CC_EMBED_DIM is "
+            f"{settings.embed_dim} — the graph writer drops every mis-sized vector; "
+            "fix CC_EMBED_DIM (or CC_EMBED_ALIAS)",
+            "CC_EMBED_DIM",
+        )
+    return ok(
+        f"{alias!r} embeds with the graph writer's key (CC_LLM_API_KEY at CC_LLM_BASE_URL, "
+        f"alias CC_EMBED_ALIAS): {width} dimensions = CC_EMBED_DIM"
+    )
 
 
 async def check_graph(ctx: Context) -> Outcome:
@@ -582,8 +645,10 @@ async def check_graph(ctx: Context) -> Outcome:
         return ok("Neo4j answers over bolt at CC_NEO4J_URL")
     said = status.get("message") if isinstance(status, dict) else status
     if isinstance(status, dict) and status.get("error") == "AuthError":
-        return fail(f"Neo4j refused the credentials ({_clip(said or '')}) — check "
-                    "CC_NEO4J_PASSWORD", "CC_NEO4J_PASSWORD")
+        return fail(
+            f"Neo4j refused the credentials ({_clip(said or '')}) — check CC_NEO4J_PASSWORD",
+            "CC_NEO4J_PASSWORD",
+        )
     return fail(f"Neo4j did not answer at CC_NEO4J_URL ({_clip(said or '')})", "CC_NEO4J_URL")
 
 
@@ -597,9 +662,11 @@ async def check_graph_patches(ctx: Context) -> Outcome:
     if state and all(v == "patched" for v in state.values()):
         return ok(f"graphiti-core carries all {len(state)} fixes ({', '.join(sorted(state))})")
     shown = ", ".join(f"{k}: {v}" for k, v in sorted(state.items()))
-    return fail(f"graphiti-core is missing carried fixes ({shown}) — the ingest worker "
-                "refuses to extract until python scripts/apply_graphiti_patches.py runs",
-                "python scripts/apply_graphiti_patches.py")
+    return fail(
+        f"graphiti-core is missing carried fixes ({shown}) — the ingest worker "
+        "refuses to extract until python scripts/apply_graphiti_patches.py runs",
+        "python scripts/apply_graphiti_patches.py",
+    )
 
 
 async def check_graph_embedder(ctx: Context) -> Outcome:
@@ -616,16 +683,24 @@ async def check_graph_embedder(ctx: Context) -> Outcome:
     try:
         verdict = await embedder_record.check(force=True)
     except Exception as exc:  # noqa: BLE001 — no verdict is the other rows' finding
-        return not_applicable(f"the embedder or the graph did not answer ({_describe(exc)}); "
-                              "the graph and embedding-as-app rows say which")
+        return not_applicable(
+            f"the embedder or the graph did not answer ({_describe(exc)}); "
+            "the graph and embedding-as-app rows say which"
+        )
     if not verdict.open:
-        return fail(verdict.reason or "the graph's embedder record disagrees with the "
-                    "configuration", EMBEDDER_REMEDY)
+        return fail(
+            verdict.reason or "the graph's embedder record disagrees with the configuration",
+            EMBEDDER_REMEDY,
+        )
     if verdict.status == embedder_record.ABSENT_EMPTY:
-        return ok("the graph holds no vectors and no embedder record yet — the first graph "
-                  "write declares it")
-    return ok(f"the graph's embedder record agrees with {settings.embed_alias!r} "
-              f"({settings.embed_dim} dimensions)")
+        return ok(
+            "the graph holds no vectors and no embedder record yet — the first graph "
+            "write declares it"
+        )
+    return ok(
+        f"the graph's embedder record agrees with {settings.embed_alias!r} "
+        f"({settings.embed_dim} dimensions)"
+    )
 
 
 # `graph-rerank`'s probe: one query, one clearly relevant and one clearly
@@ -634,13 +709,17 @@ RERANK_PROBE_QUERY = "Which city is the capital of France?"
 RERANK_PROBE_RELEVANT = "Paris is the capital and largest city of France."
 RERANK_PROBE_IRRELEVANT = "A sourdough starter needs flour, water and a warm kitchen."
 _RERANK_TIMEOUT = 120.0
-_NO_RERANKER = ("no reranker configured (CC_GRAPH_RERANK_ALIAS is empty) — fact and entity "
-                "search rank by rank fusion alone, the lower-quality ordering. To turn reranking "
-                "on, map the cc-rerank alias in LiteLLM (a dedicated reranker, or a chat model "
-                "with thinking off) and re-run ./setup.sh")
-_CHAT_RERANK_CAUSES = ("the usual causes: the endpoint returns no logprobs; the model is a "
-                       "reasoning model and thinking is not disabled on the alias; the app "
-                       "key's scope lacks the alias")
+_NO_RERANKER = (
+    "no reranker configured (CC_GRAPH_RERANK_ALIAS is empty) — fact and entity "
+    "search rank by rank fusion alone, the lower-quality ordering. To turn reranking "
+    "on, map the cc-rerank alias in LiteLLM (a dedicated reranker, or a chat model "
+    "with thinking off) and re-run ./setup.sh"
+)
+_CHAT_RERANK_CAUSES = (
+    "the usual causes: the endpoint returns no logprobs; the model is a "
+    "reasoning model and thinking is not disabled on the alias; the app "
+    "key's scope lacks the alias"
+)
 
 
 async def _rerank_probe(kind: str, alias: str) -> list[tuple[str, float]]:
@@ -673,25 +752,35 @@ async def check_graph_rerank(ctx: Context) -> Outcome:
     try:
         ranked = await _rerank_probe(kind, alias)
     except graphiti_client.RerankError as exc:
-        return fail(f"the {kind} reranker {alias!r} answered but cannot rank "
-                    f"({_clip(str(exc), 240)}) — {_CHAT_RERANK_CAUSES if kind == 'chat' else 'is the alias a rerank-shaped endpoint?'}; "
-                    "until it is fixed, fact search ERRORS (there is no unranked fallback). "
-                    "Fix the alias in LiteLLM, or set CC_GRAPH_RERANK_KIND to what it is",
-                    "CC_GRAPH_RERANK_KIND")
+        return fail(
+            f"the {kind} reranker {alias!r} answered but cannot rank "
+            f"({_clip(str(exc), 240)}) — {_CHAT_RERANK_CAUSES if kind == 'chat' else 'is the alias a rerank-shaped endpoint?'}; "
+            "until it is fixed, fact search ERRORS (there is no unranked fallback). "
+            "Fix the alias in LiteLLM, or set CC_GRAPH_RERANK_KIND to what it is",
+            "CC_GRAPH_RERANK_KIND",
+        )
     except Exception as exc:  # noqa: BLE001
         status = getattr(exc, "status_code", None)
         said = f"HTTP {status}" if status else _describe(exc)
-        causes = (f"; {_CHAT_RERANK_CAUSES}" if kind == "chat"
-                  else "; a 403 is usually the app key's scope lacking the alias")
-        return fail(f"the {kind} reranker {alias!r} failed ({said}){causes}. Until it is fixed, "
-                    "fact search ERRORS (there is no unranked fallback) — fix the alias in "
-                    "LiteLLM, or empty CC_GRAPH_RERANK_ALIAS to run without a reranker",
-                    "CC_GRAPH_RERANK_ALIAS")
+        causes = (
+            f"; {_CHAT_RERANK_CAUSES}"
+            if kind == "chat"
+            else "; a 403 is usually the app key's scope lacking the alias"
+        )
+        return fail(
+            f"the {kind} reranker {alias!r} failed ({said}){causes}. Until it is fixed, "
+            "fact search ERRORS (there is no unranked fallback) — fix the alias in "
+            "LiteLLM, or empty CC_GRAPH_RERANK_ALIAS to run without a reranker",
+            "CC_GRAPH_RERANK_ALIAS",
+        )
     ms = int((time.monotonic() - started) * 1000)
     if not ranked or ranked[0][0] != RERANK_PROBE_RELEVANT:
-        return warn(f"the {kind} reranker {alias!r} answered in {ms} ms but ranked an "
-                    "irrelevant passage above a relevant one — check which model is behind "
-                    "the alias", "CC_GRAPH_RERANK_ALIAS")
+        return warn(
+            f"the {kind} reranker {alias!r} answered in {ms} ms but ranked an "
+            "irrelevant passage above a relevant one — check which model is behind "
+            "the alias",
+            "CC_GRAPH_RERANK_ALIAS",
+        )
     return ok(f"the {kind} reranker {alias!r} ranked a relevant passage first in {ms} ms")
 
 
@@ -705,22 +794,36 @@ async def check_sandbox(ctx: Context) -> Outcome:
     # The same header `integrations/sandbox_client._client` sends. The runner
     # enforces its token on EVERY route, so its read-only OpenAPI document
     # proves both that it listens and that it takes this token.
-    headers = ({"authorization": f"Bearer {settings.sandbox_runner_token}"}
-               if settings.sandbox_runner_token else {})
+    headers = (
+        {"authorization": f"Bearer {settings.sandbox_runner_token}"}
+        if settings.sandbox_runner_token
+        else {}
+    )
     try:
-        resp = await _get(f"{settings.sandbox_runner_url.rstrip('/')}/openapi.json",
-                          headers=headers)
+        resp = await _get(
+            f"{settings.sandbox_runner_url.rstrip('/')}/openapi.json", headers=headers
+        )
     except Exception as exc:  # noqa: BLE001
-        return fail(f"the sandbox runner does not answer at CC_SANDBOX_RUNNER_URL "
-                    f"({_describe(exc)}) — ./setup.sh starts it (its boot phase)", "CC_SANDBOX_RUNNER_URL")
+        return fail(
+            f"the sandbox runner does not answer at CC_SANDBOX_RUNNER_URL "
+            f"({_describe(exc)}) — ./setup.sh starts it (its boot phase)",
+            "CC_SANDBOX_RUNNER_URL",
+        )
     if resp.status_code == 401:
-        return fail("the sandbox runner refused CC_SANDBOX_RUNNER_TOKEN (HTTP 401) — the "
-                    "runner and the API must read the same value", "CC_SANDBOX_RUNNER_TOKEN")
+        return fail(
+            "the sandbox runner refused CC_SANDBOX_RUNNER_TOKEN (HTTP 401) — the "
+            "runner and the API must read the same value",
+            "CC_SANDBOX_RUNNER_TOKEN",
+        )
     if resp.status_code != 200:
-        return fail(f"the sandbox runner answered HTTP {resp.status_code} at "
-                    "CC_SANDBOX_RUNNER_URL", "CC_SANDBOX_RUNNER_URL")
-    return ok("the sandbox runner answers at CC_SANDBOX_RUNNER_URL and takes "
-              + ("CC_SANDBOX_RUNNER_TOKEN" if settings.sandbox_runner_token else "no token"))
+        return fail(
+            f"the sandbox runner answered HTTP {resp.status_code} at CC_SANDBOX_RUNNER_URL",
+            "CC_SANDBOX_RUNNER_URL",
+        )
+    return ok(
+        "the sandbox runner answers at CC_SANDBOX_RUNNER_URL and takes "
+        + ("CC_SANDBOX_RUNNER_TOKEN" if settings.sandbox_runner_token else "no token")
+    )
 
 
 async def check_crawler(ctx: Context) -> Outcome:
@@ -731,11 +834,14 @@ async def check_crawler(ctx: Context) -> Outcome:
     try:
         resp = await _get(f"{settings.crawler_url.rstrip('/')}/healthz")
     except Exception as exc:  # noqa: BLE001
-        return fail(f"the crawler does not answer at CC_CRAWLER_URL ({_describe(exc)})",
-                    "CC_CRAWLER_URL")
+        return fail(
+            f"the crawler does not answer at CC_CRAWLER_URL ({_describe(exc)})", "CC_CRAWLER_URL"
+        )
     if not 200 <= resp.status_code < 300:
-        return fail(f"the crawler's /healthz answered HTTP {resp.status_code} at CC_CRAWLER_URL",
-                    "CC_CRAWLER_URL")
+        return fail(
+            f"the crawler's /healthz answered HTTP {resp.status_code} at CC_CRAWLER_URL",
+            "CC_CRAWLER_URL",
+        )
     return ok("the crawler's /healthz answers at CC_CRAWLER_URL")
 
 
@@ -761,9 +867,12 @@ async def _heartbeat_polls_mail() -> bool:
     except Exception:  # noqa: BLE001
         return False
     try:
-        return bool(await conn.fetchval(
-            "select exists(select 1 from heartbeat_schedule "
-            "where action_kind = 'feed.poll' and enabled)"))
+        return bool(
+            await conn.fetchval(
+                "select exists(select 1 from heartbeat_schedule "
+                "where action_kind = 'feed.poll' and enabled)"
+            )
+        )
     except Exception:  # noqa: BLE001
         return False
     finally:
@@ -798,53 +907,89 @@ async def check_mail(ctx: Context) -> Outcome:
             described = _describe(exc)
             auth = any(s in described for s in ("Unauthorized", "401", "credentials"))
             key = "CC_EXCHANGE_PASSWORD" if auth else "CC_EXCHANGE_URL"
-            return at(fail(
-                f"Exchange did not list the inbox ({described}) — check CC_EXCHANGE_URL, "
-                "CC_EXCHANGE_USERNAME and CC_EXCHANGE_PASSWORD", key), None)
-        return Outcome(PASS, f"Exchange lists the inbox with the configured mailbox "
-                             f"({n} reference read)", system=None)
-    partial = [k for k, v in (("CC_EXCHANGE_URL", settings.exchange_url),
-                              ("CC_EXCHANGE_USERNAME", settings.exchange_username),
-                              ("CC_EXCHANGE_PASSWORD", settings.exchange_password)) if not v]
+            return at(
+                fail(
+                    f"Exchange did not list the inbox ({described}) — check CC_EXCHANGE_URL, "
+                    "CC_EXCHANGE_USERNAME and CC_EXCHANGE_PASSWORD",
+                    key,
+                ),
+                None,
+            )
+        return Outcome(
+            PASS,
+            f"Exchange lists the inbox with the configured mailbox ({n} reference read)",
+            system=None,
+        )
+    partial = [
+        k
+        for k, v in (
+            ("CC_EXCHANGE_URL", settings.exchange_url),
+            ("CC_EXCHANGE_USERNAME", settings.exchange_username),
+            ("CC_EXCHANGE_PASSWORD", settings.exchange_password),
+        )
+        if not v
+    ]
     if len(partial) < 3:
-        return at(fail(
-            f"Exchange is half-configured: {', '.join(partial)} empty — mail routes to "
-            "the n8n façade until all three are set", partial[0]), None)
+        return at(
+            fail(
+                f"Exchange is half-configured: {', '.join(partial)} empty — mail routes to "
+                "the n8n façade until all three are set",
+                partial[0],
+            ),
+            None,
+        )
     reader = await _mail_reader()
     if reader is None:
-        return at(not_applicable(
-            "the mail feed is off (CC_FEED_ENABLED=0, and no enabled heartbeat mail-poll "
-            "schedule) and Exchange is not configured, so nothing in the app reads mail; "
-            "turn the feed on and the self-check will prove the provider"), None)
+        return at(
+            not_applicable(
+                "the mail feed is off (CC_FEED_ENABLED=0, and no enabled heartbeat mail-poll "
+                "schedule) and Exchange is not configured, so nothing in the app reads mail; "
+                "turn the feed on and the self-check will prove the provider"
+            ),
+            None,
+        )
     if settings.google_provider == "native":
         return await _check_google_mail(reader)
     if not email_facade.configured():
         # The façade's own switch (url AND token); the two messages only say
         # WHICH key is the empty one.
         if not settings.email_facade_token:
-            return fail(f"{reader} reads mail through the n8n façade, but CC_EMAIL_FACADE_TOKEN "
-                        "is empty — the façade refuses an unauthenticated call",
-                        "CC_EMAIL_FACADE_TOKEN")
-        return fail(f"{reader} reads mail through the n8n façade, but CC_EMAIL_FACADE_URL "
-                    "is empty", "CC_EMAIL_FACADE_URL")
+            return fail(
+                f"{reader} reads mail through the n8n façade, but CC_EMAIL_FACADE_TOKEN "
+                "is empty — the façade refuses an unauthenticated call",
+                "CC_EMAIL_FACADE_TOKEN",
+            )
+        return fail(
+            f"{reader} reads mail through the n8n façade, but CC_EMAIL_FACADE_URL is empty",
+            "CC_EMAIL_FACADE_URL",
+        )
     try:
         refs = await email_facade.list_refs(MAIL_PROBE_QUERY)
     except Exception as exc:  # noqa: BLE001
         described = _describe(exc)
         if "unreachable" in described:
-            return fail(f"the n8n mail façade is unreachable ({described}) — {reader} reads "
-                        "mail through it: run n8n (CC_ENABLE_N8N=1 on the single-node "
-                        "install), configure Exchange (CC_EXCHANGE_*), or turn the feed "
-                        "off; check CC_EMAIL_FACADE_URL", "CC_EMAIL_FACADE_URL")
+            return fail(
+                f"the n8n mail façade is unreachable ({described}) — {reader} reads "
+                "mail through it: run n8n (CC_ENABLE_N8N=1 on the single-node "
+                "install), configure Exchange (CC_EXCHANGE_*), or turn the feed "
+                "off; check CC_EMAIL_FACADE_URL",
+                "CC_EMAIL_FACADE_URL",
+            )
         if re.search(r"HTTP 40[13]", described):
-            return fail(f"the n8n mail façade refused CC_EMAIL_FACADE_TOKEN ({described})",
-                        "CC_EMAIL_FACADE_TOKEN")
-        return fail(f"the n8n mail façade failed a references-only list ({described}) — "
-                    "check the Gmail credential inside n8n (its UI, CC_N8N_UI_URL)",
-                    "CC_N8N_UI_URL")
+            return fail(
+                f"the n8n mail façade refused CC_EMAIL_FACADE_TOKEN ({described})",
+                "CC_EMAIL_FACADE_TOKEN",
+            )
+        return fail(
+            f"the n8n mail façade failed a references-only list ({described}) — "
+            "check the Gmail credential inside n8n (its UI, CC_N8N_UI_URL)",
+            "CC_N8N_UI_URL",
+        )
     # A count, never content: refs are ids only, and none is printed.
-    return ok(f"the n8n mail façade answers a references-only list "
-              f"({len(refs) if isinstance(refs, list) else 0} ref(s) in the last day)")
+    return ok(
+        f"the n8n mail façade answers a references-only list "
+        f"({len(refs) if isinstance(refs, list) else 0} ref(s) in the last day)"
+    )
 
 
 async def _check_google_mail(reader: str) -> Outcome:
@@ -854,19 +999,33 @@ async def _check_google_mail(reader: str) -> Outcome:
 
     missing = google.missing_settings()
     if missing:
-        return at(fail(f"{reader} reads mail through the native Google client "
-                       f"(CC_GOOGLE_PROVIDER=native), but {', '.join(missing)} is empty — "
-                       "python -m central_command.google_consent writes the refresh token",
-                       missing[0]), None)
+        return at(
+            fail(
+                f"{reader} reads mail through the native Google client "
+                f"(CC_GOOGLE_PROVIDER=native), but {', '.join(missing)} is empty — "
+                "python -m central_command.google_consent writes the refresh token",
+                missing[0],
+            ),
+            None,
+        )
     try:
         refs = await email_facade.list_refs(MAIL_PROBE_QUERY)
     except Exception as exc:  # noqa: BLE001
-        return at(fail(f"the native Google client failed a references-only list "
-                       f"({_describe(exc)}) — check CC_GOOGLE_CLIENT_ID/_SECRET and re-run "
-                       "python -m central_command.google_consent", "CC_GOOGLE_REFRESH_TOKEN"), None)
-    return Outcome(PASS, f"the native Google client answers a references-only list "
-                         f"({len(refs) if isinstance(refs, list) else 0} ref(s) in the last day)",
-                   system=None)
+        return at(
+            fail(
+                f"the native Google client failed a references-only list "
+                f"({_describe(exc)}) — check CC_GOOGLE_CLIENT_ID/_SECRET and re-run "
+                "python -m central_command.google_consent",
+                "CC_GOOGLE_REFRESH_TOKEN",
+            ),
+            None,
+        )
+    return Outcome(
+        PASS,
+        f"the native Google client answers a references-only list "
+        f"({len(refs) if isinstance(refs, list) else 0} ref(s) in the last day)",
+        system=None,
+    )
 
 
 def _load_atlassian_probe():
@@ -890,27 +1049,43 @@ async def check_integrations(ctx: Context) -> Outcome:
     system = "jira" if jira_on else "confluence"
     if jira_on and not jira.configured():
         basic = jira.auth_mode() != "bearer"
-        return at(fail(
-            "CC_JIRA_BASE_URL is set but CC_JIRA_API_TOKEN"
-            + (" and CC_JIRA_EMAIL are" if basic and not settings.jira_email else " is")
-            + " not — every Jira read will fail", "CC_JIRA_API_TOKEN"), "jira")
+        return at(
+            fail(
+                "CC_JIRA_BASE_URL is set but CC_JIRA_API_TOKEN"
+                + (" and CC_JIRA_EMAIL are" if basic and not settings.jira_email else " is")
+                + " not — every Jira read will fail",
+                "CC_JIRA_API_TOKEN",
+            ),
+            "jira",
+        )
     if wiki_on and not confluence.configured():
-        return at(fail(
-            "CC_CONFLUENCE_BASE_URL is set but its credentials are not (CC_CONFLUENCE_API_TOKEN, "
-            "plus CC_CONFLUENCE_EMAIL under basic auth) — every Confluence read will fail",
-            "CC_CONFLUENCE_API_TOKEN"), "confluence")
+        return at(
+            fail(
+                "CC_CONFLUENCE_BASE_URL is set but its credentials are not (CC_CONFLUENCE_API_TOKEN, "
+                "plus CC_CONFLUENCE_EMAIL under basic auth) — every Confluence read will fail",
+                "CC_CONFLUENCE_API_TOKEN",
+            ),
+            "confluence",
+        )
     probe = _load_atlassian_probe()
     out = await probe.run_checks(jira_on=jira_on, confluence_on=wiki_on)
     checks, failures = int(out.get("checks") or 0), int(out.get("failures") or 0)
     if failures:
         first = (out.get("fail_lines") or ["(no line)"])[0]
-        return at(fail(
-            f"{failures} of {checks} read-only Atlassian checks failed, first: {_clip(first)} "
-            "— run python scripts/atlassian_probe.py for the whole walk",
-            "python scripts/atlassian_probe.py"), system)
+        return at(
+            fail(
+                f"{failures} of {checks} read-only Atlassian checks failed, first: {_clip(first)} "
+                "— run python scripts/atlassian_probe.py for the whole walk",
+                "python scripts/atlassian_probe.py",
+            ),
+            system,
+        )
     products = " and ".join(p for p, on in (("Jira", jira_on), ("Confluence", wiki_on)) if on)
-    return Outcome(PASS, f"{checks} read-only {products} checks pass "
-                         "(scripts/atlassian_probe.py's walk)", system=system)
+    return Outcome(
+        PASS,
+        f"{checks} read-only {products} checks pass (scripts/atlassian_probe.py's walk)",
+        system=system,
+    )
 
 
 async def check_cockpit(ctx: Context) -> Outcome:
@@ -920,11 +1095,16 @@ async def check_cockpit(ctx: Context) -> Outcome:
     try:
         resp = await _get(f"http://127.0.0.1:{port}/")
     except Exception as exc:  # noqa: BLE001
-        return fail(f"nothing answers on the cockpit port (CC_COCKPIT_PORT={port}: "
-                    f"{_describe(exc)}) — ./setup.sh starts the cockpit (its boot phase)", "CC_COCKPIT_PORT")
+        return fail(
+            f"nothing answers on the cockpit port (CC_COCKPIT_PORT={port}: "
+            f"{_describe(exc)}) — ./setup.sh starts the cockpit (its boot phase)",
+            "CC_COCKPIT_PORT",
+        )
     if resp.status_code >= 500:
-        return fail(f"the cockpit answers HTTP {resp.status_code} on CC_COCKPIT_PORT={port}",
-                    "CC_COCKPIT_PORT")
+        return fail(
+            f"the cockpit answers HTTP {resp.status_code} on CC_COCKPIT_PORT={port}",
+            "CC_COCKPIT_PORT",
+        )
     return ok(f"the cockpit answers on CC_COCKPIT_PORT={port}")
 
 
@@ -934,16 +1114,17 @@ def link_settings() -> list[str]:
     (config.py names them that way and only them). tests/test_selfcheck.py
     pins this set against the `"url": settings.<name>` rows in
     api/systems.py, so a new link joins this check without a second list."""
-    return sorted(n for n in Settings.model_fields
-                  if re.search(r"_(ui|docs|browser)_url$", n))
+    return sorted(n for n in Settings.model_fields if re.search(r"_(ui|docs|browser)_url$", n))
 
 
 def _boot_started_origins() -> set[str]:
     """Origins of the host processes `boot` starts — not up yet under
     --pre-boot, so a link pointing at one is not checked then."""
-    origins = {_origin(f"http://127.0.0.1:{_cockpit_port()}"),
-               _origin(f"http://127.0.0.1:{settings.api_port}"),
-               _origin(settings.sandbox_runner_url)}
+    origins = {
+        _origin(f"http://127.0.0.1:{_cockpit_port()}"),
+        _origin(f"http://127.0.0.1:{settings.api_port}"),
+        _origin(settings.sandbox_runner_url),
+    }
     return {o for o in origins if o}
 
 
@@ -975,13 +1156,19 @@ async def check_links(ctx: Context) -> Outcome:
     dead = [k for (k, _v), up in zip(set_links, results) if not up]
     later = f"; {', '.join(deferred)} not checked before boot" if deferred else ""
     if dead:
-        also = (f"; also blank: {', '.join(blank_derived)}" if blank_derived else "")
-        return fail(f"set but not answering: {', '.join(dead)} — fix the address in .env or "
-                    f"blank it{also}{later}", dead[0])
+        also = f"; also blank: {', '.join(blank_derived)}" if blank_derived else ""
+        return fail(
+            f"set but not answering: {', '.join(dead)} — fix the address in .env or "
+            f"blank it{also}{later}",
+            dead[0],
+        )
     if blank_derived:
-        return warn(f"blank: {', '.join(blank_derived)} — the single-node installer always "
-                    "derives it (re-run ./setup.sh there); on another profile, set it by hand"
-                    f"{later}", blank_derived[0])
+        return warn(
+            f"blank: {', '.join(blank_derived)} — the single-node installer always "
+            "derives it (re-run ./setup.sh there); on another profile, set it by hand"
+            f"{later}",
+            blank_derived[0],
+        )
     if not set_links:
         return not_applicable("no Systems-page link is set" + later)
     return ok(f"{len(set_links)} Systems-page link(s) answer{later}")
@@ -993,7 +1180,7 @@ async def check_links(ctx: Context) -> Outcome:
 @dataclass(frozen=True)
 class Check:
     name: str
-    system: str | None           # the /api/systems row this sits beside
+    system: str | None  # the /api/systems row this sits beside
     remedy: str | Callable[[], str]  # what a TIMEOUT names
     timeout: Callable[[Context], float]
     cli_only: bool = False
@@ -1015,29 +1202,35 @@ def _mail_remedy() -> str:
 
     if exchange.configured():
         return "CC_EXCHANGE_URL"
-    return "CC_GOOGLE_REFRESH_TOKEN" if settings.google_provider == "native" else "CC_EMAIL_FACADE_URL"
+    return (
+        "CC_GOOGLE_REFRESH_TOKEN" if settings.google_provider == "native" else "CC_EMAIL_FACADE_URL"
+    )
 
 
 CHECKS: tuple[Check, ...] = (
     Check("spine", "postgres", "CC_DATABASE_URL", _fixed(_SHORT * 2)),
     Check("proxy-as-app", "litellm", "CC_LLM_BASE_URL", _fixed(_SHORT * 2)),
-    Check("completion-as-app", "litellm", "CC_SELFCHECK_COMPLETION_TIMEOUT",
-          lambda ctx: ctx.completion_timeout),
+    Check(
+        "completion-as-app",
+        "litellm",
+        "CC_SELFCHECK_COMPLETION_TIMEOUT",
+        lambda ctx: ctx.completion_timeout,
+    ),
     Check("embedding-as-app", "litellm", "CC_EMBED_ALIAS", _fixed(_EMBED_TIMEOUT + 5)),
     Check("graph", "neo4j", "CC_NEO4J_URL", _fixed(_GRAPH_TIMEOUT + 5)),
-    Check("graph-patches", "graphiti", "python scripts/apply_graphiti_patches.py",
-          _fixed(_SHORT)),
-    Check("graph-embedder", "graphiti", EMBEDDER_REMEDY,
-          _fixed(_EMBED_TIMEOUT + _GRAPH_TIMEOUT + 5)),
+    Check("graph-patches", "graphiti", "python scripts/apply_graphiti_patches.py", _fixed(_SHORT)),
+    Check(
+        "graph-embedder", "graphiti", EMBEDDER_REMEDY, _fixed(_EMBED_TIMEOUT + _GRAPH_TIMEOUT + 5)
+    ),
     Check("graph-rerank", "graphiti", "CC_GRAPH_RERANK_ALIAS", _fixed(_RERANK_TIMEOUT)),
     Check("sandbox", "sandbox-runner", "CC_SANDBOX_RUNNER_URL", _fixed(_SHORT * 2)),
     Check("crawler", "crawler", "CC_CRAWLER_URL", _fixed(_SHORT * 2)),
     Check("mail", "n8n", _mail_remedy, _fixed(_MAIL_TIMEOUT + 5)),
-    Check("integrations", None, "python scripts/atlassian_probe.py",
-          _fixed(_ATLASSIAN_TIMEOUT)),
+    Check("integrations", None, "python scripts/atlassian_probe.py", _fixed(_ATLASSIAN_TIMEOUT)),
     Check("cockpit", "cockpit", "CC_COCKPIT_PORT", _fixed(_SHORT * 2), cli_only=True),
-    Check("links", None, "the CC_*_UI_URL / CC_*_DOCS_URL link settings",
-          _fixed(_LINK_TIMEOUT * 4)),
+    Check(
+        "links", None, "the CC_*_UI_URL / CC_*_DOCS_URL link settings", _fixed(_LINK_TIMEOUT * 4)
+    ),
 )
 
 
@@ -1076,8 +1269,15 @@ def overall(checks: list[dict]) -> str:
 
 def never_run(mode: str = "api") -> dict:
     """The document before the first run: nothing checked, nothing spent."""
-    return {"status": "never_run", "running": False, "ran_at": None, "duration_ms": None,
-            "version": __version__, "mode": mode, "checks": []}
+    return {
+        "status": "never_run",
+        "running": False,
+        "ran_at": None,
+        "duration_ms": None,
+        "version": __version__,
+        "mode": mode,
+        "checks": [],
+    }
 
 
 # The modules the checks import lazily. Importing one is SYNCHRONOUS and, on a
@@ -1110,13 +1310,15 @@ def _warm_imports() -> None:
             importlib.import_module(name)
 
 
-async def run(*, mode: str = "api", pre_boot: bool = False,
-              completion_timeout: float | None = None) -> dict:
+async def run(
+    *, mode: str = "api", pre_boot: bool = False, completion_timeout: float | None = None
+) -> dict:
     """Run every check that applies to `mode` concurrently — each under its own
     timeout — and return the result document. Never raises for a failed
     dependency; that is what the document is for."""
     ctx = Context(
-        mode=mode, pre_boot=pre_boot,
+        mode=mode,
+        pre_boot=pre_boot,
         completion_timeout=float(completion_timeout or settings.selfcheck_completion_timeout),
     )
     _warm_imports()
@@ -1162,17 +1364,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m central_command.selfcheck",
         description="Prove the install AS THE APP: the settings and credentials the API "
-                    "itself uses. Run from the install's .venv with the repo root as cwd.",
+        "itself uses. Run from the install's .venv with the repo root as cwd.",
     )
-    parser.add_argument("--pre-boot", action="store_true",
-                        help="the installer's verify phase: the host processes boot starts "
-                             "(cockpit, sandbox runner) are not checked yet")
-    parser.add_argument("--json", action="store_true",
-                        help="print the result document instead of protocol lines")
-    parser.add_argument("--timeout", type=float, metavar="SECONDS",
-                        help="completion-as-app's timeout for this run (default "
-                             "CC_SELFCHECK_COMPLETION_TIMEOUT, "
-                             f"{settings.selfcheck_completion_timeout:g} s)")
+    parser.add_argument(
+        "--pre-boot",
+        action="store_true",
+        help="the installer's verify phase: the host processes boot starts "
+        "(cockpit, sandbox runner) are not checked yet",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="print the result document instead of protocol lines"
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        metavar="SECONDS",
+        help="completion-as-app's timeout for this run (default "
+        "CC_SELFCHECK_COMPLETION_TIMEOUT, "
+        f"{settings.selfcheck_completion_timeout:g} s)",
+    )
     args = parser.parse_args(argv)
     _utf8_output()
     doc = asyncio.run(run(mode="cli", pre_boot=args.pre_boot, completion_timeout=args.timeout))

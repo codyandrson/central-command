@@ -69,8 +69,13 @@ def _clear(monkeypatch):
 
 
 def _cli(*args):
-    return subprocess.run([sys.executable, "-I", str(MODULE), *args],
-                          capture_output=True, text=True, cwd=ROOT, timeout=60)
+    return subprocess.run(
+        [sys.executable, "-I", str(MODULE), *args],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        timeout=60,
+    )
 
 
 # --- (a) the guard -------------------------------------------------------------------
@@ -78,7 +83,10 @@ def _cli(*args):
 
 @pytest.mark.parametrize(("key", "value"), REFUSED)
 def test_a_run_mode_key_in_the_env_file_stops_startup_naming_the_key(
-    monkeypatch, tmp_path, key, value,
+    monkeypatch,
+    tmp_path,
+    key,
+    value,
 ):
     from central_command.api import app as app_module
 
@@ -126,8 +134,7 @@ def test_with_none_of_the_keys_the_rule_passes_and_the_cli_exits_0(monkeypatch, 
     env = tmp_path / ".env"
     env.write_text("CC_LLM_BASE_URL=http://127.0.0.1:4000\n# CC_EXECUTOR_MODE=live\n")
     environ = tmp_path / "environ"
-    environ.write_bytes(b"".join(
-        f"{k}={v}\0".encode() for k, v in os.environ.items()))
+    environ.write_bytes(b"".join(f"{k}={v}\0".encode() for k, v in os.environ.items()))
     out = _cli("--env-file", str(env), "--environ", str(environ))
     assert out.returncode == 0, out.stdout
     assert out.stdout.startswith("PASS run-modes: none of CC_TEST_MODEL")
@@ -139,10 +146,13 @@ def test_with_none_of_the_keys_the_rule_passes_and_the_cli_exits_0(monkeypatch, 
 def test_the_environment_cannot_turn_the_test_model_on():
     env = {k: v for k, v in os.environ.items() if k not in KEYS}
     env.update(CC_TEST_MODEL="true", CC_DEMO_MODE="true")
-    code = ("from central_command.config import Settings, settings\n"
-            "print('test_model', settings.test_model, Settings().test_model)\n")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                         cwd=ROOT, env=env, timeout=120)
+    code = (
+        "from central_command.config import Settings, settings\n"
+        "print('test_model', settings.test_model, Settings().test_model)\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT, env=env, timeout=120
+    )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip().splitlines()[-1] == "test_model False False"
 
@@ -164,6 +174,7 @@ async def _rpc(method: str, params: dict | None = None):
 def _drafting(monkeypatch, model) -> None:
     """Both routes resolve the triage model themselves; the approve route
     resolves the session's for the closing turn. Hand all of them the fake."""
+
     async def fixed(*_a, **_kw):
         return model
 
@@ -174,11 +185,17 @@ def _drafting(monkeypatch, model) -> None:
 def _proposal(capability: str, arguments: dict, claim: str, system: str) -> dict:
     return {
         "intent": f"{capability} from the email",
-        "actions": [{"capability": capability, "arguments": arguments,
-                     "target_ref": {"system": system, "id": "new"},
-                     "reversibility": "reversible"}],
-        "evidence": [{"kind": "email", "source_ref": "email:body",
-                      "locator": "body", "claim": claim}],
+        "actions": [
+            {
+                "capability": capability,
+                "arguments": arguments,
+                "target_ref": {"system": system, "id": "new"},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {"kind": "email", "source_ref": "email:body", "locator": "body", "claim": claim}
+        ],
         "expected_effect": f"{capability} performed",
         "confidence": {"level": "high", "rationale": "The test states it."},
     }
@@ -221,8 +238,9 @@ async def fresh_database():
     try:
         await conn.execute("update wiki_claim set proposal_id = null")
         await conn.execute("delete from proposal")
-        await conn.execute("delete from work_item where message_id = $1",
-                           "<ownership-2026-07-06@example.com>")
+        await conn.execute(
+            "delete from work_item where message_id = $1", "<ownership-2026-07-06@example.com>"
+        )
         assert await conn.fetchval("select count(*) from proposal") == 0
     finally:
         await conn.close()
@@ -238,12 +256,14 @@ class _NoMode:
         def read(_self):
             self.reads.append(name)
             raise AssertionError(f"a run mode was consulted: settings.{name}")
+
         return property(read)
 
 
 @needs_pg
 async def test_a_fresh_databases_first_proposal_executes_live_against_a_fake(
-    monkeypatch, fresh_database,
+    monkeypatch,
+    fresh_database,
 ):
     no_mode = _NoMode()
     for name in ("executor_mode", "demo_mode"):
@@ -252,21 +272,36 @@ async def test_a_fresh_databases_first_proposal_executes_live_against_a_fake(
 
     writes: list[dict] = []
 
-    async def fake_enqueue(name, episode_body, source_description, group_id, *,
-                           reference_time, proposal_id, scope, marker):
+    async def fake_enqueue(
+        name,
+        episode_body,
+        source_description,
+        group_id,
+        *,
+        reference_time,
+        proposal_id,
+        scope,
+        marker,
+    ):
         writes.append({"name": name, "proposal_id": proposal_id, "scope": scope})
         return {"verification": {"id": "v-1"}, "job": {"id": 7}}
 
     monkeypatch.setattr(graphiti_ingest, "enqueue", fake_enqueue)
 
-    episode = {"name": "Billing service ownership", "scope": "shared",
-               "reference_time": "2026-07-06T10:02:11Z",
-               "episode_body": "As of 2026-07-06 Priya Rivers owns the billing service; "
-                               "Marcus Doe handed it over and moved to the platform team."}
+    episode = {
+        "name": "Billing service ownership",
+        "scope": "shared",
+        "reference_time": "2026-07-06T10:02:11Z",
+        "episode_body": "As of 2026-07-06 Priya Rivers owns the billing service; "
+        "Marcus Doe handed it over and moved to the platform team.",
+    }
     pid, out = await _feed_and_approve(
-        monkeypatch, FIXTURE.read_text(),
-        _proposal("graph.add_episode", episode,
-                  "Priya Rivers owns the billing service", "graphiti"))
+        monkeypatch,
+        FIXTURE.read_text(),
+        _proposal(
+            "graph.add_episode", episode, "Priya Rivers owns the billing service", "graphiti"
+        ),
+    )
 
     assert out["ok"] is True, out
     assert writes == [{"name": episode["name"], "proposal_id": pid, "scope": "shared"}]
@@ -288,9 +323,21 @@ async def test_a_fresh_databases_first_proposal_executes_live_against_a_fake(
 # --- (d) the string guard -------------------------------------------------------------
 
 
-WALK_ROOTS = ("central_command", "web/src", "web/server/routes", "deploy", "scripts",
-              "skills", ".claude/rules", ".claude/skills", "tests", "AGENTS.md",
-              "README.md", "docs/ARCHITECTURE.md", ".env.example")
+WALK_ROOTS = (
+    "central_command",
+    "web/src",
+    "web/server/routes",
+    "deploy",
+    "scripts",
+    "skills",
+    ".claude/rules",
+    ".claude/skills",
+    "tests",
+    "AGENTS.md",
+    "README.md",
+    "docs/ARCHITECTURE.md",
+    ".env.example",
+)
 WALK_EXCLUDED: tuple[str, ...] = ()
 SKIP_DIRS = {"node_modules", "__pycache__", ".pytest_cache", "dist"}
 
@@ -299,20 +346,29 @@ SKIP_DIRS = {"node_modules", "__pycache__", ".pytest_cache", "dist"}
 # --dry-run=client) and are not matched; 'demo mode' also catches 'demo model'.
 TOKENS = re.compile(
     r"executor_mode|CC_EXECUTOR_MODE|demo_mode|CC_DEMO_MODE|demoMode|executorMode"
-    r"|'dry_run'|\"dry_run\"|\[dry-run\]|DRY RUN|(?i:demo mode)")
+    r"|'dry_run'|\"dry_run\"|\[dry-run\]|DRY RUN|(?i:demo mode)"
+)
 KEY_NAMES = frozenset({"CC_DEMO_MODE", "CC_EXECUTOR_MODE"})
 ANY = None  # every token
 
 # path -> (the tokens it may carry, why). Each reason is the allowlist's record.
 ALLOWLIST: dict[str, tuple[frozenset | None, str]] = {
     "central_command/run_modes.py": (KEY_NAMES, "the rule itself: KEYS names the refused keys"),
-    "central_command/db/repo.py": (frozenset({"[dry-run]"}),
-        ("the history read: a proposal.executed whose result_text starts '[dry-run]' "
-        "reads simulated forever (history is never rewritten)")),
-    "web/src/features/decisions/types.ts": (frozenset({"[dry-run]"}),
-        "the simulated badge's type comment: the mark is read off that history"),
-    "deploy/single/phases/check.sh": (KEY_NAMES,
-        "the guard line story 9 wrote: validate_run_modes names what it refuses"),
+    "central_command/db/repo.py": (
+        frozenset({"[dry-run]"}),
+        (
+            "the history read: a proposal.executed whose result_text starts '[dry-run]' "
+            "reads simulated forever (history is never rewritten)"
+        ),
+    ),
+    "web/src/features/decisions/types.ts": (
+        frozenset({"[dry-run]"}),
+        "the simulated badge's type comment: the mark is read off that history",
+    ),
+    "deploy/single/phases/check.sh": (
+        KEY_NAMES,
+        "the guard line story 9 wrote: validate_run_modes names what it refuses",
+    ),
     "AGENTS.md": (KEY_NAMES, "states the guard: the API refuses to start on the keys"),
     "docs/ARCHITECTURE.md": (KEY_NAMES, "states the guard"),
     ".claude/skills/setup/SKILL.md": (KEY_NAMES, "states the guard"),
@@ -325,8 +381,13 @@ ALLOWLIST: dict[str, tuple[frozenset | None, str]] = {
 }
 # The documents in the allowlist are there because they STATE the guard; a key
 # name there with no refusal beside it would be a mode described, not refused.
-STATES_THE_GUARD = ("AGENTS.md", "docs/ARCHITECTURE.md", ".claude/skills/setup/SKILL.md",
-                    "deploy/k3s/README.md", "deploy/single/phases/check.sh")
+STATES_THE_GUARD = (
+    "AGENTS.md",
+    "docs/ARCHITECTURE.md",
+    ".claude/skills/setup/SKILL.md",
+    "deploy/k3s/README.md",
+    "deploy/single/phases/check.sh",
+)
 
 
 def _walk():
@@ -335,8 +396,11 @@ def _walk():
         paths = [top] if top.is_file() else sorted(top.rglob("*"))
         for p in paths:
             r = p.relative_to(ROOT).as_posix()
-            if (not p.is_file() or r.startswith(WALK_EXCLUDED)
-                    or SKIP_DIRS & set(p.relative_to(ROOT).parts)):
+            if (
+                not p.is_file()
+                or r.startswith(WALK_EXCLUDED)
+                or SKIP_DIRS & set(p.relative_to(ROOT).parts)
+            ):
                 continue
             try:
                 text = p.read_text(encoding="utf-8")
@@ -374,7 +438,7 @@ def test_no_run_mode_string_survives_outside_the_allowlist():
                 if allowed is not None and (allowed[0] is None or token in allowed[0]):
                     seen.add(rel)
                     if rel in STATES_THE_GUARD:
-                        window = " ".join(lines[max(0, n - 3):n + 2]).lower()
+                        window = " ".join(lines[max(0, n - 3) : n + 2]).lower()
                         assert "refus" in window, f"{rel}:{n} names {token} but states no refusal"
                     continue
                 hits.append(f"{rel}:{n}: {token}: {line.strip()[:120]}")
@@ -388,18 +452,36 @@ def test_no_run_mode_string_survives_outside_the_allowlist():
 
 
 FAMILIES = [
-    ("jira.set_due_date", {"issue_key": "DEMO-1", "due_date": "2026-08-03"}, "jira",
-     "Jira is not configured"),
-    ("confluence.update_page", {"page_id": "42", "title": "Roadmap",
-                                "body_storage": "<p>new</p>", "expected_version": 3},
-     "confluence", "Confluence is not configured"),
-    ("mail.send", {"to": "dana@example.com", "subject": "Hi", "body": "Hello"}, "mail",
-     "set CC_EXCHANGE_URL"),
-    ("calendar.create_event", {"title": "Sync", "start": "2026-11-02T10:00:00Z",
-                               "end": "2026-11-02T10:30:00Z"}, "calendar",
-     "calendar façade create_event not configured"),
-    ("litellm.add_model", {"model_name": "doe-small", "model": "openai/doe-small"},
-     "litellm", "LiteLLM admin not configured"),
+    (
+        "jira.set_due_date",
+        {"issue_key": "DEMO-1", "due_date": "2026-08-03"},
+        "jira",
+        "Jira is not configured",
+    ),
+    (
+        "confluence.update_page",
+        {"page_id": "42", "title": "Roadmap", "body_storage": "<p>new</p>", "expected_version": 3},
+        "confluence",
+        "Confluence is not configured",
+    ),
+    (
+        "mail.send",
+        {"to": "dana@example.com", "subject": "Hi", "body": "Hello"},
+        "mail",
+        "set CC_EXCHANGE_URL",
+    ),
+    (
+        "calendar.create_event",
+        {"title": "Sync", "start": "2026-11-02T10:00:00Z", "end": "2026-11-02T10:30:00Z"},
+        "calendar",
+        "calendar façade create_event not configured",
+    ),
+    (
+        "litellm.add_model",
+        {"model_name": "doe-small", "model": "openai/doe-small"},
+        "litellm",
+        "LiteLLM admin not configured",
+    ),
     ("mcp.build_image", {"server_id": "e2e-build"}, "mcp", "no build host configured"),
 ]
 # Why each lands FAILED: the guard holds Jira, Confluence, Exchange and the
@@ -430,24 +512,36 @@ def connects(monkeypatch):
 
 def _outbound(addresses: list) -> list:
     """Connections to anything but this host (the test Postgres is loopback)."""
-    return [a for a in addresses if isinstance(a, tuple)
-            and a[0] not in ("127.0.0.1", "::1", "localhost")]
+    return [
+        a
+        for a in addresses
+        if isinstance(a, tuple) and a[0] not in ("127.0.0.1", "::1", "localhost")
+    ]
 
 
 @needs_pg
-@pytest.mark.parametrize(("capability", "arguments", "system", "why"), FAMILIES,
-                         ids=[f[0] for f in FAMILIES])
+@pytest.mark.parametrize(
+    ("capability", "arguments", "system", "why"), FAMILIES, ids=[f[0] for f in FAMILIES]
+)
 async def test_with_no_fake_an_approved_write_lands_failed_and_opens_no_socket(
-    monkeypatch, connects, capability, arguments, system, why,
+    monkeypatch,
+    connects,
+    capability,
+    arguments,
+    system,
+    why,
 ):
     if capability == "mcp.build_image":
         arguments = {"server_id": f"e2e-build-{uuid.uuid4().hex[:8]}"}
         await repo.upsert_mcp_server_synced(arguments["server_id"], "human:test")
-    text = (f"Message-ID: <e2e-{uuid.uuid4().hex}@example.com>\n"
-            "From: dana@example.com\nSubject: please do the thing\n\n"
-            "Dana asks for the thing to be done.\n")
+    text = (
+        f"Message-ID: <e2e-{uuid.uuid4().hex}@example.com>\n"
+        "From: dana@example.com\nSubject: please do the thing\n\n"
+        "Dana asks for the thing to be done.\n"
+    )
     pid, out = await _feed_and_approve(
-        monkeypatch, text, _proposal(capability, arguments, "Dana asks", system))
+        monkeypatch, text, _proposal(capability, arguments, "Dana asks", system)
+    )
 
     assert out.get("ok") is False and out.get("failed_capability") == capability, out
     assert why in out["error"], out["error"]

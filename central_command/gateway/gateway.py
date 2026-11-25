@@ -78,7 +78,11 @@ async def redraft_link(parent_id: str, cause: str) -> dict:
 
 
 async def _recheck_against_session_sources(
-    session_id: str, evidence, *, messages=None, proposal=None,
+    session_id: str,
+    evidence,
+    *,
+    messages=None,
+    proposal=None,
 ) -> list[dict] | None:
     """Re-check a later leg's quotes against the sources the session was fed.
 
@@ -108,21 +112,33 @@ async def _recheck_against_session_sources(
     from central_command.runtime.proposals import session_source_evidence
 
     return await session_source_evidence(
-        session_id, evidence, messages=messages, proposal=proposal,
+        session_id,
+        evidence,
+        messages=messages,
+        proposal=proposal,
     )
 
 
 async def _park_redraft(
-    session_id: str, agent_id: str, final, call, redraft_of: str,
-    evidence: list[dict], cause: str,
+    session_id: str,
+    agent_id: str,
+    final,
+    call,
+    redraft_of: str,
+    evidence: list[dict],
+    cause: str,
 ) -> dict:
     """Persist a redraft the resumed agent produced: park the session again with
     the new pending call and route the new proposal for approval — the loop
     stays closed no matter which path (rejection, execution failure) resumed it.
     `cause` is the path that resumed the drafter; the link goes on the row."""
     parked = await park_proposal(
-        session_id=session_id, agent_id=agent_id, result=final, call=call,
-        evidence=evidence, context={"redraft_of": redraft_of},
+        session_id=session_id,
+        agent_id=agent_id,
+        result=final,
+        call=call,
+        evidence=evidence,
+        context={"redraft_of": redraft_of},
         redraft=await redraft_link(redraft_of, cause),
     )
     # Never decided by an override, however it was resumed (Reject or a failed
@@ -140,9 +156,7 @@ async def _park_redraft(
 _MECHANICAL_RESOLUTION_LIMIT = 2
 
 
-async def _drive_past_non_proposals(
-    agent, final, *, model, agent_id: str, session_id: str
-):
+async def _drive_past_non_proposals(agent, final, *, model, agent_id: str, session_id: str):
     """Answer deferrals a DECISION resume cannot host, and let the run continue.
 
     `extract_deferred` returns the first deferred call whatever tool it is, and
@@ -195,8 +209,11 @@ async def _drive_past_non_proposals(
                 "the answer you would have got."
             )
         results = await deferred_results(
-            final.all_messages(), call.tool_call_id, ToolDenied(denial),
-            session_id=session_id, agent_id=agent_id,
+            final.all_messages(),
+            call.tool_call_id,
+            ToolDenied(denial),
+            session_id=session_id,
+            agent_id=agent_id,
         )
         final = await agent.run(
             message_history=final.all_messages(),
@@ -211,9 +228,13 @@ async def _drive_past_non_proposals(
         # text (the full parked-question fix stays deferred; recorded 2026-08-05).
         question = str(call_args(call).get("question") or "").strip()
         detail = f' asking: "{question}"' if question else ""
-        return final, None, (
-            f"(kept reaching for `{getattr(call, 'tool_name', '?')}`{detail}, "
-            "which this path cannot drive; the session is closed out unchanged.)"
+        return (
+            final,
+            None,
+            (
+                f"(kept reaching for `{getattr(call, 'tool_name', '?')}`{detail}, "
+                "which this path cannot drive; the session is closed out unchanged.)"
+            ),
         )
     return final, call, None
 
@@ -287,8 +308,11 @@ async def _concluded_a_discussion(session_id: str, final) -> bool:
         try:
             await repo.update_session_run_state(
                 session_id,
-                {"messages": ModelMessagesTypeAdapter.dump_python(
-                    final.all_messages(), mode="json")},
+                {
+                    "messages": ModelMessagesTypeAdapter.dump_python(
+                        final.all_messages(), mode="json"
+                    )
+                },
             )
         except Exception:  # noqa: BLE001, S110 — a transcript write must not block the close
             pass
@@ -297,9 +321,12 @@ async def _concluded_a_discussion(session_id: str, final) -> bool:
         await events.emit(
             "session.resume_failed",
             ref_id=session_id,
-            payload={"error": str(e), "conclude_discussion": True,
-                     "item_id": item["id"],
-                     "transient": classify_failure(e) == "transient"},
+            payload={
+                "error": str(e),
+                "conclude_discussion": True,
+                "item_id": item["id"],
+                "transient": classify_failure(e) == "transient",
+            },
             actor="system",
         )
         return False
@@ -335,7 +362,10 @@ async def _continue_if_conversation(session_id: str, final, after: str, proposal
 
 
 async def _redraft_evidence(
-    redraft: Proposal, after: str, feedback: str | None, decided_event_id,
+    redraft: Proposal,
+    after: str,
+    feedback: str | None,
+    decided_event_id,
     session_id: str | None = None,
 ) -> list[dict]:
     """The evidence a redraft is persisted with.
@@ -361,9 +391,7 @@ async def _redraft_evidence(
         d = e.model_dump()
         if after == "rejected" and d["kind"] == "operator" and decided_event_id:
             d["source_ref"] = f"event:{decided_event_id}"
-            d["locator"] = (
-                f"GET /api/events → id {decided_event_id}, payload.feedback"
-            )
+            d["locator"] = f"GET /api/events → id {decided_event_id}, payload.feedback"
             if quote_supported(d["claim"], feedback or ""):
                 d["claim_matches_source"] = True
             else:
@@ -373,12 +401,13 @@ async def _redraft_evidence(
     if unmatched:
         from central_command.runtime.proposals import verified_operator_evidence
 
-        words = (
-            await repo.operator_words_for_session(session_id) if session_id else []
-        )
+        words = await repo.operator_words_for_session(session_id) if session_id else []
         for n, d in enumerate(evidence):
-            if not (d["kind"] == "operator" and d.get("claim_matches_source") is None
-                    and d.get("source_ref") == f"event:{decided_event_id}"):
+            if not (
+                d["kind"] == "operator"
+                and d.get("claim_matches_source") is None
+                and d.get("source_ref") == f"event:{decided_event_id}"
+            ):
                 continue
             judged = verified_operator_evidence([d], words)[0] if words else d
             if judged.get("claim_matches_source") is None:
@@ -436,20 +465,27 @@ async def finish_decision_resume(
     if final is not None and after in ("failed", "rejected"):
         try:
             final, call, note = await _drive_past_non_proposals(
-                agent, final, model=model, agent_id=agent_id, session_id=session_id,
+                agent,
+                final,
+                model=model,
+                agent_id=agent_id,
+                session_id=session_id,
             )
             driven = True
         except Exception as e:  # noqa: BLE001 — the decision record outranks the resume
-            if pending is not None and await resume_park.park_if_transient(
-                session_id, e, pending
-            ):
+            if pending is not None and await resume_park.park_if_transient(session_id, e, pending):
                 out["resume_parked"] = True
                 out.setdefault("final_output", None)
                 return out
             await events.emit(
-                "session.resume_failed", ref_id=session_id,
-                payload={"error": str(e), "proposal_id": proposal_id,
-                         "after": after, "transient": False},
+                "session.resume_failed",
+                ref_id=session_id,
+                payload={
+                    "error": str(e),
+                    "proposal_id": proposal_id,
+                    "after": after,
+                    "transient": False,
+                },
                 actor="system",
             )
     elif final is not None and after == "approved":
@@ -470,7 +506,10 @@ async def finish_decision_resume(
             from central_command.runtime.consult import park_task_wait_deferred
 
             waited = await park_task_wait_deferred(
-                session_id=session_id, agent_id=agent_id, result=final, call=nxt,
+                session_id=session_id,
+                agent_id=agent_id,
+                result=final,
+                call=nxt,
             )
             out.update({"task_waiting": True, "task_id": waited["task_id"]})
             return out
@@ -488,12 +527,18 @@ async def finish_decision_resume(
             _meta = final.output.metadata.get(call.tool_call_id)
         follow_on = proposal_from_call(call, metadata=_meta)
         evidence = await _recheck_against_session_sources(
-            session_id, follow_on.evidence,
-            messages=final.all_messages(), proposal=follow_on,
+            session_id,
+            follow_on.evidence,
+            messages=final.all_messages(),
+            proposal=follow_on,
         )
         parked = await park_proposal(
-            session_id=session_id, agent_id=agent_id, result=final, call=call,
-            evidence=evidence, context={"follow_on_of": proposal_id},
+            session_id=session_id,
+            agent_id=agent_id,
+            result=final,
+            call=call,
+            evidence=evidence,
+            context={"follow_on_of": proposal_id},
         )
         # The follow-on on the approved leg is not a redraft, but it parks for
         # the operator by default: a follow-on of an override-decided proposal
@@ -501,10 +546,12 @@ async def finish_decision_resume(
         from central_command.gateway import overrides
 
         await overrides.record_unevaluated_park(parked["proposal_id"], "follow_on")
-        out.update({
-            "follow_on_proposal_id": parked["proposal_id"],
-            "intent": parked["proposal"].intent,
-        })
+        out.update(
+            {
+                "follow_on_proposal_id": parked["proposal_id"],
+                "intent": parked["proposal"].intent,
+            }
+        )
         return out
 
     if call is not None:
@@ -523,15 +570,28 @@ async def finish_decision_resume(
         # and document quotes a redraft still carries — a redraft that re-cites
         # the mail is checked exactly as the first draft was.
         evidence = await _redraft_evidence(
-            redraft, after, feedback, decided_event_id, session_id=session_id,
+            redraft,
+            after,
+            feedback,
+            decided_event_id,
+            session_id=session_id,
         )
-        evidence = await _recheck_against_session_sources(
-            session_id, evidence,
-            messages=final.all_messages() if final is not None else None,
-            proposal=redraft,
-        ) or evidence
+        evidence = (
+            await _recheck_against_session_sources(
+                session_id,
+                evidence,
+                messages=final.all_messages() if final is not None else None,
+                proposal=redraft,
+            )
+            or evidence
+        )
         parked = await _park_redraft(
-            session_id, agent_id, final, call, proposal_id, evidence,
+            session_id,
+            agent_id,
+            final,
+            call,
+            proposal_id,
+            evidence,
             cause=redraft_cause or after,
         )
         if after == "rejected":
@@ -543,9 +603,7 @@ async def finish_decision_resume(
         out["final_output"] = final.output if final is not None else None
     elif after == "failed" and driven:
         out["final_output"] = note if note is not None else final.output
-    closing = note if note is not None else (
-        str(final.output) if final is not None else None
-    )
+    closing = note if note is not None else (str(final.output) if final is not None else None)
 
     if not await _continue_if_conversation(session_id, final, after, proposal_id):
         from central_command.runtime.converse import land_session
@@ -559,17 +617,24 @@ async def finish_decision_resume(
             # state and lands it FAILED with the reason). Composer stays
             # disabled: `why_not_sendable` already refuses non-conversations.
             try:
-                rs = {"messages": ModelMessagesTypeAdapter.dump_python(
-                    final.all_messages(), mode="json",
-                )} if final is not None else repaired_run_state
+                rs = (
+                    {
+                        "messages": ModelMessagesTypeAdapter.dump_python(
+                            final.all_messages(),
+                            mode="json",
+                        )
+                    }
+                    if final is not None
+                    else repaired_run_state
+                )
             except Exception:  # noqa: BLE001 — fall back to a status-only rest
                 rs = None
             reason = failure_summary or "execution failed"
             await repo.mark_session_exec_failed_open(session_id, reason, rs)
             await events.emit(
-                "session.exec_failed", ref_id=session_id,
-                payload={"agent_id": agent_id, "proposal_id": proposal_id,
-                         "reason": reason},
+                "session.exec_failed",
+                ref_id=session_id,
+                payload={"agent_id": agent_id, "proposal_id": proposal_id, "reason": reason},
                 actor="system",
             )
         else:
@@ -582,14 +647,19 @@ async def finish_decision_resume(
                 try:
                     await repo.update_session_run_state(
                         session_id,
-                        {"messages": ModelMessagesTypeAdapter.dump_python(
-                            final.all_messages(), mode="json")},
+                        {
+                            "messages": ModelMessagesTypeAdapter.dump_python(
+                                final.all_messages(), mode="json"
+                            )
+                        },
                     )
                 except Exception:  # noqa: BLE001, S110 — a transcript write must not block the close
                     pass
             await land_session(
-                session_id, agent_id=agent_id,
-                proposal_id=proposal_id, after=after,
+                session_id,
+                agent_id=agent_id,
+                proposal_id=proposal_id,
+                after=after,
             )
         if after == "approved":
             await _resolve_task_after(session_id, "DONE", outcome_text)
@@ -604,9 +674,12 @@ async def finish_decision_resume(
             )
             for item_id in failed_items:
                 await events.emit(
-                    "work.failed", ref_id=item_id,
-                    payload={"reason": "approved proposal failed execution",
-                             "proposal_id": proposal_id},
+                    "work.failed",
+                    ref_id=item_id,
+                    payload={
+                        "reason": "approved proposal failed execution",
+                        "proposal_id": proposal_id,
+                    },
                     actor="system",
                 )
         else:  # rejected
@@ -636,7 +709,9 @@ def _operator_actor() -> str:
 
 
 async def _refuse_auditor_on_irreversible(
-    proposal_id: str, session_id: str, prop_row: dict,
+    proposal_id: str,
+    session_id: str,
+    prop_row: dict,
 ) -> None:
     """Raise `GraduationBarred` (after writing `proposal.graduation_barred`)
     when any action's CAPABILITY MARK in the registry is irreversible. The mark
@@ -662,13 +737,11 @@ async def _refuse_auditor_on_irreversible(
     await events.emit(
         "proposal.graduation_barred",
         ref_id=proposal_id,
-        payload={"session_id": session_id, "status": prop_row["status"],
-                 "policy_flags": flags},
+        payload={"session_id": session_id, "status": prop_row["status"], "policy_flags": flags},
         actor="auditor",
     )
     raise GraduationBarred(
-        f"proposal {proposal_id} stays with the operator: "
-        + "; ".join(f["problem"] for f in flags)
+        f"proposal {proposal_id} stays with the operator: " + "; ".join(f["problem"] for f in flags)
     )
 
 
@@ -688,8 +761,12 @@ async def source_time_for_session(session_id: str | None):
 
 
 async def approve_and_execute(
-    session_id: str, proposal_id: str, approver: str | None = None, model=None,
-    *, detach: bool = False,
+    session_id: str,
+    proposal_id: str,
+    approver: str | None = None,
+    model=None,
+    *,
+    detach: bool = False,
 ) -> dict:
     """Approve a pending proposal: execute it for real, stamp provenance, and
     resume the agent with the outcome.
@@ -750,7 +827,9 @@ async def approve_and_execute(
         # says "approved" for a proposal the operator then decides.
         try:
             await overrides.check_override_approval(
-                approver, prop_row["actions"], proposer=prop_row["agent_id"],
+                approver,
+                prop_row["actions"],
+                proposer=prop_row["agent_id"],
                 proposal_row=prop_row,
             )
         except overrides.OverrideRefused as refused:
@@ -777,8 +856,11 @@ async def approve_and_execute(
     source_refs = [e["source_ref"] for e in prop_row["evidence"]]
     try:
         outcome = await executor.execute(
-            proposal.actions, approver=approver, source_refs=source_refs,
-            proposer=prop_row["agent_id"], proposal_id=proposal_id,
+            proposal.actions,
+            approver=approver,
+            source_refs=source_refs,
+            proposer=prop_row["agent_id"],
+            proposal_id=proposal_id,
             record_progress=True,
         )
     except overrides.OverrideRefused as refused:
@@ -794,16 +876,18 @@ async def approve_and_execute(
         # A transient failure never makes an approved proposal terminal — the
         # operator's decision stands and the world-change queues (RETRY_PENDING).
         if _execution_transient(failure):
-            return await _park_execution_retry(
-                session_id, prop_row, failure, approver
-            )
+            return await _park_execution_retry(session_id, prop_row, failure, approver)
         # Semantic: the world may be half-changed and cannot be un-decided — so
         # the record must say exactly what happened: proposal FAILED (terminal,
         # never re-approvable), folds released (a failed execution covered
         # nothing), the partial results on the log, and the agent told the
         # truth on resume.
         return await _record_execution_failure(
-            session_id, proposal_id, prop_row["agent_id"], failure, model,
+            session_id,
+            proposal_id,
+            prop_row["agent_id"],
+            failure,
+            model,
             detach=detach,
         )
     except BaseException as stopped:
@@ -817,9 +901,14 @@ async def approve_and_execute(
         await _settle_stopped_execution(session_id, proposal_id, prop_row["status"], stopped)
         raise
     return await _record_execution_success(
-        session_id, proposal_id, prop_row["agent_id"],
-        outcome.result_text, outcome.provenance.model_dump(mode="json"),
-        approver, model=model, detach=detach,
+        session_id,
+        proposal_id,
+        prop_row["agent_id"],
+        outcome.result_text,
+        outcome.provenance.model_dump(mode="json"),
+        approver,
+        model=model,
+        detach=detach,
     )
 
 
@@ -868,7 +957,10 @@ async def _record_execution_success(
     folded = await repo.commit_folds(proposal_id)
     if folded:
         await events.emit(
-            "work.folded", ref_id=proposal_id, payload={"count": folded}, actor="system",
+            "work.folded",
+            ref_id=proposal_id,
+            payload={"count": folded},
+            actor="system",
         )
 
     # --- resume the paused agent with the real Executor result ---
@@ -888,8 +980,10 @@ async def _record_execution_success(
         # own error handling below (a KeyError raised out here would escape the
         # best-effort try and 500 an approval whose write already landed).
         pending = resume_park.pending_resume(
-            kind="result", text=result_text,
-            tool_call_id=run_state["tool_call_id"], after="approved",
+            kind="result",
+            text=result_text,
+            tool_call_id=run_state["tool_call_id"],
+            after="approved",
             proposal_id=proposal_id,
         )
         # Armed BEFORE the resume: the write already landed, so a process death
@@ -901,6 +995,7 @@ async def _record_execution_success(
         "result_text": result_text,
         "provenance": provenance,
     }
+
     async def _resume() -> dict:
         final = agent = None
         try:
@@ -908,8 +1003,12 @@ async def _record_execution_success(
                 raise GatewayError(f"no paused session {session_id}")
             agent = await build_agent_for(agent_id, model=model)
             final = await resume(
-                agent, load_messages(run_state), run_state["tool_call_id"],
-                result_text, model=model, agent_id=agent_id,
+                agent,
+                load_messages(run_state),
+                run_state["tool_call_id"],
+                result_text,
+                model=model,
+                agent_id=agent_id,
                 session_id=session_id,
             )
         except Exception as e:  # noqa: BLE001 — the executed record outranks the resume
@@ -917,22 +1016,32 @@ async def _record_execution_success(
             # final turn, not its result. Park it — the world change stands,
             # the session is retryable, and nothing about the decision is in
             # doubt.
-            if pending is not None and await resume_park.park_if_transient(
-                session_id, e, pending
-            ):
+            if pending is not None and await resume_park.park_if_transient(session_id, e, pending):
                 out["resume_parked"] = True
                 return out
             await events.emit(
-                "session.resume_failed", ref_id=session_id,
-                payload={"error": str(e), "proposal_id": proposal_id,
-                         "after": "approved", "transient": False},
+                "session.resume_failed",
+                ref_id=session_id,
+                payload={
+                    "error": str(e),
+                    "proposal_id": proposal_id,
+                    "after": "approved",
+                    "transient": False,
+                },
                 actor="system",
             )
 
         return await finish_decision_resume(
-            session_id=session_id, agent_id=agent_id,
-            proposal_id=proposal_id, after="approved", final=final, agent=agent,
-            model=model, out=out, outcome_text=result_text, pending=pending,
+            session_id=session_id,
+            agent_id=agent_id,
+            proposal_id=proposal_id,
+            after="approved",
+            final=final,
+            agent=agent,
+            model=model,
+            out=out,
+            outcome_text=result_text,
+            pending=pending,
         )
 
     if detach:
@@ -960,13 +1069,16 @@ async def _current_charter_shown(failure: executor.ExecutionFailed) -> dict | No
         from central_command.runtime.agent import builtin_charter
 
         return {"agent_id": agent_id, "version": 0, "content": builtin_charter(agent_id)}
-    return {"agent_id": agent_id, "version": current["version"],
-            "content": current["content"]}
+    return {"agent_id": agent_id, "version": current["version"], "content": current["content"]}
 
 
 def _execution_failure_report(
-    failure: executor.ExecutionFailed, failed_row: dict, *,
-    chain_count: int, limit: int, chain_exhausted: bool,
+    failure: executor.ExecutionFailed,
+    failed_row: dict,
+    *,
+    chain_count: int,
+    limit: int,
+    chain_exhausted: bool,
     charter: dict | None = None,
 ) -> str:
     """The honest partial report a failed execution hands its drafter (and, at
@@ -1004,8 +1116,9 @@ def _execution_failure_report(
         actions = failed_row.get("actions") or []
         held = (state.get("interrupted_action") or {}).get("index")
         index = int(held if held is not None else state.get("next_action_index") or 0)
-        in_flight = (actions[index].get("capability")
-                     if 0 <= index < len(actions) else None) or "unknown"
+        in_flight = (
+            actions[index].get("capability") if 0 <= index < len(actions) else None
+        ) or "unknown"
         report += (
             f"This execution was interrupted by a restart while {in_flight} "
             f"(action {index + 1}) was in flight: that action may itself "
@@ -1074,7 +1187,10 @@ async def _record_execution_failure(
     if chain_exhausted:
         payload["chain_exhausted"] = True
     await events.emit(
-        "proposal.failed", ref_id=proposal_id, payload=payload, actor="system",
+        "proposal.failed",
+        ref_id=proposal_id,
+        payload=payload,
+        actor="system",
     )
     if chain_exhausted:
         # Bookkeeping after the status and the failure event; it authorises
@@ -1082,8 +1198,12 @@ async def _record_execution_failure(
         await events.emit(
             "proposal.redraft_limit_reached",
             ref_id=proposal_id,
-            payload={"root": chain_root, "count": chain_count, "limit": limit,
-                     "proposal_id": proposal_id},
+            payload={
+                "root": chain_root,
+                "count": chain_count,
+                "limit": limit,
+                "proposal_id": proposal_id,
+            },
             actor="system",
         )
 
@@ -1091,8 +1211,12 @@ async def _record_execution_failure(
     # durably recorded above — a resume error must never mask it.
     charter = await _current_charter_shown(failure)
     report = _execution_failure_report(
-        failure, failed_row, chain_count=chain_count, limit=limit,
-        chain_exhausted=chain_exhausted, charter=charter,
+        failure,
+        failed_row,
+        chain_count=chain_count,
+        limit=limit,
+        chain_exhausted=chain_exhausted,
+        charter=charter,
     )
     if charter is not None:
         # The report puts this version in front of the drafter: record it as
@@ -1125,17 +1249,26 @@ async def _record_execution_failure(
         if run_state is not None and run_state.get("tool_call_id"):
             try:
                 answered = answer_pending_calls(
-                    load_messages(run_state), run_state["tool_call_id"], report,
+                    load_messages(run_state),
+                    run_state["tool_call_id"],
+                    report,
                 )
                 if answered is not None:
-                    repaired = {"messages": ModelMessagesTypeAdapter.dump_python(
-                        answered, mode="json")}
+                    repaired = {
+                        "messages": ModelMessagesTypeAdapter.dump_python(answered, mode="json")
+                    }
             except Exception:  # noqa: BLE001 — a repair failure must not mask the landing
                 repaired = None
         out["chain_exhausted"] = True
         return await finish_decision_resume(
-            session_id=session_id, agent_id=agent_id, proposal_id=proposal_id,
-            after="failed", final=None, agent=None, model=model, out=out,
+            session_id=session_id,
+            agent_id=agent_id,
+            proposal_id=proposal_id,
+            after="failed",
+            final=None,
+            agent=None,
+            model=model,
+            out=out,
             failure_summary=(
                 f"{summary} (the world moved {_times(chain_count + 1)}; "
                 f"redraft limit {limit} reached)"
@@ -1146,9 +1279,12 @@ async def _record_execution_failure(
     if run_state is not None and run_state.get("tool_call_id"):
         # see the note on the approve path
         pending = resume_park.pending_resume(
-            kind="result", text=report,
+            kind="result",
+            text=report,
             tool_call_id=run_state["tool_call_id"],
-            after="failed", proposal_id=proposal_id, failure_summary=summary,
+            after="failed",
+            proposal_id=proposal_id,
+            failure_summary=summary,
             redraft_cause=cause,
         )
         await resume_park.arm(session_id, pending)
@@ -1159,8 +1295,13 @@ async def _record_execution_failure(
             try:
                 agent = await build_agent_for(agent_id, model=model)
                 final = await resume(
-                    agent, load_messages(run_state), run_state["tool_call_id"], report,
-                    model=model, agent_id=agent_id, session_id=session_id,
+                    agent,
+                    load_messages(run_state),
+                    run_state["tool_call_id"],
+                    report,
+                    model=model,
+                    agent_id=agent_id,
+                    session_id=session_id,
                 )
             except Exception as e:  # noqa: BLE001 — the failure record outranks the resume
                 if await resume_park.park_if_transient(session_id, e, pending):
@@ -1169,17 +1310,29 @@ async def _record_execution_failure(
                 await events.emit(
                     "session.resume_failed",
                     ref_id=session_id,
-                    payload={"error": str(e), "proposal_id": proposal_id,
-                             "after": "failed", "transient": False},
+                    payload={
+                        "error": str(e),
+                        "proposal_id": proposal_id,
+                        "after": "failed",
+                        "transient": False,
+                    },
                     actor="system",
                 )
 
         # A conversation continues even past a failed action (the agent got
         # the honest failure report as text) — only a terminal session closes.
         return await finish_decision_resume(
-            session_id=session_id, agent_id=agent_id, proposal_id=proposal_id,
-            after="failed", final=final, agent=agent, model=model, out=out,
-            failure_summary=summary, pending=pending, redraft_cause=cause,
+            session_id=session_id,
+            agent_id=agent_id,
+            proposal_id=proposal_id,
+            after="failed",
+            final=final,
+            agent=agent,
+            model=model,
+            out=out,
+            failure_summary=summary,
+            pending=pending,
+            redraft_cause=cause,
         )
 
     if detach:
@@ -1200,9 +1353,7 @@ def _execution_transient(failure: executor.ExecutionFailed) -> bool:
     whatever its text says, so it answers False before either."""
     if failure.world_moved:
         return False
-    return bool(failure.transient) or (
-        classify_failure_text(failure.error) == "transient"
-    )
+    return bool(failure.transient) or (classify_failure_text(failure.error) == "transient")
 
 
 def _execution_dependencies(failure: executor.ExecutionFailed) -> list[str]:
@@ -1211,8 +1362,7 @@ def _execution_dependencies(failure: executor.ExecutionFailed) -> list[str]:
     dropped at the gate."""
     from central_command.contract.dependencies import dependencies_for_capability
 
-    return list(failure.dependencies
-                or dependencies_for_capability(failure.failed_capability))
+    return list(failure.dependencies or dependencies_for_capability(failure.failed_capability))
 
 
 async def _park_execution_retry(
@@ -1297,21 +1447,25 @@ async def emit_execution_interrupted(prop: dict) -> None:
     so it follows the park."""
     state = prop["retry_state"]
     await events.emit(
-        "proposal.execution_interrupted", ref_id=prop["id"],
-        payload={"session_id": prop["session_id"],
-                 "next_action_index": state.get("next_action_index"),
-                 "completed_actions": state.get("completed_results") or [],
-                 "failed_capability": state.get("failed_capability"),
-                 "dependencies": state.get("dependencies"),
-                 "in_flight_index": state.get("in_flight_index"),
-                 "in_flight_capability": state.get("in_flight_capability"),
-                 "error": state.get("last_error")},
+        "proposal.execution_interrupted",
+        ref_id=prop["id"],
+        payload={
+            "session_id": prop["session_id"],
+            "next_action_index": state.get("next_action_index"),
+            "completed_actions": state.get("completed_results") or [],
+            "failed_capability": state.get("failed_capability"),
+            "dependencies": state.get("dependencies"),
+            "in_flight_index": state.get("in_flight_index"),
+            "in_flight_capability": state.get("in_flight_capability"),
+            "error": state.get("last_error"),
+        },
         actor="system",
     )
 
 
-async def _land_stopped_execution(proposal_id: str, prior_status: str,
-                                  stopped: BaseException) -> str:
+async def _land_stopped_execution(
+    proposal_id: str, prior_status: str, stopped: BaseException
+) -> str:
     """Land an EXECUTING claim whose execution stopped with no Executor verdict,
     from the STORED cursor (DL-218), never from memory:
 
@@ -1331,12 +1485,14 @@ async def _land_stopped_execution(proposal_id: str, prior_status: str,
         return "untouched"
     state = row.get("retry_state") or {}
     if not state.get("completed_results") and state.get("in_flight_index") is None:
-        return "handed_back" if await repo.hand_back_execution(
-            proposal_id, prior_status) else "untouched"
+        return (
+            "handed_back"
+            if await repo.hand_back_execution(proposal_id, prior_status)
+            else "untouched"
+        )
     parked = await repo.park_interrupted_execution(
         proposal_id,
-        f"execution stopped without a verdict in this process: "
-        f"{type(stopped).__name__}: {stopped}",
+        f"execution stopped without a verdict in this process: {type(stopped).__name__}: {stopped}",
     )
     if parked is None:
         return "untouched"
@@ -1344,8 +1500,9 @@ async def _land_stopped_execution(proposal_id: str, prior_status: str,
     return "interrupted"
 
 
-async def _settle_stopped_execution(session_id: str, proposal_id: str,
-                                    prior_status: str, stopped: BaseException) -> None:
+async def _settle_stopped_execution(
+    session_id: str, proposal_id: str, prior_status: str, stopped: BaseException
+) -> None:
     """Run `_land_stopped_execution` from a handback arm, safely inside a task
     that may be being CANCELLED: shielded, so a second cancellation cannot cut
     the landing in half (the landing carries on as its own task), and never
@@ -1366,7 +1523,9 @@ async def _settle_stopped_execution(session_id: str, proposal_id: str,
         log.exception(
             "could not land the stopped execution of proposal %s (session %s); "
             "it stays EXECUTING with its cursor and the next startup parks it "
-            "interrupted", proposal_id, session_id,
+            "interrupted",
+            proposal_id,
+            session_id,
         )
 
 
@@ -1430,8 +1589,12 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
         await events.emit(
             "proposal.execution_retried",
             ref_id=proposal_id,
-            payload={"attempt": attempts, "next_action_index": index,
-                     "remaining_actions": len(remaining), "session_id": session_id},
+            payload={
+                "attempt": attempts,
+                "next_action_index": index,
+                "remaining_actions": len(remaining),
+                "session_id": session_id,
+            },
             actor="system",
         )
         if overrides.override_ids_of(approver):
@@ -1439,12 +1602,19 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
             # actions: a retry re-executes work under the stored approver, and
             # the override may have been revoked since.
             await overrides.check_override_approval(
-                approver, [a.model_dump(mode="json") for a in remaining],
-                proposer=agent_id, proposal_row=row, offset=index,
+                approver,
+                [a.model_dump(mode="json") for a in remaining],
+                proposer=agent_id,
+                proposal_row=row,
+                offset=index,
             )
         outcome = await executor.execute(
-            remaining, approver=approver, source_refs=source_refs,
-            proposer=agent_id, proposal_id=proposal_id, action_offset=index,
+            remaining,
+            approver=approver,
+            source_refs=source_refs,
+            proposer=agent_id,
+            proposal_id=proposal_id,
+            action_offset=index,
             record_progress=True,
         )
     except overrides.OverrideRefused as refused:
@@ -1456,26 +1626,36 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
             # and the operator decides the rest by hand.
             failed = executor.ExecutionFailed(
                 remaining[0].capability if remaining else "override",
-                f"override refused: {refused.reason}", completed,
+                f"override refused: {refused.reason}",
+                completed,
             )
-            out = await _record_execution_failure(
-                session_id, proposal_id, agent_id, failed, model
-            )
+            out = await _record_execution_failure(session_id, proposal_id, agent_id, failed, model)
             return {**out, "attempts": attempts, "override_refused": refused.reason}
         await repo.set_proposal_status(proposal_id, "AWAITING_HUMAN")
         record = row.get("override_eval") or {}
-        await repo.amend_override_eval(proposal_id, {
-            **record, "outcome": "parked", "reason": f"refused: {refused.reason}",
-        })
-        return {"ok": False, "override_refused": refused.reason,
-                "status": "AWAITING_HUMAN", "attempts": attempts}
+        await repo.amend_override_eval(
+            proposal_id,
+            {
+                **record,
+                "outcome": "parked",
+                "reason": f"refused: {refused.reason}",
+            },
+        )
+        return {
+            "ok": False,
+            "override_refused": refused.reason,
+            "status": "AWAITING_HUMAN",
+            "attempts": attempts,
+        }
     except executor.ExecutionFailed as failure:
         # The honest partial record spans ATTEMPTS, not just this one: splice
         # what earlier attempts landed in front of what this one did.
         spliced = executor.ExecutionFailed(
-            failure.failed_capability, failure.error,
+            failure.failed_capability,
+            failure.error,
             completed + list(failure.completed),
-            transient=failure.transient, dependencies=failure.dependencies,
+            transient=failure.transient,
+            dependencies=failure.dependencies,
             world_moved=failure.world_moved,
         )
         if _execution_transient(failure):
@@ -1483,12 +1663,14 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
             # backoff curve, for as long as the outage lasts — no limit and no
             # promotion (epic-outage-doctrine story 4). The decision stands.
             return await _park_execution_retry(
-                session_id, row, spliced, approver, attempts=attempts + 1,
+                session_id,
+                row,
+                spliced,
+                approver,
+                attempts=attempts + 1,
                 episode_at=state.get("episode_at") or state.get("parked_at"),
             )
-        out = await _record_execution_failure(
-            session_id, proposal_id, agent_id, spliced, model
-        )
+        out = await _record_execution_failure(session_id, proposal_id, agent_id, spliced, model)
         return {**out, "attempts": attempts}
     except BaseException as stopped:
         # No verdict (a crash, a cancellation at shutdown, a cursor write that
@@ -1505,8 +1687,13 @@ async def retry_execution(proposal_id: str, model=None) -> dict | None:
     # outage occurred").
     result_text = "; ".join([t for t in completed + [outcome.result_text] if t])
     out = await _record_execution_success(
-        session_id, proposal_id, agent_id, result_text,
-        outcome.provenance.model_dump(mode="json"), approver, model=model,
+        session_id,
+        proposal_id,
+        agent_id,
+        result_text,
+        outcome.provenance.model_dump(mode="json"),
+        approver,
+        model=model,
     )
     return {**out, "retried": True, "attempts": attempts}
 
@@ -1599,15 +1786,21 @@ async def reject_with_feedback(
 
     messages = load_messages(run_state)
     results = await deferred_results(
-        messages, run_state["tool_call_id"],
+        messages,
+        run_state["tool_call_id"],
         ToolDenied(resume_park.framed_denial(feedback)),
-        session_id=session_id, agent_id=prop_row["agent_id"],
+        session_id=session_id,
+        agent_id=prop_row["agent_id"],
     )
     pending = resume_park.pending_resume(
         # RAW here: the quote re-check and the decided event key off the
         # verbatim words. Framing belongs at ToolDenied construction only.
-        kind="denial", text=feedback, tool_call_id=run_state["tool_call_id"],
-        after="rejected", proposal_id=proposal_id, decided_event_id=decided["id"],
+        kind="denial",
+        text=feedback,
+        tool_call_id=run_state["tool_call_id"],
+        after="rejected",
+        proposal_id=proposal_id,
+        decided_event_id=decided["id"],
     )
     await resume_park.arm(session_id, pending)
     agent = await build_agent_for(prop_row["agent_id"], model=model)
@@ -1627,9 +1820,14 @@ async def reject_with_feedback(
             if await resume_park.park_if_transient(session_id, e, pending):
                 return {"final_output": None, "resume_parked": True}
             await events.emit(
-                "session.resume_failed", ref_id=session_id,
-                payload={"error": str(e), "proposal_id": proposal_id,
-                         "after": "rejected", "transient": False},
+                "session.resume_failed",
+                ref_id=session_id,
+                payload={
+                    "error": str(e),
+                    "proposal_id": proposal_id,
+                    "after": "rejected",
+                    "transient": False,
+                },
                 actor="system",
             )
 
@@ -1637,9 +1835,15 @@ async def reject_with_feedback(
         # conversation continues (the rejection is just another turn); any other
         # session is finished.
         return await finish_decision_resume(
-            session_id=session_id, agent_id=prop_row["agent_id"],
-            proposal_id=proposal_id, after="rejected", final=final, agent=agent,
-            model=model, feedback=feedback, decided_event_id=decided["id"],
+            session_id=session_id,
+            agent_id=prop_row["agent_id"],
+            proposal_id=proposal_id,
+            after="rejected",
+            final=final,
+            agent=agent,
+            model=model,
+            feedback=feedback,
+            decided_event_id=decided["id"],
             pending=pending,
         )
 
@@ -1649,9 +1853,7 @@ async def reject_with_feedback(
     return await _resume()
 
 
-async def dismiss_proposal(
-    session_id: str, proposal_id: str, reason: str = ""
-) -> dict:
+async def dismiss_proposal(session_id: str, proposal_id: str, reason: str = "") -> dict:
     """The third verdict: no action needed, close it out, don't ask again.
 
     Neither of the other two: not a REJECTION (no coaching intent — the
@@ -1704,19 +1906,21 @@ async def dismiss_proposal(
     await repo.set_proposal_status(proposal_id, ProposalStatus.withdrawn)
     await release_folds_for(proposal_id, "covering proposal dismissed")
     await close_session(
-        session_id, agent_id=prop_row["agent_id"], reason="dismissed", actor="operator",
+        session_id,
+        agent_id=prop_row["agent_id"],
+        reason="dismissed",
+        actor="operator",
     )
     await _resolve_task_after(
-        session_id, "DONE",
+        session_id,
+        "DONE",
         "operator dismissed the drafted proposal; no action needed",
     )
 
     return {"ok": True, "proposal_id": proposal_id, "status": "WITHDRAWN"}
 
 
-async def _dismiss_waiting_execution(
-    session_id: str, prop_row: dict, reason: str
-) -> dict:
+async def _dismiss_waiting_execution(session_id: str, prop_row: dict, reason: str) -> dict:
     """The operator withdraws an APPROVED proposal still WAITING on an outage
     (RETRY_PENDING, an interrupted execution included) — epic-outage-doctrine
     story 8. What is withdrawn is the EXECUTION, not the decision: the operator's
@@ -1751,19 +1955,32 @@ async def _dismiss_waiting_execution(
     await events.emit(
         "proposal.execution_dismissed",
         ref_id=proposal_id,
-        payload={"proposal": proposal_id, "completed_actions": landed,
-                 "actions_total": total, "reason": reason,
-                 "interrupted": bool(state.get("interrupted")),
-                 "session_id": session_id},
+        payload={
+            "proposal": proposal_id,
+            "completed_actions": landed,
+            "actions_total": total,
+            "reason": reason,
+            "interrupted": bool(state.get("interrupted")),
+            "session_id": session_id,
+        },
         actor="operator",
     )
     await release_folds_for(proposal_id, "covering proposal's waiting execution dismissed")
     await close_session(
-        session_id, agent_id=prop_row["agent_id"], reason="dismissed", actor="operator",
+        session_id,
+        agent_id=prop_row["agent_id"],
+        reason="dismissed",
+        actor="operator",
     )
     await _resolve_task_after(
-        session_id, "FAILED",
+        session_id,
+        "FAILED",
         f"operator withdrew the waiting execution; {landed} of {total} actions had landed",
     )
-    return {"ok": True, "proposal_id": proposal_id, "status": "WITHDRAWN",
-            "completed_actions": landed, "actions_total": total}
+    return {
+        "ok": True,
+        "proposal_id": proposal_id,
+        "status": "WITHDRAWN",
+        "completed_actions": landed,
+        "actions_total": total,
+    }

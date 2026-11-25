@@ -48,7 +48,7 @@ DEPLOY = ROOT / "deploy"
 pytestmark = pytest.mark.skipif(
     sys.platform == "win32",
     reason="the holders here are POSIX sleeping children; the lock itself is exercised on "
-           "Windows by every real run",
+    "Windows by every real run",
 )
 
 
@@ -67,8 +67,14 @@ def sh(script: str, env_extra: dict[str, str] | None = None) -> subprocess.Compl
     env = dict(os.environ)
     env.pop("CC_RUN_LOCK_PID", None)
     env.update(env_extra or {})
-    return subprocess.run([bash(), "-c", ". ./env-lib.sh\n" + textwrap.dedent(script)],
-                          cwd=DEPLOY, capture_output=True, text=True, env=env, timeout=60)
+    return subprocess.run(
+        [bash(), "-c", ". ./env-lib.sh\n" + textwrap.dedent(script)],
+        cwd=DEPLOY,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=60,
+    )
 
 
 @pytest.fixture
@@ -82,8 +88,12 @@ def holder(tmp_path: Path):
         d.mkdir()
         script = d / name
         script.write_text("#!/usr/bin/env bash\nsleep 120\n", encoding="utf-8")
-        p = subprocess.Popen([bash(), str(script), "all"], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        p = subprocess.Popen(
+            [bash(), str(script), "all"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         procs.append(p)
         return p
 
@@ -93,8 +103,12 @@ def holder(tmp_path: Path):
         p.wait(timeout=10)
 
 
-def write_lock(state: Path, pid: int | None, command: str = "./setup.sh all",
-               started: str = "2026-10-02T09:00:00Z") -> Path:
+def write_lock(
+    state: Path,
+    pid: int | None,
+    command: str = "./setup.sh all",
+    started: str = "2026-10-02T09:00:00Z",
+) -> Path:
     lock = state / "run.lock"
     lock.mkdir(parents=True)
     (lock / "command").write_text(command + "\n")
@@ -216,18 +230,21 @@ def test_the_child_of_the_holder_proceeds_and_does_not_release(tmp_path: Path):
     d.mkdir()
     out = tmp_path / "out.txt"
     parent = d / "update.sh"
-    parent.write_text(textwrap.dedent(f"""\
+    parent.write_text(
+        textwrap.dedent(f"""\
         #!/usr/bin/env bash
-        . "{(DEPLOY / 'env-lib.sh').as_posix()}"
+        . "{(DEPLOY / "env-lib.sh").as_posix()}"
         cc_lock_acquire "{state}" "./update.sh apply" || exit 9
         cc_lock_trap "{state}"
-        bash -c '. "{(DEPLOY / 'env-lib.sh').as_posix()}"
+        bash -c '. "{(DEPLOY / "env-lib.sh").as_posix()}"
                  cc_lock_acquire "{state}" "./setup.sh fetch" || exit 8
                  printf "child=%s\\n" "$RUN_LOCK_RESULT"
                  cc_lock_release "{state}"' >>"{out}"
         [[ -d "{state}/run.lock" ]] && echo "after-child=held" >>"{out}"
         exit 0
-    """), encoding="utf-8")
+    """),
+        encoding="utf-8",
+    )
     env = dict(os.environ)
     env.pop("CC_RUN_LOCK_PID", None)
     r = subprocess.run([bash(), str(parent)], capture_output=True, text=True, env=env, timeout=60)
@@ -237,14 +254,18 @@ def test_the_child_of_the_holder_proceeds_and_does_not_release(tmp_path: Path):
 
 
 def test_a_stranger_cannot_release_and_an_inherited_pid_that_is_not_the_holder_is_not_mine(
-        tmp_path: Path, holder):
+    tmp_path: Path, holder
+):
     state = tmp_path / "state"
     h = holder()
     write_lock(state, h.pid)
-    r = sh(f"""
+    r = sh(
+        f"""
       cc_lock_release "{state}"
       cc_lock_acquire "{state}" "./setup.sh"; printf '%s' "$RUN_LOCK_RESULT"
-    """, env_extra={"CC_RUN_LOCK_PID": "1"})
+    """,
+        env_extra={"CC_RUN_LOCK_PID": "1"},
+    )
     assert r.stdout == "held", r.stdout + r.stderr
     assert (state / "run.lock" / "pid").read_text().strip() == str(h.pid)
 
@@ -268,7 +289,7 @@ def test_the_lock_lives_in_the_state_dir_never_the_checkout():
     assert 'lock="$1/run.lock"' in lib
     for script in ("setup.sh", "update.sh"):
         text = (DEPLOY / "single" / script).read_text(encoding="utf-8")
-        assert "cc_lock_acquire \"$STATE_DIR\"" in text, script
+        assert 'cc_lock_acquire "$STATE_DIR"' in text, script
 
 
 # ── the real drivers ────────────────────────────────────────────────────────
@@ -286,8 +307,10 @@ def tree(tmp_path: Path) -> Path:
     for f in (".env.example", "VERSION", ".gitignore"):
         shutil.copy2(ROOT / f, repo / f)
     (repo / "central_command" / "db").mkdir(parents=True)
-    shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
-                 repo / "central_command" / "db" / "schema.sql")
+    shutil.copy2(
+        ROOT / "central_command" / "db" / "schema.sql",
+        repo / "central_command" / "db" / "schema.sql",
+    )
     env = (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
     env = [l for l in env if not l.startswith("CC_STATE_DIR=")]
     env.append(f"CC_STATE_DIR={env_path(tmp_path / 'state')}")
@@ -301,9 +324,14 @@ def _run(repo: Path, script: str, *args: str, env_extra: dict[str, str] | None =
     env = dict(os.environ)
     home = repo.parent / "home"
     env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
-    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_LLM_UPSTREAM_BASE_URL",
-                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
-                  "CC_RUN_LOCK_PID"):
+    for stale in (
+        "CC_STATE_DIR",
+        "CC_ENABLE_SPEECH",
+        "CC_LLM_UPSTREAM_BASE_URL",
+        "CC_LLM_PROXY_ADMIN_KEY",
+        "CC_LLM_API_KEY",
+        "CC_RUN_LOCK_PID",
+    ):
         env.pop(stale, None)
     env.update(env_extra or {})
     return run_driver([bash(), script, *args], cwd=repo / "deploy" / "single", env=env)

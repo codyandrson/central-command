@@ -14,13 +14,16 @@ from central_command.runtime.orchestrator import pair_routes, signals_from_route
 
 
 def _rec(id, task, agent, rationale="fits the role"):
-    return {"id": id, "kind": "task.recommended", "ref_id": task,
-            "payload": {"agent_id": agent, "rationale": rationale}}
+    return {
+        "id": id,
+        "kind": "task.recommended",
+        "ref_id": task,
+        "payload": {"agent_id": agent, "rationale": rationale},
+    }
 
 
 def _assign(id, task, agent):
-    return {"id": id, "kind": "task.assigned", "ref_id": task,
-            "payload": {"agent_id": agent}}
+    return {"id": id, "kind": "task.assigned", "ref_id": task, "payload": {"agent_id": agent}}
 
 
 def _cancel(id, task):
@@ -29,9 +32,12 @@ def _cancel(id, task):
 
 def test_accepted_and_overridden_pair_correctly():
     rows = [
-        _rec(1, "t1", "jira-expert"), _assign(2, "t1", "jira-expert"),   # accepted
-        _rec(3, "t2", "jira-expert"), _assign(4, "t2", "other-agent"),   # overridden
-        _rec(5, "t3", None), _assign(6, "t3", "jira-expert"),            # no-fit overridden
+        _rec(1, "t1", "jira-expert"),
+        _assign(2, "t1", "jira-expert"),  # accepted
+        _rec(3, "t2", "jira-expert"),
+        _assign(4, "t2", "other-agent"),  # overridden
+        _rec(5, "t3", None),
+        _assign(6, "t3", "jira-expert"),  # no-fit overridden
     ]
     r = pair_routes(rows)
     assert r["accepted"] == 1
@@ -45,7 +51,7 @@ def test_accepted_and_overridden_pair_correctly():
 
 def test_latest_recommendation_is_the_operative_one():
     rows = [
-        _rec(1, "t1", None, "unsure"),          # first look: no fit
+        _rec(1, "t1", None, "unsure"),  # first look: no fit
         _rec(2, "t1", "jira-expert", "re-ask"),  # operator re-routed; this stands
         _assign(3, "t1", "jira-expert"),
     ]
@@ -55,9 +61,10 @@ def test_latest_recommendation_is_the_operative_one():
 
 def test_cancellations_and_unrouted_assignments_are_not_agreement_data():
     rows = [
-        _rec(1, "t1", "jira-expert"), _cancel(2, "t1"),  # cancelled after rec
-        _assign(3, "t2", "jira-expert"),                  # operator beat the router
-        _rec(4, "t3", "jira-expert"),                     # still awaiting
+        _rec(1, "t1", "jira-expert"),
+        _cancel(2, "t1"),  # cancelled after rec
+        _assign(3, "t2", "jira-expert"),  # operator beat the router
+        _rec(4, "t3", "jira-expert"),  # still awaiting
     ]
     r = pair_routes(rows)
     assert r["total_paired"] == 0 and r["agreement_rate"] is None
@@ -67,8 +74,7 @@ def test_cancellations_and_unrouted_assignments_are_not_agreement_data():
 
 
 def test_overrides_become_citable_coaching_signals():
-    rows = [_rec(1, "t1", None, "no candidate covers this"),
-            _assign(2, "t1", "jira-expert")]
+    rows = [_rec(1, "t1", None, "no candidate covers this"), _assign(2, "t1", "jira-expert")]
     signals = signals_from_routes(pair_routes(rows), {"t1": "Water the plants"})
     assert len(signals) == 1
     s = signals[0]

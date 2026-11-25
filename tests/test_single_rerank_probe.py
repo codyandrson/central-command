@@ -40,9 +40,17 @@ esac
 """
 
 
-def _run(tmp_path: Path, env_lines: dict[str, str], *, unfilled: str = "",
-         rerank: str = "no", chat: str = "no", catalog_down: bool = False,
-         shape_rerank: int = 6, shape_chat: int = 6):
+def _run(
+    tmp_path: Path,
+    env_lines: dict[str, str],
+    *,
+    unfilled: str = "",
+    rerank: str = "no",
+    chat: str = "no",
+    catalog_down: bool = False,
+    shape_rerank: int = 6,
+    shape_chat: int = 6,
+):
     """`shape_*` is register-models.py --shape's answer per kind: 0 written or
     already that shape, 5 a row filled by hand, 6 .env does not declare it
     (the default — the v2.62.0 behaviour: probe the row as it is)."""
@@ -54,35 +62,49 @@ def _run(tmp_path: Path, env_lines: dict[str, str], *, unfilled: str = "",
     write_lf(env_file, "".join(f"{k}={v}\n" for k, v in env_lines.items()))
     log = tmp_path / "probes.log"
     log.write_text("", encoding="utf-8")
-    script = "\n".join([
-        "set -uo pipefail",
-        f'HERE="{here.as_posix()}"',
-        f'ENV_FILE="{env_file.as_posix()}"',
-        'pass() { echo "PASS $1: $2"; }',
-        'warn() { echo "WARN $1: $2"; }',
-        'fail() { echo "FAIL $1: $2"; }',
-        'useraction() { echo "USERACTION $1: $2"; }',
-        'note() { :; }',
-        'q_unquote() { printf "%s" "$1"; }',
-        'is_placeholder() { [[ -z "$1" ]]; }',
-        'get_kv() { local l out=""; while IFS= read -r l; do [[ "$l" == "$2="* ]] && out="${l#*=}"; done <"$1"; printf "%s" "$out"; }',
-        'set_kv() { printf "%s=%s\\n" "$2" "$3" >>"$1"; }',
-        ('catalog_unfilled() { return 1; }' if catalog_down else
-         'catalog_unfilled() { [[ -n "${STUB_UNFILLED:-}" ]] && printf "%s\\n" "$STUB_UNFILLED"; return 0; }'),
-        "rerank_probe_kind() {" + fns["rerank_probe_kind"] + "\n}",
-        ('rerank_shape() { printf "shape %s %s\\n" "$1" "$2" >> "$STUB_LOG"; '
-        'if [[ "$1" == rerank ]]; then return "$STUB_SHAPE_RERANK"; fi; return "$STUB_SHAPE_CHAT"; }'),
-        "rerank_decide() {" + fns["rerank_decide"] + "\n}",
-        "p_rerank_decided() {" + fns["p_rerank_decided"] + "\n}",
-        'rerank_decide; rc=$?',
-        'echo "RC=$rc"',
-        'p_rerank_decided && echo "DECIDED=yes" || echo "DECIDED=no"',
-    ])
-    env = {**os.environ, "STUB_LOG": str(log), "STUB_RERANK": rerank, "STUB_CHAT": chat,
-           "STUB_UNFILLED": unfilled, "STUB_SHAPE_RERANK": str(shape_rerank),
-           "STUB_SHAPE_CHAT": str(shape_chat)}
-    r = subprocess.run([_bash_exe(), "-c", script], capture_output=True, text=True, env=env,
-                       timeout=60)
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            f'HERE="{here.as_posix()}"',
+            f'ENV_FILE="{env_file.as_posix()}"',
+            'pass() { echo "PASS $1: $2"; }',
+            'warn() { echo "WARN $1: $2"; }',
+            'fail() { echo "FAIL $1: $2"; }',
+            'useraction() { echo "USERACTION $1: $2"; }',
+            "note() { :; }",
+            'q_unquote() { printf "%s" "$1"; }',
+            'is_placeholder() { [[ -z "$1" ]]; }',
+            'get_kv() { local l out=""; while IFS= read -r l; do [[ "$l" == "$2="* ]] && out="${l#*=}"; done <"$1"; printf "%s" "$out"; }',
+            'set_kv() { printf "%s=%s\\n" "$2" "$3" >>"$1"; }',
+            (
+                "catalog_unfilled() { return 1; }"
+                if catalog_down
+                else 'catalog_unfilled() { [[ -n "${STUB_UNFILLED:-}" ]] && printf "%s\\n" "$STUB_UNFILLED"; return 0; }'
+            ),
+            "rerank_probe_kind() {" + fns["rerank_probe_kind"] + "\n}",
+            (
+                'rerank_shape() { printf "shape %s %s\\n" "$1" "$2" >> "$STUB_LOG"; '
+                'if [[ "$1" == rerank ]]; then return "$STUB_SHAPE_RERANK"; fi; return "$STUB_SHAPE_CHAT"; }'
+            ),
+            "rerank_decide() {" + fns["rerank_decide"] + "\n}",
+            "p_rerank_decided() {" + fns["p_rerank_decided"] + "\n}",
+            "rerank_decide; rc=$?",
+            'echo "RC=$rc"',
+            'p_rerank_decided && echo "DECIDED=yes" || echo "DECIDED=no"',
+        ]
+    )
+    env = {
+        **os.environ,
+        "STUB_LOG": str(log),
+        "STUB_RERANK": rerank,
+        "STUB_CHAT": chat,
+        "STUB_UNFILLED": unfilled,
+        "STUB_SHAPE_RERANK": str(shape_rerank),
+        "STUB_SHAPE_CHAT": str(shape_chat),
+    }
+    r = subprocess.run(
+        [_bash_exe(), "-c", script], capture_output=True, text=True, env=env, timeout=60
+    )
     final: dict[str, str] = {}
     for line in env_file.read_text(encoding="utf-8").splitlines():
         if "=" in line:
@@ -113,11 +135,16 @@ def test_an_unmapped_alias_is_no_reranker_and_a_pass(tmp_path):
     assert "DECIDED=yes" in r.stdout
 
 
-@pytest.mark.parametrize("rerank,chat,kind,asked", [
-    ("ok", "ok", "rerank", ["rerank cc-rerank"]),             # /rerank first
-    ("no", "ok", "chat", ["rerank cc-rerank", "rerank-chat cc-rerank"]),
-])
-def test_a_mapped_alias_is_probed_rerank_first_and_the_kind_written(tmp_path, rerank, chat, kind, asked):
+@pytest.mark.parametrize(
+    "rerank,chat,kind,asked",
+    [
+        ("ok", "ok", "rerank", ["rerank cc-rerank"]),  # /rerank first
+        ("no", "ok", "chat", ["rerank cc-rerank", "rerank-chat cc-rerank"]),
+    ],
+)
+def test_a_mapped_alias_is_probed_rerank_first_and_the_kind_written(
+    tmp_path, rerank, chat, kind, asked
+):
     r, env, probes = _run(tmp_path, {}, rerank=rerank, chat=chat)
     assert _rc(r) == 0 and _line(r).startswith("PASS probe-rerank:"), r.stdout
     assert probes == asked
@@ -151,23 +178,31 @@ def test_an_operator_alias_wins_and_only_the_kind_is_written(tmp_path):
 
 @pytest.mark.parametrize("kind,sub", [("chat", "rerank-chat"), ("rerank", "rerank")])
 def test_a_set_kind_is_proven_never_re_detected(tmp_path, kind, sub):
-    r, env, probes = _run(tmp_path, {"CC_GRAPH_RERANK_ALIAS": "cc-rerank",
-                                     "CC_GRAPH_RERANK_KIND": kind}, rerank="ok", chat="ok")
+    r, env, probes = _run(
+        tmp_path,
+        {"CC_GRAPH_RERANK_ALIAS": "cc-rerank", "CC_GRAPH_RERANK_KIND": kind},
+        rerank="ok",
+        chat="ok",
+    )
     assert _rc(r) == 0 and probes == [f"{sub} cc-rerank"]
     assert env["CC_GRAPH_RERANK_KIND"] == kind
 
 
 def test_a_set_kind_that_fails_stops_the_run_and_is_not_swapped(tmp_path):
-    r, env, probes = _run(tmp_path, {"CC_GRAPH_RERANK_ALIAS": "cc-rerank",
-                                     "CC_GRAPH_RERANK_KIND": "rerank"}, chat="ok")
+    r, env, probes = _run(
+        tmp_path,
+        {"CC_GRAPH_RERANK_ALIAS": "cc-rerank", "CC_GRAPH_RERANK_KIND": "rerank"},
+        chat="ok",
+    )
     assert _rc(r) == 3 and _line(r).startswith("USERACTION probe-rerank:")
     assert probes == ["rerank cc-rerank"]  # the chat shape is NOT tried behind a pin
     assert env["CC_GRAPH_RERANK_KIND"] == "rerank"
 
 
 def test_an_unknown_kind_is_a_fail_naming_the_key(tmp_path):
-    r, _, probes = _run(tmp_path, {"CC_GRAPH_RERANK_ALIAS": "cc-rerank",
-                                   "CC_GRAPH_RERANK_KIND": "cohere"})
+    r, _, probes = _run(
+        tmp_path, {"CC_GRAPH_RERANK_ALIAS": "cc-rerank", "CC_GRAPH_RERANK_KIND": "cohere"}
+    )
     assert _rc(r) == 1 and _line(r).startswith("FAIL probe-rerank:")
     assert "CC_GRAPH_RERANK_KIND" in _line(r) and probes == []
 
@@ -190,16 +225,24 @@ def test_declared_dedicated_answers_first_and_its_row_is_left(tmp_path):
 def test_declared_chat_answers_after_the_dedicated_shape_fails(tmp_path):
     r, env, _ = _run(tmp_path, {}, chat="ok", shape_rerank=0, shape_chat=0)
     assert _rc(r) == 0 and env["CC_GRAPH_RERANK_KIND"] == "chat"
-    assert _run.steps == ["shape rerank cc-rerank", "rerank cc-rerank",
-                          "shape chat cc-rerank", "rerank-chat cc-rerank"]
+    assert _run.steps == [
+        "shape rerank cc-rerank",
+        "rerank cc-rerank",
+        "shape chat cc-rerank",
+        "rerank-chat cc-rerank",
+    ]
 
 
 def test_declared_neither_leaves_the_chat_row_and_warns_naming_both_and_the_providers(tmp_path):
     r, env, _ = _run(tmp_path, {}, shape_rerank=0, shape_chat=0)
     line = _line(r)
     assert _rc(r) == 0 and line.startswith("WARN probe-rerank:")
-    assert _run.steps == ["shape rerank cc-rerank", "rerank cc-rerank",
-                          "shape chat cc-rerank", "rerank-chat cc-rerank"]
+    assert _run.steps == [
+        "shape rerank cc-rerank",
+        "rerank cc-rerank",
+        "shape chat cc-rerank",
+        "rerank-chat cc-rerank",
+    ]
     # registered last, the chat shape — the plain mapping — is what stays
     assert "a dedicated reranker, then a chat model" in line
     assert "Together AI" in line and "Infinity" in line and "hosted_vllm/<id>" in line
@@ -217,14 +260,24 @@ def test_an_explicit_provider_is_probed_only_as_a_dedicated_reranker(tmp_path):
 def test_a_row_filled_by_hand_is_probed_as_it_is_both_ways(tmp_path):
     r, env, _ = _run(tmp_path, {}, chat="ok", shape_rerank=5, shape_chat=5)
     assert _rc(r) == 0 and env["CC_GRAPH_RERANK_KIND"] == "chat"
-    assert _run.steps == ["shape rerank cc-rerank", "rerank cc-rerank",
-                          "shape chat cc-rerank", "rerank-chat cc-rerank"]
+    assert _run.steps == [
+        "shape rerank cc-rerank",
+        "rerank cc-rerank",
+        "shape chat cc-rerank",
+        "rerank-chat cc-rerank",
+    ]
     assert "registered and probed" not in r.stdout
 
 
 def test_a_pinned_kind_registers_and_probes_only_its_shape(tmp_path):
-    r, _env, _ = _run(tmp_path, {"CC_GRAPH_RERANK_ALIAS": "cc-rerank", "CC_GRAPH_RERANK_KIND": "chat"},
-                     rerank="ok", chat="ok", shape_rerank=0, shape_chat=0)
+    r, _env, _ = _run(
+        tmp_path,
+        {"CC_GRAPH_RERANK_ALIAS": "cc-rerank", "CC_GRAPH_RERANK_KIND": "chat"},
+        rerank="ok",
+        chat="ok",
+        shape_rerank=0,
+        shape_chat=0,
+    )
     assert _rc(r) == 0
     assert _run.steps == ["shape chat cc-rerank", "rerank-chat cc-rerank"]
 

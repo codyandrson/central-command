@@ -29,7 +29,7 @@ CHARTER = (
     "Confluence pages people can use: org charts, contact pages, project "
     "overviews, diagrams, status pages. You never write to Confluence "
     "yourself: you PROPOSE, and a human approves before anything executes.\n\n"
-    "Your human team lead is <<operator_name>> — \"the operator\" throughout "
+    'Your human team lead is <<operator_name>> — "the operator" throughout '
     "this charter.\n\n"
     "METHOD — gather, then compose, then propose:\n"
     "- Gather BEFORE writing: search_knowledge_graph for the facts the page "
@@ -89,9 +89,14 @@ CHARTER = (
 
 
 async def build_wiki_agent(
-    model=None, charter: str | None = None, packs=None,
-    capabilities=None, skills_catalog: str = "",
-    extra_toolsets=(), mcp_section: str = "", team_section: str = "",
+    model=None,
+    charter: str | None = None,
+    packs=None,
+    capabilities=None,
+    skills_catalog: str = "",
+    extra_toolsets=(),
+    mcp_section: str = "",
+    team_section: str = "",
 ) -> Agent:
     from central_command.runtime import packs as packs_mod
     from central_command.runtime.agent import build_charter
@@ -101,11 +106,8 @@ async def build_wiki_agent(
     return Agent(
         await resolve_model(model, agent_id=AGENT_ID),
         name=AGENT_ID,
-        system_prompt=build_charter(
-            charter or render_v0(CHARTER), packs, mcp_section, team_section
-        ) + (
-            "\n\n" + skills_catalog if skills_catalog else ""
-        ),
+        system_prompt=build_charter(charter or render_v0(CHARTER), packs, mcp_section, team_section)
+        + ("\n\n" + skills_catalog if skills_catalog else ""),
         deps_type=TriageDeps,  # unused, but resume paths pass one — keep the shape
         output_type=[str, DeferredToolRequests],
         tools=[declare_gap, current_time],
@@ -174,8 +176,12 @@ async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dic
     )
 
     result = await _run_live(
-        agent, prompt, model=resolved, deps=deps,
-        agent_id=AGENT_ID, session_id=session_id,
+        agent,
+        prompt,
+        model=resolved,
+        deps=deps,
+        agent_id=AGENT_ID,
+        session_id=session_id,
     )
     tokens = _total_tokens(result)
 
@@ -184,15 +190,22 @@ async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dic
         from central_command.runtime.converse import land_session
 
         await land_session(session_id, agent_id=AGENT_ID)
-        return {"deferred": False, "output": str(result.output), "tokens": tokens,
-                "session_id": session_id}
+        return {
+            "deferred": False,
+            "output": str(result.output),
+            "tokens": tokens,
+            "session_id": session_id,
+        }
 
     kind = classify_deferred(call)
     if kind == "ask":
         from central_command.runtime.questions import park_question
 
         asked = await park_question(
-            session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+            session_id=session_id,
+            agent_id=AGENT_ID,
+            result=result,
+            call=call,
         )
         return {**asked, "tokens": tokens}
     if kind != "proposal":
@@ -200,7 +213,9 @@ async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dic
 
         await land_session(session_id, agent_id=AGENT_ID)
         return {
-            "deferred": False, "tokens": tokens, "session_id": session_id,
+            "deferred": False,
+            "tokens": tokens,
+            "session_id": session_id,
             "output": (
                 f"(reached for `{getattr(call, 'tool_name', '?')}`, which the "
                 "wiki agent cannot drive)"
@@ -208,7 +223,10 @@ async def run_repair(prompt: str, item_id: str | None = None, model=None) -> dic
         }
 
     parked = await park_proposal(
-        session_id=session_id, agent_id=AGENT_ID, result=result, call=call,
+        session_id=session_id,
+        agent_id=AGENT_ID,
+        result=result,
+        call=call,
         evidence=[e.model_dump() for e in deferred_proposal(result, call).evidence],
         context={"kind": "wiki_repair", **({"item_id": item_id} if item_id else {})},
     )
@@ -225,6 +243,8 @@ async def ensure_registered() -> None:
     from central_command.db import repo
 
     await repo.upsert_agent(
-        AGENT_ID, "Wiki Agent", "",
+        AGENT_ID,
+        "Wiki Agent",
+        "",
         "authors Confluence pages from team knowledge: org charts, contacts, project overviews, diagrams",
     )

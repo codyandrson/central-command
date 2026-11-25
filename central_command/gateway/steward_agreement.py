@@ -54,9 +54,11 @@ def pair_confidence(proposals: list[dict], decided: list[dict]) -> dict:
         if verdict in ("approved", "rejected"):
             # Last decision wins: a redraft cycle decides the same id once each
             # time, and the operator's latest word is the standing one.
-            verdicts[e["ref_id"]] = {"verdict": verdict,
-                                     "feedback": payload.get("feedback"),
-                                     "decided_event": e["id"]}
+            verdicts[e["ref_id"]] = {
+                "verdict": verdict,
+                "feedback": payload.get("feedback"),
+                "decided_event": e["id"],
+            }
 
     pairs: list[dict] = []
     awaiting = unstated = 0
@@ -72,34 +74,30 @@ def pair_confidence(proposals: list[dict], decided: list[dict]) -> dict:
         if decision is None:
             awaiting += 1
             continue
-        pairs.append({
-            "proposal_id": p["id"],
-            "intent": p.get("intent"),
-            "level": level,
-            "rationale": (conf or {}).get("rationale"),
-            **decision,
-        })
+        pairs.append(
+            {
+                "proposal_id": p["id"],
+                "intent": p.get("intent"),
+                "level": level,
+                "rationale": (conf or {}).get("rationale"),
+                **decision,
+            }
+        )
 
     by_level = {
         lvl: {
-            "approved": sum(1 for x in pairs if x["level"] == lvl
-                            and x["verdict"] == "approved"),
-            "rejected": sum(1 for x in pairs if x["level"] == lvl
-                            and x["verdict"] == "rejected"),
+            "approved": sum(1 for x in pairs if x["level"] == lvl and x["verdict"] == "approved"),
+            "rejected": sum(1 for x in pairs if x["level"] == lvl and x["verdict"] == "rejected"),
         }
         for lvl in LEVELS
     }
     for counts in by_level.values():
         total = counts["approved"] + counts["rejected"]
         counts["total"] = total
-        counts["approval_rate"] = (
-            round(counts["approved"] / total, 3) if total else None
-        )
+        counts["approval_rate"] = round(counts["approved"] / total, 3) if total else None
 
-    overconfident = [x for x in pairs
-                     if x["level"] == "high" and x["verdict"] == "rejected"]
-    under_confident = [x for x in pairs
-                       if x["level"] == "low" and x["verdict"] == "approved"]
+    overconfident = [x for x in pairs if x["level"] == "high" and x["verdict"] == "rejected"]
+    under_confident = [x for x in pairs if x["level"] == "low" and x["verdict"] == "approved"]
     return {
         "pairs": pairs,
         "by_level": by_level,
@@ -121,7 +119,5 @@ async def steward_agreement_report(agent_id: str = AGENT_ID) -> dict:
     proposals = await repo.list_proposals_for(agent_id)
     decided = await repo.list_events_of_kinds(["proposal.decided"])
     mine = {p["id"] for p in proposals}
-    report = pair_confidence(
-        proposals, [e for e in decided if e["ref_id"] in mine]
-    )
+    report = pair_confidence(proposals, [e for e in decided if e["ref_id"] in mine])
     return {"agent_id": agent_id, **report}

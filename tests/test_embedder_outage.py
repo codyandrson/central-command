@@ -76,11 +76,16 @@ async def test_a_create_raises_before_it_writes(embedder_down, writes):
 def test_there_is_no_embedding_fallback():
     """`grep -rn fallback` over the writer and the graph client finds only the
     statements that there is none."""
-    for rel in ("central_command/integrations/neo4j_writer.py",
-                "central_command/integrations/graphiti_client.py"):
+    for rel in (
+        "central_command/integrations/neo4j_writer.py",
+        "central_command/integrations/graphiti_client.py",
+    ):
         for line in (ROOT / rel).read_text().splitlines():
             if re.search(r"fallback", line, re.IGNORECASE):
-                assert re.search(r"\bno fallback\b|Never a fallback", line, re.IGNORECASE), (rel, line)
+                assert re.search(r"\bno fallback\b|Never a fallback", line, re.IGNORECASE), (
+                    rel,
+                    line,
+                )
 
 
 def test_the_dispatcher_no_longer_fails_open():
@@ -91,17 +96,30 @@ def test_the_dispatcher_no_longer_fails_open():
 
 
 async def test_the_executor_flags_an_embedder_outage_with_its_dependencies(
-    embedder_down, writes, monkeypatch,
+    embedder_down,
+    writes,
+    monkeypatch,
 ):
     from central_command.contract import Action, Reversibility
 
-    action = Action(capability="graph.create_node",
-                    arguments={"name": "Jane Doe", "group_id": "central_command",
-                               "summary": "Works at Example Co"},
-                    target_ref={"system": "graphiti"}, reversibility=Reversibility.reversible)
+    action = Action(
+        capability="graph.create_node",
+        arguments={
+            "name": "Jane Doe",
+            "group_id": "central_command",
+            "summary": "Works at Example Co",
+        },
+        target_ref={"system": "graphiti"},
+        reversibility=Reversibility.reversible,
+    )
     with pytest.raises(executor.ExecutionFailed) as failed:
-        await executor.execute([action], approver="human:lee", source_refs=[],
-                               proposer="graph-steward", proposal_id=None)
+        await executor.execute(
+            [action],
+            approver="human:lee",
+            source_refs=[],
+            proposer="graph-steward",
+            proposal_id=None,
+        )
     assert failed.value.transient is True
     assert failed.value.dependencies == ("graph", "embedder")
     assert writes == []
@@ -109,21 +127,41 @@ async def test_the_executor_flags_an_embedder_outage_with_its_dependencies(
 
 @needs_pg
 async def test_a_create_node_proposal_parks_retry_pending_and_writes_nothing(
-    embedder_down, writes, monkeypatch,
+    embedder_down,
+    writes,
+    monkeypatch,
 ):
     monkeypatch.setattr(settings, "test_model", True)
     pid = "prop_emb_" + uuid.uuid4().hex[:10]
     sid = "sess_emb_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(sid, "jira-expert")
     await repo.save_proposal(
-        pid, sid, "jira-expert", "Record Jane Doe in the graph",
-        [{"capability": "graph.create_node",
-          "arguments": {"name": "Jane Doe", "group_id": "central_command",
-                        "summary": "Works at Example Co"},
-          "target_ref": {"system": "graphiti"}, "reversibility": "reversible"}],
-        [{"kind": "operator", "source_ref": "operator:test", "locator": "test",
-          "claim": "Jane Doe works at Example Co"}],
-        "the graph knows Jane Doe", pid,
+        pid,
+        sid,
+        "jira-expert",
+        "Record Jane Doe in the graph",
+        [
+            {
+                "capability": "graph.create_node",
+                "arguments": {
+                    "name": "Jane Doe",
+                    "group_id": "central_command",
+                    "summary": "Works at Example Co",
+                },
+                "target_ref": {"system": "graphiti"},
+                "reversibility": "reversible",
+            }
+        ],
+        [
+            {
+                "kind": "operator",
+                "source_ref": "operator:test",
+                "locator": "test",
+                "claim": "Jane Doe works at Example Co",
+            }
+        ],
+        "the graph knows Jane Doe",
+        pid,
     )
 
     out = await gateway.approve_and_execute(sid, pid)
@@ -139,8 +177,11 @@ async def test_a_create_node_proposal_parks_retry_pending_and_writes_nothing(
 
 
 async def test_the_direct_create_is_refused_503_naming_the_embedder(embedder_down, writes):
-    res = await routes.graph_node_create(routes.GraphNodeIn(
-        name="Jane Doe", labels=[], summary="Works at Example Co", group_id="central_command"))
+    res = await routes.graph_node_create(
+        routes.GraphNodeIn(
+            name="Jane Doe", labels=[], summary="Works at Example Co", group_id="central_command"
+        )
+    )
     assert res.status_code == 503
     import json
 
@@ -156,8 +197,9 @@ async def test_a_wrong_width_is_still_a_422_not_a_503(monkeypatch, writes):
 
     monkeypatch.setattr(neo4j_writer, "request_embedding", _wrong)
     with pytest.raises(HTTPException) as refused:
-        await routes.graph_node_create(routes.GraphNodeIn(
-            name="Jane Doe", labels=[], summary="", group_id="central_command"))
+        await routes.graph_node_create(
+            routes.GraphNodeIn(name="Jane Doe", labels=[], summary="", group_id="central_command")
+        )
     assert refused.value.status_code == 422
     assert writes == []
 
@@ -167,7 +209,8 @@ async def test_a_wrong_width_is_still_a_422_not_a_503(monkeypatch, writes):
 
 @needs_pg
 async def test_a_ledger_item_whose_freeze_check_meets_the_outage_is_released(
-    embedder_down, monkeypatch,
+    embedder_down,
+    monkeypatch,
 ):
     import json
 
@@ -183,11 +226,16 @@ async def test_a_ledger_item_whose_freeze_check_meets_the_outage_is_released(
         ran.append(item["id"])
         return {"ok": True}
 
-    monkeypatch.setitem(dispatcher.HANDLERS, "email",
-                        dispatcher._KindHandler(must_not_run, "agent:inbox-triage", False))
-    raw = (f"Message-ID: <cc-emb-{uuid.uuid4().hex[:8]}@example.com>\n"
-           "From: sender@example.com\nSubject: Embedder outage\n"
-           "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nJane Doe joined Example Co.\n")
+    monkeypatch.setitem(
+        dispatcher.HANDLERS,
+        "email",
+        dispatcher._KindHandler(must_not_run, "agent:inbox-triage", False),
+    )
+    raw = (
+        f"Message-ID: <cc-emb-{uuid.uuid4().hex[:8]}@example.com>\n"
+        "From: sender@example.com\nSubject: Embedder outage\n"
+        "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nJane Doe joined Example Co.\n"
+    )
     await ledger.enroll_email(raw)
     item = await repo.claim_next_work_item("sess_emb")
 
@@ -198,7 +246,8 @@ async def test_a_ledger_item_whose_freeze_check_meets_the_outage_is_released(
     try:
         row = await conn.fetchrow(
             "select state, not_before, dependencies, attempts from work_item where id = $1",
-            item["id"])
+            item["id"],
+        )
         await conn.execute("delete from work_item where id = $1", item["id"])
     finally:
         await conn.close()
@@ -252,16 +301,22 @@ async def test_the_sweep_probes_what_a_released_item_waits_on(embedder_down, mon
         return False
 
     monkeypatch.setitem(probes.PROBES, "embedder", _down)
-    raw = (f"Message-ID: <cc-emb-{uuid.uuid4().hex[:8]}@example.com>\n"
-           "From: sender@example.com\nSubject: Embedder probe\n"
-           "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n")
+    raw = (
+        f"Message-ID: <cc-emb-{uuid.uuid4().hex[:8]}@example.com>\n"
+        "From: sender@example.com\nSubject: Embedder probe\n"
+        "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n"
+    )
     await ledger.enroll_email(raw)
     item = await repo.claim_next_work_item("sess_emb2")
     from datetime import datetime, timedelta
 
-    await repo.release_work_item(item["id"], error="embedder down", count_attempt=False,
-                                 not_before=datetime.now(UTC) + timedelta(minutes=1),
-                                 dependencies=("embedder",))
+    await repo.release_work_item(
+        item["id"],
+        error="embedder down",
+        count_attempt=False,
+        not_before=datetime.now(UTC) + timedelta(minutes=1),
+        dependencies=("embedder",),
+    )
     try:
         await orchestration.retry_sweep()
         assert "embedder" in asked

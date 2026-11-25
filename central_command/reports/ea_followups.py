@@ -37,9 +37,14 @@ async def tracked(max_issues: int = 15) -> dict:
         "count": out["count"],
         "truncated": out["truncated"],
         "issues": [
-            {"issue_key": i["issue_key"], "summary": i["summary"],
-             "status": i["status"], "due_date": i["due_date"],
-             "assignee": i["assignee"], "url": i["url"]}
+            {
+                "issue_key": i["issue_key"],
+                "summary": i["summary"],
+                "status": i["status"],
+                "due_date": i["due_date"],
+                "assignee": i["assignee"],
+                "url": i["url"],
+            }
             for i in out["issues"]
         ],
     }

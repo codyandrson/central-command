@@ -51,7 +51,7 @@ NOT_AN_AGENT = {
     "event_bridge": "the cockpit event bridge's drain loop",
     "asyncio": "the stdlib event-loop runner (selfcheck.py's CLI entrypoint)",
     "selfcheck": "central_command/selfcheck.py's check runner (api/selfcheck.py) — "
-                 "its one model request goes through pydantic_ai.direct, not an Agent",
+    "its one model request goes through pydantic_ai.direct, not an Agent",
 }
 
 # Agent runs that legitimately pass no deps, each with the reason it needs
@@ -96,12 +96,17 @@ def _run_calls():
     call in the package."""
     for rel, tree in _sources():
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in RUN_METHODS):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in RUN_METHODS
+            ):
                 continue
             yield (
-                rel, node.lineno, _receiver(node.func.value), node.func.attr,
+                rel,
+                node.lineno,
+                _receiver(node.func.value),
+                node.func.attr,
                 any(kw.arg == "deps" for kw in node.keywords),
             )
 
@@ -116,11 +121,13 @@ def _is_agent_receiver(receiver: str) -> bool:
 def test_every_run_receiver_in_the_package_is_classified():
     """The classification above is the load-bearing part: an unrecognised
     receiver must fail, not be quietly assumed harmless."""
-    unclassified = sorted({
-        f"{rel}:{line} {receiver}.{method}(...)"
-        for rel, line, receiver, method, _deps in _run_calls()
-        if receiver not in NOT_AN_AGENT and not _is_agent_receiver(receiver)
-    })
+    unclassified = sorted(
+        {
+            f"{rel}:{line} {receiver}.{method}(...)"
+            for rel, line, receiver, method, _deps in _run_calls()
+            if receiver not in NOT_AN_AGENT and not _is_agent_receiver(receiver)
+        }
+    )
     assert unclassified == [], (
         "a `.run()/.iter()` call was found on something this guard does not "
         "recognise. Say which it is: if it drives a pydantic-ai Agent, name the "
@@ -133,7 +140,8 @@ def test_every_run_receiver_in_the_package_is_classified():
 def test_the_walk_sees_the_agent_runs_it_is_guarding():
     """A classifier that matched no agents would pass this file forever."""
     agent_runs = {
-        (rel, receiver) for rel, _line, receiver, _m, _d in _run_calls()
+        (rel, receiver)
+        for rel, _line, receiver, _m, _d in _run_calls()
         if _is_agent_receiver(receiver)
     }
     assert ("runtime/durable.py", "agent") in agent_runs
@@ -146,11 +154,13 @@ def test_the_walk_sees_the_agent_runs_it_is_guarding():
 
 
 def test_every_agent_run_passes_deps():
-    offenders = sorted({
-        f"{rel}:{line} {receiver}.{method}(...)"
-        for rel, line, receiver, method, has_deps in _run_calls()
-        if _is_agent_receiver(receiver) and not has_deps and rel not in DEPS_EXEMPT
-    })
+    offenders = sorted(
+        {
+            f"{rel}:{line} {receiver}.{method}(...)"
+            for rel, line, receiver, method, has_deps in _run_calls()
+            if _is_agent_receiver(receiver) and not has_deps and rel not in DEPS_EXEMPT
+        }
+    )
     assert offenders == [], (
         "an agent was driven without `deps=`. Every tool in runtime/tools.py "
         "reads RunContext.deps for the agent id, session id and consult chain, "
@@ -167,7 +177,8 @@ def test_the_deps_exemptions_are_still_deps_free():
     these ever starts passing deps, the claim has changed and the entry should
     go — an exemption nobody re-reads is how an allowlist stops guarding."""
     stale = sorted(
-        rel for rel, _line, receiver, _m, has_deps in _run_calls()
+        rel
+        for rel, _line, receiver, _m, has_deps in _run_calls()
         if rel in DEPS_EXEMPT and _is_agent_receiver(receiver) and has_deps
     )
     assert stale == [], (
@@ -244,8 +255,7 @@ def test_every_fresh_run_path_loads_a_charter():
                 continue
             if owner.get(node.lineno) == RESUME_FACTORY:
                 continue  # the one deliberate charter-free build
-            passed = (any(kw.arg == "charter" for kw in node.keywords)
-                      or len(node.args) > position)
+            passed = any(kw.arg == "charter" for kw in node.keywords) or len(node.args) > position
             if not passed:
                 offenders.append(f"{rel}:{node.lineno} {node.func.id}(...)")
     assert sorted(offenders) == [], (
@@ -267,9 +277,11 @@ def test_the_resume_factory_is_still_the_only_charter_free_builder():
     source = (SRC / "runtime" / "agent.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     factory = next(
-        (n for n in ast.walk(tree)
-         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-         and n.name == RESUME_FACTORY),
+        (
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == RESUME_FACTORY
+        ),
         None,
     )
     assert factory is not None, (
@@ -280,8 +292,8 @@ def test_the_resume_factory_is_still_the_only_charter_free_builder():
     )
     builders = _charter_builders()
     built_here = {
-        n.func.id for n in ast.walk(factory)
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-        and n.func.id in builders
+        n.func.id
+        for n in ast.walk(factory)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in builders
     }
     assert built_here, f"{RESUME_FACTORY} no longer builds anything"

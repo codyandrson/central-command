@@ -44,10 +44,9 @@ def test_a_supplied_doc_id_wins_over_the_hash():
     """The future Confluence page-id key: a stable id means an EDITED document
     is the same document, which a content hash could never say."""
     first = ledger.parse_document(DOC_TITLE, DOC_TEXT, doc_id="CONF-4821")
-    edited = ledger.parse_document(DOC_TITLE, DOC_TEXT + "\nAddendum.",
-                                   doc_id="CONF-4821")
-    assert first["message_id"] == edited["message_id"] == (
-        "<cc-doc-CONF-4821@central_command.local>"
+    edited = ledger.parse_document(DOC_TITLE, DOC_TEXT + "\nAddendum.", doc_id="CONF-4821")
+    assert (
+        first["message_id"] == edited["message_id"] == ("<cc-doc-CONF-4821@central_command.local>")
     )
     assert first["synthetic"] is False
 
@@ -85,7 +84,8 @@ async def _wipe():
     try:
         await conn.execute(
             "delete from work_item where payload->>'title' like $1 or message_id like $2",
-            f"%{_MARK}%", "<cc-doc-DOCTEST-%",
+            f"%{_MARK}%",
+            "<cc-doc-DOCTEST-%",
         )
     finally:
         await conn.close()
@@ -141,8 +141,7 @@ async def test_an_email_enrolls_with_kind_email(clean_docs):
         kind = await conn.fetchval(
             "select kind from work_item where message_id = $1", result["message_id"]
         )
-        await conn.execute("delete from work_item where message_id = $1",
-                           result["message_id"])
+        await conn.execute("delete from work_item where message_id = $1", result["message_id"])
     finally:
         await conn.close()
     assert kind == "email", "the default must keep every existing row an email"
@@ -209,8 +208,7 @@ async def test_an_unknown_kind_fails_the_item_loudly(clean_docs):
     assert item["state"] == "FAILED"
 
     failures = [
-        e for e in await repo.list_events(ref_id=enrolled["item_id"])
-        if e["kind"] == "work.failed"
+        e for e in await repo.list_events(ref_id=enrolled["item_id"]) if e["kind"] == "work.failed"
     ]
     assert len(failures) == 1
     assert failures[0]["payload"]["kind"] == "confluence-page"
@@ -231,7 +229,8 @@ async def auditing_steward(clean_docs, monkeypatch):
 
     monkeypatch.setattr(settings, "auditor_enabled", True)
     monkeypatch.setattr(
-        steward, "_resolve_model",
+        steward,
+        "_resolve_model",
         aresolve(lambda model=None: model or make_steward_no_extraction_model()),
     )
     return monkeypatch
@@ -245,9 +244,7 @@ async def _dismissed_document(n: int) -> dict:
 
 
 @pytestmark_db
-async def test_a_document_dismissal_has_the_steward_actor_and_a_shadow_audit(
-    auditing_steward
-):
+async def test_a_document_dismissal_has_the_steward_actor_and_a_shadow_audit(auditing_steward):
     """Default mode: the verdict is recorded beside the item and the human gate
     is untouched — the document parks DISMISS_PENDING exactly as before."""
     auditing_steward.setattr(settings, "auditor_document_mode", "shadow")
@@ -270,9 +267,7 @@ async def test_a_document_dismissal_has_the_steward_actor_and_a_shadow_audit(
 
 
 @pytestmark_db
-async def test_the_email_class_going_active_never_carries_documents_with_it(
-    auditing_steward
-):
+async def test_the_email_class_going_active_never_carries_documents_with_it(auditing_steward):
     """THE point of a per-class knob: `CC_AUDITOR_MODE=active` graduates email
     and email alone. A document under document-shadow still waits for the
     operator, however concurring the auditor was."""
@@ -289,9 +284,7 @@ async def test_the_email_class_going_active_never_carries_documents_with_it(
 
 
 @pytestmark_db
-async def test_active_document_mode_confirms_a_concur_with_the_verdict_first(
-    auditing_steward
-):
+async def test_active_document_mode_confirms_a_concur_with_the_verdict_first(auditing_steward):
     auditing_steward.setattr(settings, "auditor_document_mode", "active")
     since = await repo.latest_event_id()
 
@@ -300,11 +293,7 @@ async def test_active_document_mode_confirms_a_concur_with_the_verdict_first(
     assert item["state"] == "PROCESSED"
     assert (item["payload"] or {})["audit"]["auto_confirmed"] is True
 
-    kinds = [
-        e["kind"] for e in await repo.list_events(
-            since_id=since, ref_id=enrolled["item_id"]
-        )
-    ]
+    kinds = [e["kind"] for e in await repo.list_events(since_id=since, ref_id=enrolled["item_id"])]
     assert kinds.index("audit.verdict") < kinds.index("work.dismissal_confirmed")
 
 
@@ -320,7 +309,7 @@ async def test_a_reopened_document_is_never_auto_confirmed(auditing_steward):
         await conn.execute(
             "update work_item set state = 'UNPROCESSED', terminal_at = null,"
             " payload = (payload - 'audit')"
-            " || '{\"operator_note\": \"look again please\"}'"
+            ' || \'{"operator_note": "look again please"}\''
             " where id = $1",
             enrolled["item_id"],
         )
@@ -358,9 +347,7 @@ async def test_a_failed_document_audit_degrades_to_the_human_gate(auditing_stewa
 
 
 @pytestmark_db
-async def test_document_verdicts_never_land_in_the_email_agreement_report(
-    auditing_steward
-):
+async def test_document_verdicts_never_land_in_the_email_agreement_report(auditing_steward):
     """Each class graduates on its OWN evidence — a document verdict counted in
     the email report would justify a flip nobody's record supports."""
     from central_command.gateway import auditor
@@ -381,9 +368,7 @@ async def test_document_verdicts_never_land_in_the_email_agreement_report(
 async def test_feeding_a_document_produces_a_proposal_and_a_processed_row(clean_docs):
     from central_command.api import routes
 
-    result = await routes.feed_document(
-        routes.DocumentIn(title=_title(5), text=DOC_TEXT)
-    )
+    result = await routes.feed_document(routes.DocumentIn(title=_title(5), text=DOC_TEXT))
     assert result["deferred"] is True
     proposal = await repo.load_proposal(result["proposal_id"])
     assert proposal["agent_id"] == "knowledge-steward"
@@ -405,8 +390,11 @@ async def test_refeeding_the_same_document_is_a_duplicate_not_a_second_run(clean
         routes.DocumentIn(title=_title(6), text=DOC_TEXT, doc_id="DOCTEST-stable")
     )
     assert first["deferred"] is True
-    assert again == {"deferred": False, "duplicate": True,
-                     "message_id": "<cc-doc-DOCTEST-stable@central_command.local>"}
+    assert again == {
+        "deferred": False,
+        "duplicate": True,
+        "message_id": "<cc-doc-DOCTEST-stable@central_command.local>",
+    }
 
     # Exactly one ledger row, and exactly one proposal — scoped to the rows
     # this test made, never a global count.
@@ -425,9 +413,7 @@ async def test_refeeding_the_same_document_is_a_duplicate_not_a_second_run(clean
 async def test_enroll_only_document_route_does_not_run_the_agent(clean_docs):
     from central_command.api import routes
 
-    result = await routes.enroll_document(
-        routes.DocumentIn(title=_title(7), text=DOC_TEXT)
-    )
+    result = await routes.enroll_document(routes.DocumentIn(title=_title(7), text=DOC_TEXT))
     assert result["enrolled"] is True
     item = await repo.get_work_item(result["item_id"])
     assert item["state"] == "UNPROCESSED" and item["session_id"] is None

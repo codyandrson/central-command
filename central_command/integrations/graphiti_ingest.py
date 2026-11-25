@@ -155,8 +155,15 @@ def _reference_time(raw: str) -> datetime:
 
 
 async def enqueue(
-    name: str, episode_body: str, source_description: str, group_id: str, *,
-    reference_time: str, proposal_id: str, scope: str, marker: str,
+    name: str,
+    episode_body: str,
+    source_description: str,
+    group_id: str,
+    *,
+    reference_time: str,
+    proposal_id: str,
+    scope: str,
+    marker: str,
 ) -> dict:
     """Queue one APPROVED episode for extraction: the verification row and the
     job, written together. `source_description` arrives provenance-stamped
@@ -169,15 +176,23 @@ async def enqueue(
         "reference_time": reference_time,
     }
     verification, job = await repo.create_graph_verification_with_job(
-        proposal_id=proposal_id, episode_name=name, group_id=group_id, scope=scope,
-        marker=marker, payload=payload,
+        proposal_id=proposal_id,
+        episode_name=name,
+        group_id=group_id,
+        scope=scope,
+        marker=marker,
+        payload=payload,
     )
     worker.wake()
     return {"verification": verification, "job": job}
 
 
 async def enqueue_delete(
-    episode_uuid: str, group_id: str, *, preview: dict, requested_by: str,
+    episode_uuid: str,
+    group_id: str,
+    *,
+    preview: dict,
+    requested_by: str,
     proposal_id: str | None = None,
 ) -> dict:
     """Queue the deletion of one episode on its group's queue. `preview` is
@@ -195,8 +210,11 @@ async def enqueue_delete(
         "requested_by": requested_by,
     }
     job = await repo.create_ingest_job(
-        verification_id=None, proposal_id=proposal_id, group_id=group_id,
-        payload=payload, kind=REMOVE,
+        verification_id=None,
+        proposal_id=proposal_id,
+        group_id=group_id,
+        payload=payload,
+        kind=REMOVE,
     )
     worker.wake()
     return job
@@ -226,18 +244,24 @@ def _deleter():
 async def _run_remove(job: dict) -> dict:
     payload = job["payload"]
     expected = payload.get("expected") or {}
-    approved = {
-        "episode": {"uuid": expected.get("episode")},
-        "facts": [{"uuid": u} for u in expected.get("facts") or []],
-        "collateral_facts": [{"uuid": u} for u in expected.get("collateral_facts") or []],
-        "entities": [{"uuid": u} for u in expected.get("entities") or []],
-        # Carried for the typed refusal's `expected` (R26); the comparison
-        # itself is by the sets, never by the digest.
-        "digest": payload.get("digest"),
-    } if expected else None
+    approved = (
+        {
+            "episode": {"uuid": expected.get("episode")},
+            "facts": [{"uuid": u} for u in expected.get("facts") or []],
+            "collateral_facts": [{"uuid": u} for u in expected.get("collateral_facts") or []],
+            "entities": [{"uuid": u} for u in expected.get("entities") or []],
+            # Carried for the typed refusal's `expected` (R26); the comparison
+            # itself is by the sets, never by the digest.
+            "digest": payload.get("digest"),
+        }
+        if expected
+        else None
+    )
     return await _deleter()(
-        payload["episode_uuid"], expected=approved,
-        known_dead_facts=list(expected.get("facts") or []) + list(expected.get("collateral_facts") or []),
+        payload["episode_uuid"],
+        expected=approved,
+        known_dead_facts=list(expected.get("facts") or [])
+        + list(expected.get("collateral_facts") or []),
     )
 
 
@@ -245,8 +269,7 @@ async def _dependencies_down() -> set[str]:
     """Which of the worker's dependencies the retry sweep last recorded DOWN.
     The persisted probe, not a probe of our own: one name, one probe (story 3)."""
     states = await repo.dependency_probe_states()
-    return {n for n in ("graph", "embedder")
-            if (states.get(n) or {}).get("state") == "down"}
+    return {n for n in ("graph", "embedder") if (states.get(n) or {}).get("state") == "down"}
 
 
 def _failing_dependencies(exc: BaseException) -> tuple[str, ...]:
@@ -300,17 +323,25 @@ async def run_job(job: dict) -> str:
     except Exception as exc:  # noqa: BLE001 — every failure lands somewhere
         if classify(exc) == TRANSIENT:
             delay = retry_backoff_seconds(max(0, int(job.get("attempts") or 1) - 1))
-            await repo.defer_ingest_job(job["id"], error=_error_text(exc),
-                                        delay_seconds=delay,
-                                        dependencies=_failing_dependencies(exc))
+            await repo.defer_ingest_job(
+                job["id"],
+                error=_error_text(exc),
+                delay_seconds=delay,
+                dependencies=_failing_dependencies(exc),
+            )
             log.info("graph ingest job %s deferred %ss: %s", job["id"], delay, exc)
             if int(job.get("attempts") or 1) <= 1:
                 await events.emit(
-                    "graph.ingest.deferred", ref_id=job.get("verification_id") or f"ingest-job-{job['id']}",
-                    payload={"job_id": job["id"], "proposal_id": job.get("proposal_id"),
-                             "kind": kind,
-                             "group_id": job["group_id"], "error": _error_text(exc),
-                             "retry_in_seconds": delay},
+                    "graph.ingest.deferred",
+                    ref_id=job.get("verification_id") or f"ingest-job-{job['id']}",
+                    payload={
+                        "job_id": job["id"],
+                        "proposal_id": job.get("proposal_id"),
+                        "kind": kind,
+                        "group_id": job["group_id"],
+                        "error": _error_text(exc),
+                        "retry_in_seconds": delay,
+                    },
                     actor=ACTOR,
                 )
             return "deferred"
@@ -319,16 +350,24 @@ async def run_job(job: dict) -> str:
 
     if kind == REMOVE:
         await repo.finish_ingest_job(
-            job["id"], episode_uuid=payload["episode_uuid"], result=removed,
+            job["id"],
+            episode_uuid=payload["episode_uuid"],
+            result=removed,
         )
         # Bookkeeping of a completed deletion, after it: the AUTHORISATION
         # was recorded before the job existed (the proposal's decision event,
         # or the operator's `graph.curated` request).
         await events.emit(
-            "graph.episode.deleted", ref_id=payload["episode_uuid"],
-            payload={"job_id": job["id"], "proposal_id": job.get("proposal_id"),
-                     "group_id": job["group_id"], "requested_by": payload.get("requested_by"),
-                     "episode_name": payload.get("episode_name"), **removed},
+            "graph.episode.deleted",
+            ref_id=payload["episode_uuid"],
+            payload={
+                "job_id": job["id"],
+                "proposal_id": job.get("proposal_id"),
+                "group_id": job["group_id"],
+                "requested_by": payload.get("requested_by"),
+                "episode_name": payload.get("episode_name"),
+                **removed,
+            },
             actor=ACTOR,
         )
         return "done"
@@ -349,34 +388,55 @@ async def _fail(job: dict, exc: BaseException) -> None:
     # The deletion worker's typed refusal (`neo4j_writer.PreviewChanged`, R26):
     # the record of what moved, as `proposal.failed` carries it. No redraft —
     # the proposal was EXECUTED when it queued this job.
-    world_moved = ({"target": exc.target, "expected": exc.expected,
-                    "actual": exc.actual, "what_moved": exc.what_moved}
-                   if is_world_moved(exc) else None)
+    world_moved = (
+        {
+            "target": exc.target,
+            "expected": exc.expected,
+            "actual": exc.actual,
+            "what_moved": exc.what_moved,
+        }
+        if is_world_moved(exc)
+        else None
+    )
     log.warning("graph ingest job %s FAILED (permanent): %s", job["id"], error)
     await repo.fail_ingest_job(job["id"], error=error)
     verification_id = job.get("verification_id")
     payload = job.get("payload") or {}
     episode_name = payload.get("name") or payload.get("episode_name")
     await events.emit(
-        "graph.ingest.failed", ref_id=verification_id or f"ingest-job-{job['id']}",
-        payload={"job_id": job["id"], "proposal_id": job.get("proposal_id"),
-                 "kind": job.get("kind") or ADD,
-                 "episode_uuid": payload.get("episode_uuid"),
-                 "group_id": job["group_id"], "episode_name": episode_name,
-                 "error": error, "error_type": type(exc).__name__,
-                 "attempts": job.get("attempts"), "world_moved": world_moved},
+        "graph.ingest.failed",
+        ref_id=verification_id or f"ingest-job-{job['id']}",
+        payload={
+            "job_id": job["id"],
+            "proposal_id": job.get("proposal_id"),
+            "kind": job.get("kind") or ADD,
+            "episode_uuid": payload.get("episode_uuid"),
+            "group_id": job["group_id"],
+            "episode_name": episode_name,
+            "error": error,
+            "error_type": type(exc).__name__,
+            "attempts": job.get("attempts"),
+            "world_moved": world_moved,
+        },
         actor=ACTOR,
     )
     if not verification_id:
         return
     mechanical = {"ingest_failed": True, "error": error}
     if await repo.finish_graph_verification(
-        verification_id, status="AWAITING_OPERATOR", mechanical=mechanical,
+        verification_id,
+        status="AWAITING_OPERATOR",
+        mechanical=mechanical,
     ):
         await events.emit(
-            "graph.verification.parked", ref_id=verification_id,
-            payload={"proposal_id": job.get("proposal_id"), "episode_name": episode_name,
-                     "mechanical": mechanical, "verdict": None},
+            "graph.verification.parked",
+            ref_id=verification_id,
+            payload={
+                "proposal_id": job.get("proposal_id"),
+                "episode_name": episode_name,
+                "mechanical": mechanical,
+                "verdict": None,
+            },
             actor=ACTOR,
         )
 
@@ -405,9 +465,7 @@ async def recover(exclude_ids: set[int] | frozenset[int] = frozenset()) -> dict:
         marker = job.get("marker") or (
             f"proposal={job['proposal_id']}" if job.get("proposal_id") else None
         )
-        episode = (
-            await neo4j_reader.episode_by_marker(marker, job["group_id"]) if marker else None
-        )
+        episode = await neo4j_reader.episode_by_marker(marker, job["group_id"]) if marker else None
         if episode is not None:
             await repo.recover_ingest_job_done(job["id"], episode_uuid=episode["uuid"])
             done.append(job["id"])
@@ -416,7 +474,9 @@ async def recover(exclude_ids: set[int] | frozenset[int] = frozenset()) -> dict:
             requeued.append(job["id"])
     if done or requeued:
         await events.emit(
-            "graph.ingest.recovered", payload={"done": done, "requeued": requeued}, actor=ACTOR,
+            "graph.ingest.recovered",
+            payload={"done": done, "requeued": requeued},
+            actor=ACTOR,
         )
     return {"done": done, "requeued": requeued}
 
@@ -455,8 +515,12 @@ class IngestWorker:
         return self._task is not None and not self._task.done()
 
     def status(self) -> dict:
-        return {"running": self.running, "state": self.state,
-                "in_flight_groups": sorted(self._jobs), "patches_ok": self._patches}
+        return {
+            "running": self.running,
+            "state": self.state,
+            "in_flight_groups": sorted(self._jobs),
+            "patches_ok": self._patches,
+        }
 
     def wake(self) -> None:
         if self._wake is not None:
@@ -611,8 +675,9 @@ class IngestWorker:
                 self._cutover_done = True
             except Exception as exc:  # noqa: BLE001 — retried next tick, logged once
                 if not self._cutover_logged:
-                    log.warning("graph ingest: cutover enqueue failed, retrying: %s",
-                                _error_text(exc))
+                    log.warning(
+                        "graph ingest: cutover enqueue failed, retrying: %s", _error_text(exc)
+                    )
                     self._cutover_logged = True
         if hold.active:
             self._report(None, "held: an update is waiting")
@@ -661,8 +726,7 @@ class IngestWorker:
             # Recording the outcome failed (the spine blinked): the job is
             # still RUNNING. Re-run recovery next tick — the marker decides it,
             # exactly as after a crash, instead of the group stalling.
-            log.exception("graph ingest job %s: landing failed; recovering it by marker",
-                          job["id"])
+            log.exception("graph ingest job %s: landing failed; recovering it by marker", job["id"])
             self._recovered = False
         finally:
             if self._jobs.get(job["group_id"]) is asyncio.current_task():

@@ -28,8 +28,12 @@ TODAY = date(2026, 7, 19)
 
 def test_past_due_date_flags_the_proposal_for_review():
     flags = policy.check_actions(
-        [{"capability": "jira.set_due_date@v1",
-          "arguments": {"issue_key": "TASKS-12", "due_date": "2024-08-10"}}],
+        [
+            {
+                "capability": "jira.set_due_date@v1",
+                "arguments": {"issue_key": "TASKS-12", "due_date": "2024-08-10"},
+            }
+        ],
         today=TODAY,
     )
     assert len(flags) == 1
@@ -42,28 +46,41 @@ def test_past_due_date_flags_the_proposal_for_review():
 
 def test_today_and_future_dates_are_clean():
     actions = [
-        {"capability": "jira.set_due_date",
-         "arguments": {"issue_key": "T-1", "due_date": TODAY.isoformat()}},
-        {"capability": "jira.update_attributes",
-         "arguments": {"issue_key": "T-1", "priority": "High",
-                       "due_date": "2026-12-01", "labels": []}},
+        {
+            "capability": "jira.set_due_date",
+            "arguments": {"issue_key": "T-1", "due_date": TODAY.isoformat()},
+        },
+        {
+            "capability": "jira.update_attributes",
+            "arguments": {
+                "issue_key": "T-1",
+                "priority": "High",
+                "due_date": "2026-12-01",
+                "labels": [],
+            },
+        },
     ]
     assert policy.check_actions(actions, today=TODAY) == []
 
 
 def test_clearing_a_date_is_not_a_hazard():
     actions = [
-        {"capability": "jira.update_attributes",
-         "arguments": {"issue_key": "T-1", "priority": "Low",
-                       "due_date": None, "labels": []}},
+        {
+            "capability": "jira.update_attributes",
+            "arguments": {"issue_key": "T-1", "priority": "Low", "due_date": None, "labels": []},
+        },
     ]
     assert policy.check_actions(actions, today=TODAY) == []
 
 
 def test_malformed_date_flags_too():
     flags = policy.check_actions(
-        [{"capability": "jira.set_due_date",
-          "arguments": {"issue_key": "T-1", "due_date": "next Tuesday"}}],
+        [
+            {
+                "capability": "jira.set_due_date",
+                "arguments": {"issue_key": "T-1", "due_date": "next Tuesday"},
+            }
+        ],
         today=TODAY,
     )
     assert len(flags) == 1
@@ -72,16 +89,23 @@ def test_malformed_date_flags_too():
 
 def test_dateless_actions_are_ignored():
     actions = [
-        {"capability": "jira.add_comment",
-         "arguments": {"issue_key": "T-1", "body": "due 1999-01-01 (prose, not a date arg)"}},
+        {
+            "capability": "jira.add_comment",
+            "arguments": {"issue_key": "T-1", "body": "due 1999-01-01 (prose, not a date arg)"},
+        },
     ]
     assert policy.check_actions(actions, today=TODAY) == []
     # A dateless graph EPISODE is the one deliberate exception (2026-08-16):
     # extraction stamps it as becoming true today, so it flags for review.
-    flags = policy.check_actions([
-        {"capability": "graph.add_episode",
-         "arguments": {"name": "n", "episode_body": "b", "source_description": "s"}},
-    ], today=TODAY)
+    flags = policy.check_actions(
+        [
+            {
+                "capability": "graph.add_episode",
+                "arguments": {"name": "n", "episode_body": "b", "source_description": "s"},
+            },
+        ],
+        today=TODAY,
+    )
     assert [f["policy"] for f in flags] == ["episodes-carry-their-time"]
 
 
@@ -112,7 +136,8 @@ async def test_flags_ride_the_review_surface_and_the_decision_record(monkeypatch
     # Approving over the flag is allowed — and recorded as exactly that.
     await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
     decided = [
-        e for e in await repo.list_events(ref_id=run["proposal_id"])
+        e
+        for e in await repo.list_events(ref_id=run["proposal_id"])
         if e["kind"] == "proposal.decided"
     ]
     assert decided[0]["payload"]["policy_flags"][0]["policy"] == "no-past-due-dates"
@@ -127,8 +152,12 @@ async def test_flags_ride_the_review_surface_and_the_decision_record(monkeypatch
 
 def test_unknown_capability_flags_the_proposal():
     flags = policy.check_actions(
-        [{"capability": "jira.create_epic@v1",
-          "arguments": {"project_key": "TASKS", "summary": "x"}}],
+        [
+            {
+                "capability": "jira.create_epic@v1",
+                "arguments": {"project_key": "TASKS", "summary": "x"},
+            }
+        ],
         today=TODAY,
     )
     assert len(flags) == 1
@@ -154,31 +183,35 @@ def test_capability_outside_grants_is_flagged():
     exists to catch."""
     granted = {"jira.set_due_date", "graph.add_episode"}
     flags = policy.check_grants(
-        [{"capability": "jira.add_comment@v1",
-          "arguments": {"issue_key": "TASKS-12", "body": "hi"}}],
+        [
+            {
+                "capability": "jira.add_comment@v1",
+                "arguments": {"issue_key": "TASKS-12", "body": "hi"},
+            }
+        ],
         granted,
     )
     assert len(flags) == 1
     assert flags[0]["policy"] == "within-granted-capabilities"
     assert flags[0]["capability"] == "jira.add_comment"
 
-    assert policy.check_grants(
-        [{"capability": "jira.set_due_date@v1", "arguments": {}}], granted
-    ) == []
+    assert (
+        policy.check_grants([{"capability": "jira.set_due_date@v1", "arguments": {}}], granted)
+        == []
+    )
     # No exemption: an agent proposing charter.update WITHOUT the
     # charter-propose grant is flagged, same as any other ungranted write.
-    flags = policy.check_grants(
-        [{"capability": "charter.update", "arguments": {}}], set()
-    )
+    flags = policy.check_grants([{"capability": "charter.update", "arguments": {}}], set())
     assert len(flags) == 1
     assert flags[0]["policy"] == "within-granted-capabilities"
     assert flags[0]["capability"] == "charter.update"
 
     # ...and a proposer that DOES hold charter-propose (i.e. its granted set
     # includes charter.update) is clean.
-    assert policy.check_grants(
-        [{"capability": "charter.update", "arguments": {}}], {"charter.update"}
-    ) == []
+    assert (
+        policy.check_grants([{"capability": "charter.update", "arguments": {}}], {"charter.update"})
+        == []
+    )
 
 
 def test_charter_referencing_unknown_capability_is_flagged():
@@ -198,10 +231,14 @@ def test_charter_referencing_unknown_capability_is_flagged():
 def test_a_dateless_episode_is_flagged_for_the_reviewer():
     """Graphiti stamps a dateless claim as becoming true at ingestion — newly
     LEARNED read as newly TRUE. The reviewer decides with that visible."""
-    flags = policy.check_actions([{
-        "capability": "graph.add_episode@v1",
-        "arguments": {"episode_body": "Bonnie Doe is the cousin of Lee."},
-    }])
+    flags = policy.check_actions(
+        [
+            {
+                "capability": "graph.add_episode@v1",
+                "arguments": {"episode_body": "Bonnie Doe is the cousin of Lee."},
+            }
+        ]
+    )
     assert len(flags) == 1
     assert flags[0]["policy"] == "episodes-carry-their-time"
     assert flags[0]["argument"] == "episode_body"
@@ -216,17 +253,28 @@ def test_an_episode_stating_its_time_is_clean():
         "Jane is Lee's mother (long-standing).",
         "Lee owns a 1996 Volvo 850; start date unknown.",
     ):
-        assert policy.check_actions([{
-            "capability": "graph.add_episode",
-            "arguments": {"episode_body": body},
-        }]) == [], f"falsely flagged: {body!r}"
+        assert (
+            policy.check_actions(
+                [
+                    {
+                        "capability": "graph.add_episode",
+                        "arguments": {"episode_body": body},
+                    }
+                ]
+            )
+            == []
+        ), f"falsely flagged: {body!r}"
 
 
 def test_non_episode_actions_never_carry_the_time_flag():
-    flags = policy.check_actions([{
-        "capability": "jira.add_comment",
-        "arguments": {"issue_key": "T-1", "body": "no dates here at all"},
-    }])
+    flags = policy.check_actions(
+        [
+            {
+                "capability": "jira.add_comment",
+                "arguments": {"issue_key": "T-1", "body": "no dates here at all"},
+            }
+        ]
+    )
     assert flags == []
 
 
@@ -234,40 +282,54 @@ def test_non_episode_actions_never_carry_the_time_flag():
 
 
 def _episode(reference_time: str) -> list[dict]:
-    return [{
-        "capability": "graph.add_episode@v1",
-        "arguments": {"name": "n", "scope": "shared",
-                      "episode_body": "Lee Doe joined Initech in January 2026.",
-                      "reference_time": reference_time},
-    }]
+    return [
+        {
+            "capability": "graph.add_episode@v1",
+            "arguments": {
+                "name": "n",
+                "scope": "shared",
+                "episode_body": "Lee Doe joined Initech in January 2026.",
+                "reference_time": reference_time,
+            },
+        }
+    ]
 
 
 def test_an_episode_from_old_mail_dated_to_the_proposal_is_flagged():
     """Read 2026-11-05: 18 of 78 triage episodes in ten days carried the
     proposal's own date as reference_time while the mail was months old —
     "registration was completed as of 2026-11-05" from a December mail."""
-    flags = policy.check_actions(_episode("2026-07-19T09:00:00Z"), today=TODAY,
-                                 source_time=datetime(2026, 1, 20, tzinfo=UTC))
+    flags = policy.check_actions(
+        _episode("2026-07-19T09:00:00Z"), today=TODAY, source_time=datetime(2026, 1, 20, tzinfo=UTC)
+    )
     assert [f["policy"] for f in flags] == ["reference-time-is-the-source-time"]
     assert flags[0]["argument"] == "reference_time"
     assert "source is from 2026-01-20, 180 days earlier" in flags[0]["problem"]
     # A day either side of today still reads as "the proposal's own date".
-    assert policy.check_actions(_episode("2026-07-18"), today=TODAY,
-                                source_time="2026-01-20T10:00:00+00:00")
+    assert policy.check_actions(
+        _episode("2026-07-18"), today=TODAY, source_time="2026-01-20T10:00:00+00:00"
+    )
 
 
 def test_an_episode_dated_to_its_source_is_clean():
-    assert policy.check_actions(_episode("2026-01-20T23:05:26Z"), today=TODAY,
-                                source_time=datetime(2026, 1, 20, tzinfo=UTC)) == []
+    assert (
+        policy.check_actions(
+            _episode("2026-01-20T23:05:26Z"),
+            today=TODAY,
+            source_time=datetime(2026, 1, 20, tzinfo=UTC),
+        )
+        == []
+    )
 
 
 def test_recent_mail_and_an_unknown_source_time_do_not_flag():
     # Inside a month, "now" and "when the mail came" bound the same window.
-    assert policy.check_actions(_episode("2026-07-19"), today=TODAY,
-                                source_time=date(2026, 7, 1)) == []
+    assert (
+        policy.check_actions(_episode("2026-07-19"), today=TODAY, source_time=date(2026, 7, 1))
+        == []
+    )
     # No source time known (a hand-fed text, a non-mail session): the check
     # does not run rather than guess.
     assert policy.check_actions(_episode("2026-07-19"), today=TODAY) == []
     # An unparseable reference_time is the Executor's refusal, not this flag.
-    assert policy.check_actions(_episode("today"), today=TODAY,
-                                source_time=date(2026, 1, 20)) == []
+    assert policy.check_actions(_episode("today"), today=TODAY, source_time=date(2026, 1, 20)) == []

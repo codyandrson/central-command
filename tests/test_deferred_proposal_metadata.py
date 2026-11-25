@@ -31,8 +31,10 @@ GUIDANCE = "# Expense reports\n1. Fill in the amount.\n2. Submit the report.\n"
 
 
 def _sources() -> dict[str, str]:
-    return {p.relative_to(SRC).as_posix(): p.read_text(encoding="utf-8")
-            for p in sorted(SRC.rglob("*.py"))}
+    return {
+        p.relative_to(SRC).as_posix(): p.read_text(encoding="utf-8")
+        for p in sorted(SRC.rglob("*.py"))
+    }
 
 
 def _calls_without_metadata(sources: dict[str, str]) -> list[str]:
@@ -45,10 +47,12 @@ def _calls_without_metadata(sources: dict[str, str]) -> list[str]:
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             for n in ast.walk(fn):
-                if (isinstance(n, ast.Call)
-                        and getattr(n.func, "id", getattr(n.func, "attr", None)) == "proposal_from_call"
-                        and not any(k.arg == "metadata" for k in n.keywords)
-                        and len(n.args) < 2):
+                if (
+                    isinstance(n, ast.Call)
+                    and getattr(n.func, "id", getattr(n.func, "attr", None)) == "proposal_from_call"
+                    and not any(k.arg == "metadata" for k in n.keywords)
+                    and len(n.args) < 2
+                ):
                     found.append(f"{rel}:{fn.name}")
     return sorted(set(found))
 
@@ -57,7 +61,8 @@ def test_no_proposal_from_call_outside_durable_omits_metadata():
     bad = [s for s in _calls_without_metadata(_sources()) if s not in ALLOWED_WITHOUT_METADATA]
     assert bad == [], (
         "these read a deferred call's proposal from its args alone — a tool that "
-        f"builds its proposal in code would crash them; use durable.deferred_proposal: {bad}")
+        f"builds its proposal in code would crash them; use durable.deferred_proposal: {bad}"
+    )
 
 
 def test_the_walk_finds_a_site_that_omits_it():
@@ -76,15 +81,24 @@ def _correcting_model(skill_id: str):
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         returns = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
         if not any(p.tool_name == "load_capability" for p in returns):
-            return ModelResponse(parts=[ToolCallPart(
-                tool_name="load_capability", args={"id": skill_id})])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="load_capability", args={"id": skill_id})]
+            )
         if any(p.tool_name == "propose_skill_correction" for p in returns):
             return ModelResponse(parts=[TextPart(content="the correction was refused")])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="propose_skill_correction",
-            args={"skill_id": skill_id, "find": "2. Submit the report.\n",
-                  "replace": "2. Attach the receipt.\n3. Submit the report.\n",
-                  "why": "A report without its receipt is sent back."})])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="propose_skill_correction",
+                    args={
+                        "skill_id": skill_id,
+                        "find": "2. Submit the report.\n",
+                        "replace": "2. Attach the receipt.\n3. Submit the report.\n",
+                        "why": "A report without its receipt is sent back.",
+                    },
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -127,9 +141,11 @@ async def test_the_steward_parks_a_code_built_correction(skill_for):
 
     await steward.ensure_registered()
     skill_id = await skill_for(AGENT_ID)
-    out = await steward.run_document("a document about expenses",
-                                     source_text="a document about expenses",
-                                     model=_correcting_model(skill_id))
+    out = await steward.run_document(
+        "a document about expenses",
+        source_text="a document about expenses",
+        model=_correcting_model(skill_id),
+    )
     await _assert_parked_correction(out, AGENT_ID, skill_id)
 
 
@@ -138,8 +154,7 @@ async def test_the_wiki_agent_parks_a_code_built_correction(skill_for):
     from central_command.runtime import wiki_agent
 
     skill_id = await skill_for(wiki_agent.AGENT_ID)
-    out = await wiki_agent.run_repair("repair the expenses page",
-                                      model=_correcting_model(skill_id))
+    out = await wiki_agent.run_repair("repair the expenses page", model=_correcting_model(skill_id))
     await _assert_parked_correction(out, wiki_agent.AGENT_ID, skill_id)
 
 
@@ -150,12 +165,20 @@ async def test_the_coach_parks_a_code_built_correction(skill_for):
 
     target = "coach-corr-" + uuid.uuid4().hex[:6]
     await repo.upsert_agent(target, target, "demo", "c")
-    await repo.save_charter_version(target, "CHARTER for a coaching test.",
-                                    "seed", created_by="operator")
-    note = await events.emit("agent.coach_requested", ref_id=target,
-                             payload={"signal_ids": [], "note": "Look at receipts."},
-                             actor="operator")
+    await repo.save_charter_version(
+        target, "CHARTER for a coaching test.", "seed", created_by="operator"
+    )
+    note = await events.emit(
+        "agent.coach_requested",
+        ref_id=target,
+        payload={"signal_ids": [], "note": "Look at receipts."},
+        actor="operator",
+    )
     skill_id = await skill_for("coach")
-    out = await run_coach(target, model=_correcting_model(skill_id),
-                          note="Look at receipts.", note_event_id=note["id"])
+    out = await run_coach(
+        target,
+        model=_correcting_model(skill_id),
+        note="Look at receipts.",
+        note_event_id=note["id"],
+    )
     await _assert_parked_correction(out, "coach", skill_id)

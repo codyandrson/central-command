@@ -31,7 +31,7 @@ async def _seed(skill_id: str = "cc-test-retire") -> None:
 @pytest.mark.asyncio
 async def test_retire_hides_doc_from_delivery_and_search_but_keeps_history(clean_skills):
     await _seed()
-    assert (await repo.search_skill_chunks("cc-test-retire", "junk"))
+    assert await repo.search_skill_chunks("cc-test-retire", "junk")
 
     row = await repo.retire_skill_doc("cc-test-retire", "junk", "superseded by better material")
     assert row is not None and row["retired_at"] is not None
@@ -59,14 +59,14 @@ async def test_retire_twice_reports_nothing_to_retire(clean_skills):
 @pytestmark_db
 @pytest.mark.asyncio
 async def test_reimport_after_retire_becomes_current_again(clean_skills):
-    """"Retire then refresh" and "supersede" converge: the next add under the
+    """ "Retire then refresh" and "supersede" converge: the next add under the
     same doc_key is version N+1, current, searchable — retirement is not a
     tombstone on the key."""
     await _seed()
     await repo.retire_skill_doc("cc-test-retire", "junk", "stale")
     doc = await repo.add_skill_doc("cc-test-retire", "junk", "reference", "J2", "fresh junk body")
     assert doc["version"] == 2 and doc["is_current"]
-    assert (await repo.search_skill_chunks("cc-test-retire", "fresh"))
+    assert await repo.search_skill_chunks("cc-test-retire", "fresh")
 
 
 @pytestmark_db
@@ -95,17 +95,23 @@ async def test_route_refuses_guidance_and_409s_a_dead_key(clean_skills):
     # teaches nothing when loaded.
     with pytest.raises(HTTPException) as exc:
         await routes.retire_skill_doc_route(
-            "cc-test-retire", "guidance", routes.RetireIn(reason="should refuse"),
+            "cc-test-retire",
+            "guidance",
+            routes.RetireIn(reason="should refuse"),
         )
     assert exc.value.status_code == 422
 
     res = await routes.retire_skill_doc_route(
-        "cc-test-retire", "keeper", routes.RetireIn(reason="via route"),
+        "cc-test-retire",
+        "keeper",
+        routes.RetireIn(reason="via route"),
     )
     assert res["ok"] and res["doc"]["retired_at"] is not None
 
     with pytest.raises(HTTPException) as exc:
         await routes.retire_skill_doc_route(
-            "cc-test-retire", "keeper", routes.RetireIn(reason="again"),
+            "cc-test-retire",
+            "keeper",
+            routes.RetireIn(reason="again"),
         )
     assert exc.value.status_code == 409

@@ -38,9 +38,15 @@ async def cleanup():
             docs = await conn.fetch("select id from catalog_document where source_id = $1", sid)
             doc_ids = [d["id"] for d in docs]
             if doc_ids:
-                await conn.execute("delete from catalog_version where document_id = any($1::text[])", doc_ids)
-                await conn.execute("delete from catalog_location where document_id = any($1::text[])", doc_ids)
-                await conn.execute("delete from catalog_document where id = any($1::text[])", doc_ids)
+                await conn.execute(
+                    "delete from catalog_version where document_id = any($1::text[])", doc_ids
+                )
+                await conn.execute(
+                    "delete from catalog_location where document_id = any($1::text[])", doc_ids
+                )
+                await conn.execute(
+                    "delete from catalog_document where id = any($1::text[])", doc_ids
+                )
             await conn.execute("delete from source where id = $1", sid)
     finally:
         await conn.close()
@@ -49,7 +55,9 @@ async def cleanup():
 async def _make_source(cleanup, **config) -> dict:
     sid = _sid()
     cleanup.append(sid)
-    return await repo.upsert_source(sid, "confluence", "Test confluence source", config, enabled=True)
+    return await repo.upsert_source(
+        sid, "confluence", "Test confluence source", config, enabled=True
+    )
 
 
 def _hit(page_id: str, title: str, when: str) -> dict:
@@ -59,8 +67,12 @@ def _hit(page_id: str, title: str, when: str) -> dict:
 
 def _page(page_id: str, title: str, body: str, version: int, space_key: str) -> dict:
     return {
-        "id": page_id, "title": title, "body": body, "version": version,
-        "space_key": space_key, "url": None,
+        "id": page_id,
+        "title": title,
+        "body": body,
+        "version": version,
+        "space_key": space_key,
+        "url": None,
     }
 
 
@@ -228,10 +240,12 @@ async def test_empty_body_takes_raw_hash_path(monkeypatch, cleanup):
 
 async def test_one_page_fetch_failure_does_not_abort_the_walk(monkeypatch, cleanup):
     async def fake_search(cql, limit=None):
-        return {"results": [
-            _hit("300", "Bad", "2026-08-20 10:00"),
-            _hit("301", "Good", "2026-08-20 11:00"),
-        ]}
+        return {
+            "results": [
+                _hit("300", "Bad", "2026-08-20 10:00"),
+                _hit("301", "Good", "2026-08-20 11:00"),
+            ]
+        }
 
     async def fake_get_page(page_id):
         if page_id == "300":
@@ -256,7 +270,11 @@ async def test_post_sources_accepts_confluence_with_space_keys(cleanup):
     sid = _sid()
     cleanup.append(sid)
     body = routes.SourceIn(
-        id=sid, kind="confluence", name="Eng wiki", config={"space_keys": ["ENG"]}, enabled=True,
+        id=sid,
+        kind="confluence",
+        name="Eng wiki",
+        config={"space_keys": ["ENG"]},
+        enabled=True,
     )
     out = await routes.upsert_source(body)
     assert out["ok"] is True

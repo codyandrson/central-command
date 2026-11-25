@@ -43,8 +43,7 @@ SCRIPT = ROOT / "deploy" / "shared" / "litellm" / "register-models.py"
 ENV_LIB = ROOT / "deploy" / "env-lib.sh"
 
 KEY = "sk-super-secret-not-in-any-log"
-BASE = {"CC_LLM_UPSTREAM_BASE_URL": "https://llm.corp.example/v1",
-        "CC_LLM_UPSTREAM_API_KEY": KEY}
+BASE = {"CC_LLM_UPSTREAM_BASE_URL": "https://llm.corp.example/v1", "CC_LLM_UPSTREAM_API_KEY": KEY}
 IDS = {
     "CC_LLM_UPSTREAM_MODEL_CC_DEFAULT": "corp-claude",
     "CC_LLM_UPSTREAM_MODEL_GRAPHITI_LLM": "corp-claude",
@@ -134,29 +133,48 @@ def _live(alias, **params):
 def test_alias_env_key_matches_the_bash_derivation(rm):
     """Two languages, one derivation — bash tells the operator which key removes
     the pause, python turns it into a row."""
-    for alias in ("cc-default", "graphiti-llm", "cc-embedding", "cc-rerank",
-                  "cc-tts", "cc-stt", "gpt-4.1-nano"):
+    for alias in (
+        "cc-default",
+        "graphiti-llm",
+        "cc-embedding",
+        "cc-rerank",
+        "cc-tts",
+        "cc-stt",
+        "gpt-4.1-nano",
+    ):
         want = subprocess.run(
             [_bash_exe(), "-c", f'. "{ENV_LIB.as_posix()}"; cc_alias_env_key {alias}'],
-            capture_output=True, text=True, check=True).stdout.strip()
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
         assert rm.alias_env_key(alias) == want, alias
     assert rm.alias_env_key("cc-rerank") == "CC_LLM_UPSTREAM_MODEL_CC_RERANK"
     assert rm.alias_env_key("gpt-4.1-nano") == "CC_LLM_UPSTREAM_MODEL_GPT_4_1_NANO"
 
 
-@pytest.mark.parametrize("speech,expected", [
-    # gpt-4.1-nano left the list in v2.62.0 (graphiti-core's unused default
-    # reranker); cc-rerank is OPTIONAL (cc_optional_aliases), never required.
-    ("1", ["cc-default", "graphiti-llm", "cc-embedding", "cc-tts", "cc-stt"]),
-    # With the bundled engine off, cc-tts/cc-stt point at engines of the
-    # operator's own — a UI job, not an upstream .env can name.
-    ("0", ["cc-default", "graphiti-llm", "cc-embedding"]),
-])
+@pytest.mark.parametrize(
+    "speech,expected",
+    [
+        # gpt-4.1-nano left the list in v2.62.0 (graphiti-core's unused default
+        # reranker); cc-rerank is OPTIONAL (cc_optional_aliases), never required.
+        ("1", ["cc-default", "graphiti-llm", "cc-embedding", "cc-tts", "cc-stt"]),
+        # With the bundled engine off, cc-tts/cc-stt point at engines of the
+        # operator's own — a UI job, not an upstream .env can name.
+        ("0", ["cc-default", "graphiti-llm", "cc-embedding"]),
+    ],
+)
 def test_cc_required_aliases_follows_the_speech_flag(speech, expected):
     out = subprocess.run(
-        [_bash_exe(), "-c",
-         f'. "{ENV_LIB.as_posix()}"; CC_ENABLE_SPEECH={speech} cc_required_aliases'],
-        capture_output=True, text=True, check=True).stdout.split()
+        [
+            _bash_exe(),
+            "-c",
+            f'. "{ENV_LIB.as_posix()}"; CC_ENABLE_SPEECH={speech} cc_required_aliases',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
     assert out == expected
 
 
@@ -164,9 +182,17 @@ def test_no_keys_creates_placeholder_skeletons(rm, monkeypatch, capsys):
     """The pre-v2.44.0 behaviour, unchanged — k3s and the UI path depend on it."""
     rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={})
     assert rc == rm.EXIT_ACTION, out
-    created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
-    assert set(created) == {"cc-default", "graphiti-llm", "cc-embedding",
-                            "cc-rerank", "cc-tts", "cc-stt"}
+    created = {
+        b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")
+    }
+    assert set(created) == {
+        "cc-default",
+        "graphiti-llm",
+        "cc-embedding",
+        "cc-rerank",
+        "cc-tts",
+        "cc-stt",
+    }
     for alias, params in created.items():
         assert params["model"] == "openai/PLACEHOLDER", alias
         assert params["api_base"] == "PLACEHOLDER", alias
@@ -177,7 +203,9 @@ def test_no_keys_creates_placeholder_skeletons(rm, monkeypatch, capsys):
 def test_declared_keys_create_real_rows(rm, monkeypatch, capsys):
     rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={**BASE, **IDS})
     assert rc == 0, out
-    created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
+    created = {
+        b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")
+    }
     assert created["cc-default"]["model"] == "openai/corp-claude"
     assert created["cc-default"]["api_base"] == "https://llm.corp.example/v1"
     assert created["cc-default"]["api_key"] == KEY
@@ -193,11 +221,16 @@ def test_a_loopback_upstream_is_rewritten_for_the_container(rm, monkeypatch, cap
     env = {**BASE, **IDS, "CC_LLM_UPSTREAM_BASE_URL": "http://127.0.0.1:8081/v1"}
     rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env=env)
     assert rc == 0, out
-    created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
+    created = {
+        b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")
+    }
     assert created["cc-default"]["api_base"] == "http://host.containers.internal:8081/v1"
     assert "LOOPBACK" in out, "the rewrite is reported, never silent"
     # A real host is passed through untouched.
-    assert rm.container_api_base("https://llm.corp.example/v1") == ("https://llm.corp.example/v1", False)
+    assert rm.container_api_base("https://llm.corp.example/v1") == (
+        "https://llm.corp.example/v1",
+        False,
+    )
 
 
 def test_a_placeholder_row_is_updated_once_env_declares_the_upstream(rm, monkeypatch, capsys):
@@ -208,7 +241,9 @@ def test_a_placeholder_row_is_updated_once_env_declares_the_upstream(rm, monkeyp
         _live("cc-embedding", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
         _live("cc-rerank", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
         _live("cc-tts", model="openai/PLACEHOLDER", api_base="PLACEHOLDER", mode="audio_speech"),
-        _live("cc-stt", model="openai/PLACEHOLDER", api_base="PLACEHOLDER", mode="audio_transcription"),
+        _live(
+            "cc-stt", model="openai/PLACEHOLDER", api_base="PLACEHOLDER", mode="audio_transcription"
+        ),
     ]
     rc, out, proxy = _run(rm, monkeypatch, capsys, live=skeletons, env={**BASE, **IDS})
     assert rc == 0, out
@@ -229,10 +264,24 @@ def test_a_row_the_operator_edited_is_never_touched(rm, monkeypatch, capsys):
         _live("cc-embedding", model="openai/their-embed", api_base="https://theirs.example/v1"),
         # A DEDICATED reranker where the skeleton says openai/: cc-rerank is
         # judged_by_probe, so a row of either shape is the operator's, not drift.
-        _live("cc-rerank", model="cohere/their-rerank", api_base="https://theirs.example/v1/rerank",
-              mode="rerank"),
-        _live("cc-tts", model="openai/their-tts", api_base="https://theirs.example/v1", mode="audio_speech"),
-        _live("cc-stt", model="openai/their-stt", api_base="https://theirs.example/v1", mode="audio_transcription"),
+        _live(
+            "cc-rerank",
+            model="cohere/their-rerank",
+            api_base="https://theirs.example/v1/rerank",
+            mode="rerank",
+        ),
+        _live(
+            "cc-tts",
+            model="openai/their-tts",
+            api_base="https://theirs.example/v1",
+            mode="audio_speech",
+        ),
+        _live(
+            "cc-stt",
+            model="openai/their-stt",
+            api_base="https://theirs.example/v1",
+            mode="audio_transcription",
+        ),
     ]
     rc, out, proxy = _run(rm, monkeypatch, capsys, live=filled, env={**BASE, **IDS})
     assert rc == 0, out
@@ -247,15 +296,27 @@ def test_require_makes_non_required_skeletons_optional(rm, monkeypatch, capsys):
     — the Windows testbed (2026-09-25) sat at the llm pause for two aliases
     nothing on the install would call. With --require naming the four, the
     skeletons are `optional` and the phase proceeds."""
-    filled = {a: _live(a, model="openai/qwen", api_base="http://up:1/v1", api_key="k")
-              for a in ("cc-default", "graphiti-llm", "cc-embedding")}
+    filled = {
+        a: _live(a, model="openai/qwen", api_base="http://up:1/v1", api_key="k")
+        for a in ("cc-default", "graphiti-llm", "cc-embedding")
+    }
     live = list(filled.values()) + [
         _live("cc-tts", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
         _live("cc-stt", model="openai/PLACEHOLDER", api_base="PLACEHOLDER"),
     ]
-    rc, out, proxy = _run(rm, monkeypatch, capsys, live=live, env={},
-                          argv=("--policy", str(SINGLE / "models.json"),
-                                "--require", "cc-default graphiti-llm cc-embedding"))
+    rc, out, proxy = _run(
+        rm,
+        monkeypatch,
+        capsys,
+        live=live,
+        env={},
+        argv=(
+            "--policy",
+            str(SINGLE / "models.json"),
+            "--require",
+            "cc-default graphiti-llm cc-embedding",
+        ),
+    )
     assert rc == 0, out
     assert "optional cc-tts" in out and "optional cc-stt" in out
     # cc-rerank is optional on every install: its skeleton is created and
@@ -271,12 +332,28 @@ def test_require_makes_non_required_skeletons_optional(rm, monkeypatch, capsys):
 # graphiti-llm's thinking-off switch lived only on the live row and was lost on
 # every re-creation; declared, it rides the skeleton and is checked afterwards.
 
+
 def _policy_with_extra():
-    return {"models": {}, "registration_only": {
-        "graphiti-llm": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER", "timeout": 300},
-                         "extra_params": {"chat_template_kwargs": {"enable_thinking": False}}},
-        "cc-embedding": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER", "timeout": 60}},
-    }}
+    return {
+        "models": {},
+        "registration_only": {
+            "graphiti-llm": {
+                "registration": {
+                    "model": "openai/PLACEHOLDER",
+                    "api_base": "PLACEHOLDER",
+                    "timeout": 300,
+                },
+                "extra_params": {"chat_template_kwargs": {"enable_thinking": False}},
+            },
+            "cc-embedding": {
+                "registration": {
+                    "model": "openai/PLACEHOLDER",
+                    "api_base": "PLACEHOLDER",
+                    "timeout": 60,
+                }
+            },
+        },
+    }
 
 
 def test_extra_params_ride_the_skeleton_and_only_where_declared(rm):
@@ -288,9 +365,16 @@ def test_extra_params_ride_the_skeleton_and_only_where_declared(rm):
 
 def test_a_filled_row_missing_a_declared_extra_param_is_drift_with_the_value_to_enter(rm):
     want = rm.declared(_policy_with_extra())
-    live_ok = _live("graphiti-llm", model="openai/qwen", api_base="http://llm.example:8081/v1",
-                    timeout=300, chat_template_kwargs={"enable_thinking": False})
-    live_bare = _live("graphiti-llm", model="openai/qwen", api_base="http://llm.example:8081/v1", timeout=300)
+    live_ok = _live(
+        "graphiti-llm",
+        model="openai/qwen",
+        api_base="http://llm.example:8081/v1",
+        timeout=300,
+        chat_template_kwargs={"enable_thinking": False},
+    )
+    live_bare = _live(
+        "graphiti-llm", model="openai/qwen", api_base="http://llm.example:8081/v1", timeout=300
+    )
     assert rm.plan({"graphiti-llm": want["graphiti-llm"]}, [live_ok])[0][0] == "ok"
     status, alias, problems = rm.plan({"graphiti-llm": want["graphiti-llm"]}, [live_bare])[0]
     assert (status, alias) == ("drift", "graphiti-llm")
@@ -298,16 +382,31 @@ def test_a_filled_row_missing_a_declared_extra_param_is_drift_with_the_value_to_
 
 
 def test_extra_params_may_not_redeclare_an_owned_field(rm):
-    bad = {"models": {}, "registration_only": {
-        "x": {"registration": {"model": "openai/PLACEHOLDER", "api_base": "PLACEHOLDER", "timeout": 1},
-              "extra_params": {"timeout": 5}}}}
+    bad = {
+        "models": {},
+        "registration_only": {
+            "x": {
+                "registration": {
+                    "model": "openai/PLACEHOLDER",
+                    "api_base": "PLACEHOLDER",
+                    "timeout": 1,
+                },
+                "extra_params": {"timeout": 5},
+            }
+        },
+    }
     with pytest.raises(SystemExit):
         rm.declared(bad)
 
 
 def test_the_k3s_declaration_pins_graphiti_llm_thinking_off(rm):
     import yaml
-    policy = yaml.safe_load((ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml").read_text(encoding="utf-8"))
+
+    policy = yaml.safe_load(
+        (ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
     assert rm.declared(policy)["graphiti-llm"]["chat_template_kwargs"] == {"enable_thinking": False}
 
 
@@ -316,17 +415,26 @@ def test_a_probe_judged_alias_is_created_as_its_skeleton_and_never_held_to_it(rm
     setup probe decides (design record 2026-10-04, D3 as rebuilt in v2.62.0).
     Its skeleton is still the creation value, and a PLACEHOLDER left in it is
     still pending — but a filled row of either shape is ok."""
-    for path in (SINGLE / "models.json", ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml"):
+    for path in (
+        SINGLE / "models.json",
+        ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml",
+    ):
         policy = rm.load_declaration(path)
         assert rm.probe_judged(policy) == {"cc-rerank"}, path
         want = rm.declared(policy)
         invariants = {a: ({} if a in rm.probe_judged(policy) else p) for a, p in want.items()}
-        for row in (_live("cc-rerank", model="openai/qwen", api_base="http://up:1/v1"),
-                    _live("cc-rerank", model="cohere/rr", api_base="http://up:2/v1/rerank", mode="rerank")):
-            statuses = {a: st for st, a, _ in rm.plan({"cc-rerank": want["cc-rerank"]}, [row], invariants)}
+        for row in (
+            _live("cc-rerank", model="openai/qwen", api_base="http://up:1/v1"),
+            _live("cc-rerank", model="cohere/rr", api_base="http://up:2/v1/rerank", mode="rerank"),
+        ):
+            statuses = {
+                a: st for st, a, _ in rm.plan({"cc-rerank": want["cc-rerank"]}, [row], invariants)
+            }
             assert statuses == {"cc-rerank": "ok"}, (path, row)
         skel = _live("cc-rerank", **want["cc-rerank"])
-        assert [st for st, *_ in rm.plan({"cc-rerank": want["cc-rerank"]}, [skel], invariants)] == ["pending"]
+        assert [st for st, *_ in rm.plan({"cc-rerank": want["cc-rerank"]}, [skel], invariants)] == [
+            "pending"
+        ]
 
 
 # ── cc-rerank's two shapes (v2.62.1) ────────────────────────────────────────
@@ -338,31 +446,38 @@ def test_a_probe_judged_alias_is_created_as_its_skeleton_and_never_held_to_it(rm
 RERANK = "CC_LLM_UPSTREAM_MODEL_CC_RERANK"
 
 
-@pytest.mark.parametrize("base,cohere,root", [
-    ("http://h:8080/v1", "http://h:8080/v1/rerank", "http://h:8080"),
-    ("http://h:8080/v1/", "http://h:8080/v1/rerank", "http://h:8080"),
-    ("http://h:8080", "http://h:8080/v1/rerank", "http://h:8080"),
-    ("http://h:8080/", "http://h:8080/v1/rerank", "http://h:8080"),
-    ("https://gw.example/llm/v1", "https://gw.example/llm/v1/rerank", "https://gw.example/llm"),
-    ("http://h:8080/v1/rerank", "http://h:8080/v1/rerank", "http://h:8080"),
-    ("  http://h:8080/v1  ", "http://h:8080/v1/rerank", "http://h:8080"),
-])
+@pytest.mark.parametrize(
+    "base,cohere,root",
+    [
+        ("http://h:8080/v1", "http://h:8080/v1/rerank", "http://h:8080"),
+        ("http://h:8080/v1/", "http://h:8080/v1/rerank", "http://h:8080"),
+        ("http://h:8080", "http://h:8080/v1/rerank", "http://h:8080"),
+        ("http://h:8080/", "http://h:8080/v1/rerank", "http://h:8080"),
+        ("https://gw.example/llm/v1", "https://gw.example/llm/v1/rerank", "https://gw.example/llm"),
+        ("http://h:8080/v1/rerank", "http://h:8080/v1/rerank", "http://h:8080"),
+        ("  http://h:8080/v1  ", "http://h:8080/v1/rerank", "http://h:8080"),
+    ],
+)
 def test_the_dedicated_api_base_ends_in_v1_rerank_exactly_once(rm, base, cohere, root):
     assert rm.rerank_base(base) == cohere
     assert rm.rerank_base(base, "hosted_vllm") == root
     assert rm.rerank_base(base, "infinity") == root
 
 
-@pytest.mark.parametrize("answer,provider", [
-    ("cohere/bge-reranker-v2-m3", "cohere"),
-    ("hosted_vllm/BAAI/bge-reranker-v2-m3", "hosted_vllm"),
-    ("infinity/mxbai-rerank", "infinity"),
-    ("BAAI/bge-reranker-v2-m3", None),          # an org/model upstream id
-    ("qwen3-reranker-0.6b", None),
-    ("openai/gpt-x", None),                      # openai cannot rerank: a model id
-    ("together_ai/Salesforce/Llama-Rank-V1", None),  # hosted elsewhere: not this base
-    ("cohere/", None), ("Cohere/x", None),
-])
+@pytest.mark.parametrize(
+    "answer,provider",
+    [
+        ("cohere/bge-reranker-v2-m3", "cohere"),
+        ("hosted_vllm/BAAI/bge-reranker-v2-m3", "hosted_vllm"),
+        ("infinity/mxbai-rerank", "infinity"),
+        ("BAAI/bge-reranker-v2-m3", None),  # an org/model upstream id
+        ("qwen3-reranker-0.6b", None),
+        ("openai/gpt-x", None),  # openai cannot rerank: a model id
+        ("together_ai/Salesforce/Llama-Rank-V1", None),  # hosted elsewhere: not this base
+        ("cohere/", None),
+        ("Cohere/x", None),
+    ],
+)
 def test_an_explicit_provider_is_only_one_from_the_allowlist(rm, answer, provider):
     assert rm.explicit_provider(answer) == provider
 
@@ -376,22 +491,39 @@ def test_one_answer_derives_both_shapes_in_probe_order(rm):
     env = {**BASE, RERANK: "BAAI/bge-reranker-v2-m3"}
     shapes = rm.alias_shapes("cc-rerank", policy, env)
     assert list(shapes) == ["rerank", "chat"]
-    assert shapes["rerank"] == {"model": "cohere/BAAI/bge-reranker-v2-m3",
-                                "api_base": "https://llm.corp.example/v1/rerank",
-                                "mode": "rerank", "api_key": KEY}
-    assert shapes["chat"] == {"model": "openai/BAAI/bge-reranker-v2-m3",
-                              "api_base": "https://llm.corp.example/v1", "api_key": KEY}
+    assert shapes["rerank"] == {
+        "model": "cohere/BAAI/bge-reranker-v2-m3",
+        "api_base": "https://llm.corp.example/v1/rerank",
+        "mode": "rerank",
+        "api_key": KEY,
+    }
+    assert shapes["chat"] == {
+        "model": "openai/BAAI/bge-reranker-v2-m3",
+        "api_base": "https://llm.corp.example/v1",
+        "api_key": KEY,
+    }
     # a loopback base is the container's view in both shapes
-    loop = rm.alias_shapes("cc-rerank", policy, {**env, "CC_LLM_UPSTREAM_BASE_URL": "http://127.0.0.1:8082/v1/"})
+    loop = rm.alias_shapes(
+        "cc-rerank", policy, {**env, "CC_LLM_UPSTREAM_BASE_URL": "http://127.0.0.1:8082/v1/"}
+    )
     assert loop["rerank"]["api_base"] == "http://host.containers.internal:8082/v1/rerank"
     assert loop["chat"]["api_base"] == "http://host.containers.internal:8082/v1/"  # as declared
     # an explicit provider: the dedicated shape only, verbatim
     explicit = rm.alias_shapes("cc-rerank", policy, {**env, RERANK: "hosted_vllm/rr"})
-    assert explicit == {"rerank": {"model": "hosted_vllm/rr", "api_base": "https://llm.corp.example",
-                                   "mode": "rerank", "api_key": KEY}}
+    assert explicit == {
+        "rerank": {
+            "model": "hosted_vllm/rr",
+            "api_base": "https://llm.corp.example",
+            "mode": "rerank",
+            "api_key": KEY,
+        }
+    }
     # not declared, or not a probe-judged alias: nothing to derive
     assert rm.alias_shapes("cc-rerank", policy, {RERANK: "x"}) == {}
-    assert rm.alias_shapes("cc-default", policy, {**BASE, "CC_LLM_UPSTREAM_MODEL_CC_DEFAULT": "x"}) == {}
+    assert (
+        rm.alias_shapes("cc-default", policy, {**BASE, "CC_LLM_UPSTREAM_MODEL_CC_DEFAULT": "x"})
+        == {}
+    )
 
 
 def test_the_k3s_skeleton_timeout_rides_every_shape(rm):
@@ -409,7 +541,9 @@ def test_ensure_shape_writes_only_rows_setup_made(rm):
     chat = _live("cc-rerank", **{k: v for k, v in shapes["chat"].items() if k != "api_key"})
     ded = _live("cc-rerank", **{k: v for k, v in shapes["rerank"].items() if k != "api_key"})
     skel = _live("cc-rerank", model="openai/PLACEHOLDER", api_base="PLACEHOLDER")
-    hand = _live("cc-rerank", model="cohere/their-own", api_base="http://theirs:9/v1/rerank", mode="rerank")
+    hand = _live(
+        "cc-rerank", model="cohere/their-own", api_base="http://theirs:9/v1/rerank", mode="rerank"
+    )
     assert rm.ensure_shape("cc-rerank", "rerank", shapes, [])[0] == "create"
     # the row setup made as chat becomes the dedicated shape, by id
     verdict, body = rm.ensure_shape("cc-rerank", "rerank", shapes, [chat])
@@ -426,20 +560,33 @@ def test_ensure_shape_writes_only_rows_setup_made(rm):
     # two rows behind the alias are the operator's arrangement
     assert rm.ensure_shape("cc-rerank", "rerank", shapes, [chat, ded])[0] == "operator"
     # a row made from an EARLIER .env answer is no longer setup's to reshape
-    assert rm.ensure_shape("cc-rerank", "rerank", _shapes(rm, "other-model"), [chat])[0] == "operator"
+    assert (
+        rm.ensure_shape("cc-rerank", "rerank", _shapes(rm, "other-model"), [chat])[0] == "operator"
+    )
     # an explicit provider has no chat shape
     assert rm.ensure_shape("cc-rerank", "chat", _shapes(rm, "cohere/rr"), [])[0] == "underivable"
     assert rm.ensure_shape("cc-rerank", "rerank", {}, [])[0] == "underivable"
 
 
-def test_the_catalog_creates_the_plain_mapping_and_an_explicit_provider_verbatim(rm, monkeypatch, capsys):
+def test_the_catalog_creates_the_plain_mapping_and_an_explicit_provider_verbatim(
+    rm, monkeypatch, capsys
+):
     rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={**BASE, **IDS, RERANK: "rr"})
     assert rc == 0, out
-    created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
-    assert created["cc-rerank"] == {"model": "openai/rr", "api_base": "https://llm.corp.example/v1",
-                                    "api_key": KEY}
-    rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={**BASE, **IDS, RERANK: "cohere/rr"})
-    created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
+    created = {
+        b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")
+    }
+    assert created["cc-rerank"] == {
+        "model": "openai/rr",
+        "api_base": "https://llm.corp.example/v1",
+        "api_key": KEY,
+    }
+    rc, out, proxy = _run(
+        rm, monkeypatch, capsys, live=[], env={**BASE, **IDS, RERANK: "cohere/rr"}
+    )
+    created = {
+        b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")
+    }
     assert created["cc-rerank"]["model"] == "cohere/rr"
     assert created["cc-rerank"]["api_base"] == "https://llm.corp.example/v1/rerank"
     assert created["cc-rerank"]["mode"] == "rerank"
@@ -451,32 +598,55 @@ def test_a_row_setup_reshaped_is_not_reported_as_the_operators(rm, monkeypatch, 
     row that differs from the plain mapping — it is still what .env declares,
     so no 'the row you filled in WINS' note, and nothing is written."""
     shapes = _shapes(rm)
-    filled = [_live(a, model="openai/x", api_base="https://llm.corp.example/v1")
-              for a in ("cc-default", "graphiti-llm", "cc-embedding")]
-    filled += [_live(a, model="openai/x", api_base="http://up/v1", mode=m)
-               for a, m in (("cc-tts", "audio_speech"), ("cc-stt", "audio_transcription"))]
+    filled = [
+        _live(a, model="openai/x", api_base="https://llm.corp.example/v1")
+        for a in ("cc-default", "graphiti-llm", "cc-embedding")
+    ]
+    filled += [
+        _live(a, model="openai/x", api_base="http://up/v1", mode=m)
+        for a, m in (("cc-tts", "audio_speech"), ("cc-stt", "audio_transcription"))
+    ]
     ded = _live("cc-rerank", **{k: v for k, v in shapes["rerank"].items() if k != "api_key"})
-    rc, out, proxy = _run(rm, monkeypatch, capsys, live=filled + [ded], env={**BASE, **IDS, RERANK: "rr"})
+    rc, out, proxy = _run(
+        rm, monkeypatch, capsys, live=filled + [ded], env={**BASE, **IDS, RERANK: "rr"}
+    )
     assert rc == 0, out
     assert proxy.calls == [], proxy.calls
     assert "note     cc-rerank" not in out
 
 
-@pytest.mark.parametrize("live_kind,ask,expected_rc,path", [
-    (None, "rerank", 0, "/model/new"),
-    ("chat", "rerank", 0, "/model/update"),
-    ("rerank", "rerank", 0, None),
-    ("hand", "rerank", 5, None),
-])
+@pytest.mark.parametrize(
+    "live_kind,ask,expected_rc,path",
+    [
+        (None, "rerank", 0, "/model/new"),
+        ("chat", "rerank", 0, "/model/update"),
+        ("rerank", "rerank", 0, None),
+        ("hand", "rerank", 5, None),
+    ],
+)
 def test_the_shape_cli(rm, monkeypatch, capsys, live_kind, ask, expected_rc, path):
     shapes = _shapes(rm)
-    rows = {"chat": [_live("cc-rerank", model="openai/rr", api_base="https://llm.corp.example/v1")],
-            "rerank": [_live("cc-rerank", model="cohere/rr", api_base="https://llm.corp.example/v1/rerank",
-                             mode="rerank")],
-            "hand": [_live("cc-rerank", model="hosted_vllm/x", api_base="http://theirs")],
-            None: []}[live_kind]
-    rc, out, proxy = _run(rm, monkeypatch, capsys, live=rows, env={**BASE, RERANK: "rr"},
-                          argv=("--policy", str(_single()), "--shape", f"cc-rerank={ask}"))
+    rows = {
+        "chat": [_live("cc-rerank", model="openai/rr", api_base="https://llm.corp.example/v1")],
+        "rerank": [
+            _live(
+                "cc-rerank",
+                model="cohere/rr",
+                api_base="https://llm.corp.example/v1/rerank",
+                mode="rerank",
+            )
+        ],
+        "hand": [_live("cc-rerank", model="hosted_vllm/x", api_base="http://theirs")],
+        None: [],
+    }[live_kind]
+    rc, out, proxy = _run(
+        rm,
+        monkeypatch,
+        capsys,
+        live=rows,
+        env={**BASE, RERANK: "rr"},
+        argv=("--policy", str(_single()), "--shape", f"cc-rerank={ask}"),
+    )
     assert rc == expected_rc, out
     want_calls = [path] if path else []
     if path == "/model/update":  # the model_info.mode write rides a PATCH
@@ -487,17 +657,29 @@ def test_the_shape_cli(rm, monkeypatch, capsys, live_kind, ask, expected_rc, pat
         assert proxy.calls[0][1]["litellm_params"] == shapes[ask]
         assert "(set, not printed)" in out
     # undeclared: exit 6, nothing written
-    rc, out, proxy = _run(rm, monkeypatch, capsys, live=rows, env={},
-                          argv=("--policy", str(_single()), "--shape", f"cc-rerank={ask}"))
+    rc, out, proxy = _run(
+        rm,
+        monkeypatch,
+        capsys,
+        live=rows,
+        env={},
+        argv=("--policy", str(_single()), "--shape", f"cc-rerank={ask}"),
+    )
     assert rc == 6 and proxy.calls == []
 
 
 def test_row_state(rm, monkeypatch, capsys):
-    for live, want in (([], "absent"),
-                       ([_live("cc-rerank", model="cohere/PLACEHOLDER", api_base="PLACEHOLDER/v1/rerank")], "skeleton"),
-                       ([_live("cc-rerank", model="cohere/rr", api_base="http://h/v1/rerank")], "filled")):
-        rc, out, proxy = _run(rm, monkeypatch, capsys, live=live, env={},
-                              argv=("--row-state", "cc-rerank"))
+    for live, want in (
+        ([], "absent"),
+        (
+            [_live("cc-rerank", model="cohere/PLACEHOLDER", api_base="PLACEHOLDER/v1/rerank")],
+            "skeleton",
+        ),
+        ([_live("cc-rerank", model="cohere/rr", api_base="http://h/v1/rerank")], "filled"),
+    ):
+        rc, out, proxy = _run(
+            rm, monkeypatch, capsys, live=live, env={}, argv=("--row-state", "cc-rerank")
+        )
         assert rc == 0 and out.strip() == want and proxy.calls == []
 
 
@@ -510,9 +692,17 @@ def test_an_optional_alias_never_pauses_even_without_require(rm, monkeypatch, ca
     assert rm.optional_aliases(policy) == {"cc-rerank"}
     assert rm.optional_aliases(rm.load_declaration(_single())) == {"cc-rerank"}
     want = rm.declared(policy)
-    live = [_live(a, **{k: (v.replace("PLACEHOLDER", "x") if isinstance(v, str) else v)
-                        for k, v in p.items()})
-            for a, p in want.items() if a != "cc-rerank"]
+    live = [
+        _live(
+            a,
+            **{
+                k: (v.replace("PLACEHOLDER", "x") if isinstance(v, str) else v)
+                for k, v in p.items()
+            },
+        )
+        for a, p in want.items()
+        if a != "cc-rerank"
+    ]
     live += [_live("cc-rerank", **want["cc-rerank"])]
     rc, out, _ = _run(rm, monkeypatch, capsys, live=live, env={}, argv=("--policy", str(k3s)))
     assert rc == 0, out
@@ -526,11 +716,14 @@ def test_a_fresh_k3s_catalog_requires_exactly_the_role_aliases(rm, monkeypatch, 
     k3s = ROOT / "deploy" / "shared" / "litellm" / "model-preferences.yaml"
     rc, out, proxy = _run(rm, monkeypatch, capsys, live=[], env={}, argv=("--policy", str(k3s)))
     created = sorted(b["model_name"] for p, b in proxy.calls if p.endswith("/model/new"))
-    assert created == sorted(["cc-default", "graphiti-llm", "cc-embedding", "cc-rerank", "cc-tts", "cc-stt"])
+    assert created == sorted(
+        ["cc-default", "graphiti-llm", "cc-embedding", "cc-rerank", "cc-tts", "cc-stt"]
+    )
     assert rc == rm.EXIT_ACTION, out
-    paused = out[out.index("OPERATOR ACTION"):]
-    assert sorted(line.split(":")[0].strip() for line in paused.splitlines()[1:] if line.strip()) == \
-        sorted(["cc-default", "graphiti-llm", "cc-embedding", "cc-tts", "cc-stt"])
+    paused = out[out.index("OPERATOR ACTION") :]
+    assert sorted(
+        line.split(":")[0].strip() for line in paused.splitlines()[1:] if line.strip()
+    ) == sorted(["cc-default", "graphiti-llm", "cc-embedding", "cc-tts", "cc-stt"])
     assert "optional cc-rerank" in out
 
 
@@ -547,7 +740,9 @@ def test_mode_is_written_to_model_info_on_create(rm, monkeypatch, capsys):
 
 def test_mode_is_patched_into_model_info_on_update(rm, monkeypatch, capsys):
     """POST /model/update drops model_info.mode; PATCH /model/{id}/update keeps it."""
-    skel = [_live("cc-tts", model="openai/PLACEHOLDER", api_base="PLACEHOLDER", mode="audio_speech")]
+    skel = [
+        _live("cc-tts", model="openai/PLACEHOLDER", api_base="PLACEHOLDER", mode="audio_speech")
+    ]
     _rc, _out, proxy = _run(rm, monkeypatch, capsys, live=skel, env={**BASE, **IDS})
     patches = [(p, b) for p, b in proxy.calls if "/update" in p and p.startswith("/model/id-")]
     assert ("/model/id-cc-tts/update", {"model_info": {"mode": "audio_speech"}}) in patches
@@ -563,7 +758,9 @@ def test_shape_update_patches_mode_and_same_needs_model_info_mode(rm):
     verdict, body = rm.ensure_shape("cc-rerank", "rerank", shapes, [ded])
     assert verdict == "update" and body["model_info"]["mode"] == "rerank"
     # a hand-filled row stays the operator's
-    hand = _live("cc-rerank", model="cohere/their-own", api_base="http://theirs:9/v1/rerank", mode="rerank")
+    hand = _live(
+        "cc-rerank", model="cohere/their-own", api_base="http://theirs:9/v1/rerank", mode="rerank"
+    )
     hand["model_info"].pop("mode")
     assert rm.ensure_shape("cc-rerank", "rerank", shapes, [hand]) == ("operator", None)
 
@@ -578,11 +775,18 @@ K3S_DECLARATION = ROOT / "deploy" / "shared" / "litellm" / "model-preferences.ya
 SPEECH_PARAMS = {"max_parallel_requests": 1, "num_retries": 0}
 
 
-@pytest.mark.parametrize("declaration", [SINGLE / "models.json", K3S_DECLARATION], ids=["single", "k3s"])
+@pytest.mark.parametrize(
+    "declaration", [SINGLE / "models.json", K3S_DECLARATION], ids=["single", "k3s"]
+)
 def test_a_created_speech_skeleton_carries_the_policy_params_and_no_other_alias_does(
-        rm, monkeypatch, capsys, declaration):
-    _rc, _out, proxy = _run(rm, monkeypatch, capsys, live=[], env={}, argv=("--policy", str(declaration)))
-    created = {b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")}
+    rm, monkeypatch, capsys, declaration
+):
+    _rc, _out, proxy = _run(
+        rm, monkeypatch, capsys, live=[], env={}, argv=("--policy", str(declaration))
+    )
+    created = {
+        b["model_name"]: b["litellm_params"] for p, b in proxy.calls if p.endswith("/model/new")
+    }
     for alias in ("cc-tts", "cc-stt"):
         assert {k: created[alias][k] for k in SPEECH_PARAMS} == SPEECH_PARAMS
         assert created[alias]["model"] == "openai/PLACEHOLDER"
@@ -591,20 +795,45 @@ def test_a_created_speech_skeleton_carries_the_policy_params_and_no_other_alias_
             assert not set(SPEECH_PARAMS) & set(params), alias
 
 
-def test_a_row_without_the_policy_params_is_not_drift_here_and_is_never_written(rm, monkeypatch, capsys):
-    live = [_live("cc-tts", model="openai/kokoro", api_base="http://cc-speech:8093/v1",
-                  mode="audio_speech", timeout=120),
-            _live("cc-stt", model="openai/whisper", api_base="http://cc-speech:8093/v1",
-                  mode="audio_transcription", timeout=180)]
+def test_a_row_without_the_policy_params_is_not_drift_here_and_is_never_written(
+    rm, monkeypatch, capsys
+):
+    live = [
+        _live(
+            "cc-tts",
+            model="openai/kokoro",
+            api_base="http://cc-speech:8093/v1",
+            mode="audio_speech",
+            timeout=120,
+        ),
+        _live(
+            "cc-stt",
+            model="openai/whisper",
+            api_base="http://cc-speech:8093/v1",
+            mode="audio_transcription",
+            timeout=180,
+        ),
+    ]
     policy = rm.load_declaration(K3S_DECLARATION)
     want = rm.declared(policy)
-    assert not set(SPEECH_PARAMS) & set(want["cc-tts"]), "policy_params are not part of the invariants"
-    assert [s for s, *_ in rm.plan({a: want[a] for a in ("cc-tts", "cc-stt")}, live)] == ["ok", "ok"]
+    assert not set(SPEECH_PARAMS) & set(want["cc-tts"]), (
+        "policy_params are not part of the invariants"
+    )
+    assert [s for s, *_ in rm.plan({a: want[a] for a in ("cc-tts", "cc-stt")}, live)] == [
+        "ok",
+        "ok",
+    ]
     assert rm.policy_params(policy) == {"cc-tts": SPEECH_PARAMS, "cc-stt": SPEECH_PARAMS}
 
 
 def test_policy_params_may_not_redeclare_an_owned_field(rm):
-    bad = {"registration_only": {"x": {"registration": {"model": "openai/PLACEHOLDER"},
-                                       "policy_params": {"api_base": "http://x"}}}}
+    bad = {
+        "registration_only": {
+            "x": {
+                "registration": {"model": "openai/PLACEHOLDER"},
+                "policy_params": {"api_base": "http://x"},
+            }
+        }
+    }
     with pytest.raises(SystemExit):
         rm.policy_params(bad)

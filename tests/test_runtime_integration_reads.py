@@ -55,22 +55,41 @@ READ_ALLOWLIST: dict[str, set[str]] = {
     # All GET /rest/api/3/... reads; `search_issues` POSTs to /search/jql,
     # which is Jira's own spelling of a query.
     "jira": {
-        "find_users", "get_issue", "get_transitions", "list_comments",
-        "list_dashboards", "list_fields",
-        "list_filters", "list_gadgets", "list_issue_types", "list_projects",
+        "find_users",
+        "get_issue",
+        "get_transitions",
+        "list_comments",
+        "list_dashboards",
+        "list_fields",
+        "list_filters",
+        "list_gadgets",
+        "list_issue_types",
+        "list_projects",
         "search_issues",
     },
     # Reads only; create_page/update_page/move_page/trash_page/set_labels/
     # remove_labels/upload_attachment/create_space are the writes and are absent.
     "confluence": {
-        "get_page", "get_page_versions", "instance_info", "list_attachments",
-        "list_children", "list_labels", "list_spaces", "search",
+        "get_page",
+        "get_page_versions",
+        "instance_info",
+        "list_attachments",
+        "list_children",
+        "list_labels",
+        "list_spaces",
+        "search",
     },
     # forge.py defines no write at all today; the allowlist still names the
     # reads, so the first write added there has to be argued for here.
     "forge": {
-        "get_issue", "get_merge_request", "list_commits", "list_instances",
-        "list_issues", "list_merge_requests", "read_file", "search_repos",
+        "get_issue",
+        "get_merge_request",
+        "list_commits",
+        "list_instances",
+        "list_issues",
+        "list_merge_requests",
+        "read_file",
+        "search_repos",
     },
     # The graph WRITE is not in `graphiti` at all any more (the ingest worker,
     # `graphiti_ingest`, which runtime/ may not import — test_governance.py);
@@ -80,8 +99,13 @@ READ_ALLOWLIST: dict[str, set[str]] = {
     # `entity_type_names` returns the ontology's names for the search tools'
     # `entity_types` validation.
     "graphiti": {
-        "entity_type_names", "episode_delete_preview", "get_group_episodes", "known_groups",
-        "search_facts", "search_nodes", "steward_map",
+        "entity_type_names",
+        "episode_delete_preview",
+        "get_group_episodes",
+        "known_groups",
+        "search_facts",
+        "search_nodes",
+        "steward_map",
     },
     # `report_spam` is the mailbox write and is absent — and so are `send` and
     # `move` (Exchange native client design, 2026-09-25): the runtime reaches
@@ -90,8 +114,7 @@ READ_ALLOWLIST: dict[str, set[str]] = {
     # folders` is the tool that answers "which folders exist", the AGENTS.md
     # "never guess X" rule. EmailFacadeError is the exception type the tools
     # catch.
-    "email_facade": {"EmailFacadeError", "get_message", "list_refs",
-                     "list_folders"},
+    "email_facade": {"EmailFacadeError", "get_message", "list_refs", "list_folders"},
     # The native Exchange client. The runtime reaches EXACTLY one name on it:
     # `configured()`, a settings predicate that opens no connection — it is how
     # `packs._offered` withholds the pack members the configured mailbox cannot
@@ -105,10 +128,21 @@ READ_ALLOWLIST: dict[str, set[str]] = {
     # is a write and is absent. `_call` is the raw transport and carries its
     # own guard below.
     "litellm": {
-        "LiteLLMError", "_call", "check_model_health", "configured",
-        "get_health", "get_routing", "get_spend", "list_credentials",
-        "list_keys", "list_mcp_servers", "list_models", "list_teams",
-        "probe_model", "provider_catalog", "thinking_mechanism",
+        "LiteLLMError",
+        "_call",
+        "check_model_health",
+        "configured",
+        "get_health",
+        "get_routing",
+        "get_spend",
+        "list_credentials",
+        "list_keys",
+        "list_mcp_servers",
+        "list_models",
+        "list_teams",
+        "probe_model",
+        "provider_catalog",
+        "thinking_mechanism",
     },
     # Decrypts what LiteLLM already stored; writes nothing.
     "litellm_credstore": {"list_provider_credentials"},
@@ -176,7 +210,7 @@ def _bindings(tree: ast.AST) -> dict[str, str]:
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.startswith(PKG + "."):
-                    binds[alias.asname or alias.name] = alias.name[len(PKG) + 1:]
+                    binds[alias.asname or alias.name] = alias.name[len(PKG) + 1 :]
     return binds
 
 
@@ -187,7 +221,7 @@ def _direct_imports(tree: ast.AST) -> list[tuple[str, str, int]]:
     out = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(PKG + "."):
-            sub = node.module[len(PKG) + 1:]
+            sub = node.module[len(PKG) + 1 :]
             for alias in node.names:
                 out.append((sub, alias.name, node.lineno))
     return out
@@ -199,9 +233,11 @@ def _reached_attributes():
     for rel, tree in _runtime_modules():
         binds = _bindings(tree)
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Attribute)
-                    and isinstance(node.value, ast.Name)
-                    and node.value.id in binds):
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in binds
+            ):
                 yield rel, binds[node.value.id], node.attr, node.lineno
 
 
@@ -230,11 +266,13 @@ def test_the_walk_sees_the_clients_it_is_guarding():
 
 
 def test_runtime_reaches_only_read_functions_on_credentialed_clients():
-    offenders = sorted({
-        f"{rel}:{line} {sub}.{attr}"
-        for rel, sub, attr, line in _reached_attributes()
-        if not _allowed(sub, attr)
-    })
+    offenders = sorted(
+        {
+            f"{rel}:{line} {sub}.{attr}"
+            for rel, sub, attr, line in _reached_attributes()
+            if not _allowed(sub, attr)
+        }
+    )
     assert offenders == [], (
         "the runtime tier reached an integrations attribute that is not on the "
         "confirmed-read allowlist in this file. Two legitimate answers, and "
@@ -255,12 +293,15 @@ def test_runtime_never_imports_a_write_only_integration():
         for rel, tree in _runtime_modules()
         for node in ast.walk(tree)
         for banned in BANNED_MODULES
-        if (isinstance(node, ast.ImportFrom)
-            and ((node.module or "") == PKG
-                 and any(a.name == banned for a in node.names)
-                 or (node.module or "") == f"{PKG}.{banned}"))
-        or (isinstance(node, ast.Import)
-            and any(a.name == f"{PKG}.{banned}" for a in node.names))
+        if (
+            isinstance(node, ast.ImportFrom)
+            and (
+                (node.module or "") == PKG
+                and any(a.name == banned for a in node.names)
+                or (node.module or "") == f"{PKG}.{banned}"
+            )
+        )
+        or (isinstance(node, ast.Import) and any(a.name == f"{PKG}.{banned}" for a in node.names))
     )
     assert offenders == [], (
         "runtime/ imported a module it may never hold: "
@@ -296,11 +337,12 @@ def test_runtime_never_binds_the_integrations_package():
         f"{rel}:{node.lineno}"
         for rel, tree in _runtime_modules()
         for node in ast.walk(tree)
-        if (isinstance(node, ast.ImportFrom)
+        if (
+            isinstance(node, ast.ImportFrom)
             and (node.module or "") == "central_command"
-            and any(a.name == "integrations" for a in node.names))
-        or (isinstance(node, ast.Import)
-            and any(a.name == PKG and a.asname for a in node.names))
+            and any(a.name == "integrations" for a in node.names)
+        )
+        or (isinstance(node, ast.Import) and any(a.name == PKG and a.asname for a in node.names))
     )
     assert offenders == [], (
         "runtime/ bound the whole `central_command.integrations` package to one "
@@ -320,11 +362,13 @@ def test_the_raw_litellm_transport_is_only_ever_asked_to_GET():
     for rel, tree in _runtime_modules():
         binds = _bindings(tree)
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "_call"
-                    and isinstance(node.func.value, ast.Name)
-                    and binds.get(node.func.value.id) == "litellm"):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "_call"
+                and isinstance(node.func.value, ast.Name)
+                and binds.get(node.func.value.id) == "litellm"
+            ):
                 continue
             method = node.args[0] if node.args else None
             if not (isinstance(method, ast.Constant) and method.value == "GET"):
@@ -347,7 +391,8 @@ def test_every_allowlisted_read_still_exists(submodule):
     source = (SRC / "integrations" / f"{submodule}.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
     defined = {
-        n.name for n in tree.body
+        n.name
+        for n in tree.body
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
     }
     missing = sorted(READ_ALLOWLIST[submodule] - defined)

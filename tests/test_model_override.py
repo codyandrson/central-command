@@ -94,7 +94,9 @@ async def test_catalog_default_is_the_agent_row_model(monkeypatch):
             settings.default_model.split(":", 1)[-1]
         )
         await repo.set_agent_model(agent, "openai/gpt-5.2", "")
-        assert (await routes.list_model_catalog(session_id=session_id))["default"] == "openai/gpt-5.2"
+        assert (await routes.list_model_catalog(session_id=session_id))[
+            "default"
+        ] == "openai/gpt-5.2"
     finally:
         await repo.set_agent_model(agent, "", "")
 
@@ -135,12 +137,14 @@ async def test_patching_a_model_persists_the_override_and_the_run_resolves_to_it
     # claim is "the override names the model the turn runs on", which is exactly
     # what _live_model is handed.
     monkeypatch.setattr(settings, "test_model", False)
+
     async def fake_live(name, agent_id=None, thinking=None):
         return ("built", name)
 
     monkeypatch.setattr(models_mod, "_live_model", fake_live)
     assert await models_mod.resolve_session_model(session_id, "inbox-triage") == (
-        "built", "openai/gpt-5.2",
+        "built",
+        "openai/gpt-5.2",
     )
 
 
@@ -149,7 +153,9 @@ async def test_a_null_model_clears_the_override_back_to_the_agent_default():
     session_id = await _session()
     await repo.set_session_model_override(session_id, "openai/gpt-5.2")
     await nerve_gateway._dispatch(
-        "sessions.patch", {"key": f"agent:inbox-triage:{session_id}", "model": None}, _noop,
+        "sessions.patch",
+        {"key": f"agent:inbox-triage:{session_id}", "model": None},
+        _noop,
     )
     assert await repo.get_session_model_override(session_id) is None
 
@@ -228,7 +234,9 @@ async def test_a_null_effort_clears_back_to_the_deployment_default():
     session_id = await _session()
     await repo.set_session_thinking_override(session_id, "medium")
     await nerve_gateway._dispatch(
-        "sessions.patch", {"key": f"agent:inbox-triage:{session_id}", "thinkingLevel": None}, _noop,
+        "sessions.patch",
+        {"key": f"agent:inbox-triage:{session_id}", "thinkingLevel": None},
+        _noop,
     )
     assert await repo.get_session_thinking_override(session_id) is None
 
@@ -255,9 +263,14 @@ def test_session_rows_carry_the_thinking_level_the_dropdown_reads():
     import datetime as dt
 
     row = {
-        "id": "sess_x", "agent_id": "inbox-triage", "status": "RUNNING",
-        "mode": "task", "created_at": dt.datetime.now(dt.UTC),
-        "updated_at": None, "parent_session_id": None, "parent_agent_id": None,
+        "id": "sess_x",
+        "agent_id": "inbox-triage",
+        "status": "RUNNING",
+        "mode": "task",
+        "created_at": dt.datetime.now(dt.UTC),
+        "updated_at": None,
+        "parent_session_id": None,
+        "parent_agent_id": None,
         "thinking_override": "medium",
     }
     assert nerve_gateway._session_row_dict(row)["thinkingLevel"] == "medium"
@@ -284,15 +297,22 @@ async def test_a_label_patch_on_an_agent_root_is_refused_not_ignored():
 
     with pytest.raises(HTTPException) as exc:
         await nerve_gateway._dispatch(
-            "sessions.patch", {"key": "agent:inbox-triage:main", "label": "renamed"}, _noop,
+            "sessions.patch",
+            {"key": "agent:inbox-triage:main", "label": "renamed"},
+            _noop,
         )
     assert exc.value.status_code == 409
 
 
 async def test_a_patch_naming_nothing_known_stays_a_no_op():
-    assert await nerve_gateway._dispatch(
-        "sessions.patch", {"key": "agent:inbox-triage:main"}, _noop,
-    ) == {}
+    assert (
+        await nerve_gateway._dispatch(
+            "sessions.patch",
+            {"key": "agent:inbox-triage:main"},
+            _noop,
+        )
+        == {}
+    )
 
 
 # --- the single-profile /api/gateway/models translation ------------------------

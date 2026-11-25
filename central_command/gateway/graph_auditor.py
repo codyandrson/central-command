@@ -81,7 +81,9 @@ from central_command.runtime.templates import render_v0  # noqa: E402
 
 async def ensure_registered() -> None:
     await repo.upsert_agent(
-        AGENT_ID, "Graph Auditor", "",
+        AGENT_ID,
+        "Graph Auditor",
+        "",
         "verify approved graph episodes landed as approved",
     )
 
@@ -117,6 +119,7 @@ def render_delta(delta: dict, include_uuids: bool = False) -> str:
     entities = delta.get("entities") or []
     edges = delta.get("edges") or []
     invalidated = delta.get("invalidated") or []
+
     def _newness(x: dict) -> str:
         # `new` may be absent on deltas audited before 2026-08-20 — absent is
         # "not checked", never a bucket.
@@ -152,7 +155,9 @@ def render_delta(delta: dict, include_uuids: bool = False) -> str:
     lines.append(f"ENTITIES ({len(entities)}):")
     for n in entities:
         labels = [l for l in (n.get("labels") or []) if l != "Entity"]
-        embedded = "" if n.get("has_embedding") else "  [NO EMBEDDING — invisible to semantic recall]"
+        embedded = (
+            "" if n.get("has_embedding") else "  [NO EMBEDDING — invisible to semantic recall]"
+        )
         lines.append(
             f"  - {_newness(n)}{n.get('name')} ({', '.join(labels) or 'Entity'})"
             f"{_uuid(n)}{_person_values(n)}{embedded}"
@@ -272,9 +277,7 @@ async def _approved_episode_body(row: dict) -> str | None:
     return approved[0]["episode_body"] if approved else None
 
 
-async def _judge(
-    row: dict, episode_body: str, delta: dict, model=None
-) -> GraphAuditVerdict | None:
+async def _judge(row: dict, episode_body: str, delta: dict, model=None) -> GraphAuditVerdict | None:
     """One judgment run. None = the auditor errored — the row degrades to the
     human gate with no verdict, exactly like a disabled auditor."""
     reference_time = (delta.get("episode") or {}).get("valid_at") or "unknown"
@@ -311,7 +314,8 @@ async def _judge(
         return run.output
     except Exception as e:  # noqa: BLE001 — a down auditor degrades to the human gate
         await events.emit(
-            "graph.audit.error", ref_id=row["id"],
+            "graph.audit.error",
+            ref_id=row["id"],
             payload={"error": str(e), "transient": is_transient(e)},
             actor="graph-auditor",
         )
@@ -341,12 +345,15 @@ async def _enqueue_from_proposal(row: dict) -> str | None:
     except ExecutorError as e:
         return str(e)
     await repo.create_ingest_job(
-        verification_id=row["id"], proposal_id=row["proposal_id"], group_id=row["group_id"],
+        verification_id=row["id"],
+        proposal_id=row["proposal_id"],
+        group_id=row["group_id"],
         payload={
             "name": args["name"],
             "episode_body": args["episode_body"],
             "source_description": episode_source_description(
-                args.get("source_description", ""), approver, row["marker"]),
+                args.get("source_description", ""), approver, row["marker"]
+            ),
             "reference_time": reference_time,
         },
     )
@@ -375,7 +382,8 @@ async def enqueue_cutover() -> dict:
             skipped.append({"id": row["id"], "reason": reason})
     if enqueued or skipped:
         await events.emit(
-            "graph.ingest.cutover", payload={"enqueued": enqueued, "skipped": skipped},
+            "graph.ingest.cutover",
+            payload={"enqueued": enqueued, "skipped": skipped},
             actor="graph-ingest",
         )
     return {"enqueued": enqueued, "skipped": skipped}
@@ -383,12 +391,19 @@ async def enqueue_cutover() -> dict:
 
 async def _park_missing(row: dict, mechanical: dict) -> str:
     await repo.finish_graph_verification(
-        row["id"], status="AWAITING_OPERATOR", mechanical=mechanical,
+        row["id"],
+        status="AWAITING_OPERATOR",
+        mechanical=mechanical,
     )
     await events.emit(
-        "graph.verification.parked", ref_id=row["id"],
-        payload={"proposal_id": row["proposal_id"], "episode_name": row["episode_name"],
-                 "mechanical": mechanical, "verdict": None},
+        "graph.verification.parked",
+        ref_id=row["id"],
+        payload={
+            "proposal_id": row["proposal_id"],
+            "episode_name": row["episode_name"],
+            "mechanical": mechanical,
+            "verdict": None,
+        },
         actor="graph-auditor",
     )
     return "missing"
@@ -437,23 +452,26 @@ async def verify_one(row: dict, model=None) -> str:
     deletion = await repo.episode_deletion_job(episode["uuid"])
     if deletion is not None:
         await repo.finish_graph_verification(
-            row["id"], status="AWAITING_OPERATOR", episode_uuid=episode["uuid"],
-            mechanical={"missing": False, "episode_deleted": True,
-                        "deletion_job": deletion["id"]},
+            row["id"],
+            status="AWAITING_OPERATOR",
+            episode_uuid=episode["uuid"],
+            mechanical={"missing": False, "episode_deleted": True, "deletion_job": deletion["id"]},
         )
         await events.emit(
-            "graph.verification.parked", ref_id=row["id"],
-            payload={"proposal_id": row["proposal_id"], "episode_name": row["episode_name"],
-                     "mechanical": {"episode_deleted": True, "deletion_job": deletion["id"]},
-                     "verdict": None},
+            "graph.verification.parked",
+            ref_id=row["id"],
+            payload={
+                "proposal_id": row["proposal_id"],
+                "episode_name": row["episode_name"],
+                "mechanical": {"episode_deleted": True, "deletion_job": deletion["id"]},
+                "verdict": None,
+            },
             actor="graph-auditor",
         )
         return "awaiting"
 
     delta = await neo4j_reader.episode_delta(episode["uuid"])
-    unembedded = [
-        n.get("name") for n in delta.get("entities") or [] if not n.get("has_embedding")
-    ]
+    unembedded = [n.get("name") for n in delta.get("entities") or [] if not n.get("has_embedding")]
     mechanical = {
         "missing": False,
         "empty_delta": not (delta.get("entities") or delta.get("edges")),
@@ -461,9 +479,7 @@ async def verify_one(row: dict, model=None) -> str:
     }
     mechanical_clean = not mechanical["empty_delta"] and not unembedded
     has_invalidations = bool(delta.get("invalidated"))
-    action_class = (
-        GRAPH_AUDIT_INVALIDATION_CLASS if has_invalidations else GRAPH_AUDIT_ACTION_CLASS
-    )
+    action_class = GRAPH_AUDIT_INVALIDATION_CLASS if has_invalidations else GRAPH_AUDIT_ACTION_CLASS
 
     verdict: GraphAuditVerdict | None = None
     if settings.graph_auditor_enabled and mechanical_clean:
@@ -482,7 +498,8 @@ async def verify_one(row: dict, model=None) -> str:
     # ordering rule) — an auto-close must never appear before its reason.
     if verdict is not None:
         await events.emit(
-            "graph.audit.verdict", ref_id=row["id"],
+            "graph.audit.verdict",
+            ref_id=row["id"],
             payload={
                 "action_class": action_class,
                 "verdict": "aligned" if verdict.aligned else "flag",
@@ -514,17 +531,23 @@ async def verify_one(row: dict, model=None) -> str:
     )
     if auto_close:
         await events.emit(
-            "graph.verification.confirmed", ref_id=row["id"],
-            payload={"by": "graph-auditor", "action_class": action_class,
-                     "rationale": verdict.rationale},
+            "graph.verification.confirmed",
+            ref_id=row["id"],
+            payload={
+                "by": "graph-auditor",
+                "action_class": action_class,
+                "rationale": verdict.rationale,
+            },
             actor="graph-auditor",
         )
         return "auto_verified"
 
     await events.emit(
-        "graph.verification.parked", ref_id=row["id"],
+        "graph.verification.parked",
+        ref_id=row["id"],
         payload={
-            "proposal_id": row["proposal_id"], "episode_name": row["episode_name"],
+            "proposal_id": row["proposal_id"],
+            "episode_name": row["episode_name"],
             "mechanical": mechanical,
             "verdict": None if verdict is None else ("aligned" if verdict.aligned else "flag"),
             "has_invalidations": has_invalidations,
@@ -540,8 +563,15 @@ async def verify_sweep(settle_minutes: int = 10, model=None) -> dict:
     is retried next tick — the sweep can never wedge, and never silently
     drops a row."""
     rows = await repo.due_graph_verifications(settle_minutes)
-    summary = {"checked": 0, "auto_verified": 0, "awaiting": 0, "missing": 0,
-               "waiting": 0, "failed": 0, "errors": []}
+    summary = {
+        "checked": 0,
+        "auto_verified": 0,
+        "awaiting": 0,
+        "missing": 0,
+        "waiting": 0,
+        "failed": 0,
+        "errors": [],
+    }
     for row in rows:
         summary["checked"] += 1
         try:
@@ -569,8 +599,15 @@ def pair_graph_verdicts(rows: list[dict], action_class: str) -> dict:
     def close(ref: str, outcome: str, outcome_event: int, note: str | None = None) -> None:
         verdict = pending.pop(ref, None)
         if verdict is not None:
-            pairs.append({"verification_id": ref, "outcome": outcome,
-                          "outcome_event": outcome_event, "note": note, **verdict})
+            pairs.append(
+                {
+                    "verification_id": ref,
+                    "outcome": outcome,
+                    "outcome_event": outcome_event,
+                    "note": note,
+                    **verdict,
+                }
+            )
 
     for e in rows:
         kind, ref, payload = e["kind"], e["ref_id"], e.get("payload") or {}
@@ -593,8 +630,7 @@ def pair_graph_verdicts(rows: list[dict], action_class: str) -> dict:
         elif kind == "graph.verification.problem":
             close(ref, "problem", e["id"], note=payload.get("note"))
 
-    q = {"aligned_confirmed": 0, "flag_problem": 0,
-         "flag_confirmed": 0, "aligned_problem": 0}
+    q = {"aligned_confirmed": 0, "flag_problem": 0, "flag_confirmed": 0, "aligned_problem": 0}
     for p in pairs:
         q[f"{p['verdict']}_{p['outcome']}"] += 1
 
@@ -608,10 +644,12 @@ def pair_graph_verdicts(rows: list[dict], action_class: str) -> dict:
         "agreement_rate": round(agreed / len(pairs), 3) if pairs else None,
         # The DANGEROUS quadrant: an aligned verdict the operator overruled is
         # exactly what active mode would have silently let through.
-        "auditor_misses": [p for p in pairs
-                           if p["verdict"] == "aligned" and p["outcome"] == "problem"],
-        "over_cautious": [p for p in pairs
-                          if p["verdict"] == "flag" and p["outcome"] == "confirmed"],
+        "auditor_misses": [
+            p for p in pairs if p["verdict"] == "aligned" and p["outcome"] == "problem"
+        ],
+        "over_cautious": [
+            p for p in pairs if p["verdict"] == "flag" and p["outcome"] == "confirmed"
+        ],
         "auto_confirmed": auto_confirmed,
         "awaiting_outcome": len(pending),
     }
@@ -624,25 +662,29 @@ def signals_from_graph_report(report: dict, names: dict[str, str] | None = None)
     signals: list[dict] = []
     for p in report.get("over_cautious", []):
         name = names.get(p["verification_id"]) or p.get("episode_name") or p["verification_id"]
-        signals.append({
-            "kind": "graph-audit-overcautious",
-            "event_id": p["verdict_event"],
-            "feedback": (
-                f"on episode “{name}” you flagged with “{p['rationale']}” — "
-                "the team lead confirmed the graph change was faithful"
-            ),
-        })
+        signals.append(
+            {
+                "kind": "graph-audit-overcautious",
+                "event_id": p["verdict_event"],
+                "feedback": (
+                    f"on episode “{name}” you flagged with “{p['rationale']}” — "
+                    "the team lead confirmed the graph change was faithful"
+                ),
+            }
+        )
     for p in report.get("auditor_misses", []):
         name = names.get(p["verification_id"]) or p.get("episode_name") or p["verification_id"]
         note = f" — their note: “{p['note']}”" if p.get("note") else ""
-        signals.append({
-            "kind": "graph-audit-miss",
-            "event_id": p["verdict_event"],
-            "feedback": (
-                f"on episode “{name}” you judged the change ALIGNED with "
-                f"“{p['rationale']}” — the team lead found a real problem{note}"
-            ),
-        })
+        signals.append(
+            {
+                "kind": "graph-audit-miss",
+                "event_id": p["verdict_event"],
+                "feedback": (
+                    f"on episode “{name}” you judged the change ALIGNED with "
+                    f"“{p['rationale']}” — the team lead found a real problem{note}"
+                ),
+            }
+        )
     return signals
 
 
@@ -650,8 +692,7 @@ async def agreement_report() -> dict:
     """The shadow-vs-operator record per action class, computed fresh from the
     event log every time — the log is the truth; nothing cached or restated."""
     rows = await repo.list_events_of_kinds(
-        ["graph.audit.verdict", "graph.verification.confirmed",
-         "graph.verification.problem"]
+        ["graph.audit.verdict", "graph.verification.confirmed", "graph.verification.problem"]
     )
     classes = {}
     for action_class in (GRAPH_AUDIT_ACTION_CLASS, GRAPH_AUDIT_INVALIDATION_CLASS):

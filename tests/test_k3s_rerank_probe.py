@@ -31,34 +31,47 @@ def _bash_exe() -> str:
     return resolved
 
 
-def _run(tmp_path: Path, app_env: str, *, state: str = "filled", rerank: str = "no",
-         chat: str = "no"):
+def _run(
+    tmp_path: Path, app_env: str, *, state: str = "filled", rerank: str = "no", chat: str = "no"
+):
     fns = functions_in(SETUP.read_text(encoding="utf-8"))
     env_file = tmp_path / "app.env"
     write_lf(env_file, app_env)
     log = tmp_path / "calls.log"
     log.write_text("", encoding="utf-8")
-    script = "\n".join([
-        "set -uo pipefail",
-        f'APP_ENV="{env_file.as_posix()}"',
-        'REPO_ROOT=/nonexistent',
-        'pass() { echo "PASS $1: $2"; }',
-        'fail() { echo "FAIL $1: $2"; }',
-        'llm_gate() { echo "USERACTION llm-models: $1"; }',
-        # $PY register-models.py --row-state <alias>
-        ('PY=__py; __py() { printf "row-state %s\\n" "$3" >> "$STUB_LOG"; '
-        '[[ "$STUB_STATE" == down ]] && return 1; printf "%s\\n" "$STUB_STATE"; }'),
-        ('probe_alias() { printf "%s %s\\n" "$1" "$2" >> "$STUB_LOG"; '
-        'case "$1" in rerank) [[ "$STUB_RERANK" == ok ]];; rerank-chat) [[ "$STUB_CHAT" == ok ]];; esac; }'),
-        "get_kv() {" + fns["get_kv"] + "\n}",
-        "set_kv() {" + fns["set_kv"] + "\n}",
-        "rerank_decide_k3s() {" + fns["rerank_decide_k3s"] + "\n}",
-        'rerank_decide_k3s; echo "RC=$?"',
-    ])
-    env = {**os.environ, "STUB_LOG": str(log), "STUB_STATE": state, "STUB_RERANK": rerank,
-           "STUB_CHAT": chat}
-    r = subprocess.run([_bash_exe(), "-c", script], capture_output=True, text=True, env=env,
-                       timeout=60)
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            f'APP_ENV="{env_file.as_posix()}"',
+            "REPO_ROOT=/nonexistent",
+            'pass() { echo "PASS $1: $2"; }',
+            'fail() { echo "FAIL $1: $2"; }',
+            'llm_gate() { echo "USERACTION llm-models: $1"; }',
+            # $PY register-models.py --row-state <alias>
+            (
+                'PY=__py; __py() { printf "row-state %s\\n" "$3" >> "$STUB_LOG"; '
+                '[[ "$STUB_STATE" == down ]] && return 1; printf "%s\\n" "$STUB_STATE"; }'
+            ),
+            (
+                'probe_alias() { printf "%s %s\\n" "$1" "$2" >> "$STUB_LOG"; '
+                'case "$1" in rerank) [[ "$STUB_RERANK" == ok ]];; rerank-chat) [[ "$STUB_CHAT" == ok ]];; esac; }'
+            ),
+            "get_kv() {" + fns["get_kv"] + "\n}",
+            "set_kv() {" + fns["set_kv"] + "\n}",
+            "rerank_decide_k3s() {" + fns["rerank_decide_k3s"] + "\n}",
+            'rerank_decide_k3s; echo "RC=$?"',
+        ]
+    )
+    env = {
+        **os.environ,
+        "STUB_LOG": str(log),
+        "STUB_STATE": state,
+        "STUB_RERANK": rerank,
+        "STUB_CHAT": chat,
+    }
+    r = subprocess.run(
+        [_bash_exe(), "-c", script], capture_output=True, text=True, env=env, timeout=60
+    )
     calls = [c for c in log.read_text(encoding="utf-8").splitlines() if c]
     return r, env_file.read_text(encoding="utf-8"), calls
 
@@ -87,8 +100,9 @@ def test_the_next_run_reads_the_explicit_off_and_probes_nothing(tmp_path):
     assert _rc(r) == 0 and "explicit 'no reranker'" in r.stdout and calls == []
 
 
-@pytest.mark.parametrize("app_env", ["CC_GRAPH_RERANK_ALIAS=cc-rerank\n",
-                                     "CC_GRAPH_RERANK_KIND=rerank\n"])
+@pytest.mark.parametrize(
+    "app_env", ["CC_GRAPH_RERANK_ALIAS=cc-rerank\n", "CC_GRAPH_RERANK_KIND=rerank\n"]
+)
 def test_an_unfilled_row_the_app_env_names_is_the_gate_with_the_exact_line(tmp_path, app_env):
     r, env, _ = _run(tmp_path, app_env, state="skeleton")
     assert _rc(r) == 3
@@ -97,12 +111,21 @@ def test_an_unfilled_row_the_app_env_names_is_the_gate_with_the_exact_line(tmp_p
     assert env == app_env  # nothing written
 
 
-@pytest.mark.parametrize("app_env,rerank,chat,calls,kind", [
-    # A filled row: exactly v2.62.0's path.
-    ("CC_GRAPH_RERANK_ALIAS=cc-rerank\n", "ok", "no", ["rerank cc-rerank"], "rerank"),
-    ("CC_GRAPH_RERANK_ALIAS=cc-rerank\n", "no", "ok", ["rerank cc-rerank", "rerank-chat cc-rerank"], "chat"),
-    ("", "ok", "no", ["rerank cc-rerank"], "rerank"),
-])
+@pytest.mark.parametrize(
+    "app_env,rerank,chat,calls,kind",
+    [
+        # A filled row: exactly v2.62.0's path.
+        ("CC_GRAPH_RERANK_ALIAS=cc-rerank\n", "ok", "no", ["rerank cc-rerank"], "rerank"),
+        (
+            "CC_GRAPH_RERANK_ALIAS=cc-rerank\n",
+            "no",
+            "ok",
+            ["rerank cc-rerank", "rerank-chat cc-rerank"],
+            "chat",
+        ),
+        ("", "ok", "no", ["rerank cc-rerank"], "rerank"),
+    ],
+)
 def test_a_filled_row_is_probed_as_before(tmp_path, app_env, rerank, chat, calls, kind):
     r, env, seen = _run(tmp_path, app_env, rerank=rerank, chat=chat)
     assert _rc(r) == 0, r.stdout

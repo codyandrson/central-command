@@ -97,8 +97,10 @@ _SEP = re.compile(r"^[\s`*]*(?:->|→|/|·|,|\|)[\s`*]*$")
 
 def phase_runs(text: str, phases: list[str]) -> list[list[str]]:
     """Every run of 3+ phase names joined only by sequence separators."""
-    hits = [(m.start(), m.end(), m.group(1)) for m in
-            re.finditer(r"\b(" + "|".join(phases) + r")\b", text.lower())]
+    hits = [
+        (m.start(), m.end(), m.group(1))
+        for m in re.finditer(r"\b(" + "|".join(phases) + r")\b", text.lower())
+    ]
     runs, cur, last_end = [], [], 0
     for start, end, name in hits:
         if cur and _SEP.match(text[last_end:start]):
@@ -160,8 +162,7 @@ def test_the_skill_names_the_three_commands():
 
 def test_the_skill_never_names_a_phase_to_run():
     text = _read(SKILL)
-    named = re.findall(r"(?<![\w/.])\./setup\.sh\s+(" + "|".join(manifest_phases()) + r")\b",
-                       text)
+    named = re.findall(r"(?<![\w/.])\./setup\.sh\s+(" + "|".join(manifest_phases()) + r")\b", text)
     assert not named, (
         f"{SKILL}: names phase(s) {sorted(set(named))} as a command — the "
         "operator-side contract is ./setup.sh, ./setup.sh status, ./setup.sh report"

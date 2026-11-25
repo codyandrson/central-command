@@ -47,9 +47,23 @@ SCANNED = [*single_scripts(), ROOT / "deploy" / "n8n" / "apply-workflows.sh"]
 # The reporters, and the few other places a sentence reaches the operator:
 # update.sh's `deploy_phase <phase> <the pause sentence>`, a `read -p` prompt,
 # and a `*_WHY=` reason a caller later prints (boot.sh's PROC_WHY).
-REPORTERS = ("pass", "warn", "fail", "useraction", "note", "ok", "bad", "skip",
-             "die", "write_status", "echo", "printf", "deploy_phase", "read",
-             r"[A-Z_]*WHY=")
+REPORTERS = (
+    "pass",
+    "warn",
+    "fail",
+    "useraction",
+    "note",
+    "ok",
+    "bad",
+    "skip",
+    "die",
+    "write_status",
+    "echo",
+    "printf",
+    "deploy_phase",
+    "read",
+    r"[A-Z_]*WHY=",
+)
 
 
 def _phases() -> list[str]:
@@ -90,8 +104,11 @@ ALLOWLIST: list[tuple[str, str]] = [
 ]
 
 _HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?")
-_CALL = re.compile(r"(?:^\s*|[;&|(){]\s*|\bthen\s+|\bdo\s+|\belse\s+|\|\|\s*|&&\s*)(" +
-                   "|".join(REPORTERS) + r")(?:\s|(?<==))")
+_CALL = re.compile(
+    r"(?:^\s*|[;&|(){]\s*|\bthen\s+|\bdo\s+|\belse\s+|\|\|\s*|&&\s*)("
+    + "|".join(REPORTERS)
+    + r")(?:\s|(?<==))"
+)
 
 
 def _unbalanced(text: str) -> bool:
@@ -157,16 +174,25 @@ def test_no_message_names_a_phase_to_run():
         bad += violations(path.name, path.read_text(encoding="utf-8"))
     assert not bad, (
         "an operator-facing message names `./setup.sh <phase>` (or `diagnose`) as a command. "
-        "The operator runs ONE command — `./setup.sh`, which resumes in order (say \"it resumes "
-        "at <phase>\" where that helps) — and `./setup.sh report` instead of diagnose:\n  "
+        'The operator runs ONE command — `./setup.sh`, which resumes in order (say "it resumes '
+        'at <phase>" where that helps) — and `./setup.sh report` instead of diagnose:\n  '
         + "\n  ".join(bad)
     )
 
 
 def test_the_scan_covers_the_installer_and_the_n8n_script():
     names = {p.name for p in SCANNED}
-    assert {"setup.sh", "update.sh", "update-run.sh", "verify.sh", "resolve-images.sh",
-            "make-secrets.sh", "apply-workflows.sh", "stack.sh", "llm.sh"} <= names, names
+    assert {
+        "setup.sh",
+        "update.sh",
+        "update-run.sh",
+        "verify.sh",
+        "resolve-images.sh",
+        "make-secrets.sh",
+        "apply-workflows.sh",
+        "stack.sh",
+        "llm.sh",
+    } <= names, names
     # And it actually finds messages in them — a parser that matched nothing
     # would pass the guard above forever.
     stack = SINGLE / "phases" / "stack.sh"
@@ -174,47 +200,58 @@ def test_the_scan_covers_the_installer_and_the_n8n_script():
 
 
 def test_the_guard_catches_a_planted_violation():
-    planted = "\n".join([
-        'phase_x() {',
-        '  fail "venv" ".venv missing — run: ./setup.sh app"',
-        '  useraction "llm-models" "fill the catalog, then re-run: ./setup.sh llm"',
-        '  note "  need longer:  CC_PROBE_TIMEOUT=900 ./setup.sh llm"',
-        '  warn "x" "a long message that wraps',
-        '     onto the next line and says re-run ./setup.sh demo"',
-        '  [[ -n "$x" ]] || fail "x" "proxy never answered — run: ./setup.sh diagnose"',
-        '  write_status failed "rollback" "then: ./update.sh rollback && ./setup.sh boot"',
-        # The two P5 found (F1): a dry-run command handed to the operator, and
-        # a `next:` that names check where the one command is the move.
-        '  pass "z" "./setup.sh machine --dry-run reports the diff"',
-        '  note "next: ./setup.sh check"',
-        '}',
-    ])
+    planted = "\n".join(
+        [
+            "phase_x() {",
+            '  fail "venv" ".venv missing — run: ./setup.sh app"',
+            '  useraction "llm-models" "fill the catalog, then re-run: ./setup.sh llm"',
+            '  note "  need longer:  CC_PROBE_TIMEOUT=900 ./setup.sh llm"',
+            '  warn "x" "a long message that wraps',
+            '     onto the next line and says re-run ./setup.sh demo"',
+            '  [[ -n "$x" ]] || fail "x" "proxy never answered — run: ./setup.sh diagnose"',
+            '  write_status failed "rollback" "then: ./update.sh rollback && ./setup.sh boot"',
+            # The two P5 found (F1): a dry-run command handed to the operator, and
+            # a `next:` that names check where the one command is the move.
+            '  pass "z" "./setup.sh machine --dry-run reports the diff"',
+            '  note "next: ./setup.sh check"',
+            "}",
+        ]
+    )
     found = violations("planted.sh", planted)
-    for hint in ("setup.sh app", "setup.sh llm", "setup.sh demo", "setup.sh diagnose",
-                 "setup.sh boot", "setup.sh machine", "next: ./setup.sh check"):
+    for hint in (
+        "setup.sh app",
+        "setup.sh llm",
+        "setup.sh demo",
+        "setup.sh diagnose",
+        "setup.sh boot",
+        "setup.sh machine",
+        "next: ./setup.sh check",
+    ):
         assert any(hint in f for f in found), (hint, found)
     assert len(found) == 8, found
 
 
 def test_the_guard_leaves_commands_comments_and_usage_alone():
-    clean = "\n".join([
-        '# a comment may say: run ./setup.sh app',
-        'usage() {',
-        '  cat >&2 <<USAGE',
-        '       ./setup.sh <phase>   # developer form: ./setup.sh app',
-        'USAGE',
-        '}',
-        'f() {',
-        '  fail "x" "requires app/install, which is pending — run ./setup.sh (it resumes in order)"',
-        '  warn "y" "fix the key in .env, then run: ./setup.sh check"',
-        '  pass "z" "the machine phase owns the drop-in, and prints its diff before it writes"',
-        '  note "next: ./setup.sh   (it runs the dry check first, then installs)"',
-        '  fail "w" "git not found (./setup.sh preflight)"',
-        '  useraction "v" "run ./setup.sh report and hand over the file; ./setup.sh status shows it"',
-        '  logline "run end: ./setup.sh machine -> exit 0"',
-        '  "$HERE/setup.sh" boot',
-        '}',
-    ])
+    clean = "\n".join(
+        [
+            "# a comment may say: run ./setup.sh app",
+            "usage() {",
+            "  cat >&2 <<USAGE",
+            "       ./setup.sh <phase>   # developer form: ./setup.sh app",
+            "USAGE",
+            "}",
+            "f() {",
+            '  fail "x" "requires app/install, which is pending — run ./setup.sh (it resumes in order)"',
+            '  warn "y" "fix the key in .env, then run: ./setup.sh check"',
+            '  pass "z" "the machine phase owns the drop-in, and prints its diff before it writes"',
+            '  note "next: ./setup.sh   (it runs the dry check first, then installs)"',
+            '  fail "w" "git not found (./setup.sh preflight)"',
+            '  useraction "v" "run ./setup.sh report and hand over the file; ./setup.sh status shows it"',
+            '  logline "run end: ./setup.sh machine -> exit 0"',
+            '  "$HERE/setup.sh" boot',
+            "}",
+        ]
+    )
     assert violations("clean.sh", clean) == []
 
 
@@ -246,9 +283,13 @@ def _tracked_content_names() -> set[str]:
     return names
 
 
-_EDIT_VERBS = r"(?:edit|modify|patch|change|add|append|insert|uncomment|bump|set|put|write|tweak|hand-edit)"
+_EDIT_VERBS = (
+    r"(?:edit|modify|patch|change|add|append|insert|uncomment|bump|set|put|write|tweak|hand-edit)"
+)
 _EDIT_FILE = re.compile(
-    r"\b" + _EDIT_VERBS + r"\b[^.;\n]{0,80}?(?<![\w.-])(?:[\w./-]*/)?("
+    r"\b"
+    + _EDIT_VERBS
+    + r"\b[^.;\n]{0,80}?(?<![\w.-])(?:[\w./-]*/)?("
     + "|".join(sorted((re.escape(n) for n in _tracked_content_names()), key=len, reverse=True))
     + r")(?![\w.-])",
     re.IGNORECASE,
@@ -260,7 +301,8 @@ _EDIT_SERVICE = re.compile(
     re.IGNORECASE,
 )
 _EDIT_BY_HAND = re.compile(
-    r"\b(?:add|edit|patch|modify|change|append|insert)\b[^.;\n]{0,80}\bby hand\b", re.IGNORECASE,
+    r"\b(?:add|edit|patch|modify|change|append|insert)\b[^.;\n]{0,80}\bby hand\b",
+    re.IGNORECASE,
 )
 
 
@@ -286,30 +328,34 @@ def test_no_message_tells_the_reader_to_edit_a_tracked_file():
 
 
 def test_the_tree_edit_guard_catches_a_planted_violation():
-    planted = "\n".join([
-        'f() {',
-        # The llm pause's own lines, as the first laptop run read them (F14).
-        '  note "  item in the design record: add HTTP(S)_PROXY to the litellm service"',
-        '  note "  by hand if you need it."',
-        '  fail "x" "the tag is wrong — edit deploy/single/images.txt and re-run ./setup.sh"',
-        '  useraction "y" "change compose.yaml so the port is free, then re-run ./setup.sh"',
-        '  warn "z" "patch the healthcheck by hand"',
-        '}',
-    ])
+    planted = "\n".join(
+        [
+            "f() {",
+            # The llm pause's own lines, as the first laptop run read them (F14).
+            '  note "  item in the design record: add HTTP(S)_PROXY to the litellm service"',
+            '  note "  by hand if you need it."',
+            '  fail "x" "the tag is wrong — edit deploy/single/images.txt and re-run ./setup.sh"',
+            '  useraction "y" "change compose.yaml so the port is free, then re-run ./setup.sh"',
+            '  warn "z" "patch the healthcheck by hand"',
+            "}",
+        ]
+    )
     found = tree_edit_violations("planted.sh", planted)
     for hint in ("litellm service", "images.txt", "compose.yaml", "by hand"):
         assert any(hint in f for f in found), (hint, found)
 
 
 def test_the_tree_edit_guard_leaves_env_keys_commands_and_findings_alone():
-    clean = "\n".join([
-        'f() {',
-        '  fail "x" "fix or unset CC_IMG_NEO4J in .env, then re-run: ./setup.sh"',
-        '  note "  Do not add one to a tracked file: the install refuses a tree that differs"',
-        '  useraction "y" "set it in .env or run ./setup.sh configure in a terminal"',
-        '  warn "z" "podman-compose must be 1.6.0 or newer; check it by hand"',
-        '  fail "w" "images.txt locks a digest the registry does not serve — do not install it"',
-        '  pass "v" "wrote the drop-in from CC_PROXY (deploy/single/compose.yaml is untouched)"',
-        '}',
-    ])
+    clean = "\n".join(
+        [
+            "f() {",
+            '  fail "x" "fix or unset CC_IMG_NEO4J in .env, then re-run: ./setup.sh"',
+            '  note "  Do not add one to a tracked file: the install refuses a tree that differs"',
+            '  useraction "y" "set it in .env or run ./setup.sh configure in a terminal"',
+            '  warn "z" "podman-compose must be 1.6.0 or newer; check it by hand"',
+            '  fail "w" "images.txt locks a digest the registry does not serve — do not install it"',
+            '  pass "v" "wrote the drop-in from CC_PROXY (deploy/single/compose.yaml is untouched)"',
+            "}",
+        ]
+    )
     assert tree_edit_violations("clean.sh", clean) == []

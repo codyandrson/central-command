@@ -16,13 +16,17 @@ from tests.conftest import needs_pg
 
 
 def _row(i, kind, ref, actor="operator", payload=None):
-    return {"id": i, "kind": kind, "ref_id": ref, "actor": actor,
-            "payload": payload or {}}
+    return {"id": i, "kind": kind, "ref_id": ref, "actor": actor, "payload": payload or {}}
 
 
 def _verdict(i, ref, verdict, mode="shadow"):
-    return _row(i, "audit.verdict", ref, actor="auditor",
-                payload={"verdict": verdict, "rationale": f"r{i}", "mode": mode})
+    return _row(
+        i,
+        "audit.verdict",
+        ref,
+        actor="auditor",
+        payload={"verdict": verdict, "rationale": f"r{i}", "mode": mode},
+    )
 
 
 def test_all_four_quadrants_tally():
@@ -37,8 +41,12 @@ def test_all_four_quadrants_tally():
         _row(8, "work.reopened", "d"),
     ]
     r = pair_verdicts(rows)
-    assert r["quadrants"] == {"concur_confirmed": 1, "challenge_reopened": 1,
-                             "challenge_confirmed": 1, "concur_reopened": 1}
+    assert r["quadrants"] == {
+        "concur_confirmed": 1,
+        "challenge_reopened": 1,
+        "challenge_confirmed": 1,
+        "concur_reopened": 1,
+    }
     assert r["agreed"] == 2 and r["total_paired"] == 4
     assert r["agreement_rate"] == 0.5
     assert [p["item_id"] for p in r["auditor_misses"]] == ["d"]
@@ -49,8 +57,7 @@ def test_bulk_confirm_all_pairs_every_listed_item():
     rows = [
         _verdict(1, "a", "concur"),
         _verdict(2, "b", "concur"),
-        _row(3, "work.dismissal_confirmed", None,
-             payload={"count": 2, "item_ids": ["a", "b"]}),
+        _row(3, "work.dismissal_confirmed", None, payload={"count": 2, "item_ids": ["a", "b"]}),
     ]
     r = pair_verdicts(rows)
     assert r["quadrants"]["concur_confirmed"] == 2
@@ -60,8 +67,7 @@ def test_bulk_confirm_all_pairs_every_listed_item():
 def test_auto_confirms_carry_no_operator_signal():
     rows = [
         _verdict(1, "a", "concur", mode="active"),
-        _row(2, "work.dismissal_confirmed", "a", actor="auditor",
-             payload={"by": "auditor"}),
+        _row(2, "work.dismissal_confirmed", "a", actor="auditor", payload={"by": "auditor"}),
     ]
     r = pair_verdicts(rows)
     assert r["total_paired"] == 0
@@ -72,7 +78,7 @@ def test_auto_confirms_carry_no_operator_signal():
 def test_a_reopen_cycle_contributes_one_pair_per_round():
     rows = [
         _verdict(1, "a", "concur"),
-        _row(2, "work.reopened", "a"),          # round 1: auditor miss
+        _row(2, "work.reopened", "a"),  # round 1: auditor miss
         _verdict(3, "a", "challenge"),
         _row(4, "work.dismissal_confirmed", "a"),  # round 2: over-cautious
     ]
@@ -100,17 +106,16 @@ def test_outcomes_without_verdicts_are_ignored():
 # --- end to end over the real log --------------------------------------------
 
 
-
-
 @needs_pg
 async def test_agreement_report_reads_the_real_log():
     ref = "wi_agree_" + uuid.uuid4().hex[:8]
     await events.emit(
-        "audit.verdict", ref_id=ref, actor="auditor",
+        "audit.verdict",
+        ref_id=ref,
+        actor="auditor",
         payload={"verdict": "concur", "rationale": "synthetic", "mode": "shadow"},
     )
-    await events.emit("work.reopened", ref_id=ref, payload={"note": "look again"},
-                      actor="operator")
+    await events.emit("work.reopened", ref_id=ref, payload={"note": "look again"}, actor="operator")
 
     report = await agreement_report()
     ours = [p for p in report["auditor_misses"] if p["item_id"] == ref]

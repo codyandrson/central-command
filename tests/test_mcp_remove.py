@@ -93,7 +93,9 @@ async def test_propose_remove_test_model_is_a_stub(monkeypatch):
     assert "test model" in out
 
 
-@pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])
+@pytest.mark.parametrize(
+    "server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""]
+)
 async def test_propose_remove_bad_server_ids_are_refused(monkeypatch, server_id):
     monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_remove(_Ctx(), server_id, "test")
@@ -119,7 +121,9 @@ async def test_propose_remove_captures_the_expected_proposal_shape(monkeypatch):
 async def test_remove_refuses_with_no_row_at_all(monkeypatch):
     with pytest.raises(executor.ExecutionFailed, match="missing or already retired"):
         await executor.execute(
-            [_action("no-such-server")], approver="human:lee", source_refs=[],
+            [_action("no-such-server")],
+            approver="human:lee",
+            source_refs=[],
         )
 
 
@@ -130,7 +134,9 @@ async def test_remove_refuses_when_already_retired(monkeypatch):
     try:
         with pytest.raises(executor.ExecutionFailed, match="missing or already retired"):
             await executor.execute(
-                [_action(server_id)], approver="human:lee", source_refs=[],
+                [_action(server_id)],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _delete_mcp_server(server_id)
@@ -144,7 +150,9 @@ async def test_remove_refuses_with_no_kubeconfig(monkeypatch):
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "")
         with pytest.raises(executor.ExecutionFailed, match="kubeconfig not configured"):
             await executor.execute(
-                [_action(server_id)], approver="human:lee", source_refs=[],
+                [_action(server_id)],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _delete_mcp_server(server_id)
@@ -157,7 +165,10 @@ async def test_remove_refuses_with_no_kubeconfig(monkeypatch):
 async def test_remove_happy_path_deletes_deregisters_and_retires(monkeypatch):
     server_id = "remove-happy"
     await _insert_mcp_server(
-        server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-happy",
+        server_id,
+        "registered",
+        namespace="cc-mcp",
+        litellm_alias="uuid-happy",
     )
     try:
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
@@ -188,14 +199,26 @@ async def test_remove_happy_path_deletes_deregisters_and_retires(monkeypatch):
         monkeypatch.setattr(litellm_client, "remove_mcp_server_from_key", fake_remove_key)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
-            proposer="mcp-tester", proposal_id="prop_rm0001",
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
+            proposer="mcp-tester",
+            proposal_id="prop_rm0001",
         )
 
-        assert run_calls == [[
-            "kubectl", "--kubeconfig", "/fake/kubeconfig", "-n", "cc-mcp", "delete",
-            f"deployment/{server_id}", f"service/{server_id}", "--ignore-not-found",
-        ]]
+        assert run_calls == [
+            [
+                "kubectl",
+                "--kubeconfig",
+                "/fake/kubeconfig",
+                "-n",
+                "cc-mcp",
+                "delete",
+                f"deployment/{server_id}",
+                f"service/{server_id}",
+                "--ignore-not-found",
+            ]
+        ]
         assert dereg_calls == ["uuid-happy"]
         assert "retired" in outcome.result_text
 
@@ -228,7 +251,9 @@ async def test_remove_pod_already_gone_still_succeeds(monkeypatch):
         monkeypatch.setattr(litellm_client, "deregister_mcp_server", _boom)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         assert "retired" in outcome.result_text
         row = await repo.get_mcp_server(server_id)
@@ -256,7 +281,9 @@ async def test_remove_never_registered_skips_deregistration_cleanly(monkeypatch)
         monkeypatch.setattr(litellm_client, "deregister_mcp_server", _boom)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         assert "no litellm registration" in outcome.result_text
         row = await repo.get_mcp_server(server_id)
@@ -288,9 +315,15 @@ async def test_remove_mcp_server_from_key_narrows_never_clobbers(monkeypatch):
     async def fake_call(method, path, json_body=None, auth_key=None):
         calls.append((method, path, json_body, auth_key))
         if path.startswith("/key/info"):
-            return FakeResp({"info": {"object_permission": {
-                "mcp_servers": ["uuid-keep", "uuid-gone"],
-            }}})
+            return FakeResp(
+                {
+                    "info": {
+                        "object_permission": {
+                            "mcp_servers": ["uuid-keep", "uuid-gone"],
+                        }
+                    }
+                }
+            )
         return FakeResp({})
 
     monkeypatch.setattr(litellm_client, "_call", fake_call)
@@ -298,10 +331,17 @@ async def test_remove_mcp_server_from_key_narrows_never_clobbers(monkeypatch):
     assert out["changed"] is True
     assert calls[0] == ("GET", "/key/info", None, "sk-agent")
     update = [c for c in calls if c[1] == "/key/update"]
-    assert update == [("POST", "/key/update", {
-        "key": "sk-agent",
-        "object_permission": {"mcp_servers": ["uuid-keep"]},
-    }, None)]
+    assert update == [
+        (
+            "POST",
+            "/key/update",
+            {
+                "key": "sk-agent",
+                "object_permission": {"mcp_servers": ["uuid-keep"]},
+            },
+            None,
+        )
+    ]
 
 
 async def test_remove_mcp_server_from_key_is_idempotent(monkeypatch):
@@ -327,7 +367,10 @@ async def test_remove_mcp_server_from_key_is_idempotent(monkeypatch):
 async def test_remove_happy_path_cleans_up_key_permission(monkeypatch):
     server_id = "remove-keygrant"
     await _insert_mcp_server(
-        server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-kg",
+        server_id,
+        "registered",
+        namespace="cc-mcp",
+        litellm_alias="uuid-kg",
     )
     try:
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
@@ -354,7 +397,9 @@ async def test_remove_happy_path_cleans_up_key_permission(monkeypatch):
         monkeypatch.setattr(litellm_client, "remove_mcp_server_from_key", fake_remove_key)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         assert removed == [("sk-shared", "uuid-kg")]
         assert "key permission: removed from shared key" in outcome.result_text
@@ -366,7 +411,10 @@ async def test_remove_happy_path_cleans_up_key_permission(monkeypatch):
 async def test_remove_stands_when_key_cleanup_fails_but_says_so_loudly(monkeypatch):
     server_id = "remove-keyfail"
     await _insert_mcp_server(
-        server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-kf",
+        server_id,
+        "registered",
+        namespace="cc-mcp",
+        litellm_alias="uuid-kf",
     )
     try:
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
@@ -389,7 +437,9 @@ async def test_remove_stands_when_key_cleanup_fails_but_says_so_loudly(monkeypat
         monkeypatch.setattr(litellm_client, "remove_mcp_server_from_key", fake_remove_key)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         # removal itself stands...
         row = await repo.get_mcp_server(server_id)
@@ -419,7 +469,9 @@ async def test_remove_never_registered_skips_key_cleanup_too(monkeypatch):
         monkeypatch.setattr(litellm_client, "remove_mcp_server_from_key", _boom)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         assert "no litellm registration" in outcome.result_text
         row = await repo.get_mcp_server(server_id)
@@ -434,7 +486,10 @@ async def test_remove_already_gone_from_proxy_skips_deregistration(monkeypatch):
     must not error, just record the skip and still retire."""
     server_id = "gone-from-proxy"
     await _insert_mcp_server(
-        server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-stale",
+        server_id,
+        "registered",
+        namespace="cc-mcp",
+        litellm_alias="uuid-stale",
     )
     try:
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "/fake/kubeconfig")
@@ -457,7 +512,9 @@ async def test_remove_already_gone_from_proxy_skips_deregistration(monkeypatch):
         monkeypatch.setattr(litellm_client, "remove_mcp_server_from_key", fake_remove_key)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         assert "already gone from proxy" in outcome.result_text
         row = await repo.get_mcp_server(server_id)

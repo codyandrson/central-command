@@ -9,6 +9,7 @@ so Neo4j (which shares the compute node) must request at least twice what the
 speech pod does, and the requests of everything the manifests place on the
 compute node must still fit a 2-CPU node with room for kube-system.
 """
+
 from pathlib import Path
 
 import yaml
@@ -49,7 +50,9 @@ def _milli(q) -> int:
 def test_the_speech_container_has_a_memory_limit_and_no_cpu_limit():
     res = _container("cc-speech", "speech")["resources"]
     assert res["limits"].get("memory") == "4Gi", "memory is not compressible: the limit stays"
-    assert "cpu" not in res["limits"], "ONNX Runtime ignores a CPU quota and spins one thread per core"
+    assert "cpu" not in res["limits"], (
+        "ONNX Runtime ignores a CPU quota and spins one thread per core"
+    )
     assert _milli(res["requests"]["cpu"]) > 0, "no limit means the CPU REQUEST is its whole claim"
 
 
@@ -57,7 +60,8 @@ def test_neo4j_requests_at_least_twice_the_speech_pods_cpu():
     neo = _milli(_container("cc-neo4j", "neo4j")["resources"]["requests"]["cpu"])
     speech = _milli(_container("cc-speech", "speech")["resources"]["requests"]["cpu"])
     assert neo >= 2 * speech, (
-        f"contended CPU is shared by request: the graph ({neo}m) must hold twice speech's ({speech}m)")
+        f"contended CPU is shared by request: the graph ({neo}m) must hold twice speech's ({speech}m)"
+    )
 
 
 def _places_on_compute(pod_spec) -> bool:
@@ -66,10 +70,17 @@ def _places_on_compute(pod_spec) -> bool:
     if (pod_spec.get("nodeSelector") or {}).get("cc-role/compute") == "true":
         return True
     aff = (pod_spec.get("affinity") or {}).get("nodeAffinity") or {}
-    required = (aff.get("requiredDuringSchedulingIgnoredDuringExecution") or {}).get("nodeSelectorTerms") or []
-    preferred = [p["preference"] for p in aff.get("preferredDuringSchedulingIgnoredDuringExecution") or []]
-    return any(e["key"] == "cc-role/compute" for term in [*required, *preferred]
-               for e in term.get("matchExpressions") or [])
+    required = (aff.get("requiredDuringSchedulingIgnoredDuringExecution") or {}).get(
+        "nodeSelectorTerms"
+    ) or []
+    preferred = [
+        p["preference"] for p in aff.get("preferredDuringSchedulingIgnoredDuringExecution") or []
+    ]
+    return any(
+        e["key"] == "cc-role/compute"
+        for term in [*required, *preferred]
+        for e in term.get("matchExpressions") or []
+    )
 
 
 def _compute_node_requests() -> dict[str, int]:
@@ -83,7 +94,8 @@ def _compute_node_requests() -> dict[str, int]:
         if doc["kind"] == "DaemonSet" or _places_on_compute(spec):
             for c in spec["containers"]:
                 out[f"{doc['metadata']['name']}/{c['name']}"] = _milli(
-                    ((c.get("resources") or {}).get("requests") or {}).get("cpu", 0))
+                    ((c.get("resources") or {}).get("requests") or {}).get("cpu", 0)
+                )
     return out
 
 

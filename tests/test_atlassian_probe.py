@@ -48,11 +48,17 @@ def test_the_probe_scrubs_every_credential_and_every_email(monkeypatch):
     monkeypatch.setattr(settings, "confluence_email", "wiki@acme.example")
     probe = _probe()
 
-    text = ('{"errorMessages":["s3cret-jira-token rejected for op@acme.example"],'
-            '"reporter":"someone.else@corp.example","wiki":"s3cret-wiki-token"}')
+    text = (
+        '{"errorMessages":["s3cret-jira-token rejected for op@acme.example"],'
+        '"reporter":"someone.else@corp.example","wiki":"s3cret-wiki-token"}'
+    )
     out = probe._scrub(text)
-    for secret in ("s3cret-jira-token", "s3cret-wiki-token", "op@acme.example",
-                   "someone.else@corp.example"):
+    for secret in (
+        "s3cret-jira-token",
+        "s3cret-wiki-token",
+        "op@acme.example",
+        "someone.else@corp.example",
+    ):
         assert secret not in out, f"{secret!r} survived _scrub: {out}"
     assert "<redacted>" in out and "<redacted-email>" in out
 
@@ -141,8 +147,9 @@ async def test_the_probe_prints_the_server_version_line_marked_verify_on_site(mo
     probe = _probe()
     probe.QUIET = False
     await probe.probe_confluence()
-    line = next(l for l in capsys.readouterr().out.splitlines()
-                if l.startswith("INFO confluence version="))
+    line = next(
+        l for l in capsys.readouterr().out.splitlines() if l.startswith("INFO confluence version=")
+    )
     assert "version=9.2.1 (9021)" in line and "VERIFY-ON-SITE" in line
 
 

@@ -33,7 +33,9 @@ async def test_attachment_text_lands_in_the_created_tasks_instructions():
         TaskCreateIn(
             instructions="Review the attached note.",
             agent_id="jira-expert",
-            attachments=[_att("notes.txt", "text/plain", b"Renew the Jira licence before 2026-09-01.")],
+            attachments=[
+                _att("notes.txt", "text/plain", b"Renew the Jira licence before 2026-09-01.")
+            ],
         )
     )
     task = await repo.get_task(out["task_id"])

@@ -54,8 +54,18 @@ EXTRACTOR_AGENT = "inbox-triage"
 
 # Types the model may answer with. `Place` is accepted so the model has
 # somewhere to put a city it felt it had to name, and then dropped.
-TYPES = ("Organization", "Person", "Product", "Vehicle", "Account", "Order",
-         "Policy", "Place", "Event", "Other")
+TYPES = (
+    "Organization",
+    "Person",
+    "Product",
+    "Vehicle",
+    "Account",
+    "Order",
+    "Policy",
+    "Place",
+    "Event",
+    "Other",
+)
 HUB_TYPES = frozenset({"Place"})
 
 PROMPT = """Extract the entities this email is about, for matching it against other emails about the same things.
@@ -72,11 +82,28 @@ Answer with ONLY a JSON object, no prose: {{"entities": [{{"name": "...", "type"
 
 # Names that are hubs whatever the model typed them: the mail providers the
 # sender key already treats as "not a family", and a handful of generics.
-HUB_NAMES = frozenset({
-    "gmail", "google", "gmail.com", "outlook", "hotmail", "yahoo", "icloud",
-    "apple mail", "email", "mail", "inbox", "invoice", "receipt", "account",
-    "order", "update", "notification", "newsletter",
-})
+HUB_NAMES = frozenset(
+    {
+        "gmail",
+        "google",
+        "gmail.com",
+        "outlook",
+        "hotmail",
+        "yahoo",
+        "icloud",
+        "apple mail",
+        "email",
+        "mail",
+        "inbox",
+        "invoice",
+        "receipt",
+        "account",
+        "order",
+        "update",
+        "notification",
+        "newsletter",
+    }
+)
 
 MAX_TEXT_CHARS = 4000
 MAX_KEYS = 10
@@ -182,8 +209,9 @@ async def _complete(model_id: str, text: str) -> str | None:
     on `reasoning_content` first and a tight cap answers nothing (measured
     2026-11-01, two of fourteen calls at 2000 tokens)."""
     base = (settings.llm_base_url or "").rstrip("/")
-    async with httpx.AsyncClient(timeout=http_client.llm_timeout(),
-                                 **http_client.client_kwargs()) as client:
+    async with httpx.AsyncClient(
+        timeout=http_client.llm_timeout(), **http_client.client_kwargs()
+    ) as client:
         resp = await client.post(
             f"{base}/v1/chat/completions",
             headers={"Authorization": f"Bearer {settings.llm_api_key}"},
@@ -204,9 +232,12 @@ async def _complete(model_id: str, text: str) -> str | None:
 _DELIM = re.compile(r"</?\s*email\b[^>]*>", re.IGNORECASE)
 
 
-async def extract(subject: str | None, text: str | None,
-                  model_id: str | None = None,
-                  agent_id: str = EXTRACTOR_AGENT) -> list[dict]:
+async def extract(
+    subject: str | None,
+    text: str | None,
+    model_id: str | None = None,
+    agent_id: str = EXTRACTOR_AGENT,
+) -> list[dict]:
     """The typed entity list for one item's text. Empty for empty text (nothing
     is not an outage). `DependencyDown(('llm',))` when the model is DOWN; a
     second unparseable answer raises `ValueError` — loud, never an empty list."""
@@ -237,8 +268,7 @@ async def extract(subject: str | None, text: str | None,
             return parse_answer(content)
         except (ValueError, json.JSONDecodeError) as exc:
             last = exc
-            log.warning("entity extraction: unparseable answer (attempt %d): %s",
-                        attempt + 1, exc)
+            log.warning("entity extraction: unparseable answer (attempt %d): %s", attempt + 1, exc)
     raise ValueError(f"entity extraction answered unparseably twice: {last}")
 
 

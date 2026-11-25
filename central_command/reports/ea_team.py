@@ -88,11 +88,21 @@ def team_load(issues: list[dict], today: date) -> dict:
         if not isinstance(who, str) or not who.strip():
             unassigned_in_read += 1
             continue
-        p = people.setdefault(who, {
-            "assignee": who, "open": 0, "in_progress": 0, "overdue": 0,
-            "due_next_7": 0, "due_next_14": 0, "estimate_hours": 0.0,
-            "estimated": 0, "unestimated": 0, "_overdue_rows": [],
-        })
+        p = people.setdefault(
+            who,
+            {
+                "assignee": who,
+                "open": 0,
+                "in_progress": 0,
+                "overdue": 0,
+                "due_next_7": 0,
+                "due_next_14": 0,
+                "estimate_hours": 0.0,
+                "estimated": 0,
+                "unestimated": 0,
+                "_overdue_rows": [],
+            },
+        )
         p["open"] += 1
         if issue.get("status_category") == "indeterminate":
             p["in_progress"] += 1
@@ -100,12 +110,14 @@ def team_load(issues: list[dict], today: date) -> dict:
         if due is not None:
             if due < today:
                 p["overdue"] += 1
-                p["_overdue_rows"].append({
-                    "issue_key": issue.get("issue_key"),
-                    "summary": _clip(issue.get("summary"), SUMMARY_CHARS),
-                    "due_date": due.isoformat(),
-                    "days_overdue": (today - due).days,
-                })
+                p["_overdue_rows"].append(
+                    {
+                        "issue_key": issue.get("issue_key"),
+                        "summary": _clip(issue.get("summary"), SUMMARY_CHARS),
+                        "due_date": due.isoformat(),
+                        "days_overdue": (today - due).days,
+                    }
+                )
             else:
                 if due <= week:
                     p["due_next_7"] += 1
@@ -154,8 +166,7 @@ def unassigned_jql(team_jql: str) -> tuple[str | None, str | None]:
         return None, "plan_team_jql has an ORDER BY"
     found = _ASSIGNED_CLAUSE.findall(team_jql)
     if len(found) != 1:
-        return None, ("plan_team_jql has no single `assignee is not EMPTY` "
-                      "clause to turn round")
+        return None, ("plan_team_jql has no single `assignee is not EMPTY` clause to turn round")
     return _ASSIGNED_CLAUSE.sub("assignee is EMPTY", team_jql), None
 
 
@@ -172,9 +183,11 @@ async def load() -> dict:
     unassigned_query, why_not = unassigned_jql(jql)
     if unassigned_query is not None:
         found = await jira.search_issues(unassigned_query, limit=limit)
-        unassigned = {"count": len(found["issues"]),
-                      "truncated": bool(found.get("truncated")),
-                      "asked": unassigned_query}
+        unassigned = {
+            "count": len(found["issues"]),
+            "truncated": bool(found.get("truncated")),
+            "asked": unassigned_query,
+        }
     else:
         unassigned = None
     return {
@@ -184,8 +197,11 @@ async def load() -> dict:
         "limit": limit,
         "truncated": bool(out.get("truncated")),
         **result,
-        **({"unassigned": unassigned} if unassigned is not None
-           else {"unassigned_omitted": why_not}),
+        **(
+            {"unassigned": unassigned}
+            if unassigned is not None
+            else {"unassigned_omitted": why_not}
+        ),
         "cannot_show": CANNOT_SHOW,
     }
 
@@ -215,19 +231,20 @@ def delegated_rows(issues: list[dict], today: date, tz: ZoneInfo) -> list[dict]:
         due = _due(issue.get("due_date"))
         updated = _updated_day(issue.get("updated"), tz)
         overdue = due is not None and due < today
-        rows.append({
-            "issue_key": issue.get("issue_key"),
-            "summary": _clip(issue.get("summary"), SUMMARY_CHARS),
-            "assignee": issue.get("assignee"),
-            "status": issue.get("status"),
-            "due_date": due.isoformat() if due else None,
-            "overdue": overdue,
-            **({"days_overdue": (today - due).days} if overdue else {}),
-            "days_since_update": (today - updated).days if updated else None,
-            **({"url": issue["url"]} if issue.get("url") else {}),
-        })
-    rows.sort(key=lambda r: (r["due_date"] is None, r["due_date"] or "",
-                             str(r["issue_key"] or "")))
+        rows.append(
+            {
+                "issue_key": issue.get("issue_key"),
+                "summary": _clip(issue.get("summary"), SUMMARY_CHARS),
+                "assignee": issue.get("assignee"),
+                "status": issue.get("status"),
+                "due_date": due.isoformat() if due else None,
+                "overdue": overdue,
+                **({"days_overdue": (today - due).days} if overdue else {}),
+                "days_since_update": (today - updated).days if updated else None,
+                **({"url": issue["url"]} if issue.get("url") else {}),
+            }
+        )
+    rows.sort(key=lambda r: (r["due_date"] is None, r["due_date"] or "", str(r["issue_key"] or "")))
     return rows
 
 
@@ -244,7 +261,7 @@ async def delegated() -> dict:
     out = await jira.search_issues(jql, limit=max(1, int(settings.plan_backlog_limit)))
     today = _today()
     rows = delegated_rows(out["issues"], today, ZoneInfo(settings.ea_timezone))
-    shown = rows[:max(0, settings.plan_brief_items)]
+    shown = rows[: max(0, settings.plan_brief_items)]
     return {
         "available": True,
         "count": len(rows),

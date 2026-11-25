@@ -25,10 +25,17 @@ from central_command.runtime import templates as t
 from central_command.runtime.packs import PACKS
 
 PROFILE_MODULES = (
-    "auditor_profile", "coach_profile", "ea_profile", "editor_profile",
-    "graph_auditor_profile", "graph_curator_profile",
-    "litellm_manager_profile", "mcp_manager_profile", "orchestrator_profile",
-    "staffing_profile", "steward_profile",
+    "auditor_profile",
+    "coach_profile",
+    "ea_profile",
+    "editor_profile",
+    "graph_auditor_profile",
+    "graph_curator_profile",
+    "litellm_manager_profile",
+    "mcp_manager_profile",
+    "orchestrator_profile",
+    "staffing_profile",
+    "steward_profile",
 )
 
 
@@ -38,11 +45,11 @@ LOOSE_CHARTERS = ("agent", "jira_expert")
 
 # Every id `agent.builtin_charter` answers for — the founders, whose v0 is a
 # code constant resolved on every read because they have no hire event.
-FOUNDER_IDS = ("inbox-triage", "jira-expert", "auditor", "orchestrator",
-               "litellm-manager", "coach")
+FOUNDER_IDS = ("inbox-triage", "jira-expert", "auditor", "orchestrator", "litellm-manager", "coach")
 
-IDENTITY_LINE = ('Your human team lead is <<operator_name>> — '
-                 '"the operator" throughout this charter.')
+IDENTITY_LINE = (
+    'Your human team lead is <<operator_name>> — "the operator" throughout this charter.'
+)
 
 
 def _shipped_charters():
@@ -53,8 +60,10 @@ def _shipped_charters():
 
 
 def test_placeholder_fills_and_unknown_raises():
-    assert t.render_charter("hi <<operator_name>>", packs=(),
-                            values={"operator_name": "Lee"}) == "hi Lee"
+    assert (
+        t.render_charter("hi <<operator_name>>", packs=(), values={"operator_name": "Lee"})
+        == "hi Lee"
+    )
     with pytest.raises(ValueError, match="unknown placeholder"):
         t.render_charter("hi <<no_such_thing>>", packs=())
 
@@ -65,11 +74,14 @@ def test_sections_resolve_against_actual_grants():
     assert t.render_charter(text, packs=()) == "always\ntail\n"
 
 
-@pytest.mark.parametrize("bad", [
-    "[[if-pack jira-read]]\nunclosed",
-    "orphan\n[[end-pack]]\n",
-    "[[if-pack a]]\n[[if-pack b]]\nnested\n[[end-pack]]\n[[end-pack]]\n",
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "[[if-pack jira-read]]\nunclosed",
+        "orphan\n[[end-pack]]\n",
+        "[[if-pack a]]\n[[if-pack b]]\nnested\n[[end-pack]]\n[[end-pack]]\n",
+    ],
+)
 def test_malformed_sections_fail_loudly(bad):
     with pytest.raises(ValueError):
         t.render_charter(bad, packs=("jira-read", "a", "b"))
@@ -160,7 +172,7 @@ def test_no_v0_charter_constant_reaches_a_model_unrendered():
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             stripped = line.strip()
             if stripped.startswith("#") or "`" in stripped:
-                continue          # prose: comments and docstrings quote the shape
+                continue  # prose: comments and docstrings quote the shape
             if re.search(r"\bor\s+[A-Z_]*CHARTER\b", line):
                 bad.append(f"{path.relative_to(root)}:{n}: {line.strip()}")
     assert not bad, "unrendered v0 charter fallback(s):\n" + "\n".join(bad)
@@ -172,15 +184,17 @@ def test_schema_seeds_no_charter_templates():
     an agent verbatim. Fails loudly if the extraction finds no founders at all,
     so a schema refactor cannot silently drop this coverage.
     """
-    schema = (pathlib.Path(__file__).resolve().parents[1]
-              / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (
+        pathlib.Path(__file__).resolve().parents[1] / "central_command" / "db" / "schema.sql"
+    ).read_text(encoding="utf-8")
     block = re.search(
-        r"insert into agent \(id, name, model, charter\) values(.*?)on conflict",
-        schema, re.DOTALL)
+        r"insert into agent \(id, name, model, charter\) values(.*?)on conflict", schema, re.DOTALL
+    )
     assert block, "schema.sql: founding-roster insert not found"
     rows = re.findall(r"\(\s*'([a-z-]+)',[^)]*?,\s*'((?:[^']|'')*)'\s*\)", block.group(1))
     assert len(rows) >= 6, f"schema.sql: extracted only {len(rows)} founder rows"
     assert {r[0] for r in rows} >= set(FOUNDER_IDS)
     for agent_id, seeded in rows:
         assert not re.findall(r"<<[a-z_]+>>|\[\[[^\]]*\]\]", seeded), (
-            f"{agent_id}: schema.sql seeds a template marker nothing renders")
+            f"{agent_id}: schema.sql seeds a template marker nothing renders"
+        )

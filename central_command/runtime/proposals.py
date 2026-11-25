@@ -116,9 +116,7 @@ async def park_proposal(
         evidence if evidence is not None else [e.model_dump() for e in proposal.evidence],
     )
 
-    await repo.save_paused_session(
-        session_id, agent_id, dump_run_state(result, call.tool_call_id)
-    )
+    await repo.save_paused_session(session_id, agent_id, dump_run_state(result, call.tool_call_id))
     await repo.save_proposal(
         proposal_id=proposal_id,
         session_id=session_id,
@@ -131,8 +129,7 @@ async def park_proposal(
         # The agent's own uncertainty, validated by the contract before it is
         # persisted. None means the agent stated none — never "low".
         confidence=(
-            proposal.confidence.model_dump(mode="json")
-            if proposal.confidence is not None else None
+            proposal.confidence.model_dump(mode="json") if proposal.confidence is not None else None
         ),
         origin=origin,
         redraft=redraft,
@@ -182,15 +179,9 @@ def verified_email_evidence(evidence, source_texts: list[str]) -> list[dict]:
     out = []
     for e in evidence:
         d = e.model_dump() if hasattr(e, "model_dump") else dict(e)
-        if (
-            d.get("kind") == "email"
-            and d.get("claim_matches_source") is None
-            and source_texts
-        ):
+        if d.get("kind") == "email" and d.get("claim_matches_source") is None and source_texts:
             claim = d.get("claim") or ""
-            d["claim_matches_source"] = any(
-                quote_supported(claim, t) for t in source_texts if t
-            )
+            d["claim_matches_source"] = any(quote_supported(claim, t) for t in source_texts if t)
         out.append(d)
     return out
 
@@ -273,7 +264,7 @@ def _legacy_mail_text(part: dict) -> list[str]:
         return []
     if part.get("tool_name") == _MAIL_READ_TOOL:
         at = content.rfind(LEGACY_MAIL_TEXT_MARKER)
-        text = content[at + len(LEGACY_MAIL_TEXT_MARKER):].strip() if at >= 0 else ""
+        text = content[at + len(LEGACY_MAIL_TEXT_MARKER) :].strip() if at >= 0 else ""
         return [text] if text else []
     out = []
     for line in content.splitlines():
@@ -301,23 +292,17 @@ def verified_operator_evidence(evidence, operator_words: list[dict]) -> list[dic
     out = []
     for e in evidence:
         d = e.model_dump() if hasattr(e, "model_dump") else dict(e)
-        if (
-            d.get("kind") == "operator"
-            and d.get("claim_matches_source") is None
-            and operator_words
-        ):
+        if d.get("kind") == "operator" and d.get("claim_matches_source") is None and operator_words:
             claim = d.get("claim") or ""
             hit = next(
-                (w for w in operator_words
-                 if w.get("text") and quote_supported(claim, w["text"])),
+                (w for w in operator_words if w.get("text") and quote_supported(claim, w["text"])),
                 None,
             )
             d["claim_matches_source"] = hit is not None
             if hit is not None:
                 d["source_ref"] = hit["ref"]
                 d["locator"] = (
-                    f"record {hit['ref']} ({hit['source']}: the operator's words "
-                    "in this session)"
+                    f"record {hit['ref']} ({hit['source']}: the operator's words in this session)"
                 )
         out.append(d)
     return out
@@ -331,7 +316,11 @@ def _cites_a_charter_update(proposal) -> bool:
 
 
 async def session_source_evidence(
-    session_id: str, evidence, *, messages=None, proposal=None,
+    session_id: str,
+    evidence,
+    *,
+    messages=None,
+    proposal=None,
 ) -> list[dict] | None:
     """Check a proposal's quotes against everything the session's record shows
     it was given — the one copy used by every leg after the first draft (a
@@ -356,13 +345,13 @@ async def session_source_evidence(
     from central_command.ingest import mail_attachments
 
     doc_texts = [
-        (i.get("payload") or {}).get("text") or ""
-        for i in items if i.get("kind") == "document"
+        (i.get("payload") or {}).get("text") or "" for i in items if i.get("kind") == "document"
     ]
     # A mail's stored text and each read attachment's whole text (DL-216).
     mail_texts = [
         t
-        for i in items if (i.get("kind") or "email") == "email"
+        for i in items
+        if (i.get("kind") or "email") == "email"
         for t in mail_attachments.source_texts(i.get("payload") or {})
     ]
     mail_texts += read_mail_sources(messages)
@@ -375,12 +364,9 @@ async def session_source_evidence(
         out = verified_evidence(out, doc_texts[0])
     out = verified_email_evidence(out, mail_texts)
     if not _cites_a_charter_update(proposal) and any(
-        d.get("kind") == "operator" and d.get("claim_matches_source") is None
-        for d in out
+        d.get("kind") == "operator" and d.get("claim_matches_source") is None for d in out
     ):
-        out = verified_operator_evidence(
-            out, await repo.operator_words_for_session(session_id)
-        )
+        out = verified_operator_evidence(out, await repo.operator_words_for_session(session_id))
     if any(e.get("claim_matches_source") is not None for e in out):
         return out
     return None
@@ -407,9 +393,7 @@ def _keep_only_server_skill_base(proposal, *, server_built: bool) -> None:
         if action.capability.split("@", 1)[0] != "skill.doc_add":
             continue
         if "base_version" in (action.arguments or {}):
-            action.arguments = {
-                k: v for k, v in action.arguments.items() if k != "base_version"
-            }
+            action.arguments = {k: v for k, v in action.arguments.items() if k != "base_version"}
 
 
 _NOTE_STAMP = ("source_quote", "source_session_id", "quote_source")
@@ -442,8 +426,10 @@ def _note_quote_verdicts(proposal, evidence: list[dict]) -> list[dict]:
     Nothing else is touched; a note without a stamp (stripped above) gets no
     verdict, and the Executor refuses it."""
     stamped = {
-        ((a.arguments or {}).get("source_quote"),
-         f"session:{(a.arguments or {}).get('source_session_id')}")
+        (
+            (a.arguments or {}).get("source_quote"),
+            f"session:{(a.arguments or {}).get('source_session_id')}",
+        )
         for a in proposal.actions
         if a.capability.split("@", 1)[0] in _STAMPED_NOTE_CAPABILITIES
         and (a.arguments or {}).get("source_quote")

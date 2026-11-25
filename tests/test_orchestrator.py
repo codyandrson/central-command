@@ -59,8 +59,11 @@ async def test_recommendation_is_stored_announced_and_transcribed():
     stored = (await repo.get_task(task["id"]))["recommendation"]
     assert stored["agent_id"] == "jira-expert" and stored["rationale"]
 
-    events = [e for e in await repo.list_events_of_kinds(["task.recommended"])
-              if e["ref_id"] == task["id"]]
+    events = [
+        e
+        for e in await repo.list_events_of_kinds(["task.recommended"])
+        if e["ref_id"] == task["id"]
+    ]
     assert len(events) == 1
     assert events[0]["actor"] == "agent:orchestrator"
     assert events[0]["payload"]["agent_id"] == "jira-expert"
@@ -85,18 +88,25 @@ async def test_no_fitting_agent_is_an_honest_first_class_answer():
 
 async def test_hallucinated_agent_id_is_sanitized_on_the_record():
     def _respond(messages, info) -> ModelResponse:
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name=info.output_tools[0].name,
-            args={"agent_id": "made-up-agent", "rationale": "Sounds right."},
-        )])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=info.output_tools[0].name,
+                    args={"agent_id": "made-up-agent", "rationale": "Sounds right."},
+                )
+            ]
+        )
 
     task = await _new_task("Do the thing.")
     rec = await orchestrator.recommend(task, model=FunctionModel(_respond))
 
     assert rec["agent_id"] is None
     assert rec["sanitized_from"] == "made-up-agent"
-    events = [e for e in await repo.list_events_of_kinds(["task.recommended"])
-              if e["ref_id"] == task["id"]]
+    events = [
+        e
+        for e in await repo.list_events_of_kinds(["task.recommended"])
+        if e["ref_id"] == task["id"]
+    ]
     assert events[0]["payload"]["sanitized"] is True
 
 
@@ -122,6 +132,9 @@ async def test_orchestrator_error_degrades_to_the_parked_task():
     assert rec is None
     after = await repo.get_task(task["id"])
     assert after["status"] == "NEW" and after["recommendation"] is None
-    errors = [e for e in await repo.list_events_of_kinds(["task.route_error"])
-              if e["ref_id"] == task["id"]]
+    errors = [
+        e
+        for e in await repo.list_events_of_kinds(["task.route_error"])
+        if e["ref_id"] == task["id"]
+    ]
     assert len(errors) == 1 and "orchestrator down" in errors[0]["payload"]["error"]

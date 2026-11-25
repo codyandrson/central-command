@@ -44,6 +44,7 @@ def _stamp(secs_ago: int = 0) -> str:
 
 # ── /api/version/check ──────────────────────────────────────────────────────
 
+
 async def test_version_check_reports_available_update(monkeypatch):
     monkeypatch.setattr(update, "read_product_version", lambda: "2.21.1")
 
@@ -72,6 +73,7 @@ async def test_version_check_airgapped_points_at_the_file_path(monkeypatch):
 
 # ── /api/update/status ──────────────────────────────────────────────────────
 
+
 async def test_status_shape_and_staleness(tmp_path, monkeypatch):
     upd = tmp_path / "upd"
     upd.mkdir()
@@ -86,17 +88,26 @@ async def test_status_shape_and_staleness(tmp_path, monkeypatch):
         "stage": {"pending": False, "inFlight": False, "status": None},
     }
 
-    (upd / "status.json").write_text(json.dumps(
-        {"state": "running", "phase": "apply", "updated_at": _stamp(0)}))
+    (upd / "status.json").write_text(
+        json.dumps({"state": "running", "phase": "apply", "updated_at": _stamp(0)})
+    )
     assert _body(await update.update_status())["inFlight"] is True
 
     # A "running" older than the runner could possibly still be = a dead run.
-    (upd / "status.json").write_text(json.dumps(
-        {"state": "running", "phase": "apply", "updated_at": _stamp(update.STALE_RUNNING_SECS + 60)}))
+    (upd / "status.json").write_text(
+        json.dumps(
+            {
+                "state": "running",
+                "phase": "apply",
+                "updated_at": _stamp(update.STALE_RUNNING_SECS + 60),
+            }
+        )
+    )
     assert _body(await update.update_status())["inFlight"] is False
 
 
 # ── /api/update/upload ──────────────────────────────────────────────────────
+
 
 async def test_upload_stages_and_reports_target(tmp_path, monkeypatch):
     monkeypatch.setattr(update, "read_product_version", lambda: "2.21.1")
@@ -124,8 +135,13 @@ async def test_upload_rejects_empty_and_failed_stage(monkeypatch):
     assert (await update.update_upload(_FakeRequest([]))).status_code == 422
 
     monkeypatch.setattr(update, "_staged_target", lambda: None)
-    monkeypatch.setattr(update, "_run_update_sh", lambda *a: subprocess.CompletedProcess(
-        a, 1, stdout="FAIL zip-shape: not a source zip\n", stderr=""))
+    monkeypatch.setattr(
+        update,
+        "_run_update_sh",
+        lambda *a: subprocess.CompletedProcess(
+            a, 1, stdout="FAIL zip-shape: not a source zip\n", stderr=""
+        ),
+    )
     resp = await update.update_upload(_FakeRequest([b"junk"]))
     assert resp.status_code == 422
     assert "zip-shape" in _body(resp)["error"]
@@ -134,12 +150,14 @@ async def test_upload_rejects_empty_and_failed_stage(monkeypatch):
 async def test_upload_refuses_while_a_run_is_in_flight(monkeypatch):
     upd = update._update_dir()
     upd.mkdir(parents=True, exist_ok=True)
-    (upd / "status.json").write_text(json.dumps(
-        {"state": "running", "phase": "apply", "updated_at": _stamp(0)}))
+    (upd / "status.json").write_text(
+        json.dumps({"state": "running", "phase": "apply", "updated_at": _stamp(0)})
+    )
     assert (await update.update_upload(_FakeRequest([b"x"]))).status_code == 409
 
 
 # ── /api/update/apply ───────────────────────────────────────────────────────
+
 
 async def test_apply_spawns_the_runner_detached(monkeypatch):
     monkeypatch.setattr(update, "read_product_version", lambda: "2.21.1")
@@ -148,8 +166,7 @@ async def test_apply_spawns_the_runner_detached(monkeypatch):
     # Two arguments since v2.42.0: the second carries CC_UPDATE_DIR into the
     # detached runner's environment, so both sides address the same working
     # directory once this process is gone.
-    monkeypatch.setattr(update, "_spawn_detached",
-                        lambda cmd, env=None: spawned.append((cmd, env)))
+    monkeypatch.setattr(update, "_spawn_detached", lambda cmd, env=None: spawned.append((cmd, env)))
 
     resp = await update.update_apply(update.ApplyRequest(target="2.22.0"))
     assert resp.status_code == 202
@@ -184,12 +201,14 @@ async def test_apply_409s(monkeypatch):
     # In-flight guard beats everything.
     upd = update._update_dir()
     upd.mkdir(parents=True, exist_ok=True)
-    (upd / "status.json").write_text(json.dumps(
-        {"state": "running", "phase": "apply", "updated_at": _stamp(0)}))
+    (upd / "status.json").write_text(
+        json.dumps({"state": "running", "phase": "apply", "updated_at": _stamp(0)})
+    )
     assert (await update.update_apply(update.ApplyRequest(target="2.22.0"))).status_code == 409
 
 
 # ── no bundled-skill gate (DL-232) ───────────────────────────────────────────
+
 
 async def test_apply_never_reads_the_bundled_skills(monkeypatch):
     """The pre-update review is gone: an apply reads nothing about skills, and an

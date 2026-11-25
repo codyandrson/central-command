@@ -84,7 +84,8 @@ async def test_the_agent_rows_thinking_applies_with_no_session_or_schedule(live)
     await repo.set_agent_model(AGENT, "", "medium")
     m = await models_mod.resolve_model(agent_id=AGENT)
     assert m.settings["extra_body"]["chat_template_kwargs"] == {
-        "enable_thinking": True, "reasoning_effort": "medium",
+        "enable_thinking": True,
+        "reasoning_effort": "medium",
     }
 
 
@@ -173,6 +174,7 @@ async def test_an_unreachable_proxy_sends_nothing_rather_than_guessing(live, cap
 async def test_no_thinking_means_no_proxy_read_at_all(live):
     """The common path must not pay a round-trip: with no level set, nothing
     asks the proxy how this model thinks."""
+
     async def boom(model_id: str):
         raise AssertionError("the proxy must not be consulted with no thinking set")
 
@@ -205,7 +207,9 @@ async def test_the_rpc_sets_both_halves_and_the_roster_carries_them():
 async def test_clearing_sends_null_not_an_empty_string():
     await repo.set_agent_model(AGENT, "cc-default", "medium")
     out = await nerve_gateway._dispatch(
-        "agents.setModel", {"id": AGENT, "model": None, "thinking": None}, lambda _f: None,
+        "agents.setModel",
+        {"id": AGENT, "model": None, "thinking": None},
+        lambda _f: None,
     )
     assert out["agent"]["model"] is None and out["agent"]["thinking"] is None
     row = next(a for a in (await routes.list_agents())["agents"] if a["id"] == AGENT)
@@ -216,7 +220,8 @@ async def test_an_invalid_thinking_level_is_refused_and_nothing_is_written():
     await repo.set_agent_model(AGENT, "", "")
     with pytest.raises(Exception) as exc:
         await nerve_gateway._dispatch(
-            "agents.setModel", {"id": AGENT, "model": "", "thinking": "ludicrous"},
+            "agents.setModel",
+            {"id": AGENT, "model": "", "thinking": "ludicrous"},
             lambda _f: None,
         )
     assert "thinking must be one of" in str(getattr(exc.value, "detail", exc.value))
@@ -226,7 +231,8 @@ async def test_an_invalid_thinking_level_is_refused_and_nothing_is_written():
 async def test_an_unknown_agent_is_a_404_not_a_silent_no_op():
     with pytest.raises(Exception) as exc:
         await routes.set_agent_model(
-            "no-such-agent", routes.AgentModelIn(model="cc-default"),
+            "no-such-agent",
+            routes.AgentModelIn(model="cc-default"),
         )
     assert "does not exist" in str(getattr(exc.value, "detail", exc.value))
 
@@ -244,10 +250,15 @@ async def test_the_heartbeat_passes_model_and_thinking_through(monkeypatch):
         return {"task_id": "task_x"}
 
     monkeypatch.setattr(routes, "create_and_run_task", fake_create)
-    out = await actions.ACTIONS["task.create"].run("sched_1", {
-        "agent_id": AGENT, "instructions": "do the thing",
-        "model": "cc-default", "thinking": "xhigh",
-    })
+    out = await actions.ACTIONS["task.create"].run(
+        "sched_1",
+        {
+            "agent_id": AGENT,
+            "instructions": "do the thing",
+            "model": "cc-default",
+            "thinking": "xhigh",
+        },
+    )
     assert out["task_id"] == "task_x"
     assert seen["model_name"] == "cc-default"
     assert seen["thinking"] == "xhigh"
@@ -264,7 +275,8 @@ async def test_a_schedule_with_no_override_passes_none(monkeypatch):
 
     monkeypatch.setattr(routes, "create_and_run_task", fake_create)
     await actions.ACTIONS["task.create"].run(
-        "sched_1", {"agent_id": AGENT, "instructions": "do the thing"})
+        "sched_1", {"agent_id": AGENT, "instructions": "do the thing"}
+    )
     assert seen["model_name"] is None and seen["thinking"] is None
 
 
@@ -273,11 +285,13 @@ def test_a_bad_thinking_level_cannot_be_scheduled_at_all():
     nobody is watching is the worst place to discover a typo."""
     from central_command.heartbeat import actions
 
-    actions.validate_action("task.create", {
-        "agent_id": AGENT, "instructions": "x", "thinking": "medium"})
+    actions.validate_action(
+        "task.create", {"agent_id": AGENT, "instructions": "x", "thinking": "medium"}
+    )
     with pytest.raises(ValueError, match="thinking"):
-        actions.validate_action("task.create", {
-            "agent_id": AGENT, "instructions": "x", "thinking": "ludicrous"})
+        actions.validate_action(
+            "task.create", {"agent_id": AGENT, "instructions": "x", "thinking": "ludicrous"}
+        )
 
 
 async def test_create_and_run_task_refuses_a_bad_level_before_the_task_row(monkeypatch):
@@ -286,7 +300,6 @@ async def test_create_and_run_task_refuses_a_bad_level_before_the_task_row(monke
     monkeypatch.setattr(settings, "test_model", True)
     before = len(await repo.list_tasks())
     with pytest.raises(Exception) as exc:
-        await routes.create_and_run_task(
-            "do the thing", None, AGENT, thinking="ludicrous")
+        await routes.create_and_run_task("do the thing", None, AGENT, thinking="ludicrous")
     assert "thinking must be one of" in str(getattr(exc.value, "detail", exc.value))
     assert len(await repo.list_tasks()) == before

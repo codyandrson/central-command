@@ -37,8 +37,15 @@ from tests.fake_world import fake_world
 pytestmark = needs_pg
 
 WAITING_FIELDS = {
-    "dependencies", "down_since", "attempts", "next_retry", "interrupted",
-    "completed_actions", "in_flight_capability", "failing_despite_probe", "last_error",
+    "dependencies",
+    "down_since",
+    "attempts",
+    "next_retry",
+    "interrupted",
+    "completed_actions",
+    "in_flight_capability",
+    "failing_despite_probe",
+    "last_error",
 }
 
 
@@ -50,27 +57,44 @@ def world_log(monkeypatch):
     yield fake_world(monkeypatch)
 
 
-async def _parked(*, state: dict | None = None, actions: int = 2,
-                  with_task: bool = False) -> dict:
+async def _parked(*, state: dict | None = None, actions: int = 2, with_task: bool = False) -> dict:
     """An approved proposal parked RETRY_PENDING: the operator's decision is on
     the log, the first action landed, the second waits."""
     pid = "prop_wait_" + uuid.uuid4().hex[:10]
     sid = "sess_wait_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(sid, "jira-expert")
     await repo.save_proposal(
-        pid, sid, "jira-expert", "Comment on DEMO-1, then record it",
-        [{"capability": "jira.add_comment" if i == 0 else "graph.add_episode",
-          "arguments": {}, "target_ref": {"system": "x"}, "reversibility": "reversible"}
-         for i in range(actions)],
-        [], "DEMO-1 is commented", pid,
+        pid,
+        sid,
+        "jira-expert",
+        "Comment on DEMO-1, then record it",
+        [
+            {
+                "capability": "jira.add_comment" if i == 0 else "graph.add_episode",
+                "arguments": {},
+                "target_ref": {"system": "x"},
+                "reversibility": "reversible",
+            }
+            for i in range(actions)
+        ],
+        [],
+        "DEMO-1 is commented",
+        pid,
     )
-    await events.emit("proposal.decided", ref_id=pid,
-                      payload={"verdict": "approved", "session_id": sid},
-                      actor="human:lee")
+    await events.emit(
+        "proposal.decided",
+        ref_id=pid,
+        payload={"verdict": "approved", "session_id": sid},
+        actor="human:lee",
+    )
     retry_state = {
-        "completed_results": ["DEMO-1 commented"], "next_action_index": 1,
-        "approver": "human:lee", "attempts": 2, "failed_capability": "graph.add_episode",
-        "dependencies": ["graph", "embedder"], "last_error": "Connection refused",
+        "completed_results": ["DEMO-1 commented"],
+        "next_action_index": 1,
+        "approver": "human:lee",
+        "attempts": 2,
+        "failed_capability": "graph.add_episode",
+        "dependencies": ["graph", "embedder"],
+        "last_error": "Connection refused",
         "not_before": (datetime.now(UTC) + timedelta(minutes=2)).isoformat(),
         **(state or {}),
     }
@@ -143,7 +167,8 @@ async def test_decisions_list_carries_a_waiting_list_that_is_not_the_pending_lis
     assert parked["proposal_id"] in ids
     assert parked["proposal_id"] not in [p["id"] for p in payload["proposals"]], (
         "a decision already made does not need one: the 'needs your decision' "
-        "badge counts `proposals`, never `waiting`")
+        "badge counts `proposals`, never `waiting`"
+    )
     mine = next(p for p in payload["waiting"] if p["id"] == parked["proposal_id"])
     assert mine["status"] == "RETRY_PENDING"
     assert set(mine["waiting"]) == WAITING_FIELDS
@@ -157,7 +182,8 @@ async def test_the_waiting_list_is_oldest_first():
     try:
         await conn.execute(
             "update proposal set decided_at = now() - interval '1 hour' where id = $1",
-            first["proposal_id"])
+            first["proposal_id"],
+        )
     finally:
         await conn.close()
     ids = [p["id"] for p in jsonable_encoder(await nerve_gateway._decisions_list())["waiting"]]
@@ -171,7 +197,8 @@ async def test_the_session_wait_line_names_the_dependencies():
 
     interrupted = await _parked(state={"interrupted": True})
     assert "interrupted" in await nerve_gateway.parked_proposal_wait_line(
-        interrupted["proposal_id"])
+        interrupted["proposal_id"]
+    )
 
 
 # --- dismissing a waiting execution -------------------------------------------------------------
@@ -200,8 +227,11 @@ async def test_dismissing_a_waiting_proposal_withdraws_the_execution(monkeypatch
     kinds = [e["kind"] for e in await repo.list_events(ref_id=pid, limit=500)]
     assert kinds.count("proposal.decided") == 1, "the decision stands; no second one"
     assert world_log == [], "dismissing withdraws the execution: no handler ran"
-    dismissed = [e for e in await repo.list_events(ref_id=pid, limit=500)
-                 if e["kind"] == "proposal.execution_dismissed"]
+    dismissed = [
+        e
+        for e in await repo.list_events(ref_id=pid, limit=500)
+        if e["kind"] == "proposal.execution_dismissed"
+    ]
     assert len(dismissed) == 1
     assert dismissed[0]["payload"]["proposal"] == pid
     assert dismissed[0]["payload"]["completed_actions"] == 1
@@ -210,8 +240,7 @@ async def test_dismissing_a_waiting_proposal_withdraws_the_execution(monkeypatch
 
     task = await repo.get_task(task_id)
     assert task["status"] == "FAILED", "never DONE 'no action needed' for a waiting execution"
-    assert task["outcome"] == (
-        "operator withdrew the waiting execution; 1 of 2 actions had landed")
+    assert task["outcome"] == ("operator withdrew the waiting execution; 1 of 2 actions had landed")
 
 
 async def test_the_event_precedes_the_task_resolution_it_authorises():
@@ -227,7 +256,7 @@ async def test_the_event_precedes_the_task_resolution_it_authorises():
 async def test_a_dismiss_after_the_retry_claimed_it_is_refused():
     parked = await _parked()
     pid = parked["proposal_id"]
-    claimed = await repo.claim_proposal_retry(pid)          # RETRY_PENDING → EXECUTING
+    claimed = await repo.claim_proposal_retry(pid)  # RETRY_PENDING → EXECUTING
     assert claimed is not None
 
     with pytest.raises(gateway.GatewayError):
@@ -235,7 +264,8 @@ async def test_a_dismiss_after_the_retry_claimed_it_is_refused():
 
     assert (await repo.load_proposal(pid))["status"] == "EXECUTING", "nothing was withdrawn"
     assert "proposal.execution_dismissed" not in [
-        e["kind"] for e in await repo.list_events(ref_id=pid, limit=500)]
+        e["kind"] for e in await repo.list_events(ref_id=pid, limit=500)
+    ]
 
 
 async def test_the_sql_guard_lets_exactly_one_of_a_dismiss_and_a_claim_win():
@@ -244,7 +274,8 @@ async def test_the_sql_guard_lets_exactly_one_of_a_dismiss_and_a_claim_win():
     parked = await _parked()
     pid = parked["proposal_id"]
     withdrawn, claimed = await asyncio.gather(
-        repo.withdraw_proposal_if_open(pid), repo.claim_proposal_retry(pid))
+        repo.withdraw_proposal_if_open(pid), repo.claim_proposal_retry(pid)
+    )
     assert (withdrawn is not None) != (claimed is not None), (withdrawn, claimed)
 
 
@@ -252,8 +283,11 @@ async def test_dismissing_an_interrupted_proposal_works_the_same_way():
     parked = await _parked(state={"interrupted": True}, with_task=True)
     out = await gateway.dismiss_proposal(parked["session_id"], parked["proposal_id"])
     assert out["status"] == "WITHDRAWN"
-    dismissed = [e for e in await repo.list_events(ref_id=parked["proposal_id"], limit=500)
-                 if e["kind"] == "proposal.execution_dismissed"]
+    dismissed = [
+        e
+        for e in await repo.list_events(ref_id=parked["proposal_id"], limit=500)
+        if e["kind"] == "proposal.execution_dismissed"
+    ]
     assert dismissed[0]["payload"]["interrupted"] is True
 
 
@@ -302,8 +336,16 @@ from central_command.heartbeat import probes  # noqa: E402
 from central_command.ingest import ledger  # noqa: E402
 from central_command.runtime import resume_park  # noqa: E402
 
-DEP_FIELDS = {"name", "state", "checked_at", "down_since", "waiting", "interrupted",
-              "failing", "total"}
+DEP_FIELDS = {
+    "name",
+    "state",
+    "checked_at",
+    "down_since",
+    "waiting",
+    "interrupted",
+    "failing",
+    "total",
+}
 KIND_FIELDS = {"sessions", "proposals", "tasks", "work_items", "ingest_jobs"}
 
 
@@ -315,8 +357,8 @@ async def _park_session(dep: str) -> str:
     sid = "sess_out_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(sid, "jira-expert")
     await resume_park.park_resume(
-        sid, {"kind": "turn", "after": "task", "attempts": 0, "dependencies": [dep]},
-        _down(dep))
+        sid, {"kind": "turn", "after": "task", "attempts": 0, "dependencies": [dep]}, _down(dep)
+    )
     return sid
 
 
@@ -328,15 +370,20 @@ async def _park_task(dep: str, attempts: int = 1) -> str:
 
 
 async def _park_item(dep: str) -> str:
-    raw = (f"Message-ID: <cc-out-{uuid.uuid4().hex[:8]}@example.com>\n"
-           "From: sender@example.com\nSubject: Outage wire\n"
-           "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n")
+    raw = (
+        f"Message-ID: <cc-out-{uuid.uuid4().hex[:8]}@example.com>\n"
+        "From: sender@example.com\nSubject: Outage wire\n"
+        "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n"
+    )
     await ledger.enroll_email(raw)
     item = await repo.claim_next_work_item("sess_out")
     await repo.release_work_item(
-        item["id"], error=f"{dep} down", count_attempt=False,
+        item["id"],
+        error=f"{dep} down",
+        count_attempt=False,
         not_before=datetime.now(UTC) + timedelta(minutes=30),
-        dependencies=(dep,))
+        dependencies=(dep,),
+    )
     return item["id"]
 
 
@@ -349,7 +396,9 @@ async def _park_job(dep: str) -> int:
                values ('central_command', '{}'::jsonb, 'QUEUED',
                        now() + interval '30 minutes', $1, $2::jsonb)
                returning id""",
-            f"{dep} down", f'["{dep}"]')
+            f"{dep} down",
+            f'["{dep}"]',
+        )
     finally:
         await conn.close()
 
@@ -371,8 +420,10 @@ async def clean_outage_rows():
     async def settle():
         conn = await repo._conn()
         try:
-            await conn.execute("delete from graph_ingest_job where group_id = 'central_command' "
-                               "and payload = '{}'::jsonb")
+            await conn.execute(
+                "delete from graph_ingest_job where group_id = 'central_command' "
+                "and payload = '{}'::jsonb"
+            )
             await conn.execute("delete from work_item where message_id like '<cc-out-%'")
         finally:
             await conn.close()
@@ -510,19 +561,28 @@ async def test_retry_with_the_probe_up_drives_the_five_and_the_counts_drop(monke
 
     assert out["probe"] == "up"
     assert out["driven"] == {k: 1 for k in KIND_FIELDS}
-    assert {d for d in driven} == {("session", parked["session"]),
-                                   ("task", parked["task"]),
-                                   ("proposal", parked["proposal"])}
+    assert {d for d in driven} == {
+        ("session", parked["session"]),
+        ("task", parked["task"]),
+        ("proposal", parked["proposal"]),
+    }
     assert ("proposal", other["proposal_id"]) not in driven, "only the graph's units"
 
-    requested = [e for e in await repo.list_events(ref_id="graph", limit=500)
-                 if e["kind"] == "outage.retry_requested"][-1]
-    assert requested["payload"] == {"dependency": "graph", "include_interrupted": False,
-                                    "actor": "operator"}
+    requested = [
+        e
+        for e in await repo.list_events(ref_id="graph", limit=500)
+        if e["kind"] == "outage.retry_requested"
+    ][-1]
+    assert requested["payload"] == {
+        "dependency": "graph",
+        "include_interrupted": False,
+        "actor": "operator",
+    }
     assert requested["actor"] == "operator"
     for ref in (parked["session"], parked["task"], parked["proposal"]):
-        retried = [e for e in await repo.list_events(ref_id=ref, limit=500)
-                   if e["kind"] == "test.retried"]
+        retried = [
+            e for e in await repo.list_events(ref_id=ref, limit=500) if e["kind"] == "test.retried"
+        ]
         assert retried and requested["id"] < retried[0]["id"], "emit-before"
 
     deps = _by_name(jsonable_encoder(await outages.list_outages()))
@@ -537,16 +597,18 @@ async def test_an_interrupted_proposal_is_driven_only_when_asked_and_resumes_at_
 
     fake_world(monkeypatch, real=("jira.set_due_date", "graph.add_episode"))
 
-    run = await _parked_run(monkeypatch)             # jira landed, the graph write parked
+    run = await _parked_run(monkeypatch)  # jira landed, the graph write parked
     pid = run["proposal_id"]
     conn = await repo._conn()
     try:
         await conn.execute(
             "update proposal set retry_state = jsonb_set(jsonb_set(retry_state, "
-            "'{interrupted}', 'true'), '{dependencies}', '[\"graph\"]') where id = $1", pid)
+            "'{interrupted}', 'true'), '{dependencies}', '[\"graph\"]') where id = $1",
+            pid,
+        )
     finally:
         await conn.close()
-    graph_calls = _graph_spy(monkeypatch)            # the graph is back
+    graph_calls = _graph_spy(monkeypatch)  # the graph is back
 
     out = await outages.retry_outage("graph")
     await orchestration.sweep_settle()
@@ -580,7 +642,8 @@ async def test_the_http_routes_and_the_rpc_return_the_same_shapes(monkeypatch):
     assert rest_payload == rpc_payload
 
     rpc_out = await nerve_gateway._dispatch(
-        "outages.retry", {"dependency": "graph", "includeInterrupted": False}, None)
+        "outages.retry", {"dependency": "graph", "includeInterrupted": False}, None
+    )
     await orchestration.sweep_settle()
     assert rpc_out["probe"] == "up"
     assert set(rpc_out["driven"]) == KIND_FIELDS and rpc_out["driven"]["sessions"] == 1

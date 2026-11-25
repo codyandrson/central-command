@@ -86,14 +86,11 @@ def _no_probes(monkeypatch, **answers):
 
         return _probe
 
-    monkeypatch.setattr(
-        probes, "PROBES", {name: _make(name) for name in probes.PROBES}
-    )
+    monkeypatch.setattr(probes, "PROBES", {name: _make(name) for name in probes.PROBES})
     return asked
 
 
-def _empty_worklists(monkeypatch, *, sessions=(), proposals=(), tasks=(),
-                     orphans=()):
+def _empty_worklists(monkeypatch, *, sessions=(), proposals=(), tasks=(), orphans=()):
     async def _sessions(due_only=False):
         assert due_only is True, "the sweep must respect the backoff"
         return list(sessions)
@@ -117,8 +114,12 @@ def _empty_worklists(monkeypatch, *, sessions=(), proposals=(), tasks=(),
 
     async def _record(name, up, error=None):
         before = table.get(name)
-        table[name] = {"name": name, "state": "up" if up else "down",
-                       "error": error, "down_since": datetime.now(UTC)}
+        table[name] = {
+            "name": name,
+            "state": "up" if up else "down",
+            "error": error,
+            "down_since": datetime.now(UTC),
+        }
         return before
 
     async def _failing(n):
@@ -145,8 +146,7 @@ def _no_touch(monkeypatch, rec=None):
     monkeypatch.setattr(repo, "touch_heartbeat_fired", _touch)
 
 
-SWEEP_SCHEDULE = {"id": "retry-sweep", "action_kind": "retry.sweep",
-                  "action_params": {}}
+SWEEP_SCHEDULE = {"id": "retry-sweep", "action_kind": "retry.sweep", "action_params": {}}
 
 
 # --- 1: the quiet tick ---------------------------------------------------------
@@ -165,8 +165,12 @@ async def test_a_sweep_with_nothing_parked_writes_nothing(monkeypatch):
 
     assert out["ok"] and out["quiet"] is True
     assert out["result"] == {
-        "resumed": [], "orphaned": [], "retried_executions": [],
-        "retried_tasks": [], "skipped_gated": [], "errors": [],
+        "resumed": [],
+        "orphaned": [],
+        "retried_executions": [],
+        "retried_tasks": [],
+        "skipped_gated": [],
+        "errors": [],
     }
     assert rec.kinds == ["touch:last_fired"], "a no-op sweep wrote to the log"
 
@@ -181,9 +185,7 @@ async def test_a_gated_skip_never_calls_the_driver(monkeypatch):
     rec = _Recorder(monkeypatch)
     _no_touch(monkeypatch, rec)
     _no_probes(monkeypatch, llm=False)
-    _empty_worklists(
-        monkeypatch, sessions=["sess_gated"], tasks=[{"id": "task_gated"}]
-    )
+    _empty_worklists(monkeypatch, sessions=["sess_gated"], tasks=[{"id": "task_gated"}])
 
     async def _must_not_run(*a, **k):
         raise AssertionError("a gated unit reached its driver")
@@ -239,9 +241,7 @@ async def test_a_gated_skip_leaves_the_attempt_count_on_the_row(monkeypatch):
     finally:
         conn = await repo._conn()
         try:
-            await conn.execute(
-                "update task set retry_state = null where id = $1", task_id
-            )
+            await conn.execute("update task set retry_state = null where id = $1", task_id)
         finally:
             await conn.close()
 
@@ -255,13 +255,10 @@ async def test_a_tick_that_skipped_and_errored_is_recorded(monkeypatch):
     rec = _Recorder(monkeypatch)
     _no_touch(monkeypatch, rec)
     _no_probes(monkeypatch, llm=False, jira=True)
-    _empty_worklists(
-        monkeypatch, sessions=["sess_gated"], proposals=[{"id": "prop_boom"}]
-    )
+    _empty_worklists(monkeypatch, sessions=["sess_gated"], proposals=[{"id": "prop_boom"}])
 
     async def _load(proposal_id):
-        return {"id": proposal_id,
-                "retry_state": {"failed_capability": "jira.set_due_date"}}
+        return {"id": proposal_id, "retry_state": {"failed_capability": "jira.set_due_date"}}
 
     monkeypatch.setattr(repo, "load_proposal", _load)
 
@@ -320,8 +317,7 @@ async def test_a_jira_proposal_gates_on_jira_not_on_the_llm(monkeypatch):
     _empty_worklists(monkeypatch, proposals=[{"id": "prop_jira"}])
 
     async def _load(proposal_id):
-        return {"id": proposal_id,
-                "retry_state": {"failed_capability": "jira.set_due_date"}}
+        return {"id": proposal_id, "retry_state": {"failed_capability": "jira.set_due_date"}}
 
     monkeypatch.setattr(repo, "load_proposal", _load)
 
@@ -375,15 +371,27 @@ async def test_the_engine_fires_the_sweep_like_any_action(monkeypatch):
 
     async def _sweep(cache=None):
         ran.append(True)
-        return {"resumed": ["sess_1"], "retried_executions": [],
-                "retried_tasks": [], "skipped_gated": [], "errors": []}
+        return {
+            "resumed": ["sess_1"],
+            "retried_executions": [],
+            "retried_tasks": [],
+            "skipped_gated": [],
+            "errors": [],
+        }
 
     monkeypatch.setattr(orchestration, "retry_sweep", _sweep)
 
     now = datetime.now(UTC)
-    schedule = {"id": "retry-sweep", "name": "Retry sweep", "schedule_kind": "every",
-                "schedule": {"every_seconds": 300}, "action_kind": "retry.sweep",
-                "action_params": {}, "enabled": True, "updated_at": now}
+    schedule = {
+        "id": "retry-sweep",
+        "name": "Retry sweep",
+        "schedule_kind": "every",
+        "schedule": {"every_seconds": 300},
+        "action_kind": "retry.sweep",
+        "action_params": {},
+        "enabled": True,
+        "updated_at": now,
+    }
 
     async def _list(enabled_only=False):
         return [schedule]
@@ -391,10 +399,10 @@ async def test_the_engine_fires_the_sweep_like_any_action(monkeypatch):
     monkeypatch.setattr(repo, "list_heartbeat_schedules", _list)
 
     engine = HeartbeatEngine()
-    await engine._tick()          # first sight: due is computed from now
+    await engine._tick()  # first sight: due is computed from now
     assert ran == [], "a just-seen schedule must not fire immediately"
     engine._next_due["retry-sweep"] = now - timedelta(seconds=1)
-    await engine._tick()          # due: fires
+    await engine._tick()  # due: fires
 
     assert ran == [True]
     assert rec.kinds == ["touch:last_fired", "heartbeat.completed"]
@@ -434,9 +442,7 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
 
     monkeypatch.setattr(gateway, "resume", maybe_boom)
     spike = make_spike_model()
-    parked_session = await ingest_and_propose(
-        "Dana: DEMO-1 slipped, due Aug 3.", model=spike
-    )
+    parked_session = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=spike)
     await gateway.approve_and_execute(
         parked_session["session_id"], parked_session["proposal_id"], model=spike
     )
@@ -454,15 +460,11 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
 
     monkeypatch.setattr(graphiti_ingest, "enqueue", enqueue)
     sc1 = make_sc1_model()
-    parked_exec = await ingest_and_propose(
-        "Dana: DEMO-1 slipped, due Aug 3.", model=sc1
-    )
+    parked_exec = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=sc1)
     await gateway.approve_and_execute(
         parked_exec["session_id"], parked_exec["proposal_id"], model=sc1
     )
-    assert (await repo.load_proposal(parked_exec["proposal_id"]))["status"] == (
-        "RETRY_PENDING"
-    )
+    assert (await repo.load_proposal(parked_exec["proposal_id"]))["status"] == ("RETRY_PENDING")
 
     # (c) a task parked for a re-run, backdated so it is DUE.
     task_id = "task_" + uuid.uuid4().hex[:12]
@@ -473,17 +475,19 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
         await conn.execute(
             "update task set retry_state = jsonb_set(retry_state, '{not_before}', "
             "to_jsonb($2::text)) where id = $1",
-            task_id, (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+            task_id,
+            (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
         )
     finally:
         await conn.close()
 
     # The dependencies are back.
     down["on"] = False
-    _no_probes(monkeypatch, llm=True, n8n=True, graph=True, embedder=True,
-               jira=True, litellm=True)
+    _no_probes(monkeypatch, llm=True, n8n=True, graph=True, embedder=True, jira=True, litellm=True)
     monkeypatch.setattr(
-        routes, "resolve_model", aresolve(lambda *a, **k: _advice_model()),
+        routes,
+        "resolve_model",
+        aresolve(lambda *a, **k: _advice_model()),
     )
 
     await make_parks_due()
@@ -494,9 +498,11 @@ async def test_the_sweep_drives_one_of_each_parked_kind(monkeypatch):
     assert parked_exec["proposal_id"] in result["retried_executions"]
     assert task_id in result["retried_tasks"]
     assert result["errors"] == []
-    assert not [s for s in result["skipped_gated"]
-                if s["id"] in (parked_session["session_id"],
-                               parked_exec["proposal_id"], task_id)]
+    assert not [
+        s
+        for s in result["skipped_gated"]
+        if s["id"] in (parked_session["session_id"], parked_exec["proposal_id"], task_id)
+    ]
 
     # Each driver's OWN event is on the log — the sweep is quiet-eligible
     # precisely because these exist.
@@ -534,9 +540,11 @@ def test_the_retry_sweep_seed_is_enabled_at_five_minutes():
     click is not convergence."""
     from pathlib import Path
 
-    schema = (Path(hb_actions.__file__).parents[1] / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (Path(hb_actions.__file__).parents[1] / "db" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
     start = schema.index("insert into heartbeat_schedule", schema.index("'ea-digest'"))
-    seed = schema[start:schema.index("on conflict (id) do nothing", start)]
+    seed = schema[start : schema.index("on conflict (id) do nothing", start)]
     assert "'retry-sweep'" in seed
     assert "'retry.sweep'" in seed and "retry.sweep" in hb_actions.ACTIONS
     assert '"every_seconds": 300' in seed
@@ -588,9 +596,7 @@ async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch, wor
 
     monkeypatch.setattr(gateway, "resume", resume_killed)
     with pytest.raises(asyncio.CancelledError):
-        await gateway.approve_and_execute(
-            run["session_id"], run["proposal_id"], model=model
-        )
+        await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
     session_id = run["session_id"]
     assert await repo.session_status(session_id) == "AWAITING_HUMAN"
     assert session_id not in await repo.sessions_awaiting_resume(), (
@@ -603,8 +609,9 @@ async def test_a_killed_resume_converges_on_the_recurring_sweep(monkeypatch, wor
     # approval's single write).
     resweep_log = fake_world(monkeypatch)
     monkeypatch.setattr(settings, "test_model", True)
-    monkeypatch.setattr(orchestration, "PROCESS_STARTED_AT",
-                        datetime.now(UTC) + timedelta(days=1))  # "we restarted after it was armed"
+    monkeypatch.setattr(
+        orchestration, "PROCESS_STARTED_AT", datetime.now(UTC) + timedelta(days=1)
+    )  # "we restarted after it was armed"
     _no_probes(monkeypatch, llm=True)
     _no_touch(monkeypatch)
 
@@ -641,7 +648,8 @@ async def test_the_sweep_returns_while_an_agent_lane_is_busy(monkeypatch):
         await conn.execute(
             "update task set retry_state = jsonb_set(retry_state, '{not_before}', "
             "to_jsonb($2::text)) where id = $1",
-            task_id, (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+            task_id,
+            (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
         )
     finally:
         await conn.close()

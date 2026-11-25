@@ -40,11 +40,20 @@ settings.graph_ingest_enabled = False
 
 # graphiti-core's write surface on a real `Graphiti` object. A test reaching any
 # of these through `graphiti_client.get_graphiti()` fails (see below).
-_GRAPHITI_WRITES = frozenset({
-    "add_episode", "add_episode_bulk", "add_triplet", "remove_episode",
-    "build_indices_and_constraints", "build_communities", "update_communities",
-    "summarize_saga", "nodes", "edges",
-})
+_GRAPHITI_WRITES = frozenset(
+    {
+        "add_episode",
+        "add_episode_bulk",
+        "add_triplet",
+        "remove_episode",
+        "build_indices_and_constraints",
+        "build_communities",
+        "update_communities",
+        "summarize_saga",
+        "nodes",
+        "edges",
+    }
+)
 
 
 def aresolve(fn):
@@ -54,6 +63,7 @@ def aresolve(fn):
     coroutine function now — a plain lambda substituted for it fails at the
     `await`, not at the patch, which reads as a runtime bug in the code under
     test rather than a stale double."""
+
     async def _resolve(*a, **k):
         return fn(*a, **k)
 
@@ -79,7 +89,7 @@ _CHECKOUT = hashlib.sha1(str(Path(__file__).resolve().parents[1]).encode()).hexd
 _WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
 TEST_DB = f"central_command_test_{_CHECKOUT}" + (f"_{_WORKER}" if _WORKER else "")
 _TEST_DB_PREFIX = "central_command_test_"
-_OWN_TEST_DBS = f"{_TEST_DB_PREFIX}{_CHECKOUT}"   # this checkout's set: itself and `_gw<N>`
+_OWN_TEST_DBS = f"{_TEST_DB_PREFIX}{_CHECKOUT}"  # this checkout's set: itself and `_gw<N>`
 _SWEEP_MIN_AGE = timedelta(hours=6)
 # EXACTLY the names this harness builds for `TEST_DB` above: the prefix, the
 # eight hex digits of `_CHECKOUT` (a sha1 hexdigest slice) and, under xdist, the
@@ -89,8 +99,9 @@ _SWEEP_MIN_AGE = timedelta(hours=6)
 _TEST_DB_NAME = re.compile(r"^central_command_test_[0-9a-f]{8}(_gw\d+)?$")
 
 
-def sweepable_test_databases(rows, *, now: datetime, own: str = _OWN_TEST_DBS,
-                             min_age: timedelta = _SWEEP_MIN_AGE) -> list[str]:
+def sweepable_test_databases(
+    rows, *, now: datetime, own: str = _OWN_TEST_DBS, min_age: timedelta = _SWEEP_MIN_AGE
+) -> list[str]:
     """Which test databases the sweep may drop, from `(name, connections,
     created)` rows: a name this harness builds (`_TEST_DB_NAME`) that is not
     this checkout's own set (`own` itself or `own_gw<N>`), has no connection at
@@ -127,7 +138,8 @@ def _sweep_idle_test_databases() -> None:
                     "select d.datname, d.oid::text as oid, "
                     "(select count(*) from pg_stat_activity a "
                     "where a.datname = d.datname) as n "
-                    "from pg_database d where d.datname like 'central\\_command\\_test\\_%'")
+                    "from pg_database d where d.datname like 'central\\_command\\_test\\_%'"
+                )
                 found = []
                 for r in rows:
                     created = None
@@ -137,7 +149,9 @@ def _sweep_idle_test_databases() -> None:
                         try:
                             created = await conn.fetchval(
                                 "select (pg_stat_file('base/' || $1::text || "
-                                "'/PG_VERSION')).modification", r["oid"])
+                                "'/PG_VERSION')).modification",
+                                r["oid"],
+                            )
                         except Exception:  # noqa: BLE001 — unreadable: left alone
                             created = None
                     found.append((r["datname"], r["n"], created))
@@ -428,9 +442,7 @@ NO_LIVE_WORLD = {
     "mcp_build_host": "",
 }
 
-REAL_SUBPROCESS_REFUSED = (
-    "a test reached a real subprocess — fake executor._run / executor._git"
-)
+REAL_SUBPROCESS_REFUSED = "a test reached a real subprocess — fake executor._run / executor._git"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -554,8 +566,7 @@ def no_live_model():
 # hangs.
 GRAPH_PREFLIGHT_SECS = 10.0
 GRAPH_DOWN_REASON = (
-    "graph backend did not answer within 10 s (embedder/LLM offline?) "
-    "— live graph reads skipped"
+    "graph backend did not answer within 10 s (embedder/LLM offline?) — live graph reads skipped"
 )
 
 
@@ -657,7 +668,9 @@ def _switch_to_test_database() -> None:
         finally:
             await conn.close()
 
-        schema = (Path(__file__).resolve().parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+        schema = (
+            Path(__file__).resolve().parents[1] / "central_command" / "db" / "schema.sql"
+        ).read_text(encoding="utf-8")
         conn = await asyncpg.connect(test_url)
         try:
             await conn.execute(schema)
@@ -705,9 +718,7 @@ _PG_AVAILABLE: bool | None = None
 # THE marker for "this test needs a real Postgres". Use it three ways, matching
 # what the modules already did: `pytestmark = needs_pg` (file-wide),
 # `@needs_pg` (one test), or `pytestmark = [needs_pg, other]`.
-needs_pg = pytest.mark.skipif(
-    not pg_available(), reason=f"no Postgres at {settings.database_url}"
-)
+needs_pg = pytest.mark.skipif(not pg_available(), reason=f"no Postgres at {settings.database_url}")
 
 
 @pytest.fixture(autouse=True)
@@ -740,9 +751,7 @@ eager_settle = pytest.mark.eager_settle
 
 
 async def _settle_queue(conn) -> None:
-    await conn.execute(
-        f"update work_item set state = '{PARKED}' where state = 'UNPROCESSED'"
-    )
+    await conn.execute(f"update work_item set state = '{PARKED}' where state = 'UNPROCESSED'")
     # The retry sweep persists probe results (a global table, one row per
     # dependency): a test that took a dependency down must not leave the
     # next test re-probing it. The test database is throwaway.
@@ -756,28 +765,33 @@ async def _settle_queue(conn) -> None:
     # own; the test database is throwaway. Terminal states, never deletes
     # (sessions and proposals are never destroyed), and a cancelled task
     # so the startup relaunch sweep cannot mistake it for a never-started one.
-    await conn.execute("update proposal set status = 'FAILED', retry_state = null "
-                       "where status = 'RETRY_PENDING'")
-    await conn.execute("update session set status = 'DONE' "
-                       "where status = 'AWAITING_RESUME'")
+    await conn.execute(
+        "update proposal set status = 'FAILED', retry_state = null where status = 'RETRY_PENDING'"
+    )
+    await conn.execute("update session set status = 'DONE' where status = 'AWAITING_RESUME'")
     # An orchestrator parked on its children (a test's planted row, often
     # with no `task_id` in its payload) is picked up by the next test's
     # `orchestration.resume_sweep()` the same way.
-    await conn.execute("update session set status = 'DONE' "
-                       "where status = 'AWAITING_AGENTS'")
-    await conn.execute("update task set status = 'CANCELLED', retry_state = null "
-                       "where status = 'ASSIGNED' and retry_state is not null")
+    await conn.execute("update session set status = 'DONE' where status = 'AWAITING_AGENTS'")
+    await conn.execute(
+        "update task set status = 'CANCELLED', retry_state = null "
+        "where status = 'ASSIGNED' and retry_state is not null"
+    )
     # The relatedness hold (2026-11-02) reads busy from the tables: a FAILED
     # item an earlier test left unacknowledged, or a session it left short of
     # DONE over a processed item, would hold every later test's related row
     # (the e2e family all mails as dana@example.com). Acknowledge the one and
     # land the other — this database is nobody's record.
-    await conn.execute("update work_item set payload = payload || "
-                       "'{\"failure_ack\": true}'::jsonb where state = 'FAILED' "
-                       "and not coalesce((payload ->> 'failure_ack')::boolean, false)")
-    await conn.execute("update session set status = 'DONE' where status <> 'DONE' "
-                       "and id in (select session_id from work_item "
-                       "where state in ('PROCESSED', 'FOLDED') and session_id is not null)")
+    await conn.execute(
+        "update work_item set payload = payload || "
+        "'{\"failure_ack\": true}'::jsonb where state = 'FAILED' "
+        "and not coalesce((payload ->> 'failure_ack')::boolean, false)"
+    )
+    await conn.execute(
+        "update session set status = 'DONE' where status <> 'DONE' "
+        "and id in (select session_id from work_item "
+        "where state in ('PROCESSED', 'FOLDED') and session_id is not null)"
+    )
 
 
 class _LazySettle:
@@ -797,8 +811,7 @@ class _LazySettle:
         self._locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
 
     async def get_pool(self):
-        if not self.active or self.settled or _settling.get() \
-                or settings.database_url != self.url:
+        if not self.active or self.settled or _settling.get() or settings.database_url != self.url:
             return await _REAL_GET_POOL()
         lock = self._locks.setdefault(asyncio.get_running_loop(), asyncio.Lock())
         async with lock:
@@ -926,11 +939,13 @@ async def make_parks_due() -> None:
             "update session set run_state = jsonb_set(run_state, "
             "'{pending_resume,not_before}', "
             "to_jsonb((now() - interval '1 second')::text)) "
-            "where status = 'AWAITING_RESUME' and run_state ? 'pending_resume'")
+            "where status = 'AWAITING_RESUME' and run_state ? 'pending_resume'"
+        )
         await conn.execute(
             "update proposal set retry_state = jsonb_set(retry_state, "
             "'{not_before}', to_jsonb((now() - interval '1 second')::text)) "
-            "where status = 'RETRY_PENDING' and retry_state is not null")
+            "where status = 'RETRY_PENDING' and retry_state is not null"
+        )
     finally:
         await conn.close()
 

@@ -87,7 +87,9 @@ async def run_case(inputs: dict, model=None) -> dict:
     from central_command.runtime.run import AGENT_ID
 
     primary = (FIXTURES / inputs["primary"]).read_text(encoding="utf-8")
-    sibling_texts = [(FIXTURES / n).read_text(encoding="utf-8") for n in inputs.get("siblings") or []]
+    sibling_texts = [
+        (FIXTURES / n).read_text(encoding="utf-8") for n in inputs.get("siblings") or []
+    ]
 
     def _item(text: str) -> dict:
         parsed = parse_email(text)
@@ -306,14 +308,18 @@ def main() -> int:
     ap.add_argument("-k", metavar="SUBSTRING", help="only cases whose name contains this")
     ap.add_argument("--dataset", type=Path, default=DATASET, help=f"default: {DATASET}")
     ap.add_argument(
-        "--concurrency", type=int, default=1,
+        "--concurrency",
+        type=int,
+        default=1,
         help="cases in flight at once (default 1 — the local model serves one at a time)",
     )
     ap.add_argument("--list", action="store_true", help="print the case names and exit")
     ap.add_argument(
-        "--model", action="append", metavar="ALIAS",
+        "--model",
+        action="append",
+        metavar="ALIAS",
         help="a LiteLLM model-group alias (e.g. cc-default); repeatable to run the "
-             "dataset once per model and compare. Omit for the configured default.",
+        "dataset once per model and compare. Omit for the configured default.",
     )
     ap.add_argument("--out", type=Path, help="write the comparison as JSON to PATH")
     args = ap.parse_args()

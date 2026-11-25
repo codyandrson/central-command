@@ -48,9 +48,7 @@ def _text_model(text: str):
     from pydantic_ai.messages import ModelResponse, TextPart
     from pydantic_ai.models.function import FunctionModel
 
-    return FunctionModel(
-        lambda messages, info: ModelResponse(parts=[TextPart(content=text)])
-    )
+    return FunctionModel(lambda messages, info: ModelResponse(parts=[TextPart(content=text)]))
 
 
 @pytest.fixture(autouse=True)
@@ -70,14 +68,20 @@ async def _settle(cond, timeout: float = 5.0):
 
 async def _start_project(instructions: str = "Demo project: review TASKS-12.") -> dict:
     return await routes.create_and_run_task(
-        instructions, "Demo project", "orchestrator", actor="operator",
+        instructions,
+        "Demo project",
+        "orchestrator",
+        actor="operator",
         background=False,
     )
 
 
 async def _open_item(session_id: str, kind: str) -> dict:
-    items = [i for i in await repo.list_operator_items("OPEN")
-             if i["session_id"] == session_id and i["kind"] == kind]
+    items = [
+        i
+        for i in await repo.list_operator_items("OPEN")
+        if i["session_id"] == session_id and i["kind"] == kind
+    ]
     assert len(items) == 1, f"expected one OPEN {kind} item, got {len(items)}"
     return items[0]
 
@@ -94,7 +98,8 @@ async def test_full_loop_ungated_answer_flows_without_approval(monkeypatch):
     # The child answers in TEXT — nothing external changes, so its result
     # returns to the orchestrator with NO approval anywhere (The operator's rule).
     monkeypatch.setattr(
-        routes, "resolve_model",
+        routes,
+        "resolve_model",
         aresolve(lambda *a, **k: _text_model("Review done: TASKS-12 hygiene is fine.")),
     )
     r = await _start_project()
@@ -115,6 +120,7 @@ async def test_full_loop_ungated_answer_flows_without_approval(monkeypatch):
     async def done():
         t = await repo.get_task(r["task_id"])
         return t["status"] == "DONE"
+
     await _settle(done)
 
     project = await repo.get_task(r["task_id"])
@@ -122,8 +128,7 @@ async def test_full_loop_ungated_answer_flows_without_approval(monkeypatch):
 
     # Lineage: exactly one child task, linked to the orchestrator session, and
     # the child's SESSION carries the parent link (the spawnedBy tree's data).
-    children = [t for t in await repo.list_tasks()
-                if t.get("parent_session_id") == sid]
+    children = [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid]
     assert len(children) == 1
     child = children[0]
     assert child["agent_id"] == "jira-expert" and child["status"] == "DONE"
@@ -131,19 +136,26 @@ async def test_full_loop_ungated_answer_flows_without_approval(monkeypatch):
     assert child_session["parent_session_id"] == sid
 
     # UNGATED: the child produced no proposal — nothing awaited a human.
-    props = [p for p in await repo.list_proposals()
-             if p["session_id"] == child["session_id"]]
+    props = [p for p in await repo.list_proposals() if p["session_id"] == child["session_id"]]
     assert props == []
 
     # Event order: the round announcement precedes the child it authorises
     # (M8), and the loop's lifecycle is on the log.
     kinds = await repo.list_events_of_kinds(
-        ["orchestration.round", "task.created", "orchestration.parked",
-         "orchestration.resumed", "orchestration.completed"])
-    mine = [e for e in kinds
-            if e["ref_id"] == sid or e["ref_id"] == child["id"]]
-    round2 = [e for e in mine if e["kind"] == "orchestration.round"
-              and (e["payload"] or {}).get("assignments")]
+        [
+            "orchestration.round",
+            "task.created",
+            "orchestration.parked",
+            "orchestration.resumed",
+            "orchestration.completed",
+        ]
+    )
+    mine = [e for e in kinds if e["ref_id"] == sid or e["ref_id"] == child["id"]]
+    round2 = [
+        e
+        for e in mine
+        if e["kind"] == "orchestration.round" and (e["payload"] or {}).get("assignments")
+    ]
     child_created = [e for e in mine if e["kind"] == "task.created"]
     assert round2 and child_created and round2[0]["id"] < child_created[0]["id"]
     assert any(e["kind"] == "orchestration.completed" for e in mine)
@@ -154,7 +166,9 @@ async def test_gated_child_parks_proposal_and_resumes_after_approval(monkeypatch
     # the orchestrator stays parked until the operator decides. The gate is
     # exactly where it always was — on the action class, not the delegation.
     monkeypatch.setattr(
-        routes, "resolve_model", aresolve(lambda *a, **k: make_jira_task_model()),
+        routes,
+        "resolve_model",
+        aresolve(lambda *a, **k: make_jira_task_model()),
     )
     r = await _start_project("Demo project: set the TASKS-12 due date properly.")
     sid = r["session_id"]
@@ -165,33 +179,36 @@ async def test_gated_child_parks_proposal_and_resumes_after_approval(monkeypatch
     # the orchestrator's own resume parks it AWAITING_AGENTS again: settle on
     # every fact asserted below, not just the first to land (R31).
     async def child_in_review():
-        kids = [t for t in await repo.list_tasks()
-                if t.get("parent_session_id") == sid]
+        kids = [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid]
         if not kids or kids[0]["status"] != "REVIEW":
             return False
-        waiting = [p for p in await repo.list_proposals()
-                   if p["session_id"] == kids[0]["session_id"]
-                   and p["status"] == "AWAITING_HUMAN"]
+        waiting = [
+            p
+            for p in await repo.list_proposals()
+            if p["session_id"] == kids[0]["session_id"] and p["status"] == "AWAITING_HUMAN"
+        ]
         return bool(waiting) and await repo.session_status(sid) == "AWAITING_AGENTS"
+
     await _settle(child_in_review)
 
-    child = next(t for t in await repo.list_tasks()
-             if t.get("parent_session_id") == sid)
-    props = [p for p in await repo.list_proposals()
-             if p["session_id"] == child["session_id"]
-             and p["status"] == "AWAITING_HUMAN"]
+    child = next(t for t in await repo.list_tasks() if t.get("parent_session_id") == sid)
+    props = [
+        p
+        for p in await repo.list_proposals()
+        if p["session_id"] == child["session_id"] and p["status"] == "AWAITING_HUMAN"
+    ]
     assert len(props) == 1
     # The orchestrator is still parked — a pending gate is never skipped.
     assert await repo.session_status(sid) == "AWAITING_AGENTS"
 
     # Operator approves the child's proposal → child resolves → loop resumes
     # (the gateway's _resolve_task_after hook) → final report.
-    await gateway.approve_and_execute(
-        child["session_id"], props[0]["id"], approver="human:lee")
+    await gateway.approve_and_execute(child["session_id"], props[0]["id"], approver="human:lee")
 
     async def project_done():
         t = await repo.get_task(r["task_id"])
         return t["status"] == "DONE"
+
     await _settle(project_done)
     assert "PROJECT COMPLETE" in (await repo.get_task(r["task_id"]))["outcome"]
 
@@ -208,8 +225,8 @@ async def test_orchestrator_self_assignment_is_refused_as_a_cycle():
 
     async def run_with_bad_model():
         await repo.answer_operator_item(item["id"], "", "approved")
-        return await orchestration.maybe_resume(
-            sid, model=make_bad_target_project_model())
+        return await orchestration.maybe_resume(sid, model=make_bad_target_project_model())
+
     out = await run_with_bad_model()
 
     # The batch was rejected (nothing created), and the model's honest text
@@ -217,10 +234,8 @@ async def test_orchestrator_self_assignment_is_refused_as_a_cycle():
     assert out is not None
     rejected = await repo.list_events_of_kinds(["orchestration.batch_rejected"])
     mine = [e for e in rejected if e["ref_id"] == sid]
-    assert mine and any("is yourself" in p and "cycle" in p
-                        for p in mine[0]["payload"]["problems"])
-    children = [t for t in await repo.list_tasks()
-                if t.get("parent_session_id") == sid]
+    assert mine and any("is yourself" in p and "cycle" in p for p in mine[0]["payload"]["problems"])
+    children = [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid]
     assert children == []
     assert (await repo.get_task(r["task_id"]))["status"] == "DONE"
     assert "Giving up honestly" in (await repo.get_task(r["task_id"]))["outcome"]
@@ -233,14 +248,16 @@ async def test_assign_before_approved_plan_is_rejected(monkeypatch):
     def impatient(messages, info):
         for m in messages:
             for part in getattr(m, "parts", []):
-                if isinstance(part, ToolReturnPart) and \
-                        "BATCH REJECTED" in str(part.content):
-                    return ModelResponse(parts=[TextPart(
-                        content="Understood — plan first.")])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="assign_work",
-            args={"agent_id": "jira-expert", "title": "x",
-                  "instructions": "skip the plan"})])
+                if isinstance(part, ToolReturnPart) and "BATCH REJECTED" in str(part.content):
+                    return ModelResponse(parts=[TextPart(content="Understood — plan first.")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="assign_work",
+                    args={"agent_id": "jira-expert", "title": "x", "instructions": "skip the plan"},
+                )
+            ]
+        )
 
     task_id = "task_" + __import__("uuid").uuid4().hex[:12]
     await repo.create_task(task_id, "t", "Demo: no plan.", "orchestrator")
@@ -257,8 +274,7 @@ async def test_stall_escalates_to_operator_instead_of_looping(monkeypatch):
     task_id = "task_" + __import__("uuid").uuid4().hex[:12]
     await repo.create_task(task_id, "t", "Demo: stall.", "orchestrator")
     task = await repo.get_task(task_id)
-    out = await orchestration.run_project(
-        task, model=make_stalling_project_model())
+    out = await orchestration.run_project(task, model=make_stalling_project_model())
 
     # The requested calls were NOT executed; ONE stall item parks for the
     # operator with the ledger, and the loop waits.
@@ -267,15 +283,18 @@ async def test_stall_escalates_to_operator_instead_of_looping(monkeypatch):
     item = await _open_item(sid, "stall")
     assert "PAUSED by the control plane" in item["body"]
     assert await repo.session_status(sid) == "AWAITING_AGENTS"
-    assert [i for i in await repo.list_operator_items("OPEN")
-            if i["session_id"] == sid and i["kind"] == "plan_review"] == []
-    stalled = [e for e in await repo.list_events_of_kinds(["orchestration.stalled"])
-               if e["ref_id"] == sid]
+    assert [
+        i
+        for i in await repo.list_operator_items("OPEN")
+        if i["session_id"] == sid and i["kind"] == "plan_review"
+    ] == []
+    stalled = [
+        e for e in await repo.list_events_of_kinds(["orchestration.stalled"]) if e["ref_id"] == sid
+    ]
     assert stalled and "without progress" in stalled[0]["payload"]["reason"]
 
 
-async def test_project_exceeding_orch_fanout_limit_parks_an_operator_question(
-        monkeypatch):
+async def test_project_exceeding_orch_fanout_limit_parks_an_operator_question(monkeypatch):
     """The orchestrator's own fan-out ceiling (not the task backstop's count,
     which lives at the create seam) pauses the loop for the operator: nothing
     is assigned and the question names the fan-out backstop."""
@@ -290,21 +309,26 @@ async def test_project_exceeding_orch_fanout_limit_parks_an_operator_question(
     # parks the session AWAITING_AGENTS (:308), and answer_item resumes in the
     # background: settle on BOTH facts the test asserts (R31).
     async def parked():
-        return (any(i["session_id"] == sid and i["kind"] == "stall"
-                    for i in await repo.list_operator_items("OPEN"))
-                and await repo.session_status(sid) == "AWAITING_AGENTS")
+        return (
+            any(
+                i["session_id"] == sid and i["kind"] == "stall"
+                for i in await repo.list_operator_items("OPEN")
+            )
+            and await repo.session_status(sid) == "AWAITING_AGENTS"
+        )
+
     await _settle(parked)
 
     item = await _open_item(sid, "stall")
     assert "PAUSED by the control plane" in item["body"]
     assert "fan-out backstop" in item["body"]
     assert "were NOT executed" in item["body"]
-    stalled = [e for e in await repo.list_events_of_kinds(["orchestration.stalled"])
-               if e["ref_id"] == sid]
+    stalled = [
+        e for e in await repo.list_events_of_kinds(["orchestration.stalled"]) if e["ref_id"] == sid
+    ]
     assert stalled and "fan-out backstop" in stalled[0]["payload"]["reason"]
     # The batch did not run: no child task hangs off the orchestrator session.
-    assert [t for t in await repo.list_tasks()
-            if t.get("parent_session_id") == sid] == []
+    assert [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid] == []
     assert await repo.session_status(sid) == "AWAITING_AGENTS"
 
 
@@ -327,45 +351,61 @@ def _replan_model(*, stall_with: str = "no_progress"):
     from pydantic_ai.models.function import FunctionModel
 
     def progress(made: bool, step: str):
-        return ToolCallPart(tool_name="record_progress", args={
-            "made_progress": made, "in_a_loop": not made, "next_step": step})
+        return ToolCallPart(
+            tool_name="record_progress",
+            args={"made_progress": made, "in_a_loop": not made, "next_step": step},
+        )
 
     def assign():
-        return ToolCallPart(tool_name="assign_work", args={
-            "agent_id": "jira-expert", "title": "job",
-            "instructions": "Demo: job."})
+        return ToolCallPart(
+            tool_name="assign_work",
+            args={"agent_id": "jira-expert", "title": "job", "instructions": "Demo: job."},
+        )
 
     def respond(messages, info):
-        latest = {p.tool_name: str(p.content)
-                  for p in getattr(messages[-1], "parts", [])
-                  if isinstance(p, ToolReturnPart)}
+        latest = {
+            p.tool_name: str(p.content)
+            for p in getattr(messages[-1], "parts", [])
+            if isinstance(p, ToolReturnPart)
+        }
         approvals = sum(
-            1 for m in messages if isinstance(m, ModelRequest)
-            for p in m.parts if isinstance(p, ToolReturnPart)
+            1
+            for m in messages
+            if isinstance(m, ModelRequest)
+            for p in m.parts
+            if isinstance(p, ToolReturnPart)
             and p.tool_name == "submit_plan"
-            and str(p.content).startswith("PLAN APPROVED"))
+            and str(p.content).startswith("PLAN APPROVED")
+        )
         if "assign_work" in latest:
             text = latest["assign_work"]
             if text.startswith("BATCH REJECTED"):
-                return ModelResponse(parts=[
-                    progress(True, "replan"),
-                    ToolCallPart(tool_name="submit_plan",
-                                 args={"plan": "PLAN 2: replanned."})])
+                return ModelResponse(
+                    parts=[
+                        progress(True, "replan"),
+                        ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN 2: replanned."}),
+                    ]
+                )
             if text.startswith("OPERATOR ANSWER"):
                 return ModelResponse(parts=[progress(True, "assign"), assign()])
             return ModelResponse(parts=[TextPart(content="Done.")])
         if "submit_plan" in latest:
             if latest["submit_plan"].startswith("PLAN NOT APPROVED"):
-                return ModelResponse(parts=[
-                    progress(True, "revise"),
-                    ToolCallPart(tool_name="submit_plan",
-                                 args={"plan": "PLAN 2: revised."})])
+                return ModelResponse(
+                    parts=[
+                        progress(True, "revise"),
+                        ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN 2: revised."}),
+                    ]
+                )
             first = approvals <= 1
             made = not (first and stall_with == "no_progress")
             return ModelResponse(parts=[progress(made, "go"), assign()])
-        return ModelResponse(parts=[
-            progress(True, "plan"),
-            ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN: go."})])
+        return ModelResponse(
+            parts=[
+                progress(True, "plan"),
+                ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN: go."}),
+            ]
+        )
 
     return FunctionModel(respond)
 
@@ -376,8 +416,11 @@ async def _answer_and_resume(item: dict, answer: str, verdict, sid: str, model):
 
 
 async def _rejections(sid: str) -> list[dict]:
-    return [e for e in await repo.list_events_of_kinds(["orchestration.batch_rejected"])
-            if e["ref_id"] == sid]
+    return [
+        e
+        for e in await repo.list_events_of_kinds(["orchestration.batch_rejected"])
+        if e["ref_id"] == sid
+    ]
 
 
 async def test_a_revise_answer_parks_a_second_plan_review(monkeypatch):
@@ -395,8 +438,7 @@ async def test_a_revise_answer_parks_a_second_plan_review(monkeypatch):
     assert "PLAN 2: revised." in second["body"]
     rs = await repo.get_session_run_state(sid)
     assert rs["orch"]["plan_approved"] is False
-    assert [t for t in await repo.list_tasks()
-            if t.get("parent_session_id") == sid] == []
+    assert [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid] == []
 
 
 async def test_an_answered_no_progress_stall_withdraws_plan_approval(monkeypatch):
@@ -404,9 +446,7 @@ async def test_an_answered_no_progress_stall_withdraws_plan_approval(monkeypatch
     NO-PROGRESS pause is guidance, not approval of what comes next. The next
     assign_work is rejected until a NEW plan review is answered."""
     monkeypatch.setattr(settings, "orch_stall_limit", 1)
-    monkeypatch.setattr(
-        routes, "resolve_model",
-        aresolve(lambda *a, **k: _text_model("Done.")))
+    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _text_model("Done.")))
     model = _replan_model(stall_with="no_progress")
     r = await _start_project()
     sid = r["session_id"]
@@ -427,24 +467,24 @@ async def test_an_answered_no_progress_stall_withdraws_plan_approval(monkeypatch
     await _answer_and_resume(stall, "Try the other approach.", None, sid, model)
     (rej,) = await _rejections(sid)
     assert any("APPROVED plan" in p for p in rej["payload"]["problems"])
-    assert [t for t in await repo.list_tasks()
-            if t.get("parent_session_id") == sid] == []
+    assert [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid] == []
     second = await _open_item(sid, "plan_review")
     assert "PLAN 2: replanned." in second["body"]
     rs = await repo.get_session_run_state(sid)
     assert rs["orch"]["plan_approved"] is False and rs["orch"]["stalls"] == 0
-    answers = [str(p.get("content")) for m in rs["messages"]
-               for p in m.get("parts", [])
-               if p.get("part_kind") == "tool-return"
-               and str(p.get("content")).startswith("OPERATOR ANSWER")]
-    assert answers and all("submit_plan again before assign_work" in a
-                           for a in answers)
+    answers = [
+        str(p.get("content"))
+        for m in rs["messages"]
+        for p in m.get("parts", [])
+        if p.get("part_kind") == "tool-return"
+        and str(p.get("content")).startswith("OPERATOR ANSWER")
+    ]
+    assert answers and all("submit_plan again before assign_work" in a for a in answers)
 
     # Only a newly answered plan review lets assign_work through.
     await _answer_and_resume(second, "", "approved", sid, model)
     assert len(await _rejections(sid)) == 1
-    (child,) = [t for t in await repo.list_tasks()
-                if t.get("parent_session_id") == sid]
+    (child,) = [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid]
     assert child["parent_task_id"] == r["task_id"]
 
 
@@ -475,8 +515,11 @@ async def test_an_answered_fan_out_stall_leaves_plan_approval_alone(monkeypatch)
     assert again["id"] != stall["id"]
     rs = await repo.get_session_run_state(sid)
     assert rs["orch"]["plan_approved"] is True
-    assert [i for i in await repo.list_operator_items("OPEN")
-            if i["session_id"] == sid and i["kind"] == "plan_review"] == []
+    assert [
+        i
+        for i in await repo.list_operator_items("OPEN")
+        if i["session_id"] == sid and i["kind"] == "plan_review"
+    ] == []
 
 
 async def test_a_continue_window_never_withdraws_plan_approval(monkeypatch):
@@ -487,25 +530,34 @@ async def test_a_continue_window_never_withdraws_plan_approval(monkeypatch):
     from pydantic_ai.models.function import FunctionModel
 
     monkeypatch.setattr(settings, "run_request_limit", 3)
-    monkeypatch.setattr(
-        routes, "resolve_model",
-        aresolve(lambda *a, **k: _text_model("Done.")))
+    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _text_model("Done.")))
     phase = {"now": "plan"}
 
     def progress():
-        return ToolCallPart(tool_name="record_progress", args={
-            "made_progress": True, "in_a_loop": False, "next_step": "go"})
+        return ToolCallPart(
+            tool_name="record_progress",
+            args={"made_progress": True, "in_a_loop": False, "next_step": "go"},
+        )
 
     def respond(messages, info):
         if phase["now"] == "plan":
-            return ModelResponse(parts=[progress(), ToolCallPart(
-                tool_name="submit_plan", args={"plan": "PLAN: go."})])
+            return ModelResponse(
+                parts=[
+                    progress(),
+                    ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN: go."}),
+                ]
+            )
         if phase["now"] == "loop":
             return ModelResponse(parts=[progress()])  # never ends the round
-        return ModelResponse(parts=[progress(), ToolCallPart(
-            tool_name="assign_work", args={
-                "agent_id": "jira-expert", "title": "job",
-                "instructions": "Demo: job."})])
+        return ModelResponse(
+            parts=[
+                progress(),
+                ToolCallPart(
+                    tool_name="assign_work",
+                    args={"agent_id": "jira-expert", "title": "job", "instructions": "Demo: job."},
+                ),
+            ]
+        )
 
     model = FunctionModel(respond)
     r = await _start_project()
@@ -525,8 +577,7 @@ async def test_a_continue_window_never_withdraws_plan_approval(monkeypatch):
     await orchestration.continue_session(parked["item_id"], model=model)
 
     assert await _rejections(sid) == []
-    (child,) = [t for t in await repo.list_tasks()
-                if t.get("parent_session_id") == sid]
+    (child,) = [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid]
     assert child["parent_task_id"] == r["task_id"]
 
 
@@ -539,13 +590,14 @@ async def test_assign_work_children_count_against_the_project_task():
     await orchestration.answer_item(plan["id"], "", "approved")
 
     async def assigned():
-        return (any(t.get("parent_session_id") == sid
-                    for t in await repo.list_tasks())
-                and await repo.count_child_tasks(parent_task_id=r["task_id"]) == 1)
+        return (
+            any(t.get("parent_session_id") == sid for t in await repo.list_tasks())
+            and await repo.count_child_tasks(parent_task_id=r["task_id"]) == 1
+        )
+
     await _settle(assigned)
 
-    (child,) = [t for t in await repo.list_tasks()
-                if t.get("parent_session_id") == sid]
+    (child,) = [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid]
     assert child["parent_task_id"] == r["task_id"]
     assert await repo.count_child_tasks(parent_task_id=r["task_id"]) == 1
 
@@ -562,20 +614,31 @@ def _assigning_model(*targets: str):
     from pydantic_ai.models.function import FunctionModel
 
     def respond(messages, info):
-        returns = {p.tool_name: str(p.content) for m in messages
-                   for p in getattr(m, "parts", [])
-                   if isinstance(p, ToolReturnPart)}
+        returns = {
+            p.tool_name: str(p.content)
+            for m in messages
+            for p in getattr(m, "parts", [])
+            if isinstance(p, ToolReturnPart)
+        }
         if "BATCH REJECTED" in returns.get("assign_work", ""):
-            return ModelResponse(parts=[TextPart(
-                content="Rejected: " + returns["assign_work"])])
+            return ModelResponse(parts=[TextPart(content="Rejected: " + returns["assign_work"])])
         if "submit_plan" in returns:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name="assign_work", args={
-                    "agent_id": t, "title": f"job {i}",
-                    "instructions": f"Demo: job {i}."})
-                for i, t in enumerate(targets)])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="submit_plan", args={"plan": "PLAN: delegate."})])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="assign_work",
+                        args={
+                            "agent_id": t,
+                            "title": f"job {i}",
+                            "instructions": f"Demo: job {i}.",
+                        },
+                    )
+                    for i, t in enumerate(targets)
+                ]
+            )
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN: delegate."})]
+        )
 
     return FunctionModel(respond)
 
@@ -586,8 +649,13 @@ async def _start_agent_project(creator: str = "jira-expert") -> tuple[dict, str]
     creating = "sess_" + __import__("uuid").uuid4().hex[:12]
     await repo.create_running_session(creating, creator)
     r = await routes.create_and_run_task(
-        "Demo project: review TASKS-12.", "Agent project", "orchestrator",
-        actor="human:lee", background=False, parent_session_id=creating)
+        "Demo project: review TASKS-12.",
+        "Agent project",
+        "orchestrator",
+        actor="human:lee",
+        background=False,
+        parent_session_id=creating,
+    )
     return r, creating
 
 
@@ -611,20 +679,17 @@ async def test_agent_created_project_reaches_its_plan_review_park():
     assert project["created_by"] == "agent:jira-expert"
     assert project["creator_chain"] == ["jira-expert"]
     # Nothing was assigned before the plan was approved.
-    assert [t for t in await repo.list_tasks()
-            if t.get("parent_session_id") == r["session_id"]] == []
+    assert [
+        t for t in await repo.list_tasks() if t.get("parent_session_id") == r["session_id"]
+    ] == []
 
 
-async def test_an_agent_projects_children_carry_the_orchestrator_in_their_chain(
-        monkeypatch):
-    monkeypatch.setattr(
-        routes, "resolve_model",
-        aresolve(lambda *a, **k: _text_model("Done.")))
+async def test_an_agent_projects_children_carry_the_orchestrator_in_their_chain(monkeypatch):
+    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _text_model("Done.")))
     r, _ = await _start_agent_project()
     await _approve_plan(r["session_id"], _assigning_model("litellm-manager"))
 
-    (child,) = [t for t in await repo.list_tasks()
-                if t.get("parent_session_id") == r["session_id"]]
+    (child,) = [t for t in await repo.list_tasks() if t.get("parent_session_id") == r["session_id"]]
     assert child["parent_task_id"] == r["task_id"]
     assert child["creator_chain"] == ["jira-expert", "orchestrator"]
     assert child["created_by"] == "agent:orchestrator"
@@ -638,13 +703,18 @@ async def test_the_orchestrators_child_past_the_depth_cap_is_refused(monkeypatch
     since = await repo.latest_event_id()
     await _approve_plan(sid, _assigning_model("litellm-manager"))
 
-    assert [t for t in await repo.list_tasks()
-            if t.get("parent_session_id") == sid] == []
-    (rej,) = [e for e in await repo.list_events_of_kinds(
-        ["orchestration.batch_rejected"]) if e["ref_id"] == sid]
+    assert [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid] == []
+    (rej,) = [
+        e
+        for e in await repo.list_events_of_kinds(["orchestration.batch_rejected"])
+        if e["ref_id"] == sid
+    ]
     assert any("(depth)" in p for p in rej["payload"]["problems"])
-    (refused,) = [e for e in await repo.list_events(since_id=since, kind="task")
-                  if e["kind"] == "task.refused"]
+    (refused,) = [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.refused"
+    ]
     assert refused["ref_id"] == r["task_id"]
     assert refused["payload"]["reason"] == "depth"
     assert refused["payload"]["chain"] == ["jira-expert", "orchestrator"]
@@ -656,35 +726,46 @@ async def test_the_orchestrator_cannot_hand_work_back_to_its_creator():
     since = await repo.latest_event_id()
     await _approve_plan(sid, _assigning_model("jira-expert"))
 
-    (rej,) = [e for e in await repo.list_events_of_kinds(
-        ["orchestration.batch_rejected"]) if e["ref_id"] == sid]
+    (rej,) = [
+        e
+        for e in await repo.list_events_of_kinds(["orchestration.batch_rejected"])
+        if e["ref_id"] == sid
+    ]
     assert any("(cycle)" in p for p in rej["payload"]["problems"])
-    (refused,) = [e for e in await repo.list_events(since_id=since, kind="task")
-                  if e["kind"] == "task.refused"]
+    (refused,) = [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.refused"
+    ]
     assert refused["payload"]["reason"] == "cycle"
 
 
-async def test_a_batch_whose_third_assignment_exceeds_the_cap_creates_none(
-        monkeypatch):
+async def test_a_batch_whose_third_assignment_exceeds_the_cap_creates_none(monkeypatch):
     monkeypatch.setattr(settings, "task_fanout_limit", 2)
     r = await _start_project()
     sid = r["session_id"]
     since = await repo.latest_event_id()
-    await _approve_plan(sid, _assigning_model(
-        "jira-expert", "litellm-manager", "confluence-expert"))
+    await _approve_plan(
+        sid, _assigning_model("jira-expert", "litellm-manager", "confluence-expert")
+    )
 
     # All-or-nothing: the first two (individually fine) were NOT created.
-    assert [t for t in await repo.list_tasks()
-            if t.get("parent_session_id") == sid] == []
-    (rej,) = [e for e in await repo.list_events_of_kinds(
-        ["orchestration.batch_rejected"]) if e["ref_id"] == sid]
+    assert [t for t in await repo.list_tasks() if t.get("parent_session_id") == sid] == []
+    (rej,) = [
+        e
+        for e in await repo.list_events_of_kinds(["orchestration.batch_rejected"])
+        if e["ref_id"] == sid
+    ]
     (line,) = rej["payload"]["problems"]
     assert "confluence-expert" in line and "(fan-out)" in line
     # The refusal reached the orchestrator in its tool result.
     assert "(fan-out)" in (await repo.get_task(r["task_id"]))["outcome"]
     # Recorded once, for the one refused assignment — not per retry or sibling.
-    (refused,) = [e for e in await repo.list_events(since_id=since, kind="task")
-                  if e["kind"] == "task.refused"]
+    (refused,) = [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.refused"
+    ]
     assert refused["ref_id"] == r["task_id"]
     assert refused["payload"]["reason"] == "fan-out"
     assert refused["payload"]["limit"] == 2 and refused["payload"]["created"] == 2
@@ -694,21 +775,30 @@ async def test_the_batch_precheck_counts_children_that_already_exist(monkeypatch
     monkeypatch.setattr(settings, "task_fanout_limit", 2)
     r = await _start_project()
     sid = r["session_id"]
-    await repo.create_task("task_prior", "p", "prior", "jira-expert",
-                           parent_session_id=sid, parent_task_id=r["task_id"])
+    await repo.create_task(
+        "task_prior",
+        "p",
+        "prior",
+        "jira-expert",
+        parent_session_id=sid,
+        parent_task_id=r["task_id"],
+    )
     await _approve_plan(sid, _assigning_model("litellm-manager", "wiki-agent"))
 
     # One existing child + a batch of two reaches the cap at the second.
-    assert [t["id"] for t in await repo.list_tasks()
-            if t.get("parent_session_id") == sid] == ["task_prior"]
-    (rej,) = [e for e in await repo.list_events_of_kinds(
-        ["orchestration.batch_rejected"]) if e["ref_id"] == sid]
+    assert [t["id"] for t in await repo.list_tasks() if t.get("parent_session_id") == sid] == [
+        "task_prior"
+    ]
+    (rej,) = [
+        e
+        for e in await repo.list_events_of_kinds(["orchestration.batch_rejected"])
+        if e["ref_id"] == sid
+    ]
     (line,) = rej["payload"]["problems"]
     assert "wiki-agent" in line and "(fan-out)" in line
 
 
-async def test_two_agents_creating_tasks_for_each_other_do_not_deadlock(
-        monkeypatch):
+async def test_two_agents_creating_tasks_for_each_other_do_not_deadlock(monkeypatch):
     """A and B each hold their own per-agent task lock while creating a task
     for the other. Creation is background, so neither waits on the other's
     lock; a timeout makes a deadlock fail instead of hang."""
@@ -721,8 +811,9 @@ async def test_two_agents_creating_tasks_for_each_other_do_not_deadlock(
     both_inside = asyncio.Event()
     created: list[str] = []
 
-    async def fake_run_task(agent_id, instructions, model=None,
-                            parent_session_id=None, task_id=None, **_kw):
+    async def fake_run_task(
+        agent_id, instructions, model=None, parent_session_id=None, task_id=None, **_kw
+    ):
         sess = "sess_" + uuid.uuid4().hex[:12]
         await repo.create_running_session(sess, agent_id)
         await repo.start_task(task_id, sess)
@@ -733,8 +824,13 @@ async def test_two_agents_creating_tasks_for_each_other_do_not_deadlock(
             await both_inside.wait()  # both locks are held at this point
             other = b if agent_id == a else a
             out = await routes.create_and_run_task(
-                f"made by {agent_id}", None, other, actor=f"agent:{agent_id}",
-                background=True, parent_session_id=sess)
+                f"made by {agent_id}",
+                None,
+                other,
+                actor=f"agent:{agent_id}",
+                background=True,
+                parent_session_id=sess,
+            )
             created.append(out["task_id"])
         return {"deferred": False, "output": "ok", "session_id": sess}
 
@@ -742,13 +838,13 @@ async def test_two_agents_creating_tasks_for_each_other_do_not_deadlock(
 
     async def scenario():
         for agent in (a, b):
-            await routes.create_and_run_task(
-                f"root for {agent}", None, agent, background=True)
+            await routes.create_and_run_task(f"root for {agent}", None, agent, background=True)
+
         async def all_done():
             if len(created) < 2:
                 return False
-            return all([(await repo.get_task(t))["status"] == "DONE"
-                        for t in created])
+            return all([(await repo.get_task(t))["status"] == "DONE" for t in created])
+
         await _settle(all_done, timeout=8.0)
 
     await asyncio.wait_for(scenario(), timeout=15.0)
@@ -763,7 +859,8 @@ async def test_orchestrate_pack_is_orchestrator_only():
     for t in TEMPLATES.values():
         assert "orchestrate" not in t.default_packs, (
             "hire templates must not hand out the orchestrate pack — "
-            "the orchestrator loop is a structural property")
+            "the orchestrator loop is a structural property"
+        )
 
 
 # --- restart-proofness + capability gaps ---------------------------------------
@@ -774,7 +871,8 @@ async def test_resume_works_purely_from_persisted_state(monkeypatch):
     # memory is needed — answer the item at the repo level (as a fresh
     # process would find it) and resume from the DB alone.
     monkeypatch.setattr(
-        routes, "resolve_model",
+        routes,
+        "resolve_model",
         aresolve(lambda *a, **k: _text_model("Done.")),
     )
     r = await _start_project("Demo project: restart-proof.")
@@ -783,7 +881,8 @@ async def test_resume_works_purely_from_persisted_state(monkeypatch):
 
     rs = await repo.get_session_run_state(sid)
     assert rs["orch"]["pending"] and rs["messages"], (
-        "the park must persist messages + the pending map")
+        "the park must persist messages + the pending map"
+    )
 
     await repo.answer_operator_item(item["id"], "", "approved")
     out = await orchestration.maybe_resume(sid)  # fresh-process entry point
@@ -791,6 +890,7 @@ async def test_resume_works_purely_from_persisted_state(monkeypatch):
 
     async def done():
         return (await repo.get_task(r["task_id"]))["status"] == "DONE"
+
     await _settle(done)
 
 
@@ -804,9 +904,14 @@ async def test_child_capability_gap_lands_on_the_event_log(monkeypatch):
 
     class _ChildCtx:
         def __init__(self, session_id, agent_id):
-            self.deps = type("D", (), {
-                "session_id": session_id, "agent_id": agent_id,
-            })()
+            self.deps = type(
+                "D",
+                (),
+                {
+                    "session_id": session_id,
+                    "agent_id": agent_id,
+                },
+            )()
 
     import uuid as _uuid
 
@@ -814,7 +919,9 @@ async def test_child_capability_gap_lands_on_the_event_log(monkeypatch):
     session_id = "sess_" + _uuid.uuid4().hex[:12]
 
     await repo.create_task(
-        task_id, "Port the mainframe job", "Port TASKS-12 to the new stack",
+        task_id,
+        "Port the mainframe job",
+        "Port TASKS-12 to the new stack",
         "jira-expert",
     )
     await repo.start_task(task_id, session_id)
@@ -825,9 +932,10 @@ async def test_child_capability_gap_lands_on_the_event_log(monkeypatch):
     # actually assigned, and must win over the payload's copy.
     await declare_gap(
         _ChildCtx(session_id, None),
-        kind="missing_agent", subject="cobol",
+        kind="missing_agent",
+        subject="cobol",
         need="nobody on the roster knows COBOL; a new agent or reference "
-             "material before this can be done well",
+        "material before this can be done well",
     )
     await repo.resolve_task(task_id, "DONE", outcome="Review done.")
 
@@ -863,6 +971,9 @@ async def test_operator_item_answer_guards():
         await orchestration.answer_item(item["id"], "again", "approved")
 
     # The answer is on the log BEFORE the resume it authorises.
-    answered = [e for e in await repo.list_events_of_kinds(
-        ["orchestration.item_answered"]) if e["ref_id"] == item["id"]]
+    answered = [
+        e
+        for e in await repo.list_events_of_kinds(["orchestration.item_answered"])
+        if e["ref_id"] == item["id"]
+    ]
     assert answered and answered[0]["payload"]["answer"] == "looks good"

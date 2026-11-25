@@ -63,8 +63,17 @@ def _repo(monkeypatch, running: list[dict]):
 
 
 async def test_engage_waits_while_runs_are_live_then_triggers_unforced(monkeypatch, tmp_path):
-    running = [{"id": "sess_1", "agent_id": "ea", "mode": "oneshot", "stop_requested": True,
-                "last_step_age_s": 12, "task_id": "task_1", "dispatch": False}]
+    running = [
+        {
+            "id": "sess_1",
+            "agent_id": "ea",
+            "mode": "oneshot",
+            "stop_requested": True,
+            "last_step_age_s": 12,
+            "task_id": "task_1",
+            "dispatch": False,
+        }
+    ]
     flagged = _repo(monkeypatch, running)
 
     out = await api_hold.engage("2.30.0")
@@ -84,9 +93,20 @@ async def test_engage_waits_while_runs_are_live_then_triggers_unforced(monkeypat
 
 
 async def test_update_now_forces_the_trigger_and_names_what_it_kills(monkeypatch, tmp_path):
-    _repo(monkeypatch, [{"id": "sess_9", "agent_id": "graph-curator", "mode": "oneshot",
-                         "stop_requested": True, "last_step_age_s": 4000,
-                         "task_id": None, "dispatch": False}])
+    _repo(
+        monkeypatch,
+        [
+            {
+                "id": "sess_9",
+                "agent_id": "graph-curator",
+                "mode": "oneshot",
+                "stop_requested": True,
+                "last_step_age_s": 4000,
+                "task_id": None,
+                "dispatch": False,
+            }
+        ],
+    )
     await api_hold.engage("2.30.0")
     await api_hold.update_now()
     assert json.loads((tmp_path / "trigger").read_text())["force"] is True
@@ -103,8 +123,9 @@ async def test_release_clears_the_flag_and_resumes_what_the_hold_parked(monkeypa
 
     from central_command.api import orchestration
 
-    monkeypatch.setattr(orchestration, "_spawn_detached",
-                        lambda unit, uid, driver: resumed.append(uid))
+    monkeypatch.setattr(
+        orchestration, "_spawn_detached", lambda unit, uid, driver: resumed.append(uid)
+    )
     await api_hold.engage("2.30.0")
     assert hold.active
     out = await api_hold.release()
@@ -149,9 +170,20 @@ def test_the_hold_disables_the_cockpit_composer():
 # ── the restart kind (Settings > Connection) ────────────────────────────────
 
 
-async def test_a_restart_hold_triggers_with_the_restart_action_when_nothing_runs(monkeypatch, tmp_path):
-    running = [{"id": "sess_1", "agent_id": "ea", "mode": "oneshot", "stop_requested": True,
-                "last_step_age_s": 12, "task_id": "task_1", "dispatch": False}]
+async def test_a_restart_hold_triggers_with_the_restart_action_when_nothing_runs(
+    monkeypatch, tmp_path
+):
+    running = [
+        {
+            "id": "sess_1",
+            "agent_id": "ea",
+            "mode": "oneshot",
+            "stop_requested": True,
+            "last_step_age_s": 12,
+            "task_id": "task_1",
+            "dispatch": False,
+        }
+    ]
     flagged = _repo(monkeypatch, running)
 
     out = await api_hold.engage("", "restart")
@@ -163,16 +195,31 @@ async def test_a_restart_hold_triggers_with_the_restart_action_when_nothing_runs
     running.clear()
     await asyncio.sleep(0.05)
     trigger = json.loads((tmp_path / "trigger").read_text())
-    assert trigger == {"target": "", "force": False, "action": "restart",
-                       "requested_at": trigger["requested_at"]}
+    assert trigger == {
+        "target": "",
+        "force": False,
+        "action": "restart",
+        "requested_at": trigger["requested_at"],
+    }
     assert [e[0] for e in emitted] == ["restart.hold", "restart.triggered"]
     assert emitted[1][2] == "system"
 
 
 async def test_restart_now_forces_the_trigger_and_names_what_it_kills(monkeypatch, tmp_path):
-    _repo(monkeypatch, [{"id": "sess_9", "agent_id": "graph-curator", "mode": "oneshot",
-                         "stop_requested": True, "last_step_age_s": 4000,
-                         "task_id": None, "dispatch": False}])
+    _repo(
+        monkeypatch,
+        [
+            {
+                "id": "sess_9",
+                "agent_id": "graph-curator",
+                "mode": "oneshot",
+                "stop_requested": True,
+                "last_step_age_s": 4000,
+                "task_id": None,
+                "dispatch": False,
+            }
+        ],
+    )
     await api_hold.engage("", "restart")
     await api_hold.update_now("restart")
     trigger = json.loads((tmp_path / "trigger").read_text())
@@ -192,8 +239,9 @@ async def test_cancelling_a_restart_hold_releases_it_and_resumes_what_it_parked(
     monkeypatch.setattr(api_hold.repo, "sessions_stopped_for_update", sessions_stopped_for_update)
     from central_command.api import orchestration
 
-    monkeypatch.setattr(orchestration, "_spawn_detached",
-                        lambda unit, uid, driver: resumed.append(uid))
+    monkeypatch.setattr(
+        orchestration, "_spawn_detached", lambda unit, uid, driver: resumed.append(uid)
+    )
     await api_hold.engage("", "restart")
     out = await api_hold.release("restart")
     assert not out["active"] and out["kind"] is None and resumed == ["sess_a"]
@@ -203,12 +251,26 @@ async def test_cancelling_a_restart_hold_releases_it_and_resumes_what_it_parked(
 async def test_the_two_kinds_exclude_each_other_and_nothing_is_converted(monkeypatch, tmp_path):
     from fastapi import HTTPException
 
-    _repo(monkeypatch, [{"id": "s", "agent_id": "ea", "mode": "oneshot", "stop_requested": True,
-                         "last_step_age_s": 1, "task_id": "t", "dispatch": False}])
+    _repo(
+        monkeypatch,
+        [
+            {
+                "id": "s",
+                "agent_id": "ea",
+                "mode": "oneshot",
+                "stop_requested": True,
+                "last_step_age_s": 1,
+                "task_id": "t",
+                "dispatch": False,
+            }
+        ],
+    )
     await api_hold.engage("2.30.0")
-    for call in (lambda: api_hold.engage("", "restart"),
-                 lambda: api_hold.update_now("restart"),
-                 lambda: api_hold.release("restart")):
+    for call in (
+        lambda: api_hold.engage("", "restart"),
+        lambda: api_hold.update_now("restart"),
+        lambda: api_hold.release("restart"),
+    ):
         with pytest.raises(HTTPException) as e:
             await call()
         assert e.value.status_code == 409
@@ -217,8 +279,11 @@ async def test_the_two_kinds_exclude_each_other_and_nothing_is_converted(monkeyp
     await api_hold.release()
 
     await api_hold.engage("", "restart")
-    for call in (lambda: api_hold.engage("2.30.0"), lambda: api_hold.update_now(),
-                 lambda: api_hold.release()):
+    for call in (
+        lambda: api_hold.engage("2.30.0"),
+        lambda: api_hold.update_now(),
+        lambda: api_hold.release(),
+    ):
         with pytest.raises(HTTPException) as e:
             await call()
         assert e.value.status_code == 409
@@ -237,7 +302,9 @@ async def test_an_unknown_kind_is_refused(monkeypatch):
     assert e.value.status_code == 422 and not hold.active
 
 
-async def test_a_restart_needs_the_updater_seam_where_the_update_hold_does_not(monkeypatch, tmp_path):
+async def test_a_restart_needs_the_updater_seam_where_the_update_hold_does_not(
+    monkeypatch, tmp_path
+):
     """No `/run/cc-update`-style directory (the single-node profile has no root
     updater): a restart hold would pause the team for a trigger nothing reads."""
     from fastapi import HTTPException
@@ -259,5 +326,6 @@ async def test_a_restart_hold_parks_under_the_reason_the_next_process_resumes():
     code, text = why_not_sendable({"id": "sess_c", "mode": "conversation", "status": "DONE"})
     assert code == "update_hold" and text.startswith("a restart is waiting")
     hold.kind = "update"
-    assert why_not_sendable({"id": "sess_c", "mode": "conversation", "status": "DONE"})[1].startswith(
-        "an update is waiting")
+    assert why_not_sendable({"id": "sess_c", "mode": "conversation", "status": "DONE"})[
+        1
+    ].startswith("an update is waiting")

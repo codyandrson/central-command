@@ -47,14 +47,24 @@ TRANSIENT_CASES = [
     # A gateway's edge firewall denies the egress IP for minutes, not forever
     # (Kilo.ai behind Vercel, 2026-09-19).
     ("http 403 (edge firewall deny)", ModelHTTPError(403, "cc-default")),
-    ("http 400 whose body names a missing LiteLLM alias (2026-09-12)",
-     ModelHTTPError(400, "cc-default", body={
-         "message": "/chat/completions: Invalid model name passed in "
-                    "model=cc-default. Call `/v1/models` to view available models."})),
-    ("every fallback leg was transient", FallbackExceptionGroup(
-        "all models failed",
-        [ModelHTTPError(429, "primary"), ModelHTTPError(503, "fallback")],
-    )),
+    (
+        "http 400 whose body names a missing LiteLLM alias (2026-09-12)",
+        ModelHTTPError(
+            400,
+            "cc-default",
+            body={
+                "message": "/chat/completions: Invalid model name passed in "
+                "model=cc-default. Call `/v1/models` to view available models."
+            },
+        ),
+    ),
+    (
+        "every fallback leg was transient",
+        FallbackExceptionGroup(
+            "all models failed",
+            [ModelHTTPError(429, "primary"), ModelHTTPError(503, "fallback")],
+        ),
+    ),
     ("httpx connect error", httpx.ConnectError("connection refused")),
     ("httpx read timeout", httpx.ReadTimeout("read timed out")),
     ("httpx write timeout", httpx.WriteTimeout("write timed out")),
@@ -75,10 +85,13 @@ SEMANTIC_CASES = [
     # A conflict IS an answer: re-sending gets the same conflict.
     ("http 409", ModelHTTPError(409, "cc-default")),
     ("http 422", ModelHTTPError(422, "cc-default")),
-    ("one fallback leg answered 400", FallbackExceptionGroup(
-        "all models failed",
-        [ModelHTTPError(429, "primary"), ModelHTTPError(400, "fallback")],
-    )),
+    (
+        "one fallback leg answered 400",
+        FallbackExceptionGroup(
+            "all models failed",
+            [ModelHTTPError(429, "primary"), ModelHTTPError(400, "fallback")],
+        ),
+    ),
     ("an application error", RuntimeError("404 issue does not exist")),
     ("a validation error", ValueError("evidence[0].claim is required")),
     ("an unknown error", Exception("something we have never seen")),
@@ -128,9 +141,7 @@ def test_nested_exception_groups_are_flattened():
     outer = FallbackExceptionGroup("outer", [inner, ModelHTTPError(503, "b")])
     assert classify_failure(outer) == "transient"
 
-    poisoned = FallbackExceptionGroup(
-        "outer", [inner, ModelHTTPError(400, "judged")]
-    )
+    poisoned = FallbackExceptionGroup("outer", [inner, ModelHTTPError(400, "judged")])
     assert classify_failure(poisoned) == "semantic"
 
 
@@ -158,8 +169,13 @@ def test_model_api_error_follows_its_cause():
         ("404: issue DEMO-9 does not exist", "semantic"),
         # The 2026-09-18 shape: a 404 whose model uuid happens to contain "429"
         # was retried five times as an outage.
-        (('update_model — not found (404): {"error":{"message":"Model '
-          '0e6dc227-0b80-460d-aa7c-34292af47192 not found on proxy."}}'), "semantic"),
+        (
+            (
+                'update_model — not found (404): {"error":{"message":"Model '
+                '0e6dc227-0b80-460d-aa7c-34292af47192 not found on proxy."}}'
+            ),
+            "semantic",
+        ),
         ("status_code: 429, model_name: cc-default", "transient"),
         ("error_code=429", "transient"),
         ("field 'due_date' is not a valid date", "semantic"),
@@ -202,9 +218,7 @@ async def test_proposal_failed_and_resume_failed_carry_the_label(monkeypatch):
 
     model = make_spike_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
-    await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model
-    )
+    await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
 
     assert (await _payload("proposal.failed", run["proposal_id"]))["transient"] is False
     assert (await _payload("session.resume_failed", run["session_id"]))["transient"] is False
@@ -231,9 +245,7 @@ async def test_a_provider_outage_parks_the_execution_labelled_transient(monkeypa
 
     model = make_spike_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
-    await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model
-    )
+    await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
 
     parked = await _payload("proposal.execution_parked", run["proposal_id"])
     assert parked["transient"] is True
@@ -270,15 +282,19 @@ async def test_heartbeat_error_carries_the_label(monkeypatch):
         raise httpx.ConnectError("connection refused")
 
     monkeypatch.setitem(
-        hb_actions.ACTIONS, "stub.transient",
+        hb_actions.ACTIONS,
+        "stub.transient",
         hb_actions.ActionSpec(
-            kind="stub.transient", description="test stub", params={},
-            required=(), levers=("ingest.feed.poll_once",), run=_boom,
+            kind="stub.transient",
+            description="test stub",
+            params={},
+            required=(),
+            levers=("ingest.feed.poll_once",),
+            run=_boom,
         ),
     )
     schedule_id = "sched_" + uuid.uuid4().hex[:8]
-    await fire({"id": schedule_id, "action_kind": "stub.transient",
-                "action_params": {}})
+    await fire({"id": schedule_id, "action_kind": "stub.transient", "action_params": {}})
 
     assert (await _payload("heartbeat.error", schedule_id))["transient"] is True
 
@@ -355,8 +371,9 @@ def test_a_provider_no_status_is_semantic(cls, status):
 
 
 def test_a_4xx_body_naming_a_misconfigured_dependency_still_reads_transient():
-    exc = confluence.ConfluenceError("updatePage — rejected (400): no deployments available",
-                                     status_code=400)
+    exc = confluence.ConfluenceError(
+        "updatePage — rejected (400): no deployments available", status_code=400
+    )
     assert classify_failure(exc) == "transient"
 
 
@@ -368,9 +385,14 @@ def test_a_provider_error_with_no_status_falls_to_the_text_sniff():
 
 def test_the_status_beats_misleading_text():
     # A 503 whose text carries no marker used to land FAILED.
-    assert classify_failure(
-        jira.JiraError("setDueDate — provider rejected the request (503) for A-1: <html>",
-                       status_code=503)) == "transient"
+    assert (
+        classify_failure(
+            jira.JiraError(
+                "setDueDate — provider rejected the request (503) for A-1: <html>", status_code=503
+            )
+        )
+        == "transient"
+    )
 
 
 def test_every_integration_error_is_a_provider_status_error_subclass():
@@ -387,13 +409,15 @@ def test_a_world_moved_failure_is_semantic_whatever_its_text_or_status():
     # Foreign text inside what_moved can never make it an outage, and a 409
     # carried as a typed status cannot reach the status branch's text sniff.
     stale = confluence.ConfluenceStale(
-        "updatePage — timeout connection 429", page_id="42", expected=4, actual=6,
+        "updatePage — timeout connection 429",
+        page_id="42",
+        expected=4,
+        actual=6,
         status_code=409,
     )
     assert is_world_moved(stale)
     assert classify_failure(stale) == "semantic"
-    moved = WorldMoved("temporarily unavailable", target="t",
-                       what_moved="timeout connection 503")
+    moved = WorldMoved("temporarily unavailable", target="t", what_moved="timeout connection 503")
     assert classify_failure(moved) == "semantic"
     # By type only: the same words on a plain error are not world-moved.
     assert not is_world_moved(confluence.ConfluenceError("stale version 4 -> 6"))

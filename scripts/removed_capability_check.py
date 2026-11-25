@@ -51,14 +51,20 @@ async def pending_for(capability: str) -> tuple[list[str], list[str]]:
                   and exists (select 1 from jsonb_array_elements(actions) a
                                where split_part(a->>'capability', '@', 1) = $2)
                 order by created_at""",
-            list(PRE_VERDICT_PROPOSAL_STATUSES), capability,
+            list(PRE_VERDICT_PROPOSAL_STATUSES),
+            capability,
         )
         key = PARKED_ON_KEY.get(capability)
-        sess = await conn.fetch(
-            """select id from session
+        sess = (
+            await conn.fetch(
+                """select id from session
                 where status = 'AWAITING_AGENTS' and run_state ? $1
-                order by created_at""", key,
-        ) if key else []
+                order by created_at""",
+                key,
+            )
+            if key
+            else []
+        )
         return [r["id"] for r in props], [r["id"] for r in sess]
     finally:
         await conn.close()
@@ -75,12 +81,16 @@ def main(argv: list[str]) -> int:
         print(f"removed-capability check could not run: {type(e).__name__}: {e}", file=sys.stderr)
         return 2
     for cap, props, sess in blocked:
-        print(f"REFUSED: capability {cap} is removed by the target release but still has undecided work")
+        print(
+            f"REFUSED: capability {cap} is removed by the target release but still has undecided work"
+        )
         print(f"  pending proposals ({len(props)}): {', '.join(props) or 'none'}")
         print(f"  sessions parked on it ({len(sess)}): {', '.join(sess) or 'none'}")
     if blocked:
-        print("Nothing was changed or decided. Approve, reject or dismiss each proposal in the cockpit "
-              "(parked sessions resume once their proposal or task resolves), then apply again.")
+        print(
+            "Nothing was changed or decided. Approve, reject or dismiss each proposal in the cockpit "
+            "(parked sessions resume once their proposal or task resolves), then apply again."
+        )
         return 1
     return 0
 

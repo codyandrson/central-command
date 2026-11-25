@@ -68,7 +68,7 @@ def rig(tmp_path):
     calls = tmp_path / "calls.log"
     calls.touch()
     health_flag = tmp_path / "health-ok"
-    flag = health_flag.as_posix()   # the spelling bash resolves on every host
+    flag = health_flag.as_posix()  # the spelling bash resolves on every host
 
     stub_bin = tmp_path / "bin"
     stub_bin.mkdir()
@@ -76,18 +76,23 @@ def rig(tmp_path):
     write_lf(stub_bin / "curl", f"#!/usr/bin/env bash\n[[ -f '{flag}' ]]\n", mode=0o755)
 
     def script(name: str, body: str) -> None:
-        write_lf(single / name,
-                 f"#!/usr/bin/env bash\necho \"{name} $*\" >> '{calls.as_posix()}'\n{body}\n",
-                 mode=0o755)
+        write_lf(
+            single / name,
+            f"#!/usr/bin/env bash\necho \"{name} $*\" >> '{calls.as_posix()}'\n{body}\n",
+            mode=0o755,
+        )
 
     # Defaults: stop drops the flag, boot raises it, apply succeeds.
-    script("setup.sh", f"""
+    script(
+        "setup.sh",
+        f"""
 case "$1" in
   stop) rm -f '{flag}' ;;
   boot) touch '{flag}' ;;
 esac
 exit 0
-""")
+""",
+    )
     script("update.sh", "exit 0")
 
     runner = upd / "run.sh"
@@ -101,11 +106,21 @@ exit 0
         # first `bash` is WSL's launcher), and a PATH joined the way this OS
         # joins one — the stubs must shadow the real curl/podman for bash.
         from central_command.api.update import _bash
-        env = with_stub_path({"PATH": os.pathsep.join([str(stub_bin), "/usr/bin", "/bin"]),
-                              "HOME": str(tmp_path), "CC_UPDATE_DIR": str(upd)}, stub_bin)
+
+        env = with_stub_path(
+            {
+                "PATH": os.pathsep.join([str(stub_bin), "/usr/bin", "/bin"]),
+                "HOME": str(tmp_path),
+                "CC_UPDATE_DIR": str(upd),
+            },
+            stub_bin,
+        )
         proc = subprocess.run(
             [_bash() or "bash", str(runner), target, str(single)],
-            capture_output=True, text=True, timeout=120, env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
         )
         status = json.loads((upd / "status.json").read_text())
         return proc, status
@@ -135,7 +150,12 @@ def test_apply_failure_rolls_back(rig):
     script("update.sh", '[[ "$1" == apply ]] && { echo "FAIL merge: conflicts" ; exit 1; }\nexit 0')
     proc, status = run()
     assert proc.returncode == 1
-    assert _lines(calls) == ["setup.sh stop", "update.sh apply", "update.sh rollback", "setup.sh boot"]
+    assert _lines(calls) == [
+        "setup.sh stop",
+        "update.sh apply",
+        "update.sh rollback",
+        "setup.sh boot",
+    ]
     assert status["state"] == "rolled_back"
     assert "FAIL merge" in status["error"]
 
@@ -172,7 +192,7 @@ def test_the_rig_runs_the_real_env_lib_and_the_runner_requires_it(rig):
     env_lib = single.parent / "env-lib.sh"
     assert env_lib.read_bytes() == ENV_LIB_SRC.read_bytes()
     env_lib.unlink()
-    with pytest.raises(FileNotFoundError):   # no status.json was ever written
+    with pytest.raises(FileNotFoundError):  # no status.json was ever written
         run()
     assert _lines(calls) == [], "the API must not be stopped before the helper is loaded"
 
@@ -181,8 +201,11 @@ def test_the_runner_spells_no_literal_exit_and_uses_the_one_helper():
     """R6: every exit goes through cc_exit_code (FAIL > USERACTION > WARN). A
     literal `exit 1`/`exit 3` is the hand-relayed code the rule replaces, and a
     new branch copying the old shape would quietly bring it back."""
-    code = [ln for ln in RUNNER_SRC.read_text(encoding="utf-8").splitlines()
-            if not ln.lstrip().startswith("#")]
+    code = [
+        ln
+        for ln in RUNNER_SRC.read_text(encoding="utf-8").splitlines()
+        if not ln.lstrip().startswith("#")
+    ]
     literal = [ln for ln in code if re.search(r"\bexit\s+[0-9]", ln)]
     assert not literal, f"a literal exit status outside a comment: {literal}"
     body = "\n".join(code)
@@ -213,9 +236,16 @@ UPDATE_SRC = Path(__file__).resolve().parents[1] / "deploy" / "single" / "update
 RELEASE_ZIP_SRC = Path(__file__).resolve().parents[1] / "deploy" / "single" / "release-zip.py"
 
 
-def _make_zip(tmp_path, name: str, *, manifest: str | None, extra: dict[str, str],
-              links: dict[str, str] | None = None, executables: dict[str, str] | None = None,
-              raw: dict[str, str] | None = None) -> Path:
+def _make_zip(
+    tmp_path,
+    name: str,
+    *,
+    manifest: str | None,
+    extra: dict[str, str],
+    links: dict[str, str] | None = None,
+    executables: dict[str, str] | None = None,
+    raw: dict[str, str] | None = None,
+) -> Path:
     """A GitHub-shaped source zip (`<repo>-<ref>/` wrapper) with a tiny tree.
     `links` are symlink entries (git archive's mode 120000) and `executables`
     0755 files, both under the wrapper; `raw` entries are written by their
@@ -267,8 +297,9 @@ def deployment(tmp_path):
     shutil.copyfile(RELEASE_ZIP_SRC, repo / "deploy" / "single" / "release-zip.py")
 
     def git(*args):
-        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
-                              check=True)
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+        )
 
     git("init", "-q", ".")
     git("config", "user.email", "t@example.com")
@@ -291,17 +322,23 @@ def _import(repo: Path, zip_path: Path, extra_path: str | None = None):
     stub = Path(extra_path) if extra_path else repo.parent / "import-stub"
     stub.mkdir(exist_ok=True)
     python_shim(stub)
-    env = with_stub_path({"PATH": os.pathsep.join([str(stub), "/usr/bin", "/bin"]),
-                          "HOME": str(repo.parent)}, stub)
+    env = with_stub_path(
+        {"PATH": os.pathsep.join([str(stub), "/usr/bin", "/bin"]), "HOME": str(repo.parent)}, stub
+    )
     return run_driver(
         [_bash() or "bash", str(repo / "deploy" / "single" / "update.sh"), "import", str(zip_path)],
-        cwd=repo, env=env,
+        cwd=repo,
+        env=env,
     )
 
 
 def _tracked(repo: Path, ref: str) -> list[str]:
-    out = subprocess.run(["git", "-C", str(repo), "ls-tree", "-r", "--name-only", ref],
-                         capture_output=True, text=True, check=True)
+    out = subprocess.run(
+        ["git", "-C", str(repo), "ls-tree", "-r", "--name-only", ref],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     return sorted(out.stdout.split())
 
 
@@ -312,10 +349,12 @@ def test_an_equal_manifest_skips_the_vendor_subtree(deployment, tmp_path):
     test tests/test_vendor_manifest.py fails the suite before such a zip could be
     built). It is the only way to OBSERVE the skip from outside: if the importer
     unpacked docs/vendor, that file would land on `upstream`."""
-    zp = _make_zip(tmp_path, "equal.zip",
-                   manifest="sha256:" + "a" * 64 + "\n",
-                   extra={"docs/vendor/sneaked.txt": "must not arrive\n",
-                          "NEWFILE.txt": "a real change\n"})
+    zp = _make_zip(
+        tmp_path,
+        "equal.zip",
+        manifest="sha256:" + "a" * 64 + "\n",
+        extra={"docs/vendor/sneaked.txt": "must not arrive\n", "NEWFILE.txt": "a real change\n"},
+    )
     proc = _import(deployment, zp)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "PASS vendor-docs: unchanged since the deployed release (manifest match)" in proc.stdout
@@ -330,9 +369,12 @@ def test_an_equal_manifest_skips_the_vendor_subtree(deployment, tmp_path):
 
 @drives_installer
 def test_a_different_manifest_syncs_the_whole_subtree(deployment, tmp_path):
-    zp = _make_zip(tmp_path, "changed.zip",
-                   manifest="sha256:" + "b" * 64 + "\n",
-                   extra={"docs/vendor/added.txt": "a refetched doc\n"})
+    zp = _make_zip(
+        tmp_path,
+        "changed.zip",
+        manifest="sha256:" + "b" * 64 + "\n",
+        extra={"docs/vendor/added.txt": "a refetched doc\n"},
+    )
     proc = _import(deployment, zp)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "PASS vendor-docs: changed — full sync" in proc.stdout
@@ -343,24 +385,29 @@ def test_a_different_manifest_syncs_the_whole_subtree(deployment, tmp_path):
 def test_no_manifest_on_one_side_warns_and_syncs(deployment, tmp_path):
     """A pre-F19 release, either direction: the fast path is not available and
     saying so is the point — a silent skip there would be a wrong tree."""
-    zp = _make_zip(tmp_path, "old.zip", manifest=None,
-                   extra={"docs/vendor/added.txt": "a refetched doc\n"})
+    zp = _make_zip(
+        tmp_path, "old.zip", manifest=None, extra={"docs/vendor/added.txt": "a refetched doc\n"}
+    )
     proc = _import(deployment, zp)
-    assert proc.returncode == 2, proc.stdout + proc.stderr   # WARN -> exit 2
+    assert proc.returncode == 2, proc.stdout + proc.stderr  # WARN -> exit 2
     assert "WARN vendor-docs: no manifest on one side — full sync" in proc.stdout
     assert "docs/vendor/added.txt" in _tracked(deployment, "upstream")
 
 
 def _ls_tree(repo: Path, ref: str) -> dict[str, str]:
     """path -> mode, for every entry on <ref>."""
-    out = subprocess.run(["git", "-C", str(repo), "ls-tree", "-r", ref],
-                         capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(
+        ["git", "-C", str(repo), "ls-tree", "-r", ref], capture_output=True, text=True, check=True
+    ).stdout
     return {line.split("\t", 1)[1]: line.split()[0] for line in out.splitlines()}
 
 
 def _upstream_subject(repo: Path) -> str:
-    return subprocess.run(["git", "-C", str(repo), "log", "-1", "--format=%s", "upstream"],
-                          capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", "-C", str(repo), "log", "-1", "--format=%s", "upstream"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 @drives_installer
@@ -369,16 +416,19 @@ def test_the_skip_covers_a_nested_vendor_tree_and_its_symlinks_with_no_unzip(dep
     `/`, so a nested tree and its symlink members were unpacked anyway. Under a
     matching MANIFEST nothing under docs/vendor/ is read or written — at any
     depth, links included — and the PATH holds no unzip at all."""
-    zp = _make_zip(tmp_path, "nested.zip",
-                   manifest="sha256:" + "a" * 64 + "\n",
-                   extra={"docs/vendor/a/b/c/deep.md": "must not arrive\n",
-                          "NEWFILE.txt": "a real change\n"},
-                   links={"docs/vendor/a/b/c/link.md": "../../../../README.md"},
-                   executables={"deploy/single/tool.sh": "#!/usr/bin/env bash\necho hi\n"})
+    zp = _make_zip(
+        tmp_path,
+        "nested.zip",
+        manifest="sha256:" + "a" * 64 + "\n",
+        extra={"docs/vendor/a/b/c/deep.md": "must not arrive\n", "NEWFILE.txt": "a real change\n"},
+        links={"docs/vendor/a/b/c/link.md": "../../../../README.md"},
+        executables={"deploy/single/tool.sh": "#!/usr/bin/env bash\necho hi\n"},
+    )
     nounzip = tmp_path / "nounzip"
     nounzip.mkdir()
-    write_lf(nounzip / "unzip", "#!/bin/sh\necho 'unzip must not be called' >&2\nexit 99\n",
-             mode=0o755)
+    write_lf(
+        nounzip / "unzip", "#!/bin/sh\necho 'unzip must not be called' >&2\nexit 99\n", mode=0o755
+    )
     proc = _import(deployment, zp, extra_path=str(nounzip))
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "unzip must not be called" not in proc.stderr
@@ -400,29 +450,42 @@ def test_a_full_sync_records_the_releases_symlinks_as_git_links(deployment, tmp_
     differing nothing is skipped, and a link Windows cannot create on disk is
     recorded straight into the import commit instead — so `upstream` is the
     release on every host, and no link ever touches the filesystem."""
-    zp = _make_zip(tmp_path, "links.zip",
-                   manifest="sha256:" + "b" * 64 + "\n",
-                   extra={"docs/vendor/pkg/docs/real.md": "the real doc\n"},
-                   links={"docs/vendor/pkg/docs/readme.md": "real.md"})
+    zp = _make_zip(
+        tmp_path,
+        "links.zip",
+        manifest="sha256:" + "b" * 64 + "\n",
+        extra={"docs/vendor/pkg/docs/real.md": "the real doc\n"},
+        links={"docs/vendor/pkg/docs/readme.md": "real.md"},
+    )
     proc = _import(deployment, zp)
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "PASS vendor-docs: changed — full sync" in proc.stdout
     tree = _ls_tree(deployment, "upstream")
     assert tree["docs/vendor/pkg/docs/readme.md"] == "120000", tree
-    target = subprocess.run(["git", "-C", str(deployment), "cat-file", "-p",
-                             "upstream:docs/vendor/pkg/docs/readme.md"],
-                            capture_output=True, text=True, check=True).stdout
+    target = subprocess.run(
+        ["git", "-C", str(deployment), "cat-file", "-p", "upstream:docs/vendor/pkg/docs/readme.md"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     assert target == "real.md"
     assert tree["docs/vendor/pkg/docs/real.md"] == "100644"
 
 
 @drives_installer
-def test_an_archive_entry_that_escapes_fails_the_import_by_name_and_commits_nothing(deployment, tmp_path):
+def test_an_archive_entry_that_escapes_fails_the_import_by_name_and_commits_nothing(
+    deployment, tmp_path
+):
     """F20's rule, kept: an archive that does not unpack cleanly is a FAIL, and
     `upstream` keeps the deployed tree. The extractor decides every entry
     before writing one, so the FAIL names the entry."""
-    zp = _make_zip(tmp_path, "escape.zip", manifest="sha256:" + "b" * 64 + "\n", extra={},
-                   raw={"central-command-v2/../../escaped.txt": "out\n"})
+    zp = _make_zip(
+        tmp_path,
+        "escape.zip",
+        manifest="sha256:" + "b" * 64 + "\n",
+        extra={},
+        raw={"central-command-v2/../../escaped.txt": "out\n"},
+    )
     proc = _import(deployment, zp)
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "FAIL extract: " in proc.stdout
@@ -434,8 +497,13 @@ def test_an_archive_entry_that_escapes_fails_the_import_by_name_and_commits_noth
 
 @drives_installer
 def test_a_symlink_pointing_out_of_the_tree_fails_the_import_by_name(deployment, tmp_path):
-    zp = _make_zip(tmp_path, "badlink.zip", manifest="sha256:" + "a" * 64 + "\n", extra={},
-                   links={"tools/evil": "../../../../etc/passwd"})
+    zp = _make_zip(
+        tmp_path,
+        "badlink.zip",
+        manifest="sha256:" + "a" * 64 + "\n",
+        extra={},
+        links={"tools/evil": "../../../../etc/passwd"},
+    )
     proc = _import(deployment, zp)
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "FAIL extract: " in proc.stdout and "tools/evil" in proc.stdout

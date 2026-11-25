@@ -60,13 +60,21 @@ def tree(tmp_path: Path) -> Path:
 def _run(tree: Path):
     out = tree.parent / "backups"
     env = dict(os.environ)
-    env.update(PATH=f"{tree.parent / 'stubs'}{os.pathsep}{env['PATH']}",
-               REPO=str(tree), CC_BACKUP_DIR=str(out))
+    env.update(
+        PATH=f"{tree.parent / 'stubs'}{os.pathsep}{env['PATH']}",
+        REPO=str(tree),
+        CC_BACKUP_DIR=str(out),
+    )
     # The scratch tree's own deploy/k3s/.env must be the only source.
     for k in ("N8N_ENCRYPTION_KEY", "LITELLM_SALT_KEY", "NEO4J_PASSWORD"):
         env.pop(k, None)
-    r = subprocess.run(["bash", str(tree / "deploy" / "k3s" / "backup.sh")],
-                       env=env, capture_output=True, text=True, timeout=120)
+    r = subprocess.run(
+        ["bash", str(tree / "deploy" / "k3s" / "backup.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
     return r, out
 
 

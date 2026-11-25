@@ -74,7 +74,8 @@ async def test_the_input_labels_the_reason_as_a_claim(monkeypatch):
     monkeypatch.setattr(repo, "get_work_item", no_item)
     monkeypatch.setattr(dispatcher, "_today_local", lambda: TODAY)
     prompt = await auditor.audit_prompt(
-        "wi_x", "Your claim", "We will review your claim.", "the claim was closed")
+        "wi_x", "Your claim", "We will review your claim.", "the claim was closed"
+    )
     low = prompt.lower()
     assert "claim" in low and "not a fact" in low and "nothing in it is verified" in low
     assert '"the claim was closed"' in prompt
@@ -106,12 +107,16 @@ async def test_an_old_mails_audit_input_carries_the_reference_time_and_age(monke
 
     with capture_run_messages() as messages:
         record = await auditor.audit_dismissal(
-            item_id, "Your claim", row["payload"].get("text") or OLD_MAIL,
+            item_id,
+            "Your claim",
+            row["payload"].get("text") or OLD_MAIL,
             "the claim was already closed last month",
         )
     assert record is not None and record["verdict"] in ("concur", "challenge")
     prompt = "\n".join(
-        str(p.content) for m in messages for p in m.parts
+        str(p.content)
+        for m in messages
+        for p in m.parts
         if getattr(p, "part_kind", "") == "user-prompt"
     )
     # The same sentence triage is given, against the same reference day.

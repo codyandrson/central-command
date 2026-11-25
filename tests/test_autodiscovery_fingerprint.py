@@ -61,8 +61,12 @@ def test_every_fingerprint_field_actually_moves_the_fingerprint():
     """A field listed but not read would be a rule nobody enforces — the
     comprehension in `catalog_fingerprint` drops keys absent from the entry, so
     a typo'd field name is invisible rather than loud."""
-    base = {"id": "vendor/model-a", "shutdown_date": None,
-            "display_name": "Model A", "pricing": {"input": 1.0}}
+    base = {
+        "id": "vendor/model-a",
+        "shutdown_date": None,
+        "display_name": "Model A",
+        "pricing": {"input": 1.0},
+    }
     baseline = hb_actions.catalog_fingerprint(base)
     for field in hb_actions.FINGERPRINT_FIELDS:
         moved = dict(base, **{field: "something-else"})
@@ -102,8 +106,9 @@ def test_the_fingerprint_is_order_and_absence_stable():
     assert hb_actions.catalog_fingerprint(a) == hb_actions.catalog_fingerprint(b)
     # An absent field and an explicitly-null one are different answers on
     # purpose: "the vendor said nothing" is not "the vendor said no shutdown".
-    assert (hb_actions.catalog_fingerprint({"id": "m"})
-            != hb_actions.catalog_fingerprint({"id": "m", "shutdown_date": None}))
+    assert hb_actions.catalog_fingerprint({"id": "m"}) != hb_actions.catalog_fingerprint(
+        {"id": "m", "shutdown_date": None}
+    )
 
 
 def test_the_snapshot_setting_key_is_the_one_the_action_reads_back():

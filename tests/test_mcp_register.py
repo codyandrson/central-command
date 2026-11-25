@@ -73,15 +73,23 @@ def test_register_is_registered_gated_and_dispatched():
 def test_mcp_propose_pack_carries_its_tools_and_capabilities():
     pack = packs.PACKS["mcp-propose"]
     assert pack.tool_names == (
-        "propose_mcp_sync_source", "propose_mcp_build", "propose_mcp_deploy",
-        "propose_mcp_register", "propose_mcp_remove",
-        "propose_mcp_server_register", "propose_mcp_server_unregister",
+        "propose_mcp_sync_source",
+        "propose_mcp_build",
+        "propose_mcp_deploy",
+        "propose_mcp_register",
+        "propose_mcp_remove",
+        "propose_mcp_server_register",
+        "propose_mcp_server_unregister",
         "mcp_list_servers",
     )
     assert {c.name for c in pack.capabilities} == {
-        "mcp.sync_source", "mcp.build_image", "mcp.server_deploy",
-        "litellm.register_mcp_server", "mcp.server_remove",
-        "mcp.server_register", "mcp.server_unregister",
+        "mcp.sync_source",
+        "mcp.build_image",
+        "mcp.server_deploy",
+        "litellm.register_mcp_server",
+        "mcp.server_remove",
+        "mcp.server_register",
+        "mcp.server_unregister",
     }
     for agent_id, names in packs.DEFAULT_PACKS.items():
         assert "mcp-propose" not in names, f"{agent_id} should not default-hold it"
@@ -107,8 +115,10 @@ async def test_register_mcp_server_posts_expected_payload(monkeypatch):
 
         def json(self):
             return {
-                "server_id": "uuid-123", "server_name": "myserver",
-                "alias": "myserver", "url": "http://myserver.cc-mcp.svc.cluster.local:8000/mcp",
+                "server_id": "uuid-123",
+                "server_name": "myserver",
+                "alias": "myserver",
+                "url": "http://myserver.cc-mcp.svc.cluster.local:8000/mcp",
                 "transport": "http",
             }
 
@@ -118,15 +128,20 @@ async def test_register_mcp_server_posts_expected_payload(monkeypatch):
 
     monkeypatch.setattr(litellm_client, "_call", fake_call)
     out = await litellm_client.register_mcp_server(
-        "myserver", "myserver", "http://myserver.cc-mcp.svc.cluster.local:8000/mcp",
-        transport="http", description="prov",
+        "myserver",
+        "myserver",
+        "http://myserver.cc-mcp.svc.cluster.local:8000/mcp",
+        transport="http",
+        description="prov",
     )
     assert seen["method"] == "POST"
     assert seen["path"] == "/v1/mcp/server"
     assert seen["body"] == {
-        "server_name": "myserver", "alias": "myserver",
+        "server_name": "myserver",
+        "alias": "myserver",
         "url": "http://myserver.cc-mcp.svc.cluster.local:8000/mcp",
-        "transport": "http", "description": "prov",
+        "transport": "http",
+        "description": "prov",
     }
     assert out["server"]["litellm_server_id"] == "uuid-123"
 
@@ -194,7 +209,9 @@ async def test_propose_register_test_model_is_a_stub(monkeypatch):
     assert "test model" in out
 
 
-@pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])
+@pytest.mark.parametrize(
+    "server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""]
+)
 async def test_propose_register_bad_server_ids_are_refused(monkeypatch, server_id):
     monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_register(_Ctx(), server_id, "test")
@@ -229,7 +246,9 @@ async def test_register_refuses_when_not_yet_deployed(monkeypatch):
     try:
         with pytest.raises(executor.ExecutionFailed, match="not deployed yet"):
             await executor.execute(
-                [_action(server_id)], approver="human:lee", source_refs=[],
+                [_action(server_id)],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _delete_mcp_server(server_id)
@@ -239,7 +258,9 @@ async def test_register_refuses_when_not_yet_deployed(monkeypatch):
 async def test_register_refuses_with_no_row_at_all(monkeypatch):
     with pytest.raises(executor.ExecutionFailed, match="not deployed yet"):
         await executor.execute(
-            [_action("no-such-server")], approver="human:lee", source_refs=[],
+            [_action("no-such-server")],
+            approver="human:lee",
+            source_refs=[],
         )
 
 
@@ -250,7 +271,9 @@ async def test_register_refuses_bad_transport_at_execute_time(monkeypatch):
     try:
         with pytest.raises(executor.ExecutionFailed, match="transport"):
             await executor.execute(
-                [_action(server_id, transport="grpc")], approver="human:lee", source_refs=[],
+                [_action(server_id, transport="grpc")],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _delete_mcp_server(server_id)
@@ -268,10 +291,16 @@ async def test_register_happy_path_url_construction_and_row_update(monkeypatch):
 
         async def fake_register(server_name, alias, url, transport="http", description=None):
             calls.append((server_name, alias, url, transport))
-            return {"ok": True, "server": {
-                "litellm_server_id": "uuid-abc", "server_name": server_name,
-                "alias": alias, "url": url, "transport": transport,
-            }}
+            return {
+                "ok": True,
+                "server": {
+                    "litellm_server_id": "uuid-abc",
+                    "server_name": server_name,
+                    "alias": alias,
+                    "url": url,
+                    "transport": transport,
+                },
+            }
 
         monkeypatch.setattr(litellm_client, "register_mcp_server", fake_register)
 
@@ -287,16 +316,23 @@ async def test_register_happy_path_url_construction_and_row_update(monkeypatch):
         monkeypatch.setattr(litellm_client, "add_mcp_server_to_key", fake_grant)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
-            proposer="mcp-tester", proposal_id="prop_reg0001",
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
+            proposer="mcp-tester",
+            proposal_id="prop_reg0001",
         )
         # Two namespaces, two rules: the PROXY name is underscored (LiteLLM
         # 400s on '-'), the URL keeps hyphens (k8s DNS forbids '_'). Live-found
         # 2026-08-04 on the first real registration.
-        assert calls == [(
-            server_id.replace("-", "_"), server_id.replace("-", "_"),
-            f"http://{server_id}.cc-mcp.svc.cluster.local:8000/mcp", "http",
-        )]
+        assert calls == [
+            (
+                server_id.replace("-", "_"),
+                server_id.replace("-", "_"),
+                f"http://{server_id}.cc-mcp.svc.cluster.local:8000/mcp",
+                "http",
+            )
+        ]
         assert "uuid-abc" in outcome.result_text
 
         row = await repo.get_mcp_server(server_id)
@@ -310,7 +346,10 @@ async def test_register_happy_path_url_construction_and_row_update(monkeypatch):
 async def test_register_is_idempotent_when_already_registered(monkeypatch):
     server_id = "already-registered"
     await _insert_mcp_server(
-        server_id, "registered", namespace="cc-mcp", litellm_alias="uuid-existing",
+        server_id,
+        "registered",
+        namespace="cc-mcp",
+        litellm_alias="uuid-existing",
     )
     try:
 
@@ -324,7 +363,9 @@ async def test_register_is_idempotent_when_already_registered(monkeypatch):
         monkeypatch.setattr(litellm_client, "list_mcp_servers", fake_list)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         assert "already registered" in outcome.result_text
 
@@ -382,9 +423,11 @@ def test_each_module_holds_exactly_one_hyphen_translation():
     for module in (executor, packs):
         tree = ast.parse(Path(module.__file__).read_text())
         translations = [
-            node for node in ast.walk(tree)
+            node
+            for node in ast.walk(tree)
             if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute) and node.func.attr == "replace"
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "replace"
             and [getattr(a, "value", None) for a in node.args] == ["-", "_"]
         ]
         assert len(translations) == 1, (module.__name__, [n.lineno for n in translations])
@@ -424,10 +467,17 @@ async def test_add_mcp_server_to_key_merges_never_clobbers(monkeypatch):
     assert calls[0] == ("GET", "/key/info", None, "sk-agent")
     update = [c for c in calls if c[1] == "/key/update"]
     # the existing entry rides along — merge, never clobber
-    assert update == [("POST", "/key/update", {
-        "key": "sk-agent",
-        "object_permission": {"mcp_servers": ["uuid-old", "uuid-new"]},
-    }, None)]
+    assert update == [
+        (
+            "POST",
+            "/key/update",
+            {
+                "key": "sk-agent",
+                "object_permission": {"mcp_servers": ["uuid-old", "uuid-new"]},
+            },
+            None,
+        )
+    ]
 
 
 async def test_add_mcp_server_to_key_is_idempotent(monkeypatch):
@@ -474,7 +524,9 @@ async def test_register_grants_the_shared_key_access_to_the_new_server(monkeypat
         monkeypatch.setattr(litellm_client, "add_mcp_server_to_key", fake_grant)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         assert granted == [("sk-shared", "uuid-kg")]
         assert "key permission: shared key granted access" in outcome.result_text
@@ -502,7 +554,9 @@ async def test_register_stands_when_key_grant_fails_but_says_so_loudly(monkeypat
         monkeypatch.setattr(litellm_client, "add_mcp_server_to_key", fake_grant)
 
         outcome = await executor.execute(
-            [_action(server_id)], approver="human:lee", source_refs=[],
+            [_action(server_id)],
+            approver="human:lee",
+            source_refs=[],
         )
         # registration itself stands...
         row = await repo.get_mcp_server(server_id)
@@ -515,12 +569,15 @@ async def test_register_stands_when_key_grant_fails_but_says_so_loudly(monkeypat
 
 
 @needs_pg
-async def test_a_registration_the_proxy_answers_without_an_id_fails_and_records_nothing(monkeypatch):
+async def test_a_registration_the_proxy_answers_without_an_id_fails_and_records_nothing(
+    monkeypatch,
+):
     """With no id the row could never be taken off the proxy again, so the
     execution fails loudly before the row is marked registered."""
     server_id = "register-noid"
     await _insert_mcp_server(server_id, "deployed", namespace="cc-mcp")
     try:
+
         async def fake_register(server_name, alias, url, transport="http", description=None):
             return {"ok": True, "server": {}}
 

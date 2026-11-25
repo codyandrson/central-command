@@ -62,9 +62,7 @@ async def park_question(
     searched = str(args.get("searched") or "").strip()
     body = question + (f"\n\nChecked first: {searched}" if searched else "")
 
-    await repo.save_paused_session(
-        session_id, agent_id, dump_run_state(result, call.tool_call_id)
-    )
+    await repo.save_paused_session(session_id, agent_id, dump_run_state(result, call.tool_call_id))
 
     item_id = "item_" + uuid.uuid4().hex[:12]
     await repo.create_operator_item(
@@ -102,9 +100,7 @@ async def park_question(
         "tier": "discussion" if wants_discussion else "question",
     }
     if wants_discussion:
-        discussion = await _open_discussion(
-            item_id, agent_id, session_id, question, why
-        )
+        discussion = await _open_discussion(item_id, agent_id, session_id, question, why)
         if discussion is None:
             # Over the attention budget: no lane. The question is NOT lost —
             # the operator_item above is already in the queue and answering it
@@ -123,7 +119,11 @@ async def park_question(
 
 
 async def _open_discussion(
-    item_id: str, agent_id: str, task_session_id: str, question: str, why: str,
+    item_id: str,
+    agent_id: str,
+    task_session_id: str,
+    question: str,
+    why: str,
 ) -> str | None:
     """Open a clarification CONVERSATION, already showing the agent's question.
 
@@ -190,9 +190,11 @@ async def _open_discussion(
     )
     await repo.update_session_run_state(
         session_id,
-        {"messages": ModelMessagesTypeAdapter.dump_python(
-            [charter, ModelResponse(parts=[TextPart(content=opening)])], mode="json"
-        )},
+        {
+            "messages": ModelMessagesTypeAdapter.dump_python(
+                [charter, ModelResponse(parts=[TextPart(content=opening)])], mode="json"
+            )
+        },
     )
     await repo.mark_session_awaiting_operator(session_id)
     await repo.link_operator_item_discussion(item_id, session_id)
@@ -211,7 +213,9 @@ async def _open_discussion(
 
 
 async def conclude_discussion(
-    discussion_session_id: str, summary: str, agent_id: str,
+    discussion_session_id: str,
+    summary: str,
+    agent_id: str,
 ) -> dict:
     """The agent has what it needs: close the discussion and resume the task.
 
@@ -235,14 +239,11 @@ async def conclude_discussion(
 
     item = await repo.get_operator_item_by_discussion(discussion_session_id)
     if item is None:
-        raise ValueError(
-            f"session {discussion_session_id!r} is not a clarification discussion"
-        )
+        raise ValueError(f"session {discussion_session_id!r} is not a clarification discussion")
 
     run_state = await repo.get_session_run_state(discussion_session_id) or {}
     operator_words = "\n".join(
-        t["content"] for t in simplify_messages(run_state)
-        if t["kind"] == "user-prompt"
+        t["content"] for t in simplify_messages(run_state) if t["kind"] == "user-prompt"
     )
     supported = claim_supported(summary, operator_words)
 
@@ -269,7 +270,9 @@ async def conclude_discussion(
     # is legitimately RUNNING, so that path would refuse with
     # `turn_in_progress`. Same close, different authority.
     await converse_close(
-        discussion_session_id, agent_id=agent_id, reason="concluded",
+        discussion_session_id,
+        agent_id=agent_id,
+        reason="concluded",
         actor=f"agent:{agent_id}",
     )
 
@@ -329,9 +332,10 @@ def _readable_output(final) -> str:
 
     out = final.output
     if isinstance(out, DeferredToolRequests):
-        tools = ", ".join(
-            f"`{getattr(c, 'tool_name', '?')}`" for c in (out.calls or [])
-        ) or "an unnamed tool"
+        tools = (
+            ", ".join(f"`{getattr(c, 'tool_name', '?')}`" for c in (out.calls or []))
+            or "an unnamed tool"
+        )
         return (
             f"(the run ended still reaching for {tools}, which this path cannot "
             "drive; nothing was done with it and the session is closed out.)"
@@ -408,8 +412,10 @@ async def resume_with_answer(item_id: str, answer: str, model=None) -> dict:
         model = await resolve_model(agent_id=agent_id)
     agent = await build_agent_for(agent_id, model=model)
     pending = resume_park.pending_resume(
-        kind="result", text=answer,
-        tool_call_id=run_state["tool_call_id"], after="answered",
+        kind="result",
+        text=answer,
+        tool_call_id=run_state["tool_call_id"],
+        after="answered",
         item_id=item_id,
     )
     # Armed before the run, like the three decision paths: the operator's answer
@@ -418,8 +424,13 @@ async def resume_with_answer(item_id: str, answer: str, model=None) -> dict:
     await resume_park.arm(session_id, pending)
     try:
         final = await resume(
-            agent, load_messages(run_state), run_state["tool_call_id"], answer,
-            model=model, agent_id=agent_id, session_id=session_id,
+            agent,
+            load_messages(run_state),
+            run_state["tool_call_id"],
+            answer,
+            model=model,
+            agent_id=agent_id,
+            session_id=session_id,
         )
     except Exception as e:  # classified, not swallowed
         # Outage equivalence: the answer is already recorded (answer_item ran
@@ -431,17 +442,32 @@ async def resume_with_answer(item_id: str, answer: str, model=None) -> dict:
         parked = await resume_park.park_if_transient(session_id, e, pending)
         if parked is None:
             raise
-        return {"deferred": False, "resume_parked": True,
-                "session_id": session_id, "item_id": item_id}
+        return {
+            "deferred": False,
+            "resume_parked": True,
+            "session_id": session_id,
+            "item_id": item_id,
+        }
 
     return await _settle(
-        final, agent=agent, model=model, item=item,
-        session_id=session_id, agent_id=agent_id, may_drive=True,
+        final,
+        agent=agent,
+        model=model,
+        item=item,
+        session_id=session_id,
+        agent_id=agent_id,
+        may_drive=True,
     )
 
 
 async def _settle(
-    final, *, agent, model, item: dict, session_id: str, agent_id: str,
+    final,
+    *,
+    agent,
+    model,
+    item: dict,
+    session_id: str,
+    agent_id: str,
     may_drive: bool,
 ) -> dict:
     """What the resumed run ended on, and what that means for the task session.
@@ -478,20 +504,27 @@ async def _settle(
             _meta = final.output.metadata.get(call.tool_call_id)
         drafted = proposal_from_call(call, metadata=_meta)
         evidence = await session_source_evidence(
-            session_id, drafted.evidence,
-            messages=final.all_messages(), proposal=drafted,
+            session_id,
+            drafted.evidence,
+            messages=final.all_messages(),
+            proposal=drafted,
         )
         parked = await park_proposal(
-            session_id=session_id, agent_id=agent_id, result=final, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=final,
+            call=call,
             evidence=evidence,
             context={"tasked": True, "after_question": item["id"]},
         )
-        return {"deferred": True, "session_id": session_id,
-                "proposal_id": parked["proposal_id"]}
+        return {"deferred": True, "session_id": session_id, "proposal_id": parked["proposal_id"]}
     if kind == "ask":
         # Answering one question can legitimately raise the next one.
         again = await park_question(
-            session_id=session_id, agent_id=agent_id, result=final, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=final,
+            call=call,
             task_id=item.get("task_id"),
         )
         return again
@@ -501,7 +534,10 @@ async def _settle(
         from central_command.runtime.consult import park_consult_wait
 
         return await park_consult_wait(
-            session_id=session_id, agent_id=agent_id, result=final, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=final,
+            call=call,
             task_id=item.get("task_id"),
         )
     if kind == "task_wait":
@@ -509,7 +545,10 @@ async def _settle(
         from central_command.runtime.consult import park_task_wait_deferred
 
         return await park_task_wait_deferred(
-            session_id=session_id, agent_id=agent_id, result=final, call=call,
+            session_id=session_id,
+            agent_id=agent_id,
+            result=final,
+            call=call,
         )
     if kind == "conclude":
         # Observed live 2026-07-30 (EA digest, sess_bbc8e24e7324): the resumed
@@ -539,13 +578,16 @@ async def _settle(
             from central_command.runtime.durable import deferred_results
 
             results = await deferred_results(
-                final.all_messages(), call.tool_call_id, ToolDenied(
+                final.all_messages(),
+                call.tool_call_id,
+                ToolDenied(
                     "`conclude_discussion` did nothing: you have no open "
                     "discussion lane in this run, so there is nothing to "
                     "conclude. The operator's answer is already in your hands "
                     "— close out in text."
                 ),
-                session_id=session_id, agent_id=agent_id,
+                session_id=session_id,
+                agent_id=agent_id,
             )
             final = await agent.run(
                 message_history=final.all_messages(),
@@ -554,12 +596,16 @@ async def _settle(
                 deps=TriageDeps(agent_id=agent_id, session_id=session_id),
             )
             return await _settle(
-                final, agent=agent, model=model, item=item,
-                session_id=session_id, agent_id=agent_id, may_drive=False,
+                final,
+                agent=agent,
+                model=model,
+                item=item,
+                session_id=session_id,
+                agent_id=agent_id,
+                may_drive=False,
             )
 
     from central_command.runtime.converse import land_session
 
     await land_session(session_id, agent_id=agent_id)
-    return {"deferred": False, "session_id": session_id,
-            "output": _readable_output(final)}
+    return {"deferred": False, "session_id": session_id, "output": _readable_output(final)}

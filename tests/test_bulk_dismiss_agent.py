@@ -102,12 +102,14 @@ def _bulk_model(query: str = _QUERY) -> FunctionModel:
         )
         if already:
             return ModelResponse(parts=[TextPart(content="Understood.")])
-        return ModelResponse(parts=[
-            ToolCallPart(
-                tool_name="propose_bulk_dismiss",
-                args={"query": query, "rationale": "Shop newsletters — nothing to act on."},
-            )
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="propose_bulk_dismiss",
+                    args={"query": query, "rationale": "Shop newsletters — nothing to act on."},
+                )
+            ]
+        )
 
     return FunctionModel(respond)
 
@@ -115,10 +117,12 @@ def _bulk_model(query: str = _QUERY) -> FunctionModel:
 async def _state(uuid: str) -> dict:
     conn = await repo._conn()
     try:
-        return dict(await conn.fetchrow(
-            "select state, folded_into, terminal_at from work_item where message_id = $1",
-            provider_message_id(uuid),
-        ))
+        return dict(
+            await conn.fetchrow(
+                "select state, folded_into, terminal_at from work_item where message_id = $1",
+                provider_message_id(uuid),
+            )
+        )
     finally:
         await conn.close()
 
@@ -178,8 +182,11 @@ async def test_approving_commits_the_folds_and_reports_the_real_count(monkeypatc
     for mid in result["folded_message_ids"]:
         conn = await repo._conn()
         try:
-            row = dict(await conn.fetchrow(
-                "select state, terminal_at from work_item where message_id = $1", mid))
+            row = dict(
+                await conn.fetchrow(
+                    "select state, terminal_at from work_item where message_id = $1", mid
+                )
+            )
         finally:
             await conn.close()
         assert row["state"] == "FOLDED" and row["terminal_at"] is not None
@@ -210,14 +217,19 @@ async def test_the_outcome_reports_shrinkage_rather_than_failing(monkeypatch):
 async def test_rejecting_releases_the_reserved_items(monkeypatch):
     result = await _propose(monkeypatch)
     await gateway.reject_with_feedback(
-        result["session_id"], result["proposal_id"], "Too broad — handle these separately.",
+        result["session_id"],
+        result["proposal_id"],
+        "Too broad — handle these separately.",
         model=_bulk_model(),
     )
     for mid in result["folded_message_ids"]:
         conn = await repo._conn()
         try:
-            row = dict(await conn.fetchrow(
-                "select state, folded_into from work_item where message_id = $1", mid))
+            row = dict(
+                await conn.fetchrow(
+                    "select state, folded_into from work_item where message_id = $1", mid
+                )
+            )
         finally:
             await conn.close()
         assert row["state"] == "UNPROCESSED" and row["folded_into"] is None
@@ -233,8 +245,7 @@ async def test_dismissing_releases_them_too(monkeypatch):
     for mid in result["folded_message_ids"]:
         conn = await repo._conn()
         try:
-            state = await conn.fetchval(
-                "select state from work_item where message_id = $1", mid)
+            state = await conn.fetchval("select state from work_item where message_id = $1", mid)
         finally:
             await conn.close()
         assert state == "UNPROCESSED"

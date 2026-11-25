@@ -37,7 +37,9 @@ def dataset():
 def test_dataset_parses_with_its_evaluators(dataset):
     assert len(dataset.cases) >= 8, "the judgment set should not quietly shrink"
     assert {type(e).__name__ for e in dataset.evaluators} == {
-        "DispositionMatch", "ExpectedActions", "EvidenceCited"
+        "DispositionMatch",
+        "ExpectedActions",
+        "EvidenceCited",
     }
     assert len({c.name for c in dataset.cases}) == len(dataset.cases), "duplicate case names"
 
@@ -80,9 +82,15 @@ def test_evaluators_score_a_known_right_and_a_known_wrong_answer(dataset):
 
     def ctx(output):
         return EvaluatorContext(
-            name=case.name, inputs=case.inputs, metadata=case.metadata,
-            expected_output=case.expected_output, output=output,
-            duration=0.0, _span_tree=None, attributes={}, metrics={},
+            name=case.name,
+            inputs=case.inputs,
+            metadata=case.metadata,
+            expected_output=case.expected_output,
+            output=output,
+            duration=0.0,
+            _span_tree=None,
+            attributes={},
+            metrics={},
         )
 
     right_out = {
@@ -91,8 +99,13 @@ def test_evaluators_score_a_known_right_and_a_known_wrong_answer(dataset):
         "issue_keys": ["TASKS-12"],
         "due_dates": ["2026-08-07"],
         "fold": True,
-        "evidence": [{"kind": "email", "source_ref": "<sprint-planning-reply@example.com>",
-                      "claim": "Make the TASKS-12 due date Friday"}],
+        "evidence": [
+            {
+                "kind": "email",
+                "source_ref": "<sprint-planning-reply@example.com>",
+                "claim": "Make the TASKS-12 due date Friday",
+            }
+        ],
     }
     right = ctx(right_out)
     assert disposition.evaluate(right) is True
@@ -109,13 +122,13 @@ def test_evaluators_score_a_known_right_and_a_known_wrong_answer(dataset):
         "evidence": [],
     }
     wrong = ctx(wrong_out)
-    assert disposition.evaluate(wrong) is True     # right KIND of decision...
-    assert actions.evaluate(wrong) < 0.6           # ...wrong content
+    assert disposition.evaluate(wrong) is True  # right KIND of decision...
+    assert actions.evaluate(wrong) < 0.6  # ...wrong content
     assert evidence.evaluate(wrong) is False
 
     dismissed = ctx({**wrong_out, "disposition": "dismiss"})
     assert disposition.evaluate(dismissed) is False
-    assert evidence.evaluate(dismissed) is True    # a dismissal cites nothing, by design
+    assert evidence.evaluate(dismissed) is True  # a dismissal cites nothing, by design
 
 
 def test_model_comparison_json_shape():
@@ -146,11 +159,17 @@ def test_model_comparison_json_shape():
         def averages(self):
             return FakeAverages(assertions=0.75)
 
-    good = FakeCase("case-a", {"DispositionMatch": FakeResult(True), "EvidenceCited": FakeResult(True)})
-    bad = FakeCase("case-b", {"DispositionMatch": FakeResult(False), "EvidenceCited": FakeResult(True)})
+    good = FakeCase(
+        "case-a", {"DispositionMatch": FakeResult(True), "EvidenceCited": FakeResult(True)}
+    )
+    bad = FakeCase(
+        "case-b", {"DispositionMatch": FakeResult(False), "EvidenceCited": FakeResult(True)}
+    )
     report = FakeReport(cases=[good, bad])
 
-    doc = run_evals.build_results_json(Path("evals/triage_judgment.yaml"), {"cc-default": (report, 12.5)})
+    doc = run_evals.build_results_json(
+        Path("evals/triage_judgment.yaml"), {"cc-default": (report, 12.5)}
+    )
 
     assert doc["dataset"] == "evals/triage_judgment.yaml"
     assert "run_at" in doc and "T" in doc["run_at"]  # ISO-8601
@@ -160,8 +179,14 @@ def test_model_comparison_json_shape():
     assert model["score"] == 0.75
     assert model["seconds"] == 12.5
     assert model["cases_detail"] == [
-        {"name": "case-a", "passed": True,
-         "assertions": {"DispositionMatch": True, "EvidenceCited": True}},
-        {"name": "case-b", "passed": False,
-         "assertions": {"DispositionMatch": False, "EvidenceCited": True}},
+        {
+            "name": "case-a",
+            "passed": True,
+            "assertions": {"DispositionMatch": True, "EvidenceCited": True},
+        },
+        {
+            "name": "case-b",
+            "passed": False,
+            "assertions": {"DispositionMatch": False, "EvidenceCited": True},
+        },
     ]

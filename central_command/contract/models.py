@@ -62,14 +62,23 @@ def _normalize(text: str) -> str:
 # separators, and these visible-as-nothing characters outside those classes.
 # ONE place: the runtime's build-time collapse removes them and the repo's
 # Executor-side check refuses them (both import from here).
-NOTE_INVISIBLE_CODEPOINTS = frozenset({
-    0x2800,                                   # braille pattern blank (So)
-    0x3164, 0xFFA0, 0x115F, 0x1160,           # Hangul fillers (Lo)
-    0x034F, 0x17B4, 0x17B5,                   # combining grapheme joiner, Khmer vowels (Mn)
-    0x180B, 0x180C, 0x180D,                   # Mongolian variation selectors (Mn)
-    *range(0xFE00, 0xFE10),                   # variation selectors 1-16
-    *range(0xE0100, 0xE01F0),                 # variation selectors 17-256
-})
+NOTE_INVISIBLE_CODEPOINTS = frozenset(
+    {
+        0x2800,  # braille pattern blank (So)
+        0x3164,
+        0xFFA0,
+        0x115F,
+        0x1160,  # Hangul fillers (Lo)
+        0x034F,
+        0x17B4,
+        0x17B5,  # combining grapheme joiner, Khmer vowels (Mn)
+        0x180B,
+        0x180C,
+        0x180D,  # Mongolian variation selectors (Mn)
+        *range(0xFE00, 0xFE10),  # variation selectors 1-16
+        *range(0xE0100, 0xE01F0),  # variation selectors 17-256
+    }
+)
 
 
 def note_forbidden_char(ch: str) -> bool:
@@ -78,8 +87,11 @@ def note_forbidden_char(ch: str) -> bool:
     invisible set above."""
     if ch == " ":
         return False
-    return (ch.isspace() or unicodedata.category(ch)[0] in ("C", "Z")
-            or ord(ch) in NOTE_INVISIBLE_CODEPOINTS)
+    return (
+        ch.isspace()
+        or unicodedata.category(ch)[0] in ("C", "Z")
+        or ord(ch) in NOTE_INVISIBLE_CODEPOINTS
+    )
 
 
 def claim_supported(claim: str, source: str) -> bool:
@@ -148,10 +160,7 @@ def quote_supported(claim: str, source: str) -> bool:
     hay = f" {_normalize(source)} "
     if not hay.strip():
         return False
-    pieces = [
-        _normalize(p).split()
-        for p in _ELLIPSIS.split(unicodedata.normalize("NFKC", claim))
-    ]
+    pieces = [_normalize(p).split() for p in _ELLIPSIS.split(unicodedata.normalize("NFKC", claim))]
     pieces = [p for p in pieces if p]
     if not pieces:
         return False
@@ -184,7 +193,7 @@ def _segment_piece(words: list[str], hay: str, start: int, budget: list[int]) ->
         e = best[i]
         if e is None:
             continue
-        needle = " " + " ".join(words[i:i + QUOTE_MIN_SEGMENT_WORDS - 1])
+        needle = " " + " ".join(words[i : i + QUOTE_MIN_SEGMENT_WORDS - 1])
         k = e
         for j in range(i + QUOTE_MIN_SEGMENT_WORDS, m + 1):
             budget[0] -= 1
@@ -207,9 +216,7 @@ class Action(BaseModel):
 
     capability: str = Field(..., description="Skill@version, e.g. 'jira.update_issue@v2'")
     arguments: dict
-    target_ref: dict = Field(
-        ..., description="{system, id}"
-    )
+    target_ref: dict = Field(..., description="{system, id}")
     reversibility: Reversibility
 
 

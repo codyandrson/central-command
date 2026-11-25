@@ -44,8 +44,11 @@ async def _running(agent_id: str) -> str:
 
 
 async def _created_since(since: int) -> list[dict]:
-    return [e for e in await repo.list_events(since_id=since, kind="task")
-            if e["kind"] == "task.created"]
+    return [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.created"
+    ]
 
 
 def test_task_create_is_no_longer_a_gated_write():
@@ -63,8 +66,13 @@ def test_task_create_is_no_longer_a_gated_write():
 def test_the_agents_that_proposed_tasks_now_create_them():
     """Story 4.7 grants `task-create` to exactly the agents that held
     `task-propose`; story 4.9 widened it to the rest (test_task_create_grants)."""
-    for agent_id in ("inbox-triage", "jira-expert", "litellm-manager",
-                     "confluence-expert", "wiki-agent"):
+    for agent_id in (
+        "inbox-triage",
+        "jira-expert",
+        "litellm-manager",
+        "confluence-expert",
+        "wiki-agent",
+    ):
         assert "task-create" in packs.DEFAULT_PACKS[agent_id]
     assert "task-create" in packs.DEFAULT_PACKS["orchestrator"]
 
@@ -93,8 +101,9 @@ async def test_an_agent_creates_a_task_with_no_proposal_and_no_inbox_item():
     since = await repo.latest_event_id()
     items_before = len(await repo.list_operator_items(status=None))
 
-    out = await create_task(_ctx(creator, session), "jira-expert",
-                            "Audit TASKS-12 links.", "Link audit")
+    out = await create_task(
+        _ctx(creator, session), "jira-expert", "Audit TASKS-12 links.", "Link audit"
+    )
 
     assert "created and assigned to jira-expert" in out
     (created,) = await _created_since(since)
@@ -120,14 +129,14 @@ async def test_the_created_tasks_gated_proposal_still_parks_in_the_inbox(monkeyp
     created the task."""
     from central_command.runtime.spike_model import make_jira_task_model
 
-    monkeypatch.setattr(routes, "resolve_model",
-                        aresolve(lambda *a, **k: make_jira_task_model()))
+    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: make_jira_task_model()))
     creator = "inbox-triage"
     session = await _running(creator)
     since = await repo.latest_event_id()
 
-    await create_task(_ctx(creator, session), "jira-expert",
-                      "Comment on TASKS-12 with the due date.")
+    await create_task(
+        _ctx(creator, session), "jira-expert", "Comment on TASKS-12 with the due date."
+    )
     (created,) = await _created_since(since)
     task_id = created["ref_id"]
 
@@ -137,8 +146,7 @@ async def test_the_created_tasks_gated_proposal_still_parks_in_the_inbox(monkeyp
             break
         await asyncio.sleep(0.02)
     assert task["status"] == "REVIEW"
-    props = [p for p in await repo.list_proposals()
-             if p["session_id"] == task["session_id"]]
+    props = [p for p in await repo.list_proposals() if p["session_id"] == task["session_id"]]
     assert len(props) == 1 and props[0]["status"] == "AWAITING_HUMAN"
     assert not [p for p in await repo.list_proposals() if p["session_id"] == session]
 
@@ -162,8 +170,11 @@ async def test_a_backstop_refusal_comes_back_to_the_agent_as_text(monkeypatch):
     assert out.startswith("Task NOT created")
     assert "depth" in out
     assert len(await repo.list_tasks()) == before
-    refused = [e for e in await repo.list_events(since_id=since, kind="task")
-               if e["kind"] == "task.refused"]
+    refused = [
+        e
+        for e in await repo.list_events(since_id=since, kind="task")
+        if e["kind"] == "task.refused"
+    ]
     assert len(refused) == 1 and refused[0]["ref_id"] == root
     assert not await _created_since(since)
 

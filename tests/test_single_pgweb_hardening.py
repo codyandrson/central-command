@@ -7,6 +7,7 @@ a role holding nothing but `pg_read_all_data` (created by schema.sql), and the
 server refuses the writes; pgweb's own `--readonly` keyword blacklist is not
 relied on. It stays locked to its one connection, with SSH tunnelling off.
 """
+
 import contextlib
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -25,7 +26,9 @@ ROLE = "cc_pgweb"
 
 
 def _k3s_container() -> dict:
-    (deployment,) = [d for d in yaml.safe_load_all(K3S.read_text()) if d and d["kind"] == "Deployment"]
+    (deployment,) = [
+        d for d in yaml.safe_load_all(K3S.read_text()) if d and d["kind"] == "Deployment"
+    ]
     (container,) = deployment["spec"]["template"]["spec"]["containers"]
     return container
 
@@ -54,7 +57,9 @@ def test_k3s_pgweb_runs_locked():
     for flag in FLAGS:
         assert flag in (container.get("args") or []), f"pgweb must run with {flag}"
     assert "--readonly" not in (container.get("args") or [])
-    assert "command" not in container, "args append to the image entrypoint; a command would replace it"
+    assert "command" not in container, (
+        "args append to the image entrypoint; a command would replace it"
+    )
 
 
 def test_both_profiles_log_in_as_the_read_only_role_not_the_owner():
@@ -62,7 +67,12 @@ def test_both_profiles_log_in_as_the_read_only_role_not_the_owner():
     compose_url = _compose_service()["environment"]["PGWEB_DATABASE_URL"]
     assert k3s_url == compose_url, "the two profiles connect the same way"
     assert _user(compose_url) == ROLE
-    assert _user(compose_url) != yaml.safe_load(COMPOSE.read_text())["services"]["postgres"]["environment"]["POSTGRES_USER"]
+    assert (
+        _user(compose_url)
+        != yaml.safe_load(COMPOSE.read_text())["services"]["postgres"]["environment"][
+            "POSTGRES_USER"
+        ]
+    )
 
 
 def _as_role(url: str) -> str:
@@ -74,17 +84,20 @@ def _as_role(url: str) -> str:
 
 
 @needs_pg
-@pytest.mark.parametrize("statement", [
-    "insert into app_setting (key, value) values ('pgweb-test', '1')",
-    "update agent set name = name",
-    "delete from app_setting where key = 'pgweb-test'",
-    "truncate app_setting",
-    "create table pgweb_probe (id int)",
-    "alter table agent add column pgweb_probe int",
-    "do $$ begin insert into app_setting (key, value) values ('pgweb-test', '1'); end $$",
-    "select nextval(pg_get_serial_sequence('audit_event', 'id'))",
-    "set role central_command",
-])
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "insert into app_setting (key, value) values ('pgweb-test', '1')",
+        "update agent set name = name",
+        "delete from app_setting where key = 'pgweb-test'",
+        "truncate app_setting",
+        "create table pgweb_probe (id int)",
+        "alter table agent add column pgweb_probe int",
+        "do $$ begin insert into app_setting (key, value) values ('pgweb-test', '1'); end $$",
+        "select nextval(pg_get_serial_sequence('audit_event', 'id'))",
+        "set role central_command",
+    ],
+)
 async def test_the_role_cannot_write(statement):
     """Connected with the manifests' credential, the server refuses every
     write — the ones pgweb's keyword list missed (ALTER, DO, SET) included."""
@@ -97,10 +110,13 @@ async def test_the_role_cannot_write(statement):
 
 
 @needs_pg
-@pytest.mark.parametrize("statement", [
-    "grant select on agent to public",
-    "revoke select on agent from public",
-])
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "grant select on agent to public",
+        "revoke select on agent from public",
+    ],
+)
 async def test_the_role_cannot_change_a_grant(statement):
     """GRANT/REVOKE by a role without grant options is a WARNING in Postgres,
     not an error — so the proof is that no privilege moved."""
@@ -108,8 +124,10 @@ async def test_the_role_cannot_change_a_grant(statement):
     try:
         # A GRANT that grants nothing may still write the default ACL out
         # explicitly, so the comparison is of the EFFECTIVE privileges.
-        acl = ("select coalesce(relacl, acldefault('r', relowner))::text "
-               "from pg_class where oid = 'agent'::regclass")
+        acl = (
+            "select coalesce(relacl, acldefault('r', relowner))::text "
+            "from pg_class where oid = 'agent'::regclass"
+        )
         before = await conn.fetchval(acl)
         with contextlib.suppress(asyncpg.InsufficientPrivilegeError):
             await conn.execute(statement)
@@ -125,11 +143,13 @@ async def test_the_role_reads_and_holds_nothing_else():
         assert await conn.fetchval("select count(*) >= 0 from agent")
         row = await conn.fetchrow(
             "select rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls "
-            "from pg_roles where rolname = current_user")
+            "from pg_roles where rolname = current_user"
+        )
         assert not any(row.values()), dict(row)
         memberships = await conn.fetch(
             "select r.rolname from pg_auth_members m join pg_roles r on r.oid = m.roleid "
-            "where m.member = (select oid from pg_roles where rolname = current_user)")
+            "where m.member = (select oid from pg_roles where rolname = current_user)"
+        )
         assert [m["rolname"] for m in memberships] == ["pg_read_all_data"]
     finally:
         await conn.close()

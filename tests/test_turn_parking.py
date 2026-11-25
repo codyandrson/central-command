@@ -91,8 +91,12 @@ async def _messages(session_id: str) -> list[dict]:
 
 
 def _user_prompts(messages: list[dict], text: str) -> int:
-    return sum(1 for m in messages for p in m.get("parts", [])
-               if p.get("part_kind") == "user-prompt" and text in str(p.get("content")))
+    return sum(
+        1
+        for m in messages
+        for p in m.get("parts", [])
+        if p.get("part_kind") == "user-prompt" and text in str(p.get("content"))
+    )
 
 
 async def _sweep() -> dict:
@@ -112,10 +116,13 @@ async def _send(session_id: str, message: str) -> list[dict]:
         frames.append(frame)
 
     await nerve_gateway._chat_send(
-        {"sessionKey": f"agent:jira-expert:{session_id}", "message": message}, notify)
+        {"sessionKey": f"agent:jira-expert:{session_id}", "message": message}, notify
+    )
     for _ in range(200):
-        if any(f.get("event") == "agent"
-               and f["payload"]["data"]["phase"] in ("end", "error") for f in frames):
+        if any(
+            f.get("event") == "agent" and f["payload"]["data"]["phase"] in ("end", "error")
+            for f in frames
+        ):
             break
         await asyncio.sleep(0.05)
     return frames
@@ -145,12 +152,13 @@ async def test_a_chat_turn_whose_model_is_down_parks_and_lands_the_reply(monkeyp
     assert pending["dependencies"] == ["llm"]
     assert "session.failed" not in await _kinds(sid)
     code, message = converse.why_not_sendable(
-        await nerve_gateway._with_parked_on(await repo.get_session(sid)))
+        await nerve_gateway._with_parked_on(await repo.get_session(sid))
+    )
     assert code == "awaiting_resume" and "llm" in message
     assert "llm" in await nerve_gateway.parked_wait_line(sid)
     assert _user_prompts(await _messages(sid), ask) == 1
 
-    out = await _sweep()                                   # every probe up
+    out = await _sweep()  # every probe up
 
     assert sid in out["resumed"]
     assert await repo.session_status(sid) == "AWAITING_OPERATOR"
@@ -222,20 +230,21 @@ async def test_a_task_run_whose_second_turn_is_down_parks_and_resumes_to_done(mo
     assert await repo.session_status(sid) == "AWAITING_RESUME"
     before = await _messages(sid)
     assert before[-1]["kind"] == "request", "the unsent request is what re-sends"
-    calls_before = script.calls                                   # 2
+    calls_before = script.calls  # 2
 
     await _sweep()
 
     row = await repo.get_task(task["id"])
     assert row["status"] == "DONE", row
     after = await _messages(sid)
-    assert after[:len(before) - 1] == before[:-1], "the turns before the outage are kept"
+    assert after[: len(before) - 1] == before[:-1], "the turns before the outage are kept"
+
     # The unsent request is RE-SENT, not rebuilt: same parts (the tool's
     # return is the one it gave before the outage — the tool did not re-run);
     # pydantic-ai restamps only its send metadata (run id, state, timestamp).
     def _parts(m):
-        return [(p["part_kind"], p.get("tool_call_id"), p.get("content"))
-                for p in m["parts"]]
+        return [(p["part_kind"], p.get("tool_call_id"), p.get("content")) for p in m["parts"]]
+
     assert _parts(after[len(before) - 1]) == _parts(before[-1])
     assert len(after) == len(before) + 1
     # Only the outage turn was re-sent: this session's record gained exactly
@@ -259,14 +268,14 @@ async def test_a_second_outage_on_the_resumed_run_parks_in_place_again(monkeypat
     await routes._run_assigned_task(task, actor="operator")
     sid = (await repo.get_task(task["id"]))["session_id"]
 
-    await _sweep()                                               # still down
+    await _sweep()  # still down
 
     assert await repo.session_status(sid) == "AWAITING_RESUME"
     pending = (await repo.get_session_run_state(sid))["pending_resume"]
     assert pending["kind"] == "turn" and pending["attempts"] == 1
     assert (await repo.get_task(task["id"]))["status"] == "IN_PROGRESS"
 
-    await _sweep()                                               # back
+    await _sweep()  # back
 
     assert (await repo.get_task(task["id"]))["status"] == "DONE"
     assert "session.failed" not in await _kinds(sid)
@@ -321,10 +330,14 @@ async def test_a_semantic_model_error_in_an_orchestrator_round_still_fails(monke
 
 
 _PARKING_CALLERS = {
-    "orchestration.run_project", "orchestration._reject_batch",
-    "orchestration.maybe_resume", "orchestration._drive_tail",
-    "orchestration.continue_session", "orchestration.resume_stopped_session",
-    "converse._turn", "run.run_task",
+    "orchestration.run_project",
+    "orchestration._reject_batch",
+    "orchestration.maybe_resume",
+    "orchestration._drive_tail",
+    "orchestration.continue_session",
+    "orchestration.resume_stopped_session",
+    "converse._turn",
+    "run.run_task",
 }
 
 
@@ -342,8 +355,11 @@ def _walk(callee: str, *, failed_only: bool = False) -> set[str]:
                 if name != callee:
                     continue
                 if failed_only and not any(
-                        k.arg == "failed" and isinstance(k.value, ast.Constant)
-                        and k.value.value is True for k in n.keywords):
+                    k.arg == "failed"
+                    and isinstance(k.value, ast.Constant)
+                    and k.value.value is True
+                    for k in n.keywords
+                ):
                     continue
                 found.add(f"{p.stem}.{fn.name}")
     return found
@@ -355,7 +371,7 @@ def _section() -> str:
     landings live in it)."""
     text = (ROOT / "docs" / "ARCHITECTURE.md").read_text()
     start = text.index("### The outage doctrine")
-    return text[start:text.index("\n## 5.", start)]
+    return text[start : text.index("\n## 5.", start)]
 
 
 def test_the_no_tail_table_matches_the_runs_that_cannot_park():

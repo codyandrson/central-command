@@ -42,7 +42,7 @@ def parse_frontmatter(raw: str) -> tuple[dict, str]:
             continue
         key, _, value = line.partition(":")
         meta[key.strip()] = value.strip().strip("'\"")
-    return meta, raw[m.end():].lstrip("\n")
+    return meta, raw[m.end() :].lstrip("\n")
 
 
 def parse_id_list(value: str) -> list[str]:
@@ -62,9 +62,9 @@ def _doc_key(filename: str) -> str:
 class NormalisedDoc:
     """One document as the library stores it, with what its render touched."""
 
-    meta: dict          # frontmatter fields, parsed as written (never rendered)
-    text: str           # the stored content: frontmatter stripped, overlay rendered
-    resolved: list[str]    # overlay field NAMES filled in
+    meta: dict  # frontmatter fields, parsed as written (never rendered)
+    text: str  # the stored content: frontmatter stripped, overlay rendered
+    resolved: list[str]  # overlay field NAMES filled in
     unresolved: list[str]  # overlay field NAMES with no text (marker removed)
 
 
@@ -98,7 +98,7 @@ def normalise_doc_text(
         overlay = skill_overlay.load(settings.resolved_skill_overlay_dir())
     meta, _ = parse_frontmatter(raw_text)
     m = _FRONTMATTER.match(raw_text)
-    head, rest = (raw_text[: m.end()], raw_text[m.end():]) if m else ("", raw_text)
+    head, rest = (raw_text[: m.end()], raw_text[m.end() :]) if m else ("", raw_text)
     skill_overlay.refuse_in(head, source=source)
     rendered, got, missed = skill_overlay.render(
         rest, overlay, source=source, first_line=head.count("\n") + 1
@@ -279,9 +279,7 @@ async def import_skill_folder(
             "a distinct skill_id."
         )
 
-    default_agents = (
-        parse_id_list(meta.get("default_agents", "")) if apply_default_grants else []
-    )
+    default_agents = parse_id_list(meta.get("default_agents", "")) if apply_default_grants else []
 
     references_to_write: list[tuple[str, Path, str]] = []
     for f in ref_files:
@@ -301,16 +299,28 @@ async def import_skill_folder(
 
     await repo.create_skill(sid, title, summary)
     await repo.add_skill_doc(
-        sid, "guidance", "guidance", title, body,
-        source_url=source_url, describes=describes, captured_at=captured_at,
+        sid,
+        "guidance",
+        "guidance",
+        title,
+        body,
+        source_url=source_url,
+        describes=describes,
+        captured_at=captured_at,
         **_provenance(skill_md, body),
     )
 
     references: list[str] = []
     for key, f, ref_body in references_to_write:
         await repo.add_skill_doc(
-            sid, key, "reference", f.stem, ref_body,
-            source_url=source_url, describes=describes, captured_at=captured_at,
+            sid,
+            key,
+            "reference",
+            f.stem,
+            ref_body,
+            source_url=source_url,
+            describes=describes,
+            captured_at=captured_at,
             **_provenance(f, ref_body),
         )
         references.append(key)
@@ -321,7 +331,9 @@ async def import_skill_folder(
     default_grants = await repo.seed_skill_grants(sid, default_agents)
 
     return {
-        "skill_id": sid, "guidance": "guidance", "references": references,
+        "skill_id": sid,
+        "guidance": "guidance",
+        "references": references,
         "default_grants": default_grants,
         "overlay": {"resolved": sorted(resolved), "unresolved": sorted(unresolved)},
         # The release the docs were stamped with; None when the folder is not

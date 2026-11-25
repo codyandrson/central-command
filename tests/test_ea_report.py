@@ -36,11 +36,9 @@ def test_the_reports_tier_never_reaches_the_write_tier():
                 names = [prefix] + [f"{prefix}.{a.name}" for a in node.names]
             for dotted in names:
                 parts = dotted.split(".")
-                assert not (len(parts) >= 2 and parts[0] == "central_command"
-                            and parts[1] == "gateway"), (
-                    f"{py.name} imports {dotted!r} — reports/ must stay "
-                    "runtime-importable"
-                )
+                assert not (
+                    len(parts) >= 2 and parts[0] == "central_command" and parts[1] == "gateway"
+                ), f"{py.name} imports {dotted!r} — reports/ must stay runtime-importable"
 
 
 def test_one_activity_vocabulary_for_both_readers():
@@ -52,8 +50,14 @@ def test_one_activity_vocabulary_for_both_readers():
     source = Path(tools.__file__).read_text(encoding="utf-8")
     assert "ea_report.snapshot" in source
     assert set(ea_report.ACTIVITY_KINDS) == {
-        "proposal.created", "proposal.decided", "task.completed", "task.blocked",
-        "task.review", "agent.asked", "gap.declared", "work.enrolled",
+        "proposal.created",
+        "proposal.decided",
+        "task.completed",
+        "task.blocked",
+        "task.review",
+        "agent.asked",
+        "gap.declared",
+        "work.enrolled",
     }
 
 
@@ -61,9 +65,13 @@ def test_one_activity_vocabulary_for_both_readers():
 async def test_the_snapshot_windows_activity_and_reports_current_state():
     before = datetime.now(UTC)
     mine = await events.emit(
-        "gap.declared", ref_id="eareport_1",
-        payload={"kind": "missing_tool", "subject": "eareport",
-                 "need": "a widget only this test wants"},
+        "gap.declared",
+        ref_id="eareport_1",
+        payload={
+            "kind": "missing_tool",
+            "subject": "eareport",
+            "need": "a widget only this test wants",
+        },
         actor="agent:eareport",
     )
 
@@ -78,9 +86,13 @@ async def test_the_snapshot_windows_activity_and_reports_current_state():
     assert set(snap["activity"]) == set(ea_report.ACTIVITY_KINDS)
 
     # Current state, not windowed: these are depths, and they are integers.
-    for name in ("proposals_awaiting_decision", "work_items_in_flight",
-                 "dismissals_awaiting_confirmation", "operator_items_open",
-                 "discussions_open"):
+    for name in (
+        "proposals_awaiting_decision",
+        "work_items_in_flight",
+        "dismissals_awaiting_confirmation",
+        "operator_items_open",
+        "discussions_open",
+    ):
         assert isinstance(snap["queues"][name], int)
     assert isinstance(snap["work_ledger_by_state"], dict)
     assert isinstance(snap["tasks_by_status"], dict)
@@ -101,10 +113,12 @@ async def test_an_empty_window_is_a_complete_answer():
 @needs_pg
 async def test_the_window_boundary_is_inclusive_of_since_and_excludes_before():
     """The boundary itself: an event emitted before `since` must not appear."""
-    old = await events.emit("gap.declared", ref_id="eareport_old",
-                            payload={"subject": "old"}, actor="agent:eareport")
-    new = await events.emit("gap.declared", ref_id="eareport_new",
-                            payload={"subject": "new"}, actor="agent:eareport")
+    old = await events.emit(
+        "gap.declared", ref_id="eareport_old", payload={"subject": "old"}, actor="agent:eareport"
+    )
+    new = await events.emit(
+        "gap.declared", ref_id="eareport_new", payload={"subject": "new"}, actor="agent:eareport"
+    )
     # The boundary is the DATABASE's clock, like the rows it is compared with:
     # a host clock a few ms behind the DB put `old` inside the window.
     boundary = datetime.fromisoformat(new["created_at"])
@@ -129,7 +143,8 @@ async def test_the_snapshot_is_json_serialisable():
 async def _asked(item_id: str) -> dict:
     """The `agent.asked` event the question tool emits, for `item_id`."""
     return await events.emit(
-        "agent.asked", ref_id=item_id,
+        "agent.asked",
+        ref_id=item_id,
         payload={"agent_id": "eareport", "question": f"question for {item_id}?"},
         actor="agent:eareport",
     )
@@ -139,6 +154,7 @@ async def _mine_only(monkeypatch, item_ids: set[str]):
     """The snapshot's activity read, narrowed to the events this test made: the
     shared dev database may hold other `agent.asked` rows, and `still_open`
     counts the whole window."""
+
     async def only_mine(since):
         rows = await repo.list_events_of_kinds(["agent.asked"])
         return [r for r in rows if r["ref_id"] in item_ids]
@@ -153,19 +169,26 @@ async def _seed_asked_items() -> dict[str, str]:
 
     await ea.ensure_registered()  # a session row carries a foreign key to its agent
     tag = uuid.uuid4().hex[:8]
-    ids = {name: f"item_{name}_{tag}"
-           for name in ("open", "answered", "withdrawn", "missing")}
+    ids = {name: f"item_{name}_{tag}" for name in ("open", "answered", "withdrawn", "missing")}
     for name in ("open", "answered"):
         session_id = f"sess_eareport_{name}_{tag}"
         await repo.create_running_session(session_id, "ea")
         await repo.create_operator_item(
-            item_id=ids[name], kind="question", session_id=session_id,
-            agent_id="eareport", body=f"question for {ids[name]}?")
+            item_id=ids[name],
+            kind="question",
+            session_id=session_id,
+            agent_id="eareport",
+            body=f"question for {ids[name]}?",
+        )
     session_id = f"sess_eareport_withdrawn_{tag}"
     await repo.create_running_session(session_id, "ea")
     await repo.create_operator_item(
-        item_id=ids["withdrawn"], kind="question", session_id=session_id,
-        agent_id="eareport", body="a question whose work was cancelled")
+        item_id=ids["withdrawn"],
+        kind="question",
+        session_id=session_id,
+        agent_id="eareport",
+        body="a question whose work was cancelled",
+    )
     assert await repo.answer_operator_item(ids["answered"], "do the first one")
     await repo.withdraw_operator_items_for_session(session_id)
     for item_id in ids.values():
@@ -184,16 +207,18 @@ async def test_an_asked_question_carries_its_items_current_state(monkeypatch):
 
     snap = await ea_report.snapshot(datetime.now(UTC) - timedelta(hours=1))
 
-    state = {e["ref_id"]: e["state"]
-             for e in snap["activity"]["agent.asked"]["examples"]}
+    state = {e["ref_id"]: e["state"] for e in snap["activity"]["agent.asked"]["examples"]}
     assert state[ids["open"]] == "open"
     assert state[ids["answered"]] == "answered"
     assert state[ids["withdrawn"]] == "withdrawn"
     assert state[ids["missing"]] == "unknown"
     # Only the kind that needs it carries a state.
-    assert all("state" not in e
-               for kind, entry in snap["activity"].items() if kind != "agent.asked"
-               for e in entry["examples"])
+    assert all(
+        "state" not in e
+        for kind, entry in snap["activity"].items()
+        if kind != "agent.asked"
+        for e in entry["examples"]
+    )
 
 
 @needs_pg
@@ -209,8 +234,12 @@ async def test_still_open_counts_only_open_questions_over_the_whole_window(monke
         session_id = f"sess_eareport_extra{n}_{ids['open'][-8:]}"
         await repo.create_running_session(session_id, "ea")
         await repo.create_operator_item(
-            item_id=item_id, kind="question", session_id=session_id,
-            agent_id="eareport", body="another open question")
+            item_id=item_id,
+            kind="question",
+            session_id=session_id,
+            agent_id="eareport",
+            body="another open question",
+        )
         await _asked(item_id)
         extra.add(item_id)
     await _mine_only(monkeypatch, set(ids.values()) | extra)
@@ -222,8 +251,9 @@ async def test_still_open_counts_only_open_questions_over_the_whole_window(monke
     assert entry["truncated"] > 0
     assert entry["still_open"] == 1 + len(extra)
     # Nothing else's entry gains the key.
-    assert all("still_open" not in e
-               for kind, e in snap["activity"].items() if kind != "agent.asked")
+    assert all(
+        "still_open" not in e for kind, e in snap["activity"].items() if kind != "agent.asked"
+    )
 
 
 @needs_pg

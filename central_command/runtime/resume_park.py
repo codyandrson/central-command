@@ -74,15 +74,17 @@ def pending_resume(
     return out
 
 
-def read_pending(*, call, metadata: dict, after: str,
-                 task_id: str | None = None) -> dict:
+def read_pending(*, call, metadata: dict, after: str, task_id: str | None = None) -> dict:
     """The pending record of a PARKED READ (FR-40): everything the resume
     driver needs to re-execute it — the tool, its arguments as the model sent
     them, the dependencies it waits on — and nothing of the turn's text (the
     history already holds the turn; the read's result does not exist yet).
     `not_before` is filled by `park_resume`, like every other kind's."""
     return pending_resume(
-        kind="read", text=None, tool_call_id=call.tool_call_id, after=after,
+        kind="read",
+        text=None,
+        tool_call_id=call.tool_call_id,
+        after=after,
         tool=metadata.get("tool") or call.tool_name,
         args=metadata.get("args") or {},
         dependencies=list(metadata.get("dependencies") or []),
@@ -91,8 +93,14 @@ def read_pending(*, call, metadata: dict, after: str,
 
 
 async def park_read(
-    *, session_id: str, result, call, metadata: dict, after: str = "task",
-    task_id: str | None = None, state: dict | None = None,
+    *,
+    session_id: str,
+    result,
+    call,
+    metadata: dict,
+    after: str = "task",
+    task_id: str | None = None,
+    state: dict | None = None,
 ) -> dict:
     """Park a run whose read found its dependencies DOWN: AWAITING_RESUME with
     the pending read, announced by the same `session.resume_parked` every
@@ -106,22 +114,25 @@ async def park_read(
     """
     from central_command.runtime.durable import dump_run_state
 
-    await repo.update_session_run_state(
-        session_id, dump_run_state(result, call.tool_call_id)
-    )
+    await repo.update_session_run_state(session_id, dump_run_state(result, call.tool_call_id))
     pending = read_pending(call=call, metadata=metadata, after=after, task_id=task_id)
     if state:
         # The orchestrator round's loop counters, which its tail cannot
         # rebuild from the record (the same `state` a turn park carries).
         pending["state"] = state
-    return await park_resume(
-        session_id, pending, metadata.get("error") or "dependency down"
-    )
+    return await park_resume(session_id, pending, metadata.get("error") or "dependency down")
 
 
 async def park_turn(
-    *, session_id: str, after: str, error: BaseException, task_id: str | None,
-    state: dict | None, window: int, attempts: int, dependencies: list[str],
+    *,
+    session_id: str,
+    after: str,
+    error: BaseException,
+    task_id: str | None,
+    state: dict | None,
+    window: int,
+    attempts: int,
+    dependencies: list[str],
 ) -> dict:
     """Park a run whose TURN met a DOWN dependency (epic-outage-doctrine story
     6): AWAITING_RESUME with a `pending_resume` of kind `turn`. Called by
@@ -207,8 +218,7 @@ async def _episode_of(session_id: str, pending: dict, now: datetime) -> str:
     if pending.get("episode_at"):
         return pending["episode_at"]
     if int(pending.get("attempts") or 0) > 0:
-        prior = (await repo.get_session_run_state(session_id) or {}).get(
-            "pending_resume") or {}
+        prior = (await repo.get_session_run_state(session_id) or {}).get("pending_resume") or {}
         carried = prior.get("episode_at") or prior.get("parked_at")
         if carried:
             return carried
@@ -216,7 +226,10 @@ async def _episode_of(session_id: str, pending: dict, now: datetime) -> str:
 
 
 async def park_resume(
-    session_id: str, pending: dict, error: BaseException | str, *,
+    session_id: str,
+    pending: dict,
+    error: BaseException | str,
+    *,
     due_now: bool = False,
 ) -> dict:
     """Park the session AWAITING_RESUME and announce it. Returns the stored
@@ -327,14 +340,23 @@ async def park_continuation(
     await events.emit(
         "session.window_exhausted",
         ref_id=session_id,
-        payload={"agent_id": agent_id, "requests": requests, "windows": windows,
-                 "after": after, "task_id": task_id},
+        payload={
+            "agent_id": agent_id,
+            "requests": requests,
+            "windows": windows,
+            "after": after,
+            "task_id": task_id,
+        },
         actor="system",
     )
     item_id = "item_" + uuid.uuid4().hex[:12]
     await repo.create_operator_item(
-        item_id=item_id, kind="continue", session_id=session_id,
-        agent_id=agent_id, body=body, task_id=task_id,
+        item_id=item_id,
+        kind="continue",
+        session_id=session_id,
+        agent_id=agent_id,
+        body=body,
+        task_id=task_id,
     )
     return {"item_id": item_id, "body": body, "marker": marker}
 
@@ -380,16 +402,13 @@ async def park_stopped(
     await events.emit(
         "session.stopped",
         ref_id=session_id,
-        payload={"agent_id": agent_id, "after": after, "task_id": task_id,
-                 "reason": reason},
+        payload={"agent_id": agent_id, "after": after, "task_id": task_id, "reason": reason},
         actor="operator" if reason == "operator" else "system",
     )
     return {"marker": marker}
 
 
-async def park_if_transient(
-    session_id: str, exc: BaseException, pending: dict
-) -> dict | None:
+async def park_if_transient(session_id: str, exc: BaseException, pending: dict) -> dict | None:
     """Park when `exc` is TRANSIENT, else return None so the caller runs its
     unchanged semantic handling. One place decides, so no path can drift into
     retrying a real error (or terminating a survivable one)."""

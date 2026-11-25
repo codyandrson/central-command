@@ -45,9 +45,17 @@ AFTER_LOAD, AFTER_TOOL_RETRY, AFTER_OUTPUT_RETRY = 2, 3 + READS + 1, 3 + READS +
 
 
 def _call(name: str, args: dict, call_id: str) -> dict:
-    return {"role": "assistant", "content": None, "tool_calls": [{
-        "id": call_id, "type": "function",
-        "function": {"name": name, "arguments": json.dumps(args)}}]}
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(args)},
+            }
+        ],
+    }
 
 
 def _script(n: int) -> dict:
@@ -75,16 +83,31 @@ def install_stub_seam(monkeypatch, script, *, window: int = 9_000, cfg: dict | N
     def answer(request: httpx.Request) -> httpx.Response:
         bodies.append(json.loads(request.content))
         msg = script(len(bodies))
-        return httpx.Response(200, json={
-            "id": f"chatcmpl-{len(bodies)}", "object": "chat.completion", "created": 0,
-            "model": "cc-default",
-            "choices": [{"index": 0, "message": msg,
-                         "finish_reason": "tool_calls" if msg.get("tool_calls") else "stop"}],
-            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}})
+        return httpx.Response(
+            200,
+            json={
+                "id": f"chatcmpl-{len(bodies)}",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "cc-default",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": msg,
+                        "finish_reason": "tool_calls" if msg.get("tool_calls") else "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            },
+        )
 
     def stub_client(api_key, base_url):
-        return AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=0,
-                           http_client=httpx.AsyncClient(transport=httpx.MockTransport(answer)))
+        return AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            max_retries=0,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(answer)),
+        )
 
     async def undeclared(model):
         return None
@@ -104,12 +127,23 @@ def install_stub_seam(monkeypatch, script, *, window: int = 9_000, cfg: dict | N
         pass
 
     async def load():
-        return {**context.DEFAULTS, **(cfg if cfg is not None else {
-            "pressure_warning": False, "summarize_threshold": 0.5,
-            "output_headroom": False, "clear_tool_results": False})}
+        return {
+            **context.DEFAULTS,
+            **(
+                cfg
+                if cfg is not None
+                else {
+                    "pressure_warning": False,
+                    "summarize_threshold": 0.5,
+                    "output_headroom": False,
+                    "clear_tool_results": False,
+                }
+            ),
+        }
 
     from central_command import events
     from central_command.db import repo
+
     monkeypatch.setenv("CC_LIVE_MODEL_TESTS", "1")  # the transport is in-process
     monkeypatch.setattr(http_client, "openai_client", stub_client)
     monkeypatch.setattr(context, "output_cap_for", undeclared)
@@ -145,16 +179,26 @@ async def capture_session(monkeypatch) -> list[dict]:
     bodies, store = install_stub_seam(monkeypatch, _script)
 
     def build(model):
-        cap = Capability(id=SKILL_ID, description="How this Jira is used",
-                         instructions=GUIDANCE, defer_loading=True)
+        cap = Capability(
+            id=SKILL_ID,
+            description="How this Jira is used",
+            instructions=GUIDANCE,
+            defer_loading=True,
+        )
 
         def search(query: str) -> str:
             """Search the skill's references."""
             return "[ref] Quote the key, e.g. TASKS-12."
+
         cap.tool_plain(name=SKILL_TOOL, retries=10)(search)
-        agent = Agent(model, system_prompt=CHARTER, output_type=[str, DeferredToolRequests],
-                      deps_type=TriageDeps, capabilities=[cap, *context.capabilities()],
-                      tools=[Tool(tools.propose_action, max_retries=10)])
+        agent = Agent(
+            model,
+            system_prompt=CHARTER,
+            output_type=[str, DeferredToolRequests],
+            deps_type=TriageDeps,
+            capabilities=[cap, *context.capabilities()],
+            tools=[Tool(tools.propose_action, max_retries=10)],
+        )
 
         @agent.tool_plain
         def read_thing(n: int) -> str:
@@ -166,18 +210,24 @@ async def capture_session(monkeypatch) -> list[dict]:
             if output == "I am done.":
                 raise ModelRetry("Finish by proposing, or say in plain text why nothing is needed.")
             return output
+
         return agent
 
     deps = TriageDeps(agent_id="inbox-triage", session_id="sess_wire")
     first = await build(await models._live_model("cc-default")).run(
-        "Mail: Jane Doe flies to Tampa on 2026-08-25.", deps=deps)
+        "Mail: Jane Doe flies to Tampa on 2026-08-25.", deps=deps
+    )
     call = durable.extract_deferred(first)
     assert call is not None, "the redraft parks"
     stored = json.loads(json.dumps(durable.dump_run_state(first, call.tool_call_id)))
     resumed = await durable.resume(
-        build(await models._live_model("cc-default")), durable.load_messages(stored),
-        stored["tool_call_id"], "approved: executed", agent_id="inbox-triage",
-        session_id="sess_wire")
+        build(await models._live_model("cc-default")),
+        durable.load_messages(stored),
+        stored["tool_call_id"],
+        "approved: executed",
+        agent_id="inbox-triage",
+        session_id="sess_wire",
+    )
     assert resumed.output == "Recorded."
     assert store.get("context_summary"), "the window reached a summary"
     return bodies
@@ -192,12 +242,14 @@ async def test_no_system_message_after_the_first_in_any_request(monkeypatch):
     assert len(bodies) == AFTER_OUTPUT_RETRY + 1
     for i, body in enumerate(bodies, 1):
         assert_one_leading_system_and_a_valid_sequence(body, i)
-    for i, body in enumerate(bodies[AFTER_LOAD - 1:], AFTER_LOAD):
+    for i, body in enumerate(bodies[AFTER_LOAD - 1 :], AFTER_LOAD):
         assert GUIDANCE in _texts(body), f"request {i} lost the skill's guidance"
         assert SKILL_TOOL in [t["function"]["name"] for t in body.get("tools", [])]
     assert GUIDANCE not in _texts(bodies[0]), "an unloaded skill costs no context"
     assert CHARTER in bodies[-1]["messages"][0]["content"], "the resume sends the charter"
-    assert any("SUMMARY-OF-EARLIER-TURNS" in _texts(b) for b in bodies), "a summarised window was sent"
+    assert any("SUMMARY-OF-EARLIER-TURNS" in _texts(b) for b in bodies), (
+        "a summarised window was sent"
+    )
     # The retries reached the model in the tool and user voices.
     tool_retry = [m for m in bodies[AFTER_TOOL_RETRY - 1]["messages"] if m["role"] == "tool"][-1]
     assert tools._ROUTE_CHECK_MARK in tool_retry["content"]
@@ -208,6 +260,7 @@ async def test_no_system_message_after_the_first_in_any_request(monkeypatch):
 async def test_every_model_the_seam_builds_carries_the_profile(monkeypatch):
     async def undeclared(model):
         return None
+
     monkeypatch.setattr(context, "output_cap_for", undeclared)
     monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "llm_base_url", "http://llm.invalid:4000")
@@ -223,21 +276,40 @@ async def test_a_session_parked_at_2_18_resumes_through_the_real_mapping(monkeyp
     real seam: one system message, first, carrying the ORIGINAL charter."""
     from pathlib import Path
 
-    rs = json.loads((Path(__file__).parent / "fixtures" / "pai_2_18_paused_session.json").read_text())
-    bodies, _store = install_stub_seam(monkeypatch, lambda n: {"role": "assistant", "content": "Recorded."})
-    cap = Capability(id="jira-guide", description="How this Jira is used",
-                     instructions="SKILL: Jira guide. Always quote the issue key.", defer_loading=True)
+    rs = json.loads(
+        (Path(__file__).parent / "fixtures" / "pai_2_18_paused_session.json").read_text()
+    )
+    bodies, _store = install_stub_seam(
+        monkeypatch, lambda n: {"role": "assistant", "content": "Recorded."}
+    )
+    cap = Capability(
+        id="jira-guide",
+        description="How this Jira is used",
+        instructions="SKILL: Jira guide. Always quote the issue key.",
+        defer_loading=True,
+    )
 
     def skill_jira_guide(query: str) -> str:
         """Search the Jira guide."""
         return "guide"
+
     cap.tool_plain(name="skill_jira_guide", retries=10)(skill_jira_guide)
-    agent = Agent(await models._live_model("cc-default"), system_prompt="NEW CHARTER",
-                  output_type=[str, DeferredToolRequests], deps_type=TriageDeps,
-                  capabilities=[cap, *context.capabilities()],
-                  tools=[Tool(tools.propose_action, max_retries=10)])
-    result = await durable.resume(agent, durable.load_messages(rs), rs["tool_call_id"],
-                                  "approved: executed", agent_id="inbox-triage", session_id="sess_old")
+    agent = Agent(
+        await models._live_model("cc-default"),
+        system_prompt="NEW CHARTER",
+        output_type=[str, DeferredToolRequests],
+        deps_type=TriageDeps,
+        capabilities=[cap, *context.capabilities()],
+        tools=[Tool(tools.propose_action, max_retries=10)],
+    )
+    result = await durable.resume(
+        agent,
+        durable.load_messages(rs),
+        rs["tool_call_id"],
+        "approved: executed",
+        agent_id="inbox-triage",
+        session_id="sess_old",
+    )
     assert result.output == "Recorded."
     body = bodies[-1]
     assert_one_leading_system_and_a_valid_sequence(body, "resume")
@@ -268,6 +340,7 @@ async def test_the_production_builder_windows_and_keeps_the_wire_shape(monkeypat
 
         async def big_hits(skill_id, query, limit):
             return [{"doc_key": "ref", "title": "Ref", "content": f"[{query}] " + "y" * PAYLOAD}]
+
         monkeypatch.setattr(repo, "search_skill_chunks", big_hits)
         caps = await skills_mod.capabilities_for("inbox-triage")
         catalog = await skills_mod.catalog_line("inbox-triage")
@@ -279,12 +352,19 @@ async def test_the_production_builder_windows_and_keeps_the_wire_shape(monkeypat
                 return _call(tool, {"query": f"q{n}"}, f"c-skill-{n}")
             return {"role": "assistant", "content": "Nothing else to do."}
 
-        bodies, _store = install_stub_seam(monkeypatch, script, window=1_000_000,
-                                           cfg={"summarize": False, "pressure_warning": False})
-        agent = await agent_mod.build_agent(model=await models._live_model("cc-default"),
-                                            capabilities=caps, skills_catalog=catalog)
-        result = await agent.run("Mail: please comment on TASKS-12.",
-                                 deps=TriageDeps(agent_id="inbox-triage", session_id="sess_prod"))
+        bodies, _store = install_stub_seam(
+            monkeypatch,
+            script,
+            window=1_000_000,
+            cfg={"summarize": False, "pressure_warning": False},
+        )
+        agent = await agent_mod.build_agent(
+            model=await models._live_model("cc-default"), capabilities=caps, skills_catalog=catalog
+        )
+        result = await agent.run(
+            "Mail: please comment on TASKS-12.",
+            deps=TriageDeps(agent_id="inbox-triage", session_id="sess_prod"),
+        )
     finally:
         await _drop_test_skill(skill)
     assert result.output == "Nothing else to do."
@@ -298,9 +378,16 @@ async def test_the_production_builder_windows_and_keeps_the_wire_shape(monkeypat
     cleared = [m for m in last_tools if m["content"].startswith("[cleared from context")]
     assert len(cleared) == calls - 3, "the working window (old tool output cleared) is on the wire"
     from pydantic_ai.messages import ToolReturnPart
-    raw = [p for m in result.all_messages() for p in getattr(m, "parts", [])
-           if isinstance(p, ToolReturnPart) and p.tool_name == tool]
-    assert len(raw) == calls and all(len(str(p.content)) > PAYLOAD for p in raw), "the record is raw"
+
+    raw = [
+        p
+        for m in result.all_messages()
+        for p in getattr(m, "parts", [])
+        if isinstance(p, ToolReturnPart) and p.tool_name == tool
+    ]
+    assert len(raw) == calls and all(len(str(p.content)) > PAYLOAD for p in raw), (
+        "the record is raw"
+    )
 
 
 async def _drop_test_skill(skill_id: str) -> None:
@@ -345,6 +432,7 @@ async def test_the_production_builder_summarises_again_and_loses_nothing(monkeyp
 
         async def big_hits(skill_id, query, limit):
             return [{"doc_key": "ref", "title": "Ref", "content": f"[{query}] " + "y" * PAYLOAD}]
+
         monkeypatch.setattr(repo, "search_skill_chunks", big_hits)
         caps = await skills_mod.capabilities_for("inbox-triage")
         catalog = await skills_mod.catalog_line("inbox-triage")
@@ -356,22 +444,39 @@ async def test_the_production_builder_summarises_again_and_loses_nothing(monkeyp
                 return _call(tool, {"query": f"q{n}"}, f"c-skill-{n}")
             return {"role": "assistant", "content": "Nothing else to do."}
 
-        bodies, _store = install_stub_seam(monkeypatch, script, window=12_000, cfg={
-            "pressure_warning": False, "clear_tool_results": False, "drop_thinking": False,
-            "output_headroom": False, "summarize_threshold": 0.5})
+        bodies, _store = install_stub_seam(
+            monkeypatch,
+            script,
+            window=12_000,
+            cfg={
+                "pressure_warning": False,
+                "clear_tool_results": False,
+                "drop_thinking": False,
+                "output_headroom": False,
+                "summarize_threshold": 0.5,
+            },
+        )
         summarised: set = set()
         made = []
 
         async def fake_summarize(model, region):
-            summarised.update(p.tool_call_id for m in region for p in m.parts
-                              if isinstance(p, (ToolCallPart, ToolReturnPart)))
+            summarised.update(
+                p.tool_call_id
+                for m in region
+                for p in m.parts
+                if isinstance(p, (ToolCallPart, ToolReturnPart))
+            )
             made.append(1)
             return f"SUMMARY-{len(made)}"
+
         monkeypatch.setattr(context, "summarize", fake_summarize)
-        agent = await agent_mod.build_agent(model=await models._live_model("cc-default"),
-                                            capabilities=caps, skills_catalog=catalog)
-        result = await agent.run("Mail: please comment on TASKS-12.",
-                                 deps=TriageDeps(agent_id="inbox-triage", session_id="sess_prodsum"))
+        agent = await agent_mod.build_agent(
+            model=await models._live_model("cc-default"), capabilities=caps, skills_catalog=catalog
+        )
+        result = await agent.run(
+            "Mail: please comment on TASKS-12.",
+            deps=TriageDeps(agent_id="inbox-triage", session_id="sess_prodsum"),
+        )
     finally:
         await _drop_test_skill(skill)
     assert result.output == "Nothing else to do."
@@ -379,18 +484,26 @@ async def test_the_production_builder_summarises_again_and_loses_nothing(monkeyp
     record = result.all_messages()
     for i, body in enumerate(bodies, 1):
         assert_one_leading_system_and_a_valid_sequence(body, i)
-        raw = record[:2 * i - 1]
+        raw = record[: 2 * i - 1]
         on_wire = _wire_ids(body)
-        missing = [p.tool_call_id for m in raw for p in m.parts
-                   if isinstance(p, (ToolCallPart, ToolReturnPart))
-                   and p.tool_call_id not in on_wire | summarised]
+        missing = [
+            p.tool_call_id
+            for m in raw
+            for p in m.parts
+            if isinstance(p, (ToolCallPart, ToolReturnPart))
+            and p.tool_call_id not in on_wire | summarised
+        ]
         assert not missing, f"request {i}: neither summarised nor sent: {missing}"
         newest = {p.tool_call_id for p in raw[-1].parts if isinstance(p, ToolReturnPart)}
         assert newest <= on_wire, f"request {i}: the newest result is not on the wire"
         if i > 1:
             text = json.dumps(body["messages"])
-            loads = [c for m in body["messages"] for c in m.get("tool_calls") or []
-                     if c["function"]["name"] == "load_capability"]
+            loads = [
+                c
+                for m in body["messages"]
+                for c in m.get("tool_calls") or []
+                if c["function"]["name"] == "load_capability"
+            ]
             assert len(loads) == 1, f"request {i}: the load exchange appears {len(loads)} times"
             assert text.count(GUIDANCE) == 1, f"request {i}: the guidance is not sent once"
 
@@ -405,21 +518,35 @@ async def test_a_2_18_session_resumes_through_the_production_resume_factory(monk
     from central_command.db import repo
     from central_command.runtime import agent as agent_mod
 
-    rs = json.loads((Path(__file__).parent / "fixtures" / "pai_2_18_paused_session.json").read_text())
+    rs = json.loads(
+        (Path(__file__).parent / "fixtures" / "pai_2_18_paused_session.json").read_text()
+    )
     skill = "jira-guide"  # the id the fixture's session loaded
     assert await repo.get_skill(skill) is None, "the test owns this skill id"
     try:
         await repo.create_skill(skill, "Jira guide", "How this Jira is used")
-        await repo.add_skill_doc(skill, "guidance", "guidance", "How we use Jira",
-                                 "SKILL: Jira guide. Always quote the issue key.")
+        await repo.add_skill_doc(
+            skill,
+            "guidance",
+            "guidance",
+            "How we use Jira",
+            "SKILL: Jira guide. Always quote the issue key.",
+        )
         await repo.grant_skill("inbox-triage", skill)
         bodies, _store = install_stub_seam(
-            monkeypatch, lambda n: {"role": "assistant", "content": "Recorded."})
+            monkeypatch, lambda n: {"role": "assistant", "content": "Recorded."}
+        )
         agent = await agent_mod.build_agent_for(
-            "inbox-triage", model=await models._live_model("cc-default"))
-        result = await durable.resume(agent, durable.load_messages(rs), rs["tool_call_id"],
-                                      "approved: executed", agent_id="inbox-triage",
-                                      session_id="sess_old_prod")
+            "inbox-triage", model=await models._live_model("cc-default")
+        )
+        result = await durable.resume(
+            agent,
+            durable.load_messages(rs),
+            rs["tool_call_id"],
+            "approved: executed",
+            agent_id="inbox-triage",
+            session_id="sess_old_prod",
+        )
     finally:
         await _drop_test_skill(skill)
     assert result.output == "Recorded."

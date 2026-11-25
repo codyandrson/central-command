@@ -82,7 +82,12 @@ NEEDS_DECISION = "close_or_redate"
 
 # The planning inputs, in the order `missing` names them.
 PLANNING_INPUTS: tuple[str, ...] = (
-    "stakes", "value", "lateness_loss", "deadline_type", "estimate", "due_date",
+    "stakes",
+    "value",
+    "lateness_loss",
+    "deadline_type",
+    "estimate",
+    "due_date",
 )
 
 DEADLINE_TYPES = ("hard", "soft")
@@ -128,8 +133,7 @@ def _deadline_type(raw) -> str | None:
     return value if value in DEADLINE_TYPES else None
 
 
-def _latest_start(due: date, estimate_hours: float, hours_per_day: float,
-                  padding: float) -> date:
+def _latest_start(due: date, estimate_hours: float, hours_per_day: float, padding: float) -> date:
     days = max(1, math.ceil(estimate_hours * padding / hours_per_day))
     return due - timedelta(days=days - 1)
 
@@ -141,22 +145,29 @@ def _row(issue: dict, today: date, hours_per_day: float, padding: float) -> dict
     deadline = _deadline_type(issue.get("deadline_type"))
     estimate = _number(issue.get("estimate_hours"))
     if estimate == 0:
-        estimate = None     # per-hour scores need an estimate above zero
+        estimate = None  # per-hour scores need an estimate above zero
     due = _due(issue.get("due_date"))
 
-    present = {"stakes": stakes is not None, "value": value is not None,
-               "lateness_loss": lateness is not None,
-               "deadline_type": deadline is not None,
-               "estimate": estimate is not None, "due_date": due is not None}
+    present = {
+        "stakes": stakes is not None,
+        "value": value is not None,
+        "lateness_loss": lateness is not None,
+        "deadline_type": deadline is not None,
+        "estimate": estimate is not None,
+        "due_date": due is not None,
+    }
     missing = [name for name in PLANNING_INPUTS if not present[name]]
 
-    latest = (_latest_start(due, estimate, hours_per_day, padding)
-              if due is not None and estimate is not None else None)
+    latest = (
+        _latest_start(due, estimate, hours_per_day, padding)
+        if due is not None and estimate is not None
+        else None
+    )
     past_hard = due is not None and due < today and deadline == "hard"
 
     if past_hard:
         tier, score = "past_hard", None
-    elif (latest is not None and lateness is not None and latest <= today):
+    elif latest is not None and lateness is not None and latest <= today:
         tier, score = "must_start", lateness / estimate
     elif value is not None and estimate is not None:
         tier, score = "standard", value / estimate
@@ -176,7 +187,7 @@ def _row(issue: dict, today: date, hours_per_day: float, padding: float) -> dict
         "lateness_loss": lateness,
         "deadline_type": deadline,
         "tier": tier,
-        "rank": None,           # filled once the tier is sorted
+        "rank": None,  # filled once the tier is sorted
         "score": score,
         "latest_start": latest.isoformat() if latest else None,
         "missing": missing,
@@ -190,8 +201,7 @@ def _due_key(row: dict) -> tuple:
     return (row["due_date"] is None, row["due_date"] or "")
 
 
-def rank(issues: list[dict], today: date, hours_per_day: float,
-         padding: float = 1.0) -> dict:
+def rank(issues: list[dict], today: date, hours_per_day: float, padding: float = 1.0) -> dict:
     """Every issue in exactly one tier, each tier ordered (see the module doc).
 
     `issues` are normalised rows: issue_key, summary, status, priority,
@@ -237,8 +247,10 @@ async def tracker_field_names() -> dict[str, str]:
     `jira.match_field_name`); a field the tracker lacks keeps its configured
     name. One tracker read, cached by the client."""
     declared = (await jira.list_fields())["fields"]
-    return {field: jira.match_field_name(name, declared) or name
-            for field, name in _field_names().items()}
+    return {
+        field: jira.match_field_name(name, declared) or name
+        for field, name in _field_names().items()
+    }
 
 
 def _today() -> date:
@@ -257,8 +269,9 @@ async def _read() -> dict:
     # Each planning input under the name the TRACKER declares for it (the
     # setting's name, matched without regard to case); an input with no such
     # field keeps the configured name, which is what `missing` reports.
-    names = {field: jira.match_field_name(name, declared) or name
-             for field, name in configured.items()}
+    names = {
+        field: jira.match_field_name(name, declared) or name for field, name in configured.items()
+    }
     declared_names = [n for n in names.values() if n in by_name]
     missing_names = [n for n in names.values() if n not in by_name]
     # A declared field of a type the client cannot read in a search row (its
@@ -266,8 +279,7 @@ async def _read() -> dict:
     # issue. Say so instead of letting it look like an empty backlog.
     unreadable = [n for n in declared_names if not by_name[n].get("writable")]
 
-    out = await jira.search_issues(settings.plan_backlog_jql,
-                                   limit=settings.plan_backlog_limit)
+    out = await jira.search_issues(settings.plan_backlog_jql, limit=settings.plan_backlog_limit)
     if out.get("custom_fields_error"):
         # Every row would read unscored. That is not a ranking; raise and let
         # the caller degrade the block with the reason.
@@ -276,13 +288,19 @@ async def _read() -> dict:
     rows = []
     for i in out["issues"]:
         custom = i.get("custom_fields") or {}
-        rows.append({
-            "issue_key": i.get("issue_key"), "summary": i.get("summary"),
-            "status": i.get("status"), "priority": i.get("priority"),
-            "assignee": i.get("assignee"), "due_date": i.get("due_date"),
-            "estimate_hours": i.get("estimate_hours"), "url": i.get("url"),
-            **{field: custom.get(name) for field, name in names.items()},
-        })
+        rows.append(
+            {
+                "issue_key": i.get("issue_key"),
+                "summary": i.get("summary"),
+                "status": i.get("status"),
+                "priority": i.get("priority"),
+                "assignee": i.get("assignee"),
+                "due_date": i.get("due_date"),
+                "estimate_hours": i.get("estimate_hours"),
+                "url": i.get("url"),
+                **{field: custom.get(name) for field, name in names.items()},
+            }
+        )
 
     # Estimate against actual (D4, D6; step 4a): the evening review's recorded
     # outcomes pad the estimate once there are enough of them (a Postgres read;
@@ -295,7 +313,8 @@ async def _read() -> dict:
     return {
         "names": names,
         "planning_fields": {
-            "declared": declared_names, "missing": missing_names,
+            "declared": declared_names,
+            "missing": missing_names,
             **({"unreadable": unreadable} if unreadable else {}),
         },
         "padding": pad,
@@ -312,7 +331,7 @@ async def backlog() -> dict:
     read = await _read()
     ranked = read["ranked"]
     ordered = [r for t in TIERS for r in ranked["tiers"][t]]
-    shown = ordered[:max(0, settings.plan_brief_items)]
+    shown = ordered[: max(0, settings.plan_brief_items)]
     return {
         "available": True,
         "unit": settings.plan_value_unit,
@@ -336,8 +355,11 @@ POINTS_SCALE: tuple[int, ...] = (1, 2, 3, 5, 8)
 # A planning input as `missing` names it -> the `jira.set_planning_fields`
 # argument that writes it.
 SET_ARGUMENT: dict[str, str] = {
-    "stakes": "stakes", "value": "value", "lateness_loss": "lateness_loss",
-    "deadline_type": "deadline_type", "estimate": "estimate_hours",
+    "stakes": "stakes",
+    "value": "value",
+    "lateness_loss": "lateness_loss",
+    "deadline_type": "deadline_type",
+    "estimate": "estimate_hours",
     "due_date": "due_date",
 }
 
@@ -354,12 +376,23 @@ def gaps(ranked: dict, limit: int) -> dict:
     decision (close it, or set a new due date), and scoring one that may be
     closed spends approvals on it and offers a way round the decision. Once the
     due date moves, or the issue closes, it is read again as any other."""
-    rows = [r for t in TIERS if t != "past_hard"
-            for r in ranked["tiers"][t] if r["missing"]]
+    rows = [r for t in TIERS if t != "past_hard" for r in ranked["tiers"][t] if r["missing"]]
     rows.sort(key=lambda r: (*_due_key(r), str(r["issue_key"] or "")))
-    shown = rows[:max(0, int(limit))]
-    keep = ("issue_key", "summary", "status", "tier", "due_date", "estimate_hours",
-            "stakes", "value", "lateness_loss", "deadline_type", "missing", "url")
+    shown = rows[: max(0, int(limit))]
+    keep = (
+        "issue_key",
+        "summary",
+        "status",
+        "tier",
+        "due_date",
+        "estimate_hours",
+        "stakes",
+        "value",
+        "lateness_loss",
+        "deadline_type",
+        "missing",
+        "url",
+    )
     return {
         "issues": [{k: r[k] for k in keep if k in r} for r in shown],
         "needing": len(rows),
@@ -379,8 +412,7 @@ async def planning_gaps() -> dict:
     read = await _read()
     found = gaps(read["ranked"], settings.plan_enrich_per_run)
     names = read["names"]
-    undeclared = [i for i in _CUSTOM_INPUTS
-                  if names[i] in read["planning_fields"]["missing"]]
+    undeclared = [i for i in _CUSTOM_INPUTS if names[i] in read["planning_fields"]["missing"]]
     unit = settings.plan_value_unit
     return {
         "available": True,

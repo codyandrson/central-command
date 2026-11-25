@@ -32,12 +32,19 @@ async def _seed_rejection(agent_id: str) -> None:
     await repo.upsert_agent(agent_id, agent_id, "demo", "c")
     await repo.save_paused_session(sid, agent_id, {})
     await repo.save_proposal(
-        proposal_id=pid, session_id=sid, agent_id=agent_id,
-        intent="set a date", actions=[], evidence=[], expected_effect="",
-        idempotency_key=f"{pid}:0", status="REJECTED",
+        proposal_id=pid,
+        session_id=sid,
+        agent_id=agent_id,
+        intent="set a date",
+        actions=[],
+        evidence=[],
+        expected_effect="",
+        idempotency_key=f"{pid}:0",
+        status="REJECTED",
     )
     await events.emit(
-        "proposal.decided", ref_id=pid,
+        "proposal.decided",
+        ref_id=pid,
         payload={"verdict": "rejected", "feedback": "never propose past dates"},
         actor="operator",
     )
@@ -64,8 +71,10 @@ async def _seed_done_task(agent_id: str, outcome: str) -> str:
     await repo.create_task(task_id, "Register the new alias", "do the thing", agent_id)
     await repo.resolve_task(task_id, "DONE", outcome=outcome)
     await events.emit(
-        "task.completed", ref_id=task_id,
-        payload={"outcome": outcome}, actor="system",
+        "task.completed",
+        ref_id=task_id,
+        payload={"outcome": outcome},
+        actor="system",
     )
     return task_id
 
@@ -103,8 +112,7 @@ async def test_a_coach_run_on_a_task_outcome_verifies_its_citation():
     signals = await gather_coaching_signals(agent)
     assert [s["kind"] for s in signals] == ["task-outcome"]
 
-    out = await run_coach(agent, model=make_coach_model(),
-                          signal_ids=[signals[0]["event_id"]])
+    out = await run_coach(agent, model=make_coach_model(), signal_ids=[signals[0]["event_id"]])
     row = await repo.load_proposal(out["proposal_id"])
     cited = [e for e in row["evidence"] if e.get("citation")]
     assert cited, row["evidence"]
@@ -197,7 +205,8 @@ async def test_a_coached_proposal_announces_itself_on_the_log():
     out = await run_coach(agent, model=make_coach_model())
 
     created = [
-        e for e in await repo.list_events_of_kinds(["proposal.created"])
+        e
+        for e in await repo.list_events_of_kinds(["proposal.created"])
         if e["ref_id"] == out["proposal_id"]
     ]
     assert len(created) == 1, "exactly once — two emitters would double-log it"
@@ -256,21 +265,21 @@ async def test_only_selected_signals_feed_the_session():
     await _seed_rejection("inbox-triage")
     from central_command.runtime.run import gather_coaching_signals
 
-    signals = [s for s in await gather_coaching_signals("inbox-triage")
-               if s["kind"] == "rejection"]
+    signals = [s for s in await gather_coaching_signals("inbox-triage") if s["kind"] == "rejection"]
     assert len(signals) >= 2
     chosen = signals[0]["event_id"]
 
-    out = await run_coach("inbox-triage", model=make_coach_model(),
-                          signal_ids=[chosen])
+    out = await run_coach("inbox-triage", model=make_coach_model(), signal_ids=[chosen])
     assert out["deferred"] is True
     assert out["signals"] == 1  # exactly the curated input, nothing else
 
 
 async def test_note_only_coaching_cites_the_request_event():
     out = await run_coach(
-        "inbox-triage", model=make_coach_model(),
-        signal_ids=[], note="always ask the expert before proposing links",
+        "inbox-triage",
+        model=make_coach_model(),
+        signal_ids=[],
+        note="always ask the expert before proposing links",
         note_event_id=424242,
     )
     assert out["deferred"] is True and out["signals"] == 1
@@ -280,8 +289,7 @@ async def test_note_only_coaching_cites_the_request_event():
 
 async def test_empty_selection_and_no_note_refuses():
     await _seed_rejection("inbox-triage")
-    out = await run_coach("inbox-triage", model=make_coach_model(),
-                          signal_ids=[], note=None)
+    out = await run_coach("inbox-triage", model=make_coach_model(), signal_ids=[], note=None)
     assert out["deferred"] is False and out["signals"] == 0
 
 
@@ -289,8 +297,11 @@ async def test_charter_edit_review_carries_a_diff():
     from central_command.api import routes
 
     out = await run_coach(
-        "inbox-triage", model=make_coach_model(),
-        signal_ids=[], note="review as diff please", note_event_id=1,
+        "inbox-triage",
+        model=make_coach_model(),
+        signal_ids=[],
+        note="review as diff please",
+        note_event_id=1,
     )
     row = await routes.get_proposal(out["proposal_id"])
     action = row["actions"][0]

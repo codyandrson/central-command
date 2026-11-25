@@ -62,8 +62,10 @@ STACK = ROOT / "deploy" / "single" / "phases" / "stack.sh"
 
 # The ids the files ship, by the pattern the script reads them with.
 _ID = re.compile(r'^  "id": "([A-Za-z0-9]*)",$', re.MULTILINE)
-SHIPPED = {p.name: _ID.search(p.read_text(encoding="utf-8")).group(1)
-           for p in sorted(WORKFLOWS.glob("*.json"))}
+SHIPPED = {
+    p.name: _ID.search(p.read_text(encoding="utf-8")).group(1)
+    for p in sorted(WORKFLOWS.glob("*.json"))
+}
 CALENDAR = ("cc-calendar-facade.json", "lib-google-calendar.json")
 
 # The stub `curl` must beat Git's /mingw64/bin/curl, which Git Bash's launcher
@@ -78,9 +80,12 @@ CALENDAR = ("cc-calendar-facade.json", "lib-google-calendar.json")
 # names unless told otherwise), missing-cred (the script's unresolved-credential
 # SELECT answers this name), import-fails, wf-missing (one shipped workflow is
 # not in workflow_entity).
-_PODMAN = r'''#!/usr/bin/env bash
+_PODMAN = (
+    r"""#!/usr/bin/env bash
 echo "podman $*" >> "$STUB/log"
-''' + CRED_ANSWER + r'''
+"""
+    + CRED_ANSWER
+    + r"""
 ctr="$STUB/ctr"
 case "$1" in
   # The stack phase asks whether the RETIRED Graphiti server's container is
@@ -112,15 +117,23 @@ case "$1" in
              exit 0 ;;
 esac
 exit 0
-'''
+"""
+)
 
 # curl: the script's webhook poll. 500 is what the façade answers without a
 # token (the WORKFLOW refused it) — registered, so the poll ends at once.
 _CURL = '#!/usr/bin/env bash\necho "curl $*" >> "$STUB/log"\nprintf 500\n'
 
 
-def _stack(repo: Path, *, n8n: str = "1", calendar: str = "", token: str = "test-facade-token",
-           creds: tuple[str, ...] = ("Gmail account", "Google Calendar account"), **flags: str):
+def _stack(
+    repo: Path,
+    *,
+    n8n: str = "1",
+    calendar: str = "",
+    token: str = "test-facade-token",
+    creds: tuple[str, ...] = ("Gmail account", "Google Calendar account"),
+    **flags: str,
+):
     stub = repo.parent / "stub"
     stub.mkdir(exist_ok=True)
     bindir = repo.parent / "bin"
@@ -131,9 +144,17 @@ def _stack(repo: Path, *, n8n: str = "1", calendar: str = "", token: str = "test
     for name, value in flags.items():
         write_lf(stub / name.replace("_", "-"), value + "\n")
     _append_stubs(repo, _STACK_STUBS)
-    _set(repo / ".env", {"CC_ENABLE_N8N": n8n, "CC_N8N_PORT": "5679", "CC_EMBED_DIM": "1024",
-                         "CC_POD_PREFIX": "cc-", "CC_EMAIL_FACADE_TOKEN": token,
-                         "CC_CALENDAR_FACADE_TOKEN": calendar})
+    _set(
+        repo / ".env",
+        {
+            "CC_ENABLE_N8N": n8n,
+            "CC_N8N_PORT": "5679",
+            "CC_EMBED_DIM": "1024",
+            "CC_POD_PREFIX": "cc-",
+            "CC_EMAIL_FACADE_TOKEN": token,
+            "CC_CALENDAR_FACADE_TOKEN": calendar,
+        },
+    )
     phases_before = ("check", "machine", "fetch", "llm")
     _write_ledger(repo, [(f"{r[0]}/{r[1]}", "done") for r in _rows() if r[0] in phases_before])
     stubbed = with_stub_path({"PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}"}, bindir)
@@ -148,9 +169,14 @@ def _count(stub: Path, name: str) -> int:
 
 
 def _probe_selects(log: str) -> list[str]:
-    return [l for l in log.splitlines()
-            if l.startswith("podman exec cc-n8n-db psql") and "from workflow_entity" in l
-            and "update " not in l and "string_agg" not in l]
+    return [
+        l
+        for l in log.splitlines()
+        if l.startswith("podman exec cc-n8n-db psql")
+        and "from workflow_entity" in l
+        and "update " not in l
+        and "string_agg" not in l
+    ]
 
 
 # ── the row as declared ─────────────────────────────────────────────────────
@@ -162,7 +188,12 @@ def test_the_row_follows_the_credential_gate_and_reads_the_workflow_tree():
     assert wf[2] == "run" and wf[6] == "p_n8n_workflows", wf
     assert wf[3] == "stack/n8n-credential", wf
     reads = wf[4].split(",")
-    for key in ("CC_ENABLE_N8N", "CC_EMAIL_FACADE_TOKEN", "CC_CALENDAR_FACADE_TOKEN", "@deploy/n8n"):
+    for key in (
+        "CC_ENABLE_N8N",
+        "CC_EMAIL_FACADE_TOKEN",
+        "CC_CALENDAR_FACADE_TOKEN",
+        "@deploy/n8n",
+    ):
         assert key in reads, (key, reads)
     assert wf[5] == "-", "the script writes nothing in .env"
     order = [(r[0], r[1]) for r in _rows()]
@@ -178,7 +209,9 @@ def test_the_probe_and_the_script_agree_on_the_optional_calendar_pair():
     m = re.search(r"^\s*([\w.|-]+\.json)\)\s*\[\[ -n \"\$CAL_TOKEN\" \]\]", script, re.MULTILINE)
     assert m, "apply-workflows.sh's calendar `case` arm moved — re-point this test"
     in_script = set(m.group(1).split("|"))
-    m = re.search(r'^N8N_CALENDAR_WORKFLOWS="([^"]+)"', STACK.read_text(encoding="utf-8"), re.MULTILINE)
+    m = re.search(
+        r'^N8N_CALENDAR_WORKFLOWS="([^"]+)"', STACK.read_text(encoding="utf-8"), re.MULTILINE
+    )
     assert m, "N8N_CALENDAR_WORKFLOWS is gone from phases/stack.sh"
     assert set(m.group(1).split()) == in_script == set(CALENDAR)
     assert all((WORKFLOWS / f).is_file() for f in CALENDAR)
@@ -249,7 +282,9 @@ def test_the_scripts_own_useraction_reaches_the_operator_as_one(tree: Path):
     BACKSTOP: the n8n-credential gate asks for every name the import needs
     first, so this fires only when n8n disagrees with that gate (a credential
     deleted in between, a type the import would not bind)."""
-    r, _, stub = _stack(tree, calendar="test-calendar-token", missing_cred="Google Calendar account")
+    r, _, stub = _stack(
+        tree, calendar="test-calendar-token", missing_cred="Google Calendar account"
+    )
     assert r.returncode == 3, r.stdout + r.stderr
     ua = _lines(r.stdout, "USERACTION n8n-workflows:")
     assert len(ua) == 1, r.stdout
@@ -315,10 +350,16 @@ def _bash_required(calendar: str) -> dict[str, str]:
     from tests.test_single_driver_ledger import _bash_exe
 
     lib = (ROOT / "deploy" / "single" / "phases" / "stack.sh").as_posix()
-    script = (f'REPO_ROOT="{ROOT.as_posix()}"; p_flag() {{ local v="${{!1:-}}"; printf "%s" "${{v:-$2}}"; }}; '
-              f'. "{lib}"; n8n_required_credentials')
-    r = subprocess.run([_bash_exe(), "-c", script], capture_output=True, text=True,
-                       env={**os.environ, "CC_CALENDAR_FACADE_TOKEN": calendar})
+    script = (
+        f'REPO_ROOT="{ROOT.as_posix()}"; p_flag() {{ local v="${{!1:-}}"; printf "%s" "${{v:-$2}}"; }}; '
+        f'. "{lib}"; n8n_required_credentials'
+    )
+    r = subprocess.run(
+        [_bash_exe(), "-c", script],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "CC_CALENDAR_FACADE_TOKEN": calendar},
+    )
     assert r.returncode == 0, r.stderr
     return dict(l.split("\t") for l in r.stdout.splitlines() if l)
 

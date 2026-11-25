@@ -94,9 +94,17 @@ def test_no_warning_when_verification_is_on(blank_trust, caplog):
     assert not [r for r in caplog.records if "CC_TLS_INSECURE" in r.getMessage()]
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("", False), ("  ", False), ("0", False), ("1", True), ("true", True), ("yes", True),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("", False),
+        ("  ", False),
+        ("0", False),
+        ("1", True),
+        ("true", True),
+        ("yes", True),
+    ],
+)
 def test_an_empty_or_odd_env_value_boots_and_parses(monkeypatch, raw, expected):
     """A plain bool field fails validation on `CC_TLS_INSECURE=` and would stop
     the boot; the before-validator reads blank as false."""

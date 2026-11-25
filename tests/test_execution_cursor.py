@@ -59,11 +59,14 @@ async def settle_leftovers():
     """The startup landing is GLOBAL: land what other tests left EXECUTING or
     parked first, and settle this file's own afterwards (the pattern of
     tests/test_restart_landing.py)."""
+
     async def settle():
         conn = await repo._conn()
         try:
-            await conn.execute("update proposal set status = 'FAILED', retry_state = null "
-                               "where status in ('EXECUTING', 'RETRY_PENDING')")
+            await conn.execute(
+                "update proposal set status = 'FAILED', retry_state = null "
+                "where status in ('EXECUTING', 'RETRY_PENDING')"
+            )
         finally:
             await conn.close()
 
@@ -73,18 +76,26 @@ async def settle_leftovers():
 
 
 def _comment(n: int) -> dict:
-    return {"capability": "jira.add_comment",
-            "arguments": {"issue_key": f"DEMO-{n}", "body": f"note {n}"},
-            "target_ref": {"system": "jira", "id": f"DEMO-{n}", "read_version": "etag:1"},
-            "reversibility": "reversible"}
+    return {
+        "capability": "jira.add_comment",
+        "arguments": {"issue_key": f"DEMO-{n}", "body": f"note {n}"},
+        "target_ref": {"system": "jira", "id": f"DEMO-{n}", "read_version": "etag:1"},
+        "reversibility": "reversible",
+    }
 
 
 def _three() -> dict:
     return {
         "intent": "Comment on three issues",
         "actions": [_comment(1), _comment(2), _comment(3)],
-        "evidence": [{"kind": "operator", "source_ref": "operator:task",
-                      "locator": "test task", "claim": "Operator tasked three comments."}],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "test task",
+                "claim": "Operator tasked three comments.",
+            }
+        ],
         "expected_effect": "DEMO-1, DEMO-2 and DEMO-3 each carry a note",
         "confidence": {"level": "high", "rationale": "The test states it."},
     }
@@ -125,8 +136,7 @@ def _approve(row: dict, drafter: _Drafter):
 
 
 async def _event(ref_id: str, kind: str) -> dict:
-    return [e for e in await repo.list_events(ref_id=ref_id, limit=1000)
-            if e["kind"] == kind][-1]
+    return [e for e in await repo.list_events(ref_id=ref_id, limit=1000) if e["kind"] == kind][-1]
 
 
 def _assert_held_at(state: dict, index: int) -> None:
@@ -154,8 +164,7 @@ async def _retry_now_converges(row: dict, drafter: _Drafter) -> dict:
     assert state["next_action_index"] == 3
     assert "in_flight_index" not in state
     executed = await _event(row["id"], "proposal.executed")
-    assert executed["payload"]["result_text"] == "; ".join(
-        [_result(1), _result(2), _result(3)])
+    assert executed["payload"]["result_text"] == "; ".join([_result(1), _result(2), _result(3)])
     return final
 
 
@@ -333,8 +342,7 @@ async def test_a_transient_failure_parks_the_cursor_once_and_the_sweep_runs_the_
     assert final["retry_state"]["completed_results"] == [_result(1), _result(2), _result(3)]
     assert final["retry_state"]["attempts"] == 1, "the park's own keys are kept"
     executed = await _event(row["id"], "proposal.executed")
-    assert executed["payload"]["result_text"] == "; ".join(
-        [_result(1), _result(2), _result(3)])
+    assert executed["payload"]["result_text"] == "; ".join([_result(1), _result(2), _result(3)])
 
 
 async def test_a_retry_that_stops_lands_from_the_cursor_instead_of_staying_executing(
@@ -419,8 +427,7 @@ async def test_a_row_withdrawn_mid_execution_is_not_written_or_moved(monkeypatch
     async def withdraw(args):
         conn = await repo._conn()
         try:
-            await conn.execute("update proposal set status = 'WITHDRAWN' where id = $1",
-                               row["id"])
+            await conn.execute("update proposal set status = 'WITHDRAWN' where id = $1", row["id"])
         finally:
             await conn.close()
         seen["state"] = (await repo.load_proposal(row["id"]))["retry_state"]

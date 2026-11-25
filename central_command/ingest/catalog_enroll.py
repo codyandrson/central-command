@@ -45,13 +45,18 @@ def _norm(text: str) -> str:
 
 def _diff(older: dict, newer: dict, older_no: int, newer_no: int) -> tuple[str, int]:
     """(unified diff text, changed-line count)."""
-    lines = list(difflib.unified_diff(
-        (older["extracted_text"] or "").splitlines(),
-        (newer["extracted_text"] or "").splitlines(),
-        fromfile=f"v{older_no}", tofile=f"v{newer_no}", lineterm="",
-    ))
+    lines = list(
+        difflib.unified_diff(
+            (older["extracted_text"] or "").splitlines(),
+            (newer["extracted_text"] or "").splitlines(),
+            fromfile=f"v{older_no}",
+            tofile=f"v{newer_no}",
+            lineterm="",
+        )
+    )
     changed = sum(
-        1 for line in lines
+        1
+        for line in lines
         if (line.startswith("+") and not line.startswith("+++"))
         or (line.startswith("-") and not line.startswith("---"))
     )
@@ -136,24 +141,19 @@ async def enroll_pending(source: dict, limit: int | None = None) -> dict:
         if meta.get("extraction", "ok") != "ok":
             # Stamped, not evented: a source full of scans would otherwise
             # write one event per file for a thing that did nothing.
-            await repo.update_version_meta(
-                row["id"], {"skipped_enrollment": "no extractable text"}
-            )
+            await repo.update_version_meta(row["id"], {"skipped_enrollment": "no extractable text"})
             skipped += 1
             continue
 
         older = await repo.catalog_sibling_version(
             row["document_id"], row["version_no"], newer=False
         )
-        if older is not None and _norm(older["extracted_text"]) == _norm(
-            row["extracted_text"]
-        ):
+        if older is not None and _norm(older["extracted_text"]) == _norm(row["extracted_text"]):
             await repo.update_version_meta(row["id"], {"autofolded": True})
             await events.emit(
                 "catalog.version.autofolded",
                 ref_id=row["id"],
-                payload={"document_id": row["document_id"],
-                         "version_no": row["version_no"]},
+                payload={"document_id": row["document_id"], "version_no": row["version_no"]},
                 actor="watcher",
             )
             autofolded += 1
@@ -178,7 +178,7 @@ async def enroll_pending(source: dict, limit: int | None = None) -> dict:
                     "neighbor_version_id": newer["id"] if newer else None,
                 },
             },
-            thread_id=row["document_id"],   # the lineage IS the thread (Decision 5)
+            thread_id=row["document_id"],  # the lineage IS the thread (Decision 5)
             # `backlog`, never `live`: the claim query orders live-feed-first,
             # so email always outranks catalog work. Deliberate.
             feed="backlog",
@@ -197,10 +197,12 @@ async def enroll_pending(source: dict, limit: int | None = None) -> dict:
     }
     if enrolled:
         await events.emit(
-            "catalog.enrolled", ref_id=source["id"],
-            payload={"source_id": source["id"], **{
-                k: summary[k] for k in ("enrolled", "autofolded", "skipped")
-            }},
+            "catalog.enrolled",
+            ref_id=source["id"],
+            payload={
+                "source_id": source["id"],
+                **{k: summary[k] for k in ("enrolled", "autofolded", "skipped")},
+            },
             actor="watcher",
         )
     return summary

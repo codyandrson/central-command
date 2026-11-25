@@ -42,9 +42,14 @@ def seen(monkeypatch):
     return texts
 
 
-@pytest.mark.parametrize("name,summary", [
-    ("Jane Doe", "Works at Example Co"), ("Jane Doe", ""), ("  Padded  ", "  two\nlines  "),
-])
+@pytest.mark.parametrize(
+    "name,summary",
+    [
+        ("Jane Doe", "Works at Example Co"),
+        ("Jane Doe", ""),
+        ("  Padded  ", "  two\nlines  "),
+    ],
+)
 async def test_create_node_embeds_the_entity_recipe(seen, name, summary):
     await neo4j_writer.create_node(name, [], summary, "g")
     assert seen == [embedding_text("entity", name, summary)]
@@ -64,8 +69,10 @@ async def test_update_node_embeds_the_entity_recipe_over_the_new_text(seen):
 async def test_edges_embed_the_fact_verbatim(seen):
     await neo4j_writer.create_edge("a", "b", "WORKS_AT", "Jane works there")
     await neo4j_writer.update_edge("u-1", fact="Jane no longer works there")
-    assert seen == [embedding_text("edge", fact="Jane works there"),
-                    embedding_text("edge", fact="Jane no longer works there")]
+    assert seen == [
+        embedding_text("edge", fact="Jane works there"),
+        embedding_text("edge", fact="Jane no longer works there"),
+    ]
     assert seen == ["Jane works there", "Jane no longer works there"]
 
 
@@ -76,10 +83,20 @@ def test_the_writer_holds_no_inline_recipe():
     import inspect
 
     tree = ast.parse(inspect.getsource(neo4j_writer))
-    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
-             and isinstance(n.func, ast.Name) and n.func.id == "embed" and n.args]
+    calls = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "embed"
+        and n.args
+    ]
     # `embed` itself is called by the dispatcher-facing helpers with a caller's text;
     # the four hand-made write sites are the ones that name a recipe.
-    recipes = [c for c in calls if isinstance(c.args[0], ast.Call)
-               and getattr(c.args[0].func, "id", None) == "embedding_text"]
+    recipes = [
+        c
+        for c in calls
+        if isinstance(c.args[0], ast.Call)
+        and getattr(c.args[0].func, "id", None) == "embedding_text"
+    ]
     assert len(recipes) == 4, [ast.unparse(c) for c in calls]

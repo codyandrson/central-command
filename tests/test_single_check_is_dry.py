@@ -110,9 +110,18 @@ def _reachable() -> set[str]:
 def test_check_reaches_the_phases_it_composes():
     """If this shrinks, check stopped composing and started copying."""
     reach = _reachable()
-    for fn in ("validate_answers", "validate_compose_config", "preflight_host",
-               "machine_report", "phase_machine", "resolve_python_deps",
-               "check_images", "check_indexes", "check_llm", "check_models"):
+    for fn in (
+        "validate_answers",
+        "validate_compose_config",
+        "preflight_host",
+        "machine_report",
+        "phase_machine",
+        "resolve_python_deps",
+        "check_images",
+        "check_indexes",
+        "check_llm",
+        "check_models",
+    ):
         assert fn in reach, f"phase_check no longer reaches {fn}"
 
 
@@ -149,9 +158,17 @@ def test_check_list_needs_no_answer_file():
     """It is documentation: a machine with no `.env` must still be able to
     print it (and printing it must not create a state directory)."""
     rows = _list_rows()
-    assert [s for s, _ in rows] == ["answers", "host", "machine", "images",
-                                    "indexes", "llm", "integrations", "compose",
-                                    "models"], rows
+    assert [s for s, _ in rows] == [
+        "answers",
+        "host",
+        "machine",
+        "images",
+        "indexes",
+        "llm",
+        "integrations",
+        "compose",
+        "models",
+    ], rows
 
 
 @drives_installer
@@ -172,30 +189,38 @@ def test_check_list_matches_the_table_in_the_readme():
 # 200 seconds later. index_reachable asks with HEAD; a server that refuses
 # HEAD (curl 22) still gets the GET; a connection that fails is asked once.
 
-@pytest.mark.parametrize("head_rc,get_rc,want_rc,want_calls", [
-    (0, 0, 0, ["HEAD"]),            # the normal case: no body is downloaded
-    (22, 0, 0, ["HEAD", "GET"]),    # a mirror that refuses HEAD still answers
-    (22, 22, 22, ["HEAD", "GET"]),
-    (28, 0, 28, ["HEAD"]),          # a timeout is not retried as a GET
-    (7, 0, 7, ["HEAD"]),
-])
+
+@pytest.mark.parametrize(
+    "head_rc,get_rc,want_rc,want_calls",
+    [
+        (0, 0, 0, ["HEAD"]),  # the normal case: no body is downloaded
+        (22, 0, 0, ["HEAD", "GET"]),  # a mirror that refuses HEAD still answers
+        (22, 22, 22, ["HEAD", "GET"]),
+        (28, 0, 28, ["HEAD"]),  # a timeout is not retried as a GET
+        (7, 0, 7, ["HEAD"]),
+    ],
+)
 def test_an_index_is_asked_with_head_and_a_refused_head_falls_back_to_get(
-        head_rc, get_rc, want_rc, want_calls):
+    head_rc, get_rc, want_rc, want_calls
+):
     fns = installer_functions()
-    script = "\n".join([
-        "calls=()",
-        "curl() {",
-        '  local a m=GET; for a in "$@"; do [[ "$a" == -I ]] && m=HEAD; done',
-        '  calls+=("$m")',
-        f'  [[ "$m" == HEAD ]] && return {head_rc}',
-        f"  return {get_rc}",
-        "}",
-        "index_reachable() {" + fns["index_reachable"] + "\n}",
-        'index_reachable https://pypi.example.com/simple/; rc=$?',
-        'echo "rc=$rc calls=${calls[*]}"',
-    ])
-    r = subprocess.run([BASH, "-c", script], capture_output=True, text=True, timeout=60,
-                       check=False)
+    script = "\n".join(
+        [
+            "calls=()",
+            "curl() {",
+            '  local a m=GET; for a in "$@"; do [[ "$a" == -I ]] && m=HEAD; done',
+            '  calls+=("$m")',
+            f'  [[ "$m" == HEAD ]] && return {head_rc}',
+            f"  return {get_rc}",
+            "}",
+            "index_reachable() {" + fns["index_reachable"] + "\n}",
+            "index_reachable https://pypi.example.com/simple/; rc=$?",
+            'echo "rc=$rc calls=${calls[*]}"',
+        ]
+    )
+    r = subprocess.run(
+        [BASH, "-c", script], capture_output=True, text=True, timeout=60, check=False
+    )
     assert f"rc={want_rc} calls={' '.join(want_calls)}" in r.stdout, (r.stdout, r.stderr)
 
 
@@ -220,16 +245,22 @@ def test_the_index_probes_ask_for_lockfile_projects_and_discover_agrees():
     lock = (ROOT / "requirements.lock").read_text(encoding="utf-8")
     norm = re.sub(r"[-_.]+", "-", pypi).lower()
     assert re.search(rf"^{re.escape(norm)}==", lock, re.MULTILINE | re.IGNORECASE), (
-        f"{pypi} is no longer in requirements.lock — pick another small project the install resolves")
+        f"{pypi} is no longer in requirements.lock — pick another small project the install resolves"
+    )
     pkgs = json.loads((ROOT / "web" / "package-lock.json").read_text(encoding="utf-8"))["packages"]
     assert f"node_modules/{npm}" in pkgs, (
-        f"{npm} is no longer in web/package-lock.json — pick another small package the cockpit installs")
+        f"{npm} is no longer in web/package-lock.json — pick another small package the cockpit installs"
+    )
     body = check.read_text(encoding="utf-8")
     assert '"${pypi%/}/${INDEX_PROBE_PYPI_PROJECT}/"' in body
     assert '"${npm%/}/${INDEX_PROBE_NPM_PACKAGE}"' in body
-    assert "/pip/" not in body and '%/}/npm"' not in body, "an index probe went back to a package the lockfiles lack"
+    assert "/pip/" not in body and '%/}/npm"' not in body, (
+        "an index probe went back to a package the lockfiles lack"
+    )
     discover = ROOT / "deploy" / "discover.sh"
     assert _shell_constant(discover, "PYPI_PROBE_PROJECT") == pypi
     text = discover.read_text(encoding="utf-8")
-    assert '"https://pypi.org/simple/${PYPI_PROBE_PROJECT}/"' in text, "discover's pypi row probes the index ROOT again"
+    assert '"https://pypi.org/simple/${PYPI_PROBE_PROJECT}/"' in text, (
+        "discover's pypi row probes the index ROOT again"
+    )
     assert 'DISCO_MIRROR_PYPI="${CC_PYPI_INDEX_URL%/}/${PYPI_PROBE_PROJECT}/"' in text

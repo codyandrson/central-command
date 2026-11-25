@@ -126,9 +126,7 @@ async def test_colliding_reference_filenames_are_rejected_and_nothing_is_written
 
 @pytestmark_db
 @pytest.mark.asyncio
-async def test_reference_colliding_with_the_guidance_key_is_rejected(
-    clean_skills, tmp_path
-):
+async def test_reference_colliding_with_the_guidance_key_is_rejected(clean_skills, tmp_path):
     """A reference file literally named guidance.md slugs to the same doc_key
     ("guidance") the SKILL.md body is stored under — it must be caught as a
     collision against SKILL.md itself, not just against other references."""
@@ -228,8 +226,9 @@ async def test_a_derived_id_that_already_exists_is_refused(clean_skills, tmp_pat
 
     # Naming the target explicitly is still allowed — that is the refresh path.
     await import_skill_folder(second, skill_id="cc-test-thing")
-    guidance = next(d for d in await repo.list_skill_docs("cc-test-thing")
-                if d["doc_key"] == "guidance")
+    guidance = next(
+        d for d in await repo.list_skill_docs("cc-test-thing") if d["doc_key"] == "guidance"
+    )
     assert "vendor two" in guidance["content"]
 
 
@@ -300,21 +299,20 @@ async def test_an_import_from_under_the_checkout_stamps_every_doc(
     assert result["bundled_release"] == "9.9.9"
     docs = await repo.list_skill_docs("cc-test-litellm")
     assert len(docs) == 5
-    paths = {
-        d["doc_key"]: d["bundled_path"] for d in docs
-    }
+    paths = {d["doc_key"]: d["bundled_path"] for d in docs}
     assert paths["guidance"] == "skills/litellm/SKILL.md"
     assert paths["routing-doctrine"] == "skills/litellm/references/routing-doctrine.md"
     assert all(d["bundled_release"] == "9.9.9" for d in docs)
     # The hash is over the STORED text — the rendered text, not the file.
-    assert all(
-        d["bundled_hash"] == hashlib.sha256(d["content"].encode()).hexdigest() for d in docs
-    )
+    assert all(d["bundled_hash"] == hashlib.sha256(d["content"].encode()).hexdigest() for d in docs)
     marked = next(d for d in docs if d["doc_key"] == "models-and-model-info")
     assert "DEMO" in marked["content"]
-    assert marked["bundled_hash"] != hashlib.sha256(
-        (root / "skills/litellm/references/models-and-model-info.md").read_bytes()
-    ).hexdigest()
+    assert (
+        marked["bundled_hash"]
+        != hashlib.sha256(
+            (root / "skills/litellm/references/models-and-model-info.md").read_bytes()
+        ).hexdigest()
+    )
     # One text row per distinct text, holding exactly the stored content.
     hashes = sorted({d["bundled_hash"] for d in docs})
     rows = await _text_rows(hashes)
@@ -326,9 +324,7 @@ async def test_an_import_from_under_the_checkout_stamps_every_doc(
 
 @pytestmark_db
 @pytest.mark.asyncio
-async def test_two_docs_with_the_same_text_share_one_text_row(
-    clean_skills, tmp_path, monkeypatch
-):
+async def test_two_docs_with_the_same_text_share_one_text_row(clean_skills, tmp_path, monkeypatch):
     root = _checkout(tmp_path, monkeypatch)
     folder = root / "skills" / "twins"
     (folder / "references").mkdir(parents=True)
@@ -341,7 +337,7 @@ async def test_two_docs_with_the_same_text_share_one_text_row(
     docs = await repo.list_skill_docs("cc-test-twins")
     assert len(docs) == 3
     hashes = {d["bundled_hash"] for d in docs}
-    assert len(hashes) == 2          # frontmatter is stripped before hashing
+    assert len(hashes) == 2  # frontmatter is stripped before hashing
     assert len(await _text_rows(sorted(hashes))) == 2
 
 
@@ -405,7 +401,10 @@ async def test_a_hand_post_after_an_import_carries_no_provenance(
 
     v2, v1 = await repo.skill_doc_history("cc-test-litellm", "guidance")
     assert (v2["version"], v2["bundled_release"], v2["bundled_path"], v2["bundled_hash"]) == (
-        2, None, None, None,
+        2,
+        None,
+        None,
+        None,
     )
     assert v1["bundled_release"] == "9.9.9" and v1["bundled_hash"] is not None
 
@@ -476,7 +475,10 @@ def test_normalise_refuses_a_marker_in_frontmatter_and_an_unknown_kind():
 
     with pytest.raises(ValueError, match="mem:2"):
         normalise_doc_text(
-            "guidance", "---\nname: <!-- overlay: model_server_layout -->\n---\nx", "mem", overlay={}
+            "guidance",
+            "---\nname: <!-- overlay: model_server_layout -->\n---\nx",
+            "mem",
+            overlay={},
         )
     with pytest.raises(ValueError, match="unknown document kind"):
         normalise_doc_text("tome", "x", "mem", overlay={})

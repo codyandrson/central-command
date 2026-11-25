@@ -88,8 +88,14 @@ class Thrown(Exception):
 def _js(code: str, *, json_=None, nodes=None, input_=None, response=None):
     script = _HARNESS.replace("__CODE__", code)
     ctx = {"json": json_, "nodes": nodes or {}, "input": input_ or [], "response": response}
-    done = subprocess.run([NODE, "-e", script], input=json.dumps(ctx), capture_output=True,
-                          text=True, timeout=30, check=False)
+    done = subprocess.run(
+        [NODE, "-e", script],
+        input=json.dumps(ctx),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
     assert done.returncode == 0, done.stderr
     out = json.loads(done.stdout)
     if "thrown" in out:
@@ -107,9 +113,12 @@ def _expr(expression: str, **ctx) -> str:
     evaluates code."""
     if not isinstance(expression, str) or not expression.startswith("="):
         return expression
-    code = ("return " + json.dumps(expression[1:]) +
-            ".replace(/\\{\\{([\\s\\S]*?)\\}\\}/g, (_, e) => { const v = eval(e); "
-            "return typeof v === 'string' ? v : JSON.stringify(v); });")
+    code = (
+        "return "
+        + json.dumps(expression[1:])
+        + ".replace(/\\{\\{([\\s\\S]*?)\\}\\}/g, (_, e) => { const v = eval(e); "
+        "return typeof v === 'string' ? v : JSON.stringify(v); });"
+    )
     return _js(code, **ctx)
 
 
@@ -129,8 +138,12 @@ class N8nSim:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
-        item = {"headers": {k.lower(): v for k, v in request.headers.items()},
-                "body": json.loads(request.content), "params": {}, "query": {}}
+        item = {
+            "headers": {k.lower(): v for k, v in request.headers.items()},
+            "body": json.loads(request.content),
+            "params": {},
+            "query": {},
+        }
         if url == EMAIL_URL:
             return self._email(item)
         if url == CAL_URL:
@@ -152,9 +165,13 @@ class N8nSim:
         body = None
         if p.get("sendBody"):
             body = json.loads(_expr(p["jsonBody"], **kw))
-        request = httpx.Request(p.get("method", "GET"), url, params=params or None,
-                                content=_compact(body) if body is not None else None,
-                                headers={"content-type": "application/json"} if body is not None else None)
+        request = httpx.Request(
+            p.get("method", "GET"),
+            url,
+            params=params or None,
+            content=_compact(body) if body is not None else None,
+            headers={"content-type": "application/json"} if body is not None else None,
+        )
         try:
             resp = self.google(request)
             if resp.status_code == 401:
@@ -169,8 +186,14 @@ class N8nSim:
             parsed = resp.json() if resp.content else {}
         except ValueError:
             parsed = resp.text
-        return {"json": {"statusCode": resp.status_code, "body": parsed,
-                         "headers": dict(resp.headers), "statusMessage": ""}}
+        return {
+            "json": {
+                "statusCode": resp.status_code,
+                "body": parsed,
+                "headers": dict(resp.headers),
+                "statusMessage": "",
+            }
+        }
 
     # -- cc-email-facade → lib-email-provider -----------------------------------
 
@@ -182,10 +205,17 @@ class N8nSim:
         try:
             envelope = self._email_lib(inp)
         except Thrown as e:
-            out = _code(EMAIL_FACADE, "Classify provider error", input_=[{"json": {"error": str(e)}}])[0]["json"]
-            return httpx.Response(out["status"], content=_compact({"message": out["message"]}),
-                                  headers={"content-type": "application/json"})
-        return httpx.Response(200, content=_compact(envelope), headers={"content-type": "application/json"})
+            out = _code(
+                EMAIL_FACADE, "Classify provider error", input_=[{"json": {"error": str(e)}}]
+            )[0]["json"]
+            return httpx.Response(
+                out["status"],
+                content=_compact({"message": out["message"]}),
+                headers={"content-type": "application/json"},
+            )
+        return httpx.Response(
+            200, content=_compact(envelope), headers={"content-type": "application/json"}
+        )
 
     def _email_lib(self, inp: dict) -> dict:
         nodes = {"When Called (source ref + mode)": inp}
@@ -199,7 +229,10 @@ class N8nSim:
         elif mode == "list":
             node = EMAIL_LIB["List messages (Gmail API)"]
             pag = node["parameters"]["options"]["pagination"]["pagination"]
-            assert pag["maxRequests"] == 5 and pag["completeExpression"] == "={{ !$response.body?.nextPageToken }}"
+            assert (
+                pag["maxRequests"] == 5
+                and pag["completeExpression"] == "={{ !$response.body?.nextPageToken }}"
+            )
             pages, token = [], None
             for _ in range(pag["maxRequests"]):
                 page = self._http(node, {"json": req}, token)
@@ -239,15 +272,25 @@ class N8nSim:
             got = self._http(CAL_LIB[request_node], {"json": req, "nodes": nodes})
             if mode == "create_event":
                 rule = CAL_LIB["Route (create answer)"]["parameters"]["rules"]["values"][0]
-                route = _expr(rule["conditions"]["conditions"][0]["leftValue"], json_=got["json"], nodes=nodes)
+                route = _expr(
+                    rule["conditions"]["conditions"][0]["leftValue"], json_=got["json"], nodes=nodes
+                )
                 if route == "existing":
-                    got = self._http(CAL_LIB["Get existing event (GCal REST)"], {"json": got["json"], "nodes": nodes})
+                    got = self._http(
+                        CAL_LIB["Get existing event (GCal REST)"],
+                        {"json": got["json"], "nodes": nodes},
+                    )
                     return_node = "Return: create_event (existing)"
             out = _code(CAL_LIB, return_node, nodes=nodes, input_=[got])[0]["json"]
         except Thrown:
-            return httpx.Response(500, content=_compact({"message": "Error in workflow"}),
-                                  headers={"content-type": "application/json"})
-        return httpx.Response(200, content=_compact(out), headers={"content-type": "application/json"})
+            return httpx.Response(
+                500,
+                content=_compact({"message": "Error in workflow"}),
+                headers={"content-type": "application/json"},
+            )
+        return httpx.Response(
+            200, content=_compact(out), headers={"content-type": "application/json"}
+        )
 
 
 # --- running one call both ways ---------------------------------------------
@@ -304,13 +347,16 @@ async def _parity(monkeypatch, script, call, *, text: bool):
 
 # --- the scenarios ------------------------------------------------------------
 
+
 def G(*routes):
     """A FakeGoogle factory: each route is (method, url, *answers)."""
+
     def make():
         fake = FakeGoogle()
         for method, url, *answers in routes:
             fake.on(method, url, *answers)
         return fake
+
     return make
 
 
@@ -326,80 +372,256 @@ BLOB = bytes(range(256)) * 2 + b"\xfb\xff\xfe"
 
 EMAIL_CASES = {
     # list_refs ------------------------------------------------------------
-    "list one page": (G(("GET", LIST, (200, {"messages": [{"id": "a1", "threadId": "t1"},
-                                                          {"id": "b2", "threadId": "b2"}]}))),
-                      lambda: email_facade.list_refs("in:inbox newer_than:1d"), True),
-    "list three pages": (G(("GET", LIST,
-                            (200, {"messages": [{"id": "p1", "threadId": "t"}], "nextPageToken": "n2"}),
-                            (200, {"messages": [{"id": "p2", "threadId": "t"}], "nextPageToken": "n3"}),
-                            (200, {"messages": [{"id": "p3", "threadId": "t"}]}))),
-                         lambda: email_facade.list_refs("label:receipts"), True),
-    "list empty": (G(("GET", LIST, (200, {"resultSizeEstimate": 0}))),
-                   lambda: email_facade.list_refs("in:inbox"), True),
-    "list drops one bad id": (G(("GET", LIST, (200, {"messages": [{"id": "ok", "threadId": "t"},
-                                                                  {"id": "x/y", "threadId": "t"}]}))),
-                              lambda: email_facade.list_refs("q"), True),
-    "list drops all": (G(("GET", LIST, (200, {"messages": [{"id": "x y", "threadId": "t"}]}))),
-                       lambda: email_facade.list_refs("q"), True),
-    "list page cap": (G(("GET", LIST, (200, {"messages": [{"id": "a", "threadId": "a"}], "nextPageToken": "m"}))),
-                      lambda: email_facade.list_refs("in:anywhere"), True),
+    "list one page": (
+        G(
+            (
+                "GET",
+                LIST,
+                (
+                    200,
+                    {"messages": [{"id": "a1", "threadId": "t1"}, {"id": "b2", "threadId": "b2"}]},
+                ),
+            )
+        ),
+        lambda: email_facade.list_refs("in:inbox newer_than:1d"),
+        True,
+    ),
+    "list three pages": (
+        G(
+            (
+                "GET",
+                LIST,
+                (200, {"messages": [{"id": "p1", "threadId": "t"}], "nextPageToken": "n2"}),
+                (200, {"messages": [{"id": "p2", "threadId": "t"}], "nextPageToken": "n3"}),
+                (200, {"messages": [{"id": "p3", "threadId": "t"}]}),
+            )
+        ),
+        lambda: email_facade.list_refs("label:receipts"),
+        True,
+    ),
+    "list empty": (
+        G(("GET", LIST, (200, {"resultSizeEstimate": 0}))),
+        lambda: email_facade.list_refs("in:inbox"),
+        True,
+    ),
+    "list drops one bad id": (
+        G(
+            (
+                "GET",
+                LIST,
+                (
+                    200,
+                    {"messages": [{"id": "ok", "threadId": "t"}, {"id": "x/y", "threadId": "t"}]},
+                ),
+            )
+        ),
+        lambda: email_facade.list_refs("q"),
+        True,
+    ),
+    "list drops all": (
+        G(("GET", LIST, (200, {"messages": [{"id": "x y", "threadId": "t"}]}))),
+        lambda: email_facade.list_refs("q"),
+        True,
+    ),
+    "list page cap": (
+        G(("GET", LIST, (200, {"messages": [{"id": "a", "threadId": "a"}], "nextPageToken": "m"}))),
+        lambda: email_facade.list_refs("in:anywhere"),
+        True,
+    ),
     "list empty query": (G(), lambda: email_facade.list_refs(" "), True),
-    "list 400": (G(("GET", LIST, (400, gf.error_body(400, "Invalid query")))), lambda: email_facade.list_refs("q("), True),
-    "list 401": (G(("GET", LIST, (401, gf.error_body(401)))), lambda: email_facade.list_refs("q"), True),
-    "list 403": (G(("GET", LIST, (403, gf.error_body(403)))), lambda: email_facade.list_refs("q"), True),
-    "list 404": (G(("GET", LIST, (404, gf.error_body(404)))), lambda: email_facade.list_refs("q"), True),
-    "list 409": (G(("GET", LIST, (409, gf.error_body(409)))), lambda: email_facade.list_refs("q"), True),
-    "list 429": (G(("GET", LIST, (429, gf.error_body(429)))), lambda: email_facade.list_refs("q"), True),
-    "list 500": (G(("GET", LIST, (500, gf.error_body(500)))), lambda: email_facade.list_refs("q"), True),
-    "list 503 on page 2": (G(("GET", LIST, (200, {"messages": [{"id": "a", "threadId": "a"}], "nextPageToken": "m"}),
-                              (503, gf.error_body(503)))), lambda: email_facade.list_refs("q"), True),
+    "list 400": (
+        G(("GET", LIST, (400, gf.error_body(400, "Invalid query")))),
+        lambda: email_facade.list_refs("q("),
+        True,
+    ),
+    "list 401": (
+        G(("GET", LIST, (401, gf.error_body(401)))),
+        lambda: email_facade.list_refs("q"),
+        True,
+    ),
+    "list 403": (
+        G(("GET", LIST, (403, gf.error_body(403)))),
+        lambda: email_facade.list_refs("q"),
+        True,
+    ),
+    "list 404": (
+        G(("GET", LIST, (404, gf.error_body(404)))),
+        lambda: email_facade.list_refs("q"),
+        True,
+    ),
+    "list 409": (
+        G(("GET", LIST, (409, gf.error_body(409)))),
+        lambda: email_facade.list_refs("q"),
+        True,
+    ),
+    "list 429": (
+        G(("GET", LIST, (429, gf.error_body(429)))),
+        lambda: email_facade.list_refs("q"),
+        True,
+    ),
+    "list 500": (
+        G(("GET", LIST, (500, gf.error_body(500)))),
+        lambda: email_facade.list_refs("q"),
+        True,
+    ),
+    "list 503 on page 2": (
+        G(
+            (
+                "GET",
+                LIST,
+                (200, {"messages": [{"id": "a", "threadId": "a"}], "nextPageToken": "m"}),
+                (503, gf.error_body(503)),
+            )
+        ),
+        lambda: email_facade.list_refs("q"),
+        True,
+    ),
     "list transport": (G(("GET", LIST, CONNECT)), lambda: email_facade.list_refs("q"), False),
     # get_message ------------------------------------------------------------
-    "message multipart": (G(("GET", MSG, (200, gf.multipart_message()))),
-                          lambda: email_facade.get_message("18c0ffee00aa11bb"), True),
-    "message single html": (G(("GET", f"{GMAIL}/messages/18c0ffee00bb22cc", (200, gf.single_part_html()))),
-                            lambda: email_facade.get_message("18c0ffee00bb22cc"), True),
+    "message multipart": (
+        G(("GET", MSG, (200, gf.multipart_message()))),
+        lambda: email_facade.get_message("18c0ffee00aa11bb"),
+        True,
+    ),
+    "message single html": (
+        G(("GET", f"{GMAIL}/messages/18c0ffee00bb22cc", (200, gf.single_part_html()))),
+        lambda: email_facade.get_message("18c0ffee00bb22cc"),
+        True,
+    ),
     "message bad ref": (G(), lambda: email_facade.get_message("a/../b"), True),
-    "message 400": (G(("GET", MSG, (400, gf.error_body(400)))), lambda: email_facade.get_message("18c0ffee00aa11bb"), True),
-    "message 404": (G(("GET", MSG, (404, gf.error_body(404)))), lambda: email_facade.get_message("18c0ffee00aa11bb"), True),
-    "message 403": (G(("GET", MSG, (403, gf.error_body(403)))), lambda: email_facade.get_message("18c0ffee00aa11bb"), True),
-    "message 429": (G(("GET", MSG, (429, gf.error_body(429)))), lambda: email_facade.get_message("18c0ffee00aa11bb"), True),
-    "message 500": (G(("GET", MSG, (500, gf.error_body(500)))), lambda: email_facade.get_message("18c0ffee00aa11bb"), True),
-    "message transport": (G(("GET", MSG, CONNECT)), lambda: email_facade.get_message("18c0ffee00aa11bb"), False),
+    "message 400": (
+        G(("GET", MSG, (400, gf.error_body(400)))),
+        lambda: email_facade.get_message("18c0ffee00aa11bb"),
+        True,
+    ),
+    "message 404": (
+        G(("GET", MSG, (404, gf.error_body(404)))),
+        lambda: email_facade.get_message("18c0ffee00aa11bb"),
+        True,
+    ),
+    "message 403": (
+        G(("GET", MSG, (403, gf.error_body(403)))),
+        lambda: email_facade.get_message("18c0ffee00aa11bb"),
+        True,
+    ),
+    "message 429": (
+        G(("GET", MSG, (429, gf.error_body(429)))),
+        lambda: email_facade.get_message("18c0ffee00aa11bb"),
+        True,
+    ),
+    "message 500": (
+        G(("GET", MSG, (500, gf.error_body(500)))),
+        lambda: email_facade.get_message("18c0ffee00aa11bb"),
+        True,
+    ),
+    "message transport": (
+        G(("GET", MSG, CONNECT)),
+        lambda: email_facade.get_message("18c0ffee00aa11bb"),
+        False,
+    ),
     # get_attachment ---------------------------------------------------------
-    "attachment": (G(("GET", ATT, (200, {"attachmentId": "ANGjdJ_pdf-1", "size": len(BLOB), "data": gf.b64url(BLOB)}))),
-                   lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"), True),
-    "attachment bad id": (G(), lambda: email_facade.get_attachment("18c0ffee00aa11bb", "a/b"), True),
-    "attachment 400": (G(("GET", ATT, (400, gf.error_body(400)))),
-                       lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"), True),
-    "attachment 404": (G(("GET", ATT, (404, gf.error_body(404)))),
-                       lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"), True),
-    "attachment 403": (G(("GET", ATT, (403, gf.error_body(403)))),
-                       lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"), True),
-    "attachment 503": (G(("GET", ATT, (503, gf.error_body(503)))),
-                       lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"), True),
-    "attachment no data": (G(("GET", ATT, (200, {"size": 3}))),
-                           lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"), True),
-    "attachment transport": (G(("GET", ATT, CONNECT)),
-                             lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"), False),
+    "attachment": (
+        G(
+            (
+                "GET",
+                ATT,
+                (200, {"attachmentId": "ANGjdJ_pdf-1", "size": len(BLOB), "data": gf.b64url(BLOB)}),
+            )
+        ),
+        lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"),
+        True,
+    ),
+    "attachment bad id": (
+        G(),
+        lambda: email_facade.get_attachment("18c0ffee00aa11bb", "a/b"),
+        True,
+    ),
+    "attachment 400": (
+        G(("GET", ATT, (400, gf.error_body(400)))),
+        lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"),
+        True,
+    ),
+    "attachment 404": (
+        G(("GET", ATT, (404, gf.error_body(404)))),
+        lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"),
+        True,
+    ),
+    "attachment 403": (
+        G(("GET", ATT, (403, gf.error_body(403)))),
+        lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"),
+        True,
+    ),
+    "attachment 503": (
+        G(("GET", ATT, (503, gf.error_body(503)))),
+        lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"),
+        True,
+    ),
+    "attachment no data": (
+        G(("GET", ATT, (200, {"size": 3}))),
+        lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"),
+        True,
+    ),
+    "attachment transport": (
+        G(("GET", ATT, CONNECT)),
+        lambda: email_facade.get_attachment("18c0ffee00aa11bb", "ANGjdJ_pdf-1"),
+        False,
+    ),
     # report_spam ------------------------------------------------------------
-    "spam": (G(("POST", SPAM, (200, {"id": "18c0ffee00aa11bb", "threadId": "t", "labelIds": ["SPAM"]}))),
-             lambda: email_facade.report_spam("18c0ffee00aa11bb"), True),
-    "spam 404": (G(("POST", SPAM, (404, gf.error_body(404)))), lambda: email_facade.report_spam("18c0ffee00aa11bb"), True),
-    "spam 403": (G(("POST", SPAM, (403, gf.error_body(403)))), lambda: email_facade.report_spam("18c0ffee00aa11bb"), True),
-    "spam 429": (G(("POST", SPAM, (429, gf.error_body(429)))), lambda: email_facade.report_spam("18c0ffee00aa11bb"), True),
-    "spam 500": (G(("POST", SPAM, (500, gf.error_body(500)))), lambda: email_facade.report_spam("18c0ffee00aa11bb"), True),
-    "spam transport": (G(("POST", SPAM, CONNECT)), lambda: email_facade.report_spam("18c0ffee00aa11bb"), False),
+    "spam": (
+        G(("POST", SPAM, (200, {"id": "18c0ffee00aa11bb", "threadId": "t", "labelIds": ["SPAM"]}))),
+        lambda: email_facade.report_spam("18c0ffee00aa11bb"),
+        True,
+    ),
+    "spam 404": (
+        G(("POST", SPAM, (404, gf.error_body(404)))),
+        lambda: email_facade.report_spam("18c0ffee00aa11bb"),
+        True,
+    ),
+    "spam 403": (
+        G(("POST", SPAM, (403, gf.error_body(403)))),
+        lambda: email_facade.report_spam("18c0ffee00aa11bb"),
+        True,
+    ),
+    "spam 429": (
+        G(("POST", SPAM, (429, gf.error_body(429)))),
+        lambda: email_facade.report_spam("18c0ffee00aa11bb"),
+        True,
+    ),
+    "spam 500": (
+        G(("POST", SPAM, (500, gf.error_body(500)))),
+        lambda: email_facade.report_spam("18c0ffee00aa11bb"),
+        True,
+    ),
+    "spam transport": (
+        G(("POST", SPAM, CONNECT)),
+        lambda: email_facade.report_spam("18c0ffee00aa11bb"),
+        False,
+    ),
 }
 
 _EVENTS = [
-    gf.event("ev1", description="Agenda", attendees=[
-        {"email": "operator@example.com", "self": True, "responseStatus": "accepted"},
-        {"email": "jane.doe@example.com", "responseStatus": "needsAction"}]),
-    gf.event("ev2", start={"date": "2025-11-20"}, end={"date": "2025-11-21"},
-             organizer={"email": "john.rivers@example.com"}, location="Home"),
-    gf.event("ev3", description="  ", organizer=None, creator={"email": "operator@example.com", "self": True},
-             attendees=[{"email": "operator@example.com", "self": True, "responseStatus": "declined"}]),
+    gf.event(
+        "ev1",
+        description="Agenda",
+        attendees=[
+            {"email": "operator@example.com", "self": True, "responseStatus": "accepted"},
+            {"email": "jane.doe@example.com", "responseStatus": "needsAction"},
+        ],
+    ),
+    gf.event(
+        "ev2",
+        start={"date": "2025-11-20"},
+        end={"date": "2025-11-21"},
+        organizer={"email": "john.rivers@example.com"},
+        location="Home",
+    ),
+    gf.event(
+        "ev3",
+        description="  ",
+        organizer=None,
+        creator={"email": "operator@example.com", "self": True},
+        attendees=[{"email": "operator@example.com", "self": True, "responseStatus": "declined"}],
+    ),
     gf.event("ev4", status="cancelled", attachments=[{"fileUrl": "https://example.com/d"}]),
     {"kind": "calendar#event", "id": "ev5", "start": {"dateTime": "2025-11-20T15:00:00Z"}},
 ]
@@ -407,74 +629,208 @@ _EVENTS[2].pop("organizer")
 
 
 def _create(**kw):
-    return lambda: calendar_facade.create_event("Budget review", "2025-11-20T09:00:00-07:00",
-                                                "2025-11-20T09:30:00-07:00", description="Q4",
-                                                attendees=["jane.doe@example.com"], **kw)
+    return lambda: calendar_facade.create_event(
+        "Budget review",
+        "2025-11-20T09:00:00-07:00",
+        "2025-11-20T09:30:00-07:00",
+        description="Q4",
+        attendees=["jane.doe@example.com"],
+        **kw,
+    )
 
 
 CAL_CASES = {
     # list_events ------------------------------------------------------------
-    "list events": (G(("GET", EVENTS, (200, gf.events_page(_EVENTS)))), lambda: calendar_facade.list_events(*DAY), True),
-    "list other calendar": (G(("GET", f"{CAL}team%40example.com/events", (200, gf.events_page([])))),
-                            lambda: calendar_facade.list_events(*DAY, "team@example.com"), True),
-    "list empty kind": (G(("GET", EVENTS, (200, gf.events_page(None)))), lambda: calendar_facade.list_events(*DAY), True),
-    "list truncated": (G(("GET", EVENTS, (200, gf.events_page(_EVENTS[:1], nextPageToken="n")))),
-                       lambda: calendar_facade.list_events(*DAY), True),
-    "list not a list": (G(("GET", EVENTS, (200, {"kind": "calendar#calendar"}))),
-                        lambda: calendar_facade.list_events(*DAY), True),
-    "list bad window": (G(), lambda: calendar_facade.list_events("2025-11-20", "2025-11-21"), False),
+    "list events": (
+        G(("GET", EVENTS, (200, gf.events_page(_EVENTS)))),
+        lambda: calendar_facade.list_events(*DAY),
+        True,
+    ),
+    "list other calendar": (
+        G(("GET", f"{CAL}team%40example.com/events", (200, gf.events_page([])))),
+        lambda: calendar_facade.list_events(*DAY, "team@example.com"),
+        True,
+    ),
+    "list empty kind": (
+        G(("GET", EVENTS, (200, gf.events_page(None)))),
+        lambda: calendar_facade.list_events(*DAY),
+        True,
+    ),
+    "list truncated": (
+        G(("GET", EVENTS, (200, gf.events_page(_EVENTS[:1], nextPageToken="n")))),
+        lambda: calendar_facade.list_events(*DAY),
+        True,
+    ),
+    "list not a list": (
+        G(("GET", EVENTS, (200, {"kind": "calendar#calendar"}))),
+        lambda: calendar_facade.list_events(*DAY),
+        True,
+    ),
+    "list bad window": (
+        G(),
+        lambda: calendar_facade.list_events("2025-11-20", "2025-11-21"),
+        False,
+    ),
     "list reversed window": (G(), lambda: calendar_facade.list_events(DAY[1], DAY[0]), False),
-    "list 401": (G(("GET", EVENTS, (401, gf.error_body(401))))  , lambda: calendar_facade.list_events(*DAY), False),
-    "list 404": (G(("GET", EVENTS, (404, gf.error_body(404)))), lambda: calendar_facade.list_events(*DAY), False),
-    "list 429": (G(("GET", EVENTS, (429, gf.error_body(429)))), lambda: calendar_facade.list_events(*DAY), False),
-    "list 503": (G(("GET", EVENTS, (503, gf.error_body(503)))), lambda: calendar_facade.list_events(*DAY), False),
-    "list transport": (G(("GET", EVENTS, CONNECT)), lambda: calendar_facade.list_events(*DAY), False),
+    "list 401": (
+        G(("GET", EVENTS, (401, gf.error_body(401)))),
+        lambda: calendar_facade.list_events(*DAY),
+        False,
+    ),
+    "list 404": (
+        G(("GET", EVENTS, (404, gf.error_body(404)))),
+        lambda: calendar_facade.list_events(*DAY),
+        False,
+    ),
+    "list 429": (
+        G(("GET", EVENTS, (429, gf.error_body(429)))),
+        lambda: calendar_facade.list_events(*DAY),
+        False,
+    ),
+    "list 503": (
+        G(("GET", EVENTS, (503, gf.error_body(503)))),
+        lambda: calendar_facade.list_events(*DAY),
+        False,
+    ),
+    "list transport": (
+        G(("GET", EVENTS, CONNECT)),
+        lambda: calendar_facade.list_events(*DAY),
+        False,
+    ),
     # get_event --------------------------------------------------------------
-    "get": (G(("GET", f"{EVENTS}/ev1", (200, _EVENTS[0]))), lambda: calendar_facade.get_event("ev1"), True),
-    "get 404": (G(("GET", f"{EVENTS}/ev1", (404, gf.error_body(404)))), lambda: calendar_facade.get_event("ev1"), True),
-    "get 410": (G(("GET", f"{EVENTS}/ev1", (410, gf.error_body(410)))), lambda: calendar_facade.get_event("ev1"), True),
-    "get no id": (G(("GET", f"{EVENTS}/ev1", (200, {"kind": "calendar#event"}))), lambda: calendar_facade.get_event("ev1"), True),
-    "get 403": (G(("GET", f"{EVENTS}/ev1", (403, gf.error_body(403)))), lambda: calendar_facade.get_event("ev1"), False),
+    "get": (
+        G(("GET", f"{EVENTS}/ev1", (200, _EVENTS[0]))),
+        lambda: calendar_facade.get_event("ev1"),
+        True,
+    ),
+    "get 404": (
+        G(("GET", f"{EVENTS}/ev1", (404, gf.error_body(404)))),
+        lambda: calendar_facade.get_event("ev1"),
+        True,
+    ),
+    "get 410": (
+        G(("GET", f"{EVENTS}/ev1", (410, gf.error_body(410)))),
+        lambda: calendar_facade.get_event("ev1"),
+        True,
+    ),
+    "get no id": (
+        G(("GET", f"{EVENTS}/ev1", (200, {"kind": "calendar#event"}))),
+        lambda: calendar_facade.get_event("ev1"),
+        True,
+    ),
+    "get 403": (
+        G(("GET", f"{EVENTS}/ev1", (403, gf.error_body(403)))),
+        lambda: calendar_facade.get_event("ev1"),
+        False,
+    ),
     "get bad id": (G(), lambda: calendar_facade.get_event("ev 1"), False),
     # create_event -----------------------------------------------------------
-    "create": (G(("POST", EVENTS, (200, gf.event("new1", summary="Budget review")))), _create(), True),
-    "create with client id": (G(("POST", EVENTS, (200, gf.event(CID, summary="Budget review")))),
-                              _create(client_event_id=CID), True),
-    "create 409 existing": (G(("POST", EVENTS, (409, gf.error_body(409))),
-                              ("GET", f"{EVENTS}/{CID}", (200, gf.event(CID, summary="Budget review")))),
-                            _create(client_event_id=CID), True),
-    "create 409 cancelled": (G(("POST", EVENTS, (409, gf.error_body(409))),
-                               ("GET", f"{EVENTS}/{CID}", (200, gf.event(CID, status="cancelled")))),
-                             _create(client_event_id=CID), True),
-    "create 409 unreadable": (G(("POST", EVENTS, (409, gf.error_body(409))),
-                                ("GET", f"{EVENTS}/{CID}", (404, gf.error_body(404)))),
-                              _create(client_event_id=CID), True),
-    "create 409 readback down": (G(("POST", EVENTS, (409, gf.error_body(409))),
-                                   ("GET", f"{EVENTS}/{CID}", (503, gf.error_body(503)))),
-                                 _create(client_event_id=CID), False),
+    "create": (
+        G(("POST", EVENTS, (200, gf.event("new1", summary="Budget review")))),
+        _create(),
+        True,
+    ),
+    "create with client id": (
+        G(("POST", EVENTS, (200, gf.event(CID, summary="Budget review")))),
+        _create(client_event_id=CID),
+        True,
+    ),
+    "create 409 existing": (
+        G(
+            ("POST", EVENTS, (409, gf.error_body(409))),
+            ("GET", f"{EVENTS}/{CID}", (200, gf.event(CID, summary="Budget review"))),
+        ),
+        _create(client_event_id=CID),
+        True,
+    ),
+    "create 409 cancelled": (
+        G(
+            ("POST", EVENTS, (409, gf.error_body(409))),
+            ("GET", f"{EVENTS}/{CID}", (200, gf.event(CID, status="cancelled"))),
+        ),
+        _create(client_event_id=CID),
+        True,
+    ),
+    "create 409 unreadable": (
+        G(
+            ("POST", EVENTS, (409, gf.error_body(409))),
+            ("GET", f"{EVENTS}/{CID}", (404, gf.error_body(404))),
+        ),
+        _create(client_event_id=CID),
+        True,
+    ),
+    "create 409 readback down": (
+        G(
+            ("POST", EVENTS, (409, gf.error_body(409))),
+            ("GET", f"{EVENTS}/{CID}", (503, gf.error_body(503))),
+        ),
+        _create(client_event_id=CID),
+        False,
+    ),
     "create 409 without id": (G(("POST", EVENTS, (409, gf.error_body(409)))), _create(), False),
     "create 404": (G(("POST", EVENTS, (404, gf.error_body(404)))), _create(), False),
     "create transport": (G(("POST", EVENTS, CONNECT)), _create(), False),
-    "create bad attendee": (G(), lambda: calendar_facade.create_event(
-        "x", "2025-11-20T09:00:00Z", "2025-11-20T10:00:00Z", attendees=["not-an-email"]), False),
-    "create end before start": (G(), lambda: calendar_facade.create_event(
-        "x", "2025-11-20T10:00:00Z", "2025-11-20T09:00:00Z"), False),
+    "create bad attendee": (
+        G(),
+        lambda: calendar_facade.create_event(
+            "x", "2025-11-20T09:00:00Z", "2025-11-20T10:00:00Z", attendees=["not-an-email"]
+        ),
+        False,
+    ),
+    "create end before start": (
+        G(),
+        lambda: calendar_facade.create_event("x", "2025-11-20T10:00:00Z", "2025-11-20T09:00:00Z"),
+        False,
+    ),
     # update_event -----------------------------------------------------------
-    "update title": (G(("PATCH", f"{EVENTS}/ev1", (200, gf.event("ev1", summary="Moved")))),
-                     lambda: calendar_facade.update_event("ev1", title="Moved"), True),
-    "update times and people": (G(("PATCH", f"{EVENTS}/ev1", (200, gf.event("ev1")))),
-                                lambda: calendar_facade.update_event(
-                                    "ev1", start="2025-11-20T11:00:00Z", end="2025-11-20T11:30:00Z",
-                                    attendees=["jane.doe@example.com"], description=""), True),
+    "update title": (
+        G(("PATCH", f"{EVENTS}/ev1", (200, gf.event("ev1", summary="Moved")))),
+        lambda: calendar_facade.update_event("ev1", title="Moved"),
+        True,
+    ),
+    "update times and people": (
+        G(("PATCH", f"{EVENTS}/ev1", (200, gf.event("ev1")))),
+        lambda: calendar_facade.update_event(
+            "ev1",
+            start="2025-11-20T11:00:00Z",
+            end="2025-11-20T11:30:00Z",
+            attendees=["jane.doe@example.com"],
+            description="",
+        ),
+        True,
+    ),
     "update nothing": (G(), lambda: calendar_facade.update_event("ev1"), False),
-    "update 404": (G(("PATCH", f"{EVENTS}/ev1", (404, gf.error_body(404)))),
-                   lambda: calendar_facade.update_event("ev1", title="x"), False),
+    "update 404": (
+        G(("PATCH", f"{EVENTS}/ev1", (404, gf.error_body(404)))),
+        lambda: calendar_facade.update_event("ev1", title="x"),
+        False,
+    ),
     # delete_event -----------------------------------------------------------
-    "delete": (G(("DELETE", f"{EVENTS}/ev1", (204, None))), lambda: calendar_facade.delete_event("ev1"), True),
-    "delete 410": (G(("DELETE", f"{EVENTS}/ev1", (410, gf.error_body(410)))), lambda: calendar_facade.delete_event("ev1"), True),
-    "delete 404": (G(("DELETE", f"{EVENTS}/ev1", (404, gf.error_body(404)))), lambda: calendar_facade.delete_event("ev1"), False),
-    "delete 401": (G(("DELETE", f"{EVENTS}/ev1", (401, gf.error_body(401)))), lambda: calendar_facade.delete_event("ev1"), False),
-    "delete transport": (G(("DELETE", f"{EVENTS}/ev1", CONNECT)), lambda: calendar_facade.delete_event("ev1"), False),
+    "delete": (
+        G(("DELETE", f"{EVENTS}/ev1", (204, None))),
+        lambda: calendar_facade.delete_event("ev1"),
+        True,
+    ),
+    "delete 410": (
+        G(("DELETE", f"{EVENTS}/ev1", (410, gf.error_body(410)))),
+        lambda: calendar_facade.delete_event("ev1"),
+        True,
+    ),
+    "delete 404": (
+        G(("DELETE", f"{EVENTS}/ev1", (404, gf.error_body(404)))),
+        lambda: calendar_facade.delete_event("ev1"),
+        False,
+    ),
+    "delete 401": (
+        G(("DELETE", f"{EVENTS}/ev1", (401, gf.error_body(401)))),
+        lambda: calendar_facade.delete_event("ev1"),
+        False,
+    ),
+    "delete transport": (
+        G(("DELETE", f"{EVENTS}/ev1", CONNECT)),
+        lambda: calendar_facade.delete_event("ev1"),
+        False,
+    ),
 }
 
 
@@ -502,6 +858,8 @@ async def test_the_simulator_reads_the_shipped_nodes_it_claims_to():
     endpoints the native client calls."""
     assert EMAIL_LIB["Get message (Gmail API)"]["parameters"]["url"].endswith("?format=full")
     assert "sendUpdates=all" in CAL_LIB["Create event (GCal REST)"]["parameters"]["url"]
-    out = _expr(CAL_LIB["Get event (GCal REST)"]["parameters"]["url"],
-                json_={"calendar_id": "team@example.com", "event_id": "ev1"})
+    out = _expr(
+        CAL_LIB["Get event (GCal REST)"]["parameters"]["url"],
+        json_={"calendar_id": "team@example.com", "event_id": "ev1"},
+    )
     assert out == f"{CAL}team%40example.com/events/ev1"

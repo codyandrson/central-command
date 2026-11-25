@@ -109,18 +109,14 @@ def parse_record(path: Path, directory: str) -> Record:
             f"{HEADER_SCAN_LINES} lines after the title"
         )
     if status not in VALID_STATUSES:
-        raise RecordHeaderError(
-            f"{path}: Status '{status}' is not one of {sorted(VALID_STATUSES)}"
-        )
+        raise RecordHeaderError(f"{path}: Status '{status}' is not one of {sorted(VALID_STATUSES)}")
     if asbuilt is None:
         raise RecordHeaderError(
             f"{path}: no '> **As-built:** ...' line found within "
             f"{HEADER_SCAN_LINES} lines after the title"
         )
     if "`" not in asbuilt:
-        raise RecordHeaderError(
-            f"{path}: As-built line has no backticked path: {asbuilt!r}"
-        )
+        raise RecordHeaderError(f"{path}: As-built line has no backticked path: {asbuilt!r}")
 
     return Record(
         directory=directory,
@@ -171,8 +167,7 @@ DIR_LABELS = {
 DIR_BLURBS = {
     "specs": "A spec records a design DECISION — what was decided, and why — "
     "before or alongside the code that implements it.",
-    "plans": "A plan records the task-by-task IMPLEMENTATION of a decision, "
-    "usually a spec's.",
+    "plans": "A plan records the task-by-task IMPLEMENTATION of a decision, usually a spec's.",
     "research": "Research records an evidence base or a design question worked "
     "through before a decision was ready to write down as a spec.",
 }

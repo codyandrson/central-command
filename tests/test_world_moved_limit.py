@@ -111,7 +111,11 @@ async def test_the_fourth_world_moved_failure_is_terminal_and_loud(monkeypatch):
     assert kinds.count("proposal.redraft_limit_reached") == 1
     assert kinds.index("proposal.failed") < kinds.index("proposal.redraft_limit_reached")
     assert (await _event("proposal.redraft_limit_reached", last))["payload"] == {
-        "root": row["id"], "count": 3, "limit": 3, "proposal_id": last}
+        "root": row["id"],
+        "count": 3,
+        "limit": 3,
+        "proposal_id": last,
+    }
     for earlier in ids[:3]:
         assert await _count("proposal.redraft_limit_reached", earlier) == 0
     assert await _count("session.resume_retried", sid) == 0
@@ -133,8 +137,8 @@ async def test_the_fourth_world_moved_failure_is_terminal_and_loud(monkeypatch):
     assert task["status"] == "FAILED" and "redraft limit 3" in task["outcome"]
     # Nothing is armed: the sweep has nothing to resume.
     assert "pending_resume" not in (await repo.get_session_run_state(sid)) or (
-        (await repo.get_session_run_state(sid))["pending_resume"].get("proposal_id")
-        != last)
+        (await repo.get_session_run_state(sid))["pending_resume"].get("proposal_id") != last
+    )
 
 
 @pytest.mark.usefixtures("confluence_grant")
@@ -150,7 +154,11 @@ async def test_a_limit_of_zero_makes_the_first_world_moved_failure_terminal(monk
     assert (await repo.load_proposal(row["id"]))["status"] == "FAILED"
     assert (await _event("proposal.failed", row["id"]))["payload"]["chain_exhausted"] is True
     assert (await _event("proposal.redraft_limit_reached", row["id"]))["payload"] == {
-        "root": row["id"], "count": 0, "limit": 0, "proposal_id": row["id"]}
+        "root": row["id"],
+        "count": 0,
+        "limit": 0,
+        "proposal_id": row["id"],
+    }
     assert len(drafter.calls) == 1
     assert "redraft limit 0" in (await repo.get_session(row["session_id"]))["exec_failure"]
     assert (await repo.get_task(task_id))["status"] == "FAILED"
@@ -167,8 +175,9 @@ async def test_a_limit_below_the_chain_is_read_live(monkeypatch):
     assert len(outs) == 2 and outs[1]["chain_exhausted"] is True
     first_redraft = await repo.load_proposal(outs[0]["redraft_proposal_id"])
     assert first_redraft["redraft"]["world_moved_count"] == 1
-    assert (await _event("proposal.redraft_limit_reached",
-                         outs[0]["redraft_proposal_id"]))["payload"]["count"] == 1
+    assert (await _event("proposal.redraft_limit_reached", outs[0]["redraft_proposal_id"]))[
+        "payload"
+    ]["count"] == 1
 
 
 @pytest.mark.parametrize("limit", [3, 0])
@@ -211,10 +220,15 @@ async def test_a_reject_in_the_middle_keeps_the_root_and_the_count(monkeypatch):
     rejected = await gateway.reject_with_feedback(sid, moved, "not that one", model=drafter.model)
     after_reject = await repo.load_proposal(rejected["redraft_proposal_id"])
     assert after_reject["redraft"] == {
-        "of": moved, "root": row["id"], "cause": "rejected", "world_moved_count": 1}
+        "of": moved,
+        "root": row["id"],
+        "cause": "rejected",
+        "world_moved_count": 1,
+    }
 
     second = await gateway.approve_and_execute(
-        sid, rejected["redraft_proposal_id"], model=drafter.model)
+        sid, rejected["redraft_proposal_id"], model=drafter.model
+    )
     link = (await repo.load_proposal(second["redraft_proposal_id"]))["redraft"]
     assert link["root"] == row["id"] and link["world_moved_count"] == 2
     assert link["cause"] == "world_moved"
@@ -226,8 +240,7 @@ async def test_a_conversation_lane_at_the_limit_stays_sendable_over_a_repaired_h
 ):
     drafter = _Persistent(_stale_page)
     _confluence_answers(monkeypatch, version=LIVE_VERSION)
-    out = await converse.start_conversation(
-        AGENT, "update the roadmap page", model=drafter.model)
+    out = await converse.start_conversation(AGENT, "update the roadmap page", model=drafter.model)
     sid, first = out["session_id"], out["proposal_id"]
 
     outs = await _chain(sid, first, drafter.model, 4)
@@ -275,10 +288,14 @@ async def test_a_turn_that_parks_keeps_the_conversation_lanes_exec_failure(monke
 async def test_a_sibling_deferred_in_the_same_response_is_answered_too():
     from central_command.runtime.durable import answer_pending_calls
 
-    messages = [ModelResponse(parts=[
-        ToolCallPart(tool_name="propose_action", args={}, tool_call_id="a"),
-        ToolCallPart(tool_name="ask_operator", args={}, tool_call_id="b"),
-    ])]
+    messages = [
+        ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="propose_action", args={}, tool_call_id="a"),
+                ToolCallPart(tool_name="ask_operator", args={}, tool_call_id="b"),
+            ]
+        )
+    ]
     answered = answer_pending_calls(messages, "a", "REPORT")
     assert unanswered_calls(answered) == []
     returns = {p.tool_call_id: p.content for p in answered[-1].parts}
@@ -295,8 +312,10 @@ def test_the_landing_is_written_after_the_event_with_nothing_armed():
     import inspect
 
     src = inspect.getsource(gateway._record_execution_failure)
-    limit_branch = src[src.index("if chain_exhausted:\n        # The drafter"):
-                       src.index("if run_state is not None and run_state.get(\"tool_call_id\"):\n"
-                                 "        # see the note")]
+    limit_branch = src[
+        src.index("if chain_exhausted:\n        # The drafter") : src.index(
+            'if run_state is not None and run_state.get("tool_call_id"):\n        # see the note'
+        )
+    ]
     assert "resume_park.arm" not in limit_branch
     assert "finish_decision_resume" in limit_branch

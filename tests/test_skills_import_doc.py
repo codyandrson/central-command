@@ -27,8 +27,10 @@ pytestmark_db = needs_pg
 async def test_url_and_content_both_present_is_422(clean_skills):
     await repo.create_skill("cc-test-doc-import", "T", "S")
     body = routes.SkillDocImportIn(
-        skill_id="cc-test-doc-import", doc_key="api",
-        url="https://example.test/x", content="hi",
+        skill_id="cc-test-doc-import",
+        doc_key="api",
+        url="https://example.test/x",
+        content="hi",
     )
     with pytest.raises(HTTPException) as exc:
         await routes.import_skill_doc_route(body)
@@ -49,7 +51,9 @@ async def test_url_and_content_both_absent_is_422(clean_skills):
 @pytest.mark.asyncio
 async def test_unknown_skill_is_404(clean_skills):
     body = routes.SkillDocImportIn(
-        skill_id="cc-test-doc-import-missing", doc_key="api", content="hi",
+        skill_id="cc-test-doc-import-missing",
+        doc_key="api",
+        content="hi",
     )
     with pytest.raises(HTTPException) as exc:
         await routes.import_skill_doc_route(body)
@@ -61,8 +65,11 @@ async def test_unknown_skill_is_404(clean_skills):
 async def test_content_import_lands_a_current_doc_version(clean_skills):
     await repo.create_skill("cc-test-doc-import", "T", "S")
     body = routes.SkillDocImportIn(
-        skill_id="cc-test-doc-import", doc_key="api", title="API",
-        content="# Endpoints\nGET /thing", describes="v1",
+        skill_id="cc-test-doc-import",
+        doc_key="api",
+        title="API",
+        content="# Endpoints\nGET /thing",
+        describes="v1",
     )
     doc = await routes.import_skill_doc_route(body)
     assert doc["version"] == 1
@@ -80,7 +87,9 @@ async def test_content_import_lands_a_current_doc_version(clean_skills):
 async def test_guidance_doc_key_is_kind_guidance(clean_skills):
     await repo.create_skill("cc-test-doc-import", "T", "S")
     body = routes.SkillDocImportIn(
-        skill_id="cc-test-doc-import", doc_key="guidance", content="# Guide",
+        skill_id="cc-test-doc-import",
+        doc_key="guidance",
+        content="# Guide",
     )
     doc = await routes.import_skill_doc_route(body)
     assert doc["kind"] == "guidance"
@@ -93,7 +102,8 @@ async def test_url_import_fetches_and_records_provenance(clean_skills, monkeypat
 
     def handler(request):
         return httpx.Response(
-            200, headers={"content-type": "text/html"},
+            200,
+            headers={"content-type": "text/html"},
             text="<html><body><h1>Hi</h1></body></html>",
         )
 
@@ -106,7 +116,8 @@ async def test_url_import_fetches_and_records_provenance(clean_skills, monkeypat
     monkeypatch.setattr(webfetch.httpx, "AsyncClient", _factory)
 
     body = routes.SkillDocImportIn(
-        skill_id="cc-test-doc-import", doc_key="api",
+        skill_id="cc-test-doc-import",
+        doc_key="api",
         url="https://example.test/page",
     )
     doc = await routes.import_skill_doc_route(body)
@@ -132,7 +143,8 @@ async def test_url_fetch_failure_is_422_not_a_crash(clean_skills, monkeypatch):
     monkeypatch.setattr(webfetch.httpx, "AsyncClient", _factory)
 
     body = routes.SkillDocImportIn(
-        skill_id="cc-test-doc-import", doc_key="api",
+        skill_id="cc-test-doc-import",
+        doc_key="api",
         url="https://example.test/down",
     )
     with pytest.raises(HTTPException) as exc:

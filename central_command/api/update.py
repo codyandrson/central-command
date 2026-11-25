@@ -120,7 +120,9 @@ def _git(*args: str) -> str | None:
     try:
         out = subprocess.run(  # noqa: PLW1510 — the return code is read below
             ["git", "-C", str(REPO_ROOT), *args],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         return out.stdout.strip() if out.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):
@@ -177,26 +179,31 @@ async def version_check(request: Request) -> JSONResponse:
     if force or not _version_cache or now - _version_cache["checked_at"] > CHECK_CACHE_SECS:
         resolved = await _latest_release_version()
         if resolved is None:
-            return JSONResponse({
-                "current": current,
-                "latest": None,
-                "updateAvailable": False,
-                "projectDir": str(REPO_ROOT),
-                "error": "could not resolve the latest release (no network, or no git origin) "
-                         "— air-gapped installs update from a downloaded zip instead",
-            })
+            return JSONResponse(
+                {
+                    "current": current,
+                    "latest": None,
+                    "updateAvailable": False,
+                    "projectDir": str(REPO_ROOT),
+                    "error": "could not resolve the latest release (no network, or no git origin) "
+                    "— air-gapped installs update from a downloaded zip instead",
+                }
+            )
         _version_cache = {"latest": resolved[0], "source": resolved[1], "checked_at": now}
-    return JSONResponse({
-        "current": current,
-        "latest": _version_cache["latest"],
-        "source": _version_cache["source"],
-        "updateAvailable": compare_semver(_version_cache["latest"], current) > 0,
-        "projectDir": str(REPO_ROOT),
-        "checkedAt": int(_version_cache["checked_at"] * 1000),
-    })
+    return JSONResponse(
+        {
+            "current": current,
+            "latest": _version_cache["latest"],
+            "source": _version_cache["source"],
+            "updateAvailable": compare_semver(_version_cache["latest"], current) > 0,
+            "projectDir": str(REPO_ROOT),
+            "checkedAt": int(_version_cache["checked_at"] * 1000),
+        }
+    )
 
 
 # ── the runner's records ────────────────────────────────────────────────────
+
 
 def _read_json(path: Path) -> dict | None:
     try:
@@ -232,16 +239,19 @@ def _staged_target() -> str | None:
 async def update_status() -> JSONResponse:
     status = _read_json(_update_dir() / "status.json")
     stage = _read_json(_update_dir() / "stage.json")
-    return JSONResponse({
-        "mode": "local",
-        "pending": False,
-        "inFlight": _in_flight(status),
-        "status": status,
-        "stage": {"pending": False, "inFlight": False, "status": stage},
-    })
+    return JSONResponse(
+        {
+            "mode": "local",
+            "pending": False,
+            "inFlight": _in_flight(status),
+            "status": status,
+            "stage": {"pending": False, "inFlight": False, "status": stage},
+        }
+    )
 
 
 # ── upload + stage ──────────────────────────────────────────────────────────
+
 
 def _run_update_sh(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(  # noqa: PLW1510 — the return code is read by the caller
@@ -254,7 +264,10 @@ def _run_update_sh(*args: str) -> subprocess.CompletedProcess:
         # changed; the hour-plus case is a release that really did refetch the
         # vendored docs. The ceiling stays generous for exactly that case: the
         # script's own gates bound the work, this is a last resort, not a budget.
-        capture_output=True, text=True, cwd=str(SINGLE_DIR), timeout=3600,
+        capture_output=True,
+        text=True,
+        cwd=str(SINGLE_DIR),
+        timeout=3600,
     )
 
 
@@ -286,7 +299,9 @@ def _write_stage_record(state: str, target: str, error: str | None = None) -> No
 @router.post("/update/upload")
 async def update_upload(request: Request) -> JSONResponse:
     if _bash() is None or not (SINGLE_DIR / "update.sh").is_file():
-        return JSONResponse({"error": "deploy/single/update.sh is not available on this install"}, status_code=503)
+        return JSONResponse(
+            {"error": "deploy/single/update.sh is not available on this install"}, status_code=503
+        )
     if _in_flight(_read_json(_update_dir() / "status.json")):
         return JSONResponse({"error": "an update is already running"}, status_code=409)
 
@@ -299,12 +314,18 @@ async def update_upload(request: Request) -> JSONResponse:
             async for chunk in request.stream():
                 size += len(chunk)
                 if size > MAX_ZIP_BYTES:
-                    return JSONResponse({"error": f"zip exceeds {MAX_ZIP_BYTES // (1024 * 1024)} MB"}, status_code=413)
+                    return JSONResponse(
+                        {"error": f"zip exceeds {MAX_ZIP_BYTES // (1024 * 1024)} MB"},
+                        status_code=413,
+                    )
                 fh.write(chunk)
     except OSError as exc:
         return JSONResponse({"error": f"could not store the upload: {exc}"}, status_code=500)
     if size == 0:
-        return JSONResponse({"error": "empty upload — send the downloaded source zip as the request body"}, status_code=422)
+        return JSONResponse(
+            {"error": "empty upload — send the downloaded source zip as the request body"},
+            status_code=422,
+        )
 
     # stage = init-if-needed + import + plan; only the `upstream` branch moves,
     # so this is safe while the API (this process) keeps serving.
@@ -318,16 +339,19 @@ async def update_upload(request: Request) -> JSONResponse:
     current = read_product_version()
     update_available = compare_semver(target, current) > 0
     _write_stage_record("success", target)
-    return JSONResponse({
-        "target": target,
-        "current": current,
-        "updateAvailable": update_available,
-        "projectDir": str(REPO_ROOT),
-        "plan": proc.stdout,
-    })
+    return JSONResponse(
+        {
+            "target": target,
+            "current": current,
+            "updateAvailable": update_available,
+            "projectDir": str(REPO_ROOT),
+            "plan": proc.stdout,
+        }
+    )
 
 
 # ── apply ───────────────────────────────────────────────────────────────────
+
 
 async def _download_and_stage(target: str) -> str | None:
     """Fetch v<target>'s source zip from origin and stage it. None on success."""
@@ -371,17 +395,22 @@ def _spawn_detached(cmd: list[str], extra_env: dict[str, str] | None = None) -> 
             | subprocess.CREATE_NEW_PROCESS_GROUP
             | subprocess.CREATE_NO_WINDOW
         )
-        subprocess.Popen(cmd, stdin=devnull, stdout=devnull, stderr=devnull,
-                         creationflags=flags, env=env)
+        subprocess.Popen(
+            cmd, stdin=devnull, stdout=devnull, stderr=devnull, creationflags=flags, env=env
+        )
     else:
-        subprocess.Popen(cmd, stdin=devnull, stdout=devnull, stderr=devnull,
-                         start_new_session=True, env=env)
+        subprocess.Popen(
+            cmd, stdin=devnull, stdout=devnull, stderr=devnull, start_new_session=True, env=env
+        )
 
 
 @router.post("/update/apply")
 async def update_apply(body: ApplyRequest) -> JSONResponse:
     if _bash() is None or not (SINGLE_DIR / "update-run.sh").is_file():
-        return JSONResponse({"error": "deploy/single/update-run.sh is not available on this install"}, status_code=503)
+        return JSONResponse(
+            {"error": "deploy/single/update-run.sh is not available on this install"},
+            status_code=503,
+        )
     if _in_flight(_read_json(_update_dir() / "status.json")):
         return JSONResponse({"error": "an update is already running"}, status_code=409)
     current = read_product_version()
@@ -400,7 +429,10 @@ async def update_apply(body: ApplyRequest) -> JSONResponse:
     if staged is None:
         return JSONResponse({"error": "nothing is staged — upload a zip first"}, status_code=409)
     if body.target and body.target != staged:
-        return JSONResponse({"error": f"staged version is v{staged}, not v{body.target} — re-upload"}, status_code=409)
+        return JSONResponse(
+            {"error": f"staged version is v{staged}, not v{body.target} — re-upload"},
+            status_code=409,
+        )
 
     upd = _update_dir()
     upd.mkdir(parents=True, exist_ok=True)
@@ -411,17 +443,26 @@ async def update_apply(body: ApplyRequest) -> JSONResponse:
 
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     tmp = upd / "status.json.tmp"
-    tmp.write_text(json.dumps({
-        "state": "running", "phase": "requested", "current": current,
-        "target": staged, "started_at": now, "updated_at": now,
-    }))
+    tmp.write_text(
+        json.dumps(
+            {
+                "state": "running",
+                "phase": "requested",
+                "current": current,
+                "target": staged,
+                "started_at": now,
+                "updated_at": now,
+            }
+        )
+    )
     tmp.replace(upd / "status.json")
 
     try:
         # CC_UPDATE_DIR travels explicitly: this process dies mid-run, so the
         # runner must not have to re-derive the directory we are polling.
-        _spawn_detached([_bash() or "bash", str(runner), staged, str(SINGLE_DIR)],
-                        {"CC_UPDATE_DIR": str(upd)})
+        _spawn_detached(
+            [_bash() or "bash", str(runner), staged, str(SINGLE_DIR)], {"CC_UPDATE_DIR": str(upd)}
+        )
     except OSError as exc:
         return JSONResponse({"error": f"could not start the update runner: {exc}"}, status_code=500)
     return JSONResponse({"triggered": True, "target": staged}, status_code=202)

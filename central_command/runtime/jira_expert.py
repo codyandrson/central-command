@@ -35,7 +35,7 @@ CHARTER = (
     "and the operator tasks directly. You never write to Jira yourself: in "
     "consultation you ADVISE ONLY; on a direct task you PROPOSE, and a human "
     "approves before anything executes.\n\n"
-    "Your human team lead is <<operator_name>> — \"the operator\" throughout this "
+    'Your human team lead is <<operator_name>> — "the operator" throughout this '
     "charter.\n\n"
     "EXPERTISE — apply these practice patterns:\n"
     "- Hierarchy vs links: native hierarchy (Epic > Story > Task > Sub-task; "
@@ -83,9 +83,14 @@ CHARTER = (
 
 
 async def build_jira_expert(
-    model=None, charter: str | None = None, packs=None,
-    capabilities=None, skills_catalog: str = "",
-    extra_toolsets=(), mcp_section: str = "", team_section: str = "",
+    model=None,
+    charter: str | None = None,
+    packs=None,
+    capabilities=None,
+    skills_catalog: str = "",
+    extra_toolsets=(),
+    mcp_section: str = "",
+    team_section: str = "",
 ) -> Agent:
     """The operator-tasked expert. The ADVISORY build lives in
     `runtime/consult.py` now (`build_advisory_agent`) and is generic — one
@@ -102,11 +107,8 @@ async def build_jira_expert(
     return Agent(
         await resolve_model(model, agent_id=AGENT_ID),
         name=AGENT_ID,
-        system_prompt=build_charter(
-            charter or render_v0(CHARTER), packs, mcp_section, team_section
-        ) + (
-            "\n\n" + skills_catalog if skills_catalog else ""
-        ),
+        system_prompt=build_charter(charter or render_v0(CHARTER), packs, mcp_section, team_section)
+        + ("\n\n" + skills_catalog if skills_catalog else ""),
         deps_type=TriageDeps,  # unused, but resume paths pass one — keep the shape
         output_type=[str, DeferredToolRequests],
         # declare_gap is ungated (it returns text, never CallDeferred), so it
@@ -121,7 +123,9 @@ async def ensure_registered() -> None:
     from central_command.db import repo
 
     await repo.upsert_agent(
-        AGENT_ID, "Jira Expert", "",
+        AGENT_ID,
+        "Jira Expert",
+        "",
         "Jira best practices; consulted by agents, tasked by the operator",
     )
 

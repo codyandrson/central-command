@@ -57,6 +57,7 @@ def parse_email(raw: str) -> dict:
     # marketing mail's plain part is mostly raw tracking URLs — and an HTML
     # part is CONVERTED, never handed to the agent as markup.
     if msg.is_multipart():
+
         def part(kind: str) -> str:
             p = msg.get_body(preferencelist=(kind,))
             return p.get_content() if p is not None else ""
@@ -177,14 +178,12 @@ def parse_document(title: str, text: str, doc_id: str | None = None) -> dict:
     if doc_id and doc_id.strip():
         key, synthetic = doc_id.strip(), False
     else:
-        digest = hashlib.sha256(
-            f"{title}\x00{text}".encode()
-        ).hexdigest()[:24]
+        digest = hashlib.sha256(f"{title}\x00{text}".encode()).hexdigest()[:24]
         key, synthetic = digest, True
     message_id = f"<cc-doc-{key}@central_command.local>"
     return {
         "message_id": message_id,
-        "synthetic": synthetic,   # identity is a content hash, not a fact
+        "synthetic": synthetic,  # identity is a content hash, not a fact
         "thread_id": message_id,
         "doc_id": doc_id.strip() if doc_id and doc_id.strip() else None,
         "subject": title or None,
@@ -230,8 +229,7 @@ async def enroll_document(
         parsed["message_id"],
         # `text` present from the start: a hand-fed document needs no hydration
         # adapter, and `hydrate_work_item` no-ops on it by construction.
-        {"text": document_input(parsed), "title": parsed["title"],
-         "doc_id": parsed["doc_id"]},
+        {"text": document_input(parsed), "title": parsed["title"], "doc_id": parsed["doc_id"]},
         thread_id=parsed["thread_id"],
         feed=feed,
         source=source,
@@ -260,9 +258,7 @@ async def enroll_fixture_dir(path: str | Path, *, feed: str = "backlog") -> dict
 
     enrolled = duplicates = 0
     for eml in sorted(directory.glob("*.eml")):
-        result = await enroll_email(
-            eml.read_text(encoding="utf-8"), feed=feed, source="fixture"
-        )
+        result = await enroll_email(eml.read_text(encoding="utf-8"), feed=feed, source="fixture")
         if result["enrolled"]:
             enrolled += 1
         else:
@@ -271,6 +267,7 @@ async def enroll_fixture_dir(path: str | Path, *, feed: str = "backlog") -> dict
 
 
 # --- the real provider feed (M12) ----------------------------------------------
+
 
 def provider_source() -> str:
     """`work_item.source` for mail arriving through the provider feed —
@@ -322,7 +319,7 @@ def provider_uuid(message_id: str) -> str | None:
     `provider_message_id` itself — the format string lives in ONE place."""
     prefix, suffix = provider_message_id("\x00").split("\x00")
     if message_id.startswith(prefix) and message_id.endswith(suffix):
-        return message_id[len(prefix):-len(suffix)] or None
+        return message_id[len(prefix) : -len(suffix)] or None
     return None
 
 

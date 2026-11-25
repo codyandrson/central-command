@@ -81,13 +81,13 @@ def _version() -> str:
 # (a stub venv cannot import the app); the cockpit's own probes stay REAL, so
 # the plan and the post-phase check are the shipped decision. It loads .env
 # first, as the real phase does: the cockpit step reads its seams from there.
-_TAIL = r'''
+_TAIL = r"""
 for __f in $(compgen -A function p_); do
   case "$__f" in p_cockpit_npm|p_cockpit_build|p_node_ok) continue ;; esac
   eval "$__f() { return 0; }"
 done
 phase_fetch() { load_env || return 1; fetch_cockpit; }
-'''
+"""
 
 
 class Rig:
@@ -102,14 +102,21 @@ class Rig:
         env = dict(os.environ)
         home = self.tmp / "home"
         env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
-        for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_RUN_LOCK_PID",
-                      "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
-                      "CC_STAGED_FOR"):
+        for stale in (
+            "CC_STATE_DIR",
+            "CC_ENABLE_SPEECH",
+            "CC_RUN_LOCK_PID",
+            "CC_LLM_PROXY_ADMIN_KEY",
+            "CC_LLM_API_KEY",
+            "CC_STAGED_FOR",
+        ):
             env.pop(stale, None)
         env["PATH"] = str(self.tmp / "bin") + os.pathsep + env.get("PATH", "")
         env = with_stub_path(env, self.tmp / "bin")
         self.npm_log.write_text("")
-        return run_driver([_bash(), "setup.sh", phase], cwd=self.repo / "deploy" / "single", env=env)
+        return run_driver(
+            [_bash(), "setup.sh", phase], cwd=self.repo / "deploy" / "single", env=env
+        )
 
     def npm_calls(self) -> list[str]:
         return [l for l in self.npm_log.read_text().splitlines() if l]
@@ -128,13 +135,20 @@ def rig(tmp_path: Path) -> Rig:
         shutil.copy2(ROOT / f, repo / f)
     shutil.copy2(ROOT / ".env.example", repo / ".env")
     (repo / "central_command" / "db").mkdir(parents=True)
-    shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
-                 repo / "central_command" / "db" / "schema.sql")
+    shutil.copy2(
+        ROOT / "central_command" / "db" / "schema.sql",
+        repo / "central_command" / "db" / "schema.sql",
+    )
     (tmp_path / "home").mkdir()
     r.state.mkdir()
-    _set(repo / ".env", {"CC_STATE_DIR": env_path(r.state),
-                         "CC_LLM_API_KEY": "sk-already-minted-0000000000",
-                         "CC_LLM_PROXY_ADMIN_KEY": ""})
+    _set(
+        repo / ".env",
+        {
+            "CC_STATE_DIR": env_path(r.state),
+            "CC_LLM_API_KEY": "sk-already-minted-0000000000",
+            "CC_LLM_PROXY_ADMIN_KEY": "",
+        },
+    )
     setup = repo / "deploy" / "single" / "setup.sh"
     text = setup.read_text(encoding="utf-8")
     tail = 'main "$@"'
@@ -157,8 +171,13 @@ def rig(tmp_path: Path) -> Rig:
 
     # The ledger: everything fetch/cockpit and app's rows require, done.
     led = ["# prepared"]
-    for s in ("check/tree-pristine", "machine/machine-registries", "fetch/venv", "llm/secrets",
-              "llm/litellm-live"):
+    for s in (
+        "check/tree-pristine",
+        "machine/machine-registries",
+        "fetch/venv",
+        "llm/secrets",
+        "llm/litellm-live",
+    ):
         led.append(f"{s}\tdone\t{_version()}\t2026-10-01T00:00:00Z\tnone\t")
     (r.state / "ledger.tsv").write_text("\n".join(led) + "\n")
 
@@ -171,7 +190,9 @@ def rig(tmp_path: Path) -> Rig:
     _exe(b / "uv", "#!/usr/bin/env bash\nexit 0\n")
     _exe(b / "node", "#!/usr/bin/env bash\necho v22.11.0\n")
     python_shim(b)
-    _exe(b / "npm", f'''#!/usr/bin/env bash
+    _exe(
+        b / "npm",
+        f'''#!/usr/bin/env bash
 [[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $*" >> "{r.npm_log.as_posix()}"
 case "$1" in
@@ -179,7 +200,8 @@ case "$1" in
   run) rm -rf dist server-dist && mkdir -p dist server-dist && touch server-dist/index.js ;;
 esac
 exit 0
-''')
+''',
+    )
     return r
 
 
@@ -281,7 +303,9 @@ def test_the_lockfile_is_not_an_input_of_either_record(rig: Rig):
 def test_a_new_npm_major_reinstalls(rig: Rig):
     _ok(rig.run("fetch"))
     _ok(rig.run("app"))
-    _exe(rig.tmp / "bin" / "npm", f'''#!/usr/bin/env bash
+    _exe(
+        rig.tmp / "bin" / "npm",
+        f'''#!/usr/bin/env bash
 [[ "$1" == "-v" ]] && {{ echo 12.0.0; exit 0; }}
 echo "npm $*" >> "{rig.npm_log.as_posix()}"
 case "$1" in
@@ -289,7 +313,8 @@ case "$1" in
   run) rm -rf dist server-dist && mkdir -p dist server-dist && touch server-dist/index.js ;;
 esac
 exit 0
-''')
+''',
+    )
     f = rig.run("fetch")
     _ok(f)
     assert rig.npm_calls() == [_INSTALL], rig.npm_calls()
@@ -300,11 +325,14 @@ def test_npm_10_is_refused_with_the_fix_named_and_nothing_is_installed(rig: Rig)
     """`npm install --no-package-lock` crashes inside npm 10's resolver on this
     tree: the drivers gate npm >= 11 the way they gate node >= 22 (a WARN: the
     API runs without the cockpit), and name the fix."""
-    _exe(rig.tmp / "bin" / "npm", f'''#!/usr/bin/env bash
+    _exe(
+        rig.tmp / "bin" / "npm",
+        f'''#!/usr/bin/env bash
 [[ "$1" == "-v" ]] && {{ echo 10.9.9; exit 0; }}
 echo "npm $*" >> "{rig.npm_log.as_posix()}"
 exit 0
-''')
+''',
+    )
     f = rig.run("fetch")
     _ok(f)
     assert "WARN cockpit: npm v10.9.9 is older than 11" in f.stdout, f.stdout
@@ -331,12 +359,15 @@ def test_a_failed_build_leaves_no_record_behind(rig: Rig):
     _ok(rig.run("fetch"))
     _ok(rig.run("app"))
     write_lf(rig.web / "src" / "main.tsx", "export const a = 2\n")
-    _exe(rig.tmp / "bin" / "npm", f'''#!/usr/bin/env bash
+    _exe(
+        rig.tmp / "bin" / "npm",
+        f'''#!/usr/bin/env bash
 [[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $*" >> "{rig.npm_log.as_posix()}"
 [[ "$1" == run ]] && {{ mkdir -p dist server-dist; touch server-dist/index.js; exit 1; }}
 exit 0
-''')
+''',
+    )
     a = rig.run("app")
     assert a.returncode == 1, a.stdout + a.stderr
     assert not rig.record("build").exists(), "a failed build left a record that reads current"
@@ -359,7 +390,9 @@ def _preinstalled(rig: Rig, *, ls_rc: int = 0, tree: bool = True) -> Path:
     if tree:
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("installed by hand\n")
-    _exe(rig.tmp / "bin" / "npm", f'''#!/usr/bin/env bash
+    _exe(
+        rig.tmp / "bin" / "npm",
+        f'''#!/usr/bin/env bash
 [[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $*" >> "{rig.npm_log.as_posix()}"
 case "$1" in
@@ -372,7 +405,8 @@ case "$1" in
   run) rm -rf dist server-dist && mkdir -p dist server-dist && touch server-dist/index.js ;;
 esac
 exit 0
-''')
+''',
+    )
     return marker
 
 
@@ -412,7 +446,10 @@ def test_a_provided_tree_that_does_not_fit_fails_and_is_left_alone(rig: Rig):
     marker = _preinstalled(rig, ls_rc=1)
     f = rig.run("fetch")
     assert f.returncode == 1, f.stdout + f.stderr
-    assert "FAIL cockpit: CC_COCKPIT_NPM_PREINSTALLED=1 but web/node_modules does not satisfy" in f.stdout
+    assert (
+        "FAIL cockpit: CC_COCKPIT_NPM_PREINSTALLED=1 but web/node_modules does not satisfy"
+        in f.stdout
+    )
     assert "missing: fancy-canvas@2.1.0" in f.stdout, "the FAIL line does not name npm's finding"
     assert rig.npm_calls() == [_LS], "a failed check went on to the install"
     assert marker.exists(), "a tree that failed the check was deleted"
@@ -434,7 +471,9 @@ def test_app_alone_accepts_a_provided_tree_and_refuses_to_build_on_a_bad_one(rig
     after fetch): app asks the same question and never falls back to the install."""
     marker = _preinstalled(rig)
     led = rig.state / "ledger.tsv"
-    led.write_text(led.read_text() + f"fetch/cockpit\tdone\t{_version()}\t2026-10-01T00:00:00Z\tnone\t\n")
+    led.write_text(
+        led.read_text() + f"fetch/cockpit\tdone\t{_version()}\t2026-10-01T00:00:00Z\tnone\t\n"
+    )
     a = rig.run("app")
     _ok(a)
     assert rig.npm_calls() == [_LS, "npm run build"], rig.npm_calls()

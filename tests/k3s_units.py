@@ -31,14 +31,27 @@ def run_render(template: Path, *values: str) -> subprocess.CompletedProcess:
     if not bash:
         pytest.skip("bash needed to run the unit render")
     return subprocess.run(
-        [bash, "-c", '. "$1" && shift && cc_k3s_render_unit "$@"', "render",
-         LIB.as_posix(), template.as_posix(), *values],
-        capture_output=True, timeout=30,
+        [
+            bash,
+            "-c",
+            '. "$1" && shift && cc_k3s_render_unit "$@"',
+            "render",
+            LIB.as_posix(),
+            template.as_posix(),
+            *values,
+        ],
+        capture_output=True,
+        timeout=30,
     )
 
 
-def render_unit(template: Path, checkout: str = CHECKOUT, owner: str = OWNER,
-                group: str = GROUP, home: str = HOME) -> str:
+def render_unit(
+    template: Path,
+    checkout: str = CHECKOUT,
+    owner: str = OWNER,
+    group: str = GROUP,
+    home: str = HOME,
+) -> str:
     r = run_render(template, checkout, owner, group, home)
     assert r.returncode == 0, f"{template.name} did not render: {r.stderr.decode()}"
     return r.stdout.decode("utf-8")

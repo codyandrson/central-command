@@ -30,12 +30,29 @@ def enqueued(monkeypatch):
     signature: reference_time keyword-only, no default."""
     calls = []
 
-    async def fake_enqueue(name, episode_body, source_description, group_id, *,
-                           reference_time, proposal_id, scope, marker):
-        calls.append({"name": name, "episode_body": episode_body,
-                      "source_description": source_description, "group_id": group_id,
-                      "reference_time": reference_time, "proposal_id": proposal_id,
-                      "scope": scope, "marker": marker})
+    async def fake_enqueue(
+        name,
+        episode_body,
+        source_description,
+        group_id,
+        *,
+        reference_time,
+        proposal_id,
+        scope,
+        marker,
+    ):
+        calls.append(
+            {
+                "name": name,
+                "episode_body": episode_body,
+                "source_description": source_description,
+                "group_id": group_id,
+                "reference_time": reference_time,
+                "proposal_id": proposal_id,
+                "scope": scope,
+                "marker": marker,
+            }
+        )
         return {"verification": {"id": "cc-test"}, "job": {"id": 1}}
 
     monkeypatch.setattr(graphiti_ingest, "enqueue", fake_enqueue)
@@ -76,6 +93,7 @@ def no_stewards(monkeypatch):
     """Default roster fixture for tests that don't care about stewardship:
     no active agent stewards a domain, so read-group widening and write
     defaulting are no-ops and old (pre-stewardship) assertions still hold."""
+
     async def fake_list_agents(include_retired=True, roster_only=True):
         return []
 
@@ -87,8 +105,12 @@ def no_stewards(monkeypatch):
 
 
 async def test_add_episode_defaults_to_the_shared_group(enqueued, no_stewards):
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z",
-            "scope": "shared"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "shared",
+    }
     await _graph_add_episode(args, approver="lee", proposer=None)
     assert enqueued[0]["group_id"] == graphiti.settings.graph_write_group
     # The reference time rides every enqueued episode (2026-09-19): Graphiti's
@@ -99,6 +121,7 @@ async def test_add_episode_defaults_to_the_shared_group(enqueued, no_stewards):
 
 def test_enqueue_has_no_reference_time_default():
     import inspect
+
     param = inspect.signature(graphiti_ingest.enqueue).parameters["reference_time"]
     assert param.kind is inspect.Parameter.KEYWORD_ONLY
     assert param.default is inspect.Parameter.empty
@@ -126,6 +149,7 @@ async def test_read_groups_widen_with_active_stewards(monkeypatch):
     """A steward's domain group joins the shared read set automatically —
     every agent reads it, even though only the steward writes there by
     default (2026-08-22 domain stewardship)."""
+
     async def fake_list_agents(include_retired=True, roster_only=True):
         assert include_retired is False  # retired stewards must not widen reads
         return [
@@ -170,34 +194,47 @@ def test_every_group_id_satisfies_graphitis_charset():
 
 
 async def test_executor_shared_scope_uses_default_group(monkeypatch, enqueued, no_stewards):
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "shared",
+    }
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
     assert enqueued[0]["group_id"] == graphiti.settings.graph_write_group
 
 
-async def test_executor_shared_scope_defaults_to_a_stewards_domain_group(
-    monkeypatch, enqueued
-):
+async def test_executor_shared_scope_defaults_to_a_stewards_domain_group(monkeypatch, enqueued):
     """The write-side half of domain stewardship: an unscoped shared write
     from an agent with a steward_group lands in that domain, not the plain
     shared group."""
+
     async def fake_get_agent(agent_id):
         return {"id": agent_id, "steward_group": "domain_jira"}
 
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "shared",
+    }
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
     assert enqueued[0]["group_id"] == "domain_jira"
 
 
-async def test_executor_shared_scope_explicit_group_id_wins_over_steward(
-    monkeypatch, enqueued
-):
+async def test_executor_shared_scope_explicit_group_id_wins_over_steward(monkeypatch, enqueued):
     async def fake_get_agent(agent_id):
         return {"id": agent_id, "steward_group": "domain_jira"}
 
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared", "group_id": "some_other_group"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "shared",
+        "group_id": "some_other_group",
+    }
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
     assert enqueued[0]["group_id"] == "some_other_group"
 
@@ -207,7 +244,13 @@ async def test_executor_private_scope_uses_proposers_partition_regardless_of_arg
 ):
     # An agent-authored "agent_id" in args must be ignored — proposer is the
     # only trusted partition owner.
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "agent_id": "someone-else"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "private",
+        "agent_id": "someone-else",
+    }
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
     assert enqueued[0]["group_id"] == "central_command_jira-expert"
 
@@ -220,7 +263,12 @@ async def test_executor_stamps_marker_and_enqueues_verification_and_job_together
     tests/test_graph_ingest.py proves the transaction) and carries the row's
     marker in source_description, which is the idempotency key the worker's
     crash recovery finds the Episodic node by."""
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "private",
+    }
     await _graph_add_episode(args, approver="lee", proposer="jira-expert")
 
     (row,) = enqueued
@@ -234,13 +282,23 @@ async def test_executor_stamps_marker_and_enqueues_verification_and_job_together
 
 
 async def test_executor_private_scope_without_proposer_raises(monkeypatch):
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "private",
+    }
     with pytest.raises(ExecutorError):
         await _graph_add_episode(args, approver="lee", proposer=None)
 
 
 async def test_executor_unknown_scope_raises(monkeypatch):
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "team"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "team",
+    }
     with pytest.raises(ExecutorError):
         await _graph_add_episode(args, approver="lee", proposer="jira-expert")
 
@@ -248,23 +306,30 @@ async def test_executor_unknown_scope_raises(monkeypatch):
 # --- for_agent (2026-09-01): a private rule ABOUT a teammate lands in THEIR partition
 
 
-async def test_executor_private_for_agent_targets_that_agents_partition(
-    monkeypatch, enqueued
-):
+async def test_executor_private_for_agent_targets_that_agents_partition(monkeypatch, enqueued):
     async def fake_get_agent(agent_id):
         return {"id": agent_id, "role": "triage email", "status": "ACTIVE"}
 
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "for_agent": "inbox-triage"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "private",
+        "for_agent": "inbox-triage",
+    }
     await _graph_add_episode(args, approver="lee", proposer="ea")
     assert enqueued[0]["group_id"] == "central_command_inbox-triage"
 
 
-@pytest.mark.parametrize("row", [
-    None,
-    {"id": "ghost", "role": "", "status": "ACTIVE"},        # registered, never hired
-    {"id": "ghost", "role": "old hand", "status": "RETIRED"},
-])
+@pytest.mark.parametrize(
+    "row",
+    [
+        None,
+        {"id": "ghost", "role": "", "status": "ACTIVE"},  # registered, never hired
+        {"id": "ghost", "role": "old hand", "status": "RETIRED"},
+    ],
+)
 async def test_executor_private_for_agent_must_be_an_active_roster_member(
     monkeypatch, enqueued, row
 ):
@@ -272,22 +337,33 @@ async def test_executor_private_for_agent_must_be_an_active_roster_member(
         return row
 
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "for_agent": "ghost"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "private",
+        "for_agent": "ghost",
+    }
     with pytest.raises(ExecutorError, match="for_agent"):
         await _graph_add_episode(args, approver="lee", proposer="ea")
     assert enqueued == []  # nothing queued
 
 
-async def test_executor_private_for_agent_self_needs_no_roster_lookup(
-    monkeypatch, enqueued
-):
+async def test_executor_private_for_agent_self_needs_no_roster_lookup(monkeypatch, enqueued):
     """for_agent == proposer is the plain private path — no lookup, so a
     proposer that is not (yet) a roster member keeps working as before."""
+
     async def fake_get_agent(agent_id):
         raise AssertionError("no lookup expected")
 
     monkeypatch.setattr(repo, "get_agent", fake_get_agent)
-    args = {"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "private", "for_agent": "ea"}
+    args = {
+        "name": "n",
+        "episode_body": "b",
+        "reference_time": "2026-01-01T00:00:00Z",
+        "scope": "private",
+        "for_agent": "ea",
+    }
     await _graph_add_episode(args, approver="lee", proposer="ea")
     assert enqueued[0]["group_id"] == "central_command_ea"
 
@@ -306,7 +382,10 @@ async def test_group_ids_override_bypasses_caller_scope(captured, no_stewards):
 async def test_known_groups_covers_shared_domains_and_every_roster_partition(monkeypatch):
     async def fake_list_agents(include_retired=True, roster_only=True):
         assert include_retired is False
-        return [{"id": "ea", "steward_group": ""}, {"id": "jira-expert", "steward_group": "domain_jira"}]
+        return [
+            {"id": "ea", "steward_group": ""},
+            {"id": "jira-expert", "steward_group": "domain_jira"},
+        ]
 
     monkeypatch.setattr(repo, "list_agents", fake_list_agents)
     groups = await graphiti.known_groups()

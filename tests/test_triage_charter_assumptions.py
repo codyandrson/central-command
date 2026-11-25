@@ -26,7 +26,10 @@ CHARTER = builtin_charter("inbox-triage")
 
 def test_an_unstated_conclusion_is_an_assumption_to_confirm_or_ask_about():
     assert "that no source states in words is an ASSUMPTION" in CHARTER
-    assert "You never act on an assumption, however plausible it looks; you confirm it first." in CHARTER
+    assert (
+        "You never act on an assumption, however plausible it looks; you confirm it first."
+        in CHARTER
+    )
     assert "When none states it, ask the operator with ask_operator" in CHARTER
 
 
@@ -36,11 +39,17 @@ def test_asking_is_keyed_on_what_was_stated_not_on_feeling_unsure():
         in CHARTER
     )
     # the trigger this replaced
-    assert "If you cannot place the sender or the relationship and it would change your handling" not in CHARTER
+    assert (
+        "If you cannot place the sender or the relationship and it would change your handling"
+        not in CHARTER
+    )
 
 
 def test_an_answer_with_no_facts_records_nothing():
-    assert 'An answer that gives no facts ("dismiss", "no", "not needed") means no action and no record' in CHARTER
+    assert (
+        'An answer that gives no facts ("dismiss", "no", "not needed") means no action and no record'
+        in CHARTER
+    )
 
 
 def test_the_examples_name_no_real_person_or_company():

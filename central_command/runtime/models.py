@@ -81,9 +81,7 @@ def configured_model_name(agent_id: str | None, row_model: str | None = None) ->
     `resolve_model` AND for what the cockpit prints as an agent's default —
     two copies of it read "cc-default" for an agent pinned to another alias
     for three weeks (2026-09-13)."""
-    return (
-        row_model or settings.agent_model(agent_id) or settings.default_model
-    ).split(":", 1)[-1]
+    return (row_model or settings.agent_model(agent_id) or settings.default_model).split(":", 1)[-1]
 
 
 # The thinking levels Qwen3.8's chat template accepts, and how each spells
@@ -127,8 +125,13 @@ async def _thinking_body(model_name: str, thinking: str) -> dict | None:
     try:
         mechanism, _levels = await litellm_mod.thinking_mechanism(model_name)
     except litellm_mod.LiteLLMError as exc:
-        log.warning("thinking %r for %s: cannot read the proxy's declaration (%s)"
-                    " — sending no thinking control", thinking, model_name, exc)
+        log.warning(
+            "thinking %r for %s: cannot read the proxy's declaration (%s)"
+            " — sending no thinking control",
+            thinking,
+            model_name,
+            exc,
+        )
         return None
     if mechanism == "qwen_template":
         return _thinking_extra_body(thinking)
@@ -142,7 +145,9 @@ async def _thinking_body(model_name: str, thinking: str) -> dict | None:
         return {"reasoning_effort": effort, "cache": {"no-cache": True}}
     log.warning(
         "thinking %r requested for %s but model_info declares no"
-        " thinking_mechanism — sending no thinking control", thinking, model_name,
+        " thinking_mechanism — sending no thinking control",
+        thinking,
+        model_name,
     )
     return None
 
@@ -214,8 +219,13 @@ async def _live_model(model_name: str, agent_id=None, thinking: str | None = Non
     # CC_MODEL_CONCURRENCY names this alias's pool (DL-227). Outside: the
     # wrapper where a request that missed the working window is caught
     # (runtime/context.py, slice 2), before a slot is taken.
-    return WindowedModel(limit_concurrency(OpenAIChatModel(
-        model_name, provider=provider, settings=model_settings, profile=dict(WIRE_PROFILE))))
+    return WindowedModel(
+        limit_concurrency(
+            OpenAIChatModel(
+                model_name, provider=provider, settings=model_settings, profile=dict(WIRE_PROFILE)
+            )
+        )
+    )
 
 
 # ONE system message, and only at the start. pydantic-ai 2.59+ delivers a
@@ -261,7 +271,8 @@ async def resolve_session_model(session_id: str | None, agent_id: str | None):
             # precedence (agent row, then env, then default), which is why this
             # hands both to `resolve_model` instead of re-deriving the name.
             return await resolve_model(
-                agent_id=agent_id, model_name=override or None,
+                agent_id=agent_id,
+                model_name=override or None,
                 thinking=thinking or None,
             )
     return await resolve_model(agent_id=agent_id)

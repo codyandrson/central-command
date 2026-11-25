@@ -55,17 +55,22 @@ def _proposal() -> dict:
     is where a creator waiting on its task sits."""
     return {
         "intent": "comment on TASKS-9 once jira-expert has checked its due date",
-        "actions": [{
-            "capability": "jira.add_comment",
-            "arguments": {"issue_key": "TASKS-9", "body": "Due date checked."},
-            "target_ref": {"system": "jira", "id": "TASKS-9", "read_version": "unknown"},
-            "reversibility": "reversible",
-        }],
-        "evidence": [{
-            "kind": "email", "source_ref": "gmail:msg_1",
-            "locator": "email.get_message(msg_1)",
-            "claim": "Sender asks whether TASKS-9 has a due date.",
-        }],
+        "actions": [
+            {
+                "capability": "jira.add_comment",
+                "arguments": {"issue_key": "TASKS-9", "body": "Due date checked."},
+                "target_ref": {"system": "jira", "id": "TASKS-9", "read_version": "unknown"},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "email",
+                "source_ref": "gmail:msg_1",
+                "locator": "email.get_message(msg_1)",
+                "claim": "Sender asks whether TASKS-9 has a due date.",
+            }
+        ],
         "expected_effect": "TASKS-9 carries the answer",
         "confidence": {"level": "high", "rationale": "The test states it."},
     }
@@ -97,13 +102,20 @@ async def _parked_on_a_task(model):
         "Please have jira-expert check TASKS-9 and tell me its due date.",
         model=model,
     )
-    task_id = (await routes.create_and_run_task(
-        "Check TASKS-9 for a due date.", None, "jira-expert", background=True,
-    ))["task_id"]
+    task_id = (
+        await routes.create_and_run_task(
+            "Check TASKS-9 for a due date.",
+            None,
+            "jira-expert",
+            background=True,
+        )
+    )["task_id"]
     run_state = await repo.load_paused_session(run["session_id"])
     await park_task_wait(
-        session_id=run["session_id"], agent_id="inbox-triage",
-        tool_call_id=run_state["tool_call_id"], task_id=task_id,
+        session_id=run["session_id"],
+        agent_id="inbox-triage",
+        tool_call_id=run_state["tool_call_id"],
+        task_id=task_id,
     )
     return run, task_id
 
@@ -114,8 +126,7 @@ async def _parked_on_a_task(model):
 def _creating_model(assignee: str = "jira-expert", **extra) -> FunctionModel:
     """Calls `create_task` once; once resumed with that call's result, closes
     out in text quoting it, so a test can assert what the agent was told."""
-    args = {"agent_id": assignee, "instructions": "Check TASKS-9 for a due date.",
-            **extra}
+    args = {"agent_id": assignee, "instructions": "Check TASKS-9 for a due date.", **extra}
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         for m in messages:
@@ -128,8 +139,7 @@ def _creating_model(assignee: str = "jira-expert", **extra) -> FunctionModel:
 
 
 async def _child_of(session_id: str) -> dict:
-    (child,) = [t for t in await repo.list_tasks()
-                if t.get("parent_session_id") == session_id]
+    (child,) = [t for t in await repo.list_tasks() if t.get("parent_session_id") == session_id]
     return child
 
 
@@ -192,11 +202,13 @@ async def test_a_child_that_finished_before_the_park_still_wakes_the_creator(mon
     run = await ingest_and_propose("Please have jira-expert check TASKS-9.", model=model)
     for _ in range(100):
         if "agent.task_resumed" in [
-                e["kind"] for e in await repo.list_events(ref_id=run["session_id"])]:
+            e["kind"] for e in await repo.list_events(ref_id=run["session_id"])
+        ]:
             break
         await asyncio.sleep(0.05)
     assert "agent.task_resumed" in [
-        e["kind"] for e in await repo.list_events(ref_id=run["session_id"])]
+        e["kind"] for e in await repo.list_events(ref_id=run["session_id"])
+    ]
 
 
 async def test_without_await_result_the_creator_carries_on():
@@ -222,8 +234,13 @@ async def test_a_refused_creation_cannot_be_waited_on():
     await repo.create_running_session(a_sess, "jira-expert")
     await repo.start_task(root["task_id"], a_sess)
     child = await routes.create_and_run_task(
-        "x", None, "litellm-manager", actor="agent:jira-expert",
-        background=True, parent_session_id=a_sess)
+        "x",
+        None,
+        "litellm-manager",
+        actor="agent:jira-expert",
+        background=True,
+        parent_session_id=a_sess,
+    )
     b_sess = f"sess_wait_{uuid.uuid4().hex[:8]}"
     await repo.create_running_session(b_sess, "litellm-manager")
     await repo.start_task(child["task_id"], b_sess)
@@ -237,8 +254,9 @@ async def test_await_result_is_ignored_for_a_consulted_specialist():
     already ends its turn."""
     session = f"sess_wait_{uuid.uuid4().hex[:8]}"
     await repo.create_running_session(session, "jira-expert")
-    ctx = SimpleNamespace(deps=TriageDeps(
-        agent_id="jira-expert", session_id=session, consult_chain=("inbox-triage",)))
+    ctx = SimpleNamespace(
+        deps=TriageDeps(agent_id="jira-expert", session_id=session, consult_chain=("inbox-triage",))
+    )
     out = await create_task(ctx, "litellm-manager", "Check spend.", await_result=True)
     assert "await_result ignored" in out
 
@@ -261,14 +279,27 @@ async def test_a_creator_resumed_with_one_outcome_can_wait_on_another():
     calls = {"n": 0}
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
-        returns = [p for m in messages for p in getattr(m, "parts", [])
-                   if isinstance(p, ToolReturnPart) and p.tool_name == "create_task"]
+        returns = [
+            p
+            for m in messages
+            for p in getattr(m, "parts", [])
+            if isinstance(p, ToolReturnPart) and p.tool_name == "create_task"
+        ]
         if len(returns) >= 2:
             return ModelResponse(parts=[TextPart(content="Both done.")])
         calls["n"] += 1
-        return ModelResponse(parts=[ToolCallPart(tool_name="create_task", args={
-            "agent_id": "jira-expert", "instructions": f"step {calls['n']}",
-            "await_result": True})])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="create_task",
+                    args={
+                        "agent_id": "jira-expert",
+                        "instructions": f"step {calls['n']}",
+                        "await_result": True,
+                    },
+                )
+            ]
+        )
 
     model = FunctionModel(_respond)
     run = await ingest_and_propose("Do two things in order.", model=model)
@@ -294,10 +325,12 @@ async def test_a_task_run_that_waits_holds_its_task_in_review():
     root = (await routes.create_and_run_task("root", None, "jira-expert"))["task_id"]
     from central_command.runtime.run import run_task
 
-    result = await run_task("jira-expert", "Wait on litellm-manager.",
-                            model=_creating_model(assignee="litellm-manager",
-                                                  await_result=True),
-                            task_id=root)
+    result = await run_task(
+        "jira-expert",
+        "Wait on litellm-manager.",
+        model=_creating_model(assignee="litellm-manager", await_result=True),
+        task_id=root,
+    )
     assert result.get("task_waiting") is True
     assert (await repo.get_task(root))["status"] != "FAILED"
 
@@ -349,8 +382,10 @@ async def test_a_task_create_draft_is_refused_in_run_as_no_capability():
     from central_command.runtime.tools import _validate_proposal
 
     draft = _proposal()
-    draft["actions"][0].update(capability="task.create", arguments={
-        "agent_id": "jira-expert", "instructions": "Check TASKS-9."})
+    draft["actions"][0].update(
+        capability="task.create",
+        arguments={"agent_id": "jira-expert", "instructions": "Check TASKS-9."},
+    )
     ctx = SimpleNamespace(deps=TriageDeps(agent_id="inbox-triage", session_id=None))
     with pytest.raises(ModelRetry, match="not a real capability"):
         await _validate_proposal(ctx, Proposal.model_validate(draft), agent_authored=True)

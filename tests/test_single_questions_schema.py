@@ -100,7 +100,9 @@ def test_every_key_is_declared_in_env_example(row):
     again. Commented (`#CC_X=`) counts: that is how an optional seam is shipped.
     """
     declared = set(
-        re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.MULTILINE)
+        re.findall(
+            r"^#?\s*([A-Z][A-Z0-9_]+)=", ENV_EXAMPLE.read_text(encoding="utf-8"), flags=re.MULTILINE
+        )
     )
     assert row["key"] in declared, (
         f"questions.tsv:{row['_line']} asks for {row['key']}, which .env.example "
@@ -170,7 +172,7 @@ def test_the_groups_are_in_ask_order_and_advanced_is_last():
 
 
 def test_no_question_is_required():
-    """"Required" means setup cannot run without it — and nothing qualifies.
+    """ "Required" means setup cannot run without it — and nothing qualifies.
 
     Every row has a working default or a documented blank meaning:
     `CC_OPERATOR_NAME` is asked by the cockpit on first run (v2.37.0), a blank
@@ -211,12 +213,11 @@ def test_check_reports_a_blank_catalog_as_a_pass_not_a_useraction():
     reported as one would make the NORMAL install impossible to run in one
     command. It is a PASS naming the pause instead (v2.45.1)."""
     setup = installer_source()
-    body = setup[setup.index("check_llm() {"):]
+    body = setup[setup.index("check_llm() {") :]
     body = body[: body.index("\n}\n")]
     blank = body[: body.index("CC_LLM_UPSTREAM_API_KEY:-")]
     assert 'pass "llm" "catalog will be entered in the LiteLLM UI' in blank, (
-        "check's llm section must PASS with the pause named when "
-        "CC_LLM_UPSTREAM_BASE_URL is blank"
+        "check's llm section must PASS with the pause named when CC_LLM_UPSTREAM_BASE_URL is blank"
     )
     assert "useraction" not in blank, (
         "a blank catalog is the normal case and must never be a USERACTION — "
@@ -241,8 +242,7 @@ def test_the_speech_rows_are_gated_on_the_speech_flag():
     """`cc_required_aliases` gates the speech pair on `CC_ENABLE_SPEECH`; the
     schema has to gate the matching questions the same way, or `check` would
     demand an upstream for an engine that is not installed."""
-    for key in ("CC_LLM_UPSTREAM_MODEL_CC_TTS", "CC_LLM_UPSTREAM_MODEL_CC_STT",
-                "CC_HF_ENDPOINT"):
+    for key in ("CC_LLM_UPSTREAM_MODEL_CC_TTS", "CC_LLM_UPSTREAM_MODEL_CC_STT", "CC_HF_ENDPOINT"):
         row = next(r for r in ROWS if r["key"] == key)
         assert row["when"] == "CC_ENABLE_SPEECH=1", (
             f"{key} only applies with the bundled speech engine: {row['when']!r}"
@@ -257,8 +257,12 @@ def test_the_secret_rows_are_exactly_the_credentials():
     that must never reach a terminal scrollback or a log, and on nothing else.
     Adding a credential question means adding it here in the same commit."""
     secrets = {r["key"] for r in ROWS if r["secret"] == "y"}
-    assert secrets == {"CC_LLM_UPSTREAM_API_KEY", "CC_EXCHANGE_PASSWORD",
-                       "CC_JIRA_API_TOKEN", "CC_CONFLUENCE_API_TOKEN"}, (
+    assert secrets == {
+        "CC_LLM_UPSTREAM_API_KEY",
+        "CC_EXCHANGE_PASSWORD",
+        "CC_JIRA_API_TOKEN",
+        "CC_CONFLUENCE_API_TOKEN",
+    }, (
         "a secret answer is read with no echo and printed as "
         f"`(secret, not printed)` in the diff — that set is: {sorted(secrets)}"
     )
@@ -270,12 +274,19 @@ def test_the_four_typed_keys_are_rows_with_the_right_shape():
     v_path judges the shape; v_path_readable would refuse an answer for a file
     that arrives later), and are not secrets — the key FILE is, its path is not."""
     rows = {r["key"]: r for r in ROWS}
-    assert (rows["CC_NETRC"]["group"], rows["CC_NETRC"]["default"],
-            rows["CC_NETRC"]["validator"]) == ("network", "0", "v_bool01")
+    assert (
+        rows["CC_NETRC"]["group"],
+        rows["CC_NETRC"]["default"],
+        rows["CC_NETRC"]["validator"],
+    ) == ("network", "0", "v_bool01")
     for key in ("CC_CLIENT_CERT", "CC_CLIENT_KEY"):
         r = rows[key]
         assert (r["group"], r["default"], r["validator"], r["secret"]) == (
-            "network", "-", "v_path", "n"), r
+            "network",
+            "-",
+            "v_path",
+            "n",
+        ), r
     keys = [r["key"] for r in ROWS]
     assert keys.index("CC_NETRC") > keys.index("CC_TLS_INSECURE")
     # The fourth, the mirror for the cockpit's local Whisper engine, left with
@@ -298,15 +309,16 @@ _SEAM_EXCEPTIONS = {
 
 def _seam_tokens() -> list[str]:
     lines = AIRGAP.read_text(encoding="utf-8").splitlines()
-    start = next(i for i, ln in enumerate(lines)
-                 if ln.replace(" ", "") == "|Source|Usedby|Seam|Notes|")
+    start = next(
+        i for i, ln in enumerate(lines) if ln.replace(" ", "") == "|Source|Usedby|Seam|Notes|"
+    )
     tokens: list[str] = []
-    for ln in lines[start + 2:]:           # skip the |---| rule
+    for ln in lines[start + 2 :]:  # skip the |---| rule
         if not ln.startswith("|"):
             break
         cells = [c.strip() for c in ln.strip().strip("|").split(" | ")]
         for tok in re.findall(r"`([^`]+)`", cells[2]):
-            tok = tok.split("=", 1)[0]     # `CC_TLS_INSECURE=1` -> the key
+            tok = tok.split("=", 1)[0]  # `CC_TLS_INSECURE=1` -> the key
             if re.fullmatch(r"[A-Z][A-Z0-9_]*(<[A-Z]+>)?", tok):
                 tokens.append(tok)
     return tokens
@@ -329,7 +341,9 @@ def test_every_airgap_seam_is_a_row_or_a_named_exception():
         "reason in _SEAM_EXCEPTIONS"
     )
     for tok, (reason, where) in _SEAM_EXCEPTIONS.items():
-        assert tok in tokens, f"{tok} is excepted but the table no longer names it — drop the exception"
+        assert tok in tokens, (
+            f"{tok} is excepted but the table no longer names it — drop the exception"
+        )
         if tok == "CC_LLM_UPSTREAM_MODEL_<ALIAS>":
             assert any(k.startswith("CC_LLM_UPSTREAM_MODEL_") for k in keys), reason
         elif where is not None:
@@ -344,7 +358,7 @@ def test_check_and_configure_both_read_the_schema():
     of these two stops reading `questions.tsv`, the other's list is a copy."""
     setup = installer_source()
     assert "check_schema_answers" in setup and "cmd_configure" in setup
-    body = setup[setup.index("check_schema_answers() {"):]
+    body = setup[setup.index("check_schema_answers() {") :]
     body = body[: body.index("\n}\n")]
     assert "q_rows " in body and "q_when_holds" in body, (
         "check's answers section must WALK the schema, not carry its own "
@@ -363,20 +377,29 @@ def test_the_atlassian_rows_are_asked_and_gated():
     question, not six.
     """
     rows = {r["key"]: r for r in ROWS}
-    for key in ("CC_JIRA_BASE_URL", "CC_JIRA_EMAIL", "CC_JIRA_API_TOKEN",
-                "CC_CONFLUENCE_BASE_URL", "CC_CONFLUENCE_EMAIL",
-                "CC_CONFLUENCE_API_TOKEN", "CC_JIRA_API_FLAVOR",
-                "CC_CONFLUENCE_API_FLAVOR"):
+    for key in (
+        "CC_JIRA_BASE_URL",
+        "CC_JIRA_EMAIL",
+        "CC_JIRA_API_TOKEN",
+        "CC_CONFLUENCE_BASE_URL",
+        "CC_CONFLUENCE_EMAIL",
+        "CC_CONFLUENCE_API_TOKEN",
+        "CC_JIRA_API_FLAVOR",
+        "CC_CONFLUENCE_API_FLAVOR",
+    ):
         assert key in rows, f"{key} is not asked for — it was the v2.53.0 whole point"
 
     assert rows["CC_JIRA_BASE_URL"]["when"] == "-", "the first question is unconditional"
     # Blank means NO Jira, and the prompt has to say what that costs.
     assert "no Jira" in rows["CC_JIRA_BASE_URL"]["prompt"]
-    for key in ("CC_JIRA_EMAIL", "CC_JIRA_API_TOKEN", "CC_CONFLUENCE_BASE_URL",
-                "CC_JIRA_API_FLAVOR"):
+    for key in (
+        "CC_JIRA_EMAIL",
+        "CC_JIRA_API_TOKEN",
+        "CC_CONFLUENCE_BASE_URL",
+        "CC_JIRA_API_FLAVOR",
+    ):
         assert rows[key]["when"] == "CC_JIRA_BASE_URL!=", rows[key]
-    for key in ("CC_CONFLUENCE_EMAIL", "CC_CONFLUENCE_API_TOKEN",
-                "CC_CONFLUENCE_API_FLAVOR"):
+    for key in ("CC_CONFLUENCE_EMAIL", "CC_CONFLUENCE_API_TOKEN", "CC_CONFLUENCE_API_FLAVOR"):
         assert rows[key]["when"] == "CC_CONFLUENCE_BASE_URL!=", rows[key]
     # Blank CC_CONFLUENCE_BASE_URL is OFF in the code (confluence.configured()),
     # never "the same site as Jira" — the prompt may not promise otherwise.
@@ -389,13 +412,17 @@ def test_the_atlassian_rows_are_asked_and_gated():
         assert rows[key]["group"] == "advanced"
 
 
-@pytest.mark.parametrize("value,rc", [("cloud", 0), ("server", 0), ("Cloud", 1),
-                                      ("datacenter", 1), ("", 1)])
+@pytest.mark.parametrize(
+    "value,rc", [("cloud", 0), ("server", 0), ("Cloud", 1), ("datacenter", 1), ("", 1)]
+)
 def test_v_atlassian_flavor_accepts_only_the_two_flavors(value, rc):
     """It selects the REST PATHS, so a typo 404s every read instead of degrading.
     One line of reason on failure, nothing on success, and it writes nothing."""
-    r = subprocess.run([BASH, "-c", f'. "{QUESTIONS_LIB}"; v_atlassian_flavor "{value}"'],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [BASH, "-c", f'. "{QUESTIONS_LIB}"; v_atlassian_flavor "{value}"'],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == rc, r.stdout + r.stderr
     assert len(r.stdout.splitlines()) == (0 if rc == 0 else 1), r.stdout
 
@@ -419,7 +446,9 @@ printf '%s' "$1" | sed -E "s|^/msysroot|${STUB_ROOT:-/msysroot}|; s|^/([a-zA-Z])
 """
 
 
-def _bash(snippet: str, *, bindir: Path, ostype: str, stub_root: str = "") -> subprocess.CompletedProcess:
+def _bash(
+    snippet: str, *, bindir: Path, ostype: str, stub_root: str = ""
+) -> subprocess.CompletedProcess:
     # Every path in the spelling bash resolves (as_posix), and the stub
     # directory put FIRST from inside the script — after Git Bash's launcher
     # has prepended its own /usr/bin, whose real cygpath would otherwise win.
@@ -427,12 +456,12 @@ def _bash(snippet: str, *, bindir: Path, ostype: str, stub_root: str = "") -> su
     # `cygpath -u` spells it (resolved BEFORE the stub shadows cygpath).
     b = bindir.as_posix()
     script = (
-        f'__b="$(cygpath -u \'{b}\' 2>/dev/null || printf %s \'{b}\')"\n'
+        f"__b=\"$(cygpath -u '{b}' 2>/dev/null || printf %s '{b}')\"\n"
         'export PATH="$__b:$PATH"\n'
-        f'OSTYPE={ostype}\n'
+        f"OSTYPE={ostype}\n"
         f'export STUB_ROOT="{stub_root}"\n'
         f'. "{QUESTIONS_LIB.as_posix()}"\n'
-        f'{snippet}\n'
+        f"{snippet}\n"
     )
     return subprocess.run([BASH, "-c", script], capture_output=True, text=True, check=False)
 
@@ -461,8 +490,7 @@ def test_a_path_answer_is_rewritten_on_msys_and_untouched_elsewhere(cygpath_bin)
 
     # Same cygpath on PATH, a Linux OSTYPE: a Linux box with cygpath installed
     # must not have its answers rewritten.
-    r = _bash("q_norm_path_answer /c/Users/me/ca.pem", bindir=cygpath_bin,
-              ostype="linux-gnu")
+    r = _bash("q_norm_path_answer /c/Users/me/ca.pem", bindir=cygpath_bin, ostype="linux-gnu")
     assert r.stdout == "/c/Users/me/ca.pem", r.stdout
 
     # And a blank answer stays blank — blank is a valid answer for these keys.
@@ -477,8 +505,12 @@ def test_the_path_validators_validate_the_rewritten_path(cygpath_bin, tmp_path):
 
     # The stub maps /msysroot/<x> onto tmp_path/<x>, so this answer names a file
     # that exists only under its REWRITTEN spelling.
-    r = _bash("v_path_readable /msysroot/corp-ca.pem", bindir=cygpath_bin,
-              ostype="msys", stub_root=tmp_path.as_posix())
+    r = _bash(
+        "v_path_readable /msysroot/corp-ca.pem",
+        bindir=cygpath_bin,
+        ostype="msys",
+        stub_root=tmp_path.as_posix(),
+    )
     assert r.returncode == 0, (
         "the validator must resolve the path cygpath -m produces, not the raw "
         f"answer: {r.stdout}{r.stderr}"
@@ -486,14 +518,22 @@ def test_the_path_validators_validate_the_rewritten_path(cygpath_bin, tmp_path):
 
     # A missing file still fails, and the REASON names the rewritten spelling —
     # the one the operator's other tools will use.
-    r = _bash("v_path_readable /msysroot/nope.pem", bindir=cygpath_bin,
-              ostype="msys", stub_root=tmp_path.as_posix())
+    r = _bash(
+        "v_path_readable /msysroot/nope.pem",
+        bindir=cygpath_bin,
+        ostype="msys",
+        stub_root=tmp_path.as_posix(),
+    )
     assert r.returncode == 1
     assert f"no such file: {tmp_path.as_posix()}/nope.pem" in r.stdout, r.stdout
 
     # The directory validator shares the normalisation.
-    r = _bash("v_path_dir_or_creatable /msysroot/state", bindir=cygpath_bin,
-              ostype="msys", stub_root=tmp_path.as_posix())
+    r = _bash(
+        "v_path_dir_or_creatable /msysroot/state",
+        bindir=cygpath_bin,
+        ostype="msys",
+        stub_root=tmp_path.as_posix(),
+    )
     assert r.returncode == 0, r.stdout + r.stderr
 
 
@@ -501,7 +541,7 @@ def test_configure_normalises_before_it_validates_or_stores():
     """The rewrite has to happen in q_ask, or an invalid spelling gets written."""
     setup = installer_source()
     start = setup.index("q_ask() {")
-    body = setup[start:setup.index("\ncmd_configure()", start)]
+    body = setup[start : setup.index("\ncmd_configure()", start)]
     assert "q_norm_path_answer" in body, (
         "configure must normalise a path ANSWER before validating/storing it "
         "(F33) — otherwise .env keeps the MSYS spelling native tools reject"
@@ -509,7 +549,6 @@ def test_configure_normalises_before_it_validates_or_stores():
     assert body.index("q_norm_path_answer") < body.index('"$validator" "$reply"'), (
         "normalise BEFORE the validator runs"
     )
-
 
 
 # ── a BACKSLASH path answer is refused, by every v_path* ────────────────────
@@ -521,7 +560,9 @@ def test_configure_normalises_before_it_validates_or_stores():
 
 
 @pytest.mark.parametrize("validator", ["v_path", "v_path_readable", "v_path_dir_or_creatable"])
-def test_every_path_validator_refuses_a_backslash_and_names_the_forward_spelling(validator, tmp_path):
+def test_every_path_validator_refuses_a_backslash_and_names_the_forward_spelling(
+    validator, tmp_path
+):
     target = tmp_path / ("state" if validator == "v_path_dir_or_creatable" else "f.pem")
     if validator == "v_path_dir_or_creatable":
         target.mkdir()
@@ -529,12 +570,22 @@ def test_every_path_validator_refuses_a_backslash_and_names_the_forward_spelling
         target.write_text("x\n", encoding="utf-8")
     good = target.as_posix()
     bad = good.replace("/", "\\")
-    r = subprocess.run([BASH, "-c", f'. "{QUESTIONS_LIB.as_posix()}"; {validator} "$1"', "_", bad],
-                       capture_output=True, text=True, check=False)
+    r = subprocess.run(
+        [BASH, "-c", f'. "{QUESTIONS_LIB.as_posix()}"; {validator} "$1"', "_", bad],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert r.returncode == 1, (r.stdout, r.stderr)
-    assert "backslashes" in r.stdout and f"write it with forward slashes: {good}" in r.stdout, r.stdout
-    r = subprocess.run([BASH, "-c", f'. "{QUESTIONS_LIB.as_posix()}"; {validator} "$1"', "_", good],
-                       capture_output=True, text=True, check=False)
+    assert "backslashes" in r.stdout and f"write it with forward slashes: {good}" in r.stdout, (
+        r.stdout
+    )
+    r = subprocess.run(
+        [BASH, "-c", f'. "{QUESTIONS_LIB.as_posix()}"; {validator} "$1"', "_", good],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     assert r.returncode == 0, (r.stdout, r.stderr)
 
 
@@ -545,8 +596,11 @@ def test_check_fails_a_backslash_state_dir_naming_the_key_and_the_spelling(tmp_p
     key and the forward-slash spelling — and the same path written with
     forward slashes passes."""
     repo = tmp_path / "repo"
-    shutil.copytree(ROOT / "deploy", repo / "deploy",
-                    ignore=shutil.ignore_patterns(".env", ".env.*", "__pycache__", "NUL", "nul"))
+    shutil.copytree(
+        ROOT / "deploy",
+        repo / "deploy",
+        ignore=shutil.ignore_patterns(".env", ".env.*", "__pycache__", "NUL", "nul"),
+    )
     for f in (".env.example", "VERSION"):
         shutil.copy2(ROOT / f, repo / f)
     setup = repo / "deploy" / "single" / "setup.sh"
@@ -565,17 +619,21 @@ def test_check_fails_a_backslash_state_dir_naming_the_key_and_the_spelling(tmp_p
         env = {k: v for k, v in os.environ.items() if not k.startswith("CC_")}
         # The hook runs the one function, so init_state — which would act on
         # the answer (mkdir) before check judged it — never runs.
-        env.update(__CALL="1", HOME=str(tmp_path / "home"),
-                   XDG_STATE_HOME=str(tmp_path / "home" / "state"))
-        r = run_driver([BASH, "setup.sh", "check_schema_answers"],
-                       cwd=repo / "deploy" / "single", env=env)
+        env.update(
+            __CALL="1", HOME=str(tmp_path / "home"), XDG_STATE_HOME=str(tmp_path / "home" / "state")
+        )
+        r = run_driver(
+            [BASH, "setup.sh", "check_schema_answers"], cwd=repo / "deploy" / "single", env=env
+        )
         return r.stdout + r.stderr
 
     bad = state.as_posix().replace("/", "\\")
     out = answers(bad)
     fails = [l for l in out.splitlines() if l.startswith("FAIL answers-CC_STATE_DIR:")]
     assert len(fails) == 1, out
-    assert "backslashes" in fails[0] and f"forward slashes: {state.as_posix()}" in fails[0], fails[0]
+    assert "backslashes" in fails[0] and f"forward slashes: {state.as_posix()}" in fails[0], fails[
+        0
+    ]
 
     out = answers(state.as_posix())
     assert not [l for l in out.splitlines() if l.startswith("FAIL answers-CC_STATE_DIR:")], out

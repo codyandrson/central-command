@@ -49,7 +49,7 @@ pytestmark = drives_installer
 # lock verifies) and a tags list holding the locked tag. A repository named in
 # `missing` answers 404 and lists only a tag no constraint admits — the mirror
 # lost it, which is a FAIL row.
-_CURL = r'''#!/usr/bin/env python3
+_CURL = r"""#!/usr/bin/env python3
 import json, os, re, sys
 cfg = json.load(open(os.environ["STUB_CFG"]))
 args = sys.argv[1:]
@@ -74,7 +74,7 @@ if kind == "manifests":
     sys.exit(0)
 headers(["HTTP/1.1 200 OK"])
 sys.stdout.write(json.dumps({"tags": ["0.0.1-elsewhere"] if gone else [cfg["locks"].get(repo, "x")]}))
-'''
+"""
 
 
 def _bash() -> str:
@@ -101,9 +101,11 @@ class Tree:
             shutil.copy2(ROOT / "deploy" / "single" / f, single / f)
         # The core rows, plus pgweb (on by default, DL-228): the other optional
         # components are off.
-        write_lf(self.repo / ".env",
-                 f"CC_STATE_DIR={self.state.as_posix()}\nCC_ENABLE_N8N=0\nCC_ENABLE_SPEECH=0\n"
-                 "CC_ENABLE_SANDBOX=0\nCC_ENABLE_CRAWLER=0\n")
+        write_lf(
+            self.repo / ".env",
+            f"CC_STATE_DIR={self.state.as_posix()}\nCC_ENABLE_N8N=0\nCC_ENABLE_SPEECH=0\n"
+            "CC_ENABLE_SANDBOX=0\nCC_ENABLE_CRAWLER=0\n",
+        )
         b = tmp / "bin"
         b.mkdir()
         python_shim(b)
@@ -120,14 +122,22 @@ class Tree:
                     self.digests[f"{path}:{lock}"] = dig
 
     def resolve(self, *, missing: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
-        self.cfg.write_text(json.dumps({"missing": list(missing), "locks": self.locks,
-                                        "digests": self.digests}), encoding="utf-8")
+        self.cfg.write_text(
+            json.dumps({"missing": list(missing), "locks": self.locks, "digests": self.digests}),
+            encoding="utf-8",
+        )
         env = with_stub_path(
-            {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
-             "HOME": str(self.tmp / "home"), "STUB_CFG": str(self.cfg), "LANG": "C.UTF-8"},
-            self.tmp / "bin")
-        return run_driver([_bash(), "resolve-images.sh"], cwd=self.repo / "deploy" / "single",
-                          env=env)
+            {
+                "PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
+                "HOME": str(self.tmp / "home"),
+                "STUB_CFG": str(self.cfg),
+                "LANG": "C.UTF-8",
+            },
+            self.tmp / "bin",
+        )
+        return run_driver(
+            [_bash(), "resolve-images.sh"], cwd=self.repo / "deploy" / "single", env=env
+        )
 
     def env_value(self, key: str) -> str:
         out = ""
@@ -228,7 +238,7 @@ def test_a_real_pin_survives_all_three_runs(tree: Tree):
     assert tree.env_value("CC_IMG_NEO4J") == pin
     postgres = _line(fourth.stdout, "image-postgres")
     assert postgres.startswith("PASS ") and "operator pin" not in postgres, fourth.stdout
-    assert fourth.returncode == 2, fourth.stdout + fourth.stderr   # the pin's WARN
+    assert fourth.returncode == 2, fourth.stdout + fourth.stderr  # the pin's WARN
 
 
 def test_a_first_run_failure_carries_nothing(tree: Tree):
@@ -256,7 +266,9 @@ def test_an_operator_pin_that_does_not_exist_is_still_a_fail(tree: Tree):
     line = _line(r.stdout, "image-neo4j")
     assert line.startswith("FAIL ") and "CC_IMG_NEO4J" in line and "no such manifest" in line, line
     assert not any(l.startswith("USERACTION image-") for l in r.stdout.splitlines()), r.stdout
-    assert tree.env_value("CC_IMG_NEO4J") == "docker.io/library/neo4j:5.26.32", "the pin was rewritten"
+    assert tree.env_value("CC_IMG_NEO4J") == "docker.io/library/neo4j:5.26.32", (
+        "the pin was rewritten"
+    )
 
 
 # ── a component switched OFF and back ON is not a pin either ────────────────
@@ -314,7 +326,7 @@ def test_a_pin_on_a_switched_off_component_survives_the_same_three_runs(tree: Tr
     line = _line(third.stdout, "image-n8nio_n8n")
     assert line.startswith("WARN ") and "operator pin honoured" in line, third.stdout
     assert tree.env_value(N8N) == pin
-    assert third.returncode == 2, third.stdout + third.stderr   # the pin's WARN
+    assert third.returncode == 2, third.stdout + third.stderr  # the pin's WARN
 
 
 def test_a_component_that_was_never_on_carries_nothing(tree: Tree):
@@ -340,7 +352,7 @@ def test_pgweb_is_resolved_by_default(tree: Tree):
 
 def test_a_mirror_without_pgweb_names_the_image_and_the_switch(tree: Tree):
     r = tree.resolve(missing=("sosedoff/pgweb", "library/neo4j"))
-    assert r.returncode == 3, r.stdout + r.stderr          # the operator's seam
+    assert r.returncode == 3, r.stdout + r.stderr  # the operator's seam
     line = _line(r.stdout, "image-sosedoff_pgweb")
     assert line.startswith("USERACTION "), r.stdout
     assert "sosedoff/pgweb" in line and "CC_REGISTRY_DOCKERIO" in line

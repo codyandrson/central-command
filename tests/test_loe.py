@@ -30,8 +30,11 @@ _SEMANTIC = {"questions": ["Did you run this week?"], "thresholds": "3+ = green"
 
 async def _make(loe_id: str, **kw) -> dict:
     return await repo.create_loe(
-        loe_id, kw.get("name", "Test line"), kw.get("cadence", "weekly"),
-        kw.get("agent_id", "accountability"), kw.get("semantic", _SEMANTIC),
+        loe_id,
+        kw.get("name", "Test line"),
+        kw.get("cadence", "weekly"),
+        kw.get("agent_id", "accountability"),
+        kw.get("semantic", _SEMANTIC),
         kw.get("presentation"),
     )
 
@@ -130,18 +133,21 @@ async def test_the_checkin_handler_validates_light_confidence_and_target():
     await _make("loe-exec")
     handler = executor.HANDLERS["loe.record_checkin"]
 
-    for bad in ({"loe_id": "loe-exec", "light": "amber", "confidence": 50, "summary": "s"},
-                {"loe_id": "loe-exec", "light": "green", "confidence": 101, "summary": "s"},
-                {"loe_id": "loe-exec", "light": "green", "confidence": "80", "summary": "s"},
-                {"loe_id": "loe-exec", "light": "green", "confidence": True, "summary": "s"},
-                {"loe_id": "loe-exec", "light": "green", "confidence": 50, "summary": "  "},
-                {"loe_id": "loe-missing", "light": "green", "confidence": 50, "summary": "s"}):
+    for bad in (
+        {"loe_id": "loe-exec", "light": "amber", "confidence": 50, "summary": "s"},
+        {"loe_id": "loe-exec", "light": "green", "confidence": 101, "summary": "s"},
+        {"loe_id": "loe-exec", "light": "green", "confidence": "80", "summary": "s"},
+        {"loe_id": "loe-exec", "light": "green", "confidence": True, "summary": "s"},
+        {"loe_id": "loe-exec", "light": "green", "confidence": 50, "summary": "  "},
+        {"loe_id": "loe-missing", "light": "green", "confidence": 50, "summary": "s"},
+    ):
         with pytest.raises(executor.ExecutorError):
             await handler(bad, "lee", "accountability")
 
     out = await handler(
         {"loe_id": "loe-exec", "light": "yellow", "confidence": 55, "summary": "mixed week"},
-        "lee", "accountability",
+        "lee",
+        "accountability",
     )
     assert "yellow" in out
     rows = await repo.list_loe_checkins("loe-exec")
@@ -150,16 +156,22 @@ async def test_the_checkin_handler_validates_light_confidence_and_target():
 
 async def test_the_create_handler_validates_and_refuses_a_duplicate_cleanly():
     handler = executor.HANDLERS["loe.create"]
-    good = {"loe_id": "loe-exec-create", "name": "New line",
-            "agent_id": "accountability", "semantic": _SEMANTIC}
+    good = {
+        "loe_id": "loe-exec-create",
+        "name": "New line",
+        "agent_id": "accountability",
+        "semantic": _SEMANTIC,
+    }
 
-    for bad in ({**good, "loe_id": " "},
-                {**good, "name": "  "},
-                {**good, "agent_id": ""},
-                {k: v for k, v in good.items() if k != "semantic"},
-                {**good, "semantic": "3+ a week"},
-                {**good, "semantic": {"thresholds": "3+"}},          # no questions
-                {**good, "semantic": {"questions": ["x"]}}):         # no thresholds
+    for bad in (
+        {**good, "loe_id": " "},
+        {**good, "name": "  "},
+        {**good, "agent_id": ""},
+        {k: v for k, v in good.items() if k != "semantic"},
+        {**good, "semantic": "3+ a week"},
+        {**good, "semantic": {"thresholds": "3+"}},  # no questions
+        {**good, "semantic": {"questions": ["x"]}},
+    ):  # no thresholds
         with pytest.raises(executor.ExecutorError):
             await handler(bad, "lee", "accountability")
 
@@ -181,14 +193,27 @@ async def test_a_proposed_creation_is_written_only_by_the_executor(monkeypatch):
     from central_command.contract import Action
 
     await executor.execute(
-        [Action(capability="loe.create",
-                arguments={"loe_id": "loe-gated", "name": "Gated line",
-                           "agent_id": "accountability", "cadence": "monthly",
-                           "semantic": _SEMANTIC},
-                target_ref={"system": "central_command", "id": "loe-gated",
-                            "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="lee", source_refs=[], proposer="accountability",
+        [
+            Action(
+                capability="loe.create",
+                arguments={
+                    "loe_id": "loe-gated",
+                    "name": "Gated line",
+                    "agent_id": "accountability",
+                    "cadence": "monthly",
+                    "semantic": _SEMANTIC,
+                },
+                target_ref={
+                    "system": "central_command",
+                    "id": "loe-gated",
+                    "read_version": "unknown",
+                },
+                reversibility="reversible",
+            )
+        ],
+        approver="lee",
+        source_refs=[],
+        proposer="accountability",
         proposal_id="prop-loe-create-1",
     )
     row = await repo.get_loe("loe-gated")
@@ -209,13 +234,15 @@ async def test_the_update_handler_recalibrates_and_retires():
 
     await handler(
         {"loe_id": "loe-exec-update", "semantic": {"questions": ["new"], "thresholds": "1+"}},
-        "lee", "accountability",
+        "lee",
+        "accountability",
     )
     assert (await repo.get_loe("loe-exec-update"))["semantic_version"] == 2
 
     await handler(
         {"loe_id": "loe-exec-update", "retire": True, "reason": "done"},
-        "lee", "accountability",
+        "lee",
+        "accountability",
     )
     assert (await repo.get_loe("loe-exec-update"))["status"] == "RETIRED"
 
@@ -227,13 +254,26 @@ async def test_execution_stamps_the_proposal_id_from_the_control_plane(monkeypat
 
     await _make("loe-prov")
     await executor.execute(
-        [Action(capability="loe.record_checkin",
-                arguments={"loe_id": "loe-prov", "light": "green",
-                           "confidence": 70, "summary": "good week"},
-                target_ref={"system": "central_command", "id": "loe-prov",
-                            "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="lee", source_refs=[], proposer="accountability",
+        [
+            Action(
+                capability="loe.record_checkin",
+                arguments={
+                    "loe_id": "loe-prov",
+                    "light": "green",
+                    "confidence": 70,
+                    "summary": "good week",
+                },
+                target_ref={
+                    "system": "central_command",
+                    "id": "loe-prov",
+                    "read_version": "unknown",
+                },
+                reversibility="reversible",
+            )
+        ],
+        approver="lee",
+        source_refs=[],
+        proposer="accountability",
         proposal_id="prop-loe-1",
     )
     rows = await repo.list_loe_checkins("loe-prov")
@@ -259,8 +299,16 @@ async def test_the_loe_route_carries_the_full_wire_shape_to_the_cockpit():
     body = await routes.list_loes()
     row = next(r for r in body["loes"] if r["id"] == "loe-wire")
     assert set(row) == {
-        "id", "name", "cadence", "status", "agent_id", "semantic",
-        "semantic_version", "presentation", "latest", "history",
+        "id",
+        "name",
+        "cadence",
+        "status",
+        "agent_id",
+        "semantic",
+        "semantic_version",
+        "presentation",
+        "latest",
+        "history",
         "semantic_history",
     }
     assert row["semantic_history"] == [
@@ -268,14 +316,18 @@ async def test_the_loe_route_carries_the_full_wire_shape_to_the_cockpit():
     ], "with no recalibration yet, history is just the current version"
     assert row["semantic"] == _SEMANTIC and row["presentation"] == {"colour": "green"}
     assert row["latest"]["light"] == "yellow", "latest is the newest check-in"
-    assert set(row["latest"]) == {"light", "confidence", "summary", "created_at",
-                                  "semantic_version"}
+    assert set(row["latest"]) == {
+        "light",
+        "confidence",
+        "summary",
+        "created_at",
+        "semantic_version",
+    }
     assert [c["light"] for c in row["history"]] == ["yellow", "green"]
 
     # A line with no check-ins says so rather than omitting the field.
     await _make("loe-wire-empty")
-    empty = next(r for r in (await routes.list_loes())["loes"]
-                 if r["id"] == "loe-wire-empty")
+    empty = next(r for r in (await routes.list_loes())["loes"] if r["id"] == "loe-wire-empty")
     assert empty["latest"] is None and empty["history"] == []
 
 
@@ -292,15 +344,14 @@ async def test_a_recalibration_archives_the_outgoing_semantic_version():
 
     archived = await repo.list_loe_semantic_versions("loe-archive")
     assert archived == [
-        {"version": 1, "semantic": _SEMANTIC,
-         "superseded_at": archived[0]["superseded_at"]}
+        {"version": 1, "semantic": _SEMANTIC, "superseded_at": archived[0]["superseded_at"]}
     ]
     assert archived[0]["superseded_at"] is not None
 
-    row = next(r for r in (await routes.list_loes())["loes"]
-               if r["id"] == "loe-archive")
+    row = next(r for r in (await routes.list_loes())["loes"] if r["id"] == "loe-archive")
     assert [(h["version"], h["semantic"]) for h in row["semantic_history"]] == [
-        (2, v2), (1, _SEMANTIC)
+        (2, v2),
+        (1, _SEMANTIC),
     ]
     assert row["semantic_history"][0]["superseded_at"] is None
 
@@ -323,16 +374,17 @@ async def test_the_history_param_widens_or_caps_the_window():
     for i in range(14):
         await repo.record_loe_checkin("loe-depth", "green", i, f"week {i}")
 
-    wide = next(r for r in (await routes.list_loes(history=50))["loes"]
-                if r["id"] == "loe-depth")
+    wide = next(r for r in (await routes.list_loes(history=50))["loes"] if r["id"] == "loe-depth")
     assert len(wide["history"]) == 14, "a deeper window returns everything so far"
 
-    capped = next(r for r in (await routes.list_loes(history=999))["loes"]
-                  if r["id"] == "loe-depth")
+    capped = next(
+        r for r in (await routes.list_loes(history=999))["loes"] if r["id"] == "loe-depth"
+    )
     assert len(capped["history"]) == 14, "still just the 14 rows that exist"
 
     # And the sane max clamps an absurd request rather than trusting it.
     from unittest.mock import AsyncMock, patch
+
     with patch.object(repo, "list_loe_checkins", AsyncMock(wraps=repo.list_loe_checkins)) as spy:
         await routes.list_loes(history=999)
         assert spy.call_args.kwargs["limit"] == 200
@@ -353,8 +405,7 @@ async def test_create_route_refuses_a_duplicate_id():
 
     from central_command.api import routes
 
-    body = routes.LoeIn(id="loe-post", name="Posted", agent_id="accountability",
-                        semantic=_SEMANTIC)
+    body = routes.LoeIn(id="loe-post", name="Posted", agent_id="accountability", semantic=_SEMANTIC)
     created = await routes.create_loe(body)
     assert created["id"] == "loe-post" and created["latest"] is None
     with pytest.raises(HTTPException) as e:
@@ -379,13 +430,24 @@ async def test_the_agent_is_hired_idempotently_with_its_packs():
     assert first["taskable"] is True and first["conversational"] is True
     assert first["consultable"] is True and first["deviations"].strip()
 
-    grants = sorted(g["pack"] for g in await repo.list_grants(accountability.AGENT_ID)
-                    if g["revoked_at"] is None)
+    grants = sorted(
+        g["pack"]
+        for g in await repo.list_grants(accountability.AGENT_ID)
+        if g["revoked_at"] is None
+    )
     # jira-read + calendar-read (2026-08-18): evidence at check-in time —
     # ungated reads so the agent can cite what the calendar and board show.
-    assert grants == ["ask-operator", "calendar-read", "consult", "jira-read",
-                      "loe-propose", "note-propose", "session-recall", "skill-propose",
-                      "task-create"]
+    assert grants == [
+        "ask-operator",
+        "calendar-read",
+        "consult",
+        "jira-read",
+        "loe-propose",
+        "note-propose",
+        "session-recall",
+        "skill-propose",
+        "task-create",
+    ]
 
     current = await repo.current_charter(accountability.AGENT_ID)
     assert current and current["content"].strip()
@@ -400,7 +462,9 @@ async def test_the_agent_is_taskable_and_not_seeded_in_the_schema():
     await accountability.ensure_registered()
     assert accountability.AGENT_ID in await taskable_agent_ids()
 
-    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
     assert f"'{accountability.AGENT_ID}'" not in schema
     # And no LOE rows are seeded either — lines of effort are operator data.
     assert "insert into line_of_effort" not in schema
@@ -410,11 +474,11 @@ def test_the_charter_carries_the_behaviours_the_design_depends_on():
     from central_command.runtime.accountability import CHARTER
 
     lowered = CHARTER.lower()
-    assert "loe_list" in lowered              # read the CURRENT questions first
-    assert "ask_operator" in lowered          # the check-in is a conversation
+    assert "loe_list" in lowered  # read the CURRENT questions first
+    assert "ask_operator" in lowered  # the check-in is a conversation
     assert "loe.record_checkin" in lowered
     assert "loe.update" in lowered
-    assert "three or more" in lowered         # the recalibration trigger
+    assert "three or more" in lowered  # the recalibration trigger
     assert "never nag" in lowered and "shame" in lowered
     # Goals drive work (2026-08-18): a cited task.create is how a goal that is
     # not turning into action becomes calendar time or board work.
@@ -429,7 +493,10 @@ def test_the_pack_is_wired_end_to_end():
 
     pack = packs.PACKS["loe-propose"]
     assert sorted(c.name for c in pack.capabilities) == [
-        "loe.create", "loe.record_checkin", "loe.update"]
+        "loe.create",
+        "loe.record_checkin",
+        "loe.update",
+    ]
     assert set(packs.toolset_for(["loe-propose"]).tools) == {"propose_loe", "loe_list"}
     # A deferral tool the driver cannot classify parks nothing.
     assert "propose_loe" in PROPOSE_TOOLS
@@ -459,14 +526,15 @@ def test_goal_awareness_is_spread_to_the_team():
     assert pack.tool_names == ("loe_list",)
     assert not pack.capabilities, "loe-read must stay read-only"
     assert set(packs.toolset_for(["loe-read"]).tools) == {"loe_list"}
-    assert set(packs.toolset_for(["loe-read", "loe-propose"]).tools) == {
-        "loe_list", "propose_loe"}
+    assert set(packs.toolset_for(["loe-read", "loe-propose"]).tools) == {"loe_list", "propose_loe"}
 
     assert "loe-read" in EA_TEMPLATE.default_packs
     for founder in ("jira-expert", "orchestrator"):
         assert "loe-read" in packs.DEFAULT_PACKS[founder]
 
-    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
     assert "('jira-expert',  'loe-read', 'seed:loe-read')" in schema
     assert "('orchestrator', 'loe-read', 'seed:loe-read')" in schema
 

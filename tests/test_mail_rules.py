@@ -29,11 +29,19 @@ def _item(from_, subject, body, *, exempt=False, item_id="wi_x"):
 
 
 def _rule(criteria, exceptions=None, **extra):
-    return {"id": "rule_t", "criteria": criteria, "exceptions": exceptions or {},
-            "description": "d", "reason": "r", "position": 1, **extra}
+    return {
+        "id": "rule_t",
+        "criteria": criteria,
+        "exceptions": exceptions or {},
+        "description": "d",
+        "reason": "r",
+        "position": 1,
+        **extra,
+    }
 
 
 # --- pure semantics ----------------------------------------------------------
+
 
 def test_validate_requires_a_criterion_and_refuses_a_bare_provider_domain():
     with pytest.raises(ValueError, match="at least one criterion"):
@@ -57,7 +65,7 @@ def test_describe_is_generated_from_the_criteria():
         {"subject_contains": "invoice"},
     )
     assert text == (
-        'Auto-dismiss mail from anyone at akvis.com (or a subdomain) and whose '
+        "Auto-dismiss mail from anyone at akvis.com (or a subdomain) and whose "
         'subject contains "alivecolors", except when the subject contains "invoice".'
     )
 
@@ -86,11 +94,15 @@ def test_matching_semantics():
     assert not mail_rules.matches(excepted, _item("a@akvis.com", "Your INVOICE", "b"))
 
     assert not mail_rules.matches(rule, _item("a@akvis.com", "s", "b", exempt=True))
-    assert not mail_rules.matches({**rule, "revoked_at": "2026-09-22"}, _item("a@akvis.com", "s", "b"))
+    assert not mail_rules.matches(
+        {**rule, "revoked_at": "2026-09-22"}, _item("a@akvis.com", "s", "b")
+    )
 
 
 def test_first_match_honours_position_order():
-    narrow = _rule({"from_domain": "akvis.com", "subject_contains": "invoice"}, position=1, id="narrow")
+    narrow = _rule(
+        {"from_domain": "akvis.com", "subject_contains": "invoice"}, position=1, id="narrow"
+    )
     broad = _rule({"from_domain": "akvis.com"}, position=2, id="broad")
     item = _item("a@akvis.com", "Your invoice", "b")
     assert mail_rules.first_match([broad, narrow], item)["id"] == "narrow"
@@ -104,7 +116,13 @@ pytestmark_pg = needs_pg
 
 _ROWS = [
     # id, from, subject, body, state
-    ("wi_mr_match1", "AliveColors <subscribe@akvis.com>", "Meet AliveColors 11", "promo", "UNPROCESSED"),
+    (
+        "wi_mr_match1",
+        "AliveColors <subscribe@akvis.com>",
+        "Meet AliveColors 11",
+        "promo",
+        "UNPROCESSED",
+    ),
     ("wi_mr_match2", "news@mail.akvis.com", "AliveColors sale 50%_off", "promo", "UNPROCESSED"),
     ("wi_mr_invoice", "billing@akvis.com", "Your AliveColors invoice", "pay", "UNPROCESSED"),
     ("wi_mr_other", "someone@example.com", "AliveColors review", "x", "UNPROCESSED"),
@@ -126,9 +144,13 @@ async def _wipe():
 async def _seed():
     for item_id, from_, subject, body, state in _ROWS:
         await repo.enroll_work_item(
-            item_id, f"<{item_id}@test.example>",
+            item_id,
+            f"<{item_id}@test.example>",
             {"from": from_, "text": f"From: {from_}\nSubject: {subject}\n\n{body}"},
-            thread_id=f"<thread-{item_id}>", feed="backlog", source="fixture", subject=subject,
+            thread_id=f"<thread-{item_id}>",
+            feed="backlog",
+            source="fixture",
+            subject=subject,
         )
         if state != "UNPROCESSED":
             conn = await repo._conn()
@@ -160,33 +182,51 @@ async def test_sql_preview_agrees_with_the_python_matcher(seeded):
     finally:
         await conn.close()
     rule = _rule(crit, exc)
-    expected = sorted(r["id"] for r in rows if mail_rules.matches(rule, {
-        "id": r["id"], "subject": r["subject"],
-        "payload": r["payload"] if isinstance(r["payload"], dict) else __import__("json").loads(r["payload"]),
-    }))
+    expected = sorted(
+        r["id"]
+        for r in rows
+        if mail_rules.matches(
+            rule,
+            {
+                "id": r["id"],
+                "subject": r["subject"],
+                "payload": r["payload"]
+                if isinstance(r["payload"], dict)
+                else __import__("json").loads(r["payload"]),
+            },
+        )
+    )
     assert expected == ["wi_mr_match1", "wi_mr_match2"]
     assert out["queued_matches"] == 2
-    assert {s["subject"] for s in out["samples"]} == {"Meet AliveColors 11", "AliveColors sale 50%_off"}
+    assert {s["subject"] for s in out["samples"]} == {
+        "Meet AliveColors 11",
+        "AliveColors sale 50%_off",
+    }
 
 
 @needs_pg
 async def test_create_and_sweep_folds_only_unprocessed_matches(seeded):
     crit, exc = mail_rules.validate(_CRIT, _EXC)
-    rule = await repo.create_mail_rule(crit, exc, mail_rules.describe(crit, exc), "test-mr: sweep", "operator")
+    rule = await repo.create_mail_rule(
+        crit, exc, mail_rules.describe(crit, exc), "test-mr: sweep", "operator"
+    )
     swept = await repo.sweep_mail_rule(rule, mail_rules.dismissal_rationale(rule))
     assert swept == 2
     conn = await repo._conn()
     try:
-        states = {r["id"]: r["state"] for r in await conn.fetch(
-            "select id, state from work_item where id like 'wi_mr_%'")}
+        states = {
+            r["id"]: r["state"]
+            for r in await conn.fetch("select id, state from work_item where id like 'wi_mr_%'")
+        }
         folded = await conn.fetch(
-            "select id, payload->>'rule_id' rid from work_item where id like 'wi_mr_match%'")
+            "select id, payload->>'rule_id' rid from work_item where id like 'wi_mr_match%'"
+        )
     finally:
         await conn.close()
     assert states["wi_mr_match1"] == states["wi_mr_match2"] == "FOLDED"
-    assert states["wi_mr_invoice"] == "UNPROCESSED"      # exception held
-    assert states["wi_mr_other"] == "UNPROCESSED"        # domain did not match
-    assert states["wi_mr_claimed"] == "CLAIMED"          # never yanked from a run
+    assert states["wi_mr_invoice"] == "UNPROCESSED"  # exception held
+    assert states["wi_mr_other"] == "UNPROCESSED"  # domain did not match
+    assert states["wi_mr_claimed"] == "CLAIMED"  # never yanked from a run
     assert all(r["rid"] == rule["id"] for r in folded)
     listed = {r["id"]: r for r in await repo.list_mail_rules()}
     assert listed[rule["id"]]["matched_count"] == 2
@@ -209,7 +249,9 @@ async def test_create_and_sweep_folds_only_unprocessed_matches(seeded):
 async def test_dispatcher_folds_a_matching_claim_without_a_run(seeded, monkeypatch):
     monkeypatch.setattr(settings, "test_model", True)
     crit, exc = mail_rules.validate(_CRIT, _EXC)
-    await repo.create_mail_rule(crit, exc, mail_rules.describe(crit, exc), "test-mr: claim", "operator")
+    await repo.create_mail_rule(
+        crit, exc, mail_rules.describe(crit, exc), "test-mr: claim", "operator"
+    )
 
     ran = []
 
@@ -226,7 +268,8 @@ async def test_dispatcher_folds_a_matching_claim_without_a_run(seeded, monkeypat
     try:
         await conn.execute(
             "update work_item set state='FAILED', "
-            "payload = payload || '{\"failure_ack\": true}'::jsonb where id='wi_mr_claimed'")
+            "payload = payload || '{\"failure_ack\": true}'::jsonb where id='wi_mr_claimed'"
+        )
     finally:
         await conn.close()
     item = await repo.claim_specific_work_item("wi_mr_match1", "sess_test")
@@ -239,8 +282,11 @@ async def test_dispatcher_folds_a_matching_claim_without_a_run(seeded, monkeypat
     finally:
         await conn.close()
     assert state == "FOLDED"
-    kinds = [e["kind"] for e in await repo.list_events_of_kinds(["work.rule_dismissed"])
-             if e["ref_id"] == "wi_mr_match1"]
+    kinds = [
+        e["kind"]
+        for e in await repo.list_events_of_kinds(["work.rule_dismissed"])
+        if e["ref_id"] == "wi_mr_match1"
+    ]
     assert kinds == ["work.rule_dismissed"]
 
     # An exception-matching row is NOT taken: it goes on to the run.
@@ -252,10 +298,15 @@ async def test_dispatcher_folds_a_matching_claim_without_a_run(seeded, monkeypat
 @needs_pg
 async def test_executor_revalidates_and_sweeps(seeded, monkeypatch):
     text = await executor._mail_create_rule(
-        {"criteria": _CRIT, "exceptions": _EXC, "reason": "test-mr: executor",
-         "description": "an agent-written description that must be re-derived",
-         "apply_to_queued": True},
-        approver="human:test", proposer="inbox-triage",
+        {
+            "criteria": _CRIT,
+            "exceptions": _EXC,
+            "reason": "test-mr: executor",
+            "description": "an agent-written description that must be re-derived",
+            "apply_to_queued": True,
+        },
+        approver="human:test",
+        proposer="inbox-triage",
     )
     assert "2 queued item(s) dismissed" in text
     rules = [r for r in await repo.list_mail_rules() if r["reason"] == "test-mr: executor"]
@@ -264,8 +315,13 @@ async def test_executor_revalidates_and_sweeps(seeded, monkeypatch):
     assert rules[0]["created_by"].endswith("(inbox-triage)")
     with pytest.raises(ValueError, match="mailbox provider"):
         await executor._mail_create_rule(
-            {"criteria": {"from_domain": "gmail.com"}, "reason": "test-mr: bad", "description": "x"},
-            approver="human:test", proposer=None,
+            {
+                "criteria": {"from_domain": "gmail.com"},
+                "reason": "test-mr: bad",
+                "description": "x",
+            },
+            approver="human:test",
+            proposer=None,
         )
 
 
@@ -276,14 +332,22 @@ async def test_propose_tool_pins_the_preview(seeded):
         await tools_mod.propose_mail_rule(ctx, reason="r", subject_contains="AliveColors")
     with pytest.raises(CallDeferred) as info:
         await tools_mod.propose_mail_rule(
-            ctx, reason="test-mr: tool", from_domain="akvis.com",
-            subject_contains="AliveColors", except_subject_contains="invoice",
+            ctx,
+            reason="test-mr: tool",
+            from_domain="akvis.com",
+            subject_contains="AliveColors",
+            except_subject_contains="invoice",
         )
     proposal = info.value.metadata["proposal"]
     action = proposal["actions"][0]
     assert action["capability"] == "mail.create_rule@v1"
     assert action["arguments"]["queued_matches"] == 2
-    assert action["arguments"]["criteria"] == {"from_domain": "akvis.com", "subject_contains": "alivecolors"}
-    assert action["arguments"]["description"].startswith("Auto-dismiss mail from anyone at akvis.com")
+    assert action["arguments"]["criteria"] == {
+        "from_domain": "akvis.com",
+        "subject_contains": "alivecolors",
+    }
+    assert action["arguments"]["description"].startswith(
+        "Auto-dismiss mail from anyone at akvis.com"
+    )
     assert len(action["arguments"]["samples"]) == 2
     assert proposal["evidence"][0]["kind"] == "queue"

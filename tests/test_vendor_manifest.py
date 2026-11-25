@@ -41,7 +41,9 @@ def _bash() -> str:
 def test_the_committed_manifest_matches_the_vendored_tree():
     proc = subprocess.run(
         [_bash(), str(HELPER), "--check"],
-        capture_output=True, text=True, cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert proc.stdout.startswith("PASS vendor-manifest: sha256:"), proc.stdout
@@ -65,6 +67,6 @@ def test_both_fetch_scripts_regenerate_the_manifest():
     for name in ("vendor_docs_fetch.sh", "model_library_fetch.sh"):
         body = (ROOT / "scripts" / name).read_text(encoding="utf-8")
         assert "vendor_manifest.sh" in body, f"{name} must regenerate docs/vendor/MANIFEST"
-        assert "git -C \"$root\" add --" in body, (
+        assert 'git -C "$root" add --' in body, (
             f"{name} must stage what it wrote before the index-based digest is computed"
         )

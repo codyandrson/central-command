@@ -101,9 +101,7 @@ def _patch_facade(monkeypatch, uuids: list[str]):
 
 async def test_only_the_unprocessed_row_moves(monkeypatch):
     await _seed()
-    _patch_facade(
-        monkeypatch, [_UNPROCESSED_UUID, _CLAIMED_UUID, _PROCESSED_UUID, _UNKNOWN_UUID]
-    )
+    _patch_facade(monkeypatch, [_UNPROCESSED_UUID, _CLAIMED_UUID, _PROCESSED_UUID, _UNKNOWN_UUID])
 
     resolved = await bulk_dismiss.resolve_query("q")
     assert resolved["provider_matches"] == 4

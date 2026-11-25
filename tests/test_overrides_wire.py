@@ -18,9 +18,20 @@ from tests.conftest import needs_pg
 from tests.test_gate_overrides import DRAFTER, authored  # noqa: F401 — fixture
 
 OVERRIDE_FIELDS = {
-    "id", "agent_id", "capability", "scope", "scope_text", "state", "shadow",
-    "matches", "last_match", "granted_by", "granted_at", "revoked_at",
-    "reversibility", "requires_acknowledgement",
+    "id",
+    "agent_id",
+    "capability",
+    "scope",
+    "scope_text",
+    "state",
+    "shadow",
+    "matches",
+    "last_match",
+    "granted_by",
+    "granted_at",
+    "revoked_at",
+    "reversibility",
+    "requires_acknowledgement",
 }
 
 # An agent that holds no pack covering catalog.tag, so its override is born
@@ -33,19 +44,32 @@ async def test_an_override_row_carries_every_field_in_every_state(authored):
     from central_command.runtime import packs
 
     assert "catalog.tag" not in packs.granted_capability_names(
-        await packs.granted_packs(UNGRANTED)), "the suspended case needs an ungranted agent"
+        await packs.granted_packs(UNGRANTED)
+    ), "the suspended case needs an ungranted agent"
     shadow = (await authored(DRAFTER, "catalog.tag", shadow=5))["override"]
     live = (await authored(DRAFTER, "jira.add_comment", {"target": ["DOE"]}))["override"]
     suspended = await authored(UNGRANTED, "catalog.tag", pack=False)
     revoked = (await authored(DRAFTER, "jira.add_comment", {"target": ["RIV"]}))["override"]
     await overrides.revoke(revoked["id"], "test")
 
-    rows = {o["id"]: o for o in jsonable_encoder(
-        await routes.list_agent_gate_overrides(DRAFTER))["overrides"]}
-    rows.update({o["id"]: o for o in jsonable_encoder(
-        await routes.list_agent_gate_overrides(UNGRANTED))["overrides"]})
-    expect = {shadow["id"]: "shadow", live["id"]: "live",
-              suspended["override"]["id"]: "suspended", revoked["id"]: "revoked"}
+    rows = {
+        o["id"]: o
+        for o in jsonable_encoder(await routes.list_agent_gate_overrides(DRAFTER))["overrides"]
+    }
+    rows.update(
+        {
+            o["id"]: o
+            for o in jsonable_encoder(await routes.list_agent_gate_overrides(UNGRANTED))[
+                "overrides"
+            ]
+        }
+    )
+    expect = {
+        shadow["id"]: "shadow",
+        live["id"]: "live",
+        suspended["override"]["id"]: "suspended",
+        revoked["id"]: "revoked",
+    }
     for oid, state in expect.items():
         row = rows[oid]
         assert set(row) == OVERRIDE_FIELDS, set(row) ^ OVERRIDE_FIELDS
@@ -74,28 +98,71 @@ async def test_an_acknowledgement_class_row_says_so(authored):
     assert row["shadow"]["n"] >= 1
 
 
-CAPABILITY_FIELDS = ("default_gate", "reversibility", "requires_acknowledgement",
-                     "scope_forms", "overridable", "overridable_reason")
+CAPABILITY_FIELDS = (
+    "default_gate",
+    "reversibility",
+    "requires_acknowledgement",
+    "scope_forms",
+    "overridable",
+    "overridable_reason",
+)
 
 
-@pytest.mark.parametrize("name,expect", [
-    ("catalog.tag", {"default_gate": "human", "reversibility": "reversible",
-                     "requires_acknowledgement": False,
-                     "scope_forms": ["argument", "target", "schedule"], "overridable": True}),
-    ("mail.send", {"default_gate": "human", "reversibility": "irreversible",
-                   "requires_acknowledgement": True, "overridable": True}),
-    # Overridable although its default gate is auditor (R2).
-    ("work.bulk_dismiss", {"default_gate": "auditor", "reversibility": "reversible",
-                           "requires_acknowledgement": False,
-                           "scope_forms": ["schedule"], "overridable": True}),
-    # A default-gate-none sandbox write is not.
-    ("sandbox.exec", {"default_gate": "none", "reversibility": "reversible",
-                      "requires_acknowledgement": False, "overridable": False}),
-    # No ARG_SPECS entry: no argument form (and no target form).
-    ("litellm.delete_key", {"default_gate": "human",
-                            "requires_acknowledgement": True,
-                            "scope_forms": ["schedule"], "overridable": True}),
-])
+@pytest.mark.parametrize(
+    "name,expect",
+    [
+        (
+            "catalog.tag",
+            {
+                "default_gate": "human",
+                "reversibility": "reversible",
+                "requires_acknowledgement": False,
+                "scope_forms": ["argument", "target", "schedule"],
+                "overridable": True,
+            },
+        ),
+        (
+            "mail.send",
+            {
+                "default_gate": "human",
+                "reversibility": "irreversible",
+                "requires_acknowledgement": True,
+                "overridable": True,
+            },
+        ),
+        # Overridable although its default gate is auditor (R2).
+        (
+            "work.bulk_dismiss",
+            {
+                "default_gate": "auditor",
+                "reversibility": "reversible",
+                "requires_acknowledgement": False,
+                "scope_forms": ["schedule"],
+                "overridable": True,
+            },
+        ),
+        # A default-gate-none sandbox write is not.
+        (
+            "sandbox.exec",
+            {
+                "default_gate": "none",
+                "reversibility": "reversible",
+                "requires_acknowledgement": False,
+                "overridable": False,
+            },
+        ),
+        # No ARG_SPECS entry: no argument form (and no target form).
+        (
+            "litellm.delete_key",
+            {
+                "default_gate": "human",
+                "requires_acknowledgement": True,
+                "scope_forms": ["schedule"],
+                "overridable": True,
+            },
+        ),
+    ],
+)
 async def test_get_capabilities_carries_the_override_facts(name, expect):
     body = jsonable_encoder(await routes.get_capabilities())
     row = next(r for r in body["capabilities"] if r["name"] == name)
@@ -170,13 +237,17 @@ async def _rpc_history_row(pid: str) -> dict:
 
 @needs_pg
 async def test_an_override_decided_proposal_names_the_override_and_its_scope_text(
-    demo, granted, monkeypatch,
+    demo,
+    granted,
+    monkeypatch,
 ):
     ovr = await granted(DRAFTER, "jira.add_comment", scope={"target": ["TASKS"]})
     out = await _run(monkeypatch, DRAFTER, _comment_proposal("Override decides"))
     pid = out["proposal_id"]
-    want = {"kind": "override", "overrides": [
-        {"override_id": ovr["id"], "scope_text": overrides.scope_text(ovr)}]}
+    want = {
+        "kind": "override",
+        "overrides": [{"override_id": ovr["id"], "scope_text": overrides.scope_text(ovr)}],
+    }
     assert want["overrides"][0]["scope_text"] != ""
     for row in (await _detail(pid), await _rpc_history_row(pid)):
         assert set(row["decided_by"]) == DECIDED_FIELDS
@@ -207,14 +278,15 @@ async def test_an_auditor_decided_proposal_says_so(ledger_rows, granted, monkeyp
 
 @needs_pg
 async def test_a_pending_shadowed_proposal_names_the_override_it_is_shadowing(
-    demo, granted, monkeypatch,
+    demo,
+    granted,
+    monkeypatch,
 ):
     ovr = await granted(DRAFTER, shadow_runs=3)
     first = await _run(monkeypatch, DRAFTER, _tag_proposal("Shadowed 0"))
     second = await _run(monkeypatch, DRAFTER, _tag_proposal("Shadowed 1"))
     mark = {"override_id": ovr["id"], "k": 0, "n": 3, "complete": False}
-    for row in (await _detail(first["proposal_id"]),
-                await _rpc_list_row(first["proposal_id"])):
+    for row in (await _detail(first["proposal_id"]), await _rpc_list_row(first["proposal_id"])):
         assert row["decided_by"] is None
         assert row["shadow"] == [mark]
         assert set(row["shadow"][0]) == MARK_FIELDS
@@ -226,7 +298,9 @@ async def test_a_pending_shadowed_proposal_names_the_override_it_is_shadowing(
 
 @needs_pg
 async def test_a_proposal_decided_by_two_overrides_lists_both(
-    demo, granted, monkeypatch,
+    demo,
+    granted,
+    monkeypatch,
 ):
     tag = await granted(DRAFTER, "catalog.tag")
     comment = await granted(DRAFTER, "jira.add_comment", scope={"target": ["TASKS"]})
@@ -235,21 +309,26 @@ async def test_a_proposal_decided_by_two_overrides_lists_both(
     row = await _detail(pid)
     assert row["decided_by"]["kind"] == "override"
     assert row["decided_by"]["overrides"] == sorted(
-        [{"override_id": o["id"], "scope_text": overrides.scope_text(o)}
-         for o in (tag, comment)], key=lambda m: m["override_id"])
+        [{"override_id": o["id"], "scope_text": overrides.scope_text(o)} for o in (tag, comment)],
+        key=lambda m: m["override_id"],
+    )
     assert row["decided_by"] == (await _rpc_history_row(pid))["decided_by"]
 
 
 @needs_pg
 async def test_a_pending_proposal_shadowed_by_two_overrides_lists_each(
-    demo, granted, monkeypatch,
+    demo,
+    granted,
+    monkeypatch,
 ):
     a = await granted(DRAFTER, "catalog.tag", shadow_runs=2)
     b = await granted(DRAFTER, "jira.add_comment", shadow_runs=4)
     out = await _run(monkeypatch, DRAFTER, _two_action_proposal("Two shadows"))
     row = await _rpc_list_row(out["proposal_id"])
     assert {m["override_id"]: (m["k"], m["n"], m["complete"]) for m in row["shadow"]} == {
-        a["id"]: (0, 2, False), b["id"]: (0, 4, False)}
+        a["id"]: (0, 2, False),
+        b["id"]: (0, 4, False),
+    }
 
 
 @needs_pg
@@ -282,38 +361,72 @@ async def _park(capabilities: list[tuple[str, str]], status: str = "AWAITING_HUM
     sid = "sess_mark_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(sid, "jira-expert")
     await repo.save_proposal(
-        pid, sid, "jira-expert", "marks",
-        [{"capability": cap, "arguments": {}, "target_ref": {"system": "x"},
-          "reversibility": claim} for cap, claim in capabilities],
-        [], "x", pid, status=status,
+        pid,
+        sid,
+        "jira-expert",
+        "marks",
+        [
+            {
+                "capability": cap,
+                "arguments": {},
+                "target_ref": {"system": "x"},
+                "reversibility": claim,
+            }
+            for cap, claim in capabilities
+        ],
+        [],
+        "x",
+        pid,
+        status=status,
     )
     return pid
 
 
 def test_action_marks_read_the_registry_row_and_leave_unknowns_null():
-    assert action_marks("mail.send") == {"reversibility": "irreversible", "requires_acknowledgement": True}
+    assert action_marks("mail.send") == {
+        "reversibility": "irreversible",
+        "requires_acknowledgement": True,
+    }
     assert action_marks("mail.send@v1")["reversibility"] == "irreversible"
-    assert action_marks("jira.create_issue") == {"reversibility": "reversible", "requires_acknowledgement": False}
+    assert action_marks("jira.create_issue") == {
+        "reversibility": "reversible",
+        "requires_acknowledgement": False,
+    }
     assert action_marks("nope.nothing") == {"reversibility": None, "requires_acknowledgement": None}
     for c in REGISTRY:
         if c.kind == "write":
-            assert action_marks(c.name) == {"reversibility": c.reversibility,
-                                            "requires_acknowledgement": c.acknowledge}
+            assert action_marks(c.name) == {
+                "reversibility": c.reversibility,
+                "requires_acknowledgement": c.acknowledge,
+            }
 
 
 @needs_pg
 async def test_the_proposal_detail_shows_the_registry_mark_never_the_agents_claim():
     # "hard" is the third value of the agent's enum; "reversible" is its lie.
-    pid = await _park([("mail.send", "hard"), ("mail.send", "reversible"),
-                       ("jira.create_issue", "hard"), ("mystery.write", "reversible")])
+    pid = await _park(
+        [
+            ("mail.send", "hard"),
+            ("mail.send", "reversible"),
+            ("jira.create_issue", "hard"),
+            ("mystery.write", "reversible"),
+        ]
+    )
     stored = await repo.load_proposal(pid)
     assert [a["reversibility"] for a in stored["actions"]] == [
-        "hard", "reversible", "hard", "reversible"], "the claim stays in the record"
+        "hard",
+        "reversible",
+        "hard",
+        "reversible",
+    ], "the claim stays in the record"
 
     shown = (await _detail(pid))["actions"]
     assert [(a["reversibility"], a["requires_acknowledgement"]) for a in shown] == [
-        ("irreversible", True), ("irreversible", True),
-        ("reversible", False), (None, None)]
+        ("irreversible", True),
+        ("irreversible", True),
+        ("reversible", False),
+        (None, None),
+    ]
 
 
 @needs_pg

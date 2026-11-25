@@ -127,7 +127,7 @@ async def test_operator_reopened_items_are_never_auto_confirmed(monkeypatch):
     try:  # restore the parked state the reopen path would produce mid-cycle
         await conn.execute(
             "update work_item set state = 'UNPROCESSED', terminal_at = null,"
-            " payload = payload || '{\"operator_note\": \"look again please\"}'"
+            ' payload = payload || \'{"operator_note": "look again please"}\''
             " where id = $1",
             row["id"],
         )

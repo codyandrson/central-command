@@ -80,8 +80,9 @@ async def hired():
     made: list[str] = []
 
     async def hire(name="Dana Rivers", mission="Share the platform work fairly."):
-        out = await routes.hire_agent(routes.HireIn(name=name, mission=mission,
-                                                    template="staffing"))
+        out = await routes.hire_agent(
+            routes.HireIn(name=name, mission=mission, template="staffing")
+        )
         made.append(out["agent"]["id"])
         return out["agent"]["id"]
 
@@ -108,14 +109,30 @@ def test_the_template_is_in_the_hire_menu_taskable_consultable_and_one_per_team(
 def test_its_packs_exist_and_carry_what_the_job_needs_and_no_more():
     held = TEMPLATE.default_packs
     assert set(held) <= set(packs.PACKS)
-    assert set(held) == {"graph-read", "jira-read", "jira-propose", "ask-operator",
-                         "record-read", "task-create", "session-recall",
-                         "skill-propose", "note-propose"}
+    assert set(held) == {
+        "graph-read",
+        "jira-read",
+        "jira-propose",
+        "ask-operator",
+        "record-read",
+        "task-create",
+        "session-recall",
+        "skill-propose",
+        "note-propose",
+    }
     toolset = set(packs.toolset_for(held).tools)
-    for tool in ("search_knowledge_graph", "search_knowledge_graph_entities",
-                 "jira_team_load", "jira_find_users", "jira_search_issues",
-                 "ask_operator", "read_agent_record", "search_my_sessions",
-                 "propose_action", "create_task"):
+    for tool in (
+        "search_knowledge_graph",
+        "search_knowledge_graph_entities",
+        "jira_team_load",
+        "jira_find_users",
+        "jira_search_issues",
+        "ask_operator",
+        "read_agent_record",
+        "search_my_sessions",
+        "propose_action",
+        "create_task",
+    ):
         assert tool in toolset, tool
     caps = packs.granted_capability_names(held)
     for cap in ("jira.assign_issue", "jira.set_due_date", "jira.set_planning_fields"):
@@ -181,15 +198,21 @@ def test_the_charter_names_the_three_factors_the_trap_and_the_trust_rule():
         "recommend WHO should take a piece of work",
         "keep the operator informed of the team's load",
         "You propose; the operator decides. You never assign work on your own word.",
-        "1. CAPABILITY", "Person entities", "cite what you read",
-        "2. CURRENT LOAD", "a prompt for a question, never a measurement",
+        "1. CAPABILITY",
+        "Person entities",
+        "cite what you read",
+        "2. CURRENT LOAD",
+        "a prompt for a question, never a measurement",
         "work that is not in the tracker is invisible",
-        "3. DEVELOPMENT VALUE", "the operator has said so, or the record shows it",
+        "3. DEVELOPMENT VALUE",
+        "the operator has said so, or the record shows it",
         "DO NOT KEEP LOADING THE STRONGEST PEOPLE",
         "recommend someone with capacity and name the expert as the person to consult",
         "in the issue",
-        "WHEN YOU DO NOT KNOW, SAY SO AND ASK", "never invent a competence or a workload",
-        "jira.assign_issue", "ONE proposal, with one action per issue",
+        "WHEN YOU DO NOT KNOW, SAY SO AND ASK",
+        "never invent a competence or a workload",
+        "jira.assign_issue",
+        "ONE proposal, with one action per issue",
         "reason is in the proposal's intent",
         "THE EXECUTIVE ASSISTANT OWNS THE PLANNING CONVERSATION",
         "You do not open your own conversation with the operator about the plan",
@@ -200,8 +223,9 @@ def test_the_charter_names_the_three_factors_the_trap_and_the_trust_rule():
         assert phrase in c, phrase
     for banned in ("GRANTED CAPABILITIES", "capability = '", "arguments  ="):
         assert banned not in c
-    assert ('Your human team lead is <<operator_name>> — '
-            '"the operator" throughout this charter.') in c
+    assert (
+        'Your human team lead is <<operator_name>> — "the operator" throughout this charter.'
+    ) in c
     # Only the two hire placeholders: it goes through str.format.
     assert set(re.findall(r"\{(\w*)\}", c)) == {"name", "mission"}
 
@@ -210,8 +234,14 @@ def test_the_charter_names_the_three_factors_the_trap_and_the_trust_rule():
 
 
 def _issue(key, who="Jo Doe", *, cat="new", due=None, est=None, summary=None):
-    return {"issue_key": key, "summary": summary or f"S {key}", "assignee": who,
-            "status_category": cat, "due_date": due, "estimate_hours": est}
+    return {
+        "issue_key": key,
+        "summary": summary or f"S {key}",
+        "assignee": who,
+        "status_category": cat,
+        "due_date": due,
+        "estimate_hours": est,
+    }
 
 
 def _d(n: int) -> str:
@@ -220,52 +250,82 @@ def _d(n: int) -> str:
 
 def test_every_counter_for_one_person():
     rows = [
-        _issue("A-1", cat="indeterminate", due=_d(-3), est=4.0),   # overdue, in progress
-        _issue("A-2", due=_d(-1), est=2.5),                         # overdue
-        _issue("A-3", due=_d(0)),                                   # due today: not overdue
-        _issue("A-4", due=_d(7), est=1.0),                          # 7 days on: in both
-        _issue("A-5", cat="indeterminate", due=_d(8)),              # 14 only
-        _issue("A-6", due=_d(14), est=0),                           # 14 only; zero = none
-        _issue("A-7", due=_d(15), est="3"),                         # neither; a string is none
-        _issue("A-8"),                                              # no due date
+        _issue("A-1", cat="indeterminate", due=_d(-3), est=4.0),  # overdue, in progress
+        _issue("A-2", due=_d(-1), est=2.5),  # overdue
+        _issue("A-3", due=_d(0)),  # due today: not overdue
+        _issue("A-4", due=_d(7), est=1.0),  # 7 days on: in both
+        _issue("A-5", cat="indeterminate", due=_d(8)),  # 14 only
+        _issue("A-6", due=_d(14), est=0),  # 14 only; zero = none
+        _issue("A-7", due=_d(15), est="3"),  # neither; a string is none
+        _issue("A-8"),  # no due date
     ]
     out = ea_team.team_load(rows, TODAY)
     (p,) = out["people"]
     assert p == {
-        "assignee": "Jo Doe", "open": 8, "in_progress": 2, "overdue": 2,
-        "due_next_7": 2, "due_next_14": 4, "estimate_hours": 7.5,
-        "estimated": 3, "unestimated": 5,
-        "oldest_overdue": {"issue_key": "A-1", "summary": "S A-1",
-                           "due_date": _d(-3), "days_overdue": 3},
+        "assignee": "Jo Doe",
+        "open": 8,
+        "in_progress": 2,
+        "overdue": 2,
+        "due_next_7": 2,
+        "due_next_14": 4,
+        "estimate_hours": 7.5,
+        "estimated": 3,
+        "unestimated": 5,
+        "oldest_overdue": {
+            "issue_key": "A-1",
+            "summary": "S A-1",
+            "due_date": _d(-3),
+            "days_overdue": 3,
+        },
     }
 
 
 def test_people_are_ordered_by_open_work_and_totals_add_up():
-    rows = [_issue("B-1", "Ann Doe"), _issue("C-1", "Cy Rivers", est=2.0),
-            _issue("C-2", "Cy Rivers", due=_d(-2), est=1.25),
-            _issue("D-1", "Bo Doe", due=_d(1))]
+    rows = [
+        _issue("B-1", "Ann Doe"),
+        _issue("C-1", "Cy Rivers", est=2.0),
+        _issue("C-2", "Cy Rivers", due=_d(-2), est=1.25),
+        _issue("D-1", "Bo Doe", due=_d(1)),
+    ]
     out = ea_team.team_load(rows, TODAY)
     assert [p["assignee"] for p in out["people"]] == ["Cy Rivers", "Ann Doe", "Bo Doe"]
     assert out["totals"] == {
-        "people": 3, "open": 4, "in_progress": 0, "overdue": 1, "due_next_7": 1,
-        "due_next_14": 1, "estimate_hours": 3.25, "estimated": 2, "unestimated": 2,
-        "unassigned_in_read": 0, "done_in_read": 0,
+        "people": 3,
+        "open": 4,
+        "in_progress": 0,
+        "overdue": 1,
+        "due_next_7": 1,
+        "due_next_14": 1,
+        "estimate_hours": 3.25,
+        "estimated": 2,
+        "unestimated": 2,
+        "unassigned_in_read": 0,
+        "done_in_read": 0,
     }
     ann = out["people"][1]
     assert ann["oldest_overdue"] is None and ann["estimate_hours"] == 0.0
 
 
 def test_the_oldest_overdue_breaks_ties_by_key_and_bad_dates_are_absent():
-    rows = [_issue("K-9", due=_d(-5)), _issue("K-2", due=_d(-5)), _issue("K-3", due=_d(-1)),
-            _issue("K-4", due="not a date"), _issue("K-5", due=17)]
+    rows = [
+        _issue("K-9", due=_d(-5)),
+        _issue("K-2", due=_d(-5)),
+        _issue("K-3", due=_d(-1)),
+        _issue("K-4", due="not a date"),
+        _issue("K-5", due=17),
+    ]
     (p,) = ea_team.team_load(rows, TODAY)["people"]
     assert p["overdue"] == 3 and p["oldest_overdue"]["issue_key"] == "K-2"
     assert p["due_next_7"] == 0 and p["due_next_14"] == 0
 
 
 def test_unassigned_and_done_rows_are_counted_apart():
-    rows = [_issue("U-1", None), _issue("U-2", "  "), _issue("U-3", cat="done"),
-            _issue("U-4", "Jo Doe")]
+    rows = [
+        _issue("U-1", None),
+        _issue("U-2", "  "),
+        _issue("U-3", cat="done"),
+        _issue("U-4", "Jo Doe"),
+    ]
     out = ea_team.team_load(rows, TODAY)
     assert [p["assignee"] for p in out["people"]] == ["Jo Doe"]
     assert out["totals"]["unassigned_in_read"] == 2 and out["totals"]["done_in_read"] == 1
@@ -284,20 +344,28 @@ def test_team_load_is_pure():
     assert json.dumps(rows) == snapshot, "the input is not mutated"
 
 
-@pytest.mark.parametrize("jql,expected", [
-    ("statusCategory != Done AND assignee is not EMPTY",
-     "statusCategory != Done AND assignee is EMPTY"),
-    ("project = OPS AND Assignee IS NOT empty", "project = OPS AND assignee is EMPTY"),
-])
+@pytest.mark.parametrize(
+    "jql,expected",
+    [
+        (
+            "statusCategory != Done AND assignee is not EMPTY",
+            "statusCategory != Done AND assignee is EMPTY",
+        ),
+        ("project = OPS AND Assignee IS NOT empty", "project = OPS AND assignee is EMPTY"),
+    ],
+)
 def test_the_unassigned_query_turns_the_one_clause_round(jql, expected):
     assert ea_team.unassigned_jql(jql) == (expected, None)
 
 
-@pytest.mark.parametrize("jql,why", [
-    ("project = OPS", "no single"),
-    ("assignee is not EMPTY OR assignee is not EMPTY", "no single"),
-    ("assignee is not EMPTY ORDER BY due", "ORDER BY"),
-])
+@pytest.mark.parametrize(
+    "jql,why",
+    [
+        ("project = OPS", "no single"),
+        ("assignee is not EMPTY OR assignee is not EMPTY", "no single"),
+        ("assignee is not EMPTY ORDER BY due", "ORDER BY"),
+    ],
+)
 def test_the_unassigned_query_is_omitted_when_it_cannot_be_derived(jql, why):
     query, reason = ea_team.unassigned_jql(jql)
     assert query is None and why in reason
@@ -312,8 +380,9 @@ def tracker(monkeypatch):
     # one its reads call; pinning only `ea_backlog._today` left these tests on
     # the real clock, and they passed on the day they were written only.
     monkeypatch.setattr(ea_team, "_today", lambda: TODAY)
-    monkeypatch.setattr(settings, "plan_team_jql",
-                        "statusCategory != Done AND assignee is not EMPTY")
+    monkeypatch.setattr(
+        settings, "plan_team_jql", "statusCategory != Done AND assignee is not EMPTY"
+    )
     monkeypatch.setattr(settings, "plan_team_limit", 500)
     answers: dict[str, dict] = {}
     asked: list[tuple[str, int]] = []
@@ -331,16 +400,25 @@ def tracker(monkeypatch):
 
 async def test_load_reads_once_for_the_team_and_once_for_the_unassigned(tracker):
     tracker.answers["statusCategory != Done AND assignee is not EMPTY"] = {
-        "issues": [_issue("L-1", due=_d(-1)), _issue("L-2", "Ann Doe")], "truncated": True}
+        "issues": [_issue("L-1", due=_d(-1)), _issue("L-2", "Ann Doe")],
+        "truncated": True,
+    }
     tracker.answers["statusCategory != Done AND assignee is EMPTY"] = {
-        "issues": [_issue("L-3", None)] * 3, "truncated": False}
+        "issues": [_issue("L-3", None)] * 3,
+        "truncated": False,
+    }
     out = await ea_team.load()
-    assert tracker.asked == [("statusCategory != Done AND assignee is not EMPTY", 500),
-                             ("statusCategory != Done AND assignee is EMPTY", 500)]
+    assert tracker.asked == [
+        ("statusCategory != Done AND assignee is not EMPTY", 500),
+        ("statusCategory != Done AND assignee is EMPTY", 500),
+    ]
     assert out["available"] is True and out["truncated"] is True and out["limit"] == 500
     assert out["today"] == TODAY.isoformat()
-    assert out["unassigned"] == {"count": 3, "truncated": False,
-                                 "asked": "statusCategory != Done AND assignee is EMPTY"}
+    assert out["unassigned"] == {
+        "count": 3,
+        "truncated": False,
+        "asked": "statusCategory != Done AND assignee is EMPTY",
+    }
     assert out["totals"]["open"] == 2 and len(out["people"]) == 2
     assert out["cannot_show"] == ea_team.CANNOT_SHOW
     assert "not in the tracker" in out["cannot_show"]
@@ -366,7 +444,8 @@ def test_the_settings_defaults():
     assert fields["plan_team_jql"].default == "statusCategory != Done AND assignee is not EMPTY"
     assert fields["plan_team_limit"].default == 500
     assert fields["plan_delegated_jql"].default == (
-        "reporter = currentUser() AND assignee != currentUser() AND statusCategory != Done")
+        "reporter = currentUser() AND assignee != currentUser() AND statusCategory != Done"
+    )
 
 
 # --- 4. the tool ----------------------------------------------------------------------------
@@ -378,7 +457,9 @@ def _ctx(**kw):
 
 async def test_the_tool_renders_the_load_as_json(tracker):
     tracker.answers["statusCategory != Done AND assignee is not EMPTY"] = {
-        "issues": [_issue("T-1", due=_d(2), est=3.0)], "truncated": False}
+        "issues": [_issue("T-1", due=_d(2), est=3.0)],
+        "truncated": False,
+    }
     out = json.loads(await tools.jira_team_load(_ctx()))
     assert out["people"][0]["assignee"] == "Jo Doe" and out["people"][0]["due_next_7"] == 1
     assert out["unassigned"]["count"] == 0 and "cannot_show" in out
@@ -389,7 +470,8 @@ async def test_a_tracker_outage_parks_the_run(tracker, monkeypatch):
         return None
 
     tracker.answers["statusCategory != Done AND assignee is not EMPTY"] = httpx.ConnectError(
-        "[Errno 111] Connection refused")
+        "[Errno 111] Connection refused"
+    )
     monkeypatch.setattr(tools, "_sleep", no_wait)
     with pytest.raises(CallDeferred) as paused:
         await tools.jira_team_load(_ctx(park_reads=True))
@@ -400,7 +482,8 @@ async def test_a_tracker_outage_parks_the_run(tracker, monkeypatch):
 
 async def test_a_tracker_no_is_honest_text(tracker):
     tracker.answers["statusCategory != Done AND assignee is not EMPTY"] = jira.JiraError(
-        "searchIssues — provider rejected the request (400): bad JQL", status_code=400)
+        "searchIssues — provider rejected the request (400): bad JQL", status_code=400
+    )
     out = await tools.jira_team_load(_ctx(park_reads=True))
     assert "team load read failed" in out and "bad JQL" in out
 
@@ -420,27 +503,44 @@ def test_the_tool_is_a_parkable_jira_read_in_jira_read_with_a_registry_row():
 
 
 def _waiting(key, who="Ann Doe", *, due=None, updated=None, status="In Progress"):
-    return {"issue_key": key, "summary": f"S {key}", "assignee": who, "status": status,
-            "due_date": due, "updated": updated,
-            "url": f"https://jira.example.com/browse/{key}"}
+    return {
+        "issue_key": key,
+        "summary": f"S {key}",
+        "assignee": who,
+        "status": status,
+        "due_date": due,
+        "updated": updated,
+        "url": f"https://jira.example.com/browse/{key}",
+    }
 
 
 def test_delegated_rows_are_ordered_overdue_first_then_soonest_due():
     tz = ZoneInfo(TZ)
-    rows = ea_team.delegated_rows([
-        _waiting("W-1"),                                         # no due date: last
-        _waiting("W-2", due=_d(5)),
-        _waiting("W-3", due=_d(-4), updated="2026-11-01T10:00:00.000+0000"),
-        _waiting("W-4", due=_d(0), updated="2026-11-19T05:00:00.000+0000"),  # 18 Nov local
-        _waiting("W-5", due=_d(-4)),
-        _waiting("W-6", due="soon", updated="garbage"),
-    ], TODAY, tz)
+    rows = ea_team.delegated_rows(
+        [
+            _waiting("W-1"),  # no due date: last
+            _waiting("W-2", due=_d(5)),
+            _waiting("W-3", due=_d(-4), updated="2026-11-01T10:00:00.000+0000"),
+            _waiting("W-4", due=_d(0), updated="2026-11-19T05:00:00.000+0000"),  # 18 Nov local
+            _waiting("W-5", due=_d(-4)),
+            _waiting("W-6", due="soon", updated="garbage"),
+        ],
+        TODAY,
+        tz,
+    )
     assert [r["issue_key"] for r in rows] == ["W-3", "W-5", "W-4", "W-2", "W-1", "W-6"]
     w3 = rows[0]
-    assert w3 == {"issue_key": "W-3", "summary": "S W-3", "assignee": "Ann Doe",
-                  "status": "In Progress", "due_date": _d(-4), "overdue": True,
-                  "days_overdue": 4, "days_since_update": 18,
-                  "url": "https://jira.example.com/browse/W-3"}
+    assert w3 == {
+        "issue_key": "W-3",
+        "summary": "S W-3",
+        "assignee": "Ann Doe",
+        "status": "In Progress",
+        "due_date": _d(-4),
+        "overdue": True,
+        "days_overdue": 4,
+        "days_since_update": 18,
+        "url": "https://jira.example.com/browse/W-3",
+    }
     w4 = rows[2]
     assert w4["overdue"] is False and "days_overdue" not in w4
     assert w4["days_since_update"] == 1, "the update's day is the operator's local day"
@@ -450,9 +550,11 @@ def test_delegated_rows_are_ordered_overdue_first_then_soonest_due():
 @pytest.fixture()
 def waiting(monkeypatch, tracker):
     monkeypatch.setattr(ea_team, "delegated", _REAL_DELEGATED)
-    monkeypatch.setattr(settings, "plan_delegated_jql",
-                        "reporter = currentUser() AND assignee != currentUser() "
-                        "AND statusCategory != Done")
+    monkeypatch.setattr(
+        settings,
+        "plan_delegated_jql",
+        "reporter = currentUser() AND assignee != currentUser() AND statusCategory != Done",
+    )
     monkeypatch.setattr(settings, "plan_backlog_limit", 200)
     monkeypatch.setattr(settings, "plan_brief_items", 25)
 
@@ -486,7 +588,7 @@ def contact(monkeypatch):
 
     monkeypatch.setattr(settings, "dispatch_approval_limit", 10_000)
     monkeypatch.setattr(settings, "ea_contact_budget_per_day", 0)
-    monkeypatch.setattr(ea_backlog, "_today", lambda: date(2998, 2, 3))   # no plan stored
+    monkeypatch.setattr(ea_backlog, "_today", lambda: date(2998, 2, 3))  # no plan stored
     seen: list[tuple[str, str]] = []
 
     async def fake(brief, title, agent_id, actor=None):
@@ -526,8 +628,7 @@ async def test_every_kind_that_carries_the_backlog_carries_delegated(contact, wa
 
 
 @needs_pg
-async def test_a_tracker_outage_degrades_the_block_and_never_the_contact(contact, waiting,
-                                                                         tracker):
+async def test_a_tracker_outage_degrades_the_block_and_never_the_contact(contact, waiting, tracker):
     tracker.answers[settings.plan_delegated_jql] = ConnectionError("down")
     out = await hb_actions._ea_contact("sched_staffing_down", {"kind": "morning_report"})
     assert out["delivered"] is True
@@ -538,8 +639,9 @@ async def test_a_tracker_outage_degrades_the_block_and_never_the_contact(contact
 
 @pytest.mark.parametrize("absence", ["not configured", "disabled", "nothing delegated"])
 @needs_pg
-async def test_no_block_and_no_mention_when_there_is_nothing_to_show(contact, waiting,
-                                                                      monkeypatch, absence):
+async def test_no_block_and_no_mention_when_there_is_nothing_to_show(
+    contact, waiting, monkeypatch, absence
+):
     if absence == "not configured":
         monkeypatch.setattr(jira, "configured", lambda: False)
     elif absence == "disabled":
@@ -579,8 +681,10 @@ def test_the_weekly_framing_sends_assignment_to_the_staffing_agent():
         "carry its recommendation, with its evidence, into the conversation",
         "Never recommend an assignee from your own judgment",
         "it proposes the assignments; you propose none",
-        ("If the brief carries no `staffing_agent`, say there is no staffing agent on the "
-        "roster and leave the assignment to the operator"),
+        (
+            "If the brief carries no `staffing_agent`, say there is no staffing agent on the "
+            "roster and leave the assignment to the operator"
+        ),
     ):
         assert phrase in text, phrase
     # What step 5 built is still there.
@@ -608,7 +712,8 @@ def test_the_assistants_charter_meets_the_staffing_agent():
 
 @needs_pg
 async def test_the_assistant_consults_the_staffing_agent_and_gets_its_answer(
-        hired, tracker, monkeypatch):
+    hired, tracker, monkeypatch
+):
     from pydantic_ai.messages import (
         ModelResponse,
         SystemPromptPart,
@@ -622,14 +727,20 @@ async def test_the_assistant_consults_the_staffing_agent_and_gets_its_answer(
 
     agent_id = await hired()
     tracker.answers["statusCategory != Done AND assignee is not EMPTY"] = {
-        "issues": [_issue("OPS-1", "Ann Doe", due=_d(-2)), _issue("OPS-2", "Ann Doe"),
-                   _issue("OPS-3", "Bo Doe")], "truncated": False}
+        "issues": [
+            _issue("OPS-1", "Ann Doe", due=_d(-2)),
+            _issue("OPS-2", "Ann Doe"),
+            _issue("OPS-3", "Bo Doe"),
+        ],
+        "truncated": False,
+    }
     seen: dict = {"prompt": "", "tools": set(), "returned": ""}
 
     def respond(messages, info: AgentInfo) -> ModelResponse:
         seen["tools"] = {t.name for t in info.function_tools}
-        returned = [p for m in messages for p in getattr(m, "parts", [])
-                    if isinstance(p, ToolReturnPart)]
+        returned = [
+            p for m in messages for p in getattr(m, "parts", []) if isinstance(p, ToolReturnPart)
+        ]
         for m in messages:
             for part in getattr(m, "parts", []):
                 if isinstance(part, SystemPromptPart):
@@ -639,9 +750,16 @@ async def test_the_assistant_consults_the_staffing_agent_and_gets_its_answer(
         seen["returned"] = str(returned[0].content)
         load = json.loads(returned[0].content)
         busiest = load["people"][0]
-        return ModelResponse(parts=[TextPart(content=(
-            f"Bo Doe should take OPS-9: {busiest['assignee']} has {busiest['open']} open "
-            "and one overdue; consult Ann Doe as the expert."))])
+        return ModelResponse(
+            parts=[
+                TextPart(
+                    content=(
+                        f"Bo Doe should take OPS-9: {busiest['assignee']} has {busiest['open']} open "
+                        "and one overdue; consult Ann Doe as the expert."
+                    )
+                )
+            ]
+        )
 
     async def model_for(target, model=None):
         assert target == agent_id
@@ -650,8 +768,10 @@ async def test_the_assistant_consults_the_staffing_agent_and_gets_its_answer(
     monkeypatch.setattr(consult_mod, "_consult_model", model_for)
     since = await repo.latest_event_id()
     answer = await tools.consult_agent(
-        SimpleNamespace(deps=TriageDeps(agent_id=ea_profile.AGENT_ID)), agent_id,
-        "Who should take OPS-9, and do they have room?")
+        SimpleNamespace(deps=TriageDeps(agent_id=ea_profile.AGENT_ID)),
+        agent_id,
+        "Who should take OPS-9, and do they have room?",
+    )
 
     assert answer.startswith("Bo Doe should take OPS-9: Ann Doe has 2 open")
     assert "STAFFING AGENT" in seen["prompt"] and "Dana Rivers" in seen["prompt"]
@@ -678,11 +798,16 @@ def test_the_documented_schedule_is_well_formed():
     assert set(params) == {"agent_id", "title", "instructions"}
     assert params["agent_id"] == "<staffing-agent-id>"
     assert params["instructions"] == text, "the two copies agree"
-    for phrase in ("call jira_team_load", "who is overloaded and who has room",
-                   "what is overdue and with whom", "what has no owner",
-                   "propose nothing unless a reassignment is clearly warranted",
-                   "ONE proposal with one jira.assign_issue action per issue",
-                   "jira_find_users", "say so plainly and propose nothing"):
+    for phrase in (
+        "call jira_team_load",
+        "who is overloaded and who has room",
+        "what is overdue and with whom",
+        "what has no owner",
+        "propose nothing unless a reassignment is clearly warranted",
+        "ONE proposal with one jira.assign_issue action per issue",
+        "jira_find_users",
+        "say so plainly and propose nothing",
+    ):
         assert phrase in text, phrase
     # The parameters are what the task.create action takes.
     spec = hb_actions.ACTIONS["task.create"]

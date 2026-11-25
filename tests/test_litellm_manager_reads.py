@@ -18,17 +18,32 @@ from pydantic_ai import Tool
 from central_command.integrations import litellm as litellm_client
 from central_command.runtime import tools
 
-MODELS = {"ok": True, "kind": "litellm", "operation": "list_models", "count": 3, "models": [
-    {"model_name": "deepseek-v4-pro", "model_id": "1128037f-39a1", "provider_model": "openai/deepseek/deepseek-v4-pro"},
-    {"model_name": "gpt-5.2-pro", "model_id": "526a5348-55a9", "provider_model": "openai/openai/gpt-5.2-pro"},
-    {"model_name": "cc-default", "model_id": "aaaa", "provider_model": "openai/qwen"},
-]}
+MODELS = {
+    "ok": True,
+    "kind": "litellm",
+    "operation": "list_models",
+    "count": 3,
+    "models": [
+        {
+            "model_name": "deepseek-v4-pro",
+            "model_id": "1128037f-39a1",
+            "provider_model": "openai/deepseek/deepseek-v4-pro",
+        },
+        {
+            "model_name": "gpt-5.2-pro",
+            "model_id": "526a5348-55a9",
+            "provider_model": "openai/openai/gpt-5.2-pro",
+        },
+        {"model_name": "cc-default", "model_id": "aaaa", "provider_model": "openai/qwen"},
+    ],
+}
 
 
 @pytest.fixture
 def fake_models(monkeypatch):
     async def list_models():
         return MODELS
+
     monkeypatch.setattr(litellm_client, "list_models", list_models)
 
 
@@ -52,19 +67,35 @@ def _validator(tool_fn):
 
 
 def test_a_stringified_proposal_is_parsed_like_an_object():
-    proposal = {"actions": [{"capability": "litellm.update_model",
-                             "arguments": {"model_id": "1128037f", "model_info": {"mode": "chat"}},
-                             "target_ref": {"system": "litellm", "id": "1128037f", "read_version": "unknown"},
-                             "reversibility": "reversible"}],
-                "evidence": [], "confidence": {"level": "high", "rationale": "read it"},
-                "expected_effect": "mode declared", "intent": "declare the mode"}
-    for fn in (tools.propose_litellm_change, tools.propose_action,
-               tools.propose_calendar_change, tools.propose_loe):
+    proposal = {
+        "actions": [
+            {
+                "capability": "litellm.update_model",
+                "arguments": {"model_id": "1128037f", "model_info": {"mode": "chat"}},
+                "target_ref": {"system": "litellm", "id": "1128037f", "read_version": "unknown"},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [],
+        "confidence": {"level": "high", "rationale": "read it"},
+        "expected_effect": "mode declared",
+        "intent": "declare the mode",
+    }
+    for fn in (
+        tools.propose_litellm_change,
+        tools.propose_action,
+        tools.propose_calendar_change,
+        tools.propose_loe,
+    ):
         as_object = _validator(fn).validate_python({"proposal": proposal})
         as_text = _validator(fn).validate_python({"proposal": json.dumps(proposal)})
         assert as_text["proposal"] == as_object["proposal"], fn.__name__
     # The wire schema is untouched: the tool still declares an object.
-    assert Tool(tools.propose_litellm_change).function_schema.json_schema["properties"]["proposal"].get("$ref")
+    assert (
+        Tool(tools.propose_litellm_change)
+        .function_schema.json_schema["properties"]["proposal"]
+        .get("$ref")
+    )
 
 
 def test_text_that_is_not_json_is_still_a_validation_error():

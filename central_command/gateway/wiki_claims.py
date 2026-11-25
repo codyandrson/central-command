@@ -59,8 +59,7 @@ async def capture(proposal_id: str, result_text: str) -> dict:
         prop = await repo.load_proposal(proposal_id)
         if prop is None:
             return {"captured": 0}
-        actions = [a for a in (prop["actions"] or [])
-                   if a.get("capability") in _PAGE_CAPABILITIES]
+        actions = [a for a in (prop["actions"] or []) if a.get("capability") in _PAGE_CAPABILITIES]
         if not actions:
             return {"captured": 0}
 
@@ -72,17 +71,19 @@ async def capture(proposal_id: str, result_text: str) -> dict:
             else:
                 match = _CREATED_PAGE.search(result_text or "")
                 if match is None:
-                    raise ValueError(
-                        "no created page id in the execution result: "
-                        f"{result_text!r}"
-                    )
+                    raise ValueError(f"no created page id in the execution result: {result_text!r}")
                 page_refs.append(match.group(1))
 
         evidence = prop["evidence"] or []
-        heads = await repo.catalog_document_heads(sorted({
-            e.get("source_ref") for e in evidence
-            if e.get("kind") == "catalog" and e.get("source_ref")
-        }))
+        heads = await repo.catalog_document_heads(
+            sorted(
+                {
+                    e.get("source_ref")
+                    for e in evidence
+                    if e.get("kind") == "catalog" and e.get("source_ref")
+                }
+            )
+        )
         stamped = [_stamp(e, heads) for e in evidence]
 
         # Regeneration is idempotent: an update replaces the page's claims
@@ -91,8 +92,12 @@ async def capture(proposal_id: str, result_text: str) -> dict:
             await repo.retire_wiki_claims(page_ref)
 
         rows = [
-            {"page_ref": page_ref, "proposal_id": proposal_id,
-             "statement": e.get("claim") or "", "evidence": [s]}
+            {
+                "page_ref": page_ref,
+                "proposal_id": proposal_id,
+                "statement": e.get("claim") or "",
+                "evidence": [s],
+            }
             for page_ref in dict.fromkeys(page_refs)
             for e, s in zip(evidence, stamped)
         ]

@@ -46,12 +46,14 @@ def _add(z: zipfile.ZipFile, name: str, body: str, mode: int = 0o100644) -> None
     # as `a/../../escaped.txt` and the test asked for a name the archive did
     # not hold (2026-10-02 testbed run, second pass).
     info.filename = name
-    info.create_system = 3                     # Unix, as git archive writes it
+    info.create_system = 3  # Unix, as git archive writes it
     info.external_attr = mode << 16
     z.writestr(info, body)
 
 
-def _zip(tmp: Path, *, escape: str | None = None, outside_link: tuple[str, str] | None = None) -> Path:
+def _zip(
+    tmp: Path, *, escape: str | None = None, outside_link: tuple[str, str] | None = None
+) -> Path:
     zp = tmp / "release.zip"
     with zipfile.ZipFile(zp, "w") as z:
         _add(z, W + "central_command/db/schema.sql", "-- schema\n")
@@ -68,12 +70,17 @@ def _zip(tmp: Path, *, escape: str | None = None, outside_link: tuple[str, str] 
 
 
 def _run(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, str(HELPER), *map(str, args)],
-                          capture_output=True, text=True, timeout=60)
+    return subprocess.run(
+        [sys.executable, str(HELPER), *map(str, args)], capture_output=True, text=True, timeout=60
+    )
 
 
 def _all_files(d: Path) -> list[str]:
-    return sorted(p.relative_to(d).as_posix() for p in d.rglob("*") if not p.is_dir()) if d.exists() else []
+    return (
+        sorted(p.relative_to(d).as_posix() for p in d.rglob("*") if not p.is_dir())
+        if d.exists()
+        else []
+    )
 
 
 def test_the_vendor_skip_is_a_prefix_at_every_depth_symlinks_included(tmp_path):
@@ -98,13 +105,16 @@ def test_an_executable_script_stays_executable(tmp_path):
     assert not readme.stat().st_mode & stat.S_IXUSR, "a 0644 file came out executable"
 
 
-@pytest.mark.parametrize("escape", [
-    "../escaped.txt",
-    W + "deploy/../../escaped.txt",
-    "/tmp/escaped-absolute.txt",
-    "C:/escaped.txt",
-    W + "a\\..\\..\\escaped.txt",
-])
+@pytest.mark.parametrize(
+    "escape",
+    [
+        "../escaped.txt",
+        W + "deploy/../../escaped.txt",
+        "/tmp/escaped-absolute.txt",
+        "C:/escaped.txt",
+        W + "a\\..\\..\\escaped.txt",
+    ],
+)
 def test_an_entry_that_escapes_is_refused_by_name_and_nothing_is_written(tmp_path, escape):
     zp, dest = _zip(tmp_path, escape=escape), tmp_path / "x"
     r = _run("extract", zp, dest, "--skip", W + "docs/vendor/", "--links", tmp_path / "links")

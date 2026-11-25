@@ -19,12 +19,15 @@ def test_an_entity_is_its_name_a_newline_and_its_summary_verbatim_and_stripped()
     )
 
 
-@pytest.mark.parametrize("name,summary,expected", [
-    ("Jane Doe", "", "Jane Doe"),
-    ("Jane Doe", None, "Jane Doe"),
-    ("  Jane Doe", "Runs it. \n", "Jane Doe\nRuns it."),
-    ("", "", ""),
-])
+@pytest.mark.parametrize(
+    "name,summary,expected",
+    [
+        ("Jane Doe", "", "Jane Doe"),
+        ("Jane Doe", None, "Jane Doe"),
+        ("  Jane Doe", "Runs it. \n", "Jane Doe\nRuns it."),
+        ("", "", ""),
+    ],
+)
 def test_an_entity_is_stripped_at_both_ends(name, summary, expected):
     assert embedding_text("entity", name=name, summary=summary) == expected
 

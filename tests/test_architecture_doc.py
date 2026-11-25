@@ -38,16 +38,40 @@ DOC_PATH = ROOT / "docs" / "ARCHITECTURE.md"
 PKG = ROOT / "central_command"
 
 # Directories never walked: huge, generated, or not ours.
-_PRUNE = {".git", "node_modules", ".venv", "__pycache__", "server-dist", "dist",
-          ".pytest_cache", "_bmad-output", "worktrees"}
+_PRUNE = {
+    ".git",
+    "node_modules",
+    ".venv",
+    "__pycache__",
+    "server-dist",
+    "dist",
+    ".pytest_cache",
+    "_bmad-output",
+    "worktrees",
+}
 
 # Event types are counted from `emit("kind", ...)` call sites by AST. A new
 # event type should not fail every other session's suite, so the documented
 # figure may trail the tree by this fraction; a rename-sized drift still fails.
 EVENT_TOLERANCE = 0.05
 
-_EXT = (".py", ".ts", ".tsx", ".sh", ".sql", ".tsv", ".yaml", ".yml", ".md", ".toml",
-        ".service", ".path", ".timer", ".txt", ".json")
+_EXT = (
+    ".py",
+    ".ts",
+    ".tsx",
+    ".sh",
+    ".sql",
+    ".tsv",
+    ".yaml",
+    ".yml",
+    ".md",
+    ".toml",
+    ".service",
+    ".path",
+    ".timer",
+    ".txt",
+    ".json",
+)
 
 
 def doc_text() -> str:
@@ -97,8 +121,7 @@ def documented_paths(text: str) -> list[tuple[int, str]]:
         if re.search(r"\bdeleted in v\d", line):
             continue
         toks = re.findall(r"`([^`\n]+)`", line)
-        toks += [t for t in re.findall(r"\]\(([^)\s]+)\)", line)
-                 if not re.match(r"[a-z]+:", t)]
+        toks += [t for t in re.findall(r"\]\(([^)\s]+)\)", line) if not re.match(r"[a-z]+:", t)]
         for tok in toks:
             tok = tok.split("#", 1)[0]
             if _is_path_token(tok.split("::", 1)[0]):
@@ -159,8 +182,7 @@ def missing_paths(text: str, paths: list[str]) -> list[str]:
 
 
 def packages() -> list[str]:
-    return sorted(p.name for p in PKG.iterdir()
-                  if p.is_dir() and (p / "__init__.py").exists())
+    return sorted(p.name for p in PKG.iterdir() if p.is_dir() and (p / "__init__.py").exists())
 
 
 def top_modules() -> list[str]:
@@ -206,8 +228,11 @@ def event_types() -> set[str]:
             f = node.func
             name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
             a0 = node.args[0]
-            if name in ("emit", "_emit") and isinstance(a0, ast.Constant) \
-                    and isinstance(a0.value, str):
+            if (
+                name in ("emit", "_emit")
+                and isinstance(a0, ast.Constant)
+                and isinstance(a0.value, str)
+            ):
                 kinds.add(a0.value)
     return kinds
 
@@ -220,7 +245,7 @@ def heartbeat_kinds() -> list[str]:
 def _comment_states(sql: str, anchor: str, stop: str) -> list[str]:
     """States listed as `A | B | C` in the schema comment after `anchor`."""
     start = sql.index(anchor)
-    block = sql[start:sql.index(stop, start)]
+    block = sql[start : sql.index(stop, start)]
     text = " ".join(re.sub(r"^\s*--\s?", "", ln) for ln in block.splitlines())
     return re.findall(r"(?:^|\|)\s*([A-Z][A-Z_]+)\b", text.split("Terminal:")[0])
 
@@ -237,6 +262,7 @@ def schema_state_sets() -> dict[str, list[str]]:
 
 def proposal_states() -> list[str]:
     from central_command.contract.enums import ProposalStatus
+
     # PROPOSED is the in-memory default before a proposal is parked and APPROVED
     # is declared but never assigned (the document says so, in section 3);
     # neither is ever a persisted state.
@@ -276,6 +302,7 @@ def test_every_documented_path_exists():
 
 def test_the_capability_count_matches_the_registry():
     from central_command.gateway.capabilities import REGISTRY
+
     m = re.search(r"(\d+) capabilities", doc_text())
     assert m, "the document must state the registry size as 'N capabilities'"
     assert int(m.group(1)) == len(REGISTRY), (
@@ -300,8 +327,9 @@ def test_the_event_type_count_is_close_to_the_tree():
     m = re.search(r"(\d+) distinct event types", doc_text())
     assert m, "the document must state the event-type count as 'N distinct event types'"
     documented, actual = int(m.group(1)), len(event_types())
-    assert documented <= actual * (1 + EVENT_TOLERANCE) and \
-        documented >= actual * (1 - EVENT_TOLERANCE), (
+    assert documented <= actual * (1 + EVENT_TOLERANCE) and documented >= actual * (
+        1 - EVENT_TOLERANCE
+    ), (
         f"the document says {documented} distinct event types; the tree emits {actual} "
         f"(tolerance {EVENT_TOLERANCE:.0%}) — recount and fix the row"
     )
@@ -309,8 +337,11 @@ def test_the_event_type_count_is_close_to_the_tree():
 
 def test_the_cockpit_is_covered():
     text = doc_text()
-    routes = sorted(p.stem for p in (ROOT / "web/server/routes").glob("cc-*.ts")
-                    if not p.name.endswith(".test.ts"))
+    routes = sorted(
+        p.stem
+        for p in (ROOT / "web/server/routes").glob("cc-*.ts")
+        if not p.name.endswith(".test.ts")
+    )
     missing = [r for r in routes if f"`{r}`" not in text]
     assert not missing, f"cockpit routes the document never names: {missing}"
     features = sorted(p.name for p in (ROOT / "web/src/features").iterdir() if p.is_dir())
@@ -332,8 +363,7 @@ def test_the_state_sets_match_the_schema_and_enums():
     for entity, states in expected.items():
         assert entity in documented, f"the state-set table has no {entity} row"
         assert documented[entity] == states, (
-            f"{entity} states: the document lists {documented[entity]}, "
-            f"the tree declares {states}"
+            f"{entity} states: the document lists {documented[entity]}, the tree declares {states}"
         )
 
 

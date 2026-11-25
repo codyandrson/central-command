@@ -16,8 +16,16 @@ from central_command.integrations import graph_ontology as onto
 from central_command.integrations import neo4j_writer
 
 ORDER = (
-    "Person", "Preference", "Requirement", "Procedure", "Location",
-    "Event", "Organization", "Document", "Topic", "Object",
+    "Person",
+    "Preference",
+    "Requirement",
+    "Procedure",
+    "Location",
+    "Event",
+    "Organization",
+    "Document",
+    "Topic",
+    "Object",
 )
 
 DOC_SHA256 = {
@@ -36,8 +44,14 @@ DOC_SHA256 = {
 # graphiti-core 0.30.2: Node + EntityNode. A type attribute with one of these
 # names would collide with the node's own fields in the extraction schema.
 ENTITY_NODE_FIELDS = {
-    "uuid", "name", "group_id", "labels", "created_at",
-    "name_embedding", "summary", "attributes",
+    "uuid",
+    "name",
+    "group_id",
+    "labels",
+    "created_at",
+    "name_embedding",
+    "summary",
+    "attributes",
 }
 
 
@@ -119,6 +133,6 @@ def test_the_extraction_instructions_name_the_rule_types():
     assert text == (
         "Standing rules, policies, procedures, schedules and preferences that a "
         "named person sets ARE entities here: extract each one as a Procedure or "
-        "Preference with a specific, self-describing name (e.g. \"EA morning brief "
-        "at 06:00\"), so that a fact can link the person to the rule."
+        'Preference with a specific, self-describing name (e.g. "EA morning brief '
+        'at 06:00"), so that a fact can link the person to the rule.'
     )

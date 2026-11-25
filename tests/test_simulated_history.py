@@ -42,17 +42,32 @@ async def test_an_approval_runs_its_handler_with_no_mode_to_consult(monkeypatch)
     assert not hasattr(settings, "executor_mode")
     calls = []
 
-    async def fake_enqueue(name, episode_body, source_description, group_id, *,
-                           reference_time, proposal_id, scope, marker):
+    async def fake_enqueue(
+        name,
+        episode_body,
+        source_description,
+        group_id,
+        *,
+        reference_time,
+        proposal_id,
+        scope,
+        marker,
+    ):
         calls.append(name)
         return {"verification": {"id": "v-1"}, "job": {"id": 7}}
 
     monkeypatch.setattr(graphiti_ingest, "enqueue", fake_enqueue)
-    action = Action(capability="graph.add_episode",
-                    arguments={"name": "n", "episode_body": "b", "scope": "shared",
-                               "reference_time": "2026-01-01T00:00:00Z"},
-                    target_ref={"system": "graphiti", "id": "central_command"},
-                    reversibility="reversible")
+    action = Action(
+        capability="graph.add_episode",
+        arguments={
+            "name": "n",
+            "episode_body": "b",
+            "scope": "shared",
+            "reference_time": "2026-01-01T00:00:00Z",
+        },
+        target_ref={"system": "graphiti", "id": "central_command"},
+        reversibility="reversible",
+    )
     out = await executor.execute([action], approver="human:lee", source_refs=[])
     assert calls == ["n"]
     assert not out.result_text.startswith("[dry-run]")
@@ -65,11 +80,19 @@ async def _executed(result_text: str) -> str:
     sid = "sess_dr_" + uuid.uuid4().hex[:8]
     await repo.create_running_session(sid, "jira-expert")
     await repo.save_proposal(
-        pid, sid, "jira-expert", "do a thing", [], [], "something happens", pid,
+        pid,
+        sid,
+        "jira-expert",
+        "do a thing",
+        [],
+        [],
+        "something happens",
+        pid,
     )
     await repo.set_proposal_executed(pid, {"approver": "operator", "source_refs": []})
-    await events.emit("proposal.executed", ref_id=pid,
-                      payload={"result_text": result_text}, actor="operator")
+    await events.emit(
+        "proposal.executed", ref_id=pid, payload={"result_text": result_text}, actor="operator"
+    )
     return pid
 
 

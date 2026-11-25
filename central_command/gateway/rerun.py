@@ -92,8 +92,11 @@ async def _start_conversation(run: _Run, new_session_id: str, actor: str) -> Non
     async def opening_turn() -> None:
         try:
             await start_conversation(
-                session["agent_id"], run.opening, session_id=new_session_id,
-                rerun_of=session["id"], model_override=session.get("model_override"),
+                session["agent_id"],
+                run.opening,
+                session_id=new_session_id,
+                rerun_of=session["id"],
+                model_override=session.get("model_override"),
                 thinking_override=session.get("thinking_override"),
             )
         except Exception:  # the run's own landing holds the record
@@ -157,25 +160,36 @@ async def _check_email(run: _Run) -> str | None:
     return None
 
 
-KINDS: dict[str, RerunKind] = {row.name: row for row in (
-    RerunKind("task", "task.instructions", _start_task, check=_check_task),
-    # Refused too while a child is not terminal, or the fresh run assigns the work
-    # twice. The roster cards are re-read live by design.
-    RerunKind("orchestrator", "task.instructions, through run_project", _start_task,
-              waits_for_children=True),
-    # The opening message only (A2): the agent's answers shaped the later turns,
-    # so replaying them would not be the same conversation.
-    RerunKind("conversation", "the first user-prompt part of the transcript",
-              _start_conversation, check=_check_conversation),
-    # Recurrence and pending-proposal context are recomputed per run by design.
-    RerunKind("email", "work_item.payload", _start_email, check=_check_email),
-    # A lane an agent opened to unblock its task: the agent wrote its first words.
-    RerunKind("discussion", "none", refusal=NO_STORED_INPUTS),
-    RerunKind("document", "none", refusal=NO_STORED_INPUTS),
-    RerunKind("wiki-repair", "none", refusal=NO_STORED_INPUTS),
-    # Coach, heartbeat, steward and consult sessions have no task and no item.
-    RerunKind("agent-run", "none", refusal=NO_STORED_INPUTS),
-)}
+KINDS: dict[str, RerunKind] = {
+    row.name: row
+    for row in (
+        RerunKind("task", "task.instructions", _start_task, check=_check_task),
+        # Refused too while a child is not terminal, or the fresh run assigns the work
+        # twice. The roster cards are re-read live by design.
+        RerunKind(
+            "orchestrator",
+            "task.instructions, through run_project",
+            _start_task,
+            waits_for_children=True,
+        ),
+        # The opening message only (A2): the agent's answers shaped the later turns,
+        # so replaying them would not be the same conversation.
+        RerunKind(
+            "conversation",
+            "the first user-prompt part of the transcript",
+            _start_conversation,
+            check=_check_conversation,
+        ),
+        # Recurrence and pending-proposal context are recomputed per run by design.
+        RerunKind("email", "work_item.payload", _start_email, check=_check_email),
+        # A lane an agent opened to unblock its task: the agent wrote its first words.
+        RerunKind("discussion", "none", refusal=NO_STORED_INPUTS),
+        RerunKind("document", "none", refusal=NO_STORED_INPUTS),
+        RerunKind("wiki-repair", "none", refusal=NO_STORED_INPUTS),
+        # Coach, heartbeat, steward and consult sessions have no task and no item.
+        RerunKind("agent-run", "none", refusal=NO_STORED_INPUTS),
+    )
+}
 
 _ITEM_KINDS = {"email": "email", "document": "document", "wiki_repair": "wiki-repair"}
 UNLISTED = RerunKind("unlisted", "none", refusal="this kind of run cannot be re-run")
@@ -246,13 +260,16 @@ async def rerun_session(session_id: str, actor: str = "operator") -> dict:
     item_id = run.item["id"] if run.item else None
 
     claimed = await repo.claim_rerun(
-        session_id, new_session_id, task_id, work_item_id=item_id,
+        session_id,
+        new_session_id,
+        task_id,
+        work_item_id=item_id,
         refuse_live_children=kind.waits_for_children,
     )
     if claimed is None:
         raise RerunRefused(
-            f"session {session_id} cannot be re-run: it changed while the re-run "
-            "was being claimed")
+            f"session {session_id} cannot be re-run: it changed while the re-run was being claimed"
+        )
     for proposal_id in claimed["proposals"]:
         await release_folds_for(proposal_id, "covering proposal withdrawn")
     await close_session(session_id, agent_id=agent_id, reason="rerun", actor=actor)
@@ -262,10 +279,18 @@ async def rerun_session(session_id: str, actor: str = "operator") -> dict:
     await events.emit(
         "session.rerun",
         ref_id=session_id,
-        payload={"new_session_id": new_session_id, **links,
-                 "charter_version": charter["version"] if charter else 0},
+        payload={
+            "new_session_id": new_session_id,
+            **links,
+            "charter_version": charter["version"] if charter else 0,
+        },
         actor=actor,
     )
     await kind.start(run, new_session_id, actor)
-    return {"sessionId": new_session_id, "agentId": agent_id, "rerunOf": session_id,
-            "taskId": task_id, "workItemId": item_id}
+    return {
+        "sessionId": new_session_id,
+        "agentId": agent_id,
+        "rerunOf": session_id,
+        "taskId": task_id,
+        "workItemId": item_id,
+    }

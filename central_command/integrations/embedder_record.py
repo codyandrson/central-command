@@ -49,17 +49,28 @@ MIGRATING = "migrating"
 AWAITING_CONFIG = "awaiting_config"
 _CLOSED_STATES = (MIGRATING, AWAITING_CONFIG)
 
-FIELDS = frozenset({
-    "alias", "dimensions", "epoch", "text_recipe", "state", "canary_texts",
-    "canary_vectors", "upstream_model", "updated_at", "history", "committed_at",
-    "counters", "run_started_at",
-})
+FIELDS = frozenset(
+    {
+        "alias",
+        "dimensions",
+        "epoch",
+        "text_recipe",
+        "state",
+        "canary_texts",
+        "canary_vectors",
+        "upstream_model",
+        "updated_at",
+        "history",
+        "committed_at",
+        "counters",
+        "run_started_at",
+    }
+)
 # Neo4j stores no list of lists and no map as a property.
 _JSON_FIELDS = ("canary_vectors", "counters")
 
 _CONSTRAINT = (
-    "CREATE CONSTRAINT cc_graph_meta_key IF NOT EXISTS "
-    "FOR (m:CCGraphMeta) REQUIRE m.key IS UNIQUE"
+    "CREATE CONSTRAINT cc_graph_meta_key IF NOT EXISTS FOR (m:CCGraphMeta) REQUIRE m.key IS UNIQUE"
 )
 _READ_RECORD = "MATCH (m:CCGraphMeta {key: 'embedder'}) RETURN properties(m) AS m"
 _UPDATE_RECORD = (
@@ -193,7 +204,8 @@ def _refusal(exc: httpx.HTTPStatusError) -> Verdict | None:
     if not 400 <= status < 500 or status in (408, 429):
         return None
     return _mismatch(
-        "ii", f"configured {settings.embed_alias} is refused by the proxy (HTTP {status})",
+        "ii",
+        f"configured {settings.embed_alias} is refused by the proxy (HTTP {status})",
     )
 
 
@@ -231,16 +243,21 @@ async def bootstrap_if_empty() -> bool:
             _mismatch("iii", _width_reason(wrong[0], wrong[1], "canary", dimensions)).reason
         )
     await ensure_constraint()
-    rows = await _write(_BOOTSTRAP_RECORD, fields=_encoded({
-        "alias": settings.embed_alias,
-        "dimensions": dimensions,
-        "epoch": 1,
-        "text_recipe": TEXT_RECIPE,
-        "state": STABLE,
-        "canary_texts": list(CANARY_TEXTS),
-        "canary_vectors": vectors,
-        "updated_at": datetime.now(UTC).isoformat(),
-    }))
+    rows = await _write(
+        _BOOTSTRAP_RECORD,
+        fields=_encoded(
+            {
+                "alias": settings.embed_alias,
+                "dimensions": dimensions,
+                "epoch": 1,
+                "text_recipe": TEXT_RECIPE,
+                "state": STABLE,
+                "canary_texts": list(CANARY_TEXTS),
+                "canary_vectors": vectors,
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+        ),
+    )
     clear_cache()
     return bool(rows)
 
@@ -252,7 +269,8 @@ _cached: tuple[float, Verdict] | None = None
 # A ContextVar, so nothing outside the `with` block can see it; no env key or
 # setting reaches it. `graph_reembed` verifies its own search under it.
 _operator_session: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "embedder_operator_session", default=False,
+    "embedder_operator_session",
+    default=False,
 )
 
 
@@ -290,8 +308,9 @@ async def _compare_canaries(record: dict, alias: str, dimensions: int) -> Verdic
     stored = record.get("canary_vectors") or []
     if not texts or len(texts) != len(stored) or any(len(v) != dimensions for v in stored):
         return _mismatch(
-            "iv", f"the record for {alias} holds no usable canaries, so the model behind "
-                  "it cannot be confirmed",
+            "iv",
+            f"the record for {alias} holds no usable canaries, so the model behind "
+            "it cannot be confirmed",
         )
     try:
         vectors = await _embed_canaries(texts)
@@ -306,8 +325,9 @@ async def _compare_canaries(record: dict, alias: str, dimensions: int) -> Verdic
     lowest = min(_cosine(a, b) for a, b in zip(stored, vectors))
     if lowest < settings.embedder_canary_threshold:
         return _mismatch(
-            "iv", f"the model behind {alias} has changed since the graph was embedded "
-                  f"(canary cosine {lowest:.4f})",
+            "iv",
+            f"the model behind {alias} has changed since the graph was embedded "
+            f"(canary cosine {lowest:.4f})",
         )
     return None
 
@@ -328,8 +348,9 @@ async def _verdict() -> Verdict:
     dimensions = record.get("dimensions")
     if alias != settings.embed_alias or dimensions != int(settings.embed_dim):
         return _mismatch(
-            "ii", f"configured {settings.embed_alias}/{settings.embed_dim}, "
-                  f"graph holds {alias}/{dimensions}",
+            "ii",
+            f"configured {settings.embed_alias}/{settings.embed_dim}, "
+            f"graph holds {alias}/{dimensions}",
         )
     for kind, widths in counted.items():
         for width in sorted(widths):

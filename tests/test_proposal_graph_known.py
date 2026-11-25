@@ -23,10 +23,18 @@ async def _async(value):
 
 def _row(actions: list[dict], agent_id: str = "inbox-triage") -> dict:
     return {
-        "id": "prop_gk", "session_id": "sess_gk", "agent_id": agent_id,
-        "intent": "test", "status": "AWAITING_HUMAN", "actions": actions,
-        "evidence": [], "expected_effect": "", "created_at": None,
-        "decided_at": None, "confidence": None, "origin": None,
+        "id": "prop_gk",
+        "session_id": "sess_gk",
+        "agent_id": agent_id,
+        "intent": "test",
+        "status": "AWAITING_HUMAN",
+        "actions": actions,
+        "evidence": [],
+        "expected_effect": "",
+        "created_at": None,
+        "decided_at": None,
+        "confidence": None,
+        "origin": None,
     }
 
 
@@ -66,13 +74,25 @@ class _Graph:
 
 
 _FACT = {
-    "uuid": "f1", "fact": "Jane Doe banks with Example Credit Union", "name": "BANKS_WITH",
-    "valid_at": "2026-01-02T00:00:00+00:00", "invalid_at": None, "group_id": "shared",
-    "source_node_uuid": "n1", "target_node_uuid": "n2", "episodes": ["e1"], "attributes": {},
+    "uuid": "f1",
+    "fact": "Jane Doe banks with Example Credit Union",
+    "name": "BANKS_WITH",
+    "valid_at": "2026-01-02T00:00:00+00:00",
+    "invalid_at": None,
+    "group_id": "shared",
+    "source_node_uuid": "n1",
+    "target_node_uuid": "n2",
+    "episodes": ["e1"],
+    "attributes": {},
 }
 _NODE = {
-    "uuid": "n1", "name": "Jane Doe", "summary": "A member of Example Credit Union.",
-    "labels": ["Entity", "Person"], "created_at": None, "group_id": "shared", "attributes": {},
+    "uuid": "n1",
+    "name": "Jane Doe",
+    "summary": "A member of Example Credit Union.",
+    "labels": ["Entity", "Person"],
+    "created_at": None,
+    "group_id": "shared",
+    "attributes": {},
 }
 
 
@@ -86,15 +106,32 @@ async def test_a_jira_action_and_an_episode_give_one_entry_at_the_episodes_index
 
     out = await routes.get_proposal_graph_known("prop_gk")
 
-    assert out == {"proposal_id": "prop_gk", "episodes": [{
-        "action_index": 1,
-        "name": "Jane Doe account",
-        "facts": [{"uuid": "f1", "fact": "Jane Doe banks with Example Credit Union",
-                   "name": "BANKS_WITH", "valid_at": "2026-01-02T00:00:00+00:00",
-                   "invalid_at": None, "group_id": "shared"}],
-        "entities": [{"uuid": "n1", "name": "Jane Doe",
-                      "summary": "A member of Example Credit Union."}],
-    }]}
+    assert out == {
+        "proposal_id": "prop_gk",
+        "episodes": [
+            {
+                "action_index": 1,
+                "name": "Jane Doe account",
+                "facts": [
+                    {
+                        "uuid": "f1",
+                        "fact": "Jane Doe banks with Example Credit Union",
+                        "name": "BANKS_WITH",
+                        "valid_at": "2026-01-02T00:00:00+00:00",
+                        "invalid_at": None,
+                        "group_id": "shared",
+                    }
+                ],
+                "entities": [
+                    {
+                        "uuid": "n1",
+                        "name": "Jane Doe",
+                        "summary": "A member of Example Credit Union.",
+                    }
+                ],
+            }
+        ],
+    }
     assert graph.fact_calls[0]["max_facts"] == 6
     assert graph.node_calls[0] == {"query": "Jane Doe account", "max_nodes": 3, "agent_id": None}
 
@@ -115,7 +152,10 @@ async def test_two_episodes_each_get_their_own_entry(monkeypatch):
 
     out = await routes.get_proposal_graph_known("prop_gk")
 
-    assert [(e["action_index"], e["name"]) for e in out["episodes"]] == [(0, "First"), (2, "Second")]
+    assert [(e["action_index"], e["name"]) for e in out["episodes"]] == [
+        (0, "First"),
+        (2, "Second"),
+    ]
 
 
 async def test_a_proposal_with_no_episode_returns_no_episodes_and_reads_nothing(monkeypatch):
@@ -182,8 +222,10 @@ async def test_a_failed_graph_read_is_a_503_never_an_empty_list(monkeypatch, fai
     if failing == "facts":
         graph.error = boom
     else:
+
         async def nodes(query, max_nodes=8, agent_id=None, **kw):
             raise boom
+
         monkeypatch.setattr(graphiti, "search_nodes", nodes)
 
     with pytest.raises(HTTPException) as exc:

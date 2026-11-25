@@ -39,7 +39,7 @@ CHANGED = [0.5, 0.8660254037844386, 0.0, 0.0]
 
 def _changed(graph):
     """The model behind the alias changed: a canary no longer matches."""
-    graph.declare(canary_vectors='[[1,0,0,0],[1,0,0,0],[1,0,0,0]]')
+    graph.declare(canary_vectors="[[1,0,0,0],[1,0,0,0],[1,0,0,0]]")
     graph.embed = lambda text: CHANGED
 
 
@@ -52,10 +52,15 @@ def _table(monkeypatch):
 
     async def record(name, up, error=None):
         before = table.get(name)
-        table[name] = {"name": name, "state": "up" if up else "down", "error": error,
-                       "checked_at": datetime.now(UTC),
-                       "down_since": (before or {}).get("down_since") if not up and before
-                       and before["state"] == "down" else (None if up else datetime.now(UTC))}
+        table[name] = {
+            "name": name,
+            "state": "up" if up else "down",
+            "error": error,
+            "checked_at": datetime.now(UTC),
+            "down_since": (before or {}).get("down_since")
+            if not up and before and before["state"] == "down"
+            else (None if up else datetime.now(UTC)),
+        }
         return dict(before) if before else None
 
     monkeypatch.setattr(repo, "dependency_probe_states", states)
@@ -67,7 +72,8 @@ def _table(monkeypatch):
 
 
 async def test_a_mismatch_with_the_probe_up_records_the_embedder_down_with_the_reason(
-        monkeypatch, graph):
+    monkeypatch, graph
+):
     _changed(graph)
     rec = _Recorder(monkeypatch)
     _no_probes(monkeypatch, embedder=True, graph=True)
@@ -106,7 +112,8 @@ async def test_an_agreeing_graph_records_nothing_and_asks_afresh(monkeypatch, gr
 
 
 async def test_a_probe_that_is_down_is_not_overridden_and_the_check_is_not_asked(
-        monkeypatch, graph):
+    monkeypatch, graph
+):
     async def never(force=False):
         raise AssertionError("the check must not run on a DOWN embedder probe")
 
@@ -118,7 +125,8 @@ async def test_a_probe_that_is_down_is_not_overridden_and_the_check_is_not_asked
     cache, _ = await orchestration.probe_and_record(["embedder"])
 
     assert cache.results == {"embedder": False} and table["embedder"]["error"] == (
-        "probe answered unhealthy")
+        "probe answered unhealthy"
+    )
 
 
 async def test_a_check_that_cannot_answer_is_the_outage_it_already_is(monkeypatch, graph):
@@ -135,16 +143,15 @@ async def test_a_check_that_cannot_answer_is_the_outage_it_already_is(monkeypatc
     assert table["embedder"]["error"] == "embedder check could not run (ConnectionError)"
 
 
-async def test_with_the_graph_probed_down_a_cached_mismatch_is_held_not_cleared(
-        monkeypatch, graph):
+async def test_with_the_graph_probed_down_a_cached_mismatch_is_held_not_cleared(monkeypatch, graph):
     """The check cannot run without the graph; the plain UP answer of the embedder
     probe must not clear what the check found."""
     _changed(graph)
-    assert not (await embedder_record.check()).open        # cached
+    assert not (await embedder_record.check()).open  # cached
     _no_probes(monkeypatch, embedder=True, graph=False)
     _empty_worklists(monkeypatch)
     table = _table(monkeypatch)
-    graph.read_error = ConnectionError("bolt refused")     # the check would raise
+    graph.read_error = ConnectionError("bolt refused")  # the check would raise
 
     cache, _ = await orchestration.probe_and_record(["embedder", "graph"])
 
@@ -175,8 +182,7 @@ async def test_a_sweep_and_its_retry_now_consult_the_check_once_per_cache(monkey
 # --- the sweep ---------------------------------------------------------------------
 
 
-async def test_with_nothing_parked_a_cached_mismatch_still_records_the_outage(
-        monkeypatch, graph):
+async def test_with_nothing_parked_a_cached_mismatch_still_records_the_outage(monkeypatch, graph):
     _changed(graph)
     rec = _Recorder(monkeypatch)
     _no_touch(monkeypatch, rec)
@@ -187,7 +193,7 @@ async def test_with_nothing_parked_a_cached_mismatch_still_records_the_outage(
     quiet = await orchestration.retry_sweep()
     assert "probes" not in quiet and table == {}, "no cached verdict: no probe, as before"
 
-    assert not (await embedder_record.check()).open        # what a gate hit or the worker tick does
+    assert not (await embedder_record.check()).open  # what a gate hit or the worker tick does
     result = await orchestration.retry_sweep()
 
     assert result["probes"] == {"embedder": False}
@@ -196,7 +202,8 @@ async def test_with_nothing_parked_a_cached_mismatch_still_records_the_outage(
 
 
 async def test_the_sweep_never_clears_a_recorded_mismatch_and_says_up_once_when_it_ends(
-        monkeypatch, graph):
+    monkeypatch, graph
+):
     _changed(graph)
     rec = _Recorder(monkeypatch)
     _no_probes(monkeypatch, embedder=True, graph=True)
@@ -205,13 +212,13 @@ async def test_the_sweep_never_clears_a_recorded_mismatch_and_says_up_once_when_
     await orchestration.probe_and_record(["embedder", "graph"])
     assert rec.kinds == ["dependency.down"]
 
-    for _ in range(3):                                  # recorded down: re-probed every tick
+    for _ in range(3):  # recorded down: re-probed every tick
         out = await orchestration.retry_sweep()
         assert out["probes"] == {"embedder": False}
         assert "dependency_changes" not in out
     assert table["embedder"]["state"] == "down" and rec.kinds == ["dependency.down"]
 
-    graph.declare()                                     # the operator's run: record agrees
+    graph.declare()  # the operator's run: record agrees
     graph.embed = _vector
     embedder_record.clear_cache()
     out = await orchestration.retry_sweep()
@@ -223,8 +230,7 @@ async def test_the_sweep_never_clears_a_recorded_mismatch_and_says_up_once_when_
     assert rec.kinds == ["dependency.down", "dependency.up"], "up is announced once"
 
 
-async def test_parked_work_waits_on_the_probe_gated_skip_with_no_driver_call(
-        monkeypatch, graph):
+async def test_parked_work_waits_on_the_probe_gated_skip_with_no_driver_call(monkeypatch, graph):
     _changed(graph)
     rec = _Recorder(monkeypatch)
     _no_touch(monkeypatch, rec)
@@ -243,8 +249,7 @@ async def test_parked_work_waits_on_the_probe_gated_skip_with_no_driver_call(
     out = await orchestration.retry_sweep()
 
     assert out["retried_tasks"] == []
-    assert [(s["id"], s["down"]) for s in out["skipped_gated"]] == [
-        ("task_held", ["embedder"])]
+    assert [(s["id"], s["down"]) for s in out["skipped_gated"]] == [("task_held", ["embedder"])]
     assert out["probes"]["embedder"] is False
 
 
@@ -252,8 +257,7 @@ async def test_parked_work_waits_on_the_probe_gated_skip_with_no_driver_call(
 
 
 @needs_pg
-async def test_a_task_parked_on_a_mismatch_spends_no_attempt_and_is_never_loud(
-        monkeypatch, graph):
+async def test_a_task_parked_on_a_mismatch_spends_no_attempt_and_is_never_loud(monkeypatch, graph):
     """On the real tables: three parks on a mismatch (the attempts a probe-less
     sweep would have kept spending), a sweep over a mismatched graph, and the
     unit stays at three attempts, is not `failing_despite_probe`, and the outage
@@ -278,23 +282,34 @@ async def test_a_task_parked_on_a_mismatch_spends_no_attempt_and_is_never_loud(
         assert state["attempts"] == 3, "no attempt is spent while the dependency is down"
         failing = await repo.units_failing_despite_probe(settings.retry_loud_after_attempts)
         assert task_id not in [u["id"] for u in failing]
-        loud = [e for e in await repo.list_events(ref_id=task_id, limit=100)
-                if e["kind"] == "retry.failing_despite_probe"]
+        loud = [
+            e
+            for e in await repo.list_events(ref_id=task_id, limit=100)
+            if e["kind"] == "retry.failing_despite_probe"
+        ]
         assert loud == []
 
         dep = {d["name"]: d for d in (await outages.list_outages())["dependencies"]}["embedder"]
         assert dep["state"] == "down" and dep["error"].endswith(REMEDY)
         assert dep["failing"] == [] and dep["total"] >= 1
 
-        ups_before = len([e for e in await repo.list_events(ref_id="embedder", limit=100)
-                          if e["kind"] == "dependency.up"])
+        ups_before = len(
+            [
+                e
+                for e in await repo.list_events(ref_id="embedder", limit=100)
+                if e["kind"] == "dependency.up"
+            ]
+        )
         graph.declare()
         embedder_record.clear_cache()
         graph.embed = _vector
         await orchestration.retry_sweep(ignore_not_before=True)
         await orchestration.sweep_settle()
-        ups = [e for e in await repo.list_events(ref_id="embedder", limit=100)
-               if e["kind"] == "dependency.up"]
+        ups = [
+            e
+            for e in await repo.list_events(ref_id="embedder", limit=100)
+            if e["kind"] == "dependency.up"
+        ]
         assert len(ups) == ups_before + 1
     finally:
         await repo.record_dependency_probe("embedder", True)
@@ -319,12 +334,27 @@ async def test_the_outages_list_carries_the_error_only_while_down(monkeypatch):
 
     async def states():
         return {
-            "embedder": {"name": "embedder", "state": "down", "checked_at": now,
-                         "down_since": now, "error": f"mismatch; {REMEDY}"},
-            "jira": {"name": "jira", "state": "up", "checked_at": now, "down_since": None,
-                     "error": "stale text"},
-            "graph": {"name": "graph", "state": "down", "checked_at": now,
-                      "down_since": now, "error": None},
+            "embedder": {
+                "name": "embedder",
+                "state": "down",
+                "checked_at": now,
+                "down_since": now,
+                "error": f"mismatch; {REMEDY}",
+            },
+            "jira": {
+                "name": "jira",
+                "state": "up",
+                "checked_at": now,
+                "down_since": None,
+                "error": "stale text",
+            },
+            "graph": {
+                "name": "graph",
+                "state": "down",
+                "checked_at": now,
+                "down_since": now,
+                "error": None,
+            },
         }
 
     async def counts():
@@ -358,12 +388,21 @@ async def test_an_unanswerable_check_records_its_kind_never_its_text(monkeypatch
 
 async def test_the_outages_list_scrubs_userinfo_and_key_shapes_from_a_probe_error(monkeypatch):
     now = datetime.now(UTC)
-    dirty = ("connect to http://op:hunter2@10.0.0.9:4000/x failed; "
-             "Authorization key=sk-abcdef123456 token: abc123")
+    dirty = (
+        "connect to http://op:hunter2@10.0.0.9:4000/x failed; "
+        "Authorization key=sk-abcdef123456 token: abc123"
+    )
 
     async def states():
-        return {"graph": {"name": "graph", "state": "down", "checked_at": now,
-                          "down_since": now, "error": dirty}}
+        return {
+            "graph": {
+                "name": "graph",
+                "state": "down",
+                "checked_at": now,
+                "down_since": now,
+                "error": dirty,
+            }
+        }
 
     async def counts():
         return {}
@@ -381,13 +420,16 @@ async def test_the_outages_list_scrubs_userinfo_and_key_shapes_from_a_probe_erro
     assert "http://10.0.0.9:4000/x" in error
 
 
-@pytest.mark.parametrize("text,gone", [
-    ("POST http://op:p@ss:w0rd@10.0.0.9:4000/v1 failed", "w0rd"),     # an @ in the password
-    ("Authorization: Bearer abcDEF123456 rejected", "abcDEF123456"),
-    ("bad request api_key=zzTOP-secret-1 sent", "zzTOP-secret-1"),
-    ('{"x_api_token": "tok-777"}', "tok-777"),
-    ("rejected sk-proj_abc.def-123456", "def-123456"),
-])
+@pytest.mark.parametrize(
+    "text,gone",
+    [
+        ("POST http://op:p@ss:w0rd@10.0.0.9:4000/v1 failed", "w0rd"),  # an @ in the password
+        ("Authorization: Bearer abcDEF123456 rejected", "abcDEF123456"),
+        ("bad request api_key=zzTOP-secret-1 sent", "zzTOP-secret-1"),
+        ('{"x_api_token": "tok-777"}', "tok-777"),
+        ("rejected sk-proj_abc.def-123456", "def-123456"),
+    ],
+)
 def test_the_scrub_covers_the_shapes_a_probe_error_can_carry(text, gone):
     assert gone not in outages._safe_error(text)
 

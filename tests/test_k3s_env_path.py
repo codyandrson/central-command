@@ -31,7 +31,7 @@ CONTENT = "LITELLM_SALT_KEY=salt-bytes-that-must-not-change\nN8N_ENCRYPTION_KEY=
 
 def _fn(name: str) -> str:
     start = UPDATER.index(f"\n{name}() {{") + 1
-    return UPDATER[start:UPDATER.index("\n}\n", start) + 3]
+    return UPDATER[start : UPDATER.index("\n}\n", start) + 3]
 
 
 @pytest.fixture
@@ -109,14 +109,16 @@ def test_neither_resolves_to_the_old_path_and_creates_nothing(repo: Path):
 def test_a_regular_old_file_moves_once_with_its_bytes_and_mode(repo: Path):
     _old(repo)
     r = _migrate(repo)
-    assert r.returncode == 0 and "moved deploy/pi/.env -> deploy/k3s/.env" in r.stdout, r.stdout + r.stderr
+    assert r.returncode == 0 and "moved deploy/pi/.env -> deploy/k3s/.env" in r.stdout, (
+        r.stdout + r.stderr
+    )
     new = repo / "deploy" / "k3s" / ".env"
     old = repo / "deploy" / "pi" / ".env"
     assert new.is_file() and not new.is_symlink()
     assert new.read_text() == CONTENT
     assert stat.S_IMODE(new.stat().st_mode) == 0o600
     assert old.is_symlink() and os.readlink(old) == "../k3s/.env"
-    assert old.read_text() == CONTENT          # a pre-move reader sees the same bytes
+    assert old.read_text() == CONTENT  # a pre-move reader sees the same bytes
     assert _resolve(repo) == str(new)
     # a second run changes nothing and says nothing
     r = _migrate(repo)
@@ -143,7 +145,7 @@ def test_two_regular_files_are_refused_and_neither_is_touched(repo: Path):
     assert "REFUSED" in r.stderr and str(new) in r.stderr and str(old) in r.stderr
     assert new.read_text() == "NEW=1\n" and not new.is_symlink()
     assert old.read_text() == "OLD=1\n" and not old.is_symlink()
-    assert _resolve(repo) == str(new)       # the resolver still prefers the new path
+    assert _resolve(repo) == str(new)  # the resolver still prefers the new path
 
 
 def test_a_symlink_at_the_old_path_is_never_the_file_to_move(repo: Path):
@@ -156,9 +158,9 @@ def test_a_symlink_at_the_old_path_is_never_the_file_to_move(repo: Path):
 def test_nothing_in_env_path_reads_the_files_contents():
     text = ENV_PATH_SH.read_text(encoding="utf-8")
     code = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
-    for verb in ("cat ", "grep ", "sed ", "source ", ". \"", "echo \"$(<"):
+    for verb in ("cat ", "grep ", "sed ", "source ", '. "', 'echo "$(<'):
         assert verb not in code, verb
-    assert "openssl" not in code     # it never generates a key either
+    assert "openssl" not in code  # it never generates a key either
 
 
 # ── init-env.sh on a fresh and on a pre-move tree ───────────────────────────
@@ -174,8 +176,12 @@ def init_env_repo(repo: Path) -> Path:
 
 
 def _init_env(repo: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(repo / "deploy" / "k3s" / "init-env.sh")],
-                          capture_output=True, text=True, timeout=120)
+    return subprocess.run(
+        ["bash", str(repo / "deploy" / "k3s" / "init-env.sh")],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
 
 
 def test_a_fresh_install_gets_its_env_at_the_new_path(init_env_repo: Path):
@@ -185,7 +191,9 @@ def test_a_fresh_install_gets_its_env_at_the_new_path(init_env_repo: Path):
     assert new.is_file() and stat.S_IMODE(new.stat().st_mode) == 0o600
     assert not (init_env_repo / "deploy" / "pi" / ".env").exists()
     text = new.read_text()
-    assert "LITELLM_SALT_KEY=" in text and len(text.split("LITELLM_SALT_KEY=")[1].split("\n")[0]) == 64
+    assert (
+        "LITELLM_SALT_KEY=" in text and len(text.split("LITELLM_SALT_KEY=")[1].split("\n")[0]) == 64
+    )
 
 
 def test_a_pre_move_install_is_moved_and_its_set_values_are_kept(init_env_repo: Path):
@@ -215,31 +223,35 @@ def test_init_env_stops_when_the_env_is_in_two_places(init_env_repo: Path):
 
 
 def _run_updater_step(repo: Path) -> subprocess.CompletedProcess:
-    script = "\n".join([
-        "set -uo pipefail",
-        'note() { printf "%s\\n" "$*"; }',
-        "RUNAS=()",
-        f"REPO='{repo}'",
-        _fn("migrate_k3s_env"),
-        "migrate_k3s_env",
-    ])
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            'note() { printf "%s\\n" "$*"; }',
+            "RUNAS=()",
+            f"REPO='{repo}'",
+            _fn("migrate_k3s_env"),
+            "migrate_k3s_env",
+        ]
+    )
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
 
 
 def test_the_step_runs_after_the_merge_and_before_anything_reads_the_env():
-    main = UPDATER[UPDATER.index("\nmain() {"):]
+    main = UPDATER[UPDATER.index("\nmain() {") :]
     merge = main.index('phase "merging v$TARGET_VERSION"')
     step = main.index("migrate_k3s_env")
     assert merge < step < main.index('phase "applying schema')
-    assert step < main.index("reconcile_app_config")       # mint-keys.sh reads the env there
+    assert step < main.index("reconcile_app_config")  # mint-keys.sh reads the env there
 
 
 def test_a_tree_without_env_path_skips_the_step(repo: Path):
-    (repo / "deploy" / "k3s" / "env-path.sh").unlink()     # a rollback onto a pre-v2.66.0 tree
+    (repo / "deploy" / "k3s" / "env-path.sh").unlink()  # a rollback onto a pre-v2.66.0 tree
     _old(repo)
     r = _run_updater_step(repo)
     assert r.returncode == 0 and r.stdout == "", r.stdout + r.stderr
-    assert (repo / "deploy" / "pi" / ".env").is_file() and not (repo / "deploy" / "pi" / ".env").is_symlink()
+    assert (repo / "deploy" / "pi" / ".env").is_file() and not (
+        repo / "deploy" / "pi" / ".env"
+    ).is_symlink()
 
 
 def test_the_step_moves_the_file_with_the_merged_trees_function(repo: Path):
@@ -257,6 +269,8 @@ def test_a_refused_move_is_a_warning_never_a_stop(repo: Path):
     r = _run_updater_step(repo)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "WARNING" in r.stdout and "deploy/pi/.env" in r.stdout
-    assert "./deploy/k3s/init-env.sh" in r.stdout      # the operator's fix is named, release after release
+    assert (
+        "./deploy/k3s/init-env.sh" in r.stdout
+    )  # the operator's fix is named, release after release
     assert (repo / "deploy" / "k3s" / ".env").read_text() == "NEW=1\n"
     assert (repo / "deploy" / "pi" / ".env").read_text() == "OLD=1\n"

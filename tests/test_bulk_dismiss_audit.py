@@ -66,9 +66,12 @@ def _patch_facade(monkeypatch, body: str = "Deals inside. Unsubscribe at the bot
     async def fake_get_message(uuid):
         hydrated.append(uuid)
         return {
-            "uuid": uuid, "conversation_id": uuid,
-            "from": "news@shop.example", "subject": "Your weekly digest",
-            "date": "2026-08-01T09:00:00+00:00", "body_text": body,
+            "uuid": uuid,
+            "conversation_id": uuid,
+            "from": "news@shop.example",
+            "subject": "Your weekly digest",
+            "date": "2026-08-01T09:00:00+00:00",
+            "body_text": body,
         }
 
     monkeypatch.setattr(email_facade, "list_refs", fake_list_refs)
@@ -89,8 +92,7 @@ async def _states(message_ids: list[str]) -> list[str]:
     conn = await repo._conn()
     try:
         return [
-            await conn.fetchval(
-                "select state from work_item where message_id = $1", mid)
+            await conn.fetchval("select state from work_item where message_id = $1", mid)
             for mid in message_ids
         ]
     finally:
@@ -133,8 +135,7 @@ async def test_a_challenge_leaves_the_proposal_and_its_folds_exactly_as_they_wer
     assert prop["status"] == "AWAITING_HUMAN"
     assert set(await _states(result["folded_message_ids"])) == {"FOLD_PENDING"}
 
-    verdicts = await repo.list_events(
-        kind="audit.verdict", ref_id=result["proposal_id"])
+    verdicts = await repo.list_events(kind="audit.verdict", ref_id=result["proposal_id"])
     assert verdicts and verdicts[-1]["payload"]["verdict"] == "challenge"
 
 
@@ -183,8 +184,9 @@ async def test_shadow_mode_records_the_verdict_but_approves_nothing(monkeypatch)
 
     prop = await repo.load_proposal(result["proposal_id"])
     assert prop["status"] == "AWAITING_HUMAN"
-    verdict = (await repo.list_events(
-        kind="audit.verdict", ref_id=result["proposal_id"]))[-1]["payload"]
+    verdict = (await repo.list_events(kind="audit.verdict", ref_id=result["proposal_id"]))[-1][
+        "payload"
+    ]
     assert verdict["verdict"] == "concur" and verdict["mode"] == "shadow"
     assert "auto_confirmed" not in verdict
 
@@ -202,7 +204,9 @@ async def test_the_audit_samples_the_reserved_rows_not_the_proposals_own_samples
     try:
         await conn.execute(
             """update work_item set state = 'UNPROCESSED', folded_into = null
-                where message_id = $1""", released)
+                where message_id = $1""",
+            released,
+        )
     finally:
         await conn.close()
 

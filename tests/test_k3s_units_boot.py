@@ -32,7 +32,9 @@ LONG_RUNNING = ["cc-uvicorn.service", "cc-sandbox-runner.service", "cc-graph-bol
 def directives(unit: str) -> dict[str, list[str]]:
     """Uncommented `Key=value` lines of a unit file, values split on spaces."""
     out: dict[str, list[str]] = {}
-    for key, value in re.findall(r"^([A-Za-z]+)=(.*)$", shipped_text(f"deploy/k3s/{unit}"), flags=re.MULTILINE):
+    for key, value in re.findall(
+        r"^([A-Za-z]+)=(.*)$", shipped_text(f"deploy/k3s/{unit}"), flags=re.MULTILINE
+    ):
         out.setdefault(key, []).extend(value.split() if key != "ExecStart" else [value])
     return out
 
@@ -40,7 +42,10 @@ def directives(unit: str) -> dict[str, list[str]]:
 def test_every_restarting_k3s_unit_is_covered():
     """A new always-on unit that orders itself after k3s joins LONG_RUNNING."""
     found = sorted(
-        name for name in {p.name.removesuffix(".in") for g in ("*.service", "*.service.in") for p in K3S.glob(g)}
+        name
+        for name in {
+            p.name.removesuffix(".in") for g in ("*.service", "*.service.in") for p in K3S.glob(g)
+        }
         if "always" in directives(name).get("Restart", [])
         and "k3s.service" in directives(name).get("After", [])
     )

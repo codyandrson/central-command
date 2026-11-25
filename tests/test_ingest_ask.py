@@ -26,13 +26,18 @@ pytestmark = needs_pg
 
 def _asking_model() -> FunctionModel:
     def respond(messages, info):
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="ask_operator", args={
-                "question": "Should I reply to this sender before dismissing it?",
-                "searched": "no tool I hold records this",
-                "why": "The charter says to ask when genuinely uncertain.",
-            })
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="ask_operator",
+                    args={
+                        "question": "Should I reply to this sender before dismissing it?",
+                        "searched": "no tool I hold records this",
+                        "why": "The charter says to ask when genuinely uncertain.",
+                    },
+                )
+            ]
+        )
 
     return FunctionModel(respond)
 
@@ -58,18 +63,24 @@ def _undrivable_model() -> FunctionModel:
     """A deferral tool the email path holds no driver for."""
 
     def respond(messages, info):
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="conclude_discussion", args={
-                "summary": "wrapping up a discussion that does not exist",
-            })
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="conclude_discussion",
+                    args={
+                        "summary": "wrapping up a discussion that does not exist",
+                    },
+                )
+            ]
+        )
 
     return FunctionModel(respond)
 
 
 async def test_an_undrivable_deferral_lands_for_review_instead_of_crashing():
     run = await ingest_and_propose(
-        "FW: another borderline email.", model=_undrivable_model(),
+        "FW: another borderline email.",
+        model=_undrivable_model(),
     )
 
     # `deferred: False` routes the item to DISMISS_PENDING in the dispatcher —

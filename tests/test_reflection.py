@@ -26,8 +26,14 @@ QUOTE = "stop proposing dates you cannot source"
 TRANSCRIPT = {
     "messages": [
         {"parts": [{"part_kind": "user-prompt", "content": "please set DEMO-1's due date"}]},
-        {"parts": [{"part_kind": "text",
-                    "content": f"the operator told me to {QUOTE}, so I asked first"}]},
+        {
+            "parts": [
+                {
+                    "part_kind": "text",
+                    "content": f"the operator told me to {QUOTE}, so I asked first",
+                }
+            ]
+        },
     ]
 }
 
@@ -54,8 +60,11 @@ async def _fixture_agent() -> str:
     """
     agent_id = f"{AGENT}-{uuid.uuid4().hex[:8]}"
     await repo.hire_agent(
-        agent_id, "Reflection fixture", "test fixture",
-        "You are a fixture that records what it learns.", ["graph-propose"],
+        agent_id,
+        "Reflection fixture",
+        "test fixture",
+        "You are a fixture that records what it learns.",
+        ["graph-propose"],
         template="analyst",
         # Uniform management applies to fixtures too: a non-consultable agent
         # without a recorded reason fails test_governance's roster walk — and
@@ -83,49 +92,66 @@ def _reflecting_model(reflection_args: dict):
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         if info.output_tools:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name=info.output_tools[0].name, args=reflection_args),
-            ])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name=info.output_tools[0].name, args=reflection_args),
+                ]
+            )
         # The proposer run: echo the assigned episode back as ONE gated action.
         episode = reflection_args["episodes"][0]
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="propose_action",
-            args={"proposal": {
-                "intent": f"Record the lesson: {episode['name']}",
-                "actions": [{
-                    "capability": "graph.add_episode",
-                    "arguments": {
-                        "name": episode["name"],
-                        "episode_body": episode["episode_body"],
-                        "source_description": episode["source_description"],
-                        "reference_time": "2026-01-01T00:00:00Z",
-                        "scope": episode["scope"],
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="propose_action",
+                    args={
+                        "proposal": {
+                            "intent": f"Record the lesson: {episode['name']}",
+                            "actions": [
+                                {
+                                    "capability": "graph.add_episode",
+                                    "arguments": {
+                                        "name": episode["name"],
+                                        "episode_body": episode["episode_body"],
+                                        "source_description": episode["source_description"],
+                                        "reference_time": "2026-01-01T00:00:00Z",
+                                        "scope": episode["scope"],
+                                    },
+                                    "target_ref": {
+                                        "system": "graphiti",
+                                        "id": "central_command",
+                                        "read_version": "unknown",
+                                    },
+                                    "reversibility": "reversible",
+                                }
+                            ],
+                            "evidence": [
+                                {
+                                    "kind": "record",
+                                    "source_ref": "the closed session",
+                                    "locator": "session transcript",
+                                    "claim": episode["episode_body"][:20],
+                                }
+                            ],
+                            "expected_effect": "the graph holds the distilled lesson",
+                            "confidence": {"level": "high", "rationale": "The test states it."},
+                        }
                     },
-                    "target_ref": {"system": "graphiti", "id": "central_command",
-                                   "read_version": "unknown"},
-                    "reversibility": "reversible",
-                }],
-                "evidence": [{
-                    "kind": "record",
-                    "source_ref": "the closed session",
-                    "locator": "session transcript",
-                    "claim": episode["episode_body"][:20],
-                }],
-                "expected_effect": "the graph holds the distilled lesson",
-                "confidence": {"level": "high", "rationale": "The test states it."},
-            }},
-        )])
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
 
 ONE_LESSON = {
-    "episodes": [{
-        "name": "Ask before dating",
-        "episode_body": "Due dates asserted without a source get rejected here.",
-        "scope": "private",
-        "source_description": "this session",
-    }],
+    "episodes": [
+        {
+            "name": "Ask before dating",
+            "episode_body": "Due dates asserted without a source get rejected here.",
+            "scope": "private",
+            "source_description": "this session",
+        }
+    ],
     "nomination": None,
 }
 
@@ -196,14 +222,15 @@ def test_the_per_session_bound_notes_its_overflow():
     """N is a bound, not a filter: what did not fit is recorded on the last kept
     episode, never silently dropped."""
     episodes = [
-        ReflectedEpisode(name=f"e{i}", episode_body="b", scope="shared",
-                         source_description="src")
+        ReflectedEpisode(name=f"e{i}", episode_body="b", scope="shared", source_description="src")
         for i in range(5)
     ]
     kept = bound_episodes(episodes, 3)
     assert [e.name for e in kept] == ["e0", "e1", "e2"]
-    assert kept[-1].source_description == "src | overflow: 2 further lesson(s) " \
+    assert (
+        kept[-1].source_description == "src | overflow: 2 further lesson(s) "
         "distilled but over the per-session bound"
+    )
     # Under the bound nothing is annotated, and the inputs are untouched.
     assert [e.source_description for e in bound_episodes(episodes[:2], 3)] == ["src", "src"]
     assert episodes[2].source_description == "src"
@@ -233,9 +260,11 @@ async def test_one_lesson_parks_one_scoped_proposal():
 
     await reflection.reflect_on_close(sid, agent_id, model=_reflecting_model(ONE_LESSON))
 
-    created = [e for e in await repo.list_events(since_id=since)
-               if e["kind"] == "proposal.created"
-               and e["payload"].get("source_session_id") == sid]
+    created = [
+        e
+        for e in await repo.list_events(since_id=since)
+        if e["kind"] == "proposal.created" and e["payload"].get("source_session_id") == sid
+    ]
     assert len(created) == 1
     assert created[0]["payload"]["reflection"] is True
 
@@ -269,9 +298,11 @@ async def test_the_bound_applies_to_what_actually_gets_proposed(monkeypatch):
 
     await reflection.reflect_on_close(sid, agent_id, model=_reflecting_model(two))
 
-    created = [e for e in await repo.list_events(since_id=since)
-               if e["kind"] == "proposal.created"
-               and e["payload"].get("source_session_id") == sid]
+    created = [
+        e
+        for e in await repo.list_events(since_id=since)
+        if e["kind"] == "proposal.created" and e["payload"].get("source_session_id") == sid
+    ]
     assert len(created) == 1
 
 
@@ -285,9 +316,14 @@ async def test_an_agent_without_the_grant_reflects_not_at_all():
     sid = await _closed_session(agent_id)
     since = await repo.latest_event_id()
 
-    nominated = {**ONE_LESSON, "nomination": {
-        "observation": "I should ask sooner.", "quote": QUOTE, "source_session_id": sid,
-    }}
+    nominated = {
+        **ONE_LESSON,
+        "nomination": {
+            "observation": "I should ask sooner.",
+            "quote": QUOTE,
+            "source_session_id": sid,
+        },
+    }
     await reflection.reflect_on_close(sid, agent_id, model=_reflecting_model(nominated))
 
     assert [e for e in await repo.list_events(since_id=since) if e["ref_id"] == sid] == []
@@ -310,9 +346,9 @@ async def test_a_transcript_below_the_floor_reflects_not_at_all(monkeypatch):
 @pytest.mark.parametrize(
     "quote, wrong_session, expected",
     [
-        (QUOTE, False, True),                      # an exact span of the transcript
+        (QUOTE, False, True),  # an exact span of the transcript
         ("stop proposing dates, obviously", False, False),  # a misquote
-        (QUOTE, True, False),                      # a real quote, wrong session
+        (QUOTE, True, False),  # a real quote, wrong session
     ],
 )
 async def test_a_nomination_quote_is_always_checked(quote, wrong_session, expected):
@@ -322,15 +358,21 @@ async def test_a_nomination_quote_is_always_checked(quote, wrong_session, expect
     sid = await _closed_session(agent_id)
     since = await repo.latest_event_id()
 
-    payload = {"episodes": [], "nomination": {
-        "observation": "I was right to ask before dating.",
-        "quote": quote,
-        "source_session_id": "sess_elsewhere" if wrong_session else sid,
-    }}
+    payload = {
+        "episodes": [],
+        "nomination": {
+            "observation": "I was right to ask before dating.",
+            "quote": quote,
+            "source_session_id": "sess_elsewhere" if wrong_session else sid,
+        },
+    }
     await reflection.reflect_on_close(sid, agent_id, model=_reflecting_model(payload))
 
-    emitted = [e for e in await repo.list_events(since_id=since)
-               if e["kind"] == "reflection.self_nomination" and e["ref_id"] == sid]
+    emitted = [
+        e
+        for e in await repo.list_events(since_id=since)
+        if e["kind"] == "reflection.self_nomination" and e["ref_id"] == sid
+    ]
     assert len(emitted) == 1
     p = emitted[0]["payload"]
     assert p["claim_matches_source"] is expected
@@ -354,10 +396,15 @@ async def test_a_nomination_becomes_a_coaching_signal():
     agent_id = await _fixture_agent()
     sid = await _closed_session(agent_id)
     await events.emit(
-        "reflection.self_nomination", ref_id=sid,
-        payload={"agent_id": agent_id, "observation": "I should ask sooner.",
-                 "quote": QUOTE, "source_session_id": sid,
-                 "claim_matches_source": True},
+        "reflection.self_nomination",
+        ref_id=sid,
+        payload={
+            "agent_id": agent_id,
+            "observation": "I should ask sooner.",
+            "quote": QUOTE,
+            "source_session_id": sid,
+            "claim_matches_source": True,
+        },
         actor=f"agent:{agent_id}",
     )
 
@@ -374,5 +421,8 @@ async def test_a_nomination_becomes_a_coaching_signal():
     assert "I should ask sooner." in line
 
     # Another agent's nomination is not this agent's signal.
-    assert not [s for s in await gather_coaching_signals("coach")
-                if s["kind"] == "self_reflection" and s["event_id"] == mine[0]["event_id"]]
+    assert not [
+        s
+        for s in await gather_coaching_signals("coach")
+        if s["kind"] == "self_reflection" and s["event_id"] == mine[0]["event_id"]
+    ]

@@ -53,15 +53,20 @@ async def settle_leftovers():
     """Every sweep here is GLOBAL: land what other tests left RUNNING,
     EXECUTING or parked first, so this file's assertions see only its own rows,
     and settle its own afterwards (the test database is throwaway)."""
+
     async def settle():
         conn = await repo._conn()
         try:
-            await conn.execute("update session set status = 'DONE' "
-                               "where status in ('RUNNING', 'AWAITING_RESUME')")
-            await conn.execute("update proposal set status = 'FAILED', retry_state = null "
-                               "where status in ('EXECUTING', 'RETRY_PENDING')")
-            await conn.execute("update task set status = 'CANCELLED' "
-                               "where status in ('IN_PROGRESS', 'ASSIGNED')")
+            await conn.execute(
+                "update session set status = 'DONE' where status in ('RUNNING', 'AWAITING_RESUME')"
+            )
+            await conn.execute(
+                "update proposal set status = 'FAILED', retry_state = null "
+                "where status in ('EXECUTING', 'RETRY_PENDING')"
+            )
+            await conn.execute(
+                "update task set status = 'CANCELLED' where status in ('IN_PROGRESS', 'ASSIGNED')"
+            )
             await conn.execute("delete from work_item where message_id like '<cc-restart-%'")
         finally:
             await conn.close()
@@ -122,9 +127,12 @@ async def _executing_fresh() -> str:
     model = make_sc1_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
     assert await repo.claim_proposal_for_execution(run["proposal_id"]) is not None
-    await events.emit("proposal.decided", ref_id=run["proposal_id"],
-                      payload={"verdict": "approved", "session_id": run["session_id"]},
-                      actor="human:lee")
+    await events.emit(
+        "proposal.decided",
+        ref_id=run["proposal_id"],
+        payload={"verdict": "approved", "session_id": run["session_id"]},
+        actor="human:lee",
+    )
     return run["proposal_id"]
 
 
@@ -155,9 +163,11 @@ async def test_a_restart_lands_nothing_failed(monkeypatch):
     with_cursor = await _executing_with_cursor(monkeypatch)
     cursor_before = (await repo.load_proposal(with_cursor))["retry_state"]
     fresh = await _executing_fresh()
-    raw = (f"Message-ID: <cc-restart-{uuid.uuid4().hex[:8]}@example.com>\n"
-           "From: sender@example.com\nSubject: Restart test\n"
-           "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n")
+    raw = (
+        f"Message-ID: <cc-restart-{uuid.uuid4().hex[:8]}@example.com>\n"
+        "From: sender@example.com\nSubject: Restart test\n"
+        "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n"
+    )
     await ledger.enroll_email(raw)
     item = await repo.claim_next_work_item("sess_restart")
     assert item is not None
@@ -175,14 +185,16 @@ async def test_a_restart_lands_nothing_failed(monkeypatch):
         assert "task.run_parked" in await _kinds(tid)
     assert await repo.session_status(task_session) == "STOPPED"
     assert task_run in (await repo.get_session(task_session))["closed_reason"]
-    stopped = [e for e in await repo.list_events(ref_id=task_session)
-               if e["kind"] == "session.stopped"][-1]
+    stopped = [
+        e for e in await repo.list_events(ref_id=task_session) if e["kind"] == "session.stopped"
+    ][-1]
     assert stopped["payload"]["task_id"] == task_run
 
     assert await repo.session_status(resumed_session) == "AWAITING_RESUME"
     pending_after = await _pending(resumed_session)
     assert {k: v for k, v in pending_after.items() if k != "not_before"} == {
-        k: v for k, v in pending_before.items() if k != "not_before"}
+        k: v for k, v in pending_before.items() if k != "not_before"
+    }
     assert datetime.fromisoformat(pending_after["not_before"]) <= now
 
     first = await repo.load_proposal(with_cursor)
@@ -250,19 +262,42 @@ async def test_a_stale_pending_resume_is_not_owed():
     of the same session that dies must not be mistaken for the old resume:
     the owed call is no longer the record's unanswered tail."""
     _task_id, session_id = await _running_task_run()
-    await repo.update_session_run_state(session_id, {
-        "pending_resume": {"kind": "result", "tool_call_id": "call_old",
-                           "after": "approved", "attempts": 1},
-        "messages": [
-            {"kind": "response", "parts": [
-                {"part_kind": "tool-call", "tool_name": "propose_action",
-                 "tool_call_id": "call_old", "args": {}}]},
-            {"kind": "request", "parts": [
-                {"part_kind": "tool-return", "tool_call_id": "call_old",
-                 "tool_name": "propose_action", "content": "done"}]},
-            {"kind": "response", "parts": [{"part_kind": "text", "content": "ok"}]},
-        ],
-    })
+    await repo.update_session_run_state(
+        session_id,
+        {
+            "pending_resume": {
+                "kind": "result",
+                "tool_call_id": "call_old",
+                "after": "approved",
+                "attempts": 1,
+            },
+            "messages": [
+                {
+                    "kind": "response",
+                    "parts": [
+                        {
+                            "part_kind": "tool-call",
+                            "tool_name": "propose_action",
+                            "tool_call_id": "call_old",
+                            "args": {},
+                        }
+                    ],
+                },
+                {
+                    "kind": "request",
+                    "parts": [
+                        {
+                            "part_kind": "tool-return",
+                            "tool_call_id": "call_old",
+                            "tool_name": "propose_action",
+                            "content": "done",
+                        }
+                    ],
+                },
+                {"kind": "response", "parts": [{"part_kind": "text", "content": "ok"}]},
+            ],
+        },
+    )
     landed = {r["session_id"]: r for r in await repo.park_orphaned_sessions()}
     assert landed[session_id]["outcome"] == "task_rerun"
 
@@ -279,8 +314,9 @@ _ASK = {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "hi
 
 
 async def test_a_chat_lane_whose_turn_finished_is_landed_open():
-    sid = await _conversation([
-        _ASK, {"kind": "response", "parts": [{"part_kind": "text", "content": "hello"}]}])
+    sid = await _conversation(
+        [_ASK, {"kind": "response", "parts": [{"part_kind": "text", "content": "hello"}]}]
+    )
     await orchestration.land_orphans_at_startup()
     assert await repo.session_status(sid) == "AWAITING_OPERATOR"
 
@@ -300,9 +336,22 @@ async def test_a_chat_lane_killed_at_an_unsent_request_parks_its_turn_due_now():
 
 
 async def test_a_chat_lane_with_unanswered_calls_loses_the_turn_not_the_lane():
-    sid = await _conversation([_ASK, {"kind": "response", "parts": [
-        {"part_kind": "tool-call", "tool_name": "jira_get_issue",
-         "tool_call_id": "c1", "args": {}}]}])
+    sid = await _conversation(
+        [
+            _ASK,
+            {
+                "kind": "response",
+                "parts": [
+                    {
+                        "part_kind": "tool-call",
+                        "tool_name": "jira_get_issue",
+                        "tool_call_id": "c1",
+                        "args": {},
+                    }
+                ],
+            },
+        ]
+    )
     await orchestration.land_orphans_at_startup()
     assert await repo.session_status(sid) == "DONE"
     assert "say it again" in (await repo.get_session(sid))["closed_reason"]
@@ -368,13 +417,18 @@ async def test_a_retry_now_on_an_interrupted_proposal_runs_from_its_cursor(monke
 def test_the_old_failing_sweep_is_gone_from_the_tree():
     """`grep -rn` for the removed function over central_command/ and tests/
     finds nothing. The name is assembled so this file does not match itself."""
-    names = ["fail_stale" + "_running_sessions", "sweep_orphaned" + "_sessions",
-             "fail_sessionless" + "_in_progress_tasks"]
+    names = [
+        "fail_stale" + "_running_sessions",
+        "sweep_orphaned" + "_sessions",
+        "fail_sessionless" + "_in_progress_tasks",
+    ]
     pattern = re.compile("|".join(names))
     root = Path(__file__).resolve().parents[1]
-    hits = [f"{p.relative_to(root)}:{i}"
-            for base in ("central_command", "tests")
-            for p in (root / base).rglob("*.py")
-            for i, line in enumerate(p.read_text(errors="ignore").splitlines(), 1)
-            if pattern.search(line)]
+    hits = [
+        f"{p.relative_to(root)}:{i}"
+        for base in ("central_command", "tests")
+        for p in (root / base).rglob("*.py")
+        for i, line in enumerate(p.read_text(errors="ignore").splitlines(), 1)
+        if pattern.search(line)
+    ]
     assert hits == []

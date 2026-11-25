@@ -251,9 +251,9 @@ async def test_a_failed_cap_discovery_is_not_cached(monkeypatch):
 
     monkeypatch.setattr(context, "_discover", flaky_discover)
 
-    assert await context.output_cap_for("hosted-alias") is None      # proxy down
-    assert await context.output_cap_for("hosted-alias") == 10000     # asked again
-    assert await context.output_cap_for("hosted-alias") == 10000     # cached now
+    assert await context.output_cap_for("hosted-alias") is None  # proxy down
+    assert await context.output_cap_for("hosted-alias") == 10000  # asked again
+    assert await context.output_cap_for("hosted-alias") == 10000  # cached now
     assert await context.window_for("hosted-alias") == 10000
 
 
@@ -264,8 +264,14 @@ async def test_the_ceiling_clears_the_largest_real_charter():
 
     biggest = max(
         len(builtin_charter(a))
-        for a in ("inbox-triage", "jira-expert", "auditor", "orchestrator",
-                  "litellm-manager", "coach")
+        for a in (
+            "inbox-triage",
+            "jira-expert",
+            "auditor",
+            "orchestrator",
+            "litellm-manager",
+            "coach",
+        )
     )
     # ~4 chars/token, and JSON escaping inflates a newline-dense document.
     assert cfg.max_output_tokens > (biggest / 4) * 2, (

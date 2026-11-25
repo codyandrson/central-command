@@ -85,8 +85,11 @@ def _provider_model(value: str) -> str:
 
 
 async def _call(
-    method: str, path: str, json_body: dict | None = None,
-    auth_key: str | None = None, timeout: float = 30,
+    method: str,
+    path: str,
+    json_body: dict | None = None,
+    auth_key: str | None = None,
+    timeout: float = 30,
     files: dict | None = None,
 ) -> httpx.Response:
     """`auth_key` overrides the admin key for calls made AS another key (e.g.
@@ -110,7 +113,9 @@ def _check(resp: httpx.Response, op: str) -> None:
     st = resp.status_code
     detail = resp.text[:300]
     if st in (401, 403):
-        raise LiteLLMError(f"{op} — auth failed ({st}) — check CC_LLM_PROXY_ADMIN_KEY", status_code=st)
+        raise LiteLLMError(
+            f"{op} — auth failed ({st}) — check CC_LLM_PROXY_ADMIN_KEY", status_code=st
+        )
     if st == 404:
         raise LiteLLMError(f"{op} — not found (404): {detail}", status_code=st)
     raise LiteLLMError(f"{op} — proxy rejected the request ({st}): {detail}", status_code=st)
@@ -129,9 +134,7 @@ async def exposed_model_ids() -> list[str]:
     """
     base = (settings.llm_base_url or "").rstrip("/")
     if not base:
-        raise LiteLLMError(
-            "model catalog — no LLM endpoint configured (set CC_LLM_BASE_URL)"
-        )
+        raise LiteLLMError("model catalog — no LLM endpoint configured (set CC_LLM_BASE_URL)")
     try:
         async with httpx.AsyncClient(timeout=10, **http_client.client_kwargs()) as client:
             resp = await client.get(
@@ -291,8 +294,14 @@ async def thinking_levels_by_model() -> dict[str, list[str]]:
 # invented it; it stores but never renders). The native creation stamp is
 # `created_at`.  `id` is pulled out as `model_id` separately.
 NATIVE_MODEL_INFO_FIELDS = (
-    "created_at", "created_by", "updated_at", "updated_by",
-    "base_model", "tier", "team_id", "db_model",
+    "created_at",
+    "created_by",
+    "updated_at",
+    "updated_by",
+    "base_model",
+    "tier",
+    "team_id",
+    "db_model",
 )
 
 # The CAPABILITY declarations — LiteLLM's own `supports_*` / `max_*` / `mode`
@@ -305,11 +314,20 @@ NATIVE_MODEL_INFO_FIELDS = (
 # as None here ("nobody said"); note LiteLLM's own aggregate view
 # (`/model_group/info`) coerces the same absence to FALSE.
 CAPABILITY_FIELDS = (
-    "mode", "max_input_tokens", "max_output_tokens",
-    "supports_function_calling", "supports_parallel_function_calling",
-    "supports_tool_choice", "supports_response_schema", "supports_vision",
-    "supports_pdf_input", "supports_reasoning", "supports_system_messages",
-    "supports_prompt_caching", "thinking_mechanism", "thinking_levels",
+    "mode",
+    "max_input_tokens",
+    "max_output_tokens",
+    "supports_function_calling",
+    "supports_parallel_function_calling",
+    "supports_tool_choice",
+    "supports_response_schema",
+    "supports_vision",
+    "supports_pdf_input",
+    "supports_reasoning",
+    "supports_system_messages",
+    "supports_prompt_caching",
+    "thinking_mechanism",
+    "thinking_levels",
 )
 
 
@@ -335,33 +353,43 @@ async def list_models() -> dict:
         # proxy merges in) so the agent can see — and correct — non-native fields
         # like a stray `created_date`.
         custom = {
-            k: v for k, v in info.items()
+            k: v
+            for k, v in info.items()
             if k not in NATIVE_MODEL_INFO_FIELDS
             and k not in CAPABILITY_FIELDS
             and k not in ("id", "key", "litellm_provider")
-            and not k.startswith(("input_cost", "output_cost", "cache_", "max_",
-                                  "supports_", "search_context"))
+            and not k.startswith(
+                ("input_cost", "output_cost", "cache_", "max_", "supports_", "search_context")
+            )
             and not isinstance(v, (dict, list))
         }
-        models.append({
-            "model_name": m.get("model_name"),
-            "model_id": info.get("id"),
-            # the underlying provider model, when the proxy exposes it un-encrypted
-            "provider_model": params.get("model") if isinstance(params.get("model"), str)
-            and "/" in (params.get("model") or "") else None,
-            "provider": params.get("custom_llm_provider"),
-            "api_base": params.get("api_base"),
-            # rides litellm_params UNENCRYPTED (verified live 2026-08-20) —
-            # the ownership marker for credential-driven autodiscovery: a
-            # deployment referencing a stored credential is autodiscovery's
-            # to manage.
-            "credential_name": params.get("litellm_credential_name"),
-            "model_info": native,
-            "capabilities": capabilities,
-            "custom_model_info": custom or None,
-        })
-    return {"ok": True, "kind": "litellm", "operation": "list_models",
-            "models": models, "count": len(models)}
+        models.append(
+            {
+                "model_name": m.get("model_name"),
+                "model_id": info.get("id"),
+                # the underlying provider model, when the proxy exposes it un-encrypted
+                "provider_model": params.get("model")
+                if isinstance(params.get("model"), str) and "/" in (params.get("model") or "")
+                else None,
+                "provider": params.get("custom_llm_provider"),
+                "api_base": params.get("api_base"),
+                # rides litellm_params UNENCRYPTED (verified live 2026-08-20) —
+                # the ownership marker for credential-driven autodiscovery: a
+                # deployment referencing a stored credential is autodiscovery's
+                # to manage.
+                "credential_name": params.get("litellm_credential_name"),
+                "model_info": native,
+                "capabilities": capabilities,
+                "custom_model_info": custom or None,
+            }
+        )
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "list_models",
+        "models": models,
+        "count": len(models),
+    }
 
 
 async def list_credentials() -> dict:
@@ -379,13 +407,20 @@ async def list_credentials() -> dict:
     creds = []
     for c in raw or []:
         info = c.get("credential_info") or {}
-        creds.append({
-            "credential_name": c.get("credential_name"),
-            # the provider this credential is for, when the proxy exposes it
-            "provider": info.get("custom_llm_provider") or info.get("provider"),
-        })
-    return {"ok": True, "kind": "litellm", "operation": "list_credentials",
-            "credentials": creds, "count": len(creds)}
+        creds.append(
+            {
+                "credential_name": c.get("credential_name"),
+                # the provider this credential is for, when the proxy exposes it
+                "provider": info.get("custom_llm_provider") or info.get("provider"),
+            }
+        )
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "list_credentials",
+        "credentials": creds,
+        "count": len(creds),
+    }
 
 
 async def list_keys() -> dict:
@@ -401,17 +436,25 @@ async def list_keys() -> dict:
     keys = []
     for k in rows or []:
         if isinstance(k, str):  # some builds return just hashes
-            keys.append({"token": k}); continue
-        keys.append({
-            "key_alias": k.get("key_alias"),
-            "token_id": k.get("token") or k.get("token_id"),  # hash, safe to show
-            "models": k.get("models") or [],
-            "spend": k.get("spend"),
-            "created_at": k.get("created_at"),
-            "team_id": k.get("team_id"),
-        })
-    return {"ok": True, "kind": "litellm", "operation": "list_keys",
-            "keys": keys, "count": len(keys)}
+            keys.append({"token": k})
+            continue
+        keys.append(
+            {
+                "key_alias": k.get("key_alias"),
+                "token_id": k.get("token") or k.get("token_id"),  # hash, safe to show
+                "models": k.get("models") or [],
+                "spend": k.get("spend"),
+                "created_at": k.get("created_at"),
+                "team_id": k.get("team_id"),
+            }
+        )
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "list_keys",
+        "keys": keys,
+        "count": len(keys),
+    }
 
 
 FALLBACK_TYPES = ("general", "context_window", "content_policy")
@@ -426,14 +469,21 @@ async def get_routing() -> dict:
     resp = await _call("GET", "/router/settings")
     _check(resp, "get_routing")
     body = resp.json()
-    fields = {f.get("field_name"): f.get("field_value")
-              for f in (body.get("fields") or []) if isinstance(f, dict)}
-    return {"ok": True, "kind": "litellm", "operation": "get_routing",
-            "routing_strategy": fields.get("routing_strategy"),
-            "num_retries": fields.get("num_retries"),
-            "fallbacks": fields.get("fallbacks"),
-            "context_window_fallbacks": fields.get("context_window_fallbacks"),
-            "content_policy_fallbacks": fields.get("content_policy_fallbacks")}
+    fields = {
+        f.get("field_name"): f.get("field_value")
+        for f in (body.get("fields") or [])
+        if isinstance(f, dict)
+    }
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "get_routing",
+        "routing_strategy": fields.get("routing_strategy"),
+        "num_retries": fields.get("num_retries"),
+        "fallbacks": fields.get("fallbacks"),
+        "context_window_fallbacks": fields.get("context_window_fallbacks"),
+        "content_policy_fallbacks": fields.get("content_policy_fallbacks"),
+    }
 
 
 async def list_teams() -> dict:
@@ -448,13 +498,20 @@ async def list_teams() -> dict:
     for t in rows or []:
         if not isinstance(t, dict):
             continue
-        teams.append({
-            "team_alias": t.get("team_alias"),
-            "team_id": t.get("team_id"),
-            "models": t.get("models") or [],
-        })
-    return {"ok": True, "kind": "litellm", "operation": "list_teams",
-            "teams": teams, "count": len(teams)}
+        teams.append(
+            {
+                "team_alias": t.get("team_alias"),
+                "team_id": t.get("team_id"),
+                "models": t.get("models") or [],
+            }
+        )
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "list_teams",
+        "teams": teams,
+        "count": len(teams),
+    }
 
 
 async def get_health() -> dict:
@@ -465,11 +522,17 @@ async def get_health() -> dict:
     resp = await _call("GET", "/health/readiness/details")
     _check(resp, "get_health")
     d = resp.json()
-    return {"ok": True, "kind": "litellm", "operation": "get_health",
-            "status": d.get("status"), "db": d.get("db"), "cache": d.get("cache"),
-            "litellm_version": d.get("litellm_version"),
-            "log_level": d.get("log_level"),
-            "success_callbacks_count": len(d.get("success_callbacks") or [])}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "get_health",
+        "status": d.get("status"),
+        "db": d.get("db"),
+        "cache": d.get("cache"),
+        "litellm_version": d.get("litellm_version"),
+        "log_level": d.get("log_level"),
+        "success_callbacks_count": len(d.get("success_callbacks") or []),
+    }
 
 
 async def check_model_health(model: str | None = None) -> dict:
@@ -505,9 +568,15 @@ async def check_model_health(model: str | None = None) -> dict:
         {"model": e.get("model"), "error": e.get("error") or e.get("exception")}
         for e in (d.get("unhealthy_endpoints") or [])
     ]
-    return {"ok": True, "kind": "litellm", "operation": "check_model_health",
-            "healthy": healthy, "unhealthy": unhealthy,
-            "healthy_count": len(healthy), "unhealthy_count": len(unhealthy)}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "check_model_health",
+        "healthy": healthy,
+        "unhealthy": unhealthy,
+        "healthy_count": len(healthy),
+        "unhealthy_count": len(unhealthy),
+    }
 
 
 # --- capability probe (2026-08-30) --------------------------------------------
@@ -556,24 +625,31 @@ _PROBE_SCHEMA = {
         "additionalProperties": False,
     },
 }
+
+
 def _probe_wav() -> bytes:
     """A quarter second of 8 kHz mono 16-bit silence — the smallest audio a
     transcription endpoint accepts without a too-short error."""
     data = b"\x00\x00" * 2000
-    return (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt "
-            + struct.pack("<IHHIIHH", 16, 1, 1, 8000, 16000, 2, 16)
-            + b"data" + struct.pack("<I", len(data)) + data)
+    return (
+        b"RIFF"
+        + struct.pack("<I", 36 + len(data))
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, 8000, 16000, 2, 16)
+        + b"data"
+        + struct.pack("<I", len(data))
+        + data
+    )
 
 
-PROBE_CONTEXT_CEILING = 262144   # bisect no higher than this unless asked
-PROBE_CONTEXT_STEPS = 10         # ≤10 requests to land within ~0.1% of the ceiling
+PROBE_CONTEXT_CEILING = 262144  # bisect no higher than this unless asked
+PROBE_CONTEXT_STEPS = 10  # ≤10 requests to land within ~0.1% of the ceiling
 
 
 async def _chat(model: str, body: dict, timeout: float) -> tuple[int, dict | str]:
     """One chat completion under the ADMIN key (a freshly added model is not
     yet in any agent key's scope). Returns (status, parsed-or-text)."""
-    resp = await _call("POST", "/v1/chat/completions", {"model": model, **body},
-                       timeout=timeout)
+    resp = await _call("POST", "/v1/chat/completions", {"model": model, **body}, timeout=timeout)
     try:
         return resp.status_code, resp.json()
     except ValueError:
@@ -624,13 +700,19 @@ def _verdict(st: int, payload, ok_when: bool, detail: str) -> dict:
         return {"ok": False, "detail": f"{st}: {_err(payload)}"}
     content, fin, _ = _reply(st, payload)
     if not content and fin == "length":
-        return {"ok": None, "detail": "output budget exhausted before an answer (thinking?) — inconclusive"}
+        return {
+            "ok": None,
+            "detail": "output budget exhausted before an answer (thinking?) — inconclusive",
+        }
     return {"ok": ok_when, "detail": detail}
 
 
 async def probe_model(
-    model: str, *, measure_context: bool = False,
-    context_ceiling: int = PROBE_CONTEXT_CEILING, timeout: float = 300,
+    model: str,
+    *,
+    measure_context: bool = False,
+    context_ceiling: int = PROBE_CONTEXT_CEILING,
+    timeout: float = 300,
     battery: str | None = None,
 ) -> dict:
     """Measure what `model` can actually do, one small request per capability.
@@ -665,51 +747,76 @@ async def probe_model(
     # are probing it.
     kind = battery or declared.get("mode") or "chat"
     if kind == "embedding":
-        resp = await _call("POST", "/v1/embeddings",
-                           {"model": alias, "input": "probe"}, timeout=timeout)
+        resp = await _call(
+            "POST", "/v1/embeddings", {"model": alias, "input": "probe"}, timeout=timeout
+        )
         dims = None
         if resp.status_code == 200:
             try:
                 dims = len(resp.json()["data"][0]["embedding"])
             except (KeyError, IndexError, TypeError, ValueError):
                 dims = None
-        observed["embedding"] = {"ok": resp.status_code == 200 and bool(dims),
-                                 "value": dims,
-                                 "detail": (f"{dims}-dimension vector" if dims else
-                                            f"{resp.status_code}: {resp.text[:200]}")}
-        return {"ok": bool(observed["embedding"]["ok"]), "kind": "litellm",
-                "operation": "probe_model", "model": alias, "declared": declared,
-                "observed": observed, "suggested_model_info": {}, "notes": notes}
+        observed["embedding"] = {
+            "ok": resp.status_code == 200 and bool(dims),
+            "value": dims,
+            "detail": (
+                f"{dims}-dimension vector" if dims else f"{resp.status_code}: {resp.text[:200]}"
+            ),
+        }
+        return {
+            "ok": bool(observed["embedding"]["ok"]),
+            "kind": "litellm",
+            "operation": "probe_model",
+            "model": alias,
+            "declared": declared,
+            "observed": observed,
+            "suggested_model_info": {},
+            "notes": notes,
+        }
     if kind == "rerank":
-        resp = await _call("POST", "/v1/rerank",
-                           {"model": alias, "query": "probe",
-                            "documents": ["a probe document", "another document"]},
-                           timeout=timeout)
+        resp = await _call(
+            "POST",
+            "/v1/rerank",
+            {
+                "model": alias,
+                "query": "probe",
+                "documents": ["a probe document", "another document"],
+            },
+            timeout=timeout,
+        )
         ok = False
         if resp.status_code == 200:
             try:
                 ok = bool(resp.json().get("results"))
             except ValueError:
                 ok = False
-        observed["rerank"] = {"ok": ok,
-                              "detail": "results returned" if ok else
-                                        f"{resp.status_code}: {resp.text[:200]}"}
-        return {"ok": ok, "kind": "litellm", "operation": "probe_model",
-                "model": alias, "declared": declared, "observed": observed,
-                "suggested_model_info": {}, "notes": notes}
+        observed["rerank"] = {
+            "ok": ok,
+            "detail": "results returned" if ok else f"{resp.status_code}: {resp.text[:200]}",
+        }
+        return {
+            "ok": ok,
+            "kind": "litellm",
+            "operation": "probe_model",
+            "model": alias,
+            "declared": declared,
+            "observed": observed,
+            "suggested_model_info": {},
+            "notes": notes,
+        }
 
     # The remaining non-chat modes: ONE mode-shaped request each — proof the
     # deployment answers its own endpoint. Finer facts (voices, sizes,
     # languages) come from the model card, never a probe.
     one_shot: dict[str, tuple[str, dict | None]] = {
         "audio_transcription": ("/v1/audio/transcriptions", None),  # multipart
-        "audio_speech": ("/v1/audio/speech",
-                         {"model": alias, "input": "OK", "voice": "alloy"}),
-        "image_generation": ("/v1/images/generations",
-                             {"model": alias, "prompt": "a plain red square", "n": 1}),
+        "audio_speech": ("/v1/audio/speech", {"model": alias, "input": "OK", "voice": "alloy"}),
+        "image_generation": (
+            "/v1/images/generations",
+            {"model": alias, "prompt": "a plain red square", "n": 1},
+        ),
         "moderation": ("/v1/moderations", {"model": alias, "input": "probe"}),
-        "completion": ("/v1/completions",
-                       {"model": alias, "prompt": "Say OK.", "max_tokens": 8}),
+        "completion": ("/v1/completions", {"model": alias, "prompt": "Say OK.", "max_tokens": 8}),
     }
     if kind in one_shot:
         path, body = one_shot[kind]
@@ -717,29 +824,52 @@ async def probe_model(
         # second at that limit (1.110): the probe takes its place in the same
         # line as read-aloud and voice input (integrations/speech_gate).
         line = speech_gate.GATES.get(alias)
-        async with (line.slot() if line is not None else contextlib.nullcontext()):
+        async with line.slot() if line is not None else contextlib.nullcontext():
             if kind == "audio_transcription":
-                resp = await _call("POST", path, timeout=timeout,
-                                   files={"file": ("probe.wav", _probe_wav(), "audio/wav"),
-                                          "model": (None, alias)})
+                resp = await _call(
+                    "POST",
+                    path,
+                    timeout=timeout,
+                    files={
+                        "file": ("probe.wav", _probe_wav(), "audio/wav"),
+                        "model": (None, alias),
+                    },
+                )
             else:
                 resp = await _call("POST", path, body, timeout=timeout)
         ok = resp.status_code == 200
-        observed[kind] = {"ok": ok, "detail": "endpoint answered" if ok else
-                          f"{resp.status_code}: {resp.text[:200]}"}
+        observed[kind] = {
+            "ok": ok,
+            "detail": "endpoint answered" if ok else f"{resp.status_code}: {resp.text[:200]}",
+        }
         suggested = {"mode": kind} if ok and declared.get("mode") != kind else {}
-        return {"ok": ok, "kind": "litellm", "operation": "probe_model",
-                "model": alias, "declared": declared, "observed": observed,
-                "suggested_model_info": suggested, "notes": notes}
+        return {
+            "ok": ok,
+            "kind": "litellm",
+            "operation": "probe_model",
+            "model": alias,
+            "declared": declared,
+            "observed": observed,
+            "suggested_model_info": suggested,
+            "notes": notes,
+        }
     if kind != "chat":
         # An unknown declared mode (realtime, responses, …) must not fall
         # through into the chat battery — that 404s by construction and
         # reads as "broken model". No battery -> inconclusive, not false.
-        notes.append(f"no probe battery for mode {kind!r} — declare "
-                     "capabilities from the model card")
-        return {"ok": None, "kind": "litellm", "operation": "probe_model",
-                "model": alias, "declared": declared, "observed": observed,
-                "suggested_model_info": {}, "notes": notes}
+        notes.append(
+            f"no probe battery for mode {kind!r} — declare capabilities from the model card"
+        )
+        return {
+            "ok": None,
+            "kind": "litellm",
+            "operation": "probe_model",
+            "model": alias,
+            "declared": declared,
+            "observed": observed,
+            "suggested_model_info": {},
+            "notes": notes,
+        }
 
     say_ok = [{"role": "user", "content": "Reply with the single word OK."}]
 
@@ -758,66 +888,123 @@ async def probe_model(
                 # chat-completions client now, and a bridged registration
                 # 404s there too — this branch is for any OTHER alias that
                 # still intentionally bridges.
-                notes.append("this is a Responses-bridge alias (openai/chat_completions/ "
-                             "prefix) — it answers /v1/responses only; probe the "
-                             "underlying model's own alias instead. If this is "
-                             "graphiti-llm, remove the prefix — its caller now uses "
-                             "the stock chat-completions client and the bridge 404s.")
+                notes.append(
+                    "this is a Responses-bridge alias (openai/chat_completions/ "
+                    "prefix) — it answers /v1/responses only; probe the "
+                    "underlying model's own alias instead. If this is "
+                    "graphiti-llm, remove the prefix — its caller now uses "
+                    "the stock chat-completions client and the bridge 404s."
+                )
             else:
-                notes.append("404 on chat: check api_base ends in /v1 and the provider "
-                             "prefix matches the gateway's format (openai/ vs anthropic/)")
-        return {"ok": False, "kind": "litellm", "operation": "probe_model", "model": alias,
-                "declared": declared, "observed": observed,
-                "suggested_model_info": {}, "notes": notes}
+                notes.append(
+                    "404 on chat: check api_base ends in /v1 and the provider "
+                    "prefix matches the gateway's format (openai/ vs anthropic/)"
+                )
+        return {
+            "ok": False,
+            "kind": "litellm",
+            "operation": "probe_model",
+            "model": alias,
+            "declared": declared,
+            "observed": observed,
+            "suggested_model_info": {},
+            "notes": notes,
+        }
 
     # 2. system message
-    st, out = await _chat(alias, {"messages": [{"role": "system", "content": "You are terse."},
-                                              *say_ok], "max_tokens": PROBE_MAX_TOKENS}, timeout)
-    observed["system_messages"] = {"ok": st == 200, "detail": "" if st == 200 else f"{st}: {_err(out)}"}
+    st, out = await _chat(
+        alias,
+        {
+            "messages": [{"role": "system", "content": "You are terse."}, *say_ok],
+            "max_tokens": PROBE_MAX_TOKENS,
+        },
+        timeout,
+    )
+    observed["system_messages"] = {
+        "ok": st == 200,
+        "detail": "" if st == 200 else f"{st}: {_err(out)}",
+    }
 
     # 3. forced tool call (tool_choice) — the presence of a tool_calls entry is the proof
-    st, out = await _chat(alias, {
-        "messages": [{"role": "user", "content": "What is the weather in Paris?"}],
-        "tools": [_PROBE_TOOL],
-        "tool_choice": {"type": "function", "function": {"name": "get_weather"}},
-        "max_tokens": PROBE_MAX_TOKENS,
-    }, timeout)
+    st, out = await _chat(
+        alias,
+        {
+            "messages": [{"role": "user", "content": "What is the weather in Paris?"}],
+            "tools": [_PROBE_TOOL],
+            "tool_choice": {"type": "function", "function": {"name": "get_weather"}},
+            "max_tokens": PROBE_MAX_TOKENS,
+        },
+        timeout,
+    )
     calls = _message(out).get("tool_calls") or [] if st == 200 else []
-    observed["tool_choice"] = _verdict(st, out, bool(calls), f"{len(calls)} call(s)") \
-        if not calls else {"ok": True, "detail": f"{len(calls)} call(s)"}
+    observed["tool_choice"] = (
+        _verdict(st, out, bool(calls), f"{len(calls)} call(s)")
+        if not calls
+        else {"ok": True, "detail": f"{len(calls)} call(s)"}
+    )
     # 4. tools, auto — and parallel: two cities in one turn
-    st, out = await _chat(alias, {
-        "messages": [{"role": "user", "content":
-                      "Use the tool to get the weather in Paris and in Tokyo, both, now."}],
-        "tools": [_PROBE_TOOL], "tool_choice": "auto", "max_tokens": PROBE_MAX_TOKENS,
-    }, timeout)
+    st, out = await _chat(
+        alias,
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Use the tool to get the weather in Paris and in Tokyo, both, now.",
+                }
+            ],
+            "tools": [_PROBE_TOOL],
+            "tool_choice": "auto",
+            "max_tokens": PROBE_MAX_TOKENS,
+        },
+        timeout,
+    )
     calls = _message(out).get("tool_calls") or [] if st == 200 else []
-    observed["function_calling"] = _verdict(st, out, bool(calls), f"{len(calls)} call(s)") \
-        if not calls else {"ok": True, "detail": f"{len(calls)} call(s)"}
+    observed["function_calling"] = (
+        _verdict(st, out, bool(calls), f"{len(calls)} call(s)")
+        if not calls
+        else {"ok": True, "detail": f"{len(calls)} call(s)"}
+    )
     # Two calls prove parallel calling; ONE call is a model's choice, not
     # proof of absence (gpt-oss-20b answered one city first, 2026-08-30), so
     # anything short of two is inconclusive rather than false.
-    observed["parallel_function_calling"] = {"ok": True if len(calls) >= 2 else None,
-                                             "detail": f"{len(calls)} call(s) for two cities"}
+    observed["parallel_function_calling"] = {
+        "ok": True if len(calls) >= 2 else None,
+        "detail": f"{len(calls)} call(s) for two cities",
+    }
 
     # 5. structured output — json_schema, then the looser json_object
-    st, out = await _chat(alias, {
-        "messages": [{"role": "user", "content": "What is 2+2? Answer as JSON."}],
-        "response_format": {"type": "json_schema", "json_schema": _PROBE_SCHEMA},
-        "max_tokens": PROBE_MAX_TOKENS,
-    }, timeout)
+    st, out = await _chat(
+        alias,
+        {
+            "messages": [{"role": "user", "content": "What is 2+2? Answer as JSON."}],
+            "response_format": {"type": "json_schema", "json_schema": _PROBE_SCHEMA},
+            "max_tokens": PROBE_MAX_TOKENS,
+        },
+        timeout,
+    )
     content, _fin, _ = _reply(st, out)
     parsed = None
     try:
         parsed = json.loads(content or "")
     except ValueError:
         parsed = None
-    observed["response_schema"] = _verdict(st, out, isinstance(parsed, dict) and "answer" in parsed,
-                                           (content or "")[:80])
-    st, out = await _chat(alias, {
-        "messages": [{"role": "user", "content": 'Answer as a JSON object {"answer": <int>}: what is 2+2?'}],
-        "response_format": {"type": "json_object"}, "max_tokens": PROBE_MAX_TOKENS,
-    }, timeout)
+    observed["response_schema"] = _verdict(
+        st, out, isinstance(parsed, dict) and "answer" in parsed, (content or "")[:80]
+    )
+    st, out = await _chat(
+        alias,
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": 'Answer as a JSON object {"answer": <int>}: what is 2+2?',
+                }
+            ],
+            "response_format": {"type": "json_object"},
+            "max_tokens": PROBE_MAX_TOKENS,
+        },
+        timeout,
+    )
     content, _fin, _ = _reply(st, out)
     try:
         ok = isinstance(json.loads(content or ""), dict)
@@ -826,35 +1013,79 @@ async def probe_model(
     observed["json_object"] = _verdict(st, out, ok, (content or "")[:80])
 
     # 6. vision — a 1x1 PNG; any answer is a yes, a 4xx/5xx is a no
-    st, out = await _chat(alias, {
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": "What color is this image? One word."},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_PROBE_PNG}"}},
-        ]}], "max_tokens": PROBE_MAX_TOKENS,
-    }, timeout)
+    st, out = await _chat(
+        alias,
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "What color is this image? One word."},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{_PROBE_PNG}"},
+                        },
+                    ],
+                }
+            ],
+            "max_tokens": PROBE_MAX_TOKENS,
+        },
+        timeout,
+    )
     content, _fin, _ = _reply(st, out)
     observed["vision"] = _verdict(st, out, bool(content), (content or "")[:40])
 
     # 7. reasoning — the OpenAI-style control; accepted AND visible are separate facts
-    st, out = await _chat(alias, {"messages": [{"role": "user", "content": "Is 17 prime? One word."}],
-                                  "reasoning_effort": "low", "max_tokens": PROBE_MAX_TOKENS}, timeout)
+    st, out = await _chat(
+        alias,
+        {
+            "messages": [{"role": "user", "content": "Is 17 prime? One word."}],
+            "reasoning_effort": "low",
+            "max_tokens": PROBE_MAX_TOKENS,
+        },
+        timeout,
+    )
     msg = _message(out) if st == 200 else {}
     seen = bool(msg.get("reasoning_content") or msg.get("reasoning"))
-    observed["reasoning"] = {"ok": st == 200 and seen,
-                             "detail": ("reasoning_content present" if seen else
-                                        "accepted, no reasoning_content in the reply — a template-"
-                                        "driven model (qwen_template) needs its mechanism declared by hand")
-                             if st == 200 else f"{st}: {_err(out)}"}
+    observed["reasoning"] = {
+        "ok": st == 200 and seen,
+        "detail": (
+            "reasoning_content present"
+            if seen
+            else "accepted, no reasoning_content in the reply — a template-"
+            "driven model (qwen_template) needs its mechanism declared by hand"
+        )
+        if st == 200
+        else f"{st}: {_err(out)}",
+    }
 
     # 7b. pdf input — an OpenAI `file` content part carrying a blank one-page
     # PDF; an endpoint that reads documents answers, one that does not errors.
-    st, out = await _chat(alias, {
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": "How many pages does this document have? One word."},
-            {"type": "file", "file": {"filename": "probe.pdf",
-                                      "file_data": f"data:application/pdf;base64,{_PROBE_PDF}"}},
-        ]}], "max_tokens": PROBE_MAX_TOKENS,
-    }, timeout)
+    st, out = await _chat(
+        alias,
+        {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "How many pages does this document have? One word.",
+                        },
+                        {
+                            "type": "file",
+                            "file": {
+                                "filename": "probe.pdf",
+                                "file_data": f"data:application/pdf;base64,{_PROBE_PDF}",
+                            },
+                        },
+                    ],
+                }
+            ],
+            "max_tokens": PROBE_MAX_TOKENS,
+        },
+        timeout,
+    )
     content, _fin, _ = _reply(st, out)
     observed["pdf_input"] = _verdict(st, out, bool(content), (content or "")[:40])
 
@@ -864,28 +1095,42 @@ async def probe_model(
     # thinking_mechanism changes how the runtime CONTROLS the model
     # (runtime/models._thinking_body), so that call is the operator's.
     if not declared.get("thinking_mechanism"):
-        st, out = await _chat(alias, {
-            "messages": [{"role": "user", "content": "Is 17 prime? One word."}],
-            "chat_template_kwargs": {"enable_thinking": True},
-            "max_tokens": PROBE_MAX_TOKENS,
-        }, timeout)
+        st, out = await _chat(
+            alias,
+            {
+                "messages": [{"role": "user", "content": "Is 17 prime? One word."}],
+                "chat_template_kwargs": {"enable_thinking": True},
+                "max_tokens": PROBE_MAX_TOKENS,
+            },
+            timeout,
+        )
         msg2 = _message(out) if st == 200 else {}
         seen2 = bool(msg2.get("reasoning_content") or msg2.get("reasoning"))
         observed["thinking_template"] = {
             "ok": st == 200 and seen2,
-            "detail": ("chat_template_kwargs produced reasoning_content" if seen2
-                       else "" if st != 200 else "accepted, no reasoning_content"),
+            "detail": (
+                "chat_template_kwargs produced reasoning_content"
+                if seen2
+                else ""
+                if st != 200
+                else "accepted, no reasoning_content"
+            ),
         }
         if st == 200 and seen2:
-            notes.append("template-driven thinking works — consider declaring "
-                         "thinking_mechanism: qwen_template (plus thinking_levels) "
-                         "so the runtime can control it; see the model-evaluation skill")
+            notes.append(
+                "template-driven thinking works — consider declaring "
+                "thinking_mechanism: qwen_template (plus thinking_levels) "
+                "so the runtime can control it; see the model-evaluation skill"
+            )
 
     # 8. output ceiling — ask for far too much and read what the endpoint says
     st, out = await _chat(alias, {"messages": say_ok, "max_tokens": 1_000_000}, timeout)
     if st == 200:
-        observed["max_output_tokens"] = {"ok": None, "detail": "max_tokens=1000000 accepted — no "
-                                         "request-time ceiling; declare from the model card"}
+        observed["max_output_tokens"] = {
+            "ok": None,
+            "detail": "max_tokens=1000000 accepted — no "
+            "request-time ceiling; declare from the model card",
+        }
     elif re.search(r"context length", _err(out), re.IGNORECASE):
         # A gateway that counts requested OUTPUT against its context window
         # refuses with the CONTEXT length, not an output cap — and echoes our
@@ -893,23 +1138,34 @@ async def probe_model(
         # alias was measured at 1000008 (2026-09-14) and offered as a cap
         # that would have undone its hand-declared 10000. No request can
         # isolate the output cap on such an endpoint: inconclusive.
-        observed["max_output_tokens"] = {"ok": None, "value": None,
-                                         "detail": f"{st}: {_err(out)} — the endpoint counts "
-                                         "requested output against its context; declare "
-                                         "from the model card"}
+        observed["max_output_tokens"] = {
+            "ok": None,
+            "value": None,
+            "detail": f"{st}: {_err(out)} — the endpoint counts "
+            "requested output against its context; declare "
+            "from the model card",
+        }
     else:
         # Numbers at or above what we asked for are the request echoed back,
         # never a ceiling.
         nums = [int(n) for n in re.findall(r"\d{3,}", _err(out)) if int(n) < 1_000_000]
-        observed["max_output_tokens"] = {"ok": None, "detail": f"{st}: {_err(out)}",
-                                         "value": max(nums) if nums else None}
+        observed["max_output_tokens"] = {
+            "ok": None,
+            "detail": f"{st}: {_err(out)}",
+            "value": max(nums) if nums else None,
+        }
 
     # 9. streaming
-    resp = await _call("POST", "/v1/chat/completions",
-                       {"model": alias, "messages": say_ok, "max_tokens": 64, "stream": True},
-                       timeout=timeout)
-    observed["streaming"] = {"ok": resp.status_code == 200 and "data:" in resp.text[:200],
-                             "detail": "" if resp.status_code == 200 else f"{resp.status_code}"}
+    resp = await _call(
+        "POST",
+        "/v1/chat/completions",
+        {"model": alias, "messages": say_ok, "max_tokens": 64, "stream": True},
+        timeout=timeout,
+    )
+    observed["streaming"] = {
+        "ok": resp.status_code == 200 and "data:" in resp.text[:200],
+        "detail": "" if resp.status_code == 200 else f"{resp.status_code}",
+    }
 
     # 10. input ceiling — opt-in bisect, max_tokens=1, filler of single-token words
     if measure_context:
@@ -917,19 +1173,26 @@ async def probe_model(
         best = None
         for _ in range(PROBE_CONTEXT_STEPS):
             mid = (lo + hi) // 2
-            st, out = await _chat(alias, {
-                "messages": [{"role": "user", "content": ("0 " * mid) + "\nReply OK."}],
-                "max_tokens": 1,
-            }, timeout)
+            st, out = await _chat(
+                alias,
+                {
+                    "messages": [{"role": "user", "content": ("0 " * mid) + "\nReply OK."}],
+                    "max_tokens": 1,
+                },
+                timeout,
+            )
             if st == 200:
                 best, lo = mid, mid + 1
             else:
                 hi = mid - 1
             if lo > hi:
                 break
-        observed["max_input_tokens"] = {"ok": None, "value": best,
-                                        "detail": f"largest accepted ≈{best} filler tokens "
-                                                  f"(ceiling searched: {context_ceiling})"}
+        observed["max_input_tokens"] = {
+            "ok": None,
+            "value": best,
+            "detail": f"largest accepted ≈{best} filler tokens "
+            f"(ceiling searched: {context_ceiling})",
+        }
 
     # declared → observed diff, only where the probe can speak
     flags = {
@@ -955,10 +1218,19 @@ async def probe_model(
         if val and not declared.get(key):
             suggested[key] = val
     if flags["supports_function_calling"] is False and declared.get("supports_function_calling"):
-        notes.append("declared tool-capable but produced no tool_calls — re-run before trusting either")
-    return {"ok": True, "kind": "litellm", "operation": "probe_model", "model": alias,
-            "declared": declared, "observed": observed,
-            "suggested_model_info": suggested, "notes": notes}
+        notes.append(
+            "declared tool-capable but produced no tool_calls — re-run before trusting either"
+        )
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "probe_model",
+        "model": alias,
+        "declared": declared,
+        "observed": observed,
+        "suggested_model_info": suggested,
+        "notes": notes,
+    }
 
 
 async def get_spend() -> dict:
@@ -989,9 +1261,14 @@ async def get_spend() -> dict:
     # slice, so the model never mistakes a partial breakdown for the whole one.
     _BY_MODEL_KEY_CAP = 500
     shown = lines[:_BY_MODEL_KEY_CAP]
-    result = {"ok": True, "kind": "litellm", "operation": "get_spend",
-              "by_model_key": shown, "total_spend": round(total, 6),
-              "sampled_requests": len(rows)}
+    result = {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "get_spend",
+        "by_model_key": shown,
+        "total_spend": round(total, 6),
+        "sampled_requests": len(rows),
+    }
     if len(lines) > len(shown):
         result["by_model_key_omitted"] = len(lines) - len(shown)
     return result
@@ -1044,9 +1321,7 @@ async def _openai_compatible_catalog(api_key: str, api_base: str | None = None) 
     # `/v1/v1/models` and got a 405 (Kilo.ai, 2026-09-12).
     base = re.sub(r"/v1$", "", (api_base or "https://api.openai.com").rstrip("/"))
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
-            f"{base}/v1/models", headers={"Authorization": f"Bearer {api_key}"}
-        )
+        resp = await client.get(f"{base}/v1/models", headers={"Authorization": f"Bearer {api_key}"})
     if not 200 <= resp.status_code < 300:
         raise LiteLLMError(
             f"provider_catalog — provider answered {resp.status_code}: {resp.text[:200]}"
@@ -1142,12 +1417,20 @@ async def catalog_entry_for(credential_name: str, provider_model: str) -> dict |
     fetched — the caller decides what an unanswerable price means."""
     from central_command.integrations import litellm_credstore
 
-    cred = next((c for c in await litellm_credstore.list_provider_credentials()
-                 if c.get("credential_name") == credential_name), None)
+    cred = next(
+        (
+            c
+            for c in await litellm_credstore.list_provider_credentials()
+            if c.get("credential_name") == credential_name
+        ),
+        None,
+    )
     if cred is None:
         raise LiteLLMError(f"catalog_entry_for — no stored credential named {credential_name!r}")
     values = cred.get("values") or {}
-    catalog = await provider_catalog(cred.get("provider"), values.get("api_key"), values.get("api_base"))
+    catalog = await provider_catalog(
+        cred.get("provider"), values.get("api_key"), values.get("api_base")
+    )
     wanted = candidate_ids(provider_model)
     return next((e for e in catalog if isinstance(e, dict) and str(e.get("id")) in wanted), None)
 
@@ -1174,8 +1457,11 @@ async def provider_catalog(provider: str, api_key: str, api_base: str | None = N
 
 
 async def add_model(
-    model_name: str, model: str, api_key: str | None = None,
-    model_info: dict | None = None, extra: dict | None = None,
+    model_name: str,
+    model: str,
+    api_key: str | None = None,
+    model_info: dict | None = None,
+    extra: dict | None = None,
 ) -> dict:
     """Register a model/alias in the proxy. `model_name` is the alias callers use
     (it doubles as Central Command's model name); `model` is the provider string
@@ -1203,16 +1489,23 @@ async def add_model(
     resp = await _call("POST", "/model/new", payload)
     _check(resp, "add_model")
     body = resp.json()
-    return {"ok": True, "kind": "litellm", "operation": "add_model", "model": {
-        "model_name": name,
-        "provider_model": prov,
-        "model_id": body.get("model_id") or (body.get("model_info") or {}).get("id"),
-    }}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "add_model",
+        "model": {
+            "model_name": name,
+            "provider_model": prov,
+            "model_id": body.get("model_id") or (body.get("model_info") or {}).get("id"),
+        },
+    }
 
 
 async def update_model(
-    model_id: str, model_info: dict | None = None,
-    litellm_params: dict | None = None, model_name: str | None = None,
+    model_id: str,
+    model_info: dict | None = None,
+    litellm_params: dict | None = None,
+    model_name: str | None = None,
 ) -> dict:
     """Edit an EXISTING model in place, addressed by its proxy model_id — the
     in-place alternative to delete+add. Routes to PATCH /model/{id}/update, which
@@ -1246,23 +1539,33 @@ async def update_model(
             raise LiteLLMError("update_model — model_info must be an object of metadata fields")
         body["model_info"] = model_info
     if not body:
-        raise LiteLLMError("update_model — nothing to change (give model_info, litellm_params, or model_name)")
+        raise LiteLLMError(
+            "update_model — nothing to change (give model_info, litellm_params, or model_name)"
+        )
     resp = await _call("PATCH", f"/model/{mid}/update", body)
     _check(resp, "update_model")
     body_out = resp.json()
-    return {"ok": True, "kind": "litellm", "operation": "update_model", "model": {
-        # The id we ADDRESSED, never the response's: LiteLLM's PATCH answers with
-        # a model_info.id that is not the row's (2026-09-17: three updates, three
-        # phantom ids, one 404 and one flag-set written onto the wrong model).
-        "model_id": mid,
-        "model_name": (body_out.get("model_name") if isinstance(body_out, dict) else None) or model_name,
-        "updated": sorted(body.keys()),
-    }}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "update_model",
+        "model": {
+            # The id we ADDRESSED, never the response's: LiteLLM's PATCH answers with
+            # a model_info.id that is not the row's (2026-09-17: three updates, three
+            # phantom ids, one 404 and one flag-set written onto the wrong model).
+            "model_id": mid,
+            "model_name": (body_out.get("model_name") if isinstance(body_out, dict) else None)
+            or model_name,
+            "updated": sorted(body.keys()),
+        },
+    }
 
 
 async def create_key(
-    key_alias: str, models: list | None = None,
-    metadata: dict | None = None, tags: list | None = None,
+    key_alias: str,
+    models: list | None = None,
+    metadata: dict | None = None,
+    tags: list | None = None,
     duration: str | None = None,
 ) -> dict:
     """Issue a new virtual key (POST /key/generate). `key_alias` is the human
@@ -1302,18 +1605,25 @@ async def create_key(
     _check(resp, "create_key")
     body = resp.json()
     plaintext = body.get("key") or ""
-    return {"ok": True, "kind": "litellm", "operation": "create_key", "key": {
-        "key_alias": body.get("key_alias") or key_alias,
-        "token_id": body.get("token_id") or body.get("token"),  # hash, safe
-        "models": body.get("models") or (models or []),
-        "expires": body.get("expires"),
-        # masked ONLY — the plaintext is intentionally discarded here
-        "key_preview": _mask_secret(plaintext),
-    }}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "create_key",
+        "key": {
+            "key_alias": body.get("key_alias") or key_alias,
+            "token_id": body.get("token_id") or body.get("token"),  # hash, safe
+            "models": body.get("models") or (models or []),
+            "expires": body.get("expires"),
+            # masked ONLY — the plaintext is intentionally discarded here
+            "key_preview": _mask_secret(plaintext),
+        },
+    }
 
 
 async def set_fallbacks(
-    model: str, fallback_models: list, fallback_type: str = "general",
+    model: str,
+    fallback_models: list,
+    fallback_type: str = "general",
 ) -> dict:
     """Set the fallback chain for a model (POST /fallback): when a call to `model`
     fails (after retries), the router tries `fallback_models` in order. `model` and
@@ -1322,16 +1632,30 @@ async def set_fallbacks(
     this changes how the router behaves for that model immediately."""
     _require_configured("set_fallbacks")
     m = _alias(model)
-    if not isinstance(fallback_models, list) or not fallback_models \
-            or not all(isinstance(f, str) and ALIAS_RE.match(f) for f in fallback_models):
-        raise LiteLLMError("set_fallbacks — fallback_models must be a non-empty list of alias strings")
+    if (
+        not isinstance(fallback_models, list)
+        or not fallback_models
+        or not all(isinstance(f, str) and ALIAS_RE.match(f) for f in fallback_models)
+    ):
+        raise LiteLLMError(
+            "set_fallbacks — fallback_models must be a non-empty list of alias strings"
+        )
     if fallback_type not in FALLBACK_TYPES:
         raise LiteLLMError(f"set_fallbacks — fallback_type must be one of {FALLBACK_TYPES}")
-    resp = await _call("POST", "/fallback",
-                       {"model": m, "fallback_models": fallback_models, "fallback_type": fallback_type})
+    resp = await _call(
+        "POST",
+        "/fallback",
+        {"model": m, "fallback_models": fallback_models, "fallback_type": fallback_type},
+    )
     _check(resp, "set_fallbacks")
-    return {"ok": True, "kind": "litellm", "operation": "set_fallbacks",
-            "model": m, "fallback_models": fallback_models, "fallback_type": fallback_type}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "set_fallbacks",
+        "model": m,
+        "fallback_models": fallback_models,
+        "fallback_type": fallback_type,
+    }
 
 
 async def delete_fallbacks(model: str, fallback_type: str = "general") -> dict:
@@ -1343,13 +1667,22 @@ async def delete_fallbacks(model: str, fallback_type: str = "general") -> dict:
         raise LiteLLMError(f"delete_fallbacks — fallback_type must be one of {FALLBACK_TYPES}")
     resp = await _call("DELETE", f"/fallback/{m}?fallback_type={fallback_type}")
     _check(resp, "delete_fallbacks")
-    return {"ok": True, "kind": "litellm", "operation": "delete_fallbacks",
-            "model": m, "fallback_type": fallback_type}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "delete_fallbacks",
+        "model": m,
+        "fallback_type": fallback_type,
+    }
 
 
 async def update_key(
-    key: str, models: list | None = None, metadata: dict | None = None,
-    tags: list | None = None, key_alias: str | None = None, duration: str | None = None,
+    key: str,
+    models: list | None = None,
+    metadata: dict | None = None,
+    tags: list | None = None,
+    key_alias: str | None = None,
+    duration: str | None = None,
 ) -> dict:
     """Edit an existing virtual key in place (POST /key/update), addressed by its
     token (the hash from list_keys — Central Command holds no plaintext). Change its model scope,
@@ -1381,9 +1714,14 @@ async def update_key(
         raise LiteLLMError("update_key — nothing to change")
     resp = await _call("POST", "/key/update", payload)
     _check(resp, "update_key")
-    return {"ok": True, "kind": "litellm", "operation": "update_key",
-            "key_alias": key_alias, "token_id": key.strip(),
-            "updated": sorted(k for k in payload if k != "key")}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "update_key",
+        "key_alias": key_alias,
+        "token_id": key.strip(),
+        "updated": sorted(k for k in payload if k != "key"),
+    }
 
 
 async def create_team(team_alias: str, models: list | None = None) -> dict:
@@ -1401,11 +1739,16 @@ async def create_team(team_alias: str, models: list | None = None) -> dict:
     resp = await _call("POST", "/team/new", payload)
     _check(resp, "create_team")
     body = resp.json()
-    return {"ok": True, "kind": "litellm", "operation": "create_team", "team": {
-        "team_alias": body.get("team_alias") or team_alias,
-        "team_id": body.get("team_id"),
-        "models": body.get("models") or (models or []),
-    }}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "create_team",
+        "team": {
+            "team_alias": body.get("team_alias") or team_alias,
+            "team_id": body.get("team_id"),
+            "models": body.get("models") or (models or []),
+        },
+    }
 
 
 async def delete_team(team_id: str) -> dict:
@@ -1436,8 +1779,12 @@ async def delete_key(key_alias: str | None = None, key: str | None = None) -> di
         raise LiteLLMError("delete_key — give a key_alias (preferred) or a key")
     resp = await _call("POST", "/key/delete", payload)
     _check(resp, "delete_key")
-    return {"ok": True, "kind": "litellm", "operation": "delete_key",
-            "deleted": key_alias or _mask_secret(key or "")}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "delete_key",
+        "deleted": key_alias or _mask_secret(key or ""),
+    }
 
 
 async def delete_model(model_id: str) -> dict:
@@ -1449,8 +1796,12 @@ async def delete_model(model_id: str) -> dict:
         raise LiteLLMError("delete_model — model_id must be a non-empty string")
     resp = await _call("POST", "/model/delete", {"id": model_id.strip()})
     _check(resp, "delete_model")
-    return {"ok": True, "kind": "litellm", "operation": "delete_model",
-            "model": {"model_id": model_id.strip()}}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "delete_model",
+        "model": {"model_id": model_id.strip()},
+    }
 
 
 # --- MCP gateway registration (D-sandbox slice 4) -----------------------------
@@ -1459,8 +1810,11 @@ MCP_TRANSPORTS = ("http", "sse")
 
 
 async def register_mcp_server(
-    server_name: str, alias: str, url: str,
-    transport: str = "http", description: str | None = None,
+    server_name: str,
+    alias: str,
+    url: str,
+    transport: str = "http",
+    description: str | None = None,
 ) -> dict:
     """Register a deployed MCP server with LiteLLM's MCP gateway (POST
     /v1/mcp/server). LIVE: any agent later granted access through the proxy
@@ -1470,20 +1824,28 @@ async def register_mcp_server(
     if transport not in MCP_TRANSPORTS:
         raise LiteLLMError(f"register_mcp_server — transport must be one of {MCP_TRANSPORTS}")
     payload: dict = {
-        "server_name": server_name, "alias": alias, "url": url, "transport": transport,
+        "server_name": server_name,
+        "alias": alias,
+        "url": url,
+        "transport": transport,
     }
     if description:
         payload["description"] = description
     resp = await _call("POST", "/v1/mcp/server", payload)
     _check(resp, "register_mcp_server")
     body = resp.json()
-    return {"ok": True, "kind": "litellm", "operation": "register_mcp_server", "server": {
-        "litellm_server_id": body.get("server_id"),
-        "server_name": body.get("server_name") or server_name,
-        "alias": body.get("alias") or alias,
-        "url": body.get("url") or url,
-        "transport": body.get("transport") or transport,
-    }}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "register_mcp_server",
+        "server": {
+            "litellm_server_id": body.get("server_id"),
+            "server_name": body.get("server_name") or server_name,
+            "alias": body.get("alias") or alias,
+            "url": body.get("url") or url,
+            "transport": body.get("transport") or transport,
+        },
+    }
 
 
 async def add_mcp_server_to_key(key: str, litellm_server_id: str) -> dict:
@@ -1512,16 +1874,30 @@ async def add_mcp_server_to_key(key: str, litellm_server_id: str) -> dict:
     info = (resp.json() or {}).get("info") or {}
     current = (info.get("object_permission") or {}).get("mcp_servers") or []
     if server_id in current:
-        return {"ok": True, "kind": "litellm", "operation": "add_mcp_server_to_key",
-                "litellm_server_id": server_id, "changed": False}
+        return {
+            "ok": True,
+            "kind": "litellm",
+            "operation": "add_mcp_server_to_key",
+            "litellm_server_id": server_id,
+            "changed": False,
+        }
 
-    resp = await _call("POST", "/key/update", {
-        "key": key,
-        "object_permission": {"mcp_servers": [*current, server_id]},
-    })
+    resp = await _call(
+        "POST",
+        "/key/update",
+        {
+            "key": key,
+            "object_permission": {"mcp_servers": [*current, server_id]},
+        },
+    )
     _check(resp, "add_mcp_server_to_key (key/update)")
-    return {"ok": True, "kind": "litellm", "operation": "add_mcp_server_to_key",
-            "litellm_server_id": server_id, "changed": True}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "add_mcp_server_to_key",
+        "litellm_server_id": server_id,
+        "changed": True,
+    }
 
 
 async def remove_mcp_server_from_key(key: str, litellm_server_id: str) -> dict:
@@ -1543,16 +1919,30 @@ async def remove_mcp_server_from_key(key: str, litellm_server_id: str) -> dict:
     info = (resp.json() or {}).get("info") or {}
     current = (info.get("object_permission") or {}).get("mcp_servers") or []
     if server_id not in current:
-        return {"ok": True, "kind": "litellm", "operation": "remove_mcp_server_from_key",
-                "litellm_server_id": server_id, "changed": False}
+        return {
+            "ok": True,
+            "kind": "litellm",
+            "operation": "remove_mcp_server_from_key",
+            "litellm_server_id": server_id,
+            "changed": False,
+        }
 
-    resp = await _call("POST", "/key/update", {
-        "key": key,
-        "object_permission": {"mcp_servers": [s for s in current if s != server_id]},
-    })
+    resp = await _call(
+        "POST",
+        "/key/update",
+        {
+            "key": key,
+            "object_permission": {"mcp_servers": [s for s in current if s != server_id]},
+        },
+    )
     _check(resp, "remove_mcp_server_from_key (key/update)")
-    return {"ok": True, "kind": "litellm", "operation": "remove_mcp_server_from_key",
-            "litellm_server_id": server_id, "changed": True}
+    return {
+        "ok": True,
+        "kind": "litellm",
+        "operation": "remove_mcp_server_from_key",
+        "litellm_server_id": server_id,
+        "changed": True,
+    }
 
 
 async def deregister_mcp_server(litellm_server_id: str) -> None:
@@ -1603,7 +1993,8 @@ async def list_mcp_server_tools(server_name: str) -> list[dict]:
     rows = body if isinstance(body, list) else (body.get("tools") or body.get("data") or [])
     return [
         {"name": t.get("name"), "description": t.get("description") or ""}
-        for t in rows if isinstance(t, dict) and t.get("name")
+        for t in rows
+        if isinstance(t, dict) and t.get("name")
     ]
 
 
@@ -1669,7 +2060,13 @@ async def usage_snapshot(days: int = 30) -> dict:
                 continue
             day_agg = by_date.setdefault(
                 str(day.get("date")),
-                {"date": str(day.get("date")), "spend": 0.0, "input": 0, "output": 0, "requests": 0},
+                {
+                    "date": str(day.get("date")),
+                    "spend": 0.0,
+                    "input": 0,
+                    "output": 0,
+                    "requests": 0,
+                },
             )
             models = (day.get("breakdown") or {}).get("models") or {}
             for model, entry in models.items():

@@ -42,8 +42,8 @@ SCRIPTS = single_scripts() + [
 ALLOWED = (
     '"$ENV_FILE"',
     '"$REPO_ROOT/.env"',
-    '"$1"',          # cc_set_kv/cc__absorb write "the file they were handed"
-    '"$f"',          # ...the same, inside cc_set_kv's loop
+    '"$1"',  # cc_set_kv/cc__absorb write "the file they were handed"
+    '"$f"',  # ...the same, inside cc_set_kv's loop
 )
 
 # Redirections whose TARGET is what we care about. `2>&1` / `>&2` are fd dups,
@@ -103,9 +103,16 @@ def test_nothing_is_written_inside_the_checkout(script: pathlib.Path):
 def test_the_state_dir_is_where_the_generated_files_went():
     """Each retired litter path is addressed through the state dir now."""
     setup = installer_source()
-    for name in ("setup-log.txt", "setup-diagnostics.txt", "uvicorn.log",
-                 "uvicorn.pid", "cockpit.log", "cockpit.pid", "cc-boot.cmd",
-                 "boot-at-logon.log"):
+    for name in (
+        "setup-log.txt",
+        "setup-diagnostics.txt",
+        "uvicorn.log",
+        "uvicorn.pid",
+        "cockpit.log",
+        "cockpit.pid",
+        "cc-boot.cmd",
+        "boot-at-logon.log",
+    ):
         assert f"$HERE/{name}" not in setup, f"setup.sh still writes $HERE/{name}"
     resolver = (ROOT / "deploy" / "single" / "resolve-images.sh").read_text(encoding="utf-8")
     assert '"$HERE/installed.manifest"' not in resolver

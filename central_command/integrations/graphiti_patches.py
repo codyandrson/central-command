@@ -201,8 +201,10 @@ def _load_patches(patch_dir: Path) -> list[tuple[str, list[FilePatch]]]:
         try:
             text = p.read_text(encoding="utf-8")
         except OSError as e:
-            raise PatchError(f"patch file {p} unreadable ({e.strerror}); "
-                             "a non-editable install does not ship deploy/") from e
+            raise PatchError(
+                f"patch file {p} unreadable ({e.strerror}); "
+                "a non-editable install does not ship deploy/"
+            ) from e
         try:
             out.append((name, parse_patch(text)))
         except PatchError as e:
@@ -244,7 +246,9 @@ def build_plan(site: Path, patch_dir: Path | None = None) -> Plan:
                 try:
                     state, idx = _classify(lines, h)
                 except PatchError as e:
-                    raise PatchError(f"{name}: {fp.path}: hunk {n} (near line {h.hint + 1}): {e}") from e
+                    raise PatchError(
+                        f"{name}: {fp.path}: hunk {n} (near line {h.hint + 1}): {e}"
+                    ) from e
                 if state == "pending":
                     todo.append((h, idx))
                 else:

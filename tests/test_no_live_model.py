@@ -61,6 +61,7 @@ async def _live_model(monkeypatch):
     """A live model built by `models._live_model` against a fake base URL and
     key. The proxy read for the model's declared output cap is the one other
     network touch on the build path, so it answers "undeclared"."""
+
     async def undeclared(model):
         return None
 
@@ -72,26 +73,38 @@ async def _live_model(monkeypatch):
 
 
 def _mock_completion(request: httpx.Request) -> httpx.Response:
-    return httpx.Response(200, json={
-        "id": "chatcmpl-1", "object": "chat.completion", "created": 0,
-        "model": "some-model",
-        "choices": [{"index": 0, "finish_reason": "stop",
-                     "message": {"role": "assistant", "content": "pong"}}],
-        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-    })
+    return httpx.Response(
+        200,
+        json={
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "some-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": "pong"},
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        },
+    )
 
 
 def _answering_model() -> OpenAIChatModel:
     """An OpenAIChatModel whose HTTP client is an in-process mock: it can answer
     without any socket, so the opt-in path is testable offline."""
     client = httpx.AsyncClient(transport=httpx.MockTransport(_mock_completion))
-    provider = OpenAIProvider(api_key="sk-not-a-real-key",
-                              base_url="http://llm.invalid:4000/v1", http_client=client)
+    provider = OpenAIProvider(
+        api_key="sk-not-a-real-key", base_url="http://llm.invalid:4000/v1", http_client=client
+    )
     return OpenAIChatModel("some-model", provider=provider)
 
 
 async def test_a_built_live_models_request_is_refused_and_opens_no_socket(
-    monkeypatch, connects,
+    monkeypatch,
+    connects,
 ):
     model = await _live_model(monkeypatch)
     assert type(model.wrapped) is OpenAIChatModel
@@ -103,7 +116,8 @@ async def test_a_built_live_models_request_is_refused_and_opens_no_socket(
 
 
 async def test_a_built_live_models_request_stream_is_refused_and_opens_no_socket(
-    monkeypatch, connects,
+    monkeypatch,
+    connects,
 ):
     model = await _live_model(monkeypatch)
     connects.clear()
@@ -172,7 +186,6 @@ async def test_with_the_test_model_set_resolve_model_returns_the_double(monkeypa
 
 
 def test_the_fixture_is_session_scoped_and_autouse(request):
-    [fixturedef] = request.session._fixturemanager.getfixturedefs(
-        "no_live_model", request.node)
+    [fixturedef] = request.session._fixturemanager.getfixturedefs("no_live_model", request.node)
     assert fixturedef.scope == "session"
     assert "no_live_model" in request.fixturenames  # autouse: this test asked for nothing

@@ -28,7 +28,7 @@ from central_command.integrations import email_facade
 # into a shared helper both paths call.
 _OVER_CAP_HINT = (
     "query matched too many messages for a single list (provider cap ~2,500 refs) "
-    "— narrow it, e.g. with before:/after: (\"category:promotions before:2026/01/01\")"
+    '— narrow it, e.g. with before:/after: ("category:promotions before:2026/01/01")'
 )
 
 
@@ -67,11 +67,13 @@ async def preview(query: str) -> dict:
     samples = []
     for uuid in resolved["sample_uuids"]:
         msg = await email_facade.get_message(uuid)
-        samples.append({
-            "from": msg.get("from"),
-            "subject": msg.get("subject"),
-            "date": msg.get("date"),
-        })
+        samples.append(
+            {
+                "from": msg.get("from"),
+                "subject": msg.get("subject"),
+                "date": msg.get("date"),
+            }
+        )
     resolved["samples"] = samples
     resolved["match_digest"] = _digest(resolved["message_ids"])
     return resolved

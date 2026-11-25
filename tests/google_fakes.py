@@ -55,6 +55,8 @@ def params(request: httpx.Request) -> dict:
     """The query, without the `alt=json` the client library adds to every
     request (the n8n nodes sent none; Google's default is JSON either way)."""
     return {k: v for k, v in request.url.params.multi_items() if k != "alt"}
+
+
 TOKEN = "https://oauth2.googleapis.com/token"
 
 # Fake credentials (never real ones): the client id has Google's shape so
@@ -74,9 +76,14 @@ def b64url(data: bytes | str) -> str:
 
 
 def error_body(code: int, message: str = "error", status: str = "FAILED_PRECONDITION") -> dict:
-    return {"error": {"code": code, "message": message,
-                      "errors": [{"message": message, "domain": "global", "reason": "failed"}],
-                      "status": status}}
+    return {
+        "error": {
+            "code": code,
+            "message": message,
+            "errors": [{"message": message, "domain": "global", "reason": "failed"}],
+            "status": status,
+        }
+    }
 
 
 class FakeGoogle:
@@ -108,13 +115,22 @@ class FakeGoogle:
         url = str(request.url).split("?")[0]
         if request.method == "POST" and url == TOKEN:
             return self._token(request)
-        if self.require_auth and not request.headers.get("authorization", "").startswith("Bearer ya29."):
-            return httpx.Response(401, json=error_body(401, "Request had invalid authentication credentials.",
-                                                       "UNAUTHENTICATED"))
+        if self.require_auth and not request.headers.get("authorization", "").startswith(
+            "Bearer ya29."
+        ):
+            return httpx.Response(
+                401,
+                json=error_body(
+                    401, "Request had invalid authentication credentials.", "UNAUTHENTICATED"
+                ),
+            )
         query = {k: v[-1] for k, v in parse_qs(request.url.query.decode()).items()}
         for method, path, want, answers in self.routes:
-            if method == request.method and path == url and (want is None or all(
-                    query.get(k) == v for k, v in want.items())):
+            if (
+                method == request.method
+                and path == url
+                and (want is None or all(query.get(k) == v for k, v in want.items()))
+            ):
                 answer = answers.pop(0) if len(answers) > 1 else answers[0]
                 if isinstance(answer, BaseException):
                     raise answer
@@ -131,14 +147,22 @@ class FakeGoogle:
         assert form.get("client_id") == settings.google_client_id
         assert form.get("client_secret") == settings.google_client_secret
         if self.token_answers:
-            answer = self.token_answers.pop(0) if len(self.token_answers) > 1 else self.token_answers[0]
+            answer = (
+                self.token_answers.pop(0) if len(self.token_answers) > 1 else self.token_answers[0]
+            )
             if isinstance(answer, BaseException):
                 raise answer
             return httpx.Response(answer[0], json=answer[1])
         self.issued += 1
-        return httpx.Response(200, json={
-            "access_token": f"ya29.fake-access-{self.issued}", "expires_in": 3599,
-            "scope": " ".join(google.SCOPES), "token_type": "Bearer"})
+        return httpx.Response(
+            200,
+            json={
+                "access_token": f"ya29.fake-access-{self.issued}",
+                "expires_in": 3599,
+                "scope": " ".join(google.SCOPES),
+                "token_type": "Bearer",
+            },
+        )
 
 
 def install(monkeypatch, handler) -> None:
@@ -146,10 +170,12 @@ def install(monkeypatch, handler) -> None:
     `handler`: the seam the suite already uses for Jira and the probes (here:
     the n8n webhook in the parity test, and the probe)."""
     transport = httpx.MockTransport(handler)
-    monkeypatch.setattr(httpx, "AsyncClient",
-                        lambda *a, **kw: _real_async(*a, **{**kw, "transport": transport}))
-    monkeypatch.setattr(httpx, "Client",
-                        lambda *a, **kw: _real_sync(*a, **{**kw, "transport": transport}))
+    monkeypatch.setattr(
+        httpx, "AsyncClient", lambda *a, **kw: _real_async(*a, **{**kw, "transport": transport})
+    )
+    monkeypatch.setattr(
+        httpx, "Client", lambda *a, **kw: _real_sync(*a, **{**kw, "transport": transport})
+    )
 
 
 class FakeHttp:
@@ -164,8 +190,9 @@ class FakeHttp:
         self.timeout = timeout
         self.timeouts = []
 
-    def request(self, uri, method="GET", body=None, headers=None, redirections=5,
-                connection_type=None):
+    def request(
+        self, uri, method="GET", body=None, headers=None, redirections=5, connection_type=None
+    ):
         import httplib2
 
         content = body.encode("utf-8") if isinstance(body, str) else body
@@ -228,55 +255,117 @@ def multipart_message(mid: str = "18c0ffee00aa11bb", tid: str = "18c0ffee00aa000
     body slots. Two Authentication-Results (Gmail's first), a DKIM signature
     and the RFC 8058 unsubscribe pair."""
     return {
-        "id": mid, "threadId": tid, "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
-        "snippet": "Your November statement is ready", "historyId": "987654",
-        "internalDate": "1763460000123", "sizeEstimate": 48213,
+        "id": mid,
+        "threadId": tid,
+        "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+        "snippet": "Your November statement is ready",
+        "historyId": "987654",
+        "internalDate": "1763460000123",
+        "sizeEstimate": 48213,
         "payload": {
-            "partId": "", "mimeType": "multipart/mixed", "filename": "",
+            "partId": "",
+            "mimeType": "multipart/mixed",
+            "filename": "",
             "headers": [
                 hdr("Delivered-To", "operator@example.com"),
-                hdr("Authentication-Results", "mx.google.com; dkim=pass header.i=@example.com; spf=pass"),
-                hdr("DKIM-Signature", "v=1; a=rsa-sha256; d=example.com; s=s1; h=from:list-unsubscribe:list-unsubscribe-post"),
+                hdr(
+                    "Authentication-Results",
+                    "mx.google.com; dkim=pass header.i=@example.com; spf=pass",
+                ),
+                hdr(
+                    "DKIM-Signature",
+                    "v=1; a=rsa-sha256; d=example.com; s=s1; h=from:list-unsubscribe:list-unsubscribe-post",
+                ),
                 hdr("Authentication-Results", "relay.example.net; spf=pass"),
                 hdr("From", "Jane Doe <jane.doe@example.com>"),
                 hdr("To", "operator@example.com"),
                 hdr("Cc", "John Rivers <john.rivers@example.com>"),
                 hdr("Subject", "Your November statement"),
                 hdr("Date", "Tue, 18 Nov 2025 10:00:00 +0000"),
-                hdr("List-Unsubscribe", "<https://example.com/unsub?u=1>, <mailto:unsub@example.com>"),
+                hdr(
+                    "List-Unsubscribe",
+                    "<https://example.com/unsub?u=1>, <mailto:unsub@example.com>",
+                ),
                 hdr("List-Unsubscribe-Post", "List-Unsubscribe=One-Click"),
                 hdr("Message-ID", "<abc123@example.com>"),
             ],
             "body": {"size": 0},
             "parts": [
-                {"partId": "0", "mimeType": "multipart/alternative", "filename": "",
-                 "headers": [hdr("Content-Type", 'multipart/alternative; boundary="b2"')],
-                 "body": {"size": 0},
-                 "parts": [
-                     {"partId": "0.0", "mimeType": "text/plain", "filename": "",
-                      "headers": [hdr("Content-Type", 'text/plain; charset="UTF-8"')],
-                      "body": {"size": 31, "data": b64url("Statement ready — €12.50 due.\r\n")}},
-                     {"partId": "0.1", "mimeType": "text/html", "filename": "",
-                      "headers": [hdr("Content-Type", "text/html; charset=iso-8859-1")],
-                      "body": {"size": 40, "data": b64url(b"<p>Statement \x80 ready ~ caf\xe9</p>")}},
-                 ]},
-                {"partId": "1", "mimeType": "application/pdf", "filename": "statement.pdf",
-                 "headers": [hdr("Content-Type", 'application/pdf; name="statement.pdf"'),
-                             hdr("Content-Disposition", 'attachment; filename="statement.pdf"'),
-                             hdr("Content-ID", "<pdf1>")],
-                 "body": {"attachmentId": "ANGjdJ_pdf-1", "size": 52311}},
-                {"partId": "2", "mimeType": "image/png", "filename": "logo.png",
-                 "headers": [hdr("Content-Type", "image/png"), hdr("Content-ID", "<logo>")],
-                 "body": {"attachmentId": "ANGjdJ_png-2", "size": 2048}},
-                {"partId": "3", "mimeType": "text/calendar", "filename": "",
-                 "headers": [hdr("Content-Type", "text/calendar; charset=UTF-8; method=REQUEST")],
-                 "body": {"size": 60, "data": b64url("BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR\r\n")}},
-                {"partId": "4", "mimeType": "message/rfc822", "filename": "fwd.eml",
-                 "headers": [hdr("Content-Type", "message/rfc822")],
-                 "body": {"size": 0},
-                 "parts": [{"partId": "4.0", "mimeType": "text/plain", "filename": "",
+                {
+                    "partId": "0",
+                    "mimeType": "multipart/alternative",
+                    "filename": "",
+                    "headers": [hdr("Content-Type", 'multipart/alternative; boundary="b2"')],
+                    "body": {"size": 0},
+                    "parts": [
+                        {
+                            "partId": "0.0",
+                            "mimeType": "text/plain",
+                            "filename": "",
+                            "headers": [hdr("Content-Type", 'text/plain; charset="UTF-8"')],
+                            "body": {
+                                "size": 31,
+                                "data": b64url("Statement ready — €12.50 due.\r\n"),
+                            },
+                        },
+                        {
+                            "partId": "0.1",
+                            "mimeType": "text/html",
+                            "filename": "",
+                            "headers": [hdr("Content-Type", "text/html; charset=iso-8859-1")],
+                            "body": {
+                                "size": 40,
+                                "data": b64url(b"<p>Statement \x80 ready ~ caf\xe9</p>"),
+                            },
+                        },
+                    ],
+                },
+                {
+                    "partId": "1",
+                    "mimeType": "application/pdf",
+                    "filename": "statement.pdf",
+                    "headers": [
+                        hdr("Content-Type", 'application/pdf; name="statement.pdf"'),
+                        hdr("Content-Disposition", 'attachment; filename="statement.pdf"'),
+                        hdr("Content-ID", "<pdf1>"),
+                    ],
+                    "body": {"attachmentId": "ANGjdJ_pdf-1", "size": 52311},
+                },
+                {
+                    "partId": "2",
+                    "mimeType": "image/png",
+                    "filename": "logo.png",
+                    "headers": [hdr("Content-Type", "image/png"), hdr("Content-ID", "<logo>")],
+                    "body": {"attachmentId": "ANGjdJ_png-2", "size": 2048},
+                },
+                {
+                    "partId": "3",
+                    "mimeType": "text/calendar",
+                    "filename": "",
+                    "headers": [
+                        hdr("Content-Type", "text/calendar; charset=UTF-8; method=REQUEST")
+                    ],
+                    "body": {
+                        "size": 60,
+                        "data": b64url("BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR\r\n"),
+                    },
+                },
+                {
+                    "partId": "4",
+                    "mimeType": "message/rfc822",
+                    "filename": "fwd.eml",
+                    "headers": [hdr("Content-Type", "message/rfc822")],
+                    "body": {"size": 0},
+                    "parts": [
+                        {
+                            "partId": "4.0",
+                            "mimeType": "text/plain",
+                            "filename": "",
                             "headers": [hdr("Content-Type", "text/plain")],
-                            "body": {"size": 9, "data": b64url("forwarded")}}]},
+                            "body": {"size": 9, "data": b64url("forwarded")},
+                        }
+                    ],
+                },
             ],
         },
     }
@@ -286,32 +375,57 @@ def single_part_html(mid: str = "18c0ffee00bb22cc") -> dict:
     """A one-part HTML mail with no internalDate: the body sits on the payload
     itself and the date comes from the Date header."""
     return {
-        "id": mid, "threadId": mid, "labelIds": ["INBOX"], "snippet": "Hi",
-        "payload": {"partId": "", "mimeType": "text/html", "filename": "",
-                    "headers": [hdr("From", "jane.doe@example.com"), hdr("Subject", "Hi"),
-                                hdr("Date", "Wed, 19 Nov 2025 08:30:15 -0700"),
-                                hdr("Content-Type", "text/html; charset=utf-8")],
-                    "body": {"size": 11, "data": b64url("<b>Hi</b>\n")}},
+        "id": mid,
+        "threadId": mid,
+        "labelIds": ["INBOX"],
+        "snippet": "Hi",
+        "payload": {
+            "partId": "",
+            "mimeType": "text/html",
+            "filename": "",
+            "headers": [
+                hdr("From", "jane.doe@example.com"),
+                hdr("Subject", "Hi"),
+                hdr("Date", "Wed, 19 Nov 2025 08:30:15 -0700"),
+                hdr("Content-Type", "text/html; charset=utf-8"),
+            ],
+            "body": {"size": 11, "data": b64url("<b>Hi</b>\n")},
+        },
     }
 
 
 def event(eid: str, **kw) -> dict:
-    base = {"kind": "calendar#event", "etag": '"3412"', "id": eid, "status": "confirmed",
-            "htmlLink": f"https://www.google.com/calendar/event?eid={eid}",
-            "created": "2025-11-01T10:00:00.000Z", "updated": "2025-11-02T10:00:00.000Z",
-            "summary": f"Event {eid}", "creator": {"email": "operator@example.com", "self": True},
-            "organizer": {"email": "operator@example.com", "self": True},
-            "start": {"dateTime": "2025-11-20T09:00:00-07:00", "timeZone": "America/Denver"},
-            "end": {"dateTime": "2025-11-20T09:30:00-07:00", "timeZone": "America/Denver"},
-            "iCalUID": f"{eid}@google.com", "sequence": 0, "eventType": "default"}
+    base = {
+        "kind": "calendar#event",
+        "etag": '"3412"',
+        "id": eid,
+        "status": "confirmed",
+        "htmlLink": f"https://www.google.com/calendar/event?eid={eid}",
+        "created": "2025-11-01T10:00:00.000Z",
+        "updated": "2025-11-02T10:00:00.000Z",
+        "summary": f"Event {eid}",
+        "creator": {"email": "operator@example.com", "self": True},
+        "organizer": {"email": "operator@example.com", "self": True},
+        "start": {"dateTime": "2025-11-20T09:00:00-07:00", "timeZone": "America/Denver"},
+        "end": {"dateTime": "2025-11-20T09:30:00-07:00", "timeZone": "America/Denver"},
+        "iCalUID": f"{eid}@google.com",
+        "sequence": 0,
+        "eventType": "default",
+    }
     base.update(kw)
     return base
 
 
 def events_page(items: list | None, **kw) -> dict:
-    page = {"kind": "calendar#events", "etag": '"p1"', "summary": "operator@example.com",
-            "updated": "2025-11-19T10:00:00.000Z", "timeZone": "America/Denver",
-            "accessRole": "owner", "defaultReminders": []}
+    page = {
+        "kind": "calendar#events",
+        "etag": '"p1"',
+        "summary": "operator@example.com",
+        "updated": "2025-11-19T10:00:00.000Z",
+        "timeZone": "America/Denver",
+        "accessRole": "owner",
+        "defaultReminders": [],
+    }
     if items is not None:
         page["items"] = items
     page.update(kw)

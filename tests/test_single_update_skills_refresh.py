@@ -37,7 +37,20 @@ pytestmark = [
 ]
 
 TARGET = "2.99.0"
-LIFTED = ["logline", "pass", "warn", "fail", "note", "G", "branch_kv", "merged_already", "skills_refresh_module", "skills_python", "skills_refresh_cli", "refresh_bundled_skills"]
+LIFTED = [
+    "logline",
+    "pass",
+    "warn",
+    "fail",
+    "note",
+    "G",
+    "branch_kv",
+    "merged_already",
+    "skills_refresh_module",
+    "skills_python",
+    "skills_refresh_cli",
+    "refresh_bundled_skills",
+]
 
 
 def _bash() -> str:
@@ -57,8 +70,14 @@ class Install:
     """A temp install: a git repo with `local` at 2.98.0 and `upstream` at
     TARGET, the module file, and a stub .venv/bin/python."""
 
-    def __init__(self, tmp: Path, *, module: bool = True, venv: bool = True,
-                 upstream_version: str | None = TARGET):
+    def __init__(
+        self,
+        tmp: Path,
+        *,
+        module: bool = True,
+        venv: bool = True,
+        upstream_version: str | None = TARGET,
+    ):
         self.root = tmp / "install"
         self.root.mkdir()
         self.record = tmp / "argv.txt"
@@ -76,7 +95,9 @@ class Install:
             (self.root / "VERSION").unlink()
             _git(self.root, "rm", "-q", "--cached", "VERSION")
         else:
-            (self.root / "VERSION").write_text(f"version={upstream_version}\nmin_upgrade_from=2.90.0\n")
+            (self.root / "VERSION").write_text(
+                f"version={upstream_version}\nmin_upgrade_from=2.90.0\n"
+            )
             _git(self.root, "add", "VERSION")
         (self.root / "notes.txt").write_text("a release\n")
         _git(self.root, "add", "notes.txt")
@@ -111,9 +132,9 @@ class Install:
         script = (
             "set -uo pipefail\n"
             f'REPO_ROOT="{self.root}"\nFAILS={fails}; WARNS=0; ACTIONS=0\n'
-            'LOGFILE=/dev/null; CURCMD=test\n'
+            "LOGFILE=/dev/null; CURCMD=test\n"
             f"{defs}\n"
-            f"{call}\nrc=$?\necho \"rc=$rc fails=$FAILS warns=$WARNS\"\n"
+            f'{call}\nrc=$?\necho "rc=$rc fails=$FAILS warns=$WARNS"\n'
         )
         return subprocess.run([_bash(), "-c", script], capture_output=True, text=True, timeout=60)
 
@@ -124,10 +145,15 @@ def install(tmp_path) -> Install:
 
 
 def _protocol(out: subprocess.CompletedProcess) -> list[str]:
-    return [ln for ln in out.stdout.splitlines() if ln.split(" ", 1)[0] in ("PASS", "WARN", "FAIL", "USERACTION")]
+    return [
+        ln
+        for ln in out.stdout.splitlines()
+        if ln.split(" ", 1)[0] in ("PASS", "WARN", "FAIL", "USERACTION")
+    ]
 
 
 # ── the module is absent: the step is a skip ─────────────────────────────────
+
 
 def test_a_tree_without_the_module_skips_the_step(tmp_path):
     inst = Install(tmp_path, module=False)
@@ -138,6 +164,7 @@ def test_a_tree_without_the_module_skips_the_step(tmp_path):
 
 
 # ── refresh_bundled_skills ───────────────────────────────────────────────────
+
 
 def test_refresh_runs_the_comparison_after_the_merge_with_no_target_or_ref(install):
     install.merge_upstream()
@@ -159,8 +186,9 @@ def test_a_comparison_that_fails_is_a_warning_never_a_failure(install, code):
     install.exits(code)
     out = install.run("refresh_bundled_skills")
     assert "rc=0 fails=0 warns=1" in out.stdout
-    assert any(ln.startswith("WARN skills-refresh:") and "refresh sync" in ln
-               for ln in _protocol(out))
+    assert any(
+        ln.startswith("WARN skills-refresh:") and "refresh sync" in ln for ln in _protocol(out)
+    )
 
 
 def test_with_no_interpreter_the_comparison_warns(tmp_path):
@@ -179,6 +207,7 @@ def test_a_rollback_refreshes_nothing(install):
 
 
 # ── where the steps sit: order assertions on update.sh's own text ────────────
+
 
 def _calls_of(name: str) -> list[str]:
     """Every line that CALLS `name` (an indented statement, not its definition)."""

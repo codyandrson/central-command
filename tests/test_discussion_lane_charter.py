@@ -45,10 +45,18 @@ async def _open_lane(agent_id: str = AGENT) -> dict:
     item_id = f"lanetest-item-{suffix}"
     await repo.create_running_session(task_session, agent_id)
     await repo.create_operator_item(
-        item_id, "question", task_session, agent_id, "Which project?",
+        item_id,
+        "question",
+        task_session,
+        agent_id,
+        "Which project?",
     )
     lane = await questions._open_discussion(
-        item_id, agent_id, task_session, "Which project?", "the task names none",
+        item_id,
+        agent_id,
+        task_session,
+        "Which project?",
+        "the task names none",
     )
     assert lane is not None
     return {"lane": lane, "item_id": item_id, "task_session": task_session}
@@ -93,9 +101,11 @@ async def test_a_seeded_lane_takes_a_turn_on_that_history():
     assert out["session_id"] == ids["lane"]
     history = load_messages(await repo.get_session_run_state(ids["lane"]))
     # Still exactly one charter, at the front — the turn did not add a second.
-    charters = [m for m in history
-                if isinstance(m, ModelRequest)
-                and any(isinstance(p, SystemPromptPart) for p in m.parts)]
+    charters = [
+        m
+        for m in history
+        if isinstance(m, ModelRequest) and any(isinstance(p, SystemPromptPart) for p in m.parts)
+    ]
     assert charters == [history[0]]
 
 

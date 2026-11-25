@@ -77,7 +77,9 @@ async def test_the_wire_shape_the_settings_page_reads(client, catalog, clean_set
 
 
 @needs_pg
-async def test_an_unreadable_proxy_still_answers_with_the_current_models(client, monkeypatch, clean_setting):
+async def test_an_unreadable_proxy_still_answers_with_the_current_models(
+    client, monkeypatch, clean_setting
+):
     async def down(_op):
         raise litellm.LiteLLMError("speech model catalog — http://litellm.test:4000 unreachable")
 
@@ -94,8 +96,12 @@ async def test_an_unreadable_proxy_still_answers_with_the_current_models(client,
 
 
 @needs_pg
-async def test_a_listed_model_is_chosen_and_an_unlisted_one_is_refused(client, catalog, clean_setting):
-    resp = await client.put("/api/speech/models", json={"tts": "kokoro-alt", "stt": "whisper-large"})
+async def test_a_listed_model_is_chosen_and_an_unlisted_one_is_refused(
+    client, catalog, clean_setting
+):
+    resp = await client.put(
+        "/api/speech/models", json={"tts": "kokoro-alt", "stt": "whisper-large"}
+    )
     assert resp.status_code == 200
     assert resp.json()["tts"]["selected"] == "kokoro-alt"
     assert resp.json()["stt"]["selected"] == "whisper-large"
@@ -140,7 +146,9 @@ async def test_the_routes_send_the_chosen_model(client, catalog, clean_setting, 
 
     assert (await client.post("/api/tts", json={"text": "hi"})).status_code == 200
     assert sent[-1] == ("tts", "kokoro-alt")
-    resp = await client.post("/api/transcribe", files={"file": ("a.webm", b"RIFFxxxx", "audio/webm")})
+    resp = await client.post(
+        "/api/transcribe", files={"file": ("a.webm", b"RIFFxxxx", "audio/webm")}
+    )
     assert resp.status_code == 200
     assert sent[-1] == ("stt", "whisper-large")
     assert (await client.get("/api/transcribe/config")).json()["model"] == "whisper-large"

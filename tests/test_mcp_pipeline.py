@@ -106,14 +106,18 @@ async def test_propose_deploy_test_model_is_a_stub(monkeypatch):
     assert "test model" in out
 
 
-@pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])
+@pytest.mark.parametrize(
+    "server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""]
+)
 async def test_propose_build_bad_server_ids_are_refused(monkeypatch, server_id):
     monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_build(_Ctx(), server_id, "test")
     assert "refused" in out
 
 
-@pytest.mark.parametrize("server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""])
+@pytest.mark.parametrize(
+    "server_id", ["Central Command-Server", "cc-anything", "a", "has_underscore", ""]
+)
 async def test_propose_deploy_bad_server_ids_are_refused(monkeypatch, server_id):
     monkeypatch.setattr(settings, "test_model", False)
     out = await tools_mod.propose_mcp_deploy(_Ctx(), server_id, "test")
@@ -195,7 +199,8 @@ async def test_build_refuses_when_not_yet_synced(monkeypatch):
         with pytest.raises(executor.ExecutionFailed, match="not passed sync review"):
             await executor.execute(
                 [_action("mcp.build_image@v1", server_id)],
-                approver="human:lee", source_refs=[],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _delete_mcp_server(server_id)
@@ -206,7 +211,8 @@ async def test_build_refuses_with_no_row_at_all(monkeypatch):
     with pytest.raises(executor.ExecutionFailed, match="not passed sync review"):
         await executor.execute(
             [_action("mcp.build_image@v1", "no-such-server")],
-            approver="human:lee", source_refs=[],
+            approver="human:lee",
+            source_refs=[],
         )
 
 
@@ -221,7 +227,8 @@ async def test_build_refuses_missing_dockerfile(monkeypatch, tmp_path):
         with pytest.raises(executor.ExecutionFailed, match="Dockerfile does not exist"):
             await executor.execute(
                 [_action("mcp.build_image@v1", server_id)],
-                approver="human:lee", source_refs=[],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _delete_mcp_server(server_id)
@@ -240,7 +247,8 @@ async def test_build_refuses_with_no_build_host(monkeypatch, tmp_path):
         with pytest.raises(executor.ExecutionFailed, match="no build host configured"):
             await executor.execute(
                 [_action("mcp.build_image@v1", server_id)],
-                approver="human:lee", source_refs=[],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _delete_mcp_server(server_id)
@@ -254,7 +262,8 @@ async def test_deploy_refuses_when_not_yet_built(monkeypatch):
         with pytest.raises(executor.ExecutionFailed, match="not built yet"):
             await executor.execute(
                 [_action("mcp.server_deploy@v1", server_id)],
-                approver="human:lee", source_refs=[],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _delete_mcp_server(server_id)
@@ -264,15 +273,18 @@ async def test_deploy_refuses_when_not_yet_built(monkeypatch):
 async def test_deploy_refuses_with_no_kubeconfig(monkeypatch):
     server_id = "no-kubeconfig"
     await _insert_mcp_server(
-        server_id, "built",
-        image_ref="docker.io/library/cc-mcp-no-kubeconfig:abc", digest="sha256:abc",
+        server_id,
+        "built",
+        image_ref="docker.io/library/cc-mcp-no-kubeconfig:abc",
+        digest="sha256:abc",
     )
     try:
         monkeypatch.setattr(settings, "mcp_deploy_kubeconfig", "")
         with pytest.raises(executor.ExecutionFailed, match="deploy kubeconfig not configured"):
             await executor.execute(
                 [_action("mcp.server_deploy@v1", server_id)],
-                approver="human:lee", source_refs=[],
+                approver="human:lee",
+                source_refs=[],
             )
     finally:
         await _delete_mcp_server(server_id)
@@ -305,7 +317,9 @@ async def test_build_happy_path_exact_ssh_tar_podman_shapes_and_row_update(monke
         async def fake_run(cmd=None, *, shell_cmd=None, stdin=None, cwd=None, timeout=600.0):
             calls.append({"cmd": cmd, "shell_cmd": shell_cmd, "stdin": stdin})
             if shell_cmd and "podman build" in shell_cmd:
-                assert shell_cmd.startswith(f"tar -C {server_dir} -cf - . | ssh build-host.example.com ")
+                assert shell_cmd.startswith(
+                    f"tar -C {server_dir} -cf - . | ssh build-host.example.com "
+                )
                 assert f"podman build -t {ref} -f Dockerfile -" in shell_cmd
                 return 0, "Successfully built\n", ""
             if shell_cmd and "podman image inspect" in shell_cmd:
@@ -324,7 +338,9 @@ async def test_build_happy_path_exact_ssh_tar_podman_shapes_and_row_update(monke
 
         outcome = await executor.execute(
             [_action("mcp.build_image@v1", server_id)],
-            approver="human:lee", source_refs=[], proposer="mcp-tester",
+            approver="human:lee",
+            source_refs=[],
+            proposer="mcp-tester",
             proposal_id=proposal_id,
         )
         assert len(calls) == 4
@@ -340,7 +356,9 @@ async def test_build_happy_path_exact_ssh_tar_podman_shapes_and_row_update(monke
 
 
 @needs_pg
-async def test_build_refuses_when_import_verify_is_a_near_miss_not_an_exact_match(monkeypatch, tmp_path):
+async def test_build_refuses_when_import_verify_is_a_near_miss_not_an_exact_match(
+    monkeypatch, tmp_path
+):
     """The exact-match grep bite mark: a near-miss (extra trailing char) in
     the image list must NOT be treated as presence."""
     server_id = "build-near-miss"
@@ -371,7 +389,9 @@ async def test_build_refuses_when_import_verify_is_a_near_miss_not_an_exact_matc
         with pytest.raises(executor.ExecutionFailed, match="not found"):
             await executor.execute(
                 [_action("mcp.build_image@v1", server_id)],
-                approver="human:lee", source_refs=[], proposal_id=proposal_id,
+                approver="human:lee",
+                source_refs=[],
+                proposal_id=proposal_id,
             )
 
         row = await repo.get_mcp_server(server_id)
@@ -394,8 +414,14 @@ async def test_deploy_happy_path_exact_kubectl_argv_and_stdin_and_row_update(mon
             calls.append({"cmd": cmd, "stdin": stdin})
             if cmd and cmd[:2] == ["kubectl", "--kubeconfig"] and "apply" in cmd:
                 assert cmd == [
-                    "kubectl", "--kubeconfig", "/tmp/fake.kubeconfig",
-                    "-n", "cc-mcp", "apply", "-f", "-",
+                    "kubectl",
+                    "--kubeconfig",
+                    "/tmp/fake.kubeconfig",
+                    "-n",
+                    "cc-mcp",
+                    "apply",
+                    "-f",
+                    "-",
                 ]
                 manifest = json.loads(stdin)
                 assert manifest["kind"] == "List"
@@ -408,8 +434,15 @@ async def test_deploy_happy_path_exact_kubectl_argv_and_stdin_and_row_update(mon
                 return 0, "deployment.apps/deploy-happy created\n", ""
             if cmd and "rollout" in cmd:
                 assert cmd == [
-                    "kubectl", "--kubeconfig", "/tmp/fake.kubeconfig", "-n", "cc-mcp",
-                    "rollout", "status", f"deployment/{server_id}", "--timeout=90s",
+                    "kubectl",
+                    "--kubeconfig",
+                    "/tmp/fake.kubeconfig",
+                    "-n",
+                    "cc-mcp",
+                    "rollout",
+                    "status",
+                    f"deployment/{server_id}",
+                    "--timeout=90s",
                 ]
                 return 0, "deployment successfully rolled out\n", ""
             raise AssertionError(f"unexpected _run call: {cmd!r}")
@@ -418,7 +451,8 @@ async def test_deploy_happy_path_exact_kubectl_argv_and_stdin_and_row_update(mon
 
         outcome = await executor.execute(
             [_action("mcp.server_deploy@v1", server_id)],
-            approver="human:lee", source_refs=[],
+            approver="human:lee",
+            source_refs=[],
         )
         assert len(calls) == 2
         assert "cc-mcp.svc.cluster.local:8000" in outcome.result_text

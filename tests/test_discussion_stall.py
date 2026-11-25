@@ -9,6 +9,7 @@ RUNTIME-060 / R12 (epic small-fixes, story 11.16): the sweep reads
 `settings.discussion_stall_hours`, it does not hard-code 24. The
 setting-varied cases below move the setting and leave the quiet time alone.
 """
+
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -26,8 +27,12 @@ NOW = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
 def _case(*, quiet_hours=48, last_turn_by="agent", stalled_at=None, nudged_at=None):
     moved = NOW - timedelta(hours=quiet_hours)
     return {
-        "item": {"id": "item_x", "status": "OPEN", "stalled_at": stalled_at,
-                 "nudged_at": nudged_at},
+        "item": {
+            "id": "item_x",
+            "status": "OPEN",
+            "stalled_at": stalled_at,
+            "nudged_at": nudged_at,
+        },
         "session": {"id": "sess_x", "updated_at": moved},
         "last_turn_by": last_turn_by,
         "now": NOW,
@@ -50,27 +55,39 @@ def test_operator_spoke_last_is_s2_waiting_on_the_agent():
 def test_already_flagged_in_this_quiet_window_is_not_reflagged():
     """Idempotence: the sweep runs every tick and must flag once per window."""
     moved = NOW - timedelta(hours=48)
-    assert classify_discussion_stall(
-        **_case(last_turn_by="agent", stalled_at=moved + timedelta(minutes=1))
-    ) is None
+    assert (
+        classify_discussion_stall(
+            **_case(last_turn_by="agent", stalled_at=moved + timedelta(minutes=1))
+        )
+        is None
+    )
 
 
 def test_flagged_before_the_session_last_moved_is_flagged_again():
     """Quiet -> movement -> quiet again is a NEW stall, not one already handled."""
     moved = NOW - timedelta(hours=48)
-    assert classify_discussion_stall(
-        **_case(last_turn_by="agent", stalled_at=moved - timedelta(days=3))
-    ) == "S1"
+    assert (
+        classify_discussion_stall(
+            **_case(last_turn_by="agent", stalled_at=moved - timedelta(days=3))
+        )
+        == "S1"
+    )
 
 
 def test_s2_idempotence_uses_the_nudge_stamp_not_the_stall_stamp():
     moved = NOW - timedelta(hours=48)
-    assert classify_discussion_stall(
-        **_case(last_turn_by="operator", nudged_at=moved + timedelta(minutes=1))
-    ) is None
-    assert classify_discussion_stall(
-        **_case(last_turn_by="operator", stalled_at=moved + timedelta(minutes=1))
-    ) == "S2"
+    assert (
+        classify_discussion_stall(
+            **_case(last_turn_by="operator", nudged_at=moved + timedelta(minutes=1))
+        )
+        is None
+    )
+    assert (
+        classify_discussion_stall(
+            **_case(last_turn_by="operator", stalled_at=moved + timedelta(minutes=1))
+        )
+        == "S2"
+    )
 
 
 def test_an_answered_item_is_never_a_stall():
@@ -168,17 +185,21 @@ async def _make_discussion(*, quiet_hours: float, last_turn: str) -> dict:
     # An agent's ask carries the tool call it paused on; an item without one
     # is a notice and is acknowledged, not resumed (v2.37.0).
     await repo.create_operator_item(
-        ids["item_id"], "question", ids["task_session"], AGENT,
-        "Which project should this land in?", task_id=ids["task_id"],
+        ids["item_id"],
+        "question",
+        ids["task_session"],
+        AGENT,
+        "Which project should this land in?",
+        task_id=ids["task_id"],
         tool_call_id=f"call-{suffix}",
     )
     await repo.link_operator_item_discussion(ids["item_id"], ids["discussion_session"])
     conn = await repo._conn()
     try:
         await conn.execute(
-            "update session set updated_at = now() - ($2 || ' hours')::interval"
-            " where id = $1",
-            ids["discussion_session"], str(quiet_hours),
+            "update session set updated_at = now() - ($2 || ' hours')::interval where id = $1",
+            ids["discussion_session"],
+            str(quiet_hours),
         )
     finally:
         await conn.close()
@@ -190,7 +211,8 @@ async def _events(kind: str, ref_id: str) -> list[dict]:
     try:
         rows = await conn.fetch(
             "select * from audit_event where kind = $1 and ref_id = $2 order by id",
-            kind, ref_id,
+            kind,
+            ref_id,
         )
         return [dict(r) for r in rows]
     finally:
@@ -221,9 +243,7 @@ def test_the_stall_window_defaults_to_24_hours():
 
 
 @needs_pg
-async def test_the_sweep_flags_by_the_setting_not_a_constant(
-    discussion_lab, monkeypatch
-):
+async def test_the_sweep_flags_by_the_setting_not_a_constant(discussion_lab, monkeypatch):
     """RUNTIME-060 / R12: one discussion, quiet 2 hours, the agent spoke last.
     Under `discussion_stall_hours=1` the sweep flags it; under 48 it does not,
     and the lane is left unstamped so a later, shorter setting still can."""
@@ -255,6 +275,7 @@ async def test_a_stalled_discussion_is_flagged_once(discussion_lab):
     payload = events[0]["payload"]
     if isinstance(payload, str):
         import json
+
         payload = json.loads(payload)
     assert payload["task_id"] == ids["task_id"]
     assert payload["agent_id"] == AGENT
@@ -268,9 +289,7 @@ async def test_a_stalled_discussion_is_flagged_once(discussion_lab):
 
 
 @needs_pg
-async def test_a_stalled_discussion_awaiting_the_agent_is_nudged_once(
-    discussion_lab, monkeypatch
-):
+async def test_a_stalled_discussion_awaiting_the_agent_is_nudged_once(discussion_lab, monkeypatch):
     """S2: the operator replied and the agent never concluded. The nudge is a
     real agent turn, so the test monkeypatches it — a test must never call
     Claude."""
@@ -309,9 +328,7 @@ async def test_a_sweep_that_finds_nothing_writes_no_event_at_all(discussion_lab)
 
     await _make_discussion(quiet_hours=0.5, last_turn="agent")
     before = await repo.latest_event_id()
-    out = await fire(
-        {"id": "gvtest-sched", "action_kind": "discussion.sweep", "action_params": {}}
-    )
+    out = await fire({"id": "gvtest-sched", "action_kind": "discussion.sweep", "action_params": {}})
     assert out["quiet"] is True, "a no-op sweep was recorded as material"
     assert await repo.latest_event_id() == before, "a no-op sweep wrote to the log"
 
@@ -319,9 +336,7 @@ async def test_a_sweep_that_finds_nothing_writes_no_event_at_all(discussion_lab)
     # Without this half, the assertion above would pass just as happily against
     # a sweep that never writes anything under any circumstances.
     stalled = await _make_discussion(quiet_hours=48, last_turn="agent")
-    out = await fire(
-        {"id": "gvtest-sched", "action_kind": "discussion.sweep", "action_params": {}}
-    )
+    out = await fire({"id": "gvtest-sched", "action_kind": "discussion.sweep", "action_params": {}})
     assert "quiet" not in out and out["ok"]
     assert stalled["item_id"] in out["result"]["stalled"]
     assert await repo.latest_event_id() > before
@@ -354,9 +369,7 @@ def no_task_resume(monkeypatch):
 
 
 @needs_pg
-async def test_concluding_a_discussion_emits_conversation_ended(
-    discussion_lab, no_task_resume
-):
+async def test_concluding_a_discussion_emits_conversation_ended(discussion_lab, no_task_resume):
     """The regression test for the live bug: `conclude_discussion` flipped the
     session to DONE and emitted nothing, so the cockpit's session panel — which
     refreshes on `cc.conversation.ended` — kept a stale open row. Push the
@@ -396,8 +409,7 @@ def test_a_concluded_discussion_is_read_only():
     from central_command.runtime.converse import why_not_sendable
 
     blocked = why_not_sendable(
-        {"id": "sess_c", "mode": "conversation", "status": "DONE",
-         "closed_reason": "concluded"}
+        {"id": "sess_c", "mode": "conversation", "status": "DONE", "closed_reason": "concluded"}
     )
     assert blocked is not None
     assert blocked[0] == "discussion_concluded"
@@ -409,17 +421,19 @@ def test_an_ordinary_closed_conversation_is_still_writable():
     discussion locks."""
     from central_command.runtime.converse import why_not_sendable
 
-    assert why_not_sendable(
-        {"id": "sess_o", "mode": "conversation", "status": "DONE",
-         "closed_reason": "operator"}
-    ) is None
-    assert why_not_sendable(
-        {"id": "sess_o", "mode": "conversation", "status": "DONE",
-         "closed_reason": None}
-    ) is None
-    assert why_not_sendable(
-        {"id": "sess_o", "mode": "conversation", "status": "DONE"}
-    ) is None
+    assert (
+        why_not_sendable(
+            {"id": "sess_o", "mode": "conversation", "status": "DONE", "closed_reason": "operator"}
+        )
+        is None
+    )
+    assert (
+        why_not_sendable(
+            {"id": "sess_o", "mode": "conversation", "status": "DONE", "closed_reason": None}
+        )
+        is None
+    )
+    assert why_not_sendable({"id": "sess_o", "mode": "conversation", "status": "DONE"}) is None
 
 
 def test_a_locked_discussion_also_disables_the_cockpit_composer():
@@ -444,8 +458,11 @@ async def test_composer_state_carries_closed_reason_to_the_cockpit(monkeypatch):
     from central_command.db import repo
 
     row = {
-        "id": "sess_cr", "agent_id": "jira-expert", "mode": "conversation",
-        "status": "DONE", "closed_reason": "operator",
+        "id": "sess_cr",
+        "agent_id": "jira-expert",
+        "mode": "conversation",
+        "status": "DONE",
+        "closed_reason": "operator",
     }
 
     async def fake_get(_sid):
@@ -474,10 +491,17 @@ async def test_decisions_list_carries_discussion_session_id(monkeypatch):
     from central_command.db import repo
 
     item = {
-        "id": "oi_1", "kind": "question", "session_id": "sess_q",
-        "agent_id": "ea", "task_id": "task_1", "body": "which board?",
-        "status": "OPEN", "verdict": None, "answer": None,
-        "created_at": None, "answered_at": None,
+        "id": "oi_1",
+        "kind": "question",
+        "session_id": "sess_q",
+        "agent_id": "ea",
+        "task_id": "task_1",
+        "body": "which board?",
+        "status": "OPEN",
+        "verdict": None,
+        "answer": None,
+        "created_at": None,
+        "answered_at": None,
         "discussion_session_id": "sess_lane",
     }
 
@@ -507,29 +531,51 @@ async def test_decisions_list_carries_whether_the_lane_is_still_open(monkeypatch
     from central_command.db import repo
 
     open_item = {
-        "id": "oi_open", "kind": "question", "session_id": "sess_q1",
-        "agent_id": "ea", "task_id": None, "body": "which board?",
-        "status": "OPEN", "verdict": None, "answer": None,
-        "created_at": None, "answered_at": None,
+        "id": "oi_open",
+        "kind": "question",
+        "session_id": "sess_q1",
+        "agent_id": "ea",
+        "task_id": None,
+        "body": "which board?",
+        "status": "OPEN",
+        "verdict": None,
+        "answer": None,
+        "created_at": None,
+        "answered_at": None,
         "discussion_session_id": "sess_lane_open",
     }
     closed_item = {
-        "id": "oi_closed", "kind": "question", "session_id": "sess_q2",
-        "agent_id": "ea", "task_id": None, "body": "which board again?",
-        "status": "OPEN", "verdict": None, "answer": None,
-        "created_at": None, "answered_at": None,
+        "id": "oi_closed",
+        "kind": "question",
+        "session_id": "sess_q2",
+        "agent_id": "ea",
+        "task_id": None,
+        "body": "which board again?",
+        "status": "OPEN",
+        "verdict": None,
+        "answer": None,
+        "created_at": None,
+        "answered_at": None,
         "discussion_session_id": "sess_lane_closed",
     }
     plain_item = {
-        "id": "oi_plain", "kind": "question", "session_id": "sess_q3",
-        "agent_id": "ea", "task_id": None, "body": "plain question",
-        "status": "OPEN", "verdict": None, "answer": None,
-        "created_at": None, "answered_at": None,
+        "id": "oi_plain",
+        "kind": "question",
+        "session_id": "sess_q3",
+        "agent_id": "ea",
+        "task_id": None,
+        "body": "plain question",
+        "status": "OPEN",
+        "verdict": None,
+        "answer": None,
+        "created_at": None,
+        "answered_at": None,
         "discussion_session_id": None,
     }
 
-    monkeypatch.setattr(repo, "list_operator_items",
-                         lambda _s: _async([open_item, closed_item, plain_item]))
+    monkeypatch.setattr(
+        repo, "list_operator_items", lambda _s: _async([open_item, closed_item, plain_item])
+    )
     monkeypatch.setattr(repo, "task_titles", lambda ids: _async({}))
     monkeypatch.setattr(repo, "list_proposals", lambda *a, **k: _async([]))
     monkeypatch.setattr(repo, "list_work_items", lambda *a, **k: _async([]))
@@ -563,15 +609,23 @@ async def test_decisions_list_carries_the_asks_source_email(monkeypatch):
     from central_command.db import repo
 
     item = {
-        "id": "oi_2", "kind": "question", "session_id": "sess_email",
-        "agent_id": "inbox-triage", "task_id": None,
+        "id": "oi_2",
+        "kind": "question",
+        "session_id": "sess_email",
+        "agent_id": "inbox-triage",
+        "task_id": None,
         "body": "is Goodwin & Co. your HOA?",
-        "status": "OPEN", "verdict": None, "answer": None,
-        "created_at": None, "answered_at": None,
+        "status": "OPEN",
+        "verdict": None,
+        "answer": None,
+        "created_at": None,
+        "answered_at": None,
         "discussion_session_id": None,
     }
     email = {
-        "id": "wi_1", "kind": "email", "session_id": "sess_email",
+        "id": "wi_1",
+        "kind": "email",
+        "session_id": "sess_email",
         "subject": "Reminder: Budget Ratification Meeting",
         "payload": {"from": "hoa@example.com", "text": "please attend"},
     }
@@ -612,9 +666,7 @@ ANSWER = "TASKS, please."
 
 
 @needs_pg
-async def test_answering_a_linked_question_closes_its_lane(
-    discussion_lab, no_task_resume
-):
+async def test_answering_a_linked_question_closes_its_lane(discussion_lab, no_task_resume):
     from central_command.api.orchestration import answer_item
     from central_command.runtime.durable import simplify_messages
 
@@ -648,17 +700,16 @@ async def test_answering_a_linked_question_closes_its_lane(
 
 
 @needs_pg
-async def test_answering_an_unlinked_question_is_unchanged(
-    discussion_lab, no_task_resume
-):
+async def test_answering_an_unlinked_question_is_unchanged(discussion_lab, no_task_resume):
     """Tier 2 has no lane; the close is strictly additive to that path."""
     from central_command.api.orchestration import answer_item
 
     suffix = uuid.uuid4().hex[:8]
     item_id, session_id = f"{PREFIX}item-{suffix}", f"{PREFIX}task-{suffix}"
     await repo.create_running_session(session_id, AGENT)
-    await repo.create_operator_item(item_id, "question", session_id, AGENT, "A or B?",
-                                    tool_call_id=f"call-{suffix}")
+    await repo.create_operator_item(
+        item_id, "question", session_id, AGENT, "A or B?", tool_call_id=f"call-{suffix}"
+    )
 
     before = await repo.latest_event_id()
     await answer_item(item_id, ANSWER)
@@ -704,7 +755,10 @@ async def test_answering_an_already_closed_lane_does_not_re_close_it(
 
     ids = await _make_discussion(quiet_hours=1, last_turn="operator")
     await close_session(
-        ids["discussion_session"], agent_id=AGENT, reason="operator", actor="operator",
+        ids["discussion_session"],
+        agent_id=AGENT,
+        reason="operator",
+        actor="operator",
     )
 
     await answer_item(ids["item_id"], ANSWER)

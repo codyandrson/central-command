@@ -82,8 +82,7 @@ def call(name, args, cid="c1"):
 
 
 def result(name, content, cid="c1"):
-    return {"part_kind": "tool-return", "tool_name": name, "content": content,
-            "tool_call_id": cid}
+    return {"part_kind": "tool-return", "tool_name": name, "content": content, "tool_call_id": cid}
 
 
 def transcript(*texts):
@@ -114,18 +113,31 @@ class World:
             for aid in (self.agent_a, self.agent_b):
                 await conn.execute(
                     "insert into agent (id, name, model, charter, role, status) "
-                    "values ($1, $1, '', '', 'tester', 'ACTIVE')", aid)
+                    "values ($1, $1, '', '', 'tester', 'ACTIVE')",
+                    aid,
+                )
         finally:
             await conn.close()
         return self
 
     def ctx(self, agent_id=None, session_id=None):
-        return SimpleNamespace(deps=TriageDeps(agent_id=agent_id or self.agent_a,
-                                               session_id=session_id))
+        return SimpleNamespace(
+            deps=TriageDeps(agent_id=agent_id or self.agent_a, session_id=session_id)
+        )
 
-    async def plant(self, agent_id, messages, *, status="DONE", mode="oneshot",
-                    task=None, created_by="operator", mail=None, age_minutes=0,
-                    archived=None):
+    async def plant(
+        self,
+        agent_id,
+        messages,
+        *,
+        status="DONE",
+        mode="oneshot",
+        task=None,
+        created_by="operator",
+        mail=None,
+        age_minutes=0,
+        archived=None,
+    ):
         """One session with a transcript. `age_minutes` back-dates it so the
         listing order is explicit. `task` / `mail` link what started it."""
         self._n += 1
@@ -136,23 +148,36 @@ class World:
                 "insert into session (id, agent_id, status, mode, run_state, created_at, "
                 "updated_at) values ($1, $2, $3, $4, $5::jsonb, "
                 "now() - make_interval(mins => $6), now() - make_interval(mins => $6))",
-                sid, agent_id, status, mode,
+                sid,
+                agent_id,
+                status,
+                mode,
                 json.dumps({"messages": messages, **({"archived": archived} if archived else {})}),
-                age_minutes)
+                age_minutes,
+            )
             self.sessions.append(sid)
             if task is not None:
                 tid = f"task-recall-{self.tag}-{self._n}"
                 await conn.execute(
                     "insert into task (id, title, instructions, agent_id, status, session_id, "
                     "created_by) values ($1, $2, 'x', $3, 'DONE', $4, $5)",
-                    tid, task, agent_id, sid, created_by)
+                    tid,
+                    task,
+                    agent_id,
+                    sid,
+                    created_by,
+                )
                 self.tasks.append(tid)
             if mail is not None:
                 wid = f"wi-recall-{self.tag}-{self._n}"
                 await conn.execute(
                     "insert into work_item (id, message_id, feed, source, subject, payload, "
                     "state, session_id) values ($1, $1, 'live', 'fixture', $2, '{}'::jsonb, "
-                    "'PROCESSED', $3)", wid, mail, sid)
+                    "'PROCESSED', $3)",
+                    wid,
+                    mail,
+                    sid,
+                )
                 self.items.append(wid)
         finally:
             await conn.close()
@@ -163,16 +188,22 @@ class World:
         try:
             await conn.execute(
                 "update session set run_state = $2::jsonb, updated_at = now() where id = $1",
-                sid, json.dumps({"messages": messages}))
+                sid,
+                json.dumps({"messages": messages}),
+            )
         finally:
             await conn.close()
 
     async def rows(self, sid):
         conn = await repo._conn()
         try:
-            return [dict(r) for r in await conn.fetch(
-                "select * from session_recall where session_id = $1 "
-                "order by msg_idx, part_idx", sid)]
+            return [
+                dict(r)
+                for r in await conn.fetch(
+                    "select * from session_recall where session_id = $1 order by msg_idx, part_idx",
+                    sid,
+                )
+            ]
         finally:
             await conn.close()
 
@@ -180,14 +211,16 @@ class World:
         conn = await repo._conn()
         try:
             r = await conn.fetchrow(
-                "select indexed_messages from session_recall_mark where session_id = $1", sid)
+                "select indexed_messages from session_recall_mark where session_id = $1", sid
+            )
             return r["indexed_messages"] if r else None
         finally:
             await conn.close()
 
     async def search(self, **kw):
-        return await tools.search_my_sessions(self.ctx(kw.pop("agent_id", None),
-                                                       kw.pop("current", None)), **kw)
+        return await tools.search_my_sessions(
+            self.ctx(kw.pop("agent_id", None), kw.pop("current", None)), **kw
+        )
 
     async def close(self):
         conn = await repo._conn()
@@ -198,8 +231,7 @@ class World:
                 await conn.execute("delete from task where id = any($1)", self.tasks)
             if self.sessions:  # the index rows follow by cascade
                 await conn.execute("delete from session where id = any($1)", self.sessions)
-            await conn.execute(
-                "delete from agent where id = any($1)", [self.agent_a, self.agent_b])
+            await conn.execute("delete from agent where id = any($1)", [self.agent_a, self.agent_b])
         finally:
             await conn.close()
 
@@ -217,14 +249,16 @@ async def world():
 
 
 def test_extract_keeps_what_is_worth_recalling_and_nothing_else():
-    state = {"messages": [
-        req(sysp(), prompt("Please look at DEMO-12.")),
-        resp(think(), call("jira_get_issue", {"issue_key": "DEMO-12"}), say("Looking.")),
-        req(result("jira_get_issue", {"summary": "Fix the thing"})),
-        resp(call(tools.search_my_sessions.__name__, {"query": "DEMO-12"}, "c9")),
-        req(result("search_my_sessions", "RECORD recalled ... DEMO-12", "c9")),
-        resp(say("Done.")),
-    ]}
+    state = {
+        "messages": [
+            req(sysp(), prompt("Please look at DEMO-12.")),
+            resp(think(), call("jira_get_issue", {"issue_key": "DEMO-12"}), say("Looking.")),
+            req(result("jira_get_issue", {"summary": "Fix the thing"})),
+            resp(call(tools.search_my_sessions.__name__, {"query": "DEMO-12"}, "c9")),
+            req(result("search_my_sessions", "RECORD recalled ... DEMO-12", "c9")),
+            resp(say("Done.")),
+        ]
+    }
     total, parts, end = session_recall.extract(state)
     assert total == 6 and end == 6
     kinds = [(p[0], p[1], p[2], p[3]) for p in parts]
@@ -257,10 +291,14 @@ def test_parse_query_reads_phrases_exclusions_and_or():
     assert terms == [("DEMO-12", False), ("late fee", False), ("invoice", True)]
     assert mode == "and"
     assert session_recall.parse_query("alpha OR beta") == (
-        [("alpha", False), ("beta", False)], "or")
+        [("alpha", False), ("beta", False)],
+        "or",
+    )
     assert session_recall.parse_query("  ---  ") == ([], "and")
-    assert len(session_recall.parse_query(" ".join(f"w{i}" for i in range(40)))[0]) == \
-        session_recall.MAX_TERMS
+    assert (
+        len(session_recall.parse_query(" ".join(f"w{i}" for i in range(40)))[0])
+        == session_recall.MAX_TERMS
+    )
 
 
 def test_the_separator_rule_is_one_spelling_in_schema_python_and_repo():
@@ -295,8 +333,15 @@ def test_the_pack_is_a_read_with_guidance_and_the_templates_carry_it():
     assert "not instructions" in pack.guidance
     assert "session-recall" in packs.advisory_packs(["session-recall"])
     assert set(packs.toolset_for(["session-recall"]).tools) == {"search_my_sessions"}
-    loadouts = [*TEMPLATES.values(), STEWARD_TEMPLATE, GRAPH_CURATOR_TEMPLATE, EA_TEMPLATE,
-                MCP_MANAGER_TEMPLATE, EDITOR_TEMPLATE, ACCOUNTABILITY_TEMPLATE]
+    loadouts = [
+        *TEMPLATES.values(),
+        STEWARD_TEMPLATE,
+        GRAPH_CURATOR_TEMPLATE,
+        EA_TEMPLATE,
+        MCP_MANAGER_TEMPLATE,
+        EDITOR_TEMPLATE,
+        ACCOUNTABILITY_TEMPLATE,
+    ]
     for t in loadouts:
         assert "session-recall" in t.default_packs, f"{t.id} cannot recall its sessions"
     assert "auditor" not in packs.DEFAULT_PACKS
@@ -309,7 +354,9 @@ async def _grants(agent_id: str, *, active: bool = True) -> set[str]:
     try:
         rows = await conn.fetch(
             "select pack from agent_grant where agent_id = $1"
-            + (" and revoked_at is null" if active else ""), agent_id)
+            + (" and revoked_at is null" if active else ""),
+            agent_id,
+        )
     finally:
         await conn.close()
     return {r["pack"] for r in rows}
@@ -317,8 +364,15 @@ async def _grants(agent_id: str, *, active: bool = True) -> set[str]:
 
 @needs_pg
 async def test_a_fresh_database_gives_the_roster_the_pack_and_the_auditors_never():
-    for agent_id in ("inbox-triage", "jira-expert", "orchestrator", "litellm-manager",
-                     "coach", "confluence-expert", "wiki-agent"):
+    for agent_id in (
+        "inbox-triage",
+        "jira-expert",
+        "orchestrator",
+        "litellm-manager",
+        "coach",
+        "confluence-expert",
+        "wiki-agent",
+    ):
         assert "session-recall" in await _grants(agent_id), agent_id
     for auditor in ("auditor", "graph-auditor"):
         assert "session-recall" not in await _grants(auditor, active=False), auditor
@@ -328,41 +382,53 @@ async def test_a_fresh_database_gives_the_roster_the_pack_and_the_auditors_never
 async def test_the_migration_is_additive_idempotent_and_never_resurrects_a_revoked_grant():
     sql = _SCHEMA.read_text()
     marker = "-- session-recall for every active agent but the auditors"
-    block = sql[sql.index(marker):]
+    block = sql[sql.index(marker) :]
     assert "a.id not in ('auditor', 'graph-auditor')" in block
     assert not re.search(r"\bdelete\s+from\s+agent_grant", sql, re.IGNORECASE)
     tag = uuid.uuid4().hex[:8]
     holder, revoked, bare, retired, hired = (
-        f"sr-{n}-{tag}" for n in ("holder", "revoked", "bare", "retired", "hired"))
+        f"sr-{n}-{tag}" for n in ("holder", "revoked", "bare", "retired", "hired")
+    )
     conn = await repo._conn()
     try:
-        for aid, status, role in ((holder, "ACTIVE", "r"), (revoked, "ACTIVE", "r"),
-                                  (bare, "ACTIVE", "r"), (retired, "RETIRED", "r"),
-                                  (hired, "ACTIVE", "")):
+        for aid, status, role in (
+            (holder, "ACTIVE", "r"),
+            (revoked, "ACTIVE", "r"),
+            (bare, "ACTIVE", "r"),
+            (retired, "RETIRED", "r"),
+            (hired, "ACTIVE", ""),
+        ):
             await conn.execute(
                 "insert into agent (id, name, model, charter, role, status) "
-                "values ($1, $1, '', '', $2, $3)", aid, role, status)
+                "values ($1, $1, '', '', $2, $3)",
+                aid,
+                role,
+                status,
+            )
         for aid in (holder, revoked, retired, hired):
             await conn.execute(
-                "insert into agent_grant (agent_id, pack) values ($1, 'jira-read')", aid)
+                "insert into agent_grant (agent_id, pack) values ($1, 'jira-read')", aid
+            )
         await conn.execute(
             "insert into agent_grant (agent_id, pack, revoked_at, revoked_reason) "
-            "values ($1, 'session-recall', now(), 'operator took it away')", revoked)
+            "values ($1, 'session-recall', now(), 'operator took it away')",
+            revoked,
+        )
         # the first update after this release: no marker yet
         await conn.execute(
-            "delete from app_setting where key in "
-            "('seed:session-recall', 'seed:skill-propose-all')")
+            "delete from app_setting where key in ('seed:session-recall', 'seed:skill-propose-all')"
+        )
         await conn.execute(block)
         await conn.execute(block)  # a second run changes nothing
     finally:
         await conn.close()
     try:
         assert "session-recall" in await _grants(holder)
-        assert "session-recall" not in await _grants(revoked)          # history kept
+        assert "session-recall" not in await _grants(revoked)  # history kept
         assert "session-recall" in await _grants(revoked, active=False)
-        assert await _grants(bare, active=False) == set()              # takes no toolsets
-        assert await _grants(retired, active=False) == {"jira-read"}   # not active
-        assert await _grants(hired, active=False) == {"jira-read"}     # not on the roster
+        assert await _grants(bare, active=False) == set()  # takes no toolsets
+        assert await _grants(retired, active=False) == {"jira-read"}  # not active
+        assert await _grants(hired, active=False) == {"jira-read"}  # not on the roster
     finally:
         conn = await repo._conn()
         try:
@@ -395,9 +461,11 @@ async def test_one_agent_can_neither_find_nor_read_another_agents_session():
         # scroll and read refuse, in a plain sentence, and leak nothing
         for kw in ({"session_id": theirs}, {"session_id": theirs, "around_message": 0}):
             out = await w.search(**kw)
-            assert out == (f"{theirs} is not one of your own sessions — this tool reads "
-                           "only the calling agent's own past sessions, never another "
-                           "agent's.")
+            assert out == (
+                f"{theirs} is not one of your own sessions — this tool reads "
+                "only the calling agent's own past sessions, never another "
+                "agent's."
+            )
         # an id that is no session at all reads the same
         assert "not one of your own sessions" in await w.search(session_id="nope")
 
@@ -406,8 +474,7 @@ async def test_one_agent_can_neither_find_nor_read_another_agents_session():
         assert await w.mark(theirs) is not None
         # ... and the symmetric: B cannot find A's
         assert "No match" in await w.search(agent_id=w.agent_b, query="ALPHAKEY-1")
-        assert "not one of your own sessions" in await w.search(
-            agent_id=w.agent_b, session_id=mine)
+        assert "not one of your own sessions" in await w.search(agent_id=w.agent_b, session_id=mine)
 
 
 @needs_pg
@@ -425,14 +492,16 @@ async def test_a_search_by_one_agent_indexes_only_that_agents_sessions():
 @needs_pg
 async def test_the_watermark_makes_indexing_idempotent_and_incremental(monkeypatch):
     async with world() as w:
-        stamped = {**prompt("first ask about WIDGETKEY-7"),
-                   "timestamp": "2026-11-10T09:00:00Z"}
-        sid = await w.plant(w.agent_a, [
-            req(sysp(), stamped),
-            resp(say("on it")),
-            req(prompt("second ask")),
-        ])
-        assert await w.rows(sid) == [] and await w.mark(sid) is None   # nothing yet: lazy
+        stamped = {**prompt("first ask about WIDGETKEY-7"), "timestamp": "2026-11-10T09:00:00Z"}
+        sid = await w.plant(
+            w.agent_a,
+            [
+                req(sysp(), stamped),
+                resp(say("on it")),
+                req(prompt("second ask")),
+            ],
+        )
+        assert await w.rows(sid) == [] and await w.mark(sid) is None  # nothing yet: lazy
         assert await session_recall.sync_agent(w.agent_a) == (0, 0)
         first = await w.rows(sid)
         assert [r["msg_idx"] for r in first] == [0, 1, 2] and await w.mark(sid) == 3
@@ -453,13 +522,16 @@ async def test_the_watermark_makes_indexing_idempotent_and_incremental(monkeypat
         assert len(await w.rows(sid)) == 3
 
         # The record grows: only the new messages are indexed.
-        await w.rewrite(sid, [
-            req(sysp(), prompt("first ask about WIDGETKEY-7")),
-            resp(say("on it")),
-            req(prompt("second ask")),
-            resp(say("answer mentions GADGETKEY-9")),
-            req(prompt("third ask")),
-        ])
+        await w.rewrite(
+            sid,
+            [
+                req(sysp(), prompt("first ask about WIDGETKEY-7")),
+                resp(say("on it")),
+                req(prompt("second ask")),
+                resp(say("answer mentions GADGETKEY-9")),
+                req(prompt("third ask")),
+            ],
+        )
         await session_recall.sync_agent(w.agent_a)
         assert calls == [sid]
         rows = await w.rows(sid)
@@ -471,8 +543,12 @@ async def test_the_watermark_makes_indexing_idempotent_and_incremental(monkeypat
 async def test_two_calls_racing_on_one_session_write_each_part_once():
     async with world() as w:
         sid = await w.plant(w.agent_a, transcript("race me", "a", "b", "c"))
-        results = [r[0] for r in await asyncio.gather(*(
-            repo.recall_sync_session(sid, session_recall.extract) for _ in range(4)))]
+        results = [
+            r[0]
+            for r in await asyncio.gather(
+                *(repo.recall_sync_session(sid, session_recall.extract) for _ in range(4))
+            )
+        ]
         assert sum(results) == len(await w.rows(sid)) and sorted(results)[:3] == [0, 0, 0]
         assert await w.mark(sid) == 6
 
@@ -506,8 +582,10 @@ async def test_the_index_is_derived_data_and_rebuilds_from_the_record():
 async def test_indexing_is_bounded_per_call_and_says_what_is_left(monkeypatch):
     monkeypatch.setattr(session_recall, "SYNC_MAX_SESSIONS", 2)
     async with world() as w:
-        sids = [await w.plant(w.agent_a, transcript(f"batch BATCHKEY-{i}", "ok"),
-                              age_minutes=i) for i in range(5)]   # sids[0] is newest
+        sids = [
+            await w.plant(w.agent_a, transcript(f"batch BATCHKEY-{i}", "ok"), age_minutes=i)
+            for i in range(5)
+        ]  # sids[0] is newest
         out = await w.search(query="BATCHKEY-4")
         assert "Index note: 3 of your sessions are not searchable yet" in out
         assert [await w.mark(s) is not None for s in sids] == [True, True, False, False, False]
@@ -535,23 +613,30 @@ async def test_the_current_session_is_indexed_first_and_labelled(monkeypatch):
 async def test_identifiers_are_findable():
     async with world() as w:
         uuid_ = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
-        issue = await w.plant(w.agent_a, [
-            req(prompt("Please update DEMO-12 for Jane Rivers")),
-            resp(call("jira_get_issue", {"issue_key": "DEMO-12"})),
-            req(result("jira_get_issue", {"key": "DEMO-12", "summary": "Fix the thing"})),
-        ])
-        order = await w.plant(w.agent_a, transcript(
-            f"Order ORD-2026-0042 shipped, tracking {uuid_}", "noted"))
-        mail = await w.plant(w.agent_a, transcript(
-            "Reply to jane.doe@example.com about the invoice", "sent"))
-        decoy = await w.plant(w.agent_a, transcript(
-            "DEMO-5 was closed. Unrelated: the count was 12.", "ok"))
+        issue = await w.plant(
+            w.agent_a,
+            [
+                req(prompt("Please update DEMO-12 for Jane Rivers")),
+                resp(call("jira_get_issue", {"issue_key": "DEMO-12"})),
+                req(result("jira_get_issue", {"key": "DEMO-12", "summary": "Fix the thing"})),
+            ],
+        )
+        order = await w.plant(
+            w.agent_a, transcript(f"Order ORD-2026-0042 shipped, tracking {uuid_}", "noted")
+        )
+        mail = await w.plant(
+            w.agent_a, transcript("Reply to jane.doe@example.com about the invoice", "sent")
+        )
+        decoy = await w.plant(
+            w.agent_a, transcript("DEMO-5 was closed. Unrelated: the count was 12.", "ok")
+        )
 
         assert issue in await w.search(query="DEMO-12")
-        assert issue in await w.search(query="demo-12")                  # case-insensitive
-        assert issue in await w.search(query="12 Rivers")                # a bare piece
+        assert issue in await w.search(query="demo-12")  # case-insensitive
+        assert issue in await w.search(query="12 Rivers")  # a bare piece
         assert decoy not in (await w.search(query="DEMO-12")), (
-            "`demo` and `12` far apart are not DEMO-12")
+            "`demo` and `12` far apart are not DEMO-12"
+        )
         assert order in await w.search(query="ORD-2026-0042")
         assert order in await w.search(query="0042")
         assert order in await w.search(query="2026-0042")
@@ -584,12 +669,15 @@ async def test_all_terms_are_required_but_a_miss_widens_to_any_of_them():
 @needs_pg
 async def test_system_prompt_thinking_and_the_tools_own_echo_are_not_indexed():
     async with world() as w:
-        sid = await w.plant(w.agent_a, [
-            req(sysp(), prompt("hello")),
-            resp(think(), call("search_my_sessions", {"query": "ECHOKEY-1"}, "s1")),
-            req(result("search_my_sessions", "RECORD ... ECHOKEY-1 ...", "s1")),
-            resp(say("done")),
-        ])
+        sid = await w.plant(
+            w.agent_a,
+            [
+                req(sysp(), prompt("hello")),
+                resp(think(), call("search_my_sessions", {"query": "ECHOKEY-1"}, "s1")),
+                req(result("search_my_sessions", "RECORD ... ECHOKEY-1 ...", "s1")),
+                resp(say("done")),
+            ],
+        )
         assert "No match" in await w.search(query="CHARTERSENTINEL")
         assert "No match" in await w.search(query="THINKINGSENTINEL")
         assert "No match" in await w.search(query="ECHOKEY-1")
@@ -604,12 +692,25 @@ async def test_system_prompt_thinking_and_the_tools_own_echo_are_not_indexed():
 @needs_pg
 async def test_browse_lists_recent_sessions_with_what_started_them():
     async with world() as w:
-        chat = await w.plant(w.agent_a, transcript("hi", "hello"), mode="conversation",
-                             status="AWAITING_OPERATOR", age_minutes=1)
-        mail = await w.plant(w.agent_a, transcript("mail text", "ok"),
-                             mail="Quarterly invoice from Acme", age_minutes=5)
-        task = await w.plant(w.agent_a, transcript("do it", "done", "really"),
-                             task="Audit TASKS-12 links", age_minutes=10)
+        chat = await w.plant(
+            w.agent_a,
+            transcript("hi", "hello"),
+            mode="conversation",
+            status="AWAITING_OPERATOR",
+            age_minutes=1,
+        )
+        mail = await w.plant(
+            w.agent_a,
+            transcript("mail text", "ok"),
+            mail="Quarterly invoice from Acme",
+            age_minutes=5,
+        )
+        task = await w.plant(
+            w.agent_a,
+            transcript("do it", "done", "really"),
+            task="Audit TASKS-12 links",
+            age_minutes=10,
+        )
         out = await w.search(current=chat)
         lines = out.splitlines()
         assert lines[0].startswith("RECORD recalled from your own past sessions")
@@ -624,8 +725,9 @@ async def test_browse_lists_recent_sessions_with_what_started_them():
         assert "3 messages" in by_id[task] or "4 messages" in by_id[task]
         assert "CURRENT SESSION" not in by_id[task]
         # limit
-        assert len([ln for ln in (await w.search(limit=2)).splitlines()
-                    if ln.startswith("- ")]) == 2
+        assert (
+            len([ln for ln in (await w.search(limit=2)).splitlines() if ln.startswith("- ")]) == 2
+        )
 
 
 @needs_pg
@@ -636,8 +738,12 @@ async def test_discover_hydrates_the_top_hit_and_lists_the_rest_in_one_line():
             msgs.append(resp(say(f"step {i} " + ("NEEDLEKEY-1 found here" if i == 4 else "plain"))))
             msgs.append(req(prompt(f"continue {i}")))
         top = await w.plant(w.agent_a, msgs, task="Long run")
-        other = await w.plant(w.agent_a, transcript("a brief mention of NEEDLEKEY-1", "ok"),
-                              mail="Subject line", age_minutes=30)
+        other = await w.plant(
+            w.agent_a,
+            transcript("a brief mention of NEEDLEKEY-1", "ok"),
+            mail="Subject line",
+            age_minutes=30,
+        )
         out = await w.search(query="NEEDLEKEY-1")
         lines = out.splitlines()
         assert lines[0].startswith("RECORD recalled from your own past sessions")
@@ -645,11 +751,15 @@ async def test_discover_hydrates_the_top_hit_and_lists_the_rest_in_one_line():
         assert re.search(r"\d{4}-\d\d-\d\d", lines[0]), "the date is in the first line"
         assert f"TOP MATCH — session {top}" in out
         # the hit message (index 7: 0 prompt, then resp/req pairs) and two either side
-        hit = next(i for i, m in enumerate(msgs) if m["kind"] == "response"
-                   and "NEEDLEKEY" in m["parts"][0]["content"])
+        hit = next(
+            i
+            for i, m in enumerate(msgs)
+            if m["kind"] == "response" and "NEEDLEKEY" in m["parts"][0]["content"]
+        )
         window = [ln for ln in lines if ln.lstrip(">").lstrip().startswith("[msg ")]
-        assert [int(re.search(r"\[msg (\d+)\]", ln).group(1)) for ln in window] == \
-            list(range(hit - 2, hit + 3))
+        assert [int(re.search(r"\[msg (\d+)\]", ln).group(1)) for ln in window] == list(
+            range(hit - 2, hit + 3)
+        )
         assert any(ln.startswith(">> ") and f"[msg {hit}]" in ln for ln in window)
         # the other session: one line with its id, date and message index
         (line,) = [ln for ln in lines if ln.startswith(f"- {other}")]
@@ -673,7 +783,9 @@ async def test_scroll_returns_a_window_and_reads_the_current_session_too():
         shown = [int(m) for m in re.findall(r"\[msg (\d+)\]", out)]
         assert shown == list(range(5, 12))
         assert "RESULTKEY-4" in out and ">> [msg 8]" in out
-        assert "Previous window: around_message=4." in out and "Next window: around_message=12." in out
+        assert (
+            "Previous window: around_message=4." in out and "Next window: around_message=12." in out
+        )
         # a tool result is re-readable verbatim
         assert "payload 5 RESULTKEY-5" in out
         assert "outside it" in await w.search(session_id=sid, around_message=999)
@@ -710,13 +822,16 @@ async def test_read_gives_an_outline_of_how_it_started_and_ended():
 async def test_a_heartbeat_session_ranks_below_task_mail_and_chat_but_still_answers():
     async with world() as w:
         text = "the vendor renewal HBKEY-1 is due"
-        beat = await w.plant(w.agent_a, transcript(text, "ok"), task="Morning report",
-                             created_by="heartbeat:ea-morning", age_minutes=0)   # newest
-        task = await w.plant(w.agent_a, transcript(text, "ok"), task="Renewals",
-                             age_minutes=20)
+        beat = await w.plant(
+            w.agent_a,
+            transcript(text, "ok"),
+            task="Morning report",
+            created_by="heartbeat:ea-morning",
+            age_minutes=0,
+        )  # newest
+        task = await w.plant(w.agent_a, transcript(text, "ok"), task="Renewals", age_minutes=20)
         mail = await w.plant(w.agent_a, transcript(text, "ok"), mail="Renewal", age_minutes=40)
-        chat = await w.plant(w.agent_a, transcript(text, "ok"), mode="conversation",
-                             age_minutes=60)
+        chat = await w.plant(w.agent_a, transcript(text, "ok"), mode="conversation", age_minutes=60)
         out = await w.search(query="HBKEY-1")
         order = [ln.split()[1] for ln in out.splitlines() if ln.startswith("- ")]
         top = re.search(r"TOP MATCH — session (\S+)", out).group(1)
@@ -724,12 +839,17 @@ async def test_a_heartbeat_session_ranks_below_task_mail_and_chat_but_still_answ
         assert {top, *order} == {beat, task, mail, chat}
         assert "heartbeat task" in out
         # when only a heartbeat session matches, it is the answer
-        only = await w.plant(w.agent_a, transcript("solo HBKEY-2", "ok"), task="Sweep",
-                             created_by="heartbeat:sweep")
+        only = await w.plant(
+            w.agent_a, transcript("solo HBKEY-2", "ok"), task="Sweep", created_by="heartbeat:sweep"
+        )
         assert f"TOP MATCH — session {only}" in await w.search(query="HBKEY-2")
         # a heartbeat-created task is told from the record, not guessed from a title
-        assert session_recall.origin_of(
-            {"from_heartbeat": True, "has_task": True, "task_title": "x"})[0] == "heartbeat"
+        assert (
+            session_recall.origin_of({"from_heartbeat": True, "has_task": True, "task_title": "x"})[
+                0
+            ]
+            == "heartbeat"
+        )
         assert session_recall.origin_of({"has_task": True, "task_title": "x"})[0] == "task"
         assert session_recall.origin_of({"has_mail": True})[0] == "mail"
         assert session_recall.origin_of({"mode": "conversation"})[0] == "chat"
@@ -742,11 +862,14 @@ async def test_a_heartbeat_session_ranks_below_task_mail_and_chat_but_still_answ
 async def test_each_returned_message_is_capped_with_an_honest_marker(monkeypatch):
     async with world() as w:
         big = "CAPKEY-1 " + "word " * 1000 + "end"
-        sid = await w.plant(w.agent_a, [
-            req(sysp(), prompt("brief")),
-            resp(say(big)),
-            req(prompt("next")),
-        ])
+        sid = await w.plant(
+            w.agent_a,
+            [
+                req(sysp(), prompt("brief")),
+                resp(say(big)),
+                req(prompt("next")),
+            ],
+        )
         out = await w.search(query="CAPKEY-1")
         part = next(ln for ln in out.splitlines() if "[msg 1]" in ln)
         assert "[cut: " in part and f"{len(big) - session_recall.DISCOVER_CAP} more chars" in part
@@ -791,8 +914,10 @@ async def test_only_exclusions_or_punctuation_never_match_everything():
             assert "[msg" not in out and "TOP MATCH" not in out, query
         # the SQL guard holds on its own, whatever the caller sent: an empty
         # positive beside an exclusion is no search at all
-        assert await repo.recall_search(
-            w.agent_a, [("!!!", False), ("foo", True)], "&&", 0.35, 10) == []
+        assert (
+            await repo.recall_search(w.agent_a, [("!!!", False), ("foo", True)], "&&", 0.35, 10)
+            == []
+        )
         assert await repo.recall_search(w.agent_a, [("foo", True)], "&&", 0.35, 10) == []
 
 
@@ -802,7 +927,7 @@ async def test_a_nul_byte_in_the_query_or_the_session_id_is_not_a_failure():
         sid = await w.plant(w.agent_a, transcript("the ALPHAKEY-1 ledger", "ok"))
         out = await w.search(query="ALPHA\x00KEY-1")
         assert sid in out and "failed" not in out
-        out = await w.search(query="\x00\x00")   # nothing left: the browse shape
+        out = await w.search(query="\x00\x00")  # nothing left: the browse shape
         assert out.startswith("RECORD recalled from your own past sessions") and sid in out
         out = await w.search(query="\x00-\x00")
         assert "Nothing searchable" in out
@@ -817,13 +942,17 @@ async def test_a_nul_byte_in_the_query_or_the_session_id_is_not_a_failure():
 @needs_pg
 async def test_the_grant_seeds_run_once_and_leave_a_later_hire_alone():
     sql = _SCHEMA.read_text()
-    seeds = (("seed:session-recall", "session-recall"),
-             ("seed:skill-propose-all", "skill-propose"))
+    seeds = (("seed:session-recall", "session-recall"), ("seed:skill-propose-all", "skill-propose"))
+
     async def markers():
         conn = await repo._conn()
         try:
-            return {r["key"] for r in await conn.fetch(
-                "select key from app_setting where key = any($1)", [k for k, _ in seeds])}
+            return {
+                r["key"]
+                for r in await conn.fetch(
+                    "select key from app_setting where key = any($1)", [k for k, _ in seeds]
+                )
+            }
         finally:
             await conn.close()
 
@@ -840,9 +969,12 @@ async def test_the_grant_seeds_run_once_and_leave_a_later_hire_alone():
         for aid in (later, first):
             await conn.execute(
                 "insert into agent (id, name, model, charter, role, status) "
-                "values ($1, $1, '', '', 'r', 'ACTIVE')", aid)
+                "values ($1, $1, '', '', 'r', 'ACTIVE')",
+                aid,
+            )
             await conn.execute(
-                "insert into agent_grant (agent_id, pack) values ($1, 'jira-read')", aid)
+                "insert into agent_grant (agent_id, pack) values ($1, 'jira-read')", aid
+            )
         # a later release re-runs the whole schema: the hire keeps its choice
         await conn.execute(sql)
         await conn.execute(sql)
@@ -855,25 +987,26 @@ async def test_the_grant_seeds_run_once_and_leave_a_later_hire_alone():
         # the first update after the release has no markers: it seeds, once
         conn = await repo._conn()
         try:
-            await conn.execute("delete from app_setting where key = any($1)",
-                               [k for k, _ in seeds])
+            await conn.execute("delete from app_setting where key = any($1)", [k for k, _ in seeds])
             await conn.execute(sql)
         finally:
             await conn.close()
         assert {"session-recall", "skill-propose"} <= await _grants(first)
         assert await markers() == {k for k, _ in seeds}
         conn = await repo._conn()
-        try:   # and a hire after THAT is left alone again
+        try:  # and a hire after THAT is left alone again
             await conn.execute(
                 "insert into agent (id, name, model, charter, role, status) "
-                "values ($1, $1, '', '', 'r', 'ACTIVE')", later + "b")
+                "values ($1, $1, '', '', 'r', 'ACTIVE')",
+                later + "b",
+            )
             await conn.execute(
-                "insert into agent_grant (agent_id, pack) values ($1, 'jira-read')", later + "b")
+                "insert into agent_grant (agent_id, pack) values ($1, 'jira-read')", later + "b"
+            )
             await conn.execute(sql)
         finally:
             await conn.close()
-        assert not {"session-recall", "skill-propose"} & await _grants(
-            later + "b", active=False)
+        assert not {"session-recall", "skill-propose"} & await _grants(later + "b", active=False)
     finally:
         conn = await repo._conn()
         try:
@@ -899,7 +1032,7 @@ def long_run(n_messages, key_at=None, key="CHUNKKEY-1"):
 @needs_pg
 async def test_a_big_session_is_indexed_in_chunks_and_stays_pending_until_caught_up(monkeypatch):
     monkeypatch.setattr(session_recall, "CHUNK_MESSAGES", 3)
-    monkeypatch.setattr(session_recall, "SYNC_BUDGET_SECONDS", 0)   # one chunk per call
+    monkeypatch.setattr(session_recall, "SYNC_BUDGET_SECONDS", 0)  # one chunk per call
     async with world() as w:
         sid = await w.plant(w.agent_a, long_run(10, key_at=9))
         seen = []
@@ -912,7 +1045,8 @@ async def test_a_big_session_is_indexed_in_chunks_and_stays_pending_until_caught
         assert await w.mark(sid) == 10 and sid in out and "Index note" not in out
         rows = await w.rows(sid)
         assert [(r["msg_idx"], r["part_idx"]) for r in rows] == sorted(
-            {(r["msg_idx"], r["part_idx"]) for r in rows}), "no part written twice"
+            {(r["msg_idx"], r["part_idx"]) for r in rows}
+        ), "no part written twice"
         assert [r["msg_idx"] for r in rows] == list(range(10))
         # caught up: the stamp is set, so the session is no longer pending
         pending, _total, failed = await repo.recall_pending_sessions(w.agent_a, None, 10)
@@ -924,8 +1058,10 @@ async def test_a_chunk_stops_after_its_text_budget_and_always_makes_progress(mon
     monkeypatch.setattr(session_recall, "CHUNK_CHARS", 50)
     monkeypatch.setattr(session_recall, "SYNC_BUDGET_SECONDS", 0)
     async with world() as w:
-        sid = await w.plant(w.agent_a, [req(prompt("a" * 60 + " one"))] + [
-            resp(say(f"word {i} " * 20)) for i in range(3)])
+        sid = await w.plant(
+            w.agent_a,
+            [req(prompt("a" * 60 + " one"))] + [resp(say(f"word {i} " * 20)) for i in range(3)],
+        )
         await w.search(query="word")
         assert await w.mark(sid) == 1, "the first message alone passed the budget"
         # a message larger than the whole budget is still taken: progress is guaranteed
@@ -1011,7 +1147,8 @@ async def test_a_session_that_cannot_be_indexed_is_not_retried_until_it_changes(
         try:
             r = await conn.fetchrow(
                 "select failed_for, failed_error from session_recall_mark where session_id = $1",
-                bad)
+                bad,
+            )
         finally:
             await conn.close()
         assert r["failed_for"] is None and r["failed_error"] is None
@@ -1022,13 +1159,23 @@ def test_extract_never_raises_on_a_malformed_record():
         "not a message",
         {"kind": "request", "parts": "not a list"},
         {"kind": "request", "parts": [None, 7, "x", {"part_kind": 5}, {}]},
-        {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": 12345},
-                                      {"part_kind": "tool-call", "tool_name": 5,
-                                       "args": [{"a": [{"b": object}]}]},
-                                      {"part_kind": "tool-return", "tool_name": ["x"],
-                                       "content": {"deep": [[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]}},
-                                      {"part_kind": "user-prompt", "content": "kept GOODKEY-1",
-                                       "timestamp": "not a time"}]},
+        {
+            "kind": "request",
+            "parts": [
+                {"part_kind": "user-prompt", "content": 12345},
+                {"part_kind": "tool-call", "tool_name": 5, "args": [{"a": [{"b": object}]}]},
+                {
+                    "part_kind": "tool-return",
+                    "tool_name": ["x"],
+                    "content": {"deep": [[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]},
+                },
+                {
+                    "part_kind": "user-prompt",
+                    "content": "kept GOODKEY-1",
+                    "timestamp": "not a time",
+                },
+            ],
+        },
         {"kind": "response", "parts": [say("also kept")], "timestamp": 12},
     ]
     total, parts, end = session_recall.extract({"messages": junk})
@@ -1054,17 +1201,39 @@ def test_structured_content_keeps_every_field_and_binary_is_a_placeholder():
     )
 
     png = BinaryContent(data=b"\x89PNG\r\n" * 400, media_type="image/png")
-    stored = ModelMessagesTypeAdapter.dump_python([ModelRequest(parts=[
-        UserPromptPart(content=["look at this", ImageUrl(url="https://example.com/a.png"), png,
-                                DocumentUrl(url="data:application/pdf;base64," + "QUJD" * 200)]),
-        ToolReturnPart(tool_name="jira_get_issue", tool_call_id="1",
-                       content=[{"key": "DEMO-12", "content": "Fix"}, "plain line"]),
-        ToolReturnPart(tool_name="shot", tool_call_id="2", content=png),
-        ToolReturnPart(tool_name="blob", tool_call_id="3",
-                       content={"name": "scan.pdf", "payload": "QUJD" * 500}),
-        ToolReturnPart(tool_name="ctx", tool_call_id="4",
-                       content={"type": "document", "title": "Ledger"}),
-    ])], mode="json")
+    stored = ModelMessagesTypeAdapter.dump_python(
+        [
+            ModelRequest(
+                parts=[
+                    UserPromptPart(
+                        content=[
+                            "look at this",
+                            ImageUrl(url="https://example.com/a.png"),
+                            png,
+                            DocumentUrl(url="data:application/pdf;base64," + "QUJD" * 200),
+                        ]
+                    ),
+                    ToolReturnPart(
+                        tool_name="jira_get_issue",
+                        tool_call_id="1",
+                        content=[{"key": "DEMO-12", "content": "Fix"}, "plain line"],
+                    ),
+                    ToolReturnPart(tool_name="shot", tool_call_id="2", content=png),
+                    ToolReturnPart(
+                        tool_name="blob",
+                        tool_call_id="3",
+                        content={"name": "scan.pdf", "payload": "QUJD" * 500},
+                    ),
+                    ToolReturnPart(
+                        tool_name="ctx",
+                        tool_call_id="4",
+                        content={"type": "document", "title": "Ledger"},
+                    ),
+                ]
+            )
+        ],
+        mode="json",
+    )
     _, parts, _ = session_recall.extract({"messages": stored})
     by_idx = {p[1]: p[4] for p in parts}
     prompt_text = by_idx[0]
@@ -1078,13 +1247,18 @@ def test_structured_content_keeps_every_field_and_binary_is_a_placeholder():
     # `type: document` beside no payload is ordinary data, kept
     assert by_idx[4] == '{"type":"document","title":"Ledger"}'
     # a long base64 string anywhere (a tool argument too) is a placeholder
-    call_part = {"part_kind": "tool-call", "tool_name": "sandbox_write_file",
-                 "args": {"path": "a.bin", "content": "QUJD" * 300}}
+    call_part = {
+        "part_kind": "tool-call",
+        "tool_name": "sandbox_write_file",
+        "args": {"path": "a.bin", "content": "QUJD" * 300},
+    }
     _, got, _ = session_recall.extract({"messages": [resp(call_part)]})
     assert session_recall.BINARY_NOTE in got[0][4] and "QUJD" not in got[0][4]
     # provider block shapes
-    blocks = [{"type": "text", "text": "plain text item"},
-              {"type": "image", "source": {"type": "base64", "data": "QUJD" * 300}}]
+    blocks = [
+        {"type": "text", "text": "plain text item"},
+        {"type": "image", "source": {"type": "base64", "data": "QUJD" * 300}},
+    ]
     _, got, _ = session_recall.extract({"messages": [req(prompt_blocks(blocks))]})
     assert got[0][4] == "plain text item\n" + session_recall.BINARY_NOTE
 
@@ -1096,12 +1270,21 @@ def prompt_blocks(blocks):
 @needs_pg
 async def test_a_structured_tool_result_is_found_by_its_key_and_binary_is_not_indexed():
     async with world() as w:
-        sid = await w.plant(w.agent_a, [
-            req(prompt_blocks(["screenshot attached", {
-                "data": "QUJD" * 1000, "media_type": "image/png", "kind": "binary"}])),
-            resp(call("jira_get_issue", {"issue_key": "DEMO-12"})),
-            req(result("jira_get_issue", [{"key": "DEMO-12", "content": "Fix the thing"}])),
-        ])
+        sid = await w.plant(
+            w.agent_a,
+            [
+                req(
+                    prompt_blocks(
+                        [
+                            "screenshot attached",
+                            {"data": "QUJD" * 1000, "media_type": "image/png", "kind": "binary"},
+                        ]
+                    )
+                ),
+                resp(call("jira_get_issue", {"issue_key": "DEMO-12"})),
+                req(result("jira_get_issue", [{"key": "DEMO-12", "content": "Fix the thing"}])),
+            ],
+        )
         assert sid in await w.search(query="DEMO-12")
         assert sid in await w.search(query='"Fix the thing"')
         bodies = " ".join(r["body"] for r in await w.rows(sid))
@@ -1118,8 +1301,11 @@ async def test_an_archived_window_is_indexed_first_and_keeps_the_numbering():
         assert sid in out and "[msg 0] PROMPT: OLDEST brief ARCHKEY-1" in out
         rows = await w.rows(sid)
         assert [(r["msg_idx"], r["body"]) for r in rows] == [
-            (0, "OLDEST brief ARCHKEY-1"), (1, "old answer"),
-            (2, "LIVE follow-up"), (3, "LIVE answer")]
+            (0, "OLDEST brief ARCHKEY-1"),
+            (1, "old answer"),
+            (2, "LIVE follow-up"),
+            (3, "LIVE answer"),
+        ]
         assert await w.mark(sid) == 4
         out = await w.search(session_id=sid, around_message=1)
         assert "[msg 0]" in out and "[msg 3]" in out and ">> [msg 1] YOU: old answer" in out
@@ -1128,8 +1314,14 @@ async def test_an_archived_window_is_indexed_first_and_keeps_the_numbering():
         try:
             await conn.execute(
                 "update session set run_state = $2::jsonb, updated_at = now() where id = $1",
-                sid, json.dumps({"archived": archived + live[:1], "messages": live[1:] + [
-                    req(prompt("NEWEST ask NEWKEY-2"))]}))
+                sid,
+                json.dumps(
+                    {
+                        "archived": archived + live[:1],
+                        "messages": live[1:] + [req(prompt("NEWEST ask NEWKEY-2"))],
+                    }
+                ),
+            )
         finally:
             await conn.close()
         assert sid in await w.search(query="NEWKEY-2")
@@ -1144,8 +1336,15 @@ async def test_discover_says_when_the_row_cap_cut_the_result(monkeypatch):
     monkeypatch.setattr(session_recall, "MAX_HIT_ROWS", 4)
     async with world() as w:
         for i in range(3):
-            await w.plant(w.agent_a, [req(prompt("CAPPEDKEY-1 one")), resp(say("CAPPEDKEY-1 two")),
-                                      req(prompt("CAPPEDKEY-1 three"))], age_minutes=i)
+            await w.plant(
+                w.agent_a,
+                [
+                    req(prompt("CAPPEDKEY-1 one")),
+                    resp(say("CAPPEDKEY-1 two")),
+                    req(prompt("CAPPEDKEY-1 three")),
+                ],
+                age_minutes=i,
+            )
         out = await w.search(query="CAPPEDKEY-1")
         assert "at least " in out and "session(s) matched" in out
         assert "Only the 4 best-ranked matching parts were read" in out

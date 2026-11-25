@@ -51,9 +51,11 @@ def _find_unwrapped_propose_literals(path: pathlib.Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     offenders = []
     for call in ast.walk(tree):
-        if not (isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Name)
-                and call.func.id == "FunctionToolset"):
+        if not (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "FunctionToolset"
+        ):
             continue
         if not call.args or not isinstance(call.args[0], ast.List):
             # Not a list literal (e.g. `toolset_for`'s `list(seen.values())`,

@@ -56,11 +56,18 @@ def _looping_model(stop_after: int | None = None) -> FunctionModel:
         calls["n"] += 1
         if stop_after is not None and calls["n"] > stop_after:
             return ModelResponse(parts=[TextPart(content="done after the extra window")])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="declare_gap",
-            args={"kind": "missing_tool", "subject": "looping",
-                  "need": "a tool I do not have"},
-        )])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="declare_gap",
+                    args={
+                        "kind": "missing_tool",
+                        "subject": "looping",
+                        "need": "a tool I do not have",
+                    },
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -82,8 +89,7 @@ async def test_the_park_leaves_a_model_request_tail(monkeypatch):
     tail = rs["messages"][-1]
     assert tail["kind"] == "request", "the unsent ModelRequest must be persisted"
     assert any(p["part_kind"] == "tool-return" for p in tail["parts"]), (
-        "the tail must carry the last batch's tool returns — otherwise re-entry "
-        "re-executes them"
+        "the tail must carry the last batch's tool returns — otherwise re-entry re-executes them"
     )
     assert rs["pending_continue"]["windows"] == 1
     assert rs["pending_continue"]["requests"] == 3
@@ -92,8 +98,11 @@ async def test_the_park_leaves_a_model_request_tail(monkeypatch):
     assert item["kind"] == "continue" and item["status"] == "OPEN"
     assert item["session_id"] == session_id and item["agent_id"] == "jira-expert"
 
-    parked = [e for e in await repo.list_events_of_kinds(["session.window_exhausted"])
-              if e["ref_id"] == session_id]
+    parked = [
+        e
+        for e in await repo.list_events_of_kinds(["session.window_exhausted"])
+        if e["ref_id"] == session_id
+    ]
     assert len(parked) == 1
 
     # NOT the auto-retried park: the sweep must never drive this one, or the
@@ -122,8 +131,11 @@ async def test_continuing_re_enters_with_a_fresh_window_and_lands_normally(monke
 
     # One run, continued — not a second one: the same session carries both.
     assert out["session_id"] == session_id
-    continued = [e for e in await repo.list_events_of_kinds(["session.continued"])
-                 if e["ref_id"] == session_id]
+    continued = [
+        e
+        for e in await repo.list_events_of_kinds(["session.continued"])
+        if e["ref_id"] == session_id
+    ]
     assert len(continued) == 1
     assert continued[0]["payload"]["requests"] == 25
 
@@ -179,8 +191,11 @@ async def test_a_continue_item_needs_a_verdict_and_dispatches_on_it(monkeypatch)
     assert seen == [item_id]
 
     # The verdict is recorded BEFORE the run it authorises.
-    answered = [e for e in await repo.list_events_of_kinds(["orchestration.item_answered"])
-                if e["ref_id"] == item_id]
+    answered = [
+        e
+        for e in await repo.list_events_of_kinds(["orchestration.item_answered"])
+        if e["ref_id"] == item_id
+    ]
     assert len(answered) == 1 and answered[0]["payload"]["verdict"] == "approved"
 
     await repo.mark_session_failed(parked["session_id"])  # tidy the parked row
@@ -202,9 +217,12 @@ async def test_a_non_continuable_run_still_fails(monkeypatch):
 
     with pytest.raises(UsageLimitExceeded):
         await run_mod._run_live(
-            agent, "Loop forever.", model=model,
+            agent,
+            "Loop forever.",
+            model=model,
             deps=TriageDeps(agent_id="jira-expert", session_id=session_id),
-            agent_id="jira-expert", session_id=session_id,
+            agent_id="jira-expert",
+            session_id=session_id,
         )
     assert await repo.session_status(session_id) == "FAILED"
 
@@ -279,7 +297,10 @@ async def test_continuing_a_conversation_lands_the_turn(monkeypatch):
     assert composer["enabled"] is True
 
     await converse.close_session(
-        session_id, agent_id="jira-expert", reason="operator", actor="test",
+        session_id,
+        agent_id="jira-expert",
+        reason="operator",
+        actor="test",
     )
 
 
@@ -314,13 +335,17 @@ def _looping_project_model(stop_after: int | None = None) -> FunctionModel:
     def _respond(messages, info) -> ModelResponse:
         calls["n"] += 1
         if stop_after is not None and calls["n"] > stop_after:
-            return ModelResponse(parts=[TextPart(
-                content="PROJECT COMPLETE after the extra window")])
-        return ModelResponse(parts=[ToolCallPart(
-            tool_name="record_progress",
-            args={"made_progress": True, "in_a_loop": False,
-                  "next_step": "keep thinking"},
-        )])
+            return ModelResponse(
+                parts=[TextPart(content="PROJECT COMPLETE after the extra window")]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="record_progress",
+                    args={"made_progress": True, "in_a_loop": False, "next_step": "keep thinking"},
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -416,17 +441,15 @@ async def test_the_marker_after_picks_the_landing_tail(monkeypatch):
     monkeypatch.setattr(run_mod, "_land", _fake_land)
     monkeypatch.setattr(converse, "_land_turn", _fake_land_turn)
 
-    task_parked = await run_task(
-        "jira-expert", "Loop forever.", model=_looping_model())
+    task_parked = await run_task("jira-expert", "Loop forever.", model=_looping_model())
     chat_parked = await converse.start_conversation(
-        "jira-expert", message="Loop forever.", model=_looping_model())
+        "jira-expert", message="Loop forever.", model=_looping_model()
+    )
 
     monkeypatch.setattr(settings, "run_request_limit", 25)
-    await orchestration.continue_session(
-        task_parked["item_id"], model=_looping_model(stop_after=0))
+    await orchestration.continue_session(task_parked["item_id"], model=_looping_model(stop_after=0))
     assert landed == ["task"]
-    await orchestration.continue_session(
-        chat_parked["item_id"], model=_looping_model(stop_after=0))
+    await orchestration.continue_session(chat_parked["item_id"], model=_looping_model(stop_after=0))
     assert landed == ["task", "converse"]
 
 

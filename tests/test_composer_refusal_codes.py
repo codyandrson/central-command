@@ -53,15 +53,17 @@ def _codes_from_why_not_sendable() -> set[str]:
     drift from the returns beneath it."""
     tree = ast.parse(CONVERSE.read_text(encoding="utf-8"))
     fn = next(
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name == "why_not_sendable"
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "why_not_sendable"
     )
     codes = set()
     for node in ast.walk(fn):
-        if (isinstance(node, ast.Return) and isinstance(node.value, ast.Tuple)
-                and node.value.elts
-                and isinstance(node.value.elts[0], ast.Constant)
-                and isinstance(node.value.elts[0].value, str)):
+        if (
+            isinstance(node, ast.Return)
+            and isinstance(node.value, ast.Tuple)
+            and node.value.elts
+            and isinstance(node.value.elts[0], ast.Constant)
+            and isinstance(node.value.elts[0].value, str)
+        ):
             codes.add(node.value.elts[0].value)
     return codes
 
@@ -72,7 +74,8 @@ def _codes_from_send_target() -> set[str]:
     lane. Both reach `_composer_state` by the same path."""
     tree = ast.parse(NERVE.read_text(encoding="utf-8"))
     fn = next(
-        n for n in ast.walk(tree)
+        n
+        for n in ast.walk(tree)
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "_send_target"
     )
     codes = set()

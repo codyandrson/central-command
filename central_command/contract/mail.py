@@ -60,7 +60,10 @@ def one_click_unsubscribe(msg: dict) -> tuple[str | None, str]:
     if not _public_hostname(host):
         return None, f"the List-Unsubscribe URL host {host!r} is not a public hostname"
     if (msg.get("list_unsubscribe_post") or "").strip().lower() != _ONE_CLICK:
-        return None, "the sender does not offer one-click unsubscribe (no List-Unsubscribe-Post header)"
+        return (
+            None,
+            "the sender does not offer one-click unsubscribe (no List-Unsubscribe-Post header)",
+        )
     results = msg.get("authentication_results") or []
     first = results[0] if results else ""
     if not _GMAIL_VERDICT.match(first):
@@ -86,8 +89,8 @@ def _public_hostname(host: str) -> bool:
     try:
         ipaddress.ip_address(host)
     except ValueError:
-        return True   # a name, resolved and re-checked by the Executor
-    return False      # an IP literal is never a mailing list's endpoint
+        return True  # a name, resolved and re-checked by the Executor
+    return False  # an IP literal is never a mailing list's endpoint
 
 
 def _signed(signature: str) -> set[str]:

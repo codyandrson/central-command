@@ -70,9 +70,7 @@ async def clean_ledger():
     async def wipe():
         conn = await repo._conn()
         try:
-            await conn.execute(
-                "delete from work_item where message_id like '<cc-outage-%'"
-            )
+            await conn.execute("delete from work_item where message_id like '<cc-outage-%'")
         finally:
             await conn.close()
 
@@ -99,7 +97,8 @@ def _boom_handler(monkeypatch, exc: BaseException) -> None:
         raise exc
 
     monkeypatch.setitem(
-        dispatcher.HANDLERS, "email",
+        dispatcher.HANDLERS,
+        "email",
         dispatcher._KindHandler(boom, "agent:inbox-triage", False),
     )
 
@@ -107,10 +106,13 @@ def _boom_handler(monkeypatch, exc: BaseException) -> None:
 async def _row(item_id: str) -> dict:
     conn = await repo._conn()
     try:
-        return dict(await conn.fetchrow(
-            "select state, attempts, transient_releases, not_before, last_error "
-            "from work_item where id = $1", item_id,
-        ))
+        return dict(
+            await conn.fetchrow(
+                "select state, attempts, transient_releases, not_before, last_error "
+                "from work_item where id = $1",
+                item_id,
+            )
+        )
     finally:
         await conn.close()
 
@@ -118,16 +120,15 @@ async def _row(item_id: str) -> dict:
 async def _set_not_before(item_id: str, when) -> None:
     conn = await repo._conn()
     try:
-        await conn.execute(
-            "update work_item set not_before = $2 where id = $1", item_id, when
-        )
+        await conn.execute("update work_item set not_before = $2 where id = $1", item_id, when)
     finally:
         await conn.close()
 
 
 # 1
 async def test_a_transient_dispatch_failure_releases_without_spending_an_attempt(
-    monkeypatch, clean_ledger,
+    monkeypatch,
+    clean_ledger,
 ):
     """The provider being down is not the item's fault: the attempt the CLAIM
     consumed comes back, and what grows instead is the backoff."""
@@ -140,7 +141,7 @@ async def test_a_transient_dispatch_failure_releases_without_spending_an_attempt
     assert out["ok"] is False and out["transient"] is True
 
     row = await _row(item["id"])
-    assert row["state"] == "UNPROCESSED"       # back in the queue, not FAILED
+    assert row["state"] == "UNPROCESSED"  # back in the queue, not FAILED
     assert row["attempts"] == 0, "a transient release hands the attempt back"
     assert row["transient_releases"] == 1
     assert row["not_before"] > datetime.now(UTC)
@@ -165,7 +166,8 @@ async def test_a_transient_dispatch_failure_releases_without_spending_an_attempt
 
 # 2
 async def test_a_semantic_dispatch_failure_keeps_todays_behaviour(
-    monkeypatch, clean_ledger,
+    monkeypatch,
+    clean_ledger,
 ):
     """Regression, byte-for-byte: the dependency ANSWERED, so the attempt is
     spent, the row has no backoff, and at the cap it parks FAILED."""
@@ -188,7 +190,7 @@ async def test_a_semantic_dispatch_failure_keeps_todays_behaviour(
     await dispatcher.process_claimed(second)
 
     row = await _row(first["id"])
-    assert row["state"] == "FAILED"            # terminal at the cap, as before
+    assert row["state"] == "FAILED"  # terminal at the cap, as before
     assert (await _event(first["id"], "work.failed"))["payload"]["transient"] is False
 
 
@@ -198,9 +200,13 @@ async def test_a_context_overflow_parks_on_the_first_attempt(monkeypatch, clean_
     attempts were five identical 400s (2026-09-19). Through the entry, with
     attempts to spare — FAILED at once, never released."""
     monkeypatch.setattr(settings, "dispatch_max_attempts", 5)
-    _boom_handler(monkeypatch, RuntimeError(
-        "status_code: 400, model_name: cc-default, body: litellm.ContextWindowExceededError: "
-        "request (84314 tokens) exceeds the available context size (81920 tokens)"))
+    _boom_handler(
+        monkeypatch,
+        RuntimeError(
+            "status_code: 400, model_name: cc-default, body: litellm.ContextWindowExceededError: "
+            "request (84314 tokens) exceeds the available context size (81920 tokens)"
+        ),
+    )
     await ledger.enroll_email(_raw(21))
 
     item = await repo.claim_next_work_item("sess_overflow")
@@ -279,6 +285,7 @@ def _resolver_raising(exc: BaseException):
     persisted parks the TURN in place instead (`tests/test_turn_parking.py`),
     so these tests, which pin the fresh retry park, fail at model resolution:
     no session, no record to resume, nothing to re-send."""
+
     async def _resolve(*a, **k):
         raise exc
 
@@ -315,9 +322,7 @@ async def disarm_leftovers():
         return
     conn = await repo._conn()
     try:
-        await conn.execute(
-            "update task set retry_state = null where id = any($1::text[])", _MADE
-        )
+        await conn.execute("update task set retry_state = null where id = any($1::text[])", _MADE)
     finally:
         await conn.close()
         _MADE.clear()
@@ -332,7 +337,8 @@ async def _assigned_task(agent_id: str = "jira-expert", instructions: str = "x")
 
 # 3
 async def test_a_transient_task_run_parks_the_task_and_keeps_the_dead_session(
-    monkeypatch, sessions_created,
+    monkeypatch,
+    sessions_created,
 ):
     monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task = await _assigned_task()
@@ -372,7 +378,8 @@ async def test_a_transient_task_run_parks_the_task_and_keeps_the_dead_session(
 async def test_a_semantic_task_run_failure_keeps_todays_behaviour(monkeypatch):
     """Regression: only a transient failure parks."""
     monkeypatch.setattr(
-        routes, "resolve_model",
+        routes,
+        "resolve_model",
         aresolve(lambda *a, **k: _model_that_raises(SEMANTIC)),
     )
     task = await _assigned_task()
@@ -415,8 +422,8 @@ async def test_task_retries_never_exhaust(monkeypatch):
     monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task = await _assigned_task()
 
-    await routes._run_assigned_task_detached(task, "operator")     # attempt 1
-    for attempt in range(2, 8):                                     # past the old 5
+    await routes._run_assigned_task_detached(task, "operator")  # attempt 1
+    for attempt in range(2, 8):  # past the old 5
         again = await orchestration.retry_parked_task(task["id"])
         assert again["parked"] is True and again["attempts"] == attempt
 
@@ -470,7 +477,8 @@ async def test_the_sweep_drives_due_retry_parked_tasks_and_skips_the_rest(monkey
         await conn.execute(
             "update task set retry_state = jsonb_set(retry_state, '{not_before}', "
             "to_jsonb($2::text)) where id = $1",
-            due["id"], (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
+            due["id"],
+            (datetime.now(UTC) - timedelta(minutes=1)).isoformat(),
         )
     finally:
         await conn.close()
@@ -516,7 +524,9 @@ async def test_a_synchronous_run_lands_its_failure_too(monkeypatch):
 
 async def test_a_synchronous_semantic_failure_fails_the_task(monkeypatch):
     """…and a semantic one lands FAILED rather than parking, same as detached."""
-    monkeypatch.setattr(routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(SEMANTIC)))
+    monkeypatch.setattr(
+        routes, "resolve_model", aresolve(lambda *a, **k: _model_that_raises(SEMANTIC))
+    )
     task = await _assigned_task()
 
     with pytest.raises(RuntimeError):
@@ -533,9 +543,9 @@ async def test_a_retry_is_not_parked_twice_by_the_fresh_run_guard(monkeypatch):
     the backoff would never grow past its first step."""
     monkeypatch.setattr(routes, "resolve_model", _resolver_raising(OUTAGE))
     task = await _assigned_task()
-    await routes._run_assigned_task_detached(task, "operator")          # attempt 1
+    await routes._run_assigned_task_detached(task, "operator")  # attempt 1
 
-    await orchestration.retry_parked_task(task["id"])                   # attempt 2
+    await orchestration.retry_parked_task(task["id"])  # attempt 2
     row = await repo.get_task(task["id"])
     assert row["status"] == "ASSIGNED"
     assert row["retry_state"]["attempts"] == 2, "the counter advanced, not reset"

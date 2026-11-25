@@ -99,7 +99,7 @@ def _exe(path: Path, body: str) -> None:
 # The registry answers the two calls resolve-images.sh makes: a manifest HEAD
 # for the locked tag (200 + the locked digest, so the lock verifies) and a
 # tags list. A repository named in `missing` has neither — the mirror lacks it.
-_CURL = r'''#!/usr/bin/env python3
+_CURL = r"""#!/usr/bin/env python3
 import json, os, re, sys
 cfg = json.load(open(os.environ["STUB_CFG"]))
 args = sys.argv[1:]
@@ -139,7 +139,7 @@ if kind == "manifests":
     sys.exit(0)
 headers(["HTTP/1.1 200 OK"])
 sys.stdout.write(json.dumps({"tags": ["0.0.1-elsewhere"] if gone else [cfg["locks"].get(repo, "x")]}))
-'''
+"""
 
 
 def _stub_bin(tmp: Path, log: Path, calls: Path) -> Path:
@@ -156,7 +156,9 @@ def _stub_bin(tmp: Path, log: Path, calls: Path) -> Path:
     # `--label` value there, so the stage's ASIDE tag and the live one can be
     # told apart afterwards; `untag` drops a built ref again.
     (tmp / "labels").mkdir()
-    _exe(b / "podman", f'''#!/usr/bin/env bash
+    _exe(
+        b / "podman",
+        f'''#!/usr/bin/env bash
 echo "podman $*" >> "{log}"
 key() {{ local k="${{1//\\//_}}"; printf '%s' "${{k//:/_}}"; }}
 case "$1" in
@@ -184,22 +186,29 @@ case "$1" in
           esac ;;
 esac
 exit 0
-''')
+''',
+    )
     # uv: `uv venv <path>` makes a venv whose python exits 0; `uv pip` resolves.
-    _exe(b / "uv", f'''#!/usr/bin/env bash
+    _exe(
+        b / "uv",
+        f'''#!/usr/bin/env bash
 echo "uv $*" >> "{log}"
 if [[ "$1" == venv ]]; then
   p="${{@: -1}}"; mkdir -p "$p/bin"
   printf '#!/usr/bin/env bash\\nexit 0\\n' > "$p/bin/python"; chmod +x "$p/bin/python"
 fi
 exit 0
-''')
-    _exe(b / "npm", f'''#!/usr/bin/env bash
+''',
+    )
+    _exe(
+        b / "npm",
+        f'''#!/usr/bin/env bash
 [[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $* (in $PWD)" >> "{log}"
 [[ "$1" == install ]] && mkdir -p node_modules
 exit 0
-''')
+''',
+    )
     _exe(b / "node", "#!/usr/bin/env bash\necho v22.11.0\n")
     return b
 
@@ -212,13 +221,15 @@ def _stub_tail(calls: Path, flags: Path) -> str:
     phases = ["check", "machine", "stack", "llm", "app", "verify", "test", "boot", "demo"]
     out = [
         f'__CALLS="{calls.as_posix()}"; __FLAGS="{flags.as_posix()}"',
-        'for __f in $(compgen -A function p_); do',
+        "for __f in $(compgen -A function p_); do",
         '  case "$__f" in p_models_json|p_catalog_aliases|p_catalog_filled) continue ;; esac',
         '  eval "$__f() { return 0; }"',
-        'done',
-        'eval "$(declare -f phase_fetch | sed \'1s/^phase_fetch/__real_phase_fetch/\')"',
-        ('phase_fetch() { if (( STAGED )); then echo staged-fetch; else echo fetch; fi >>"$__CALLS"; '
-        '__real_phase_fetch "$@"; }'),
+        "done",
+        "eval \"$(declare -f phase_fetch | sed '1s/^phase_fetch/__real_phase_fetch/')\"",
+        (
+            'phase_fetch() { if (( STAGED )); then echo staged-fetch; else echo fetch; fi >>"$__CALLS"; '
+            '__real_phase_fetch "$@"; }'
+        ),
     ]
     for p in phases:
         out.append(
@@ -244,8 +255,9 @@ class Dep:
 
     # ── reading ──
     def git(self, *args: str) -> str:
-        return subprocess.run(["git", "-C", str(self.repo), *args], capture_output=True,
-                              text=True, check=True).stdout.strip()
+        return subprocess.run(
+            ["git", "-C", str(self.repo), *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
 
     def head(self) -> str:
         return self.git("rev-parse", "HEAD")
@@ -258,17 +270,28 @@ class Dep:
         return self.state / "ledger.tsv"
 
     def ledger_rows(self) -> dict[str, list[str]]:
-        return {l.split("\t")[0]: l.split("\t") for l in self.ledger.read_text().splitlines()
-                if l and not l.startswith("#")}
+        return {
+            l.split("\t")[0]: l.split("\t")
+            for l in self.ledger.read_text().splitlines()
+            if l and not l.startswith("#")
+        }
 
     def stage_gone(self) -> bool:
-        worktrees = [l for l in self.git("worktree", "list", "--porcelain").splitlines()
-                     if l.startswith("worktree ")]
+        worktrees = [
+            l
+            for l in self.git("worktree", "list", "--porcelain").splitlines()
+            if l.startswith("worktree ")
+        ]
         return not (self.state / "stage").exists() and len(worktrees) == 1
 
     # ── acting ──
-    def configure(self, *, missing: tuple[str, ...] = (), models: tuple[str, ...] | None = None,
-                  placeholders: tuple[str, ...] = ()):
+    def configure(
+        self,
+        *,
+        missing: tuple[str, ...] = (),
+        models: tuple[str, ...] | None = None,
+        placeholders: tuple[str, ...] = (),
+    ):
         locks, digests = {}, {}
         for line in (self.repo / "deploy" / "single" / "images.txt").read_text().splitlines():
             parts = line.split("#", 1)[0].split()
@@ -279,21 +302,38 @@ class Dep:
                     digests[f"{path}:{lock}"] = dig
         if models is None:
             models = ("cc-default", "graphiti-llm", "cc-embedding")
-        write_lf(self.cfg, json.dumps({"log": str(self.log), "missing": list(missing),
-                                        "models": list(models), "locks": locks,
-                                        "digests": digests, "placeholders": list(placeholders)}))
+        write_lf(
+            self.cfg,
+            json.dumps(
+                {
+                    "log": str(self.log),
+                    "missing": list(missing),
+                    "models": list(models),
+                    "locks": locks,
+                    "digests": digests,
+                    "placeholders": list(placeholders),
+                }
+            ),
+        )
 
     def env(self, **extra: str) -> dict[str, str]:
-        e = {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
-             "HOME": str(self.tmp / "home"), "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
-             "STUB_CFG": str(self.cfg), "CC_BACKUP_DIR": str(self.tmp / "backups"),
-             "LANG": "C.UTF-8"}
+        e = {
+            "PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
+            "HOME": str(self.tmp / "home"),
+            "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
+            "STUB_CFG": str(self.cfg),
+            "CC_BACKUP_DIR": str(self.tmp / "backups"),
+            "LANG": "C.UTF-8",
+        }
         e.update(extra)
         return with_stub_path(e, self.tmp / "bin")
 
     def update(self, *args: str, **extra: str) -> subprocess.CompletedProcess:
-        return run_driver([_bash(), str(self.repo / "deploy" / "single" / "update.sh"), *args],
-                          cwd=self.repo / "deploy" / "single", env=self.env(**extra))
+        return run_driver(
+            [_bash(), str(self.repo / "deploy" / "single" / "update.sh"), *args],
+            cwd=self.repo / "deploy" / "single",
+            env=self.env(**extra),
+        )
 
     def fill_ledger(self, version: str = OLD) -> None:
         """Every manifest row `done` at the installed release: an install that
@@ -319,8 +359,10 @@ def dep(tmp_path: Path) -> Dep:
         shutil.copy2(ROOT / f, repo / f)
     (repo / "central_command" / "db").mkdir(parents=True)
     write_lf(repo / "central_command" / "__init__.py", "")
-    shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
-                 repo / "central_command" / "db" / "schema.sql")
+    shutil.copy2(
+        ROOT / "central_command" / "db" / "schema.sql",
+        repo / "central_command" / "db" / "schema.sql",
+    )
     (repo / "web").mkdir()
     write_lf(repo / "web" / "package.json", '{"name": "web", "version": "0.0.0"}\n')
     write_lf(repo / "web" / "package-lock.json", '{"name": "web", "lockfileVersion": 3}\n')
@@ -335,14 +377,21 @@ def dep(tmp_path: Path) -> Dep:
     assert text.rstrip().endswith(tail)
     write_lf(setup, text.rstrip()[: -len(tail)] + _stub_tail(d.calls, d.flags) + tail + "\n")
     shutil.copy2(ROOT / ".env.example", repo / ".env")
-    _set(repo / ".env", {
-        # Forward slashes: setup.sh SOURCES .env, and bash drops every
-        # unquoted backslash of a Windows spelling — the phases would read
-        # `C:UsersCody…` while update.sh (which reads the key) used the real one.
-        "CC_STATE_DIR": d.state.as_posix(), "CC_API_PORT": str(_free_port()),
-        "CC_ENABLE_SANDBOX": "0", "CC_ENABLE_CRAWLER": "0", "CC_ENABLE_SPEECH": "0",
-        "CC_ENABLE_N8N": "0", "CC_LLM_PROXY_ADMIN_KEY": "sk-test-admin-0000000000",
-    })
+    _set(
+        repo / ".env",
+        {
+            # Forward slashes: setup.sh SOURCES .env, and bash drops every
+            # unquoted backslash of a Windows spelling — the phases would read
+            # `C:UsersCody…` while update.sh (which reads the key) used the real one.
+            "CC_STATE_DIR": d.state.as_posix(),
+            "CC_API_PORT": str(_free_port()),
+            "CC_ENABLE_SANDBOX": "0",
+            "CC_ENABLE_CRAWLER": "0",
+            "CC_ENABLE_SPEECH": "0",
+            "CC_ENABLE_N8N": "0",
+            "CC_LLM_PROXY_ADMIN_KEY": "sk-test-admin-0000000000",
+        },
+    )
     _stub_bin(tmp_path, d.log, d.calls)
     d.configure()
 
@@ -423,8 +472,9 @@ def test_a_failed_staged_artifact_is_a_fail_and_still_changes_nothing(dep: Dep):
 
     assert r.returncode == 1, r.stdout + r.stderr
     assert "FAIL image-postgres:" in r.stdout, r.stdout
-    assert any(l.startswith("FAIL acquire:") and "NOTHING was changed" in l
-               for l in r.stdout.splitlines()), r.stdout
+    assert any(
+        l.startswith("FAIL acquire:") and "NOTHING was changed" in l for l in r.stdout.splitlines()
+    ), r.stdout
     _untouched(dep, head, env, led)
 
 
@@ -473,12 +523,18 @@ def test_a_declared_missing_alias_does_not_stop_the_update(dep: Dep):
     install: its row only appears when the post-merge llm phase registers it."""
     dep.fill_ledger()
     dep.configure(models=("cc-default", "graphiti-llm"))
-    _set(dep.repo / ".env", {"CC_LLM_UPSTREAM_BASE_URL": "http://llm.example.com/v1",
-                             "CC_LLM_UPSTREAM_API_KEY": "upstream-test-key",
-                             "CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING": "some-embedder"})
+    _set(
+        dep.repo / ".env",
+        {
+            "CC_LLM_UPSTREAM_BASE_URL": "http://llm.example.com/v1",
+            "CC_LLM_UPSTREAM_API_KEY": "upstream-test-key",
+            "CC_LLM_UPSTREAM_MODEL_CC_EMBEDDING": "some-embedder",
+        },
+    )
     r = dep.update("apply", CC_UPDATE_DRIVEN="1")
-    assert any(l.startswith("PASS catalog-probe:") and "cc-embedding" in l
-               for l in r.stdout.splitlines()), r.stdout
+    assert any(
+        l.startswith("PASS catalog-probe:") and "cc-embedding" in l for l in r.stdout.splitlines()
+    ), r.stdout
     assert "PASS acquire:" in r.stdout, r.stdout
     # It merged. (What happens after is the stub llm's business: it registers
     # nothing, so the real llm/catalog probe then reads the alias absent.)
@@ -495,8 +551,9 @@ def test_after_a_clean_acquisition_it_merges_and_runs_the_post_merge_phases_in_o
 
     assert r.returncode in (0, 2), r.stdout + r.stderr
     assert dep.head() == dep.git("rev-parse", "upstream"), "local was not fast-forwarded"
-    assert dep.called() == ["staged-fetch", "schema", "fetch", "llm", "stack", "app", "verify"], \
+    assert dep.called() == ["staged-fetch", "schema", "fetch", "llm", "stack", "app", "verify"], (
         dep.called()
+    )
     assert "PASS restart:" in r.stdout
     assert dep.stage_gone()
     # The post-merge fetch wrote the REAL refs and manifest; the rows the
@@ -505,12 +562,19 @@ def test_after_a_clean_acquisition_it_merges_and_runs_the_post_merge_phases_in_o
     assert "CC_IMG_NEO4J=docker.io/library/neo4j:5.26.33" in (dep.repo / ".env").read_text()
     rows = dep.ledger_rows()
     # stack among them since v2.57.0: the update DEPLOYS what it acquired.
-    for step in ("fetch/resolve-images", "llm/catalog", "stack/up-stack", "app/mint-key",
-                 "verify/selfcheck"):
+    for step in (
+        "fetch/resolve-images",
+        "llm/catalog",
+        "stack/up-stack",
+        "app/mint-key",
+        "verify/selfcheck",
+    ):
         assert rows[step][1:3] == ["done", NEW], rows[step]
     assert rows["boot/boot-api"][2] == OLD
     # The stage was sparse: what the acquisition reads, never docs/vendor.
-    stage_cmd = [l for l in dep.log.read_text().splitlines() if l.startswith("npm install --no-package-lock")]
+    stage_cmd = [
+        l for l in dep.log.read_text().splitlines() if l.startswith("npm install --no-package-lock")
+    ]
     assert any("/stage/tree/web" in l for l in stage_cmd), stage_cmd
 
 
@@ -529,7 +593,10 @@ def test_with_an_operator_provided_npm_tree_the_staged_run_installs_nothing_and_
     r = dep.update("apply", CC_UPDATE_DRIVEN="1")
 
     assert r.returncode == 2, r.stdout + r.stderr
-    assert "WARN cockpit: CC_COCKPIT_NPM_PREINSTALLED=1 — the new release's npm tree was NOT acquired" in r.stdout
+    assert (
+        "WARN cockpit: CC_COCKPIT_NPM_PREINSTALLED=1 — the new release's npm tree was NOT acquired"
+        in r.stdout
+    )
     npm = [l for l in dep.log.read_text().splitlines() if l.startswith("npm ")]
     assert not [l for l in npm if "/stage/tree/web" in l], npm
     assert not [l for l in npm if l.startswith("npm install")], npm
@@ -554,9 +621,12 @@ def test_with_n8n_the_facade_workflows_are_the_stack_phases_not_a_step_of_their_
     r = dep.update("apply", CC_UPDATE_DRIVEN="1")
 
     assert r.returncode in (0, 2), r.stdout + r.stderr
-    assert dep.called() == ["staged-fetch", "schema", "fetch", "llm", "stack", "app", "verify"], \
+    assert dep.called() == ["staged-fetch", "schema", "fetch", "llm", "stack", "app", "verify"], (
         dep.called()
-    assert not any(l.startswith(("PASS n8n:", "FAIL n8n:")) for l in r.stdout.splitlines()), r.stdout
+    )
+    assert not any(l.startswith(("PASS n8n:", "FAIL n8n:")) for l in r.stdout.splitlines()), (
+        r.stdout
+    )
     podman = dep.log.read_text()
     assert "import:workflow" not in podman and "container exists cc-n8n" not in podman, podman
 
@@ -604,14 +674,16 @@ def test_a_stop_after_the_staged_build_leaves_the_live_image_tag_alone(dep: Dep)
     dep.fill_ledger()
     _set(dep.repo / ".env", {"CC_ENABLE_SANDBOX": "1"})
     old = "0" * 64
-    write_lf(_label_file(dep, LOCAL), old + "\n")         # the old release's build
+    write_lf(_label_file(dep, LOCAL), old + "\n")  # the old release's build
     dep.configure(models=("cc-default", "graphiti-llm"))
     head, env, led = dep.head(), (dep.repo / ".env").read_bytes(), dep.ledger.read_bytes()
 
     r = dep.update("apply")
 
     assert r.returncode == 3, r.stdout + r.stderr
-    assert any(l.startswith(f"PASS image-sandbox: {ASIDE} built") for l in r.stdout.splitlines()), r.stdout
+    assert any(l.startswith(f"PASS image-sandbox: {ASIDE} built") for l in r.stdout.splitlines()), (
+        r.stdout
+    )
     builds = _builds(dep)
     assert [t for t, _ in builds] == [ASIDE], builds
     assert _label_file(dep, LOCAL).read_text().strip() == old, (
@@ -624,7 +696,9 @@ def test_a_stop_after_the_staged_build_leaves_the_live_image_tag_alone(dep: Dep)
 
 
 @drives_installer
-def test_the_post_merge_fetch_builds_the_live_tag_from_the_same_inputs_and_drops_the_aside(dep: Dep):
+def test_the_post_merge_fetch_builds_the_live_tag_from_the_same_inputs_and_drops_the_aside(
+    dep: Dep,
+):
     dep.fill_ledger()
     _set(dep.repo / ".env", {"CC_ENABLE_SANDBOX": "1"})
     write_lf(_label_file(dep, LOCAL), "0" * 64 + "\n")
@@ -640,7 +714,9 @@ def test_the_post_merge_fetch_builds_the_live_tag_from_the_same_inputs_and_drops
     assert builds[0][1] == builds[1][1]
     assert _label_file(dep, LOCAL).read_text().strip() == builds[1][1]
     log = dep.log.read_text().splitlines()
-    live_build = next(i for i, l in enumerate(log) if l.startswith("podman build") and f"-t {LOCAL} " in l)
+    live_build = next(
+        i for i, l in enumerate(log) if l.startswith("podman build") and f"-t {LOCAL} " in l
+    )
     untag = [i for i, l in enumerate(log) if l == f"podman untag {ASIDE} {ASIDE}"]
     assert untag and untag[0] > live_build, "the aside tag was not dropped after the live build"
     assert ASIDE not in (dep.tmp / "built").read_text().split()
@@ -654,8 +730,9 @@ def test_the_staged_checkout_is_sparse(dep: Dep, tmp_path: Path):
     setup = dep.repo / "deploy" / "single" / "setup.sh"
     seen = tmp_path / "seen.txt"
     text = setup.read_text().replace(
-        'phase_fetch() { if (( STAGED ));',
-        f'phase_fetch() {{ (( STAGED )) && ls -A "$REPO_ROOT" "$REPO_ROOT/docs" "$HERE/phases" > "{seen}" 2>&1; if (( STAGED ));')
+        "phase_fetch() { if (( STAGED ));",
+        f'phase_fetch() {{ (( STAGED )) && ls -A "$REPO_ROOT" "$REPO_ROOT/docs" "$HERE/phases" > "{seen}" 2>&1; if (( STAGED ));',
+    )
     write_lf(setup, text)
     subprocess.run(["git", "-C", str(dep.repo), "commit", "-qam", "probe"], check=True)
     subprocess.run(["git", "-C", str(dep.repo), "branch", "-qf", "upstream", "local"], check=True)
@@ -663,7 +740,7 @@ def test_the_staged_checkout_is_sparse(dep: Dep, tmp_path: Path):
     write_lf(dep.repo / "VERSION", f"version={NEW}\n")
     subprocess.run(["git", "-C", str(dep.repo), "commit", "-qam", "bump"], check=True)
     subprocess.run(["git", "-C", str(dep.repo), "checkout", "-q", "local"], check=True)
-    dep.configure(missing=("library/neo4j",))       # stop after the stage: quicker
+    dep.configure(missing=("library/neo4j",))  # stop after the stage: quicker
 
     dep.update("apply")
 
@@ -725,9 +802,13 @@ def test_apply_with_nothing_imported_and_a_complete_ledger_does_nothing(dep: Dep
     r = dep.update("apply")
 
     assert r.returncode == 0, r.stdout + r.stderr
-    protocol = [l for l in r.stdout.splitlines() if l.startswith(("PASS ", "WARN ", "FAIL ", "USERACTION "))]
-    assert protocol[-1] == (f"PASS apply: nothing to apply: `local` is `upstream`, and the update's "
-                            f"phases (fetch, llm, stack, app, verify) are done at {OLD}"), protocol
+    protocol = [
+        l for l in r.stdout.splitlines() if l.startswith(("PASS ", "WARN ", "FAIL ", "USERACTION "))
+    ]
+    assert protocol[-1] == (
+        f"PASS apply: nothing to apply: `local` is `upstream`, and the update's "
+        f"phases (fetch, llm, stack, app, verify) are done at {OLD}"
+    ), protocol
     assert dep.called() == [], dep.called()
     _untouched(dep, head, env, led)
 
@@ -788,8 +869,12 @@ def test_apply_with_nothing_to_apply_names_an_open_row_outside_the_update(dep: D
     line = [l for l in r.stdout.splitlines() if l.startswith("PASS apply: nothing to apply")]
     assert line, r.stdout
     assert "the ledger is complete" not in line[0]
-    assert f"the update's phases (fetch, llm, stack, app, verify) are done at {OLD}" in line[0], line[0]
-    assert f"test/test is failed at {OLD}" in line[0] and "./setup.sh resumes them" in line[0], line[0]
+    assert f"the update's phases (fetch, llm, stack, app, verify) are done at {OLD}" in line[0], (
+        line[0]
+    )
+    assert f"test/test is failed at {OLD}" in line[0] and "./setup.sh resumes them" in line[0], (
+        line[0]
+    )
     assert dep.called() == [], dep.called()
 
 
@@ -851,9 +936,14 @@ def _run_runner(dep: Dep) -> tuple[subprocess.CompletedProcess, dict]:
     shutil.copyfile(ROOT / "deploy" / "single" / "update-run.sh", runner)
     # The runner's own health waits are a minute and a half; nothing here may
     # wait on them (the API never answers in this rig).
-    write_lf(runner, runner.read_text().replace("seq 1 90", "seq 1 1").replace("seq 1 30", "seq 1 1"))
-    r = run_driver([_bash(), str(runner), NEW, str(dep.repo / "deploy" / "single")],
-                   cwd=Path.cwd(), env=dep.env(CC_UPDATE_DIR=str(upd)))
+    write_lf(
+        runner, runner.read_text().replace("seq 1 90", "seq 1 1").replace("seq 1 30", "seq 1 1")
+    )
+    r = run_driver(
+        [_bash(), str(runner), NEW, str(dep.repo / "deploy" / "single")],
+        cwd=Path.cwd(),
+        env=dep.env(CC_UPDATE_DIR=str(upd)),
+    )
     return r, json.loads((upd / "status.json").read_text())
 
 
@@ -875,8 +965,9 @@ def test_update_run_does_not_roll_back_a_stop_before_the_merge(dep: Dep):
     to the NEWEST pre-update-* tag — an EARLIER update's. A stop before the
     merge changed nothing, so that rollback was a downgrade."""
     dep.fill_ledger()
-    subprocess.run(["git", "-C", str(dep.repo), "tag", "pre-update-20200101T000000Z",
-                    "local"], check=True)
+    subprocess.run(
+        ["git", "-C", str(dep.repo), "tag", "pre-update-20200101T000000Z", "local"], check=True
+    )
     old_tags = dep.git("tag", "-l")
     write_lf(dep.flags / "pull-fails", "docker.io/library/postgres:16.16-trixie\n")
     head = dep.head()
@@ -910,7 +1001,9 @@ def test_acquire_is_refused_on_an_install_and_a_staged_run_refuses_everything_el
     single = dep.repo / "deploy" / "single"
     a = run_driver([_bash(), "setup.sh", "acquire"], cwd=single, env=dep.env())
     assert a.returncode == 1 and "FAIL acquire:" in a.stdout, a.stdout + a.stderr
-    s = run_driver([_bash(), "setup.sh", "llm"], cwd=single, env=dep.env(CC_STAGED_FOR=str(dep.repo)))
+    s = run_driver(
+        [_bash(), "setup.sh", "llm"], cwd=single, env=dep.env(CC_STAGED_FOR=str(dep.repo))
+    )
     assert s.returncode == 1 and "FAIL staged:" in s.stdout, s.stdout + s.stderr
     assert "llm" not in dep.called()
 
@@ -946,8 +1039,10 @@ def _plain_tree(tmp_path: Path) -> Path:
         shutil.copy2(ROOT / f, repo / f)
     shutil.copy2(ROOT / ".env.example", repo / ".env")
     (repo / "central_command" / "db").mkdir(parents=True)
-    shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
-                 repo / "central_command" / "db" / "schema.sql")
+    shutil.copy2(
+        ROOT / "central_command" / "db" / "schema.sql",
+        repo / "central_command" / "db" / "schema.sql",
+    )
     (tmp_path / "home").mkdir()
     (tmp_path / "state").mkdir()
     _set(repo / ".env", {"CC_STATE_DIR": (tmp_path / "state").as_posix()})
@@ -962,7 +1057,9 @@ def _version() -> str:
 
 
 def _ledger(tmp_path: Path, steps: list[str]) -> None:
-    rows = ["# prepared"] + [f"{s}\tdone\t{_version()}\t2026-10-01T00:00:00Z\tnone\t" for s in steps]
+    rows = ["# prepared"] + [
+        f"{s}\tdone\t{_version()}\t2026-10-01T00:00:00Z\tnone\t" for s in steps
+    ]
     write_lf(tmp_path / "state" / "ledger.tsv", "\n".join(rows) + "\n")
 
 
@@ -970,8 +1067,14 @@ def _setup(repo: Path, *args: str, path_prefix: str | None = None):
     env = dict(os.environ)
     home = repo.parent / "home"
     env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
-    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_RUN_LOCK_PID",
-                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY", "CC_STAGED_FOR"):
+    for stale in (
+        "CC_STATE_DIR",
+        "CC_ENABLE_SPEECH",
+        "CC_RUN_LOCK_PID",
+        "CC_LLM_PROXY_ADMIN_KEY",
+        "CC_LLM_API_KEY",
+        "CC_STAGED_FOR",
+    ):
         env.pop(stale, None)
     if path_prefix:
         env["PATH"] = path_prefix + os.pathsep + env.get("PATH", "")
@@ -982,7 +1085,9 @@ def _setup(repo: Path, *args: str, path_prefix: str | None = None):
 
 def _rows(tmp_path: Path) -> dict[str, list[str]]:
     led = (tmp_path / "state" / "ledger.tsv").read_text()
-    return {l.split("\t")[0]: l.split("\t") for l in led.splitlines() if l and not l.startswith("#")}
+    return {
+        l.split("\t")[0]: l.split("\t") for l in led.splitlines() if l and not l.startswith("#")
+    }
 
 
 @drives_installer
@@ -993,8 +1098,11 @@ def test_the_suite_runs_even_while_the_api_answers(tmp_path: Path, api_up: int):
     ran = tmp_path / "suite-ran"
     py = repo / ".venv" / "bin" / "python"
     py.parent.mkdir(parents=True)
-    _exe(py, f'#!/usr/bin/env bash\necho "$*" >> "{ran.as_posix()}"\n'
-             f'exit "$(cat "{tmp_path.as_posix()}/suite-rc" 2>/dev/null || echo 0)"\n')
+    _exe(
+        py,
+        f'#!/usr/bin/env bash\necho "$*" >> "{ran.as_posix()}"\n'
+        f'exit "$(cat "{tmp_path.as_posix()}/suite-rc" 2>/dev/null || echo 0)"\n',
+    )
 
     r = _setup(repo, "test")
     assert r.returncode == 0, r.stdout + r.stderr
@@ -1014,11 +1122,18 @@ def test_the_suite_runs_even_while_the_api_answers(tmp_path: Path, api_up: int):
 
 
 @drives_installer
-def test_a_failing_npm_install_fails_the_cockpit_step_even_when_the_build_would_succeed(tmp_path: Path):
+def test_a_failing_npm_install_fails_the_cockpit_step_even_when_the_build_would_succeed(
+    tmp_path: Path,
+):
     repo = _plain_tree(tmp_path)
-    _set(repo / ".env", {"CC_LLM_API_KEY": "sk-already-minted-0000000000", "CC_LLM_PROXY_ADMIN_KEY": ""})
-    _ledger(tmp_path, ["check/tree-pristine", "fetch/venv", "fetch/cockpit", "llm/secrets",
-                       "llm/litellm-live"])
+    _set(
+        repo / ".env",
+        {"CC_LLM_API_KEY": "sk-already-minted-0000000000", "CC_LLM_PROXY_ADMIN_KEY": ""},
+    )
+    _ledger(
+        tmp_path,
+        ["check/tree-pristine", "fetch/venv", "fetch/cockpit", "llm/secrets", "llm/litellm-live"],
+    )
     (repo / "web").mkdir()
     py = repo / ".venv" / "bin" / "python"
     py.parent.mkdir(parents=True)
@@ -1029,13 +1144,16 @@ def test_a_failing_npm_install_fails_the_cockpit_step_even_when_the_build_would_
     _exe(b / "uv", "#!/usr/bin/env bash\nexit 0\n")
     _exe(b / "node", "#!/usr/bin/env bash\necho v22.11.0\n")
     # The install fails; `npm run build` would succeed and leave a complete build.
-    _exe(b / "npm", f'''#!/usr/bin/env bash
+    _exe(
+        b / "npm",
+        f'''#!/usr/bin/env bash
 [[ "$1" == "-v" ]] && {{ echo 11.21.3; exit 0; }}
 echo "npm $*" >> "{calls.as_posix()}"
 [[ "$1" == install ]] && exit 1
 mkdir -p dist server-dist && touch server-dist/index.js
 exit 0
-''')
+''',
+    )
 
     r = _setup(repo, "app", path_prefix=str(b))
 
@@ -1070,9 +1188,8 @@ def test_machine_sh_stderr_is_logged_with_the_proxy_value_removed(tmp_path: Path
         + _lift("machine_sh_log")
         + '\nCC_PROXY="http://agent:s3cret@proxy.corp.example:3128"\n'
         + 'machine_sh_log "sudo tee /etc/x" 1 "curl: (7) Failed to connect to proxy.corp.example '
-          'port 3128; via http://agent:s3cret@proxy.corp.example:3128; '
-          'other http://bob:pw@else.example/ path"\n'
-        + 'machine_sh_log "true" 0 ""\n'
+        "port 3128; via http://agent:s3cret@proxy.corp.example:3128; "
+        'other http://bob:pw@else.example/ path"\n' + 'machine_sh_log "true" 0 ""\n'
     )
     r = subprocess.run([_bash(), "-c", script], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr

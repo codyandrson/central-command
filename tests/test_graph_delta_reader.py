@@ -66,10 +66,17 @@ async def test_window_falls_back_to_the_cap_when_nothing_follows(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_invalidated_entries_carry_when_the_fact_was_first_known(monkeypatch):
-    row = {"uuid": "e0", "name": "LEADS", "fact": "Bo leads", "source": "Bo",
-           "target": "probe", "valid_at": None, "invalid_at": None,
-           "expired_at": "2026-09-15T19:45:00+00:00",
-           "created_at": "2026-09-01T00:00:00+00:00"}
+    row = {
+        "uuid": "e0",
+        "name": "LEADS",
+        "fact": "Bo leads",
+        "source": "Bo",
+        "target": "probe",
+        "valid_at": None,
+        "invalid_at": None,
+        "expired_at": "2026-09-15T19:45:00+00:00",
+        "created_at": "2026-09-01T00:00:00+00:00",
+    }
     _script(monkeypatch, window_rows=[row])
     delta = await neo4j_reader.episode_delta(EP)
     assert delta["invalidated"] == [{**row, "attributed_by": "window"}]
@@ -77,15 +84,23 @@ async def test_invalidated_entries_carry_when_the_fact_was_first_known(monkeypat
 
 # --- a Person's single-person values ride every cockpit entity payload ----------------
 
-PERSON_ROW = {"uuid": "p", "name": "Jane Rivers Doe", "labels": ["Entity", "Person"],
-              "summary": "s", "group_id": "g", "aliases": ["Jane", "JRD"],
-              "birth_date": "1980-02-29", "phone": "+1 555 0100"}
+PERSON_ROW = {
+    "uuid": "p",
+    "name": "Jane Rivers Doe",
+    "labels": ["Entity", "Person"],
+    "summary": "s",
+    "group_id": "g",
+    "aliases": ["Jane", "JRD"],
+    "birth_date": "1980-02-29",
+    "phone": "+1 555 0100",
+}
 
 
 @pytest.mark.asyncio
 async def test_the_delta_lists_each_entitys_person_values(monkeypatch):
     """The auditor judges against the delta: a birth date that is in the entity's
     attributes is recorded, not "in no relationship"."""
+
     async def fake_read(query, **params):
         if "MENTIONS" in query:
             assert "coalesce(n.aliases, []) AS aliases" in query
@@ -98,7 +113,10 @@ async def test_the_delta_lists_each_entitys_person_values(monkeypatch):
     delta = await neo4j_reader.episode_delta(EP)
     (entity,) = delta["entities"]
     assert {k: entity[k] for k in ("aliases", "birth_date", "phone")} == {
-        "aliases": ["Jane", "JRD"], "birth_date": "1980-02-29", "phone": "+1 555 0100"}
+        "aliases": ["Jane", "JRD"],
+        "birth_date": "1980-02-29",
+        "phone": "+1 555 0100",
+    }
 
 
 @pytest.mark.asyncio
@@ -118,12 +136,24 @@ async def test_search_matches_an_alias_and_returns_the_values(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_every_entity_payload_carries_the_person_values(monkeypatch):
-    neighbor = {"uuid": "e1", "source": "p", "target": "q", "name": "KNOWS",
-                "fact": "f", "valid_at": None, "invalid_at": None, "created_at": None,
-                "neighbor_uuid": "q", "neighbor_name": "Barbara Doe",
-                "neighbor_labels": ["Entity", "Person"], "neighbor_summary": "",
-                "neighbor_group_id": "g", "neighbor_aliases": ["Barb"],
-                "neighbor_birth_date": None, "neighbor_phone": "555"}
+    neighbor = {
+        "uuid": "e1",
+        "source": "p",
+        "target": "q",
+        "name": "KNOWS",
+        "fact": "f",
+        "valid_at": None,
+        "invalid_at": None,
+        "created_at": None,
+        "neighbor_uuid": "q",
+        "neighbor_name": "Barbara Doe",
+        "neighbor_labels": ["Entity", "Person"],
+        "neighbor_summary": "",
+        "neighbor_group_id": "g",
+        "neighbor_aliases": ["Barb"],
+        "neighbor_birth_date": None,
+        "neighbor_phone": "555",
+    }
 
     async def fake_read(query, **params):
         if "RELATES_TO" in query and "neighbor_uuid" in query:
@@ -131,8 +161,17 @@ async def test_every_entity_payload_carries_the_person_values(monkeypatch):
         if "RELATES_TO" in query:
             return []
         if "MATCH (e:Episodic {uuid: $uuid})\n        RETURN" in query:
-            return [{"uuid": "ep", "name": "n", "source_description": "", "group_id": "g",
-                     "created_at": None, "valid_at": None, "content": ""}]
+            return [
+                {
+                    "uuid": "ep",
+                    "name": "n",
+                    "source_description": "",
+                    "group_id": "g",
+                    "created_at": None,
+                    "valid_at": None,
+                    "content": "",
+                }
+            ]
         assert "coalesce(n.aliases, []) AS aliases" in query, query
         return [PERSON_ROW]
 

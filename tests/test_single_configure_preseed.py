@@ -85,8 +85,18 @@ GENERATED = {
 # this file on the 2026-09-24 Windows run, taking the `test` phase — the install
 # gate — down with it.
 _DEBRIS = shutil.ignore_patterns(
-    "NUL", "nul", "CON", "con", "AUX", "aux", "PRN", "prn",
-    ".env", ".env.*", "__pycache__", "*.pyc",
+    "NUL",
+    "nul",
+    "CON",
+    "con",
+    "AUX",
+    "aux",
+    "PRN",
+    "prn",
+    ".env",
+    ".env.*",
+    "__pycache__",
+    "*.pyc",
 )
 
 
@@ -126,8 +136,7 @@ def _run_setup(repo: Path, *args: str) -> subprocess.CompletedProcess:
     # The session running pytest may itself have a Central Command .env sourced;
     # make-secrets.sh only fills a BLANK, and it reads the environment first, so
     # a leaked credential would make this temp install skip generating one.
-    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_LLM_UPSTREAM_BASE_URL",
-                  *GENERATED):
+    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_LLM_UPSTREAM_BASE_URL", *GENERATED):
         env.pop(stale, None)
     return run_driver([_bash_exe(), "setup.sh", *args], cwd=repo / "deploy" / "single", env=env)
 
@@ -149,10 +158,12 @@ def _set(path: Path, values: dict[str, str]) -> None:
 def _require(repo: Path, key: str) -> None:
     """Add a REQUIRED row to the temp copy's schema — the fail-closed fixture."""
     schema = repo / "deploy" / "single" / "questions.tsv"
-    row = "\t".join([key, "identity", f"a value {key} nothing can default",
-                     "-", "y", "-", "-", "n"])
-    schema.write_text(schema.read_text(encoding="utf-8").rstrip("\n") + "\n" + row + "\n",
-                      encoding="utf-8")
+    row = "\t".join(
+        [key, "identity", f"a value {key} nothing can default", "-", "y", "-", "-", "n"]
+    )
+    schema.write_text(
+        schema.read_text(encoding="utf-8").rstrip("\n") + "\n" + row + "\n", encoding="utf-8"
+    )
 
 
 @drives_installer
@@ -170,8 +181,11 @@ def test_an_empty_answer_file_needs_no_answers_and_exits_0(tree: Path):
     assert "USERACTION" not in r.stdout, r.stdout
     assert "  set    " not in r.stderr, "it must not write an answer it never asked for"
     # CC_STATE_DIR (P1's one write) plus exactly the credentials make-secrets owns.
-    keys = [ln.split("=")[0] for ln in env_file.read_text(encoding="utf-8").splitlines()
-            if ln.strip() and not ln.startswith("#")]
+    keys = [
+        ln.split("=")[0]
+        for ln in env_file.read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.startswith("#")
+    ]
     assert keys[0] == "CC_STATE_DIR"
     assert set(keys) == {"CC_STATE_DIR", *GENERATED}, keys
 
@@ -213,8 +227,9 @@ def test_a_missing_answer_file_is_created_from_the_template(tree: Path):
 
 
 @drives_installer
-@pytest.mark.parametrize("declare_upstream", [True, False],
-                         ids=["upstream-declared", "catalog-in-the-litellm-ui"])
+@pytest.mark.parametrize(
+    "declare_upstream", [True, False], ids=["upstream-declared", "catalog-in-the-litellm-ui"]
+)
 def test_a_prefilled_answer_file_asks_nothing_and_changes_nothing(
     tree: Path, declare_upstream: bool
 ):
@@ -262,7 +277,7 @@ def test_it_never_prompts_without_a_terminal_even_without_the_flag(tree: Path):
 
 @drives_installer
 def test_check_with_no_answer_file_stops_for_the_operator(tree: Path):
-    """"Run configure" is the operator's MOVE, which is exit 3 in this protocol
+    """ "Run configure" is the operator's MOVE, which is exit 3 in this protocol
     — not exit 1, which sends them to "fix the FAIL lines above" for a file that
     has simply never been created. `check_gate`'s exit-3 text already walks them
     to `configure`; exit 1 skipped past it (2026-09-24 Windows run)."""
@@ -274,7 +289,6 @@ def test_check_with_no_answer_file_stops_for_the_operator(tree: Path):
     assert "USERACTION answer-file:" in r.stdout, r.stdout
     assert "./setup.sh configure" in r.stdout
     assert not (tree / ".env").exists(), "check never creates the answer file"
-
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +333,11 @@ def test_every_example_value_the_code_does_not_default_is_asked_derived_or_gener
     example = _example_values()
     setup_src = installer_source()
     secrets_src = (SINGLE / "make-secrets.sh").read_text(encoding="utf-8")
-    asked = {l.split("\t", 1)[0] for l in (SINGLE / "questions.tsv").read_text(encoding="utf-8").splitlines()
-             if l and not l.startswith("#")}
+    asked = {
+        l.split("\t", 1)[0]
+        for l in (SINGLE / "questions.tsv").read_text(encoding="utf-8").splitlines()
+        if l and not l.startswith("#")
+    }
     lost = []
     for key, value in sorted(example.items()):
         fname = key[3:].lower() if key.startswith("CC_") else None

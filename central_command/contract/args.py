@@ -56,8 +56,10 @@ class ArgSpec:
 # catalog) and the spend repair script. Contract-level because both tiers
 # check it and contract has no dependencies.
 COST_FIELDS = (
-    "input_cost_per_token", "output_cost_per_token",
-    "cache_read_input_token_cost", "cache_creation_input_token_cost",
+    "input_cost_per_token",
+    "output_cost_per_token",
+    "cache_read_input_token_cost",
+    "cache_creation_input_token_cost",
 )
 
 # USD per TOKEN. The dearest model on any public card is around 1.5e-4; a
@@ -94,6 +96,8 @@ def mcp_server_id_shape_ok(server_id: object) -> bool:
 def mcp_server_id_ok(server_id: object) -> bool:
     """The slug, and not one of this system's own (`cc-`) names."""
     return mcp_server_id_shape_ok(server_id) and not server_id.startswith(MCP_RESERVED_PREFIX)
+
+
 # The upstream transports LiteLLM's MCP gateway reaches a server over by URL
 # (`http` is streamable HTTP). stdio is not one of them on purpose: a server is
 # its own container, registered by URL, never a subprocess of the proxy.
@@ -106,9 +110,11 @@ def _mcp_server_id_problems(capability: str, args: dict) -> list[str]:
         return []  # `required` already reports it
     if not mcp_server_id_ok(server_id):
         return [
-            (f"{capability}: server_id={server_id!r} must be a lowercase slug "
-            "(letters, digits and hyphens, 2 to 40 characters, starting and ending "
-            "with a letter or digit) and must not start with 'cc-'")
+            (
+                f"{capability}: server_id={server_id!r} must be a lowercase slug "
+                "(letters, digits and hyphens, 2 to 40 characters, starting and ending "
+                "with a letter or digit) and must not start with 'cc-'"
+            )
         ]
     return []
 
@@ -130,8 +136,10 @@ def _mcp_url_problems(capability: str, args: dict) -> list[str]:
         return [f"{capability}: url={url!r} must be an http:// or https:// URL with a host"]
     if parsed.username or parsed.password:
         return [
-            (f"{capability}: url carries credentials — a secret never rides a "
-            "proposal; register a server that needs none")
+            (
+                f"{capability}: url carries credentials — a secret never rides a "
+                "proposal; register a server that needs none"
+            )
         ]
     return []
 
@@ -169,8 +177,9 @@ def _calendar_plan_shape(capability: str, args: dict) -> list[str]:
             raise ValueError
         date.fromisoformat(day)
     except ValueError:
-        problems.append(f"{where}.date must be the local plan date YYYY-MM-DD for a "
-                        f"work block, got {day!r}")
+        problems.append(
+            f"{where}.date must be the local plan date YYYY-MM-DD for a work block, got {day!r}"
+        )
     return problems
 
 
@@ -193,21 +202,21 @@ def _iso_date(value) -> bool:
     return True
 
 
-def _plan_items(capability: str, args: dict, *, list_key: str, allowed: set[str],
-                limit: int, check_item) -> list[str]:
+def _plan_items(
+    capability: str, args: dict, *, list_key: str, allowed: set[str], limit: int, check_item
+) -> list[str]:
     problems: list[str] = []
     if "date" in args and not _iso_date(args["date"]):
-        problems.append(f"{capability}: date must be the local plan date YYYY-MM-DD, "
-                        f"got {args['date']!r}")
+        problems.append(
+            f"{capability}: date must be the local plan date YYYY-MM-DD, got {args['date']!r}"
+        )
     items = args.get(list_key)
     if list_key not in args or items in (None, []):
-        return problems     # the required-argument check names it
+        return problems  # the required-argument check names it
     if not isinstance(items, list):
-        return problems + [(f"{capability}: {list_key} must be a list, got "
-                           f"{type(items).__name__}")]
+        return problems + [(f"{capability}: {list_key} must be a list, got {type(items).__name__}")]
     if len(items) > limit:
-        problems.append(f"{capability}: {list_key} holds {len(items)} entries; at most "
-                        f"{limit}")
+        problems.append(f"{capability}: {list_key} holds {len(items)} entries; at most {limit}")
     seen: set[str] = set()
     for n, item in enumerate(items):
         where = f"{capability}: {list_key}[{n}]"
@@ -216,8 +225,10 @@ def _plan_items(capability: str, args: dict, *, list_key: str, allowed: set[str]
             continue
         unknown = sorted(set(item) - allowed)
         if unknown:
-            problems.append(f"{where} carries unknown key(s) {', '.join(unknown)} "
-                            f"(allowed: {', '.join(sorted(allowed))})")
+            problems.append(
+                f"{where} carries unknown key(s) {', '.join(unknown)} "
+                f"(allowed: {', '.join(sorted(allowed))})"
+            )
         key = item.get("issue_key")
         if not isinstance(key, str) or not key.strip():
             problems.append(f"{where}.issue_key is required")
@@ -242,8 +253,7 @@ def _review_item(item: dict) -> list[str]:
         problems.append(f"done must be true or false, got {item.get('done')!r}")
     if "actual_hours" in item and item["actual_hours"] is not None:
         h = item["actual_hours"]
-        if (isinstance(h, bool) or not isinstance(h, (int, float))
-                or not math.isfinite(h) or h < 0):
+        if isinstance(h, bool) or not isinstance(h, (int, float)) or not math.isfinite(h) or h < 0:
             problems.append(f"actual_hours must be a number of hours >= 0, got {h!r}")
     if "note" in item and item["note"] is not None:
         note = item["note"]
@@ -255,15 +265,25 @@ def _review_item(item: dict) -> list[str]:
 
 
 def _plan_day_shape(capability: str, args: dict) -> list[str]:
-    return _plan_items(capability, args, list_key="items",
-                       allowed={"issue_key", "reason"}, limit=PLAN_DAY_MAX_ITEMS,
-                       check_item=_day_item)
+    return _plan_items(
+        capability,
+        args,
+        list_key="items",
+        allowed={"issue_key", "reason"},
+        limit=PLAN_DAY_MAX_ITEMS,
+        check_item=_day_item,
+    )
 
 
 def _plan_review_shape(capability: str, args: dict) -> list[str]:
-    return _plan_items(capability, args, list_key="outcomes",
-                       allowed={"issue_key", "done", "actual_hours", "note"},
-                       limit=PLAN_REVIEW_MAX_OUTCOMES, check_item=_review_item)
+    return _plan_items(
+        capability,
+        args,
+        list_key="outcomes",
+        allowed={"issue_key", "done", "actual_hours", "note"},
+        limit=PLAN_REVIEW_MAX_OUTCOMES,
+        check_item=_review_item,
+    )
 
 
 # The planning fields (the EA planning design, D3 and D8; DL-221 step 4b). The
@@ -271,8 +291,14 @@ def _plan_review_shape(capability: str, args: dict) -> list[str]:
 # the configured `plan_field_*` NAMES and writes the estimate to the tracker's
 # own original estimate and the due date to its own due date. Nothing here is a
 # field id or a field name: an agent never addresses a field directly.
-PLANNING_FIELD_ARGS = ("stakes", "value", "lateness_loss", "deadline_type",
-                       "estimate_hours", "due_date")
+PLANNING_FIELD_ARGS = (
+    "stakes",
+    "value",
+    "lateness_loss",
+    "deadline_type",
+    "estimate_hours",
+    "due_date",
+)
 PLANNING_DEADLINE_TYPES = ("hard", "soft")
 PLANNING_STAKES_CHARS = 2000
 # An estimate is hours of real work that becomes a calendar block; a value far
@@ -281,14 +307,15 @@ PLANNING_ESTIMATE_MAX_HOURS = 2000.0
 
 
 def _finite_number(v) -> bool:
-    return (not isinstance(v, bool) and isinstance(v, (int, float))
-            and math.isfinite(v))
+    return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
 
 
 def _estimate_problem(where: str, h) -> str | None:
     if not _finite_number(h) or h <= 0 or h > PLANNING_ESTIMATE_MAX_HOURS:
-        return (f"{where}: estimate_hours must be a number of hours above 0 and at most "
-                f"{PLANNING_ESTIMATE_MAX_HOURS:g}, got {h!r}")
+        return (
+            f"{where}: estimate_hours must be a number of hours above 0 and at most "
+            f"{PLANNING_ESTIMATE_MAX_HOURS:g}, got {h!r}"
+        )
     return None
 
 
@@ -300,16 +327,19 @@ def _planning_value_problems(capability: str, args: dict) -> list[str]:
         if not isinstance(s, str) or not s.strip():
             problems.append(f"{capability}: stakes must be non-empty text, got {s!r}")
         elif len(s) > PLANNING_STAKES_CHARS:
-            problems.append(f"{capability}: stakes is {len(s)} characters; at most "
-                            f"{PLANNING_STAKES_CHARS}")
+            problems.append(
+                f"{capability}: stakes is {len(s)} characters; at most {PLANNING_STAKES_CHARS}"
+            )
     for key in ("value", "lateness_loss"):
         if key in args:
             v = args[key]
             if not _finite_number(v) or v < 0:
                 problems.append(f"{capability}: {key} must be a number >= 0, got {v!r}")
     if "deadline_type" in args and args["deadline_type"] not in PLANNING_DEADLINE_TYPES:
-        problems.append(f"{capability}: deadline_type={args['deadline_type']!r} is not one "
-                        f"of {', '.join(PLANNING_DEADLINE_TYPES)}")
+        problems.append(
+            f"{capability}: deadline_type={args['deadline_type']!r} is not one "
+            f"of {', '.join(PLANNING_DEADLINE_TYPES)}"
+        )
     if "estimate_hours" in args:
         p = _estimate_problem(capability, args["estimate_hours"])
         if p:
@@ -327,17 +357,20 @@ def _planning_fields_shape(capability: str, args: dict) -> list[str]:
     problems: list[str] = []
     unknown = sorted(set(args) - {"issue_key", *PLANNING_FIELD_ARGS})
     if unknown:
-        problems.append(f"{capability}: unknown argument(s) {', '.join(unknown)} (the "
-                        f"planning fields are {', '.join(PLANNING_FIELD_ARGS)}; any other "
-                        "change to an issue is not this capability's)")
+        problems.append(
+            f"{capability}: unknown argument(s) {', '.join(unknown)} (the "
+            f"planning fields are {', '.join(PLANNING_FIELD_ARGS)}; any other "
+            "change to an issue is not this capability's)"
+        )
     named = [k for k in PLANNING_FIELD_ARGS if k in args]
     if not named:
-        problems.append(f"{capability}: name at least one of "
-                        f"{', '.join(PLANNING_FIELD_ARGS)}")
+        problems.append(f"{capability}: name at least one of {', '.join(PLANNING_FIELD_ARGS)}")
     nulls = [k for k in named if args[k] is None]
     if nulls:
-        problems.append(f"{capability}: {', '.join(nulls)} is null; this capability sets "
-                        "planning fields and never clears one")
+        problems.append(
+            f"{capability}: {', '.join(nulls)} is null; this capability sets "
+            "planning fields and never clears one"
+        )
     present = {k: args[k] for k in named if args[k] is not None}
     return problems + _planning_value_problems(capability, present)
 
@@ -368,7 +401,8 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # "the text gives no start" is the literal `unbounded`, which the Executor
     # maps to null — an explicit unknown, never a silent default.
     "graph.create_edge": ArgSpec(
-        required=("source_uuid", "target_uuid", "name", "fact", "valid_at")),
+        required=("source_uuid", "target_uuid", "name", "fact", "valid_at")
+    ),
     "graph.merge_nodes": ArgSpec(required=("keep_uuid", "drop_uuid")),
     # Optional: name, summary, labels, and a Person's aliases / birth_date /
     # phone (the Executor forwards exactly those; the writer validates them
@@ -413,8 +447,9 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # is checked for shape only; that the ids exist in a catalog is not a
     # world-state fact worth a call — an unknown id on the skip list is inert.
     # `vendors` (2026-09-14) names whole groups; the Executor expands them.
-    "autodiscovery.skip": ArgSpec(required=("credential_name",),
-                                  any_of=(("model_ids", "vendors"),)),
+    "autodiscovery.skip": ArgSpec(
+        required=("credential_name",), any_of=(("model_ids", "vendors"),)
+    ),
     # litellm model writes (2026-09-14): every handler subscripts these, and
     # a per-token price is a shape fact — see COST_CEILING. `extra` is
     # add_model's litellm_params; update_model names it litellm_params.
@@ -428,11 +463,11 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # `tests/test_proposal_args.py` now walks the Executor's handlers so a
     # subscripted key without a spec fails the suite, not the operator.
     "jira.set_due_date": ArgSpec(required=("issue_key", "due_date")),
-    "jira.create_issue": ArgSpec(required=("project_key", "summary", "issue_type"),
-                                 checks=(_create_issue_estimate_shape,)),
+    "jira.create_issue": ArgSpec(
+        required=("project_key", "summary", "issue_type"), checks=(_create_issue_estimate_shape,)
+    ),
     # The planning fields (DL-221 step 4b): see `_planning_fields_shape`.
-    "jira.set_planning_fields": ArgSpec(required=("issue_key",),
-                                        checks=(_planning_fields_shape,)),
+    "jira.set_planning_fields": ArgSpec(required=("issue_key",), checks=(_planning_fields_shape,)),
     "jira.create_project": ArgSpec(required=("key", "name")),
     "jira.add_comment": ArgSpec(required=("issue_key", "body")),
     # A PARTIAL edit: only the attributes named are changed. Presence is the
@@ -458,18 +493,21 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "jira.create_dashboard": ArgSpec(required=("name",)),
     "confluence.create_page": ArgSpec(required=("space_id_or_key", "title", "body_storage")),
     "confluence.update_page": ArgSpec(
-        required=("page_id", "title", "body_storage", "expected_version")),
+        required=("page_id", "title", "body_storage", "expected_version")
+    ),
     "confluence.move_page": ArgSpec(required=("page_id", "new_parent_id")),
     "confluence.trash_page": ArgSpec(required=("page_id",)),
     "confluence.upload_attachment": ArgSpec(required=("page_id", "filename", "content")),
     "confluence.set_labels": ArgSpec(required=("page_id", "labels")),
     "confluence.create_space": ArgSpec(required=("key", "name")),
-    "calendar.create_event": ArgSpec(required=("title", "start", "end"),
-                                     checks=(_calendar_plan_shape,)),
+    "calendar.create_event": ArgSpec(
+        required=("title", "start", "end"), checks=(_calendar_plan_shape,)
+    ),
     # Adoption (D5): an existing event becomes a placeholder in the ledger. The
     # event's existence is world state, checked by the Executor's read.
-    "calendar.adopt_event": ArgSpec(required=("event_id", "kind"),
-                                    enums={"kind": ("placeholder",)}),
+    "calendar.adopt_event": ArgSpec(
+        required=("event_id", "kind"), enums={"kind": ("placeholder",)}
+    ),
     "calendar.update_event": ArgSpec(required=("event_id",)),
     "calendar.delete_event": ArgSpec(required=("event_id", "reason")),
     # Releasing a placeholder or block (DL-221 step 4a): the ledger row is
@@ -482,8 +520,7 @@ ARG_SPECS: dict[str, ArgSpec] = {
     "plan.remove_finished_block": ArgSpec(required=("event_id",)),
     # The stored day plan and the review's outcome record (D6).
     "plan.record_day": ArgSpec(required=("date", "items"), checks=(_plan_day_shape,)),
-    "plan.record_review": ArgSpec(required=("date", "outcomes"),
-                                  checks=(_plan_review_shape,)),
+    "plan.record_review": ArgSpec(required=("date", "outcomes"), checks=(_plan_review_shape,)),
     # The rationale is what the operator weighs a charter edit by, and the
     # record of why an agent's standing rules changed (GATE-009).
     "charter.update": ArgSpec(required=("agent_id", "content", "rationale")),
@@ -491,8 +528,9 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # The note store (DL-217): a note is a scope and its text; a retirement
     # names its note and why. Budget and retire-id checks are world state
     # (the store changes between propose and approve) and stay Executor-only.
-    "memory.note_add": ArgSpec(required=("scope", "text"),
-                               enums={"scope": ("private", "operator")}),
+    "memory.note_add": ArgSpec(
+        required=("scope", "text"), enums={"scope": ("private", "operator")}
+    ),
     "memory.note_retire": ArgSpec(required=("note_id", "reason")),
     # Not a gated write since story 4.7: task creation is a trigger, and the
     # direct `create_task` tool checks its shape here — the one list.
@@ -516,8 +554,7 @@ ARG_SPECS: dict[str, ArgSpec] = {
         enums={"transport": MCP_URL_TRANSPORTS},
         checks=(_mcp_server_id_problems, _mcp_url_problems),
     ),
-    "mcp.server_unregister": ArgSpec(required=("server_id",),
-                                     checks=(_mcp_server_id_problems,)),
+    "mcp.server_unregister": ArgSpec(required=("server_id",), checks=(_mcp_server_id_problems,)),
     "mcp.tool_call": ArgSpec(required=("server_id", "tool_name")),
 }
 
@@ -560,9 +597,7 @@ def validate_action_args(capability: str, arguments: dict | None) -> list[str]:
             )
     for key, allowed in spec.enums.items():
         if key in args and args[key] not in allowed:
-            problems.append(
-                f"{capability}: {key}={args[key]!r} is not one of {', '.join(allowed)}"
-            )
+            problems.append(f"{capability}: {key}={args[key]!r} is not one of {', '.join(allowed)}")
     for check in spec.checks:
         problems.extend(check(capability, args))
     for path, ceiling in spec.ceilings.items():
@@ -605,9 +640,11 @@ def validate_proposal_shape(proposal: Proposal) -> list[str]:
     confidence = getattr(proposal, "confidence", None)
     if confidence is None:
         return [
-            ("confidence: missing — state how sure you are of this proposal, as "
-            "confidence.level (high | medium | low) plus confidence.rationale, one "
-            "sentence on WHY that level")
+            (
+                "confidence: missing — state how sure you are of this proposal, as "
+                "confidence.level (high | medium | low) plus confidence.rationale, one "
+                "sentence on WHY that level"
+            )
         ]
     problems: list[str] = []
     if not getattr(confidence, "level", None):

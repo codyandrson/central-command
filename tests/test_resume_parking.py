@@ -110,9 +110,7 @@ async def test_a_transient_resume_failure_parks_the_session(monkeypatch):
         raise OUTAGE
 
     monkeypatch.setattr(gateway, "resume", resume_boom)
-    out = await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model
-    )
+    out = await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
 
     assert out["resume_parked"] is True
     # The decision and its execution are untouched — this is only about the turn.
@@ -136,8 +134,11 @@ async def test_a_transient_resume_failure_parks_the_session(monkeypatch):
     assert "session.resume_failed" not in kinds
     assert (await repo.get_task(task_id))["status"] == "IN_PROGRESS"
 
-    parked = next(e for e in await repo.list_events(ref_id=run["session_id"])
-              if e["kind"] == "session.resume_parked")
+    parked = next(
+        e
+        for e in await repo.list_events(ref_id=run["session_id"])
+        if e["kind"] == "session.resume_parked"
+    )
     assert parked["payload"]["transient"] is True
     assert parked["payload"]["after"] == "approved"
 
@@ -152,9 +153,7 @@ async def test_a_semantic_resume_failure_keeps_todays_behaviour(monkeypatch):
         raise ValueError("the message history is malformed")
 
     monkeypatch.setattr(gateway, "resume", resume_boom)
-    await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model
-    )
+    await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
 
     assert await repo.session_status(run["session_id"]) == "DONE"
     # The ARMED marker survives (run_state is a key-level merge, and it is the
@@ -163,8 +162,8 @@ async def test_a_semantic_resume_failure_keeps_todays_behaviour(monkeypatch):
     # is a note, only a status flip is a retry.
     assert run["session_id"] not in await repo.sessions_awaiting_resume()
     assert run["session_id"] not in [
-        r["id"] for r in await repo.sessions_with_orphaned_resume(
-            datetime.now(UTC) + timedelta(days=1))
+        r["id"]
+        for r in await repo.sessions_with_orphaned_resume(datetime.now(UTC) + timedelta(days=1))
     ]
     kinds = await _kinds(run["session_id"])
     assert "session.resume_failed" in kinds
@@ -172,8 +171,11 @@ async def test_a_semantic_resume_failure_keeps_todays_behaviour(monkeypatch):
     assert "session.resume_parked" not in kinds
     assert (await repo.get_task(task_id))["status"] == "DONE"
 
-    failed = next(e for e in await repo.list_events(ref_id=run["session_id"])
-              if e["kind"] == "session.resume_failed")
+    failed = next(
+        e
+        for e in await repo.list_events(ref_id=run["session_id"])
+        if e["kind"] == "session.resume_failed"
+    )
     assert failed["payload"]["transient"] is False
 
 
@@ -204,10 +206,14 @@ async def test_the_driver_finishes_a_parked_approved_resume(monkeypatch):
     kinds = await _kinds(run["session_id"])
     assert "session.completed" in kinds
     assert "session.resume_retried" in kinds
-    retried = [e for e in await repo.list_events(ref_id=run["session_id"])
-               if e["kind"] == "session.resume_retried"]
+    retried = [
+        e
+        for e in await repo.list_events(ref_id=run["session_id"])
+        if e["kind"] == "session.resume_retried"
+    ]
     assert retried[0]["payload"]["dependencies"] == ["llm"], (
-        "an untyped transient error is recorded, and named, as the model")
+        "an untyped transient error is recorded, and named, as the model"
+    )
 
     # The task resolved exactly as a no-outage run would have left it …
     task = await repo.get_task(task_id)
@@ -238,7 +244,7 @@ async def test_a_retried_rejection_redraft_still_gets_the_evidence_check(monkeyp
     assert (await repo.load_proposal(run["proposal_id"]))["status"] == "REJECTED"
 
     pending = await _pending(run["session_id"])
-    assert pending["kind"] == "denial"          # a ToolDenied, not a result
+    assert pending["kind"] == "denial"  # a ToolDenied, not a result
     assert pending["text"] == feedback
     assert pending["after"] == "rejected"
     assert pending["decided_event_id"]
@@ -269,8 +275,7 @@ async def test_a_transient_answer_resume_parks_without_failing_the_task(monkeypa
     model = make_deferred_tool_model("ask_operator")
     task_id = "task_" + uuid.uuid4().hex[:12]
     await repo.create_task(task_id, "outage test", "Update the issue.", "jira-expert")
-    out = await run_task("jira-expert", "Update the issue.", model=model,
-                         task_id=task_id)
+    out = await run_task("jira-expert", "Update the issue.", model=model, task_id=task_id)
     assert out["asked"] is True
     await repo.start_task(task_id, out["session_id"])
 
@@ -289,7 +294,7 @@ async def test_a_transient_answer_resume_parks_without_failing_the_task(monkeypa
     pending = await _pending(out["session_id"])
     assert pending["after"] == "answered"
     assert pending["kind"] == "result"
-    assert pending["text"] == "TASKS-12"     # the operator's words, verbatim
+    assert pending["text"] == "TASKS-12"  # the operator's words, verbatim
     assert pending["item_id"] == out["item_id"]
     # The answer bookkeeping stands, and the task was NOT failed.
     assert (await repo.get_operator_item(out["item_id"]))["status"] == "ANSWERED"
@@ -366,8 +371,7 @@ async def test_two_concurrent_drivers_produce_exactly_one_resume(monkeypatch):
         orchestration.resume_parked_session(run["session_id"], model=model),
     )
     assert [bool(a), bool(b)].count(True) == 1, "the AWAITING_RESUME→RUNNING flip is the lock"
-    retried = [k for k in await _kinds(run["session_id"])
-               if k == "session.resume_retried"]
+    retried = [k for k in await _kinds(run["session_id"]) if k == "session.resume_retried"]
     assert len(retried) == 1
 
 
@@ -445,9 +449,7 @@ async def test_a_killed_resume_is_recovered_by_the_sweep(monkeypatch):
 
     monkeypatch.setattr(gateway, "resume", resume_killed)
     with pytest.raises(asyncio.CancelledError):
-        await gateway.approve_and_execute(
-            run["session_id"], run["proposal_id"], model=model
-        )
+        await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
 
     # Exactly the state the restart left behind: the write landed, the session
     # is still parked on its proposal, and nothing parked it for retry.
@@ -456,8 +458,9 @@ async def test_a_killed_resume_is_recovered_by_the_sweep(monkeypatch):
 
     monkeypatch.undo()
     monkeypatch.setattr(settings, "test_model", True)
-    monkeypatch.setattr(orchestration, "PROCESS_STARTED_AT",
-                        datetime.now(UTC) + timedelta(days=1))  # "we restarted after it was armed"
+    monkeypatch.setattr(
+        orchestration, "PROCESS_STARTED_AT", datetime.now(UTC) + timedelta(days=1)
+    )  # "we restarted after it was armed"
     swept = await orchestration.resume_sweep()
 
     assert run["session_id"] in swept["orphaned"]
@@ -477,8 +480,10 @@ async def test_a_stale_marker_beside_a_new_call_is_not_re_driven(monkeypatch):
     # A rejection arms `after='rejected'`, resumes, and the agent redrafts —
     # parking a NEW proposal on a NEW tool_call_id in the same session.
     await gateway.reject_with_feedback(
-        run["session_id"], run["proposal_id"],
-        "Wrong — I spoke to Dana, make it 2026-08-10.", model=model,
+        run["session_id"],
+        run["proposal_id"],
+        "Wrong — I spoke to Dana, make it 2026-08-10.",
+        model=model,
     )
 
     session_id = run["session_id"]
@@ -487,6 +492,8 @@ async def test_a_stale_marker_beside_a_new_call_is_not_re_driven(monkeypatch):
     assert state.get("pending_resume"), "the rejection should have armed a marker"
     assert state["pending_resume"]["tool_call_id"] != state["tool_call_id"]
 
-    orphans = [r["id"] for r in await repo.sessions_with_orphaned_resume(
-        datetime.now(UTC) + timedelta(days=1))]
+    orphans = [
+        r["id"]
+        for r in await repo.sessions_with_orphaned_resume(datetime.now(UTC) + timedelta(days=1))
+    ]
     assert session_id not in orphans

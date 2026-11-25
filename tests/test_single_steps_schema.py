@@ -66,8 +66,7 @@ def _rows() -> list[dict[str, str]]:
             continue
         fields = line.split("\t")
         assert len(fields) == len(COLUMNS), (
-            f"steps.tsv: expected {len(COLUMNS)} tab-separated fields, got "
-            f"{len(fields)}: {line!r}"
+            f"steps.tsv: expected {len(COLUMNS)} tab-separated fields, got {len(fields)}: {line!r}"
         )
         row = dict(zip(COLUMNS, fields))
         out.append(row)
@@ -206,9 +205,7 @@ def _set_kv_targets() -> set[str]:
         text = script.read_text(encoding="utf-8")
         # Comments mention these calls by name (and so does this profile's
         # prose); only code counts.
-        body = "\n".join(
-            line for line in text.splitlines() if not line.lstrip().startswith("#")
-        )
+        body = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
         out |= set(SET_KV.findall(body))
     return out
 
@@ -220,10 +217,7 @@ def test_every_env_key_the_profile_writes_is_in_exactly_one_rows_writes():
             written.setdefault(cell, []).append(_qual(row))
 
     duplicated = {k: v for k, v in written.items() if len(v) > 1}
-    assert not duplicated, (
-        "a key with two writers is a key whose value nobody owns: "
-        f"{duplicated}"
-    )
+    assert not duplicated, f"a key with two writers is a key whose value nobody owns: {duplicated}"
 
     missing = sorted(k for k in _set_kv_targets() if k not in written)
     assert not missing, (
@@ -264,7 +258,9 @@ def _reachable_from(funcs: dict[str, str], roots: list[str]) -> set[str]:
 def test_every_probe_exists_in_the_installer():
     funcs = installer_functions()
     missing = sorted({row["probe"] for row in _rows() if row["probe"] not in funcs})
-    assert not missing, f"steps.tsv names probes the installer (setup.sh + phases/*.sh) does not define: {missing}"
+    assert not missing, (
+        f"steps.tsv names probes the installer (setup.sh + phases/*.sh) does not define: {missing}"
+    )
 
 
 def test_no_probe_can_mutate_anything():
@@ -282,13 +278,13 @@ def test_no_probe_can_mutate_anything():
             for pattern, why in FORBIDDEN.items():
                 for m in re.finditer(pattern, code):
                     offenders.append(f"{probe} -> {fn}(): {m.group(0)!r} — {why}")
-    assert not offenders, (
-        "a probe (or something it calls) mutates state:\n  " + "\n  ".join(offenders)
+    assert not offenders, "a probe (or something it calls) mutates state:\n  " + "\n  ".join(
+        offenders
     )
 
 
 def test_a_flag_gated_step_probes_zero_when_the_flag_is_off():
-    """"Not applicable is DONE" (D1), held to the row's own words.
+    """ "Not applicable is DONE" (D1), held to the row's own words.
 
     A row whose `doc` says "when CC_ENABLE_X=1" is declaring itself
     CONDITIONAL, and its probe must consult that flag — otherwise a deployment

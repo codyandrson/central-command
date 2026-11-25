@@ -74,7 +74,8 @@ async def test_import_grants_roster_agents_and_reports_the_rest(world, tmp_path)
     folder = _folder(tmp_path, f"{ROSTER[0]}, {ROSTER[1]}, {OFF_ROSTER}, cc-test-dg-nobody")
     r = await import_skill_folder(folder, skill_id=SKILL, apply_default_grants=True)
     assert r["default_grants"] == {
-        "applied": list(ROSTER), "skipped": [],
+        "applied": list(ROSTER),
+        "skipped": [],
         "unknown": [OFF_ROSTER, "cc-test-dg-nobody"],
     }
     g = await _grants()

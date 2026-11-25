@@ -3,6 +3,7 @@ pydantic-ai's limiter since DL-227): `CC_MODEL_CONCURRENCY` names alias
 groups that share one backend and how many requests that backend takes at
 once; `context.limit_concurrency` turns the spec into one shared
 `ConcurrencyLimiter` per pool, applied at the one model seam."""
+
 import asyncio
 
 import pytest
@@ -29,6 +30,7 @@ def _slow_model(log: list, name: str, hold: float = 0.05, model_name: str | None
         await asyncio.sleep(hold)
         yield "ok"
         log.append(f"end {name}")
+
     return FunctionModel(fn, stream_function=stream_fn, model_name=model_name or name)
 
 
@@ -51,8 +53,11 @@ def test_the_spec_parses_pools_star_and_the_legacy_integer():
     assert context.parse_concurrency_spec("1") == {"*": ("*", 1)}
     assert context.parse_concurrency_spec(1) == {"*": ("*", 1)}
     table = context.parse_concurrency_spec(" cc-default + gpt-4.1-nano = 1 ; *=8 ")
-    assert table == {"cc-default": ("cc-default+gpt-4.1-nano", 1),
-                     "gpt-4.1-nano": ("cc-default+gpt-4.1-nano", 1), "*": ("*", 8)}
+    assert table == {
+        "cc-default": ("cc-default+gpt-4.1-nano", 1),
+        "gpt-4.1-nano": ("cc-default+gpt-4.1-nano", 1),
+        "*": ("*", 8),
+    }
     assert context.parse_concurrency_spec("a=1,b=2")["b"] == ("b", 2)
     for bad in ("cc-default", "cc-default=one", "=1", "+=1"):
         with pytest.raises(ValueError):
@@ -72,8 +77,9 @@ async def test_aliases_in_one_pool_share_its_single_slot(monkeypatch):
     await _fire(a, b, n=2)
     assert len(log) == 8
     # Strict alternation: never two starts before an end, whichever alias.
-    assert all(log[i].startswith("start") and log[i + 1].startswith("end")
-               for i in range(0, len(log), 2))
+    assert all(
+        log[i].startswith("start") and log[i + 1].startswith("end") for i in range(0, len(log), 2)
+    )
     assert {e.split()[1] for e in log} == {"cc-default", "gpt-4.1-nano"}
 
 
@@ -86,15 +92,18 @@ async def test_waiting_is_first_in_first_out_with_no_rejection(monkeypatch):
     await asyncio.sleep(0.01)
     waiters = []
     for name in ("w1", "w2", "w3", "w4", "w5"):
-        model = context.WindowedModel(context.limit_concurrency(
-            _slow_model(log, name, 0.01, model_name="cc-smart")))
+        model = context.WindowedModel(
+            context.limit_concurrency(_slow_model(log, name, 0.01, model_name="cc-smart"))
+        )
         waiters.append(asyncio.create_task(_ask(model)))
-        await asyncio.sleep(0)   # enqueue in this order
+        await asyncio.sleep(0)  # enqueue in this order
     await asyncio.gather(holder, *waiters)
     starts = [e.split()[1] for e in log if e.startswith("start")]
     assert starts == ["cc-default", "w1", "w2", "w3", "w4", "w5"]
-    assert all(log[i].startswith("start") and log[i + 1] == "end" + log[i][5:]
-               for i in range(0, len(log), 2))     # one at a time, each to its end
+    assert all(
+        log[i].startswith("start") and log[i + 1] == "end" + log[i][5:]
+        for i in range(0, len(log), 2)
+    )  # one at a time, each to its end
 
 
 async def test_an_alias_the_spec_does_not_name_is_unlimited(monkeypatch):
@@ -120,8 +129,10 @@ async def test_a_failed_request_releases_its_slot(monkeypatch):
 
     async def boom(messages, info):
         raise RuntimeError("backend down")
-    model = context.WindowedModel(context.limit_concurrency(
-        FunctionModel(boom, model_name="cc-default")))
+
+    model = context.WindowedModel(
+        context.limit_concurrency(FunctionModel(boom, model_name="cc-default"))
+    )
     for _ in range(2):
         with pytest.raises(RuntimeError):
             await _ask(model)
@@ -161,7 +172,7 @@ async def test_a_streamed_request_holds_its_slot_until_the_stream_closes(monkeyp
             pass
         second = asyncio.create_task(_ask(_gated(log, "cc-default", hold=0.01)))
         await asyncio.sleep(0.05)
-        assert not second.done()          # waiting behind the open stream
+        assert not second.done()  # waiting behind the open stream
     await asyncio.wait_for(second, 2)
     assert log[-2:] == ["start cc-default", "end cc-default"]
 
@@ -178,6 +189,7 @@ async def test_empty_spec_gates_nothing(monkeypatch):
 async def _live(monkeypatch, alias):
     async def undeclared(model):
         return None
+
     monkeypatch.setattr(context, "output_cap_for", undeclared)
     monkeypatch.setattr(settings, "test_model", False)
     monkeypatch.setattr(settings, "llm_base_url", "http://llm.invalid:4000")

@@ -105,7 +105,7 @@ def _split_llms_full(text: str) -> list[tuple[str, str]]:
     sections: list[tuple[str, str]] = []
     for i, m in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        sections.append((m.group(1).strip(), text[m.start():end]))
+        sections.append((m.group(1).strip(), text[m.start() : end]))
 
     merged: list[tuple[str, str]] = []
     for title, body in sections:
@@ -123,7 +123,10 @@ def _split_llms_full(text: str) -> list[tuple[str, str]]:
 
 
 async def _import_llms_full(
-    skill_id: str, origin: str, doc_key_prefix: str | None, describes: str | None,
+    skill_id: str,
+    origin: str,
+    doc_key_prefix: str | None,
+    describes: str | None,
 ) -> dict | None:
     """Rung 0. Returns None (not a degraded result) when no llms-full.txt is
     published, so the caller falls through to rung 1."""
@@ -139,13 +142,22 @@ async def _import_llms_full(
     for title, body in sections:
         key = _keyed(doc_key_prefix, title, seen)
         await repo.add_skill_doc(
-            skill_id, key, "reference", title, body.strip(),
-            source_url=url, describes=describes, captured_at=captured_at,
+            skill_id,
+            key,
+            "reference",
+            title,
+            body.strip(),
+            source_url=url,
+            describes=describes,
+            captured_at=captured_at,
         )
         imported.append({"doc_key": key, "title": title, "source_url": url})
 
     return {
-        "imported": imported, "skipped": [], "truncated": False, "rung": "llms-full",
+        "imported": imported,
+        "skipped": [],
+        "truncated": False,
+        "rung": "llms-full",
         "notes": [f"parsed {len(sections)} sections from {url}"],
     }
 
@@ -153,13 +165,21 @@ async def _import_llms_full(
 async def _llms_txt_hint(origin: str) -> str | None:
     ok, _ = await _get_raw(f"{origin}/llms.txt", 1_000_000)
     if ok:
-        return f"{origin}/llms.txt exists but is index-only (no llms-full.txt) — not parsed into docs"
+        return (
+            f"{origin}/llms.txt exists but is index-only (no llms-full.txt) — not parsed into docs"
+        )
     return None
 
 
 async def _fetch_one(
-    skill_id: str, url: str, doc_key_prefix: str | None, describes: str | None,
-    captured_at: datetime, seen: dict[str, int], imported: list[dict], skipped: list[dict],
+    skill_id: str,
+    url: str,
+    doc_key_prefix: str | None,
+    describes: str | None,
+    captured_at: datetime,
+    seen: dict[str, int],
+    imported: list[dict],
+    skipped: list[dict],
     sem: asyncio.Semaphore,
 ) -> None:
     async with sem:
@@ -174,15 +194,26 @@ async def _fetch_one(
         path = urlsplit(url).path.strip("/") or url
         key = _keyed(doc_key_prefix, path, seen)
         doc = await repo.add_skill_doc(
-            skill_id, key, "reference", path, result["text"],
-            source_url=url, describes=describes, captured_at=captured_at,
+            skill_id,
+            key,
+            "reference",
+            path,
+            result["text"],
+            source_url=url,
+            describes=describes,
+            captured_at=captured_at,
         )
         imported.append({"doc_key": key, "title": doc["title"], "source_url": url})
 
 
 async def _import_sitemap(
-    skill_id: str, url: str, doc_key_prefix: str | None, max_pages: int,
-    path_prefix: str, describes: str | None, notes: list[str],
+    skill_id: str,
+    url: str,
+    doc_key_prefix: str | None,
+    max_pages: int,
+    path_prefix: str,
+    describes: str | None,
+    notes: list[str],
 ) -> dict:
     """Rung 1: sitemap enumeration, falling back to trafilatura's bounded
     focused_crawler when no sitemap is published. Both are synchronous
@@ -202,17 +233,32 @@ async def _import_sitemap(
     imported: list[dict] = []
     skipped: list[dict] = []
     sem = asyncio.Semaphore(_CONCURRENCY)
-    await asyncio.gather(*(
-        _fetch_one(skill_id, u, doc_key_prefix, describes, captured_at, seen, imported, skipped, sem)
-        for u in candidates
-    ))
+    await asyncio.gather(
+        *(
+            _fetch_one(
+                skill_id, u, doc_key_prefix, describes, captured_at, seen, imported, skipped, sem
+            )
+            for u in candidates
+        )
+    )
 
-    return {"imported": imported, "skipped": skipped, "truncated": truncated, "rung": "sitemap", "notes": notes}
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "truncated": truncated,
+        "rung": "sitemap",
+        "notes": notes,
+    }
 
 
 async def _import_via_crawler(
-    skill_id: str, url: str, doc_key_prefix: str | None, max_pages: int,
-    path_prefix: str, describes: str | None, filter_mode: str = "pruning",
+    skill_id: str,
+    url: str,
+    doc_key_prefix: str | None,
+    max_pages: int,
+    path_prefix: str,
+    describes: str | None,
+    filter_mode: str = "pruning",
 ) -> dict:
     """Rung 2: hand off to `central_command.integrations.crawler` (built
     concurrently with this module) for JS-rendered sites. Imported lazily and
@@ -227,7 +273,10 @@ async def _import_via_crawler(
     # where degraded is "" on success and a sentence when the service is down.
     try:
         result = await crawler.crawl_site(
-            url, max_pages=max_pages, path_prefix=path_prefix, filter_mode=filter_mode,
+            url,
+            max_pages=max_pages,
+            path_prefix=path_prefix,
+            filter_mode=filter_mode,
         )
     except Exception as e:  # noqa: BLE001
         return _degraded("crawler", [f"cc-crawler failed: {e}"])
@@ -237,7 +286,9 @@ async def _import_via_crawler(
     pages = result.get("pages", [])
     crawl_truncated = bool(result.get("truncated", False))
     crawl_notes = list(result.get("warnings", []))
-    crawl_notes += [f"page failed: {e.get('url')}: {e.get('error')}" for e in result.get("errors", [])]
+    crawl_notes += [
+        f"page failed: {e.get('url')}: {e.get('error')}" for e in result.get("errors", [])
+    ]
     if not pages:
         return _degraded("crawler", ["cc-crawler returned no pages", *crawl_notes])
 
@@ -254,12 +305,24 @@ async def _import_via_crawler(
         title = page.get("title") or urlsplit(page_url).path.strip("/") or page_url
         key = _keyed(doc_key_prefix, urlsplit(page_url).path or title, seen)
         await repo.add_skill_doc(
-            skill_id, key, "reference", title, text,
-            source_url=page_url, describes=describes, captured_at=captured_at,
+            skill_id,
+            key,
+            "reference",
+            title,
+            text,
+            source_url=page_url,
+            describes=describes,
+            captured_at=captured_at,
         )
         imported.append({"doc_key": key, "title": title, "source_url": page_url})
 
-    return {"imported": imported, "skipped": skipped, "truncated": crawl_truncated, "rung": "crawler", "notes": crawl_notes}
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "truncated": crawl_truncated,
+        "rung": "crawler",
+        "notes": crawl_notes,
+    }
 
 
 async def import_site(
@@ -284,7 +347,12 @@ async def import_site(
 
     if render:
         return await _import_via_crawler(
-            skill_id, url, doc_key_prefix, max_pages, prefix, describes,
+            skill_id,
+            url,
+            doc_key_prefix,
+            max_pages,
+            prefix,
+            describes,
             filter_mode=filter_mode,
         )
 

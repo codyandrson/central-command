@@ -31,9 +31,15 @@ AGENT_ID = "litellm-manager"
 
 
 async def build_litellm_manager(
-    model=None, charter: str | None = None, advisory: bool = False, packs=None,
-    capabilities=None, skills_catalog: str = "",
-    extra_toolsets=(), mcp_section: str = "", team_section: str = "",
+    model=None,
+    charter: str | None = None,
+    advisory: bool = False,
+    packs=None,
+    capabilities=None,
+    skills_catalog: str = "",
+    extra_toolsets=(),
+    mcp_section: str = "",
+    team_section: str = "",
 ) -> Agent:
     """`extra_toolsets`/`mcp_section` (D-sandbox slice 5): computed by the
     caller from `packs_mod.mcp_toolsets_for`/`mcp_charter_section` — see
@@ -47,17 +53,15 @@ async def build_litellm_manager(
     if advisory:
         # Advisory mode holds READ packs only — no propose tool, and no
         # mcp: grant either (a dynamic pack name, not in PACKS at all).
-        packs = [p for p in packs
-                 if not p.startswith("mcp:") and not packs_mod.PACKS[p].capabilities]
+        packs = [
+            p for p in packs if not p.startswith("mcp:") and not packs_mod.PACKS[p].capabilities
+        ]
         extra_toolsets, mcp_section = (), ""
     return Agent(
         await resolve_model(model, agent_id=AGENT_ID),
         name=AGENT_ID,
-        system_prompt=build_charter(
-            charter or render_v0(CHARTER), packs, mcp_section, team_section
-        ) + (
-            "\n\n" + skills_catalog if skills_catalog else ""
-        ),
+        system_prompt=build_charter(charter or render_v0(CHARTER), packs, mcp_section, team_section)
+        + ("\n\n" + skills_catalog if skills_catalog else ""),
         deps_type=TriageDeps,  # unused, but resume paths pass one — keep the shape
         output_type=str if advisory else [str, DeferredToolRequests],
         # declare_gap is ungated (returns text, never CallDeferred) — fits
@@ -72,6 +76,8 @@ async def ensure_registered() -> None:
     from central_command.db import repo
 
     await repo.upsert_agent(
-        AGENT_ID, "LiteLLM Manager", "",
+        AGENT_ID,
+        "LiteLLM Manager",
+        "",
         "manage the self-hosted LiteLLM proxy: models + provider mappings (spend read-only)",
     )

@@ -95,8 +95,16 @@ def test_the_shipped_manifest_loads_and_declares_the_phases_in_order():
       cc_steps_phases
     """)
     assert out.split() == [
-        "check", "machine", "fetch", "llm", "stack", "app",
-        "verify", "test", "boot", "demo",
+        "check",
+        "machine",
+        "fetch",
+        "llm",
+        "stack",
+        "app",
+        "verify",
+        "test",
+        "boot",
+        "demo",
     ], out
 
 
@@ -151,8 +159,12 @@ def test_step_fields_and_requires_come_back_qualified():
     # Space-separated and `<phase>/<step>`-qualified, which is what the ledger
     # keys on — the same step name lives in two phases (venv, cockpit,
     # image-sandbox, embed-dimension).
-    assert requires.split() == ["app/install", "app/mint-key", "verify/selfcheck",
-                              "boot/boot-sandbox"], requires   # the runner first (F20)
+    assert requires.split() == [
+        "app/install",
+        "app/mint-key",
+        "verify/selfcheck",
+        "boot/boot-sandbox",
+    ], requires  # the runner first (F20)
     assert gate_kind == "gate"
     assert empty_reads == "", "a `-` field must read back as empty, not as '-'"
 
@@ -317,9 +329,9 @@ def test_a_phase_whose_requires_are_all_done_is_not_blocked(tmp_path):
         (0, 0, 0, "0"),
         (0, 1, 0, "2"),
         (0, 0, 1, "3"),
-        (0, 1, 1, "3"),   # USERACTION outranks WARN
+        (0, 1, 1, "3"),  # USERACTION outranks WARN
         (1, 0, 0, "1"),
-        (1, 0, 1, "1"),   # ...and a FAIL outranks the gate. THE change.
+        (1, 0, 1, "1"),  # ...and a FAIL outranks the gate. THE change.
         (1, 1, 1, "1"),
         (2, 3, 4, "1"),
     ],
@@ -355,8 +367,12 @@ def test_a_batch_rewrites_its_rows_in_place_appends_new_ones_and_keeps_the_rest(
         demo/demo-feed started 2.56.0 t1 fp2 "a\treason"
     """)
     rows = [l.split("\t") for l in ok(f'cc_ledger_read "{p}"').splitlines()]
-    assert [r[0] for r in rows] == ["check/tree-pristine", "test/test", "boot/boot-api",
-                                    "demo/demo-feed"], rows
+    assert [r[0] for r in rows] == [
+        "check/tree-pristine",
+        "test/test",
+        "boot/boot-api",
+        "demo/demo-feed",
+    ], rows
     assert rows[0][1:3] == ["done", "2.55.0"], "a row not in the batch is untouched"
     assert rows[1][1:4] == ["started", "2.56.0", "t1"], "replaced IN PLACE, not appended"
     assert rows[2][5] == "no health"
@@ -368,7 +384,9 @@ def test_a_batch_rewrites_its_rows_in_place_appends_new_ones_and_keeps_the_rest(
 def test_a_batch_is_idempotent_and_an_empty_batch_writes_nothing(tmp_path):
     led = tmp_path / "ledger.tsv"
     p = led.as_posix()
-    batch = f'cc_ledger_write_batch "{p}" app/venv done 2.56.0 t fp "" app/install gate 2.56.0 t fp "x"'
+    batch = (
+        f'cc_ledger_write_batch "{p}" app/venv done 2.56.0 t fp "" app/install gate 2.56.0 t fp "x"'
+    )
     ok(batch)
     once = led.read_bytes()
     ok(batch)
@@ -401,16 +419,24 @@ def test_mark_started_writes_every_row_of_the_phase_and_nothing_else(tmp_path):
     """)
     rows = {l.split("\t")[0]: l.split("\t") for l in ok(f'cc_ledger_read "{p}"').splitlines()}
     boot = [k for k in rows if k.startswith("boot/")]
-    assert boot == ["boot/boot-api", "boot/operator-name", "boot/boot-sandbox",
-                    "boot/boot-roster", "boot/skills-imported", "boot/boot-cockpit",
-                    "boot/boot-at-logon"], boot
+    assert boot == [
+        "boot/boot-api",
+        "boot/operator-name",
+        "boot/boot-sandbox",
+        "boot/boot-roster",
+        "boot/skills-imported",
+        "boot/boot-cockpit",
+        "boot/boot-at-logon",
+    ], boot
     for k in boot:
         assert rows[k][1:4] == ["started", "2.56.0", "2026-10-02T00:00:00Z"], rows[k]
         assert rows[k][5] == "", rows[k]
     assert rows["boot/boot-api"][4] == out, "the fingerprint of the inputs it is about to run with"
     assert rows["app/install"][1] == "done", "another phase's row is untouched"
     # A phase with no manifest rows (status, validate, preflight) writes nothing.
-    ok(f'cc_steps_load ./steps.tsv && cc_ledger_mark_started "{(tmp_path / "x.tsv").as_posix()}" status 2.56.0 t "{env.as_posix()}"')
+    ok(
+        f'cc_steps_load ./steps.tsv && cc_ledger_mark_started "{(tmp_path / "x.tsv").as_posix()}" status 2.56.0 t "{env.as_posix()}"'
+    )
     assert not (tmp_path / "x.tsv").exists()
 
 
@@ -428,8 +454,14 @@ def test_a_started_row_blocks_what_requires_it(tmp_path):
 # ── the decision, in one place (D2 rule 2 + D11's drift rule) ───────────────
 
 
-def _decide(tmp_path, row: str, probe: str = "true", reads: str = "CC_A,CC_B",
-            env_body: str = "CC_A=1\nCC_B=2\n", version: str = "2.56.0") -> tuple[str, str, str]:
+def _decide(
+    tmp_path,
+    row: str,
+    probe: str = "true",
+    reads: str = "CC_A,CC_B",
+    env_body: str = "CC_A=1\nCC_B=2\n",
+    version: str = "2.56.0",
+) -> tuple[str, str, str]:
     env = tmp_path / ".env"
     env.write_text(env_body, encoding="utf-8")
     calls = tmp_path / "probe-calls"
@@ -453,13 +485,16 @@ def test_decide_skips_only_a_done_current_unchanged_row_whose_probe_holds(tmp_pa
     assert (tmp_path / "probe-calls").read_text().count("x") == 1
 
 
-@pytest.mark.parametrize("status,code,detail", [
-    ("failed", "failed", "the key never came back"),
-    ("gate", "gate", "the key never came back"),
-    ("started", "started", "T1"),
-    ("pending", "pending", ""),
-    ("whatever-this-is", "pending", ""),
-])
+@pytest.mark.parametrize(
+    "status,code,detail",
+    [
+        ("failed", "failed", "the key never came back"),
+        ("gate", "gate", "the key never came back"),
+        ("started", "started", "T1"),
+        ("pending", "pending", ""),
+        ("whatever-this-is", "pending", ""),
+    ],
+)
 def test_decide_runs_every_status_but_done_and_never_probes_it(tmp_path, status, code, detail):
     fp = _fp_of(tmp_path)
     got = _decide(tmp_path, f"s\\t{status}\\t2.56.0\\tT1\\t{fp}\\tthe key never came back")
@@ -474,7 +509,11 @@ def test_decide_an_absent_row_is_pending(tmp_path):
 
 def test_decide_a_version_change_runs_and_says_from_what_to_what(tmp_path):
     fp = _fp_of(tmp_path)
-    assert _decide(tmp_path, f"s\\tdone\\t2.55.0\\tT1\\t{fp}\\t") == ("run", "version", "2.55.0 -> 2.56.0")
+    assert _decide(tmp_path, f"s\\tdone\\t2.55.0\\tT1\\t{fp}\\t") == (
+        "run",
+        "version",
+        "2.55.0 -> 2.56.0",
+    )
     assert not (tmp_path / "probe-calls").exists()
 
 
@@ -489,8 +528,11 @@ def test_decide_a_done_row_whose_effect_is_gone_is_drift(tmp_path):
     """DSC's Test-before-Set: the probe IS the refresh. A `done` row whose
     effect is absent runs again — it is never a skip."""
     fp = _fp_of(tmp_path)
-    assert _decide(tmp_path, f"s\\tdone\\t2.56.0\\tT1\\t{fp}\\t", probe="false") == \
-        ("run", "drift", "counted")
+    assert _decide(tmp_path, f"s\\tdone\\t2.56.0\\tT1\\t{fp}\\t", probe="false") == (
+        "run",
+        "drift",
+        "counted",
+    )
 
 
 def test_decide_with_no_probe_never_skips(tmp_path):
@@ -507,8 +549,13 @@ def test_decide_with_no_probe_never_skips(tmp_path):
 # ── a phase, and its plan sentence ──────────────────────────────────────────
 
 
-def _phase(tmp_path, rows: list[str], probes: dict[str, str] | None = None,
-           env_body: str = "CC_PORT=1\n", version: str = "2.56.0") -> dict[str, str]:
+def _phase(
+    tmp_path,
+    rows: list[str],
+    probes: dict[str, str] | None = None,
+    env_body: str = "CC_PORT=1\n",
+    version: str = "2.56.0",
+) -> dict[str, str]:
     """A two-phase manifest of our own (so the probes are ours to define), a
     ledger of the given rows, and cc_phase_decide + cc_phase_plan_text."""
     steps = tmp_path / "steps.tsv"
@@ -516,7 +563,9 @@ def _phase(tmp_path, rows: list[str], probes: dict[str, str] | None = None,
         "one\ta\trun\t-\tCC_PORT\t-\tp_a\tdoc\n"
         "one\tb\trun\tone/a\t-\t-\tp_b\tdoc\n"
         "one\tc\tgate\tone/b\tCC_PORT,CC_OTHER\t-\tp_c\tdoc\n"
-        "two\tz\trun\tone/c\t-\t-\tp_z\tdoc\n", encoding="utf-8")
+        "two\tz\trun\tone/c\t-\t-\tp_z\tdoc\n",
+        encoding="utf-8",
+    )
     env = tmp_path / ".env"
     env.write_text(env_body, encoding="utf-8")
     led = tmp_path / "ledger.tsv"
@@ -524,7 +573,8 @@ def _phase(tmp_path, rows: list[str], probes: dict[str, str] | None = None,
     calls = tmp_path / "probe-calls"
     defs = "\n".join(
         f'p_{n}() {{ echo {n} >> "{calls.as_posix()}"; {(probes or {}).get(n, "true")}; }}'
-        for n in "abcz")
+        for n in "abcz"
+    )
     out = ok(f"""
       {defs}
       cc_steps_load "{steps.as_posix()}" || exit 1
@@ -538,8 +588,14 @@ def _phase(tmp_path, rows: list[str], probes: dict[str, str] | None = None,
     return res
 
 
-def _done(tmp_path, step: str, reads: str, at: str = "T1", version: str = "2.56.0",
-          env_body: str = "CC_PORT=1\n") -> str:
+def _done(
+    tmp_path,
+    step: str,
+    reads: str,
+    at: str = "T1",
+    version: str = "2.56.0",
+    env_body: str = "CC_PORT=1\n",
+) -> str:
     fp = _fp_of(tmp_path, env_body, reads) if reads else "none"
     return f"one/{step}\tdone\t{version}\t{at}\t{fp}\t"
 
@@ -552,49 +608,75 @@ def test_a_phase_on_an_empty_ledger_runs_without_a_single_probe(tmp_path):
 
 
 def test_a_phase_whose_rows_are_all_done_skips_and_says_how_many_and_when(tmp_path):
-    rows = [_done(tmp_path, "a", "CC_PORT", "T1"), _done(tmp_path, "b", "", "T3"),
-            _done(tmp_path, "c", "CC_PORT,CC_OTHER", "T2")]
+    rows = [
+        _done(tmp_path, "a", "CC_PORT", "T1"),
+        _done(tmp_path, "b", "", "T3"),
+        _done(tmp_path, "c", "CC_PORT,CC_OTHER", "T2"),
+    ]
     r = _phase(tmp_path, rows)
     assert r["verdict"] == "skip"
     assert r["lines"] == "a\tT1;b\tT3;c\tT2;"
     assert r["probed"] == ["a", "b", "c"]
-    assert r["text"] == ("one: WILL SKIP — all 3 rows are done at 2.56.0 with the same inputs, "
-                         "and every effect still reads present (last done T3)")
+    assert r["text"] == (
+        "one: WILL SKIP — all 3 rows are done at 2.56.0 with the same inputs, "
+        "and every effect still reads present (last done T3)"
+    )
 
 
 def test_a_phase_plan_names_the_changed_inputs_by_key_name_only(tmp_path):
-    rows = [_done(tmp_path, "a", "CC_PORT"), _done(tmp_path, "b", ""),
-            _done(tmp_path, "c", "CC_PORT,CC_OTHER")]
+    rows = [
+        _done(tmp_path, "a", "CC_PORT"),
+        _done(tmp_path, "b", ""),
+        _done(tmp_path, "c", "CC_PORT,CC_OTHER"),
+    ]
     r = _phase(tmp_path, rows, env_body="CC_PORT=4242\n")
     assert (r["verdict"], r["code"], r["step"]) == ("run", "inputs", "one/a")
     assert r["same"] == "1", "row c reads CC_PORT too"
-    assert r["text"] == ("one: WILL RUN — inputs changed: one/a reads one of CC_PORT "
-                         "(and 1 more row with changed inputs)")
+    assert r["text"] == (
+        "one: WILL RUN — inputs changed: one/a reads one of CC_PORT "
+        "(and 1 more row with changed inputs)"
+    )
     assert "4242" not in r["text"]
     # Row a's verdict was known WITHOUT its probe, so no later row was probed.
     assert r["probed"] == []
 
 
 def test_a_phase_plan_for_drift_names_the_row_and_its_probe(tmp_path):
-    rows = [_done(tmp_path, "a", "CC_PORT"), _done(tmp_path, "b", ""),
-            _done(tmp_path, "c", "CC_PORT,CC_OTHER")]
+    rows = [
+        _done(tmp_path, "a", "CC_PORT"),
+        _done(tmp_path, "b", ""),
+        _done(tmp_path, "c", "CC_PORT,CC_OTHER"),
+    ]
     r = _phase(tmp_path, rows, probes={"b": "false"})
     assert (r["verdict"], r["code"], r["step"]) == ("run", "drift", "one/b")
     assert r["probed"] == ["a", "b"], "c's probe is not asked once the verdict is known"
-    assert r["text"] == ("one: WILL RUN — effect absent: one/b is recorded done but its probe "
-                         "p_b reads false now (drift)")
+    assert r["text"] == (
+        "one: WILL RUN — effect absent: one/b is recorded done but its probe "
+        "p_b reads false now (drift)"
+    )
 
 
-@pytest.mark.parametrize("row,expected", [
-    ("one/a\tfailed\t2.56.0\tT1\tx\tthe proxy said 401",
-     'one: WILL RUN — failed last time: one/a — "the proxy said 401"'),
-    ("one/a\tstarted\t2.56.0\tT9\tx\t",
-     "one: WILL RUN — the last run was interrupted here: one/a was started at T9 and never finished"),
-    ("one/a\tgate\t2.56.0\tT1\tx\tfill in the catalog",
-     'one: WILL RUN — waiting on you: one/a — "fill in the catalog"'),
-    ("one/a\tdone\t2.55.0\tT1\tx\t",
-     "one: WILL RUN — version changed, 2.55.0 -> 2.56.0: one/a"),
-])
+@pytest.mark.parametrize(
+    "row,expected",
+    [
+        (
+            "one/a\tfailed\t2.56.0\tT1\tx\tthe proxy said 401",
+            'one: WILL RUN — failed last time: one/a — "the proxy said 401"',
+        ),
+        (
+            "one/a\tstarted\t2.56.0\tT9\tx\t",
+            "one: WILL RUN — the last run was interrupted here: one/a was started at T9 and never finished",
+        ),
+        (
+            "one/a\tgate\t2.56.0\tT1\tx\tfill in the catalog",
+            'one: WILL RUN — waiting on you: one/a — "fill in the catalog"',
+        ),
+        (
+            "one/a\tdone\t2.55.0\tT1\tx\t",
+            "one: WILL RUN — version changed, 2.55.0 -> 2.56.0: one/a",
+        ),
+    ],
+)
 def test_the_plan_sentence_for_each_reason(tmp_path, row, expected):
     r = _phase(tmp_path, [row, _done(tmp_path, "b", ""), _done(tmp_path, "c", "CC_PORT,CC_OTHER")])
     assert r["text"] == expected, r
@@ -631,9 +713,13 @@ def test_no_carriage_return_escape_is_written_inside_a_command_substitution():
     function body (which a `$(fn)` then runs) or outside the substitution."""
     import re
 
-    files = sorted({*(ROOT / "deploy" / "single").glob("*.sh"),
-                    *(ROOT / "deploy" / "single" / "phases").glob("*.sh"),
-                    ROOT / "deploy" / "env-lib.sh"})
+    files = sorted(
+        {
+            *(ROOT / "deploy" / "single").glob("*.sh"),
+            *(ROOT / "deploy" / "single" / "phases").glob("*.sh"),
+            ROOT / "deploy" / "env-lib.sh",
+        }
+    )
     offenders = []
     for f in files:
         lines = f.read_text(encoding="utf-8").splitlines()
@@ -643,7 +729,7 @@ def test_no_carriage_return_escape_is_written_inside_a_command_substitution():
             j = i
             while j > 0 and not re.match(r"^[A-Za-z_][A-Za-z0-9_]*\(\)\s*\{", lines[j]):
                 j -= 1
-            text = "\n".join(lines[j:i] + [line[:line.index("$'\\r'")]])
+            text = "\n".join(lines[j:i] + [line[: line.index("$'\\r'")]])
             text = re.sub(r"#[^\n]*", "", re.sub(r"'[^'\n]*'", "", text))
             stack, k = [], 0
             while k < len(text):

@@ -50,6 +50,7 @@ OPT_IN_LOOPS = {
 # DL-048: opt-in.
 # --------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("setting", sorted(set(OPT_IN_LOOPS.values())))
 def test_a_settings_object_built_from_nothing_has_the_loops_off(setting, monkeypatch):
     """Not "the dev box has it off" — a Settings built with no env file and no
@@ -69,8 +70,7 @@ def test_a_settings_object_built_from_nothing_has_the_loops_off(setting, monkeyp
 def _lifespan_tree() -> ast.AsyncFunctionDef:
     tree = ast.parse(APP.read_text(encoding="utf-8"))
     return next(
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "lifespan"
+        n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "lifespan"
     )
 
 
@@ -86,10 +86,12 @@ def _guarded_starts() -> dict[str, list[str]]:
                 walk(node.orelse, guards)
                 continue
             for child in ast.walk(node):
-                if (isinstance(child, ast.Call)
-                        and isinstance(child.func, ast.Attribute)
-                        and child.func.attr == "start"
-                        and isinstance(child.func.value, ast.Name)):
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "start"
+                    and isinstance(child.func.value, ast.Name)
+                ):
                     found.setdefault(child.func.value.id, guards)
             if isinstance(node, (ast.Try, ast.With, ast.AsyncWith, ast.For, ast.AsyncFor)):
                 walk(node.body, guards)
@@ -124,6 +126,7 @@ def test_app_startup_starts_no_loop_that_was_not_asked_for(loop, setting):
 # DL-050: one path.
 # --------------------------------------------------------------------------
 
+
 def _dispatcher_tree() -> ast.AST:
     return ast.parse(DISPATCHER.read_text(encoding="utf-8"))
 
@@ -135,7 +138,11 @@ def _registered_handler_names() -> set[str]:
         target = None
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             target = node.target.id
-        elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+        elif (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
             target = node.targets[0].id
         if target != "HANDLERS" or node.value is None:
             continue
@@ -143,7 +150,8 @@ def _registered_handler_names() -> set[str]:
             arg.id
             for call in ast.walk(node.value)
             if isinstance(call, ast.Call)
-            for arg in call.args if isinstance(arg, ast.Name)
+            for arg in call.args
+            if isinstance(arg, ast.Name)
         }
     raise AssertionError("ingest/dispatcher.py no longer defines a HANDLERS registry")
 
@@ -155,8 +163,9 @@ def _run_entrypoints() -> set[str]:
     registered = _registered_handler_names()
     names: set[str] = set()
     for node in ast.walk(tree):
-        if not (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and node.name in registered):
+        if not (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in registered
+        ):
             continue
         for call in ast.walk(node):
             if isinstance(call, ast.Call):
@@ -194,13 +203,16 @@ def test_a_registered_handler_is_reachable_only_through_the_registry():
         and "HANDLERS" in ast.unparse(node).split("=")[0]
         for line in range(node.lineno, (node.end_lineno or node.lineno) + 1)
     }
-    offenders = sorted({
-        f"dispatcher.py:{node.lineno} {node.id}"
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Name) and node.id in registered
-        and node.lineno not in registry_lines
-        and not (defs[node.id][0] <= node.lineno <= defs[node.id][1])
-    })
+    offenders = sorted(
+        {
+            f"dispatcher.py:{node.lineno} {node.id}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name)
+            and node.id in registered
+            and node.lineno not in registry_lines
+            and not (defs[node.id][0] <= node.lineno <= defs[node.id][1])
+        }
+    )
     assert offenders == [], (
         "a per-kind work-item handler is referenced outside the HANDLERS "
         "registry. Every work item goes through `process_claimed`, which owns "
@@ -217,14 +229,18 @@ def test_only_process_claimed_drives_a_handler():
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for line in range(node.lineno, (node.end_lineno or node.lineno) + 1):
                 owner.setdefault(line, node.name)
-    offenders = sorted({
-        f"dispatcher.py:{node.lineno} in {owner.get(node.lineno)}"
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "run"
-        and isinstance(node.func.value, ast.Name) and node.func.value.id == "handler"
-        and owner.get(node.lineno) != "process_claimed"
-    })
+    offenders = sorted(
+        {
+            f"dispatcher.py:{node.lineno} in {owner.get(node.lineno)}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "run"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "handler"
+            and owner.get(node.lineno) != "process_claimed"
+        }
+    )
     assert offenders == [], (
         "`handler.run(...)` is called outside `process_claimed`. That function "
         "IS the one path a work item takes; a second driver duplicates the "
@@ -241,8 +257,7 @@ def test_nothing_outside_the_dispatcher_starts_a_work_item_run():
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         defined = {
-            n.name for n in ast.walk(tree)
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):

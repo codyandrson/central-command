@@ -54,7 +54,9 @@ ENTRY_HEADING_RE = re.compile(r"^### (DL-\d+) — (.+)$", re.MULTILINE)
 BULLET_RE = re.compile(r"^- \*\*([^:*]+):\*\*\s?(.*)$")
 # An archived entry leaves a one-line stub in its area file:
 #   - **DL-NNN** — <title> — archived: [docs/archive/decisions-archived.md](...)
-STUB_RE = re.compile(r"^- \*\*(DL-\d+)\*\* — (.+) — archived: \[[^\]]+\]\(([^)]+)\)\s*$", re.MULTILINE)
+STUB_RE = re.compile(
+    r"^- \*\*(DL-\d+)\*\* — (.+) — archived: \[[^\]]+\]\(([^)]+)\)\s*$", re.MULTILINE
+)
 # A backticked token that names a reference: a repo path (optionally with
 # `::test` or `:lines`) or a bare `::test` continuation of the previous path.
 REF_RE = re.compile(r"^(?:::\w+|[A-Za-z_.][\w.*-]*(?:/[\w.*-]*)+(?:::\w+)?(?::[\d,]+)?)$")
@@ -98,15 +100,21 @@ def split_entries(text: str, area: str) -> list[Entry]:
     heads = list(ENTRY_HEADING_RE.finditer(text))
     for i, m in enumerate(heads):
         end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
-        body = text[m.end():end]
+        body = text[m.end() : end]
         # a stub line after the last entry body is not part of that body
         stub = STUB_RE.search(body)
         if stub:
             body = body[: stub.start()]
-        found.append((m.start(), Entry(m.group(1), m.group(2).strip(), area, parse_bullets(body), body)))
+        found.append(
+            (m.start(), Entry(m.group(1), m.group(2).strip(), area, parse_bullets(body), body))
+        )
     for m in STUB_RE.finditer(text):
-        found.append((m.start(), Entry(m.group(1), m.group(2).strip(), area,
-                                       {"Status": "archived"}, "", m.group(3))))
+        found.append(
+            (
+                m.start(),
+                Entry(m.group(1), m.group(2).strip(), area, {"Status": "archived"}, "", m.group(3)),
+            )
+        )
     found.sort(key=lambda pair: pair[0])
     return [e for _, e in found]
 
@@ -124,7 +132,9 @@ def load_entries(archive_path: Path | None = None) -> list[Entry]:
     for area in AREA_FILES:
         path = DECISIONS_DIR / area
         if not path.exists():
-            raise FileNotFoundError(f"docs/decisions/{area} is listed as an area but does not exist")
+            raise FileNotFoundError(
+                f"docs/decisions/{area} is listed as an area but does not exist"
+            )
         for e in split_entries(path.read_text(encoding="utf-8"), area):
             if e.archived_link and e.id in archived:
                 full = archived[e.id]
@@ -180,9 +190,11 @@ def splice(readme: str, table: str) -> str:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="gen_decision_index.py",
-        description="Rebuild the index table in docs/decisions/README.md from the area files.")
-    parser.add_argument("--check", action="store_true",
-                        help="write nothing; exit 1 if the committed table is stale")
+        description="Rebuild the index table in docs/decisions/README.md from the area files.",
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="write nothing; exit 1 if the committed table is stale"
+    )
     check = parser.parse_args(argv).check
     try:
         entries = load_entries()

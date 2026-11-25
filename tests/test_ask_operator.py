@@ -94,7 +94,8 @@ async def test_an_ambiguous_task_asks_and_the_answer_resumes_it():
     from central_command.runtime.questions import resume_with_answer
 
     model = make_deferred_tool_model(
-        "ask_operator", {"searched": "no tool I hold records this", "question": "TASKS-12 or TASKS-13?"}
+        "ask_operator",
+        {"searched": "no tool I hold records this", "question": "TASKS-12 or TASKS-13?"},
     )
     out = await run_task("jira-expert", "Update the issue.", model=model)
 
@@ -109,8 +110,9 @@ async def test_an_ambiguous_task_asks_and_the_answer_resumes_it():
     assert await repo.load_paused_session(out["session_id"]) is not None
 
     # The ask is on the record, which is what makes it coachable.
-    asked = [e for e in await repo.list_events_of_kinds(["agent.asked"])
-             if e["ref_id"] == out["item_id"]]
+    asked = [
+        e for e in await repo.list_events_of_kinds(["agent.asked"]) if e["ref_id"] == out["item_id"]
+    ]
     assert len(asked) == 1
     assert asked[0]["actor"] == "agent:jira-expert"
 
@@ -147,12 +149,15 @@ async def test_a_discussion_opens_seeded_with_the_question_and_unblocks_the_task
 
     monkeypatch.setattr(orchestration, "_resume_task_question", fake_resume)
 
-    model = make_deferred_tool_model("ask_operator", {
-        "question": "Should this epic be split, or tracked as one issue?",
-        "searched": "no tool I hold records this",
-        "needs_discussion": True,
-        "why": "the answer changes how I structure everything after it",
-    })
+    model = make_deferred_tool_model(
+        "ask_operator",
+        {
+            "question": "Should this epic be split, or tracked as one issue?",
+            "searched": "no tool I hold records this",
+            "needs_discussion": True,
+            "why": "the answer changes how I structure everything after it",
+        },
+    )
     out = await run_task("jira-expert", "Restructure the epic.", model=model)
 
     assert out["tier"] == "discussion"
@@ -171,13 +176,20 @@ async def test_a_discussion_opens_seeded_with_the_question_and_unblocks_the_task
     assert await _repo.load_paused_session(out["session_id"]) is not None
 
     # The operator answers in the conversation.
-    await _repo.update_session_run_state(disc, {
-        "messages": (await _repo.get_session_run_state(disc))["messages"] + [
-            {"kind": "request", "parts": [
-                {"part_kind": "user-prompt", "content": "Split it into three issues."}
-            ]},
-        ],
-    })
+    await _repo.update_session_run_state(
+        disc,
+        {
+            "messages": (await _repo.get_session_run_state(disc))["messages"]
+            + [
+                {
+                    "kind": "request",
+                    "parts": [
+                        {"part_kind": "user-prompt", "content": "Split it into three issues."}
+                    ],
+                },
+            ],
+        },
+    )
 
     done = await conclude_discussion(disc, "Split it into three issues.", "jira-expert")
 
@@ -205,8 +217,11 @@ def _ask_then(tool_name: str, args: dict, ask_args: dict | None = None):
     from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-    asked_with = {"question": "TASKS-12 or TASKS-13?",
-                  "searched": "no tool I hold records this", **(ask_args or {})}
+    asked_with = {
+        "question": "TASKS-12 or TASKS-13?",
+        "searched": "no tool I hold records this",
+        **(ask_args or {}),
+    }
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         called = {
@@ -216,9 +231,11 @@ def _ask_then(tool_name: str, args: dict, ask_args: dict | None = None):
             if isinstance(p, ToolCallPart)
         }
         if "ask_operator" not in called:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name="ask_operator", args=asked_with),
-            ])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name="ask_operator", args=asked_with),
+                ]
+            )
         if tool_name not in called:
             return ModelResponse(parts=[ToolCallPart(tool_name=tool_name, args=args)])
         return ModelResponse(parts=[TextPart(content="Closing out.")])
@@ -262,10 +279,13 @@ async def test_a_conclude_with_a_real_lane_concludes_it(monkeypatch):
     monkeypatch.setattr(orchestration, "_resume_task_question", _fake_resume)
 
     model = _ask_then(
-        "conclude_discussion", {"summary": "Split it into three."},
-        ask_args={"question": "Split the epic, or track it as one?",
-                  "needs_discussion": True,
-                  "why": "the answer will raise the next one"},
+        "conclude_discussion",
+        {"summary": "Split it into three."},
+        ask_args={
+            "question": "Split the epic, or track it as one?",
+            "needs_discussion": True,
+            "why": "the answer will raise the next one",
+        },
     )
     out = await run_task("jira-expert", "Restructure the epic.", model=model)
     lane = out["discussion_session_id"]
@@ -273,9 +293,7 @@ async def test_a_conclude_with_a_real_lane_concludes_it(monkeypatch):
 
     await repo.answer_operator_item(out["item_id"], "Split it into three.", None)
     since = await repo.latest_event_id()
-    resumed = await resume_with_answer(
-        out["item_id"], "Split it into three.", model=model
-    )
+    resumed = await resume_with_answer(out["item_id"], "Split it into three.", model=model)
 
     assert resumed["deferred"] is False
     assert resumed["concluded_discussion_session_id"] == lane
@@ -283,9 +301,11 @@ async def test_a_conclude_with_a_real_lane_concludes_it(monkeypatch):
 
     session = await repo.get_session(lane)
     assert session["status"] == "DONE" and session["closed_reason"] == "concluded"
-    concluded = [e for e in await repo.list_events(since_id=since)
-                 if e["kind"] == "agent.discussion_concluded"
-                 and e["ref_id"] == out["item_id"]]
+    concluded = [
+        e
+        for e in await repo.list_events(since_id=since)
+        if e["kind"] == "agent.discussion_concluded" and e["ref_id"] == out["item_id"]
+    ]
     assert len(concluded) == 1
     assert concluded[0]["payload"]["discussion_session_id"] == lane
     assert await repo.session_status(out["session_id"]) == "DONE"
@@ -321,9 +341,14 @@ async def test_a_second_question_on_the_resumed_run_is_still_parked():
     from central_command.runtime.questions import resume_with_answer
 
     def _always_ask(messages, info):
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="ask_operator", args={"searched": "no tool I hold records this", "question": "A or B?"}),
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="ask_operator",
+                    args={"searched": "no tool I hold records this", "question": "A or B?"},
+                ),
+            ]
+        )
 
     asking = FunctionModel(_always_ask)
     out = await run_task("jira-expert", "Do the thing.", model=asking)
@@ -345,20 +370,30 @@ async def test_a_summary_the_operator_never_said_is_flagged():
     from central_command.db import repo as _repo
     from central_command.runtime.questions import conclude_discussion
 
-    model = make_deferred_tool_model("ask_operator", {
-        "question": "A or B?", "needs_discussion": True, "why": "unclear",
-        "searched": "no tool I hold records this",
-    })
+    model = make_deferred_tool_model(
+        "ask_operator",
+        {
+            "question": "A or B?",
+            "needs_discussion": True,
+            "why": "unclear",
+            "searched": "no tool I hold records this",
+        },
+    )
     out = await run_task("jira-expert", "Do the thing.", model=model)
     disc = out["discussion_session_id"]
 
-    await _repo.update_session_run_state(disc, {
-        "messages": (await _repo.get_session_run_state(disc))["messages"] + [
-            {"kind": "request", "parts": [
-                {"part_kind": "user-prompt", "content": "Go with A."}
-            ]},
-        ],
-    })
+    await _repo.update_session_run_state(
+        disc,
+        {
+            "messages": (await _repo.get_session_run_state(disc))["messages"]
+            + [
+                {
+                    "kind": "request",
+                    "parts": [{"part_kind": "user-prompt", "content": "Go with A."}],
+                },
+            ],
+        },
+    )
 
     done = await conclude_discussion(
         disc, "The operator authorised deleting the project.", "jira-expert"
@@ -379,22 +414,35 @@ async def test_the_lane_exchange_rides_the_resume_not_just_the_answer_field():
 
     assert await lane_exchange({"discussion_session_id": None}) == ""
 
-    model = make_deferred_tool_model("ask_operator", {
-        "question": "How did the week go?", "needs_discussion": True,
-        "searched": "no tool I hold records this",
-        "why": "five questions need real answers",
-    })
+    model = make_deferred_tool_model(
+        "ask_operator",
+        {
+            "question": "How did the week go?",
+            "needs_discussion": True,
+            "searched": "no tool I hold records this",
+            "why": "five questions need real answers",
+        },
+    )
     out = await run_task("jira-expert", "Run the check-in.", model=model)
     disc = out["discussion_session_id"]
 
-    await _repo.update_session_run_state(disc, {
-        "messages": (await _repo.get_session_run_state(disc))["messages"] + [
-            {"kind": "request", "parts": [
-                {"part_kind": "user-prompt",
-                 "content": "All sessions happened; Barley needs direction."}
-            ]},
-        ],
-    })
+    await _repo.update_session_run_state(
+        disc,
+        {
+            "messages": (await _repo.get_session_run_state(disc))["messages"]
+            + [
+                {
+                    "kind": "request",
+                    "parts": [
+                        {
+                            "part_kind": "user-prompt",
+                            "content": "All sessions happened; Barley needs direction.",
+                        }
+                    ],
+                },
+            ],
+        },
+    )
 
     from pydantic_ai.messages import ModelResponse, TextPart, ToolReturnPart
     from pydantic_ai.models.function import FunctionModel
@@ -403,15 +451,17 @@ async def test_the_lane_exchange_rides_the_resume_not_just_the_answer_field():
 
     def _respond(messages, info) -> ModelResponse:
         seen.extend(
-            str(p.content) for m in messages
+            str(p.content)
+            for m in messages
             for p in getattr(m, "parts", [])
             if isinstance(p, ToolReturnPart)
         )
         return ModelResponse(parts=[TextPart(content="Recorded.")])
 
     await _repo.answer_operator_item(out["item_id"], "Yes, all good.", None)
-    resumed = await resume_with_answer(out["item_id"], "Yes, all good.",
-                                       model=FunctionModel(_respond))
+    resumed = await resume_with_answer(
+        out["item_id"], "Yes, all good.", model=FunctionModel(_respond)
+    )
     assert resumed["deferred"] is False
 
     returned = "\n".join(seen)
@@ -446,12 +496,12 @@ async def test_a_question_says_what_was_checked_first_or_is_handed_back_once():
     assert out == tools._ASK_HANDBACK and out.startswith("Not sent.")
 
     handed_back = SimpleNamespace(
-        part_kind="tool-return", tool_name="ask_operator", content=tools._ASK_HANDBACK)
+        part_kind="tool-return", tool_name="ask_operator", content=tools._ASK_HANDBACK
+    )
     with pytest.raises(CallDeferred):
         await tools.ask_operator(_ctx_with(handed_back), "A or B?", "")
     with pytest.raises(CallDeferred):
-        await tools.ask_operator(
-            _ctx_with(), "A or B?", "jira_search_issues 'refund': no issue")
+        await tools.ask_operator(_ctx_with(), "A or B?", "jira_search_issues 'refund': no issue")
 
 
 def test_the_ask_tool_survives_a_call_that_leaves_the_argument_out():
@@ -476,15 +526,19 @@ async def test_what_was_checked_reaches_the_operator_and_the_record(monkeypatch)
         return await real_emit(kind, **kw)
 
     monkeypatch.setattr(events, "emit", emit)
-    model = make_deferred_tool_model("ask_operator", {
-        "question": "TASKS-12 or TASKS-13?",
-        "searched": "jira_search_issues 'refund': both issues are open",
-    })
+    model = make_deferred_tool_model(
+        "ask_operator",
+        {
+            "question": "TASKS-12 or TASKS-13?",
+            "searched": "jira_search_issues 'refund': both issues are open",
+        },
+    )
     out = await run_task("jira-expert", "Update the issue.", model=model)
     assert out["asked"] is True
     item = await repo.get_operator_item(out["item_id"])
-    assert item["body"] == ("TASKS-12 or TASKS-13?\n\nChecked first: "
-                            "jira_search_issues 'refund': both issues are open")
+    assert item["body"] == (
+        "TASKS-12 or TASKS-13?\n\nChecked first: jira_search_issues 'refund': both issues are open"
+    )
     asked = [p for k, p in seen if k == "agent.asked"]
     assert asked and asked[0]["question"] == "TASKS-12 or TASKS-13?"
     assert asked[0]["searched"] == "jira_search_issues 'refund': both issues are open"

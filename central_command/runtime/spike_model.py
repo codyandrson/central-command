@@ -24,6 +24,7 @@ def _returned(part) -> bool:
     through", which a retry is not."""
     return isinstance(part, ToolReturnPart) and getattr(part, "outcome", None) != "retried"
 
+
 _PROPOSAL = {
     "intent": "Set the due date on DEMO-1 to Aug 3 — the email says the deadline slipped.",
     "actions": [
@@ -130,8 +131,7 @@ _SC1_PROPOSAL = {
             "arguments": {
                 "name": "DEMO-1 deadline slip",
                 "episode_body": (
-                    "DEMO-1's deadline moved from 2026-07-27 to 2026-08-03, "
-                    "announced by Dana."
+                    "DEMO-1's deadline moved from 2026-07-27 to 2026-08-03, announced by Dana."
                 ),
                 "source_description": "email gmail:msg_1846d2",
                 "reference_time": "2026-07-20T14:02:00Z",
@@ -143,9 +143,12 @@ _SC1_PROPOSAL = {
     ],
     "evidence": _PROPOSAL["evidence"],
     "expected_effect": "DEMO-1.duedate == 2026-08-03; graph records the slip",
-    "confidence": {"level": "high",
-                   "rationale": ("The email states the new deadline outright; "
-                                 "the episode records only what it says.")},
+    "confidence": {
+        "level": "high",
+        "rationale": (
+            "The email states the new deadline outright; the episode records only what it says."
+        ),
+    },
 }
 
 
@@ -167,9 +170,7 @@ def make_sc1_model() -> FunctionModel:
 
 
 def _respond_no_action(messages, info: AgentInfo) -> ModelResponse:
-    return ModelResponse(
-        parts=[TextPart(content="No action needed — this is a newsletter.")]
-    )
+    return ModelResponse(parts=[TextPart(content="No action needed — this is a newsletter.")])
 
 
 def make_no_action_model() -> FunctionModel:
@@ -200,8 +201,10 @@ _REDRAFT_PROPOSAL = {
         }
     ],
     "expected_effect": "DEMO-1.duedate == 2026-08-10",
-    "confidence": {"level": "high",
-                   "rationale": "The operator named the date in their rejection feedback."},
+    "confidence": {
+        "level": "high",
+        "rationale": "The operator named the date in their rejection feedback.",
+    },
 }
 
 
@@ -234,9 +237,7 @@ def make_redraft_model(claim: str | None = None) -> FunctionModel:
         )
         if "2026-08-10" in transcript and proposals_made == 1:
             return ModelResponse(
-                parts=[
-                    ToolCallPart(tool_name="propose_action", args={"proposal": proposal})
-                ]
+                parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
             )
         return ModelResponse(parts=[TextPart(content="Done — closing out.")])
 
@@ -251,9 +252,7 @@ def make_redraft_model(claim: str | None = None) -> FunctionModel:
 
 def _respond_audit(messages, info: AgentInfo) -> ModelResponse:
     text = " ".join(
-        str(getattr(p, "content", ""))
-        for m in messages
-        for p in getattr(m, "parts", [])
+        str(getattr(p, "content", "")) for m in messages for p in getattr(m, "parts", [])
     )
     actionable = bool(re.search(r"TASKS-\d+|action required", text, re.IGNORECASE))
     verdict = {
@@ -265,9 +264,7 @@ def _respond_audit(messages, info: AgentInfo) -> ModelResponse:
         ),
     }
     # The structured-output tool pydantic_ai registered for AuditVerdict.
-    return ModelResponse(
-        parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=verdict)]
-    )
+    return ModelResponse(parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=verdict)])
 
 
 def make_auditor_model() -> FunctionModel:
@@ -283,9 +280,7 @@ def make_auditor_model() -> FunctionModel:
 
 def _respond_graph_audit(messages, info: AgentInfo) -> ModelResponse:
     text = " ".join(
-        str(getattr(p, "content", ""))
-        for m in messages
-        for p in getattr(m, "parts", [])
+        str(getattr(p, "content", "")) for m in messages for p in getattr(m, "parts", [])
     )
     diverged = bool(re.search(r"misaligned|unrelated", text, re.IGNORECASE))
     verdict = {
@@ -296,9 +291,7 @@ def _respond_graph_audit(messages, info: AgentInfo) -> ModelResponse:
             else "The delta restates the approved claim faithfully."
         ),
     }
-    return ModelResponse(
-        parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=verdict)]
-    )
+    return ModelResponse(parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=verdict)])
 
 
 def make_graph_auditor_model() -> FunctionModel:
@@ -310,11 +303,18 @@ def make_graph_auditor_model() -> FunctionModel:
 # comment on the issue key named in the instruction, or answer in text when the
 # instruction contains "no change".
 
+
 def _respond_advice(messages, info: AgentInfo) -> ModelResponse:
-    return ModelResponse(parts=[TextPart(content=(
-        "Use a typed 'blocks' link, not a comment: the blocked issue gets "
-        "'is blocked by'. Links express dependencies; hierarchy stays native."
-    ))])
+    return ModelResponse(
+        parts=[
+            TextPart(
+                content=(
+                    "Use a typed 'blocks' link, not a comment: the blocked issue gets "
+                    "'is blocked by'. Links express dependencies; hierarchy stays native."
+                )
+            )
+        ]
+    )
 
 
 def make_jira_advice_model() -> FunctionModel:
@@ -323,9 +323,7 @@ def make_jira_advice_model() -> FunctionModel:
 
 def _respond_task(messages, info: AgentInfo) -> ModelResponse:
     text = " ".join(
-        str(getattr(p, "content", ""))
-        for m in messages
-        for p in getattr(m, "parts", [])
+        str(getattr(p, "content", "")) for m in messages for p in getattr(m, "parts", [])
     )
     for message in messages:
         for part in getattr(message, "parts", []):
@@ -336,21 +334,27 @@ def _respond_task(messages, info: AgentInfo) -> ModelResponse:
     key = (re.search(r"[A-Z][A-Z0-9]+-\d+", text) or ["TASKS-12"])[0]
     proposal = {
         "intent": f"Add a tracking comment to {key} per the operator's task.",
-        "actions": [{
-            "capability": "jira.add_comment",
-            "arguments": {"issue_key": key, "body": "Dependency review noted."},
-            "target_ref": {"system": "jira", "id": key},
-            "reversibility": "irreversible",
-        }],
-        "evidence": [{
-            "kind": "operator",
-            "source_ref": "operator:task",
-            "locator": "POST /api/agents/jira-expert/task",
-            "claim": "Operator tasked a dependency note.",
-        }],
+        "actions": [
+            {
+                "capability": "jira.add_comment",
+                "arguments": {"issue_key": key, "body": "Dependency review noted."},
+                "target_ref": {"system": "jira", "id": key},
+                "reversibility": "irreversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "POST /api/agents/jira-expert/task",
+                "claim": "Operator tasked a dependency note.",
+            }
+        ],
         "expected_effect": f"{key} has a new comment",
-        "confidence": {"level": "high",
-                       "rationale": "The task names the issue and the comment to add."},
+        "confidence": {
+            "level": "high",
+            "rationale": "The task names the issue and the comment to add.",
+        },
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
@@ -374,21 +378,30 @@ def _respond_litellm(messages, info: AgentInfo) -> ModelResponse:
                 return ModelResponse(parts=[TextPart(content=f"Task done — {part.content}")])
     proposal = {
         "intent": "Register alias cc-triage → anthropic/claude-haiku-4-5 per the operator's task.",
-        "actions": [{
-            "capability": "litellm.add_model",
-            "arguments": {"model_name": "cc-triage", "model": "anthropic/claude-haiku-4-5-20251001"},
-            "target_ref": {"system": "litellm", "id": "cc-triage"},
-            "reversibility": "reversible",
-        }],
-        "evidence": [{
-            "kind": "operator",
-            "source_ref": "operator:task",
-            "locator": "POST /api/agents/litellm-manager/task",
-            "claim": "Operator tasked adding a cc-triage alias on Haiku.",
-        }],
+        "actions": [
+            {
+                "capability": "litellm.add_model",
+                "arguments": {
+                    "model_name": "cc-triage",
+                    "model": "anthropic/claude-haiku-4-5-20251001",
+                },
+                "target_ref": {"system": "litellm", "id": "cc-triage"},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "POST /api/agents/litellm-manager/task",
+                "claim": "Operator tasked adding a cc-triage alias on Haiku.",
+            }
+        ],
         "expected_effect": "proxy serves alias cc-triage → anthropic/claude-haiku-4-5",
-        "confidence": {"level": "high",
-                       "rationale": "The request names the alias and the model it serves."},
+        "confidence": {
+            "level": "high",
+            "rationale": "The request names the alias and the model it serves.",
+        },
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_litellm_change", args={"proposal": proposal})]
@@ -408,25 +421,33 @@ def _respond_litellm_update(messages, info: AgentInfo) -> ModelResponse:
                 return ModelResponse(parts=[TextPart(content=f"Task done — {part.content}")])
     proposal = {
         "intent": "Set native created_at/created_by on claude-sonnet-5 in place, key preserved.",
-        "actions": [{
-            "capability": "litellm.update_model",
-            "arguments": {
-                "model_id": "e90b4587-804d-4b4a-8cf8-4b2e2df31ac4",
-                "model_info": {"created_at": "2026-07-21T00:00:00Z", "created_by": "litellm-manager"},
-            },
-            "target_ref": {"system": "litellm",
-                           "id": "e90b4587-804d-4b4a-8cf8-4b2e2df31ac4"},
-            "reversibility": "reversible",
-        }],
-        "evidence": [{
-            "kind": "operator",
-            "source_ref": "operator:task",
-            "locator": "POST /api/agents/litellm-manager/task",
-            "claim": "Operator tasked correcting the Claude model metadata using native fields.",
-        }],
+        "actions": [
+            {
+                "capability": "litellm.update_model",
+                "arguments": {
+                    "model_id": "e90b4587-804d-4b4a-8cf8-4b2e2df31ac4",
+                    "model_info": {
+                        "created_at": "2026-07-21T00:00:00Z",
+                        "created_by": "litellm-manager",
+                    },
+                },
+                "target_ref": {"system": "litellm", "id": "e90b4587-804d-4b4a-8cf8-4b2e2df31ac4"},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "POST /api/agents/litellm-manager/task",
+                "claim": "Operator tasked correcting the Claude model metadata using native fields.",
+            }
+        ],
         "expected_effect": "claude-sonnet-5 gains native created_at metadata; provider key preserved",
-        "confidence": {"level": "high",
-                       "rationale": "The catalog lists created_at; only metadata changes."},
+        "confidence": {
+            "level": "high",
+            "rationale": "The catalog lists created_at; only metadata changes.",
+        },
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_litellm_change", args={"proposal": proposal})]
@@ -446,21 +467,27 @@ def _respond_litellm_create_key(messages, info: AgentInfo) -> ModelResponse:
                 return ModelResponse(parts=[TextPart(content=f"Task done — {part.content}")])
     proposal = {
         "intent": "Issue a virtual key cc-triage-key scoped to claude-haiku-4-5 for attribution.",
-        "actions": [{
-            "capability": "litellm.create_key",
-            "arguments": {"key_alias": "cc-triage-key", "models": ["claude-haiku-4-5"]},
-            "target_ref": {"system": "litellm", "id": "cc-triage-key"},
-            "reversibility": "reversible",
-        }],
-        "evidence": [{
-            "kind": "operator",
-            "source_ref": "operator:task",
-            "locator": "POST /api/agents/litellm-manager/task",
-            "claim": "Operator tasked issuing a scoped virtual key for triage attribution.",
-        }],
+        "actions": [
+            {
+                "capability": "litellm.create_key",
+                "arguments": {"key_alias": "cc-triage-key", "models": ["claude-haiku-4-5"]},
+                "target_ref": {"system": "litellm", "id": "cc-triage-key"},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "POST /api/agents/litellm-manager/task",
+                "claim": "Operator tasked issuing a scoped virtual key for triage attribution.",
+            }
+        ],
         "expected_effect": "proxy issues virtual key cc-triage-key scoped to claude-haiku-4-5",
-        "confidence": {"level": "high",
-                       "rationale": "The request names the key alias and its one model."},
+        "confidence": {
+            "level": "high",
+            "rationale": "The request names the key alias and its one model.",
+        },
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_litellm_change", args={"proposal": proposal})]
@@ -480,22 +507,31 @@ def _respond_litellm_fallbacks(messages, info: AgentInfo) -> ModelResponse:
                 return ModelResponse(parts=[TextPart(content=f"Task done — {part.content}")])
     proposal = {
         "intent": "Set claude-sonnet-5 to fall back to claude-opus-4-8 on failure.",
-        "actions": [{
-            "capability": "litellm.set_fallbacks",
-            "arguments": {"model": "claude-sonnet-5",
-                          "fallback_models": ["claude-opus-4-8"], "fallback_type": "general"},
-            "target_ref": {"system": "litellm", "id": "claude-sonnet-5"},
-            "reversibility": "reversible",
-        }],
-        "evidence": [{
-            "kind": "operator",
-            "source_ref": "operator:task",
-            "locator": "POST /api/agents/litellm-manager/task",
-            "claim": "Operator tasked adding a fallback from claude-sonnet-5 to claude-opus-4-8.",
-        }],
+        "actions": [
+            {
+                "capability": "litellm.set_fallbacks",
+                "arguments": {
+                    "model": "claude-sonnet-5",
+                    "fallback_models": ["claude-opus-4-8"],
+                    "fallback_type": "general",
+                },
+                "target_ref": {"system": "litellm", "id": "claude-sonnet-5"},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "POST /api/agents/litellm-manager/task",
+                "claim": "Operator tasked adding a fallback from claude-sonnet-5 to claude-opus-4-8.",
+            }
+        ],
         "expected_effect": "claude-sonnet-5 falls back to claude-opus-4-8 on failure",
-        "confidence": {"level": "high",
-                       "rationale": "The request names the model and its fallback."},
+        "confidence": {
+            "level": "high",
+            "rationale": "The request names the model and its fallback.",
+        },
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_litellm_change", args={"proposal": proposal})]
@@ -515,21 +551,30 @@ def make_litellm_fallbacks() -> FunctionModel:
 
 _CONVERSE_PROPOSAL = {
     "intent": "Register alias cc-scratch → anthropic/claude-haiku-4-5 as you asked.",
-    "actions": [{
-        "capability": "litellm.add_model",
-        "arguments": {"model_name": "cc-scratch", "model": "anthropic/claude-haiku-4-5-20251001"},
-        "target_ref": {"system": "litellm", "id": "cc-scratch"},
-        "reversibility": "reversible",
-    }],
-    "evidence": [{
-        "kind": "operator",
-        "source_ref": "operator:conversation",
-        "locator": "POST /api/sessions/{id}/message",
-        "claim": "Operator asked to add a cc-scratch alias.",
-    }],
+    "actions": [
+        {
+            "capability": "litellm.add_model",
+            "arguments": {
+                "model_name": "cc-scratch",
+                "model": "anthropic/claude-haiku-4-5-20251001",
+            },
+            "target_ref": {"system": "litellm", "id": "cc-scratch"},
+            "reversibility": "reversible",
+        }
+    ],
+    "evidence": [
+        {
+            "kind": "operator",
+            "source_ref": "operator:conversation",
+            "locator": "POST /api/sessions/{id}/message",
+            "claim": "Operator asked to add a cc-scratch alias.",
+        }
+    ],
     "expected_effect": "proxy serves alias cc-scratch → anthropic/claude-haiku-4-5",
-    "confidence": {"level": "high",
-                   "rationale": "The operator asked for this alias in the conversation."},
+    "confidence": {
+        "level": "high",
+        "rationale": "The operator asked for this alias in the conversation.",
+    },
 }
 
 
@@ -555,12 +600,19 @@ def _respond_converse(messages, info: AgentInfo) -> ModelResponse:
         return ModelResponse(parts=[TextPart(content="Done — resolved. Anything else?")])
     if "add" in latest_user.lower() or "register" in latest_user.lower():
         return ModelResponse(
-            parts=[ToolCallPart(tool_name="propose_litellm_change",
-                                args={"proposal": _CONVERSE_PROPOSAL})]
+            parts=[
+                ToolCallPart(
+                    tool_name="propose_litellm_change", args={"proposal": _CONVERSE_PROPOSAL}
+                )
+            ]
         )
-    return ModelResponse(parts=[TextPart(
-        content=f"Noted: “{latest_user[:60]}”. I can add models or report spend — just say the word."
-    )])
+    return ModelResponse(
+        parts=[
+            TextPart(
+                content=f"Noted: “{latest_user[:60]}”. I can add models or report spend — just say the word."
+            )
+        ]
+    )
 
 
 def make_converse_model() -> FunctionModel:
@@ -575,17 +627,24 @@ def make_deferred_tool_model(tool_name: str, args: dict | None = None) -> Functi
     it to the proposal parser, so `ask_operator` in a chat tried to validate a
     question as a Proposal.
     """
+
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         for m in messages:
             for p in getattr(m, "parts", []):
                 if isinstance(p, ToolCallPart) and p.tool_name == tool_name:
                     return ModelResponse(parts=[TextPart(content="Closing out.")])
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name=tool_name, args=args or {
-                "question": "A or B?",
-                "searched": "no tool I hold records which one the operator means",
-            })
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=tool_name,
+                    args=args
+                    or {
+                        "question": "A or B?",
+                        "searched": "no tool I hold records which one the operator means",
+                    },
+                )
+            ]
+        )
 
     return FunctionModel(_respond)
 
@@ -600,9 +659,7 @@ def _respond_coach(
     messages, info: AgentInfo, claim_override=None, source_ref_override=None
 ) -> ModelResponse:
     text = " ".join(
-        str(getattr(p, "content", ""))
-        for m in messages
-        for p in getattr(m, "parts", [])
+        str(getattr(p, "content", "")) for m in messages for p in getattr(m, "parts", [])
     )
     for message in messages:
         for part in getattr(message, "parts", []):
@@ -637,25 +694,31 @@ def _respond_coach(
     charter = body.group(1) if body else "CHARTER"
     proposal = {
         "intent": f"Charter edit for {agent_id}: encode the operator's feedback as a standing rule.",
-        "actions": [{
-            "capability": "charter.update",
-            "arguments": {
-                "agent_id": agent_id,
-                "content": charter + "\n\nCOACHED RULE: " + claim,
-                "rationale": "Encodes recurring operator feedback as a standing rule.",
-            },
-            "target_ref": {"system": "central_command", "id": agent_id},
-            "reversibility": "reversible",
-        }],
-        "evidence": [{
-            "kind": ev_kind,
-            "source_ref": source_ref,
-            "locator": "event log",
-            "claim": claim,
-        }],
+        "actions": [
+            {
+                "capability": "charter.update",
+                "arguments": {
+                    "agent_id": agent_id,
+                    "content": charter + "\n\nCOACHED RULE: " + claim,
+                    "rationale": "Encodes recurring operator feedback as a standing rule.",
+                },
+                "target_ref": {"system": "central_command", "id": agent_id},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": ev_kind,
+                "source_ref": source_ref,
+                "locator": "event log",
+                "claim": claim,
+            }
+        ],
         "expected_effect": f"{agent_id} charter gains a rule derived from feedback",
-        "confidence": {"level": "medium",
-                       "rationale": "The rule quotes the operator's own feedback."},
+        "confidence": {
+            "level": "medium",
+            "rationale": "The rule quotes the operator's own feedback.",
+        },
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
@@ -697,9 +760,7 @@ def _last_prompt_line(messages) -> str:
     return lines[-1][:120] if lines else "the document"
 
 
-def make_steward_model(
-    claim: str | None = None, level: str = "medium"
-) -> FunctionModel:
+def make_steward_model(claim: str | None = None, level: str = "medium") -> FunctionModel:
     """Extracts one fact and proposes one episode.
 
     `claim` overrides the quoted span — pass a paraphrase to drive the
@@ -710,32 +771,32 @@ def make_steward_model(
         for message in messages:
             for part in getattr(message, "parts", []):
                 if _returned(part) and part.tool_name == "propose_action":
-                    return ModelResponse(
-                        parts=[TextPart(content=f"Recorded — {part.content}")]
-                    )
+                    return ModelResponse(parts=[TextPart(content=f"Recorded — {part.content}")])
         quoted = claim if claim is not None else _last_prompt_line(messages)
         proposal = {
             "intent": "Record the document's durable fact in the team knowledge graph.",
-            "actions": [{
-                "capability": "graph.add_episode",
-                "arguments": {
-                    "name": "Document extraction",
-                    "episode_body": (
-                        "The document states a durable team fact: " + quoted
-                    ),
-                    "source_description": "hand-fed document",
-                    "reference_time": "2026-07-20T00:00:00Z",
-                    "scope": "shared",
-                },
-                "target_ref": {"system": "graphiti", "id": "central_command"},
-                "reversibility": "reversible",
-            }],
-            "evidence": [{
-                "kind": "document",
-                "source_ref": "work item payload",
-                "locator": "work item payload",
-                "claim": quoted,
-            }],
+            "actions": [
+                {
+                    "capability": "graph.add_episode",
+                    "arguments": {
+                        "name": "Document extraction",
+                        "episode_body": ("The document states a durable team fact: " + quoted),
+                        "source_description": "hand-fed document",
+                        "reference_time": "2026-07-20T00:00:00Z",
+                        "scope": "shared",
+                    },
+                    "target_ref": {"system": "graphiti", "id": "central_command"},
+                    "reversibility": "reversible",
+                }
+            ],
+            "evidence": [
+                {
+                    "kind": "document",
+                    "source_ref": "work item payload",
+                    "locator": "work item payload",
+                    "claim": quoted,
+                }
+            ],
             "expected_effect": "the graph records the document's fact",
             "confidence": {
                 "level": level,
@@ -743,8 +804,7 @@ def make_steward_model(
             },
         }
         return ModelResponse(
-            parts=[ToolCallPart(tool_name="propose_action",
-                                args={"proposal": proposal})]
+            parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
         )
 
     return FunctionModel(_respond)
@@ -759,36 +819,40 @@ def make_steward_multifact_model(facts: list[str]) -> FunctionModel:
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
         done = sum(
-            1 for m in messages for p in getattr(m, "parts", [])
+            1
+            for m in messages
+            for p in getattr(m, "parts", [])
             if _returned(p) and p.tool_name == "propose_action"
         )
         if done >= len(facts):
-            return ModelResponse(parts=[TextPart(content=(
-                f"Nothing durable remains — {done} episode(s) recorded."
-            ))])
+            return ModelResponse(
+                parts=[TextPart(content=(f"Nothing durable remains — {done} episode(s) recorded."))]
+            )
         quoted = facts[done]
         proposal = {
             "intent": f"Record durable fact {done + 1} of {len(facts)} from the document.",
-            "actions": [{
-                "capability": "graph.add_episode",
-                "arguments": {
-                    "name": "Document extraction",
-                    "episode_body": (
-                        "The document states a durable team fact: " + quoted
-                    ),
-                    "source_description": "hand-fed document",
-                    "reference_time": "2026-07-20T00:00:00Z",
-                    "scope": "shared",
-                },
-                "target_ref": {"system": "graphiti", "id": "central_command"},
-                "reversibility": "reversible",
-            }],
-            "evidence": [{
-                "kind": "document",
-                "source_ref": "work item payload",
-                "locator": "work item payload",
-                "claim": quoted,
-            }],
+            "actions": [
+                {
+                    "capability": "graph.add_episode",
+                    "arguments": {
+                        "name": "Document extraction",
+                        "episode_body": ("The document states a durable team fact: " + quoted),
+                        "source_description": "hand-fed document",
+                        "reference_time": "2026-07-20T00:00:00Z",
+                        "scope": "shared",
+                    },
+                    "target_ref": {"system": "graphiti", "id": "central_command"},
+                    "reversibility": "reversible",
+                }
+            ],
+            "evidence": [
+                {
+                    "kind": "document",
+                    "source_ref": "work item payload",
+                    "locator": "work item payload",
+                    "claim": quoted,
+                }
+            ],
             "expected_effect": "the graph records the document's fact",
             "confidence": {
                 "level": "medium",
@@ -796,18 +860,23 @@ def make_steward_multifact_model(facts: list[str]) -> FunctionModel:
             },
         }
         return ModelResponse(
-            parts=[ToolCallPart(tool_name="propose_action",
-                                args={"proposal": proposal})]
+            parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
         )
 
     return FunctionModel(_respond)
 
 
 def _respond_steward_no_extraction(messages, info: AgentInfo) -> ModelResponse:
-    return ModelResponse(parts=[TextPart(content=(
-        "Nothing durable here — the document restates already-known context "
-        "and asserts no new fact."
-    ))])
+    return ModelResponse(
+        parts=[
+            TextPart(
+                content=(
+                    "Nothing durable here — the document restates already-known context "
+                    "and asserts no new fact."
+                )
+            )
+        ]
+    )
 
 
 def make_steward_no_extraction_model() -> FunctionModel:
@@ -818,36 +887,41 @@ def make_steward_no_extraction_model() -> FunctionModel:
 # One confluence.update_page proposal against the page named in the brief, so
 # the freshness → ledger → run_repair → park loop runs offline.
 
+
 def _respond_wiki_repair(messages, info: AgentInfo) -> ModelResponse:
     text = " ".join(
-        str(getattr(p, "content", ""))
-        for m in messages
-        for p in getattr(m, "parts", [])
+        str(getattr(p, "content", "")) for m in messages for p in getattr(m, "parts", [])
     )
     m = re.search(r"^Page: (\S+)", text, re.MULTILINE)
     page_id = m.group(1) if m else "0"
     proposal = {
         "intent": "Restate the page's claims against the current sources.",
-        "actions": [{
-            "capability": "confluence.update_page",
-            "arguments": {
-                "page_id": page_id,
-                "title": "Repaired page",
-                "body_storage": "<p>Restated from the current catalog versions.</p>",
-                "expected_version": 1,
-            },
-            "target_ref": {"system": "confluence", "id": page_id},
-            "reversibility": "reversible",
-        }],
-        "evidence": [{
-            "kind": "confluence",
-            "source_ref": page_id,
-            "locator": f"confluence page {page_id}",
-            "claim": "The page cites a source that has moved on.",
-        }],
+        "actions": [
+            {
+                "capability": "confluence.update_page",
+                "arguments": {
+                    "page_id": page_id,
+                    "title": "Repaired page",
+                    "body_storage": "<p>Restated from the current catalog versions.</p>",
+                    "expected_version": 1,
+                },
+                "target_ref": {"system": "confluence", "id": page_id},
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "confluence",
+                "source_ref": page_id,
+                "locator": f"confluence page {page_id}",
+                "claim": "The page cites a source that has moved on.",
+            }
+        ],
         "expected_effect": "the page states what its sources say now",
-        "confidence": {"level": "medium",
-                       "rationale": "The claims ledger names exactly what moved."},
+        "confidence": {
+            "level": "medium",
+            "rationale": "The claims ledger names exactly what moved.",
+        },
     }
     return ModelResponse(
         parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
@@ -862,11 +936,10 @@ def make_wiki_repair_model() -> FunctionModel:
 # Deterministic routing so the recommendation loop runs offline: Jira-ish tasks
 # go to jira-expert; anything else honestly reports that no candidate fits.
 
+
 def _respond_route(messages, info: AgentInfo) -> ModelResponse:
     text = " ".join(
-        str(getattr(p, "content", ""))
-        for m in messages
-        for p in getattr(m, "parts", [])
+        str(getattr(p, "content", "")) for m in messages for p in getattr(m, "parts", [])
     )
     # Judge only the TASK line — the briefing's candidate roster always
     # mentions Jira, which is exactly the surface-keyword trap the real
@@ -874,14 +947,13 @@ def _respond_route(messages, info: AgentInfo) -> ModelResponse:
     m = re.search(r"TASK \(from the team lead, trusted\): (.+)", text)
     task_text = m.group(1) if m else text
     if re.search(r"jira|issue|ticket|TASKS-\d+", task_text, re.IGNORECASE):
-        rec = {"agent_id": "jira-expert",
-               "rationale": "The task concerns Jira work, which is the Jira Expert's role."}
+        rec = {
+            "agent_id": "jira-expert",
+            "rationale": "The task concerns Jira work, which is the Jira Expert's role.",
+        }
     else:
-        rec = {"agent_id": None,
-               "rationale": "No candidate agent's role covers this task."}
-    return ModelResponse(
-        parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=rec)]
-    )
+        rec = {"agent_id": None, "rationale": "No candidate agent's role covers this task."}
+    return ModelResponse(parts=[ToolCallPart(tool_name=info.output_tools[0].name, args=rec)])
 
 
 def make_orchestrator_model() -> FunctionModel:
@@ -906,36 +978,72 @@ def _latest_returns(messages) -> dict[str, str]:
 def _respond_project(messages, info: AgentInfo) -> ModelResponse:
     r = _latest_returns(messages)
     if "assign_work" in r:
-        return ModelResponse(parts=[TextPart(content=(
-            "PROJECT COMPLETE — the assigned review finished with: "
-            + r["assign_work"][:200]
-        ))])
+        return ModelResponse(
+            parts=[
+                TextPart(
+                    content=(
+                        "PROJECT COMPLETE — the assigned review finished with: "
+                        + r["assign_work"][:200]
+                    )
+                )
+            ]
+        )
     if "submit_plan" in r:
         if "PLAN NOT APPROVED" in r["submit_plan"]:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name="record_progress", args={
-                    "made_progress": True, "in_a_loop": False,
-                    "next_step": "revise the plan per the operator's note"}),
-                ToolCallPart(tool_name="submit_plan", args={
-                    "plan": "REVISED PLAN: one sub-task — jira-expert reviews "
-                            "TASKS-12 hygiene (incorporating the note)."}),
-            ])
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="record_progress", args={
-                "made_progress": True, "in_a_loop": False,
-                "next_step": "assign the review to jira-expert"}),
-            ToolCallPart(tool_name="assign_work", args={
-                "agent_id": "jira-expert", "title": "Demo sub-task",
-                "instructions": "Review TASKS-12 hygiene and report."}),
-        ])
-    return ModelResponse(parts=[
-        ToolCallPart(tool_name="record_progress", args={
-            "made_progress": True, "in_a_loop": False,
-            "next_step": "draft the plan"}),
-        ToolCallPart(tool_name="submit_plan", args={
-            "plan": "PLAN: one sub-task — jira-expert reviews TASKS-12 "
-                    "hygiene; I synthesize the outcome."}),
-    ])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="record_progress",
+                        args={
+                            "made_progress": True,
+                            "in_a_loop": False,
+                            "next_step": "revise the plan per the operator's note",
+                        },
+                    ),
+                    ToolCallPart(
+                        tool_name="submit_plan",
+                        args={
+                            "plan": "REVISED PLAN: one sub-task — jira-expert reviews "
+                            "TASKS-12 hygiene (incorporating the note)."
+                        },
+                    ),
+                ]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="record_progress",
+                    args={
+                        "made_progress": True,
+                        "in_a_loop": False,
+                        "next_step": "assign the review to jira-expert",
+                    },
+                ),
+                ToolCallPart(
+                    tool_name="assign_work",
+                    args={
+                        "agent_id": "jira-expert",
+                        "title": "Demo sub-task",
+                        "instructions": "Review TASKS-12 hygiene and report.",
+                    },
+                ),
+            ]
+        )
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name="record_progress",
+                args={"made_progress": True, "in_a_loop": False, "next_step": "draft the plan"},
+            ),
+            ToolCallPart(
+                tool_name="submit_plan",
+                args={
+                    "plan": "PLAN: one sub-task — jira-expert reviews TASKS-12 "
+                    "hygiene; I synthesize the outcome."
+                },
+            ),
+        ]
+    )
 
 
 def make_project_model() -> FunctionModel:
@@ -944,13 +1052,19 @@ def make_project_model() -> FunctionModel:
 
 def _respond_project_stalling(messages, info: AgentInfo) -> ModelResponse:
     """Reports NO progress every round — the stall-escalation driver test."""
-    return ModelResponse(parts=[
-        ToolCallPart(tool_name="record_progress", args={
-            "made_progress": False, "in_a_loop": True,
-            "next_step": "retry the same thing"}),
-        ToolCallPart(tool_name="submit_plan", args={
-            "plan": "PLAN: keep retrying."}),
-    ])
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name="record_progress",
+                args={
+                    "made_progress": False,
+                    "in_a_loop": True,
+                    "next_step": "retry the same thing",
+                },
+            ),
+            ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN: keep retrying."}),
+        ]
+    )
 
 
 def make_stalling_project_model() -> FunctionModel:
@@ -962,19 +1076,33 @@ def _respond_project_bad_target(messages, info: AgentInfo) -> ModelResponse:
     up in text when the batch is rejected — the sanitization driver test."""
     r = _latest_returns(messages)
     if "assign_work" in r and "BATCH REJECTED" in r["assign_work"]:
-        return ModelResponse(parts=[TextPart(content=(
-            "Giving up honestly: my assignment was rejected — "
-            + r["assign_work"][:200]
-        ))])
+        return ModelResponse(
+            parts=[
+                TextPart(
+                    content=(
+                        "Giving up honestly: my assignment was rejected — " + r["assign_work"][:200]
+                    )
+                )
+            ]
+        )
     if "submit_plan" in r:
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="assign_work", args={
-                "agent_id": "orchestrator", "title": "Self-delegation",
-                "instructions": "Orchestrate yourself."}),
-        ])
-    return ModelResponse(parts=[
-        ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN: delegate."}),
-    ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="assign_work",
+                    args={
+                        "agent_id": "orchestrator",
+                        "title": "Self-delegation",
+                        "instructions": "Orchestrate yourself.",
+                    },
+                ),
+            ]
+        )
+    return ModelResponse(
+        parts=[
+            ToolCallPart(tool_name="submit_plan", args={"plan": "PLAN: delegate."}),
+        ]
+    )
 
 
 def make_bad_target_project_model() -> FunctionModel:
@@ -995,27 +1123,31 @@ def make_bad_target_project_model() -> FunctionModel:
 
 _EA_EPISODE_PROPOSAL = {
     "intent": "Record what the operator decided in this contact as team knowledge.",
-    "actions": [{
-        "capability": "graph.add_episode",
-        "arguments": {
-            "name": "Operator priorities",
-            "episode_body": (
-                "In the daily contact the operator set the team's priority for "
-                "the queue currently awaiting decision."
-            ),
-            "source_description": "executive assistant contact with the operator",
-            "reference_time": "2026-07-20T09:00:00Z",
-            "scope": "shared",
-        },
-        "target_ref": {"system": "graphiti", "id": "central_command"},
-        "reversibility": "reversible",
-    }],
-    "evidence": [{
-        "kind": "operator",
-        "source_ref": "the clarification discussion",
-        "locator": "conversation transcript",
-        "claim": "the operator's answer in this contact",
-    }],
+    "actions": [
+        {
+            "capability": "graph.add_episode",
+            "arguments": {
+                "name": "Operator priorities",
+                "episode_body": (
+                    "In the daily contact the operator set the team's priority for "
+                    "the queue currently awaiting decision."
+                ),
+                "source_description": "executive assistant contact with the operator",
+                "reference_time": "2026-07-20T09:00:00Z",
+                "scope": "shared",
+            },
+            "target_ref": {"system": "graphiti", "id": "central_command"},
+            "reversibility": "reversible",
+        }
+    ],
+    "evidence": [
+        {
+            "kind": "operator",
+            "source_ref": "the clarification discussion",
+            "locator": "conversation transcript",
+            "claim": "the operator's answer in this contact",
+        }
+    ],
     "expected_effect": "the graph records what the operator decided today",
     "confidence": {
         "level": "medium",
@@ -1055,31 +1187,44 @@ def _ea_in_seeded_lane(messages) -> bool:
 def _respond_ea_digest(messages, info: AgentInfo) -> ModelResponse:
     """The scheduled contact: ask (opening a lane), then on resume, propose."""
     if _ea_asked(messages):
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="propose_action",
-                         args={"proposal": _EA_EPISODE_PROPOSAL})
-        ])
-    return ModelResponse(parts=[
-        ToolCallPart(tool_name="ask_operator", args={
-            "question": _EA_DIGEST_QUESTION,
-            "searched": "only the operator can answer this; no tool I hold records it",
-            "needs_discussion": True,
-            "why": "The answer sets what I chase next and will raise the next question.",
-        })
-    ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="propose_action", args={"proposal": _EA_EPISODE_PROPOSAL})
+            ]
+        )
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name="ask_operator",
+                args={
+                    "question": _EA_DIGEST_QUESTION,
+                    "searched": "only the operator can answer this; no tool I hold records it",
+                    "needs_discussion": True,
+                    "why": "The answer sets what I chase next and will raise the next question.",
+                },
+            )
+        ]
+    )
 
 
 def _respond_ea_conclude(messages, info: AgentInfo) -> ModelResponse:
     for m in messages:
         for p in getattr(m, "parts", []):
-            if isinstance(p, (ToolCallPart, ToolReturnPart)) and \
-                    p.tool_name == "conclude_discussion":
+            if (
+                isinstance(p, (ToolCallPart, ToolReturnPart))
+                and p.tool_name == "conclude_discussion"
+            ):
                 return ModelResponse(parts=[TextPart(content="Already concluded.")])
-    return ModelResponse(parts=[
-        ToolCallPart(tool_name="conclude_discussion", args={
-            "summary": _last_prompt_line(messages),
-        })
-    ])
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name="conclude_discussion",
+                args={
+                    "summary": _last_prompt_line(messages),
+                },
+            )
+        ]
+    )
 
 
 def make_ea_conclude_model() -> FunctionModel:
@@ -1093,10 +1238,9 @@ def _respond_ea_episode(messages, info: AgentInfo) -> ModelResponse:
         for p in getattr(m, "parts", []):
             if _returned(p) and p.tool_name == "propose_action":
                 return ModelResponse(parts=[TextPart(content="Work log recorded.")])
-    return ModelResponse(parts=[
-        ToolCallPart(tool_name="propose_action",
-                     args={"proposal": _EA_EPISODE_PROPOSAL})
-    ])
+    return ModelResponse(
+        parts=[ToolCallPart(tool_name="propose_action", args={"proposal": _EA_EPISODE_PROPOSAL})]
+    )
 
 
 def make_ea_episode_model() -> FunctionModel:
@@ -1126,27 +1270,31 @@ def make_ea_model() -> FunctionModel:
 
 _INTRO_EPISODE_PROPOSAL = {
     "intent": "Record how the operator wants me to work, from our introduction.",
-    "actions": [{
-        "capability": "graph.add_episode",
-        "arguments": {
-            "name": "Operator's working preferences",
-            "episode_body": (
-                "In our introduction the operator set how they want this "
-                "agent to weigh its judgment calls."
-            ),
-            "source_description": "the onboarding tour introduction",
-            "reference_time": "2026-07-20T09:00:00Z",
-            "scope": "shared",
-        },
-        "target_ref": {"system": "graphiti", "id": "central_command"},
-        "reversibility": "reversible",
-    }],
-    "evidence": [{
-        "kind": "operator",
-        "source_ref": "the introduction discussion",
-        "locator": "conversation transcript",
-        "claim": "the operator's answer to my calibration questions",
-    }],
+    "actions": [
+        {
+            "capability": "graph.add_episode",
+            "arguments": {
+                "name": "Operator's working preferences",
+                "episode_body": (
+                    "In our introduction the operator set how they want this "
+                    "agent to weigh its judgment calls."
+                ),
+                "source_description": "the onboarding tour introduction",
+                "reference_time": "2026-07-20T09:00:00Z",
+                "scope": "shared",
+            },
+            "target_ref": {"system": "graphiti", "id": "central_command"},
+            "reversibility": "reversible",
+        }
+    ],
+    "evidence": [
+        {
+            "kind": "operator",
+            "source_ref": "the introduction discussion",
+            "locator": "conversation transcript",
+            "claim": "the operator's answer to my calibration questions",
+        }
+    ],
     "expected_effect": "the graph records the operator's stated preference",
     "confidence": {
         "level": "medium",
@@ -1165,18 +1313,24 @@ def _respond_intro(messages, info: AgentInfo) -> ModelResponse:
     if _ea_in_seeded_lane(messages):
         return _respond_ea_conclude(messages, info)
     if _ea_asked(messages):
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="propose_action",
-                         args={"proposal": _INTRO_EPISODE_PROPOSAL})
-        ])
-    return ModelResponse(parts=[
-        ToolCallPart(tool_name="ask_operator", args={
-            "question": _INTRO_QUESTION,
-            "searched": "only the operator can answer this; no tool I hold records it",
-            "needs_discussion": True,
-            "why": "Their answer is the calibration this introduction exists to get.",
-        })
-    ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(tool_name="propose_action", args={"proposal": _INTRO_EPISODE_PROPOSAL})
+            ]
+        )
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name="ask_operator",
+                args={
+                    "question": _INTRO_QUESTION,
+                    "searched": "only the operator can answer this; no tool I hold records it",
+                    "needs_discussion": True,
+                    "why": "Their answer is the calibration this introduction exists to get.",
+                },
+            )
+        ]
+    )
 
 
 def make_intro_model() -> FunctionModel:

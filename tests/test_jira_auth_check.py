@@ -55,7 +55,7 @@ async def test_dead_token_raises_loudly_instead_of_reporting_an_empty_instance(m
     _patch_client(monkeypatch, _handler(paths, myself_status=401))
     with pytest.raises(jira.JiraError, match="CC_JIRA_EMAIL/CC_JIRA_API_TOKEN"):
         await jira.list_projects()
-    assert paths == [jira.MYSELF_PATH]   # the empty list was never fetched, let alone returned
+    assert paths == [jira.MYSELF_PATH]  # the empty list was never fetched, let alone returned
 
 
 async def test_a_live_token_passes_straight_through(monkeypatch):
@@ -63,8 +63,7 @@ async def test_a_live_token_passes_straight_through(monkeypatch):
     _patch_client(monkeypatch, _handler(paths))
     out = await jira.list_projects()
     assert out["ok"] and out["count"] == 0
-    assert paths == [jira.MYSELF_PATH, "/rest/api/3/serverInfo",
-                     "/rest/api/3/project/search"]
+    assert paths == [jira.MYSELF_PATH, "/rest/api/3/serverInfo", "/rest/api/3/project/search"]
 
 
 async def test_the_check_runs_once_per_process_not_once_per_call(monkeypatch):

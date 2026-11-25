@@ -36,13 +36,21 @@ import pytest
 from tests.k3s_units import CHECKOUT, GROUP, HOME, K3S, OWNER, render_unit, run_render
 from tests.test_no_instance_facts import shapes_of
 
-TEMPLATES = ("cc-backup.service.in", "cc-nerve.service.in", "cc-sandbox-runner.service.in",
-             "cc-update-stage.service.in", "cc-update-tmpfiles.conf.in", "cc-update.service.in",
-             "cc-uvicorn.service.in")
+TEMPLATES = (
+    "cc-backup.service.in",
+    "cc-nerve.service.in",
+    "cc-sandbox-runner.service.in",
+    "cc-update-stage.service.in",
+    "cc-update-tmpfiles.conf.in",
+    "cc-update.service.in",
+    "cc-uvicorn.service.in",
+)
 PLAIN = ("cc-backup.timer", "cc-graph-bolt.service", "cc-update-stage.path", "cc-update.path")
 TOKENS = ("@CC_CHECKOUT@", "@CC_OWNER@", "@CC_OWNER_GROUP@", "@CC_OWNER_HOME@")
 
-_PATH_KEY = re.compile(r"^(?:WorkingDirectory|ExecStart|ExecStartPre|EnvironmentFile)=(.*)$", re.MULTILINE)
+_PATH_KEY = re.compile(
+    r"^(?:WorkingDirectory|ExecStart|ExecStartPre|EnvironmentFile)=(.*)$", re.MULTILINE
+)
 _ABS_NOT_SYSTEM = re.compile(r"(?<![\w.])-?(/(?!bin/|usr/|run/|dev/|var/|tcp/)[\w./-]+)")
 
 SETUP_SH = (K3S / "setup.sh").read_text(encoding="utf-8")
@@ -51,7 +59,7 @@ UPDATER_SH = (K3S / "cc-update.sh").read_text(encoding="utf-8")
 
 def _fn(text: str, name: str) -> str:
     start = text.index(f"\n{name}() {{") + 1
-    return text[start:text.index("\n}\n", start) + 3]
+    return text[start : text.index("\n}\n", start) + 3]
 
 
 def _posix_only() -> None:
@@ -61,9 +69,12 @@ def _posix_only() -> None:
 
 # -- the set of files --------------------------------------------------------
 
+
 def test_seven_templates_and_four_plain_units_and_no_unit_in_both_forms():
     assert tuple(sorted(p.name for p in K3S.glob("*.in"))) == TEMPLATES
-    plain = sorted(p.name for g in ("*.service", "*.path", "*.timer", "*-tmpfiles.conf") for p in K3S.glob(g))
+    plain = sorted(
+        p.name for g in ("*.service", "*.path", "*.timer", "*-tmpfiles.conf") for p in K3S.glob(g)
+    )
     assert tuple(plain) == PLAIN
 
 
@@ -76,6 +87,7 @@ def test_a_plain_unit_holds_no_instance_value(name):
 
 
 # -- the render --------------------------------------------------------------
+
 
 @pytest.mark.parametrize("name", TEMPLATES)
 def test_a_template_renders_with_no_token_left(name):
@@ -122,8 +134,10 @@ def test_the_group_is_its_own_value():
     assert "d /run/cc-update      0770 doe staff -\n" in tmpfiles
 
 
-@pytest.mark.parametrize("planted", ["x=@CC_NOT_A_TOKEN@\n", "x=@CC_lower@\n", "x=@CC_@\n",
-                                     "x=@CC_CHECKOUT\n", "x=@CC_\n"])
+@pytest.mark.parametrize(
+    "planted",
+    ["x=@CC_NOT_A_TOKEN@\n", "x=@CC_lower@\n", "x=@CC_@\n", "x=@CC_CHECKOUT\n", "x=@CC_\n"],
+)
 def test_the_render_refuses_a_token_it_does_not_know_or_a_malformed_one(tmp_path, planted):
     t = tmp_path / "x.service.in"
     t.write_text("User=@CC_OWNER@\n" + planted)
@@ -169,6 +183,7 @@ def test_a_value_holding_a_token_is_refused_rather_than_written_out(tmp_path):
 
 # -- setup.sh ----------------------------------------------------------------
 
+
 @pytest.fixture
 def tree(tmp_path: Path) -> Path:
     """A checkout owned by the test's own account, holding the real units."""
@@ -192,21 +207,31 @@ def _stub_bin(tmp_path: Path) -> Path:
 
 
 def _setup_script(tree: Path, body: str) -> str:
-    fns = "".join(_fn(SETUP_SH, n) for n in ("load_unit_values", "unit_text", "install_unit", "unit_paths_check"))
-    return "\n".join([
-        "set -uo pipefail",
-        f'HERE="{tree / "deploy" / "k3s"}"',
-        'pass() { printf "PASS %s: %s\\n" "$1" "$2"; }',
-        'fail() { printf "FAIL %s: %s\\n" "$1" "$2"; }',
-        fns,
-        body,
-    ])
+    fns = "".join(
+        _fn(SETUP_SH, n)
+        for n in ("load_unit_values", "unit_text", "install_unit", "unit_paths_check")
+    )
+    return "\n".join(
+        [
+            "set -uo pipefail",
+            f'HERE="{tree / "deploy" / "k3s"}"',
+            'pass() { printf "PASS %s: %s\\n" "$1" "$2"; }',
+            'fail() { printf "FAIL %s: %s\\n" "$1" "$2"; }',
+            fns,
+            body,
+        ]
+    )
 
 
 def _run_setup(tree: Path, tmp_path: Path, body: str) -> subprocess.CompletedProcess:
     env = {"PATH": f"{_stub_bin(tmp_path)}:{os.environ['PATH']}"}
-    return subprocess.run(["bash", "-c", _setup_script(tree, body)], env=env,
-                          capture_output=True, text=True, timeout=60)
+    return subprocess.run(
+        ["bash", "-c", _setup_script(tree, body)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
 
 
 def _stray() -> str:
@@ -230,11 +255,19 @@ def test_setup_path_check_refuses_a_path_outside_the_checkout(tree, tmp_path, na
 
 def _run_setup_for_layout(tree: Path) -> subprocess.CompletedProcess:
     """The check with the values given, as they are on a /home-rooted checkout."""
-    script = _setup_script(tree, ". \"$HERE/instance-lib.sh\"\n"
-                                 "UNIT_CHECKOUT=/home/doe/cc UNIT_OWNER=doe UNIT_GROUP=doe UNIT_HOME=/home/doe\n"
-                                 "load_unit_values() { :; }\nunit_paths_check")
-    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60,
-                          env={"PATH": os.environ["PATH"]})
+    script = _setup_script(
+        tree,
+        '. "$HERE/instance-lib.sh"\n'
+        "UNIT_CHECKOUT=/home/doe/cc UNIT_OWNER=doe UNIT_GROUP=doe UNIT_HOME=/home/doe\n"
+        "load_unit_values() { :; }\nunit_paths_check",
+    )
+    return subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={"PATH": os.environ["PATH"]},
+    )
 
 
 def test_setup_path_check_reads_the_rendered_text(tree):
@@ -245,7 +278,9 @@ def test_setup_path_check_reads_the_rendered_text(tree):
 
 
 def test_setup_path_check_refuses_a_sibling_of_the_checkout(tree):
-    (tree / "deploy" / "k3s" / "cc-update.service.in").write_text("[Service]\nExecStart=/home/doe/cc2/x\n")
+    (tree / "deploy" / "k3s" / "cc-update.service.in").write_text(
+        "[Service]\nExecStart=/home/doe/cc2/x\n"
+    )
     r = _run_setup_for_layout(tree)
     assert r.returncode != 0 and "cc-update.service.in" in r.stdout
 
@@ -260,13 +295,20 @@ def test_setup_path_check_refuses_a_template_that_does_not_render(tree, tmp_path
 def test_setup_install_renders_a_template_and_copies_a_plain_unit(tree, tmp_path):
     k3s, dest = tree / "deploy" / "k3s", tmp_path / "dest"
     dest.mkdir()
-    r = _run_setup(tree, tmp_path, f'''load_unit_values || exit 9
+    r = _run_setup(
+        tree,
+        tmp_path,
+        f'''load_unit_values || exit 9
 install_unit "$HERE/cc-update.service.in" "{dest}/cc-update.service" || exit 1
 install_unit "$HERE/cc-update.path" "{dest}/cc-update.path" || exit 2
-''')
+''',
+    )
     assert r.returncode == 0, r.stdout + r.stderr
     rendered = (dest / "cc-update.service").read_text()
-    assert f"ExecStart={tree.resolve()}/deploy/k3s/cc-update.sh\n" in rendered and "@CC_" not in rendered
+    assert (
+        f"ExecStart={tree.resolve()}/deploy/k3s/cc-update.sh\n" in rendered
+        and "@CC_" not in rendered
+    )
     assert (dest / "cc-update.service").stat().st_mode & 0o777 == 0o644
     assert (dest / "cc-update.path").read_bytes() == (k3s / "cc-update.path").read_bytes()
 
@@ -274,7 +316,11 @@ install_unit "$HERE/cc-update.path" "{dest}/cc-update.path" || exit 2
 def test_setup_install_of_a_refused_template_installs_nothing(tree, tmp_path):
     (tree / "deploy" / "k3s" / "cc-nerve.service.in").write_text("x=@CC_NOT_A_TOKEN@\n")
     dest = tmp_path / "out.service"
-    r = _run_setup(tree, tmp_path, f'load_unit_values || exit 9\ninstall_unit "$HERE/cc-nerve.service.in" "{dest}"')
+    r = _run_setup(
+        tree,
+        tmp_path,
+        f'load_unit_values || exit 9\ninstall_unit "$HERE/cc-nerve.service.in" "{dest}"',
+    )
     assert r.returncode == 1 and not dest.exists()
 
 
@@ -282,17 +328,23 @@ def test_setup_renders_the_owners_primary_group_never_the_checkouts(tree, tmp_pa
     """A checkout owned by doe, group `users`: a member of `users` must not be able
     to write the trigger that starts the root updater."""
     stubs = _stub_bin(tmp_path)
-    for name, body in (("stat", 'case "$2" in %U) echo doe ;; %G) echo users ;; esac\n'),
-                       ("id", 'echo doeprimary\n'),
-                       ("getent", 'printf "doe:x:1000:1000::/home/doe:/bin/bash\\n"\n')):
+    for name, body in (
+        ("stat", 'case "$2" in %U) echo doe ;; %G) echo users ;; esac\n'),
+        ("id", "echo doeprimary\n"),
+        ("getent", 'printf "doe:x:1000:1000::/home/doe:/bin/bash\\n"\n'),
+    ):
         (stubs / name).write_text("#!/usr/bin/env bash\n" + body)
         (stubs / name).chmod(0o755)
     dest = tmp_path / "dest"
     dest.mkdir()
-    r = _run_setup(tree, tmp_path, f"""load_unit_values || exit 9
+    r = _run_setup(
+        tree,
+        tmp_path,
+        f"""load_unit_values || exit 9
 install_unit "$HERE/cc-uvicorn.service.in" "{dest}/cc-uvicorn.service" || exit 1
 install_unit "$HERE/cc-update-tmpfiles.conf.in" "{dest}/cc-update.conf" || exit 2
-""")
+""",
+    )
     assert r.returncode == 0, r.stdout + r.stderr
     assert "\nUser=doe\nGroup=doeprimary\n" in (dest / "cc-uvicorn.service").read_text()
     tmpfiles = (dest / "cc-update.conf").read_text()
@@ -301,16 +353,28 @@ install_unit "$HERE/cc-update-tmpfiles.conf.in" "{dest}/cc-update.conf" || exit 
 
 def test_cc_k3s_group_is_for_the_chown_and_never_reaches_a_render():
     assert "cc_k3s_group" not in SETUP_SH
-    assert '"$OWNER" "$OWNER_PRIMARY_GROUP" "$OWNER_HOME"' in _fn(UPDATER_SH, "install_changed_unit")
-    assert 'UNIT_GROUP="$(cc_k3s_owner_primary_group "$HERE/setup.sh")"' in _fn(SETUP_SH, "load_unit_values")
+    assert '"$OWNER" "$OWNER_PRIMARY_GROUP" "$OWNER_HOME"' in _fn(
+        UPDATER_SH, "install_changed_unit"
+    )
+    assert 'UNIT_GROUP="$(cc_k3s_owner_primary_group "$HERE/setup.sh")"' in _fn(
+        SETUP_SH, "load_unit_values"
+    )
 
 
 def test_setup_installs_the_fixed_list_and_not_the_stage_pair():
     app = _fn(SETUP_SH, "phase_app")
     loop = re.search(r"for u in (.*?); do", app, re.DOTALL)
     assert loop
-    assert loop.group(1).split() == ["cc-uvicorn.service", "cc-sandbox-runner.service", "cc-graph-bolt.service",
-                                     "\\", "cc-backup.service", "cc-backup.timer", "cc-update.service", "cc-update.path"]
+    assert loop.group(1).split() == [
+        "cc-uvicorn.service",
+        "cc-sandbox-runner.service",
+        "cc-graph-bolt.service",
+        "\\",
+        "cc-backup.service",
+        "cc-backup.timer",
+        "cc-update.service",
+        "cc-update.path",
+    ]
     assert '[[ -f "$src.in" ]] && src="$src.in"' in app
     assert 'install_unit "$HERE/cc-nerve.service.in" /etc/systemd/system/cc-nerve.service' in app
     assert "cc-update-stage" not in app
@@ -320,17 +384,20 @@ def test_setup_installs_the_fixed_list_and_not_the_stage_pair():
 
 # -- cc-update.sh ------------------------------------------------------------
 
+
 def _run_updater(tree: Path, tmp_path: Path, rel: str) -> tuple[subprocess.CompletedProcess, Path]:
     etc = tmp_path / "etc"
     (etc / "systemd" / "system").mkdir(parents=True, exist_ok=True)
     (etc / "tmpfiles.d").mkdir(parents=True, exist_ok=True)
-    script = "\n".join([
-        "set -uo pipefail",
-        f'. "{K3S / "instance-lib.sh"}"',
-        f'REPO="{tree}" OWNER=doe OWNER_GROUP=users OWNER_PRIMARY_GROUP=staff OWNER_HOME=/home/doe',
-        _fn(UPDATER_SH, "install_changed_unit").replace("/etc/", f"{etc}/"),
-        f'install_changed_unit "{rel}"',
-    ])
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            f'. "{K3S / "instance-lib.sh"}"',
+            f'REPO="{tree}" OWNER=doe OWNER_GROUP=users OWNER_PRIMARY_GROUP=staff OWNER_HOME=/home/doe',
+            _fn(UPDATER_SH, "install_changed_unit").replace("/etc/", f"{etc}/"),
+            f'install_changed_unit "{rel}"',
+        ]
+    )
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60), etc
 
 
@@ -338,7 +405,11 @@ def test_the_updater_renders_a_changed_template_to_its_installed_name(tree, tmp_
     r, etc = _run_updater(tree, tmp_path, "deploy/k3s/cc-uvicorn.service.in")
     assert r.returncode == 0, r.stderr
     text = (etc / "systemd" / "system" / "cc-uvicorn.service").read_text()
-    assert "\nUser=doe\nGroup=staff\n" in text and f"WorkingDirectory={tree}\n" in text and "@CC_" not in text
+    assert (
+        "\nUser=doe\nGroup=staff\n" in text
+        and f"WorkingDirectory={tree}\n" in text
+        and "@CC_" not in text
+    )
     assert not (etc / "systemd" / "system" / "cc-uvicorn.service.in").exists()
 
 
@@ -352,7 +423,9 @@ def test_the_updater_renders_the_tmpfiles_template_to_the_runbooks_name(tree, tm
 def test_the_updater_installs_a_plain_unit_verbatim(tree, tmp_path):
     r, etc = _run_updater(tree, tmp_path, "deploy/k3s/cc-graph-bolt.service")
     assert r.returncode == 0, r.stderr
-    assert (etc / "systemd" / "system" / "cc-graph-bolt.service").read_bytes() == (K3S / "cc-graph-bolt.service").read_bytes()
+    assert (etc / "systemd" / "system" / "cc-graph-bolt.service").read_bytes() == (
+        K3S / "cc-graph-bolt.service"
+    ).read_bytes()
 
 
 def test_a_refused_render_leaves_the_installed_unit_alone(tree, tmp_path):
@@ -366,8 +439,8 @@ def test_a_refused_render_leaves_the_installed_unit_alone(tree, tmp_path):
 
 
 def test_the_updater_lists_templates_and_still_skips_a_deleted_unit():
-    block = UPDATER_SH[UPDATER_SH.index('changed_units="$(changed_between'):]
-    assert "'deploy/k3s/*.in'" in block[:block.index(')"')]
+    block = UPDATER_SH[UPDATER_SH.index('changed_units="$(changed_between') :]
+    assert "'deploy/k3s/*.in'" in block[: block.index(')"')]
     assert '[[ -f "$REPO/$f" ]] || continue' in block
     assert """grep -qx 'deploy/k3s/cc-graph-bolt.service' <<<"$changed_units\"""" in block
 
@@ -385,8 +458,21 @@ def test_the_release_that_introduces_the_templates_installs_nothing(tmp_path):
     unit.write_text(body + "User=doe\n")
 
     def git(*args: str) -> str:
-        return subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.com",
-                               *args], check=True, capture_output=True, text=True).stdout
+        return subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.com",
+                *args,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
 
     git("init", "-q")
     git("add", "-A")
@@ -395,16 +481,22 @@ def test_the_release_that_introduces_the_templates_installs_nothing(tmp_path):
     (k3s / "cc-x.service.in").write_text(body + "User=@CC_OWNER@\n")
     git("add", "-A")
     git("commit", "-qm", "new")
-    old_pathspec = ("deploy/k3s/*.service", "deploy/k3s/*.path", "deploy/k3s/*.timer", "deploy/k3s/*-tmpfiles.conf")
+    old_pathspec = (
+        "deploy/k3s/*.service",
+        "deploy/k3s/*.path",
+        "deploy/k3s/*.timer",
+        "deploy/k3s/*-tmpfiles.conf",
+    )
     listed = git("diff", "--name-only", "HEAD~1", "HEAD", "--", *old_pathspec).split()
     assert listed == ["deploy/k3s/cc-x.service"]
     assert not (tmp_path / listed[0]).exists()
     # The updater from this release on sees the template.
-    assert git("diff", "--name-only", "HEAD~1", "HEAD", "--", *old_pathspec, "deploy/k3s/*.in").split() == [
-        "deploy/k3s/cc-x.service.in"]
+    assert git(
+        "diff", "--name-only", "HEAD~1", "HEAD", "--", *old_pathspec, "deploy/k3s/*.in"
+    ).split() == ["deploy/k3s/cc-x.service.in"]
 
 
 def test_the_updater_says_why_this_release_installs_nothing():
-    comment = UPDATER_SH[:UPDATER_SH.index('changed_units="$(changed_between')]
-    comment = comment[comment.rindex("# A unit that names the checkout"):]
+    comment = UPDATER_SH[: UPDATER_SH.index('changed_units="$(changed_between')]
+    comment = comment[comment.rindex("# A unit that names the checkout") :]
     assert "previous" in comment and "'*.in'" in comment and "byte" in comment

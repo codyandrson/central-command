@@ -49,12 +49,27 @@ CRITERIA_FIELDS = ("from_address", "from_domain", "subject_contains", "body_cont
 # A domain that identifies a PROVIDER, not a sender — a rule on it alone would
 # cover every stranger who uses that provider. Mirrors the generic-provider
 # list `work_item.sender_key` uses (schema.sql).
-PUBLIC_MAIL_DOMAINS = frozenset({
-    "gmail.com", "googlemail.com", "yahoo.com", "hotmail.com", "outlook.com",
-    "live.com", "msn.com", "icloud.com", "me.com", "aol.com", "proton.me",
-    "protonmail.com", "pm.me", "comcast.net", "att.net", "verizon.net",
-    "sbcglobal.net",
-})
+PUBLIC_MAIL_DOMAINS = frozenset(
+    {
+        "gmail.com",
+        "googlemail.com",
+        "yahoo.com",
+        "hotmail.com",
+        "outlook.com",
+        "live.com",
+        "msn.com",
+        "icloud.com",
+        "me.com",
+        "aol.com",
+        "proton.me",
+        "protonmail.com",
+        "pm.me",
+        "comcast.net",
+        "att.net",
+        "verizon.net",
+        "sbcglobal.net",
+    }
+)
 
 _MIN_CONTAINS = 3
 _ADDRESS_RE = re.compile(r"<([^>]+)>")
@@ -127,9 +142,9 @@ def describe(criteria: dict, exceptions: dict | None = None) -> str:
     if "from_domain" in crit:
         parts.append(f"from anyone at {crit['from_domain']} (or a subdomain)")
     if "subject_contains" in crit:
-        parts.append(f"whose subject contains \"{crit['subject_contains']}\"")
+        parts.append(f'whose subject contains "{crit["subject_contains"]}"')
     if "body_contains" in crit:
-        parts.append(f"whose body contains \"{crit['body_contains']}\"")
+        parts.append(f'whose body contains "{crit["body_contains"]}"')
     text = "Auto-dismiss mail " + " and ".join(parts)
     ex = []
     if "from_address" in exc:
@@ -137,9 +152,9 @@ def describe(criteria: dict, exceptions: dict | None = None) -> str:
     if "from_domain" in exc:
         ex.append(f"it is from anyone at {exc['from_domain']}")
     if "subject_contains" in exc:
-        ex.append(f"the subject contains \"{exc['subject_contains']}\"")
+        ex.append(f'the subject contains "{exc["subject_contains"]}"')
     if "body_contains" in exc:
-        ex.append(f"the body contains \"{exc['body_contains']}\"")
+        ex.append(f'the body contains "{exc["body_contains"]}"')
     if ex:
         text += ", except when " + " or ".join(ex)
     return text + "."

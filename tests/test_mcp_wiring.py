@@ -48,8 +48,7 @@ EXEMPT = {
         '("skill-propose",)'
     ),
     "orchestrator.py": (
-        "holds no propose_*/write path by its own module docstring; routing "
-        "mode is tool-free"
+        "holds no propose_*/write path by its own module docstring; routing mode is tool-free"
     ),
     "jira_expert.py": (
         "leaf builder — accepts extra_toolsets/mcp_section as parameters "
@@ -114,8 +113,7 @@ def test_exempt_files_do_not_reference_the_helper(name):
 def test_every_agent_building_file_is_classified():
     classified = WIRED | set(EXEMPT)
     offenders = sorted(
-        p.name for p in SRC.glob("*.py")
-        if p.name not in classified and _builds_agents(p)
+        p.name for p in SRC.glob("*.py") if p.name not in classified and _builds_agents(p)
     )
     assert offenders == [], (
         "these files build agents (construct Agent( or call a builder entry "

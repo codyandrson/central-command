@@ -58,7 +58,7 @@ class Refused(Exception):
 
 def _mode(info: zipfile.ZipInfo) -> int:
     """The Unix st_mode the zip recorded, or 0 when it recorded none."""
-    if info.create_system != 3:          # 3 = Unix; anything else carries no mode
+    if info.create_system != 3:  # 3 = Unix; anything else carries no mode
         return 0
     return (info.external_attr >> 16) & 0xFFFF
 
@@ -86,22 +86,32 @@ def _check_name(name: str, shown: str) -> None:
     if _CONTROL.search(name):
         raise Refused(f"entry {shown!r} has a control character in its name — refusing the archive")
     if name.startswith(("/", "\\")) or _DRIVE.match(name):
-        raise Refused(f"entry {shown!r} is an absolute path and would land outside the destination — refusing the archive")
+        raise Refused(
+            f"entry {shown!r} is an absolute path and would land outside the destination — refusing the archive"
+        )
     if ".." in _parts(name):
-        raise Refused(f"entry {shown!r} climbs out with '..' and would land outside the destination — refusing the archive")
+        raise Refused(
+            f"entry {shown!r} climbs out with '..' and would land outside the destination — refusing the archive"
+        )
 
 
 def _target_of(name: str, target: str, shown: str) -> str:
     """The link target, checked to stay inside the tree the zip unpacks to."""
     if not target or _CONTROL.search(target):
-        raise Refused(f"symlink entry {shown!r} has an empty or unprintable target — refusing the archive")
+        raise Refused(
+            f"symlink entry {shown!r} has an empty or unprintable target — refusing the archive"
+        )
     if target.startswith(("/", "\\")) or _DRIVE.match(target):
-        raise Refused(f"symlink entry {shown!r} points at an absolute path ({target}) — refusing the archive")
+        raise Refused(
+            f"symlink entry {shown!r} points at an absolute path ({target}) — refusing the archive"
+        )
     here = _parts(name)[:-1]
     for p in _parts(target):
         if p == "..":
             if not here:
-                raise Refused(f"symlink entry {shown!r} points outside the tree ({target}) — refusing the archive")
+                raise Refused(
+                    f"symlink entry {shown!r} points outside the tree ({target}) — refusing the archive"
+                )
             here.pop()
         else:
             here.append(p)
@@ -132,10 +142,14 @@ def extract(zip_path: str, dest: str, skip: str = "", links: str | None = None) 
             _check_name(name, shown)
             out = os.path.join(dest, *_parts(name))
             if not _inside(dest_real, out):
-                raise Refused(f"entry {shown!r} would land outside the destination — refusing the archive")
+                raise Refused(
+                    f"entry {shown!r} would land outside the destination — refusing the archive"
+                )
             if _is_symlink(info):
                 if links is None:
-                    raise Refused(f"entry {shown!r} is a symlink, and no link list was asked for — refusing the archive")
+                    raise Refused(
+                        f"entry {shown!r} is a symlink, and no link list was asked for — refusing the archive"
+                    )
                 target = z.read(info).decode("utf-8", errors="strict")
                 link_rows.append(("/".join(_parts(name)), _target_of(name, target, shown)))
             elif info.is_dir():

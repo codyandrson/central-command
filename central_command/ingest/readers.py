@@ -68,7 +68,9 @@ def pdf_text(data: bytes) -> str:
         for i in range(len(pdf)):
             textpage = pdf[i].get_textpage()
             try:
-                pages.append(textpage.get_text_bounded().replace("\r\n", "\n").replace("\r", "\n").strip())
+                pages.append(
+                    textpage.get_text_bounded().replace("\r\n", "\n").replace("\r", "\n").strip()
+                )
             finally:
                 textpage.close()
     finally:
@@ -223,13 +225,19 @@ def calendar_text(data: bytes) -> str:
             return f"{value.isoformat()} (all day)"
         if value.tzinfo is None:
             if tzid:
-                warnings.append(f"time zone {tzid!r} could not be resolved; the time is shown as written")
+                warnings.append(
+                    f"time zone {tzid!r} could not be resolved; the time is shown as written"
+                )
                 return f"{value.strftime('%a %Y-%m-%d %H:%M')} [{tzid}, unresolved]"
             return f"{value.strftime('%a %Y-%m-%d %H:%M')} (floating: no time zone given)"
         if value.utcoffset() == dt.timedelta(0) and not tzid:
             return f"{value.strftime('%a %Y-%m-%d %H:%M')} UTC"
         utc = value.astimezone(dt.UTC).strftime("%Y-%m-%d %H:%M UTC")
-        return f"{value.strftime('%a %Y-%m-%d %H:%M')} {tzid or value.tzname() or ''} ({utc})".replace("  ", " ")
+        return (
+            f"{value.strftime('%a %Y-%m-%d %H:%M')} {tzid or value.tzname() or ''} ({utc})".replace(
+                "  ", " "
+            )
+        )
 
     def safe(event, key):
         """One property, or None when icalendar rejects its value: a malformed
@@ -288,7 +296,9 @@ def calendar_text(data: bytes) -> str:
         if exdate:
             groups = exdate if isinstance(exdate, list) else [exdate]
             try:
-                out.append("Skipped dates: " + ", ".join(d.dt.isoformat() for g in groups for d in g.dts))
+                out.append(
+                    "Skipped dates: " + ", ".join(d.dt.isoformat() for g in groups for d in g.dts)
+                )
             except Exception:
                 warnings.append("EXDATE could not be parsed and is left out")
         for label, prop in (
@@ -329,8 +339,11 @@ def calendar_text(data: bytes) -> str:
     elif len(seen) > shown:
         out += ["", f"[{len(seen) - shown} more events in this file are NOT shown]"]
     if others:
-        out += ["", "Also in this file and NOT shown: "
-                + ", ".join(f"{n} {k}" for k, n in sorted(others.items()))]
+        out += [
+            "",
+            "Also in this file and NOT shown: "
+            + ", ".join(f"{n} {k}" for k, n in sorted(others.items())),
+        ]
     if warnings:
         out += ["", "Warnings: " + "; ".join(dict.fromkeys(warnings))]
     return "\n".join(out).strip()

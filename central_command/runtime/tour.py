@@ -23,7 +23,10 @@ from __future__ import annotations
 # Decision 5: core five, in this order. The EA is the host and introduces
 # itself first, so it is not in the arc.
 TOUR_ARC: tuple[str, ...] = (
-    "inbox-triage", "jira-expert", "knowledge-steward", "coach",
+    "inbox-triage",
+    "jira-expert",
+    "knowledge-steward",
+    "coach",
 )
 
 # The gated capability that makes "propose to record what you learned" a
@@ -114,8 +117,7 @@ async def intro_task_instructions(agent_id: str) -> str:
     taskable = any(a.id == agent_id and a.taskable for a in await roster())
     return INTRO_TASK_TEMPLATE.format(
         recording=(
-            _RECORD_BY_PROPOSAL if await can_propose_episode(agent_id)
-            else _RECORD_BY_SUMMARY
+            _RECORD_BY_PROPOSAL if await can_propose_episode(agent_id) else _RECORD_BY_SUMMARY
         ),
         delivery=_DELIVER_BY_LANE if taskable else _DELIVER_IN_CHAT,
     )
@@ -139,12 +141,14 @@ async def arc() -> list[dict]:
         a = by_id.get(agent_id)
         if a is None:  # retired or never hired in this deployment
             continue
-        out.append({
-            "agent_id": a.id,
-            "role": a.role,
-            "taskable": a.taskable,
-            "instructions": await intro_task_instructions(a.id),
-        })
+        out.append(
+            {
+                "agent_id": a.id,
+                "role": a.role,
+                "taskable": a.taskable,
+                "instructions": await intro_task_instructions(a.id),
+            }
+        )
     return out
 
 
@@ -167,11 +171,16 @@ def _atlassian_sentence() -> str:
         return url.split("://", 1)[-1].strip("/") or url
 
     if settings.jira_base_url:
-        wiki = (f"Confluence is configured at {_host(settings.confluence_base_url)}"
-                if settings.confluence_base_url else "Confluence is not configured")
-        return (f"THIS DEPLOYMENT'S SYSTEMS, as configured: Jira is configured at "
-                f"{_host(settings.jira_base_url)} and {wiki} — so ask about how "
-                f"they USE those, not whether they have them.")
+        wiki = (
+            f"Confluence is configured at {_host(settings.confluence_base_url)}"
+            if settings.confluence_base_url
+            else "Confluence is not configured"
+        )
+        return (
+            f"THIS DEPLOYMENT'S SYSTEMS, as configured: Jira is configured at "
+            f"{_host(settings.jira_base_url)} and {wiki} — so ask about how "
+            f"they USE those, not whether they have them."
+        )
     return (
         "THIS DEPLOYMENT'S SYSTEMS, as configured: Jira and Confluence are NOT "
         "configured in this deployment. Tell the operator that plainly, in step "
@@ -218,69 +227,80 @@ async def brief() -> str:
     against the live roster and the live grants."""
     entries = await arc()
     lines = [
-        ("This is the ONBOARDING TOUR. A new operator has just stood this "
-        "system up and has met nobody on it. You are the HOST: you open the "
-        "conversation, you introduce yourself, and then you broker an "
-        "introduction to each teammate in turn. You never describe a "
-        "colleague — each of them speaks for itself."),
+        (
+            "This is the ONBOARDING TOUR. A new operator has just stood this "
+            "system up and has met nobody on it. You are the HOST: you open the "
+            "conversation, you introduce yourself, and then you broker an "
+            "introduction to each teammate in turn. You never describe a "
+            "colleague — each of them speaks for itself."
+        ),
         "",
-        ("OPEN by calling `ask_operator(needs_discussion=True)`. Everything "
-        "below happens in that one conversation lane, across turns, at the "
-        "operator's pace. Never run ahead: one introduction at a time, and "
-        "wait for them before moving on."),
+        (
+            "OPEN by calling `ask_operator(needs_discussion=True)`. Everything "
+            "below happens in that one conversation lane, across turns, at the "
+            "operator's pace. Never run ahead: one introduction at a time, and "
+            "wait for them before moving on."
+        ),
         "",
-        ("THE LANE HAS TWO DOORS, and only one of them keeps it open. The "
-        "operator can reply IN this lane — that keeps it open, turn after "
-        "turn. Or they can answer from the Decisions Inbox item this call "
-        "opened, which CLOSES the lane at that moment and resumes you with "
-        "just their answer. Either way, a turn you end in PLAIN TEXT "
-        "COMPLETES THE RUN — and with it the whole tour, however many "
-        "teammates are still unmet — because there is no lane left for the "
-        "tour to continue in; your words land in a task-result panel the "
-        "operator may never read. So the rule is mechanical, not "
-        "optional: any turn that still expects a reply from the operator — "
-        "including the calibration turn in step 1, and every turn after an "
-        "Inbox answer resumes you — must end by calling "
-        "`ask_operator(needs_discussion=True)` again with the next step, "
-        "never with plain text. That call is what reopens, or keeps open, "
-        "the lane the rest of the tour depends on."),
+        (
+            "THE LANE HAS TWO DOORS, and only one of them keeps it open. The "
+            "operator can reply IN this lane — that keeps it open, turn after "
+            "turn. Or they can answer from the Decisions Inbox item this call "
+            "opened, which CLOSES the lane at that moment and resumes you with "
+            "just their answer. Either way, a turn you end in PLAIN TEXT "
+            "COMPLETES THE RUN — and with it the whole tour, however many "
+            "teammates are still unmet — because there is no lane left for the "
+            "tour to continue in; your words land in a task-result panel the "
+            "operator may never read. So the rule is mechanical, not "
+            "optional: any turn that still expects a reply from the operator — "
+            "including the calibration turn in step 1, and every turn after an "
+            "Inbox answer resumes you — must end by calling "
+            "`ask_operator(needs_discussion=True)` again with the next step, "
+            "never with plain text. That call is what reopens, or keeps open, "
+            "the lane the rest of the tour depends on."
+        ),
         "",
-        ("1. YOUR OWN INTRODUCTION, first. Say who you are and what you are "
-        "for, from your charter; say what you can propose and what stays "
-        "behind their approval, from your GENERATED capabilities section; "
-        "then ask your own 2 or 3 calibration questions — how often they want "
-        "to hear from you, when they do not, and what is worth interrupting "
-        "them for. Those answers set your contact doctrine, so ask them "
-        "properly. When their answers come back, acknowledge them in ONE "
-        "sentence and continue straight to step 2 IN THE SAME TURN, closing "
-        "that turn with `ask_operator(needs_discussion=True)` per the rule "
-        "above, never plain text — the tour does not end at calibration. "
-        "This is exactly where it died on day one: the host closed in plain "
-        "text after the calibration exchange and the tour ended with nine "
-        "teammates unmet."),
+        (
+            "1. YOUR OWN INTRODUCTION, first. Say who you are and what you are "
+            "for, from your charter; say what you can propose and what stays "
+            "behind their approval, from your GENERATED capabilities section; "
+            "then ask your own 2 or 3 calibration questions — how often they want "
+            "to hear from you, when they do not, and what is worth interrupting "
+            "them for. Those answers set your contact doctrine, so ask them "
+            "properly. When their answers come back, acknowledge them in ONE "
+            "sentence and continue straight to step 2 IN THE SAME TURN, closing "
+            "that turn with `ask_operator(needs_discussion=True)` per the rule "
+            "above, never plain text — the tour does not end at calibration. "
+            "This is exactly where it died on day one: the host closed in plain "
+            "text after the calibration exchange and the tour ended with nine "
+            "teammates unmet."
+        ),
         "",
-        ("1b. THEIR WORLD, before any teammate. This is where the team learns "
-        "who it works for — it replaced the setup-time interview (2026-09-18), "
-        "so nothing here has been asked before. Three sections, in order, one "
-        "at a time, with follow-ups until each has real substance: (a) WORK "
-        "ENVIRONMENT — what they do, where they work, the systems that matter "
-        "(their Jira, their repos, their wiki), what a normal week looks "
-        "like; (b) THE TEAM — for each person, canonical full name, role, who "
-        "they report to, what they are expert in, anything known about "
-        "current load (a name alone is not a team member); (c) WORKING "
-        "PREFERENCES — what they want to review versus delegate as trust "
-        "builds, communication style, quiet hours, pet peeves. If they "
-        "decline a section, say so in the closing episode and move on."),
+        (
+            "1b. THEIR WORLD, before any teammate. This is where the team learns "
+            "who it works for — it replaced the setup-time interview (2026-09-18), "
+            "so nothing here has been asked before. Three sections, in order, one "
+            "at a time, with follow-ups until each has real substance: (a) WORK "
+            "ENVIRONMENT — what they do, where they work, the systems that matter "
+            "(their Jira, their repos, their wiki), what a normal week looks "
+            "like; (b) THE TEAM — for each person, canonical full name, role, who "
+            "they report to, what they are expert in, anything known about "
+            "current load (a name alone is not a team member); (c) WORKING "
+            "PREFERENCES — what they want to review versus delegate as trust "
+            "builds, communication style, quiet hours, pet peeves. If they "
+            "decline a section, say so in the closing episode and move on."
+        ),
         "",
         "   " + _atlassian_sentence(),
         "",
-        "   " + (_WORLD_EPISODES if await can_propose_episode("ea")
-                 else _WORLD_NO_EPISODES),
+        "   " + (_WORLD_EPISODES if await can_propose_episode("ea") else _WORLD_NO_EPISODES),
         "",
-        ("2. THE ARC. Then, in this order, broker an introduction to each of "
-        "these teammates. The `instructions` text under each is the intro "
-        "brief — use it VERBATIM as the task's instructions; it has already "
-        "been checked against that agent's real capabilities."),
+        (
+            "2. THE ARC. Then, in this order, broker an introduction to each of "
+            "these teammates. The `instructions` text under each is the intro "
+            "brief — use it VERBATIM as the task's instructions; it has already "
+            "been checked against that agent's real capabilities."
+        ),
         "",
     ]
     for i, e in enumerate(entries, start=1):
@@ -310,19 +330,22 @@ async def brief() -> str:
         lines.append("")
 
     lines += [
-        ("3. THE REST OF THE TEAM. Then name everyone else on your GENERATED "
-        "YOUR TEAM section — one line each, what they are for — and OFFER "
-        "introductions: now, on request, or at first contact ('you will meet "
-        "mcp-manager the first time you need an MCP server'). Do not run "
-        "them unasked; the arc above is deliberately short so each "
-        "introduction gets real attention."),
+        (
+            "3. THE REST OF THE TEAM. Then name everyone else on your GENERATED "
+            "YOUR TEAM section — one line each, what they are for — and OFFER "
+            "introductions: now, on request, or at first contact ('you will meet "
+            "mcp-manager the first time you need an MCP server'). Do not run "
+            "them unasked; the arc above is deliberately short so each "
+            "introduction gets real attention."
+        ),
         "",
-        "4. " + (_SUMMARY_EPISODE if await can_propose_episode("ea")
-                 else _SUMMARY_NO_EPISODE),
+        "4. " + (_SUMMARY_EPISODE if await can_propose_episode("ea") else _SUMMARY_NO_EPISODE),
         "",
-        ("The tour is RESUMABLE by construction: which intro tasks exist is "
-        "the whole of its state. If this lane picks up part-way, read what "
-        "has already happened and carry on from there rather than starting "
-        "over."),
+        (
+            "The tour is RESUMABLE by construction: which intro tasks exist is "
+            "the whole of its state. If this lane picks up part-way, read what "
+            "has already happened and carry on from there rather than starting "
+            "over."
+        ),
     ]
     return "\n".join(lines)

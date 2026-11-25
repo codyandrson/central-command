@@ -84,11 +84,15 @@ def test_retry_text_reads_all_three_shapes():
     assert all(durable.retry_text(p) for p in old)
     new = [p for m in _rewritten()["messages"] for p in m["parts"]]
     assert sorted(p["part_kind"] for p in new if durable.retry_text(p) is not None) == [
-        "retry-feedback", "tool-return"]
+        "retry-feedback",
+        "tool-return",
+    ]
     objs = [p for m in durable.load_messages(_old()) for p in m.parts]
     assert sum(durable.retry_text(p) is not None for p in objs) == 2
     # An ordinary tool return is not a retry, in either form.
-    plain = next(p for p in objs if isinstance(p, ToolReturnPart) and p.tool_name == "skill_jira_guide")
+    plain = next(
+        p for p in objs if isinstance(p, ToolReturnPart) and p.tool_name == "skill_jira_guide"
+    )
     assert durable.retry_text(plain) is None
     assert durable.retry_text({"part_kind": "tool-return", "content": "x"}) is None
 
@@ -97,16 +101,21 @@ def test_every_reader_renders_the_retries_old_and_new():
     for rs in (_old(), _rewritten()):
         simple = durable.simplify_messages(rs)
         retries = [t for t in simple if t["kind"] == "retry-prompt"]
-        assert any(t["content"].startswith(tools._ROUTE_CHECK_MARK)
-                   and t["tool"] == "propose_action" for t in retries)
+        assert any(
+            t["content"].startswith(tools._ROUTE_CHECK_MARK) and t["tool"] == "propose_action"
+            for t in retries
+        )
         assert any("Finish by proposing" in t["content"] for t in retries)
-        assert not any(t["kind"] == "tool-return" and tools._ROUTE_CHECK_MARK in t["content"]
-                       for t in simple), "a retry is never read as a tool's result"
+        assert not any(
+            t["kind"] == "tool-return" and tools._ROUTE_CHECK_MARK in t["content"] for t in simple
+        ), "a retry is never read as a tool's result"
 
         chat = nerve_gateway._transcript_to_chat_messages(rs)
         results = [c for c in chat if c["role"] == "toolResult"]
-        assert any(r["content"].startswith(tools._ROUTE_CHECK_MARK)
-                   and r["toolName"] == "propose_action" for r in results)
+        assert any(
+            r["content"].startswith(tools._ROUTE_CHECK_MARK) and r["toolName"] == "propose_action"
+            for r in results
+        )
         assert any("Finish by proposing" in r["content"] for r in results)
         assert chat[0] == {"role": "system", "content": CHARTER, "timestamp": chat[0]["timestamp"]}
 
@@ -124,10 +133,13 @@ def test_the_route_check_is_not_asked_again_after_an_old_history_resumes():
     msgs = durable.load_messages(_old())
     proposal = durable.proposal_from_call(durable.unanswered_calls(msgs)[0])
     from types import SimpleNamespace
+
     ctx = SimpleNamespace(messages=msgs, deps=SimpleNamespace(session_id="s", agent_id="a"))
     assert tools._route_check(ctx, proposal) is None
     ctx.messages = msgs[:1]
-    assert tools._route_check(ctx, proposal) is not None, "the same draft is asked about in a fresh record"
+    assert tools._route_check(ctx, proposal) is not None, (
+        "the same draft is asked about in a fresh record"
+    )
 
 
 async def test_an_old_paused_session_resumes_under_its_original_charter(monkeypatch):
@@ -144,32 +156,58 @@ async def test_an_old_paused_session_resumes_under_its_original_charter(monkeypa
         seen.append((messages, [t.name for t in info.function_tools]))
         return ModelResponse(parts=[TextPart("Recorded; nothing else to do.")])
 
-    cap = Capability(id="jira-guide", description="How this Jira is used", instructions=GUIDANCE,
-                     defer_loading=True)
+    cap = Capability(
+        id="jira-guide",
+        description="How this Jira is used",
+        instructions=GUIDANCE,
+        defer_loading=True,
+    )
 
     def skill_jira_guide(query: str) -> str:
         """Search the Jira guide."""
         return "guide"
+
     cap.tool_plain(name="skill_jira_guide")(skill_jira_guide)
-    agent = Agent(context.WindowedModel(FunctionModel(model, model_name="cc-default")),
-                  system_prompt="NEW CHARTER: must never reach a resumed session.",
-                  output_type=[str, DeferredToolRequests],
-                  capabilities=[cap, *context.capabilities()],
-                  tools=[Tool(tools.propose_action, max_retries=10)])
-    result = await durable.resume(agent, msgs, rs["tool_call_id"], "approved: executed",
-                                  agent_id="inbox-triage", session_id=None)
+    agent = Agent(
+        context.WindowedModel(FunctionModel(model, model_name="cc-default")),
+        system_prompt="NEW CHARTER: must never reach a resumed session.",
+        output_type=[str, DeferredToolRequests],
+        capabilities=[cap, *context.capabilities()],
+        tools=[Tool(tools.propose_action, max_retries=10)],
+    )
+    result = await durable.resume(
+        agent,
+        msgs,
+        rs["tool_call_id"],
+        "approved: executed",
+        agent_id="inbox-triage",
+        session_id=None,
+    )
     assert result.output == "Recorded; nothing else to do."
     wire, offered = seen[-1]
-    system = [p.content for m in wire if isinstance(m, ModelRequest) for p in m.parts
-              if isinstance(p, SystemPromptPart)]
+    system = [
+        p.content
+        for m in wire
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, SystemPromptPart)
+    ]
     assert CHARTER in system
     assert not any("NEW CHARTER" in s for s in system)
-    assert not any("NEW CHARTER" in (m.instructions or "") for m in wire if isinstance(m, ModelRequest))
+    assert not any(
+        "NEW CHARTER" in (m.instructions or "") for m in wire if isinstance(m, ModelRequest)
+    )
     assert "skill_jira_guide" in offered, "the skill loaded before the upgrade is still loaded"
     assert any(GUIDANCE in str(getattr(p, "content", "")) for m in wire for p in m.parts), (
-        "the loaded skill's guidance (carried in the 2.18 load return) still reaches the model")
-    returns = [p for m in wire if isinstance(m, ModelRequest) for p in m.parts
-               if isinstance(p, ToolReturnPart) and p.tool_call_id == rs["tool_call_id"]]
+        "the loaded skill's guidance (carried in the 2.18 load return) still reaches the model"
+    )
+    returns = [
+        p
+        for m in wire
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, ToolReturnPart) and p.tool_call_id == rs["tool_call_id"]
+    ]
     assert returns and returns[0].content == "approved: executed"
     # The resumed record is the old one plus the new turn, written in 2.66's shapes.
     record = result.all_messages()
@@ -192,31 +230,49 @@ async def test_a_session_paused_at_2_66_resumes_under_the_charter_it_was_paused_
     def model(messages, info: AgentInfo):
         seen.append(messages)
         if len(seen) == 1:
-            return ModelResponse(parts=[ToolCallPart(
-                "propose_action", {"proposal": _proposal(_JIRA).model_dump(mode="json")},
-                tool_call_id="call-p")])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        "propose_action",
+                        {"proposal": _proposal(_JIRA).model_dump(mode="json")},
+                        tool_call_id="call-p",
+                    )
+                ]
+            )
         return ModelResponse(parts=[TextPart("done")])
 
     def build(charter):
-        return Agent(FunctionModel(model), system_prompt=charter,
-                     output_type=[str, DeferredToolRequests],
-                     tools=[Tool(tools.propose_action, max_retries=10)])
+        return Agent(
+            FunctionModel(model),
+            system_prompt=charter,
+            output_type=[str, DeferredToolRequests],
+            tools=[Tool(tools.propose_action, max_retries=10)],
+        )
 
     from types import SimpleNamespace
+
     first = await build("CHARTER v1").run(
-        "mail", deps=SimpleNamespace(session_id="sess_charter", agent_id="inbox-triage"))
+        "mail", deps=SimpleNamespace(session_id="sess_charter", agent_id="inbox-triage")
+    )
     call = durable.extract_deferred(first)
     assert call is not None
     state = durable.dump_run_state(first, call.tool_call_id)
     msgs = durable.load_messages(json.loads(json.dumps(state)))
-    result = await durable.resume(build("CHARTER v2"), msgs, call.tool_call_id, "approved",
-                                  agent_id="inbox-triage")
+    result = await durable.resume(
+        build("CHARTER v2"), msgs, call.tool_call_id, "approved", agent_id="inbox-triage"
+    )
     assert result.output == "done"
-    sent = [p.content for m in seen[-1] if isinstance(m, ModelRequest) for p in m.parts
-            if isinstance(p, SystemPromptPart)]
+    sent = [
+        p.content
+        for m in seen[-1]
+        if isinstance(m, ModelRequest)
+        for p in m.parts
+        if isinstance(p, SystemPromptPart)
+    ]
     assert sent == ["CHARTER v1"]
-    assert not any("CHARTER v2" in (m.instructions or "") for m in seen[-1]
-                   if isinstance(m, ModelRequest))
+    assert not any(
+        "CHARTER v2" in (m.instructions or "") for m in seen[-1] if isinstance(m, ModelRequest)
+    )
 
 
 # --- the framework's bookkeeping parts are no one's turn (2.66 records) --------
@@ -236,8 +292,12 @@ async def _lane_record_ending_in_an_operator_reply() -> dict:
 
     def down(messages, info):
         raise Down("model down")
+
     agent = Agent(FunctionModel(down), capabilities=[cap])
-    seed = [Req(parts=[SystemPromptPart("charter")]), ModelResponse(parts=[TextPart("Which project?")])]
+    seed = [
+        Req(parts=[SystemPromptPart("charter")]),
+        ModelResponse(parts=[TextPart("Which project?")]),
+    ]
     held = {}
     try:
         async with agent.iter("TASKS, please", message_history=seed) as run:
@@ -246,7 +306,9 @@ async def _lane_record_ending_in_an_operator_reply() -> dict:
                 pass
     except Down:
         pass
-    record = ModelMessagesTypeAdapter.dump_python(held["run"].ctx.state.message_history, mode="json")
+    record = ModelMessagesTypeAdapter.dump_python(
+        held["run"].ctx.state.message_history, mode="json"
+    )
     assert [p["part_kind"] for p in record[-1]["parts"]] == ["user-prompt", "instruction-baseline"]
     return {"messages": record}
 
@@ -256,7 +318,11 @@ async def test_the_operator_spoke_last_when_only_bookkeeping_follows_their_reply
 
     rs = await _lane_record_ending_in_an_operator_reply()
     assert _last_turn_by(rs) == "operator"
-    assert [t["kind"] for t in durable.simplify_messages(rs)] == ["system-prompt", "text", "user-prompt"]
+    assert [t["kind"] for t in durable.simplify_messages(rs)] == [
+        "system-prompt",
+        "text",
+        "user-prompt",
+    ]
 
 
 async def _skill_session() -> dict:
@@ -264,7 +330,8 @@ async def _skill_session() -> dict:
 
     fn, _seen = cwa._script()
     result = await cwa._agent(FunctionModel(fn, model_name="cc-default")).run(
-        "do the thing", deps=cwa._deps())
+        "do the thing", deps=cwa._deps()
+    )
     return {"messages": ModelMessagesTypeAdapter.dump_python(result.all_messages(), mode="json")}
 
 
@@ -282,8 +349,12 @@ async def test_no_reader_turns_bookkeeping_into_a_row_and_the_guidance_shows_wit
     load = [t for t in turns if t["tool"] == "load_capability" and t["kind"] == "tool-return"]
     assert len(load) == 1 and GUIDANCE in load[0]["content"]
     chat = nerve_gateway._transcript_to_chat_messages(rs)
-    assert any(c["role"] == "toolResult" and c["toolName"] == "load_capability"
-               and GUIDANCE in c["content"] for c in chat)
+    assert any(
+        c["role"] == "toolResult"
+        and c["toolName"] == "load_capability"
+        and GUIDANCE in c["content"]
+        for c in chat
+    )
     for corpus in (reflection._transcript_text(rs), *reflection._quote_corpus(rs)):
         assert not any(j in corpus for j in junk)
     rows = session_recall.extract(rs).parts
@@ -305,16 +376,27 @@ def test_each_load_row_shows_only_its_own_skill_guidance():
 
     def model(messages, info):
         if len(messages) == 1:
-            return ModelResponse(parts=[ToolCallPart("load_capability", {"id": "sk-A"}, tool_call_id="la"),
-                                        ToolCallPart("load_capability", {"id": "sk-B"}, tool_call_id="lb")])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart("load_capability", {"id": "sk-A"}, tool_call_id="la"),
+                    ToolCallPart("load_capability", {"id": "sk-B"}, tool_call_id="lb"),
+                ]
+            )
         return ModelResponse(parts=[TextPart("done")])
+
     result = asyncio.run(Agent(FunctionModel(model), capabilities=[a, b]).run("hi"))
     rs = {"messages": ModelMessagesTypeAdapter.dump_python(result.all_messages(), mode="json")}
-    rows = {t["content"].split("'")[1]: t["content"] for t in durable.simplify_messages(rs)
-            if t["tool"] == "load_capability" and t["kind"] == "tool-return"}
+    rows = {
+        t["content"].split("'")[1]: t["content"]
+        for t in durable.simplify_messages(rs)
+        if t["tool"] == "load_capability" and t["kind"] == "tool-return"
+    }
     assert "GUIDE-A" in rows["sk-A"] and "GUIDE-B" not in rows["sk-A"]
     assert "GUIDE-B" in rows["sk-B"] and "GUIDE-A" not in rows["sk-B"]
-    chat = {c["toolCallId"]: c["content"] for c in nerve_gateway._transcript_to_chat_messages(rs)
-            if c["role"] == "toolResult" and c["toolName"] == "load_capability"}
+    chat = {
+        c["toolCallId"]: c["content"]
+        for c in nerve_gateway._transcript_to_chat_messages(rs)
+        if c["role"] == "toolResult" and c["toolName"] == "load_capability"
+    }
     assert "GUIDE-A" in chat["la"] and "GUIDE-B" not in chat["la"]
     assert "GUIDE-B" in chat["lb"] and "GUIDE-A" not in chat["lb"]

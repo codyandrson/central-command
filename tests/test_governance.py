@@ -61,17 +61,19 @@ _BANNED_RUNTIME_IMPORTS = frozenset({"gateway", "skills", "executor"})
 # holds no WRITE path: not the ingest worker, not the builder of the Graphiti
 # object (which carries add_episode/remove_episode), not the curation writer.
 # `integrations.graphiti` — the reads — stays importable.
-_BANNED_RUNTIME_MODULES = frozenset({
-    "central_command.integrations.graphiti_ingest",
-    "central_command.integrations.graphiti_client",
-    "central_command.integrations.neo4j_writer",
-    # The native Google client (DL-234) holds the OAuth credential and the
-    # writes (report_spam, the calendar writes). runtime/ reaches mail and
-    # calendar reads through the façades, as it reaches Exchange; it never
-    # imports the provider, nor the consent command that writes the token.
-    "central_command.integrations.google",
-    "central_command.google_consent",
-})
+_BANNED_RUNTIME_MODULES = frozenset(
+    {
+        "central_command.integrations.graphiti_ingest",
+        "central_command.integrations.graphiti_client",
+        "central_command.integrations.neo4j_writer",
+        # The native Google client (DL-234) holds the OAuth credential and the
+        # writes (report_spam, the calendar writes). runtime/ reaches mail and
+        # calendar reads through the façades, as it reaches Exchange; it never
+        # imports the provider, nor the consent command that writes the token.
+        "central_command.integrations.google",
+        "central_command.google_consent",
+    }
+)
 
 
 def _banned_import(node: ast.AST, package_parts: tuple[str, ...]) -> str | None:
@@ -101,7 +103,11 @@ def _banned_import(node: ast.AST, package_parts: tuple[str, ...]) -> str | None:
         # `central_command.runtime.skills` is a DIFFERENT module from
         # `central_command.skills` and must not be flagged: only match a banned
         # name directly under `central_command`.
-        if len(parts) >= 2 and parts[0] == "central_command" and parts[1] in _BANNED_RUNTIME_IMPORTS:
+        if (
+            len(parts) >= 2
+            and parts[0] == "central_command"
+            and parts[1] in _BANNED_RUNTIME_IMPORTS
+        ):
             return dotted
         if any(dotted == m or dotted.startswith(m + ".") for m in _BANNED_RUNTIME_MODULES):
             return dotted
@@ -161,12 +167,16 @@ def test_the_graph_read_module_reaches_its_client_only_lazily():
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             hit = _banned_import(node, ("central_command", "integrations"))
             assert hit is None, f"graphiti.py imports {hit!r} at module level"
-    writes = {"add_episode", "add_episode_bulk", "add_triplet", "remove_episode",
-              "build_indices_and_constraints", "ensure_indices", "enqueue"}
-    called = {
-        n.attr for n in ast.walk(tree)
-        if isinstance(n, ast.Attribute) and n.attr in writes
+    writes = {
+        "add_episode",
+        "add_episode_bulk",
+        "add_triplet",
+        "remove_episode",
+        "build_indices_and_constraints",
+        "ensure_indices",
+        "enqueue",
     }
+    called = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr in writes}
     assert called == set(), f"graphiti.py touches graph write methods: {sorted(called)}"
 
 
@@ -178,10 +188,17 @@ def test_importing_the_app_does_not_import_graphiti_core():
     import sys
 
     out = subprocess.run(
-        [sys.executable, "-c",
-         ("import sys, central_command.api.app; "
-         "print(any(m == 'graphiti_core' or m.startswith('graphiti_core.') for m in sys.modules))")],
-        capture_output=True, text=True, timeout=110,
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys, central_command.api.app; "
+                "print(any(m == 'graphiti_core' or m.startswith('graphiti_core.') for m in sys.modules))"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=110,
         cwd=Path(executor.__file__).parents[2],
     )
     assert out.returncode == 0, out.stderr[-2000:]
@@ -203,13 +220,14 @@ async def test_browser_pages_newest_first_with_a_before_cursor(since):
         e = await events.emit("govtest.page", ref_id=f"g{n}", payload={"n": n})
         ids.append(e["id"])
 
-    page1 = await repo.list_events(
-        since_id=since, kind="govtest", limit=2, newest_first=True
-    )
+    page1 = await repo.list_events(since_id=since, kind="govtest", limit=2, newest_first=True)
     assert [r["id"] for r in page1] == [ids[4], ids[3]]
 
     page2 = await repo.list_events(
-        since_id=since, kind="govtest", limit=2, newest_first=True,
+        since_id=since,
+        kind="govtest",
+        limit=2,
+        newest_first=True,
         before_id=page1[-1]["id"],
     )
     assert [r["id"] for r in page2] == [ids[2], ids[1]]
@@ -254,11 +272,14 @@ async def test_capabilities_route_serves_the_registry():
     # The override facts the authoring dialog reads ride on every row
     # (epic-gate-overrides story 8; the full shape: tests/test_overrides_wire.py).
     for c in out["capabilities"]:
-        assert {"default_gate", "requires_acknowledgement", "scope_forms",
-                "overridable", "overridable_reason"} <= set(c), c["name"]
-    assert out["policies"] and all(
-        p["status"] in ("enforced", "planned") for p in out["policies"]
-    )
+        assert {
+            "default_gate",
+            "requires_acknowledgement",
+            "scope_forms",
+            "overridable",
+            "overridable_reason",
+        } <= set(c), c["name"]
+    assert out["policies"] and all(p["status"] in ("enforced", "planned") for p in out["policies"])
 
 
 @needs_pg
@@ -287,8 +308,7 @@ async def test_every_roster_agent_is_uniformly_managed():
         else:
             current = await repo.current_charter(a.id)
             assert current and current["content"].strip(), (
-                f"hired agent {a.id} has no governed charter — the hire "
-                "invariant is broken"
+                f"hired agent {a.id} has no governed charter — the hire invariant is broken"
             )
             grants = await repo.list_grants(a.id)
             assert grants, (
@@ -332,7 +352,9 @@ def test_the_seed_matches_the_schema_seeds():
 
     from central_command.runtime.roster import SEED
 
-    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
     for a in SEED:
         assert f"('{a.id}'," in schema, f"{a.id} missing from schema.sql seeds"
         assert f"where id = '{a.id}' and role = ''" in schema, (
@@ -363,14 +385,14 @@ def test_no_agent_profile_hand_writes_a_capability_list():
     from central_command import runtime
 
     profiles = sorted(
-        m.name for m in pkgutil.iter_modules(runtime.__path__)
-        if m.name.endswith("_profile")
+        m.name for m in pkgutil.iter_modules(runtime.__path__) if m.name.endswith("_profile")
     )
     assert len(profiles) >= 8, f"expected the founding profiles, found {profiles}"
 
     for name in profiles:
-        charter = getattr(importlib.import_module(f"central_command.runtime.{name}"),
-                          "CHARTER", None)
+        charter = getattr(
+            importlib.import_module(f"central_command.runtime.{name}"), "CHARTER", None
+        )
         assert charter, f"{name} has no CHARTER"
         for banned in ("GRANTED CAPABILITIES", "capability = '", "arguments  ="):
             assert banned not in charter, (

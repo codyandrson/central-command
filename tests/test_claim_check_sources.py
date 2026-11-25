@@ -49,8 +49,8 @@ SOURCE = (
 
 
 def test_one_contiguous_passage_is_supported_whatever_its_length():
-    assert quote_supported("Friday", SOURCE)            # one word: as today
-    assert quote_supported("pay the balance", SOURCE)   # three words: as today
+    assert quote_supported("Friday", SOURCE)  # one word: as today
+    assert quote_supported("pay the balance", SOURCE)  # three words: as today
     assert quote_supported("Please pay the balance by Friday the 14th.", SOURCE)
 
 
@@ -82,8 +82,10 @@ def test_a_three_word_segment_fails():
 
 
 def test_invented_words_between_real_segments_fail():
-    claim = ("Please pay the balance by Friday and do not worry about it "
-             "call the billing desk on weekdays")
+    claim = (
+        "Please pay the balance by Friday and do not worry about it "
+        "call the billing desk on weekdays"
+    )
     assert not quote_supported(claim, SOURCE)
 
 
@@ -95,14 +97,17 @@ def test_framing_words_and_a_paraphrase_fail():
 def test_a_phrase_twice_in_the_source_is_two_occurrences_never_one_used_twice():
     # Both occurrences, in source order.
     assert quote_supported(
-        "The invoice for October is attached ... The invoice for October is final", SOURCE)
+        "The invoice for October is attached ... The invoice for October is final", SOURCE
+    )
     # Reversed: the "final" occurrence is the later one.
     assert not quote_supported(
-        "The invoice for October is final ... The invoice for October is attached", SOURCE)
+        "The invoice for October is final ... The invoice for October is attached", SOURCE
+    )
     # One occurrence cannot serve as two segments.
     once = "Hello team. Please pay the balance by Friday."
     assert not quote_supported(
-        "Please pay the balance by Friday ... Please pay the balance by Friday", once)
+        "Please pay the balance by Friday ... Please pay the balance by Friday", once
+    )
 
 
 def test_segmentation_is_exact_not_greedy():
@@ -121,8 +126,12 @@ def test_the_work_is_bounded_and_fails_closed():
 
 
 def test_the_email_checker_uses_the_segment_rule():
-    ev = Evidence(kind="email", source_ref="msg", locator="email",
-                  claim="The invoice for October is attached … call the billing desk on weekdays")
+    ev = Evidence(
+        kind="email",
+        source_ref="msg",
+        locator="email",
+        claim="The invoice for October is attached … call the billing desk on weekdays",
+    )
     assert verified_email_evidence([ev], [SOURCE])[0]["claim_matches_source"] is True
 
 
@@ -130,10 +139,17 @@ def test_the_email_checker_uses_the_segment_rule():
 
 
 def _returned(tool: str, content: str, call_id: str = "c1") -> dict:
-    return {"kind": "request", "parts": [
-        {"part_kind": "tool-return", "tool_name": tool, "content": content,
-         "tool_call_id": call_id},
-    ]}
+    return {
+        "kind": "request",
+        "parts": [
+            {
+                "part_kind": "tool-return",
+                "tool_name": tool,
+                "content": content,
+                "tool_call_id": call_id,
+            },
+        ],
+    }
 
 
 def _recorded(tool: str, tool_return) -> list:
@@ -155,26 +171,33 @@ def _recorded(tool: str, tool_return) -> list:
 
 
 def test_a_mail_read_return_counts_its_metadata_and_never_the_head():
-    head = ("- wi_1 [PROCESSED] 2025-01-02 from billing@example.com: Invoice\n"
-            "dismissal rationale: the agent wrote this reason itself\n"
-            "audit: concur — the auditor wrote this")
+    head = (
+        "- wi_1 [PROCESSED] 2025-01-02 from billing@example.com: Invoice\n"
+        "dismissal rationale: the agent wrote this reason itself\n"
+        "audit: concur — the auditor wrote this"
+    )
     record = _recorded("mail_read", tools._mail_return(head, SOURCE))
     texts = read_mail_sources(record)
     assert texts == [SOURCE]
     assert LEGACY_MAIL_TEXT_MARKER not in str(record)  # nothing writes the old form
-    ev = [Evidence(kind="email", source_ref="wi_1", locator="mail_read", claim=c)
-          for c in ("call the billing desk on weekdays", "the agent wrote this reason itself")]
+    ev = [
+        Evidence(kind="email", source_ref="wi_1", locator="mail_read", claim=c)
+        for c in ("call the billing desk on weekdays", "the agent wrote this reason itself")
+    ]
     out = verified_email_evidence(ev, texts)
     assert out[0]["claim_matches_source"] is True
     assert out[1]["claim_matches_source"] is False
 
 
 def test_metadata_on_another_tool_or_an_empty_list_is_no_source():
-    assert read_mail_sources(_recorded("search_knowledge_graph", tools._mail_return("", SOURCE))) == []
+    assert (
+        read_mail_sources(_recorded("search_knowledge_graph", tools._mail_return("", SOURCE))) == []
+    )
     # A mail tool's plain answer (an error line) records an empty list, and the
     # legacy reader is NOT consulted for it, even if the text had the marker.
-    plain = tools.ToolReturn(return_value=f"{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}",
-                             metadata={MAIL_TEXT_METADATA_KEY: []})
+    plain = tools.ToolReturn(
+        return_value=f"{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}", metadata={MAIL_TEXT_METADATA_KEY: []}
+    )
     assert read_mail_sources(_recorded("mail_read", plain)) == []
 
 
@@ -197,7 +220,9 @@ def test_a_parked_read_resumed_with_its_result_keeps_the_metadata():
         raise CallDeferred(metadata={"kind": "read"})
 
     adapter = ModelMessagesTypeAdapter
-    paused = adapter.validate_python(adapter.dump_python(agent.run_sync("go").all_messages(), mode="json"))
+    paused = adapter.validate_python(
+        adapter.dump_python(agent.run_sync("go").all_messages(), mode="json")
+    )
     results = DeferredToolResults()
     results.calls["c1"] = tools._mail_return("head", SOURCE)
     resumed = agent.run_sync(message_history=paused, deferred_tool_results=results)
@@ -230,8 +255,13 @@ def test_a_search_snippet_containing_the_line_separator_counts_whole(monkeypatch
         return []
 
     async def get_message(uuid):
-        return {"date": "2025-01-03", "from": "billing@example.com", "to": "doe@example.com",
-                "subject": "Re: Invoice", "snippet": snippet}
+        return {
+            "date": "2025-01-03",
+            "from": "billing@example.com",
+            "to": "doe@example.com",
+            "subject": "Re: Invoice",
+            "snippet": snippet,
+        }
 
     monkeypatch.setattr(email_facade, "list_refs", list_refs)
     monkeypatch.setattr(email_facade, "get_message", get_message)
@@ -240,8 +270,12 @@ def test_a_search_snippet_containing_the_line_separator_counts_whole(monkeypatch
     assert f"Re: Invoice — {snippet}" in ret.return_value
     texts = read_mail_sources(_recorded("mail_search", ret))
     assert texts == [snippet]
-    ev = Evidence(kind="email", source_ref="u7", locator="mail_search",
-                  claim="The balance — all of it — was received in full")
+    ev = Evidence(
+        kind="email",
+        source_ref="u7",
+        locator="mail_search",
+        claim="The balance — all of it — was received in full",
+    )
     assert verified_email_evidence([ev], texts)[0]["claim_matches_source"] is True
 
 
@@ -258,8 +292,10 @@ def test_a_legacy_mail_read_return_counts_from_the_marker_on():
     )
     texts = read_mail_sources([_returned("mail_read", content)])
     assert texts == [SOURCE]
-    ev = [Evidence(kind="email", source_ref="wi_1", locator="mail_read", claim=c)
-          for c in ("call the billing desk on weekdays", "the agent wrote this reason itself")]
+    ev = [
+        Evidence(kind="email", source_ref="wi_1", locator="mail_read", claim=c)
+        for c in ("call the billing desk on weekdays", "the agent wrote this reason itself")
+    ]
     out = verified_email_evidence(ev, texts)
     assert out[0]["claim_matches_source"] is True
     # Agent-written text printed above the mail is not a source.
@@ -270,11 +306,18 @@ def test_only_a_recorded_tool_return_counts_never_the_agents_own_words():
     """The agent's tool CALL, its text, and its `source_ref` are its own
     words; only the framework's record of what the tool returned is proof."""
     messages = [
-        {"kind": "response", "parts": [
-            {"part_kind": "tool-call", "tool_name": "mail_read",
-             "args": {"ref": f"{LEGACY_MAIL_TEXT_MARKER} {SOURCE}"}, "tool_call_id": "c1"},
-            {"part_kind": "text", "content": f"{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}"},
-        ]},
+        {
+            "kind": "response",
+            "parts": [
+                {
+                    "part_kind": "tool-call",
+                    "tool_name": "mail_read",
+                    "args": {"ref": f"{LEGACY_MAIL_TEXT_MARKER} {SOURCE}"},
+                    "tool_call_id": "c1",
+                },
+                {"part_kind": "text", "content": f"{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}"},
+            ],
+        },
         # A different tool's return, even with the marker in it, is not a mail read.
         _returned("search_knowledge_graph", f"{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}"),
         # A mail_read return with no marker (an error line) adds nothing.
@@ -298,16 +341,27 @@ def test_a_mail_search_snippet_outside_the_queue_counts_and_queue_lines_do_not()
 def test_pydantic_ai_message_objects_are_read_the_same_way():
     from pydantic_ai.messages import ModelRequest
 
-    msgs = [ModelRequest(parts=[ToolReturnPart(
-        tool_name="mail_read", content=f"head\n{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}", tool_call_id="c1")])]
+    msgs = [
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="mail_read",
+                    content=f"head\n{LEGACY_MAIL_TEXT_MARKER}\n{SOURCE}",
+                    tool_call_id="c1",
+                )
+            ]
+        )
+    ]
     assert read_mail_sources(msgs) == [SOURCE]
 
 
 def test_the_mail_read_attachment_page_carries_the_page_as_metadata():
     from central_command.runtime.tools import _mail_attachment_page
 
-    row = {"id": "wi_1", "attachments": [
-        {"name": "terms.txt", "status": "read", "reader": "text", "text": SOURCE}]}
+    row = {
+        "id": "wi_1",
+        "attachments": [{"name": "terms.txt", "status": "read", "reader": "text", "text": SOURCE}],
+    }
     head, page = _mail_attachment_page(row, "terms.txt", 0)
     assert page == SOURCE and SOURCE not in head
     assert read_mail_sources(_recorded("mail_read", tools._mail_return(head, page))) == [SOURCE]
@@ -317,14 +371,22 @@ def test_the_mail_read_attachment_page_carries_the_page_as_metadata():
 
 
 WORDS = [
-    {"source": "answer", "ref": "event:101", "text": "Use the second ticket for this one, the first is closed."},
+    {
+        "source": "answer",
+        "ref": "event:101",
+        "text": "Use the second ticket for this one, the first is closed.",
+    },
     {"source": "rejection", "ref": "event:102", "text": "Wrong date, make it the 20th."},
 ]
 
 
 def test_an_operator_quote_from_an_earlier_answer_verifies_and_points_at_it():
-    ev = Evidence(kind="operator", source_ref="operator:rejection-feedback", locator="x",
-                  claim="Use the second ticket for this one")
+    ev = Evidence(
+        kind="operator",
+        source_ref="operator:rejection-feedback",
+        locator="x",
+        claim="Use the second ticket for this one",
+    )
     out = verified_operator_evidence([ev], WORDS)[0]
     assert out["claim_matches_source"] is True
     assert out["source_ref"] == "event:101"
@@ -332,8 +394,12 @@ def test_an_operator_quote_from_an_earlier_answer_verifies_and_points_at_it():
 
 
 def test_an_operator_quote_found_nowhere_is_false_and_keeps_the_agents_pointer():
-    ev = Evidence(kind="operator", source_ref="operator:answer", locator="x",
-                  claim="The operator wants the second ticket used")
+    ev = Evidence(
+        kind="operator",
+        source_ref="operator:answer",
+        locator="x",
+        claim="The operator wants the second ticket used",
+    )
     out = verified_operator_evidence([ev], WORDS)[0]
     assert out["claim_matches_source"] is False
     assert out["source_ref"] == "operator:answer"
@@ -379,8 +445,12 @@ def test_tool_built_mail_descriptions_are_not_recorded_as_quotes():
         src = inspect.getsource(fn)
         assert 'kind="mailbox"' in src and 'kind="email"' not in src
     assert 'kind="email"' not in inspect.getsource(tools)
-    mailbox = {"kind": "mailbox", "source_ref": "u", "locator": "l",
-               "claim": "from billing@example.com: Invoice"}
+    mailbox = {
+        "kind": "mailbox",
+        "source_ref": "u",
+        "locator": "l",
+        "claim": "from billing@example.com: Invoice",
+    }
     assert verified_email_evidence([mailbox], [SOURCE])[0].get("claim_matches_source") is None
 
 
@@ -398,12 +468,17 @@ async def demo(monkeypatch):
 
 
 def _raw(body: str, n: int) -> str:
-    return "\n".join([
-        f"Message-ID: <cc-claimsrc-{n}@example.com>",
-        f"From: billing@example-claimsrc{n}.com",
-        f"Subject: Claim source check {n}",
-        "Date: Wed, 1 Jul 2026 09:00:00 +0000",
-    ]) + f"\n\n{body}\n"
+    return (
+        "\n".join(
+            [
+                f"Message-ID: <cc-claimsrc-{n}@example.com>",
+                f"From: billing@example-claimsrc{n}.com",
+                f"Subject: Claim source check {n}",
+                "Date: Wed, 1 Jul 2026 09:00:00 +0000",
+            ]
+        )
+        + f"\n\n{body}\n"
+    )
 
 
 def _reads_then_quotes(ref: str, claim: str) -> FunctionModel:
@@ -411,13 +486,18 @@ def _reads_then_quotes(ref: str, claim: str) -> FunctionModel:
     proposal = {**_PROPOSAL, "evidence": [{**_PROPOSAL["evidence"][0], "claim": claim}]}
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
-        called = [p.tool_name for m in messages for p in getattr(m, "parts", [])
-                  if isinstance(p, ToolCallPart)]
+        called = [
+            p.tool_name
+            for m in messages
+            for p in getattr(m, "parts", [])
+            if isinstance(p, ToolCallPart)
+        ]
         if "mail_read" not in called:
             return ModelResponse(parts=[ToolCallPart(tool_name="mail_read", args={"ref": ref})])
         if "propose_action" not in called:
-            return ModelResponse(parts=[ToolCallPart(tool_name="propose_action",
-                                                     args={"proposal": proposal})])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
+            )
         return ModelResponse(parts=[TextPart(content="Done.")])
 
     return FunctionModel(_respond)
@@ -459,21 +539,46 @@ async def test_a_redraft_quoting_an_earlier_answer_verifies_against_that_answer(
 
     sid = "sess_claimsrc_" + uuid.uuid4().hex[:8]
     answered = await events.emit(
-        "orchestration.item_answered", ref_id="item_claimsrc",
-        payload={"kind": "question", "session_id": sid,
-                 "answer": "Use the second ticket for this one, the first is closed."},
+        "orchestration.item_answered",
+        ref_id="item_claimsrc",
+        payload={
+            "kind": "question",
+            "session_id": sid,
+            "answer": "Use the second ticket for this one, the first is closed.",
+        },
         actor="operator",
     )
-    redraft = Proposal.model_validate({**_PROPOSAL, "evidence": [
-        {"kind": "operator", "source_ref": "operator:rejection-feedback",
-         "locator": "event log", "claim": "Use the second ticket for this one"},
-        {"kind": "operator", "source_ref": "operator:rejection-feedback",
-         "locator": "event log", "claim": "make it the 20th"},
-        {"kind": "operator", "source_ref": "operator:rejection-feedback",
-         "locator": "event log", "claim": "the operator said to close both tickets"},
-    ]})
+    redraft = Proposal.model_validate(
+        {
+            **_PROPOSAL,
+            "evidence": [
+                {
+                    "kind": "operator",
+                    "source_ref": "operator:rejection-feedback",
+                    "locator": "event log",
+                    "claim": "Use the second ticket for this one",
+                },
+                {
+                    "kind": "operator",
+                    "source_ref": "operator:rejection-feedback",
+                    "locator": "event log",
+                    "claim": "make it the 20th",
+                },
+                {
+                    "kind": "operator",
+                    "source_ref": "operator:rejection-feedback",
+                    "locator": "event log",
+                    "claim": "the operator said to close both tickets",
+                },
+            ],
+        }
+    )
     out = await gateway._redraft_evidence(
-        redraft, "rejected", "Wrong date, make it the 20th.", 999_999, session_id=sid,
+        redraft,
+        "rejected",
+        "Wrong date, make it the 20th.",
+        999_999,
+        session_id=sid,
     )
     earlier, current, invented = out
     assert earlier["claim_matches_source"] is True
@@ -492,23 +597,44 @@ async def test_a_proposal_parked_after_an_operator_answer_is_checked(demo):
     from central_command.runtime.run import run_task
 
     answer = "Use the second ticket for this one, the first is closed."
-    proposal = {**_PROPOSAL, "evidence": [
-        {"kind": "operator", "source_ref": "operator:answer",
-         "locator": "inbox item: ask_operator answer", "claim": "the first is closed"},
-        {"kind": "operator", "source_ref": "operator:answer",
-         "locator": "inbox item: ask_operator answer",
-         "claim": "the operator prefers the second ticket"},
-    ]}
+    proposal = {
+        **_PROPOSAL,
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:answer",
+                "locator": "inbox item: ask_operator answer",
+                "claim": "the first is closed",
+            },
+            {
+                "kind": "operator",
+                "source_ref": "operator:answer",
+                "locator": "inbox item: ask_operator answer",
+                "claim": "the operator prefers the second ticket",
+            },
+        ],
+    }
 
     def _respond(messages, info: AgentInfo) -> ModelResponse:
-        called = {p.tool_name for m in messages for p in getattr(m, "parts", [])
-                  if isinstance(p, ToolCallPart)}
+        called = {
+            p.tool_name
+            for m in messages
+            for p in getattr(m, "parts", [])
+            if isinstance(p, ToolCallPart)
+        }
         if "ask_operator" not in called:
-            return ModelResponse(parts=[ToolCallPart(tool_name="ask_operator", args={
-                "question": "Which ticket?", "searched": "nothing I hold records it"})])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="ask_operator",
+                        args={"question": "Which ticket?", "searched": "nothing I hold records it"},
+                    )
+                ]
+            )
         if "propose_action" not in called:
-            return ModelResponse(parts=[ToolCallPart(tool_name="propose_action",
-                                                     args={"proposal": proposal})])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="propose_action", args={"proposal": proposal})]
+            )
         return ModelResponse(parts=[TextPart(content="Closing out.")])
 
     model = FunctionModel(_respond)
@@ -516,7 +642,8 @@ async def test_a_proposal_parked_after_an_operator_answer_is_checked(demo):
     await repo.answer_operator_item(out["item_id"], answer, None)
     # What `api.orchestration.answer_item` writes before it resumes the run.
     answered = await events.emit(
-        "orchestration.item_answered", ref_id=out["item_id"],
+        "orchestration.item_answered",
+        ref_id=out["item_id"],
         payload={"kind": "question", "session_id": out["session_id"], "answer": answer},
         actor="operator",
     )

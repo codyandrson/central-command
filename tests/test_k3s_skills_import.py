@@ -72,24 +72,28 @@ def repo(tmp_path: Path) -> Path:
     for name in ("alpha", "beta"):
         (tmp_path / "skills" / name).mkdir(parents=True)
         (tmp_path / "skills" / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
-    (tmp_path / "skills" / "not-a-skill").mkdir()      # no SKILL.md: not bundled
+    (tmp_path / "skills" / "not-a-skill").mkdir()  # no SKILL.md: not bundled
     return tmp_path
 
 
 def _run(repo: Path, api_url: str) -> subprocess.CompletedProcess:
     fns = functions_in(SETUP.read_text(encoding="utf-8"))
-    script = "\n".join([
-        "set -uo pipefail",
-        f'REPO_ROOT="{repo.as_posix()}"',
-        f'API_URL="{api_url}"',
-        f'PY="{Path(sys.executable).as_posix()}"',
-        'pass() { echo "PASS $1: $2"; }',
-        'fail() { echo "FAIL $1: $2"; }',
-        "note() { :; }",
-        *(f"{name}() {{\n{fns[name]}\n}}" for name in
-          ("bundled_skill_dirs", "skills_library_ids", "app_skills_import")),
-        'app_skills_import; echo "RC=$?"',
-    ])
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            f'REPO_ROOT="{repo.as_posix()}"',
+            f'API_URL="{api_url}"',
+            f'PY="{Path(sys.executable).as_posix()}"',
+            'pass() { echo "PASS $1: $2"; }',
+            'fail() { echo "FAIL $1: $2"; }',
+            "note() { :; }",
+            *(
+                f"{name}() {{\n{fns[name]}\n}}"
+                for name in ("bundled_skill_dirs", "skills_library_ids", "app_skills_import")
+            ),
+            'app_skills_import; echo "RC=$?"',
+        ]
+    )
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=120)
 
 

@@ -173,8 +173,11 @@ async def probe_forge() -> bool:
     """Every configured forge instance is asked at once; the forge is up when
     ANY answers (a unit parked on one instance re-parks cheaply if it was the
     other that fell). No instance configured: nothing to wait for."""
-    raw = [e.split(":", 1)[1].strip() for e in settings.forge_instances.split(",")
-           if "=" in e and ":" in e.split("=", 1)[1]]
+    raw = [
+        e.split(":", 1)[1].strip()
+        for e in settings.forge_instances.split(",")
+        if "=" in e and ":" in e.split("=", 1)[1]
+    ]
     if not raw:
         return True
 
@@ -209,8 +212,7 @@ async def probe_embedder() -> bool:
     async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS) as client:
         resp = await client.post(
             base_url.rstrip("/") + "/v1/embeddings",
-            headers={"Authorization": f"Bearer {api_key}",
-                     "content-type": "application/json"},
+            headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
             json={"model": settings.embed_alias, "input": "ping"},
         )
     return resp.status_code not in _DOWN_STATUS
@@ -280,14 +282,15 @@ async def probe_llm() -> bool:
         async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_SECONDS) as client:
             resp = await client.post(
                 base_url.rstrip("/") + "/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}",
-                         "content-type": "application/json"},
-                json={"model": model, "max_tokens": 1,
-                      "messages": [{"role": "user", "content": "ping"}]},
+                headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
+                json={
+                    "model": model,
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "ping"}],
+                },
             )
     except httpx.ReadTimeout:
-        log.info("probe llm: completion queued past %ss; asking the proxy",
-                 PROBE_TIMEOUT_SECONDS)
+        log.info("probe llm: completion queued past %ss; asking the proxy", PROBE_TIMEOUT_SECONDS)
         return await probe_litellm()
     return resp.status_code != 429 and resp.status_code < 500
 
@@ -343,8 +346,7 @@ class ProbeCache:
 
     async def warm(self, dependencies) -> None:
         """Probe every not-yet-probed name in `dependencies`, all at once."""
-        todo = [d for d in dict.fromkeys(dependencies or ())
-                if d and d not in self._results]
+        todo = [d for d in dict.fromkeys(dependencies or ()) if d and d not in self._results]
         if todo:
             await asyncio.gather(*(self._probe_one(d) for d in todo))
 

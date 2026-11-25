@@ -64,22 +64,19 @@ def _parse_instances(raw: str) -> dict[str, Instance]:
             continue
         if "=" not in entry:
             raise ForgeError(
-                f"CC_FORGE_INSTANCES entry {entry!r} is malformed — expected "
-                "name=kind:base_url"
+                f"CC_FORGE_INSTANCES entry {entry!r} is malformed — expected name=kind:base_url"
             )
         name, rest = entry.split("=", 1)
         name = name.strip()
         if ":" not in rest:
             raise ForgeError(
-                f"CC_FORGE_INSTANCES entry {entry!r} is malformed — expected "
-                "name=kind:base_url"
+                f"CC_FORGE_INSTANCES entry {entry!r} is malformed — expected name=kind:base_url"
             )
         kind, base_url = rest.split(":", 1)
         kind, base_url = kind.strip(), base_url.strip()
         if not name or not base_url:
             raise ForgeError(
-                f"CC_FORGE_INSTANCES entry {entry!r} is malformed — expected "
-                "name=kind:base_url"
+                f"CC_FORGE_INSTANCES entry {entry!r} is malformed — expected name=kind:base_url"
             )
         if kind not in KINDS:
             raise ForgeError(
@@ -134,8 +131,11 @@ def _get_instance(name: str, op: str) -> Instance:
 
 
 async def _call(
-    inst: Instance, method: str, path: str,
-    params: dict | None = None, extra_headers: dict | None = None,
+    inst: Instance,
+    method: str,
+    path: str,
+    params: dict | None = None,
+    extra_headers: dict | None = None,
 ) -> httpx.Response:
     headers = _auth_headers(inst)
     if extra_headers:
@@ -155,7 +155,10 @@ def _check(resp: httpx.Response, op: str, ref: str | None = None) -> None:
     if st == 404:
         raise ForgeError(f"{op} — not found{r}", status_code=st)
     if st in (401, 403):
-        raise ForgeError(f"{op} — auth failed ({st}){r} — check the instance's CC_FORGE_TOKEN_<NAME>", status_code=st)
+        raise ForgeError(
+            f"{op} — auth failed ({st}){r} — check the instance's CC_FORGE_TOKEN_<NAME>",
+            status_code=st,
+        )
     if st == 429:
         raise ForgeError(f"{op} — rate limited{r} — retry later", status_code=st)
     raise ForgeError(f"{op} — provider rejected the request ({st}){r}: {detail}", status_code=st)
@@ -171,54 +174,95 @@ def _project_id(repo: str) -> str:
 
 
 def _gh_repo_row(r: dict) -> dict:
-    return {"full_name": r.get("full_name"), "description": r.get("description"),
-            "url": r.get("html_url"), "default_branch": r.get("default_branch")}
+    return {
+        "full_name": r.get("full_name"),
+        "description": r.get("description"),
+        "url": r.get("html_url"),
+        "default_branch": r.get("default_branch"),
+    }
 
 
 def _gl_repo_row(r: dict) -> dict:
-    return {"full_name": r.get("path_with_namespace"), "description": r.get("description"),
-            "url": r.get("web_url"), "default_branch": r.get("default_branch")}
+    return {
+        "full_name": r.get("path_with_namespace"),
+        "description": r.get("description"),
+        "url": r.get("web_url"),
+        "default_branch": r.get("default_branch"),
+    }
 
 
 def _gh_issue_row(it: dict) -> dict:
-    return {"number": it.get("number"), "title": it.get("title"), "state": it.get("state"),
-            "author": (it.get("user") or {}).get("login"), "url": it.get("html_url"),
-            "created_at": it.get("created_at"), "updated_at": it.get("updated_at")}
+    return {
+        "number": it.get("number"),
+        "title": it.get("title"),
+        "state": it.get("state"),
+        "author": (it.get("user") or {}).get("login"),
+        "url": it.get("html_url"),
+        "created_at": it.get("created_at"),
+        "updated_at": it.get("updated_at"),
+    }
 
 
 def _gl_issue_row(it: dict) -> dict:
-    return {"number": it.get("iid"), "title": it.get("title"), "state": it.get("state"),
-            "author": (it.get("author") or {}).get("username"), "url": it.get("web_url"),
-            "created_at": it.get("created_at"), "updated_at": it.get("updated_at")}
+    return {
+        "number": it.get("iid"),
+        "title": it.get("title"),
+        "state": it.get("state"),
+        "author": (it.get("author") or {}).get("username"),
+        "url": it.get("web_url"),
+        "created_at": it.get("created_at"),
+        "updated_at": it.get("updated_at"),
+    }
 
 
 def _gh_mr_row(it: dict) -> dict:
-    return {"number": it.get("number"), "title": it.get("title"), "state": it.get("state"),
-            "author": (it.get("user") or {}).get("login"), "url": it.get("html_url"),
-            "source_branch": (it.get("head") or {}).get("ref"),
-            "target_branch": (it.get("base") or {}).get("ref"),
-            "created_at": it.get("created_at"), "updated_at": it.get("updated_at")}
+    return {
+        "number": it.get("number"),
+        "title": it.get("title"),
+        "state": it.get("state"),
+        "author": (it.get("user") or {}).get("login"),
+        "url": it.get("html_url"),
+        "source_branch": (it.get("head") or {}).get("ref"),
+        "target_branch": (it.get("base") or {}).get("ref"),
+        "created_at": it.get("created_at"),
+        "updated_at": it.get("updated_at"),
+    }
 
 
 def _gl_mr_row(it: dict) -> dict:
-    return {"number": it.get("iid"), "title": it.get("title"), "state": it.get("state"),
-            "author": (it.get("author") or {}).get("username"), "url": it.get("web_url"),
-            "source_branch": it.get("source_branch"), "target_branch": it.get("target_branch"),
-            "created_at": it.get("created_at"), "updated_at": it.get("updated_at")}
+    return {
+        "number": it.get("iid"),
+        "title": it.get("title"),
+        "state": it.get("state"),
+        "author": (it.get("author") or {}).get("username"),
+        "url": it.get("web_url"),
+        "source_branch": it.get("source_branch"),
+        "target_branch": it.get("target_branch"),
+        "created_at": it.get("created_at"),
+        "updated_at": it.get("updated_at"),
+    }
 
 
 def _gh_commit_row(it: dict) -> dict:
     commit = it.get("commit") or {}
     author = commit.get("author") or {}
-    return {"sha": it.get("sha"), "message": commit.get("message"),
-            "author": author.get("name"), "date": author.get("date"),
-            "url": it.get("html_url")}
+    return {
+        "sha": it.get("sha"),
+        "message": commit.get("message"),
+        "author": author.get("name"),
+        "date": author.get("date"),
+        "url": it.get("html_url"),
+    }
 
 
 def _gl_commit_row(it: dict) -> dict:
-    return {"sha": it.get("id"), "message": it.get("message"),
-            "author": it.get("author_name"), "date": it.get("created_at"),
-            "url": it.get("web_url")}
+    return {
+        "sha": it.get("id"),
+        "message": it.get("message"),
+        "author": it.get("author_name"),
+        "date": it.get("created_at"),
+        "url": it.get("web_url"),
+    }
 
 
 _STATE_MAP = {"open": "opened", "closed": "closed", "all": "all"}
@@ -230,9 +274,13 @@ _STATE_MAP = {"open": "opened", "closed": "closed", "all": "all"}
 async def list_instances() -> dict:
     """Every configured instance — name + kind, NEVER tokens."""
     instances = _instances()
-    out = {"ok": True, "kind": "forge", "operation": "listInstances",
-           "instances": [{"name": i.name, "kind": i.kind} for i in instances.values()],
-           "count": len(instances)}
+    out = {
+        "ok": True,
+        "kind": "forge",
+        "operation": "listInstances",
+        "instances": [{"name": i.name, "kind": i.kind} for i in instances.values()],
+        "count": len(instances),
+    }
     if not instances:
         out["note"] = "no forge instances configured (CC_FORGE_INSTANCES is unset)"
     return out
@@ -249,8 +297,14 @@ async def search_repos(instance: str, query: str) -> dict:
         _check(resp, "searchRepos")
         items = resp.json() if isinstance(resp.json(), list) else []
         repos = [_gl_repo_row(r) for r in items]
-    return {"ok": True, "kind": "forge", "operation": "searchRepos",
-            "instance": instance, "repos": repos, "count": len(repos)}
+    return {
+        "ok": True,
+        "kind": "forge",
+        "operation": "searchRepos",
+        "instance": instance,
+        "repos": repos,
+        "count": len(repos),
+    }
 
 
 async def read_file(instance: str, repo: str, path: str, ref: str | None = None) -> dict:
@@ -262,7 +316,10 @@ async def read_file(instance: str, repo: str, path: str, ref: str | None = None)
         # endpoint's normal base64-wrapped JSON into the file's plain bytes,
         # so no manual base64 decode is needed here.
         resp = await _call(
-            inst, "GET", f"/repos/{repo}/contents/{quote(path, safe='/')}", params,
+            inst,
+            "GET",
+            f"/repos/{repo}/contents/{quote(path, safe='/')}",
+            params,
             extra_headers={"Accept": "application/vnd.github.raw+json"},
         )
         _check(resp, "readFile", f"{repo}/{path}")
@@ -271,7 +328,8 @@ async def read_file(instance: str, repo: str, path: str, ref: str | None = None)
         content = resp.text
     else:
         resp = await _call(
-            inst, "GET",
+            inst,
+            "GET",
             f"/api/v4/projects/{_project_id(repo)}/repository/files/{quote(path, safe='')}/raw",
             {"ref": ref_out},
         )
@@ -280,29 +338,56 @@ async def read_file(instance: str, repo: str, path: str, ref: str | None = None)
     truncated = len(content) > MAX_FILE_CHARS
     if truncated:
         content = content[:MAX_FILE_CHARS] + f"\n… [TRUNCATED at {MAX_FILE_CHARS} chars]"
-    return {"ok": True, "kind": "forge", "operation": "readFile", "instance": instance,
-            "file": {"repo": repo, "path": path, "ref": ref, "content": content,
-                     "truncated": truncated}}
+    return {
+        "ok": True,
+        "kind": "forge",
+        "operation": "readFile",
+        "instance": instance,
+        "file": {
+            "repo": repo,
+            "path": path,
+            "ref": ref,
+            "content": content,
+            "truncated": truncated,
+        },
+    }
 
 
 async def list_issues(instance: str, repo: str, state: str = "open") -> dict:
     inst = _get_instance(instance, "listIssues")
     if inst.kind == "github":
         gh_state = state if state in ("open", "closed", "all") else "open"
-        resp = await _call(inst, "GET", f"/repos/{repo}/issues", {"state": gh_state, "per_page": 30})
+        resp = await _call(
+            inst, "GET", f"/repos/{repo}/issues", {"state": gh_state, "per_page": 30}
+        )
         _check(resp, "listIssues", repo)
         # GitHub's issues endpoint also returns pull requests; a PR carries a
         # `pull_request` key that a genuine issue never does.
-        issues = [_gh_issue_row(it) for it in resp.json() if isinstance(it, dict) and "pull_request" not in it]
+        issues = [
+            _gh_issue_row(it)
+            for it in resp.json()
+            if isinstance(it, dict) and "pull_request" not in it
+        ]
     else:
         gl_state = _STATE_MAP.get(state, "opened")
-        resp = await _call(inst, "GET", f"/api/v4/projects/{_project_id(repo)}/issues",
-                            {"state": gl_state, "per_page": 30})
+        resp = await _call(
+            inst,
+            "GET",
+            f"/api/v4/projects/{_project_id(repo)}/issues",
+            {"state": gl_state, "per_page": 30},
+        )
         _check(resp, "listIssues", repo)
         items = resp.json() if isinstance(resp.json(), list) else []
         issues = [_gl_issue_row(it) for it in items]
-    return {"ok": True, "kind": "forge", "operation": "listIssues",
-            "instance": instance, "repo": repo, "issues": issues, "count": len(issues)}
+    return {
+        "ok": True,
+        "kind": "forge",
+        "operation": "listIssues",
+        "instance": instance,
+        "repo": repo,
+        "issues": issues,
+        "count": len(issues),
+    }
 
 
 async def get_issue(instance: str, repo: str, number: int) -> dict:
@@ -320,7 +405,13 @@ async def get_issue(instance: str, repo: str, number: int) -> dict:
         it = resp.json()
         issue = _gl_issue_row(it)
         issue["body"] = it.get("description")
-    return {"ok": True, "kind": "forge", "operation": "getIssue", "instance": instance, "issue": issue}
+    return {
+        "ok": True,
+        "kind": "forge",
+        "operation": "getIssue",
+        "instance": instance,
+        "issue": issue,
+    }
 
 
 async def list_merge_requests(instance: str, repo: str, state: str = "open") -> dict:
@@ -333,13 +424,24 @@ async def list_merge_requests(instance: str, repo: str, state: str = "open") -> 
         rows = [_gh_mr_row(it) for it in resp.json() if isinstance(it, dict)]
     else:
         gl_state = _STATE_MAP.get(state, "opened")
-        resp = await _call(inst, "GET", f"/api/v4/projects/{_project_id(repo)}/merge_requests",
-                            {"state": gl_state, "per_page": 30})
+        resp = await _call(
+            inst,
+            "GET",
+            f"/api/v4/projects/{_project_id(repo)}/merge_requests",
+            {"state": gl_state, "per_page": 30},
+        )
         _check(resp, "listMergeRequests", repo)
         items = resp.json() if isinstance(resp.json(), list) else []
         rows = [_gl_mr_row(it) for it in items]
-    return {"ok": True, "kind": "forge", "operation": "listMergeRequests",
-            "instance": instance, "repo": repo, "merge_requests": rows, "count": len(rows)}
+    return {
+        "ok": True,
+        "kind": "forge",
+        "operation": "listMergeRequests",
+        "instance": instance,
+        "repo": repo,
+        "merge_requests": rows,
+        "count": len(rows),
+    }
 
 
 async def get_merge_request(instance: str, repo: str, number: int) -> dict:
@@ -352,13 +454,20 @@ async def get_merge_request(instance: str, repo: str, number: int) -> dict:
         mr = _gh_mr_row(it)
         mr["body"] = it.get("body")
     else:
-        resp = await _call(inst, "GET", f"/api/v4/projects/{_project_id(repo)}/merge_requests/{number}")
+        resp = await _call(
+            inst, "GET", f"/api/v4/projects/{_project_id(repo)}/merge_requests/{number}"
+        )
         _check(resp, "getMergeRequest", ref)
         it = resp.json()
         mr = _gl_mr_row(it)
         mr["body"] = it.get("description")
-    return {"ok": True, "kind": "forge", "operation": "getMergeRequest",
-            "instance": instance, "merge_request": mr}
+    return {
+        "ok": True,
+        "kind": "forge",
+        "operation": "getMergeRequest",
+        "instance": instance,
+        "merge_request": mr,
+    }
 
 
 async def list_commits(instance: str, repo: str, ref: str | None = None, limit: int = 20) -> dict:
@@ -375,9 +484,18 @@ async def list_commits(instance: str, repo: str, ref: str | None = None, limit: 
         params = {"per_page": bound}
         if ref:
             params["ref_name"] = ref
-        resp = await _call(inst, "GET", f"/api/v4/projects/{_project_id(repo)}/repository/commits", params)
+        resp = await _call(
+            inst, "GET", f"/api/v4/projects/{_project_id(repo)}/repository/commits", params
+        )
         _check(resp, "listCommits", repo)
         items = resp.json() if isinstance(resp.json(), list) else []
         rows = [_gl_commit_row(it) for it in items]
-    return {"ok": True, "kind": "forge", "operation": "listCommits",
-            "instance": instance, "repo": repo, "commits": rows, "count": len(rows)}
+    return {
+        "ok": True,
+        "kind": "forge",
+        "operation": "listCommits",
+        "instance": instance,
+        "repo": repo,
+        "commits": rows,
+        "count": len(rows),
+    }

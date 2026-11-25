@@ -98,8 +98,7 @@ async def _call(payload: dict, timeout: float = 60.0) -> dict:
         ) from e
     if resp.status_code != 200:
         raise EmailFacadeError(
-            f"email façade {payload.get('mode')} failed: HTTP {resp.status_code} "
-            f"{resp.text[:200]}",
+            f"email façade {payload.get('mode')} failed: HTTP {resp.status_code} {resp.text[:200]}",
             status_code=resp.status_code,
         )
     return resp.json()
@@ -117,10 +116,12 @@ async def _call_google(google, payload: dict, timeout: float) -> dict:
     try:
         return await google.mail_request(payload, timeout=timeout)
     except google.GoogleError as e:
-        raise google.stamp(EmailFacadeError(
-            f"email façade {mode} failed: HTTP {e.status_code} {google.answer_text(e)[:200]}",
-            status_code=e.status_code,
-        )) from e
+        raise google.stamp(
+            EmailFacadeError(
+                f"email façade {mode} failed: HTTP {e.status_code} {google.answer_text(e)[:200]}",
+                status_code=e.status_code,
+            )
+        ) from e
 
 
 async def list_refs(scope_query: str) -> list[dict]:
@@ -215,8 +216,13 @@ async def report_spam(uuid: str) -> dict:
 # its mailbox cannot answer.
 
 
-async def send(to: list[str], subject: str, body: str, cc: list[str] | None = None,
-               reply_to_ref: str | None = None) -> dict:
+async def send(
+    to: list[str],
+    subject: str,
+    body: str,
+    cc: list[str] | None = None,
+    reply_to_ref: str | None = None,
+) -> dict:
     """Send one message as the operator. `reply_to_ref` threads the reply from
     the referenced message's OWN headers, never from the proposal."""
     provider = _exchange()
@@ -261,6 +267,15 @@ async def list_folders() -> list[dict]:
             raise EmailFacadeError(str(e)) from e
     return [
         {"name": name, "path": f"in:{name}", "total": None, "unread": None}
-        for name in ("inbox", "sent", "spam", "trash", "starred", "important",
-                     "unread", "category:promotions", "category:social")
+        for name in (
+            "inbox",
+            "sent",
+            "spam",
+            "trash",
+            "starred",
+            "important",
+            "unread",
+            "category:promotions",
+            "category:social",
+        )
     ]

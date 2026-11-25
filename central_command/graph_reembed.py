@@ -244,7 +244,7 @@ async def _graph(call, *args, **kwargs):
         except (ServiceUnavailable, SessionExpired):
             if attempt == GRAPH_ATTEMPTS - 1:
                 raise
-            await _sleep(2.0 ** attempt)
+            await _sleep(2.0**attempt)
 
 
 async def _read(query: str, **params) -> list[dict]:
@@ -267,7 +267,10 @@ async def _pages(kind: str, batch: int):
 
 def _text_of(kind: str, row: dict) -> str:
     return embedding_text(
-        kind, name=row.get("name"), summary=row.get("summary"), fact=row.get("fact"),
+        kind,
+        name=row.get("name"),
+        summary=row.get("summary"),
+        fact=row.get("fact"),
     )
 
 
@@ -333,11 +336,15 @@ async def _upstream_model() -> str | None:
 
 
 async def _check_alias() -> tuple[Finding, int | None]:
-    missing = [key for key, value in (
-        ("CC_LLM_BASE_URL", settings.llm_base_url),
-        ("CC_LLM_API_KEY", settings.llm_api_key),
-        ("CC_EMBED_ALIAS", settings.embed_alias),
-    ) if not value]
+    missing = [
+        key
+        for key, value in (
+            ("CC_LLM_BASE_URL", settings.llm_base_url),
+            ("CC_LLM_API_KEY", settings.llm_api_key),
+            ("CC_EMBED_ALIAS", settings.embed_alias),
+        )
+        if not value
+    ]
     if missing:
         return Finding(ACTION, f"{', '.join(missing)} empty: set it in .env"), None
     alias = settings.embed_alias
@@ -346,22 +353,31 @@ async def _check_alias() -> tuple[Finding, int | None]:
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status in (401, 403):
-            return Finding(ACTION, (
-                f"the proxy refused the app key (HTTP {status}): fix CC_LLM_API_KEY, whose "
-                f"scope must include {alias}"
-            )), None
+            return Finding(
+                ACTION,
+                (
+                    f"the proxy refused the app key (HTTP {status}): fix CC_LLM_API_KEY, whose "
+                    f"scope must include {alias}"
+                ),
+            ), None
         if 400 <= status < 500 and status not in (408, 429):
-            return Finding(ACTION, (
-                f"the proxy refused {alias} (HTTP {status}): register the alias in LiteLLM"
-            )), None
+            return Finding(
+                ACTION,
+                (f"the proxy refused {alias} (HTTP {status}): register the alias in LiteLLM"),
+            ), None
         raise
     width = len(vector)
     if width == settings.embed_dim:
-        return Finding(OK, f"{alias} answers with the app key at width {width} = CC_EMBED_DIM"), width
-    return Finding(OK, (
-        f"{alias} answers with the app key at width {width}, CC_EMBED_DIM is "
-        f"{settings.embed_dim}: a run will end awaiting_config"
-    )), width
+        return Finding(
+            OK, f"{alias} answers with the app key at width {width} = CC_EMBED_DIM"
+        ), width
+    return Finding(
+        OK,
+        (
+            f"{alias} answers with the app key at width {width}, CC_EMBED_DIM is "
+            f"{settings.embed_dim}: a run will end awaiting_config"
+        ),
+    ), width
 
 
 async def _check_alignment() -> Finding:
@@ -375,11 +391,14 @@ async def _check_alignment() -> Finding:
     for position, text in enumerate(ALIGNMENT_INPUT):
         cosine = embedder_record._cosine(batch[position], single[text])
         if cosine < threshold:
-            return Finding(PROBLEM, (
-                f"the alignment probe failed: position {position} of the batch has cosine "
-                f"{cosine:.4f} against its single call, so a batch is misaligned; check the "
-                "LiteLLM cache config"
-            ))
+            return Finding(
+                PROBLEM,
+                (
+                    f"the alignment probe failed: position {position} of the batch has cosine "
+                    f"{cosine:.4f} against its single call, so a batch is misaligned; check the "
+                    "LiteLLM cache config"
+                ),
+            )
     if batch[0] != batch[2] and embedder_record._cosine(batch[0], batch[2]) < threshold:
         return Finding(PROBLEM, "the alignment probe failed: a repeated text embedded differently")
     return Finding(OK, "the alignment probe agrees with single calls, in order")
@@ -389,18 +408,24 @@ async def _check_cache() -> Finding:
     """`/cache/ping`'s `litellm_cache_params.supported_call_types`. The fix is the
     config's own comment: embeddings are never cached (DL-062)."""
     if not litellm.configured():
-        return Finding(ACTION, (
-            "cannot read the LiteLLM cache config: set CC_LLM_PROXY_BASE_URL and "
-            "CC_LLM_PROXY_ADMIN_KEY"
-        ))
+        return Finding(
+            ACTION,
+            (
+                "cannot read the LiteLLM cache config: set CC_LLM_PROXY_BASE_URL and "
+                "CC_LLM_PROXY_ADMIN_KEY"
+            ),
+        )
     resp = await litellm._call("GET", "/cache/ping")
     if resp.status_code == 503 and "not initialized" in resp.text.lower():
         return Finding(OK, "the LiteLLM cache is off, so no embedding is cached")
     if not 200 <= resp.status_code < 300:
-        return Finding(ACTION, (
-            f"cannot read the LiteLLM cache config: /cache/ping answered {resp.status_code}; "
-            "check CC_LLM_PROXY_ADMIN_KEY"
-        ))
+        return Finding(
+            ACTION,
+            (
+                f"cannot read the LiteLLM cache config: /cache/ping answered {resp.status_code}; "
+                "check CC_LLM_PROXY_ADMIN_KEY"
+            ),
+        )
     params = resp.json().get("litellm_cache_params")
     # The vendored document shows an object; a deployed proxy double-encodes it.
     if isinstance(params, str):
@@ -410,14 +435,18 @@ async def _check_cache() -> Finding:
             params = None
     types = params.get("supported_call_types") if isinstance(params, dict) else None
     if types is None:
-        return Finding(ACTION, (
-            "cannot read the LiteLLM cache config: /cache/ping named no supported_call_types"
-        ))
+        return Finding(
+            ACTION,
+            ("cannot read the LiteLLM cache config: /cache/ping named no supported_call_types"),
+        )
     if "embedding" in str(types).lower():
-        return Finding(PROBLEM, (
-            f"the LiteLLM cache covers embeddings ({types}): remove embedding and aembedding "
-            "from supported_call_types"
-        ))
+        return Finding(
+            PROBLEM,
+            (
+                f"the LiteLLM cache covers embeddings ({types}): remove embedding and aembedding "
+                "from supported_call_types"
+            ),
+        )
     return Finding(OK, f"the LiteLLM cache excludes embeddings ({types})")
 
 
@@ -485,15 +514,21 @@ async def _check_backup(directory: Path) -> Finding:
     taken = datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
     age = (_utcnow() - taken).total_seconds()
     if age > limit:
-        return Finding(ACTION, (
-            f"the newest dump {path.name} is {_age_text(age)} old, over the limit of "
-            f"{_age_text(limit)}: {BACKUP_COMMANDS}"
-        ))
+        return Finding(
+            ACTION,
+            (
+                f"the newest dump {path.name} is {_age_text(age)} old, over the limit of "
+                f"{_age_text(limit)}: {BACKUP_COMMANDS}"
+            ),
+        )
     if path.stat().st_size <= BACKUP_MIN_BYTES:
-        return Finding(ACTION, (
-            f"the newest dump {path.name} is {path.stat().st_size} bytes, too small to be a "
-            f"graph: {BACKUP_COMMANDS}"
-        ))
+        return Finding(
+            ACTION,
+            (
+                f"the newest dump {path.name} is {path.stat().st_size} bytes, too small to be a "
+                f"graph: {BACKUP_COMMANDS}"
+            ),
+        )
     state = await asyncio.to_thread(_gzip_state, path)
     if state == "unreadable":
         return Finding(ACTION, _unreadable_text(path))
@@ -520,10 +555,13 @@ def _check_window(ignore: bool) -> Finding:
     apart = abs((now.hour * 60 + now.minute) - (hour * 60 + minute))
     apart = min(apart, 24 * 60 - apart)
     if apart <= BACKUP_WINDOW_MINUTES:
-        return Finding(ACTION, (
-            f"inside {BACKUP_WINDOW_MINUTES} minutes of the nightly backup at "
-            f"{hour:02d}:{minute:02d}: wait, or pass --ignore-backup-window if it is disabled"
-        ))
+        return Finding(
+            ACTION,
+            (
+                f"inside {BACKUP_WINDOW_MINUTES} minutes of the nightly backup at "
+                f"{hour:02d}:{minute:02d}: wait, or pass --ignore-backup-window if it is disabled"
+            ),
+        )
     return Finding(OK, f"outside the backup window at {hour:02d}:{minute:02d}")
 
 
@@ -582,7 +620,12 @@ def _stamp() -> str:
 
 
 async def _reembed_kind(
-    kind: str, batch: int, width: int, counters: dict, totals: dict[str, int], started: float,
+    kind: str,
+    batch: int,
+    width: int,
+    counters: dict,
+    totals: dict[str, int],
+    started: float,
 ) -> None:
     done = cleared = 0
     counters[kind] = counters[f"{kind}_cleared"] = 0
@@ -655,10 +698,15 @@ def _changed(previous: dict, width: int, upstream: str | None, canaries: list[li
 
 async def _verify_search(check_search: bool) -> list[Finding]:
     if not check_search:
-        return [Finding(OK, (
-            "search: skipped, because this process embeds queries at the old width; "
-            "run --finish does it"
-        ))]
+        return [
+            Finding(
+                OK,
+                (
+                    "search: skipped, because this process embeds queries at the old width; "
+                    "run --finish does it"
+                ),
+            )
+        ]
     entities = await _read(_SAMPLE_ENTITIES, limit=1)
     facts = await _read(_SAMPLE_FACT)
     out: list[Finding] = []
@@ -666,14 +714,35 @@ async def _verify_search(check_search: bool) -> list[Finding]:
     # does not span, and an empty answer would be a false failure.
     calls = []
     if facts:
-        calls.append(("search_facts by a stored fact", graphiti.search_facts,
-                      facts[0]["fact"], {"group_ids": [facts[0]["group_id"]]}, True))
+        calls.append(
+            (
+                "search_facts by a stored fact",
+                graphiti.search_facts,
+                facts[0]["fact"],
+                {"group_ids": [facts[0]["group_id"]]},
+                True,
+            )
+        )
     if entities:
         scope = {"group_ids": [entities[0]["group_id"]]}
-        calls.append(("search_nodes by a stored name", graphiti.search_nodes,
-                      entities[0]["name"], scope, True))
-        calls.append(("search_facts by a stored name", graphiti.search_facts,
-                      entities[0]["name"], scope, False))
+        calls.append(
+            (
+                "search_nodes by a stored name",
+                graphiti.search_nodes,
+                entities[0]["name"],
+                scope,
+                True,
+            )
+        )
+        calls.append(
+            (
+                "search_facts by a stored name",
+                graphiti.search_facts,
+                entities[0]["name"],
+                scope,
+                False,
+            )
+        )
     if not calls:
         return [Finding(OK, "search: the graph is empty, nothing to find")]
     for name, call, query, kwargs, must_find in calls:
@@ -690,24 +759,39 @@ async def _verify_search(check_search: bool) -> list[Finding]:
 
 
 async def _verify(
-    width: int, before: dict[str, dict[int, int]], cleared: dict[str, int], check_search: bool,
+    width: int,
+    before: dict[str, dict[int, int]],
+    cleared: dict[str, int],
+    check_search: bool,
 ) -> tuple[list[Finding], dict[str, dict[int, int]]]:
     """Every line, whatever an earlier one found, so a failure names them all. Under
     `operator_session`, because the gate is closed on purpose while this searches."""
     out: list[Finding] = []
     with embedder_record.operator_session():
         after = await _graph(embedder_record.census)
-        wrong = [f"{n} {kind} at width {w}" for kind in KINDS
-                 for w, n in sorted((after.get(kind) or {}).items()) if w != width]
-        out.append(Finding(PROBLEM, f"census: {', '.join(wrong)}, measured {width}") if wrong
-                   else Finding(OK, f"census: every vector is width {width}"))
-        lost = [
-            f"{kind} had {had}, now {now}" for kind in KINDS
-            for had in [sum((before.get(kind) or {}).values()) - cleared.get(kind, 0)]
-            for now in [sum((after.get(kind) or {}).values())] if now < had
+        wrong = [
+            f"{n} {kind} at width {w}"
+            for kind in KINDS
+            for w, n in sorted((after.get(kind) or {}).items())
+            if w != width
         ]
-        out.append(Finding(PROBLEM, f"census: an element lost its vector ({'; '.join(lost)})")
-                   if lost else Finding(OK, "census: no element lost a vector it had"))
+        out.append(
+            Finding(PROBLEM, f"census: {', '.join(wrong)}, measured {width}")
+            if wrong
+            else Finding(OK, f"census: every vector is width {width}")
+        )
+        lost = [
+            f"{kind} had {had}, now {now}"
+            for kind in KINDS
+            for had in [sum((before.get(kind) or {}).values()) - cleared.get(kind, 0)]
+            for now in [sum((after.get(kind) or {}).values())]
+            if now < had
+        ]
+        out.append(
+            Finding(PROBLEM, f"census: an element lost its vector ({'; '.join(lost)})")
+            if lost
+            else Finding(OK, "census: no element lost a vector it had")
+        )
 
         record = await _graph(embedder_record.read_record) or {}
         stored = record.get("canary_vectors") or []
@@ -716,16 +800,27 @@ async def _verify(
         agree = len(stored) == len(fresh) and all(
             c >= settings.embedder_canary_threshold for c in cosines
         )
-        out.append(Finding(OK, "canaries: the alias agrees with the record") if agree
-                   else Finding(PROBLEM, f"canaries: the alias disagrees with the record "
-                                         f"(lowest cosine {min(cosines, default=0.0):.4f})"))
+        out.append(
+            Finding(OK, "canaries: the alias agrees with the record")
+            if agree
+            else Finding(
+                PROBLEM,
+                f"canaries: the alias disagrees with the record "
+                f"(lowest cosine {min(cosines, default=0.0):.4f})",
+            )
+        )
 
         identical = [
             f"{sum(row['texts'] for row in rows)} different {kind} texts share a vector"
-            for kind in KINDS for rows in [await _read(_IDENTICAL[kind])] if rows
+            for kind in KINDS
+            for rows in [await _read(_IDENTICAL[kind])]
+            if rows
         ]
-        out.append(Finding(PROBLEM, f"identical vectors: {'; '.join(identical)}") if identical
-                   else Finding(OK, "identical vectors: none across different texts"))
+        out.append(
+            Finding(PROBLEM, f"identical vectors: {'; '.join(identical)}")
+            if identical
+            else Finding(OK, "identical vectors: none across different texts")
+        )
 
         out.extend(await _verify_search(check_search))
 
@@ -736,8 +831,11 @@ async def _verify(
             cosine = embedder_record._cosine(row["vector"], vector)
             if cosine < settings.embedder_canary_threshold:
                 drifted.append(f"{row['uuid']} at cosine {cosine:.4f}")
-        out.append(Finding(PROBLEM, f"sample: vector and text disagree: {', '.join(drifted)}")
-                   if drifted else Finding(OK, f"sample: {len(sample)} entities match their text"))
+        out.append(
+            Finding(PROBLEM, f"sample: vector and text disagree: {', '.join(drifted)}")
+            if drifted
+            else Finding(OK, f"sample: {len(sample)} entities match their text")
+        )
     return out, after
 
 
@@ -757,7 +855,9 @@ async def _run_check(args: argparse.Namespace) -> int:
     for finding in findings:
         _say(finding)
     path = _write_report(
-        _report_dir(args), f"{_stamp()}-check.md", "graph_reembed check",
+        _report_dir(args),
+        f"{_stamp()}-check.md",
+        "graph_reembed check",
         facts + [f"{f.level}: {f.line}" for f in findings],
     )
     print(f"report: {path}")
@@ -772,8 +872,14 @@ def _resume_snapshot(record: dict | None) -> dict:
     if record.get("state") in embedder_record._CLOSED_STATES and kept is not None:
         return kept
     return {
-        field: record.get(field) for field in (
-            "alias", "dimensions", "upstream_model", "canary_texts", "canary_vectors", "history",
+        field: record.get(field)
+        for field in (
+            "alias",
+            "dimensions",
+            "upstream_model",
+            "canary_texts",
+            "canary_vectors",
+            "history",
         )
     } | {"epoch": record.get("epoch") or 0}
 
@@ -806,12 +912,17 @@ async def _run_finish(args: argparse.Namespace) -> int:
     counters = record.get("counters") or {}
     census_now = await _graph(embedder_record.census)
     findings, _after = await _verify(width, census_now, {}, True)
-    _finish_report(args, "graph_reembed run --finish", [f"record: {_record_line(record)}"], findings)
+    _finish_report(
+        args, "graph_reembed run --finish", [f"record: {_record_line(record)}"], findings
+    )
     if _exit_code(findings):
         return 1
     await _land_stable(
-        counters.get("previous") or {}, width, record.get("upstream_model"),
-        record.get("canary_vectors") or [], counters,
+        counters.get("previous") or {},
+        width,
+        record.get("upstream_model"),
+        record.get("canary_vectors") or [],
+        counters,
     )
     print("state=stable: the gates reopen within the check's TTL")
     return 0
@@ -832,8 +943,11 @@ async def _run_pass(args: argparse.Namespace) -> int:
     record = await _graph(embedder_record.read_record)
     previous = _resume_snapshot(record)
     before = await _graph(embedder_record.census)
-    fields = {"state": embedder_record.MIGRATING, "run_started_at": _utcnow().isoformat(),
-              "counters": {"previous": previous}}
+    fields = {
+        "state": embedder_record.MIGRATING,
+        "run_started_at": _utcnow().isoformat(),
+        "counters": {"previous": previous},
+    }
     if not record:
         fields["epoch"] = 0  # the interim record: somewhere to keep the state
     await _graph(embedder_record.update_record, **fields)
@@ -842,10 +956,15 @@ async def _run_pass(args: argparse.Namespace) -> int:
     # A process holding an open verdict can still land for up to the TTL.
     await _sleep(settings.embedder_check_ttl_seconds + TTL_MARGIN_SECONDS)
     if not await _wait_for_running_jobs():
-        _say(Finding(ACTION, (
-            f"an ingest job is still RUNNING after {JOB_WAIT_SECONDS:.0f} s; the graph stays "
-            "closed and claims no new one: run again when it ends"
-        )))
+        _say(
+            Finding(
+                ACTION,
+                (
+                    f"an ingest job is still RUNNING after {JOB_WAIT_SECONDS:.0f} s; the graph stays "
+                    "closed and claims no new one: run again when it ends"
+                ),
+            )
+        )
         return 3
 
     alias_finding, width = await _check_alias()
@@ -876,27 +995,41 @@ async def _run_pass(args: argparse.Namespace) -> int:
         line += f" ({upstream})"
     await _graph(
         embedder_record.update_record,
-        alias=settings.embed_alias, dimensions=width, epoch=epoch, text_recipe=TEXT_RECIPE,
-        canary_texts=list(CANARY_TEXTS), canary_vectors=canaries, upstream_model=upstream,
-        history=list(previous.get("history") or []) + [line], committed_at=committed,
+        alias=settings.embed_alias,
+        dimensions=width,
+        epoch=epoch,
+        text_recipe=TEXT_RECIPE,
+        canary_texts=list(CANARY_TEXTS),
+        canary_vectors=canaries,
+        upstream_model=upstream,
+        history=list(previous.get("history") or []) + [line],
+        committed_at=committed,
         counters=counters,
     )
 
     width_differs = width != settings.embed_dim
     verified, after = await _verify(width, before, cleared, not width_differs)
     if short:
-        verified.insert(0, Finding(PROBLEM, (
-            f"pass: fewer rewritten than the graph holds: {', '.join(short)}; "
-            "an element may have no uuid"
-        )))
+        verified.insert(
+            0,
+            Finding(
+                PROBLEM,
+                (
+                    f"pass: fewer rewritten than the graph holds: {', '.join(short)}; "
+                    "an element may have no uuid"
+                ),
+            ),
+        )
     lines = [
         f"alias: {settings.embed_alias}",
         f"upstream model: {previous.get('upstream_model') or 'unknown'} -> {upstream or 'unknown'}",
         f"epoch: {previous['epoch']} -> {epoch}",
         f"before: {_census_line(before)}",
         f"after: {_census_line(after)}",
-        (f"rewritten: {rewritten} vectors in {time.monotonic() - started:.1f} s "
-        f"({time.monotonic() - begun:.1f} s with the wait)"),
+        (
+            f"rewritten: {rewritten} vectors in {time.monotonic() - started:.1f} s "
+            f"({time.monotonic() - begun:.1f} s with the wait)"
+        ),
     ]
     for text in lines:
         print(text)
@@ -917,7 +1050,8 @@ async def _run_pass(args: argparse.Namespace) -> int:
 async def _run_run(args: argparse.Namespace) -> int:
     # Before anything it authorises. A refusal is on the log too.
     await events.emit(
-        "graph.reembed.run", ref_id=None,
+        "graph.reembed.run",
+        ref_id=None,
         payload={"finish": args.finish, "batch": args.batch, "alias": settings.embed_alias},
         actor="operator",
     )
@@ -954,18 +1088,30 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="the record and the census; exit 0, or 2 if it cannot read")
     for name, text in (
         ("check", "read-only: exit 0 clear, 1 a problem, 2 could not run, 3 operator action"),
-        ("run", "re-embed offline: exit 0 stable, 1 a failed line, 2 could not run, 3 operator action"),
+        (
+            "run",
+            "re-embed offline: exit 0 stable, 1 a failed line, 2 could not run, 3 operator action",
+        ),
     ):
         p = sub.add_parser(name, help=text)
-        p.add_argument("--backup-dir", help="where neo4j_<stamp>.dump.gz is (default CC_BACKUP_DIR)")
+        p.add_argument(
+            "--backup-dir", help="where neo4j_<stamp>.dump.gz is (default CC_BACKUP_DIR)"
+        )
         p.add_argument("--report-dir", help="where reports go (default <backup-dir>/reembed)")
-        p.add_argument("--ignore-backup-window", action="store_true",
-                       help="for an operator who disabled the nightly backup timer")
+        p.add_argument(
+            "--ignore-backup-window",
+            action="store_true",
+            help="for an operator who disabled the nightly backup timer",
+        )
         if name == "run":
-            p.add_argument("--batch", type=int, default=DEFAULT_BATCH,
-                           help="texts per embedding request")
-            p.add_argument("--finish", action="store_true",
-                           help="after a width change: verify and open once settings match")
+            p.add_argument(
+                "--batch", type=int, default=DEFAULT_BATCH, help="texts per embedding request"
+            )
+            p.add_argument(
+                "--finish",
+                action="store_true",
+                help="after a width change: verify and open once settings match",
+            )
     args = parser.parse_args(argv)
     if getattr(args, "batch", 1) < 1:
         print("error: --batch must be at least 1", file=sys.stderr)

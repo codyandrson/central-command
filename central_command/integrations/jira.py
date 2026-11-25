@@ -52,17 +52,30 @@ LINK_TYPES = ("Blocks", "Relates", "Duplicate")
 # measure days-since-update"). They are exactly the axes its hygiene doctrine
 # reasons about — and without `issuelinks` it could not check whether a link
 # already existed before proposing `linkIssues`.
-FIELDS = ("summary,description,priority,status,issuetype,labels,duedate,"
-          "created,updated,assignee,parent,issuelinks,"
-          "timeoriginalestimate,timetracking")
+FIELDS = (
+    "summary,description,priority,status,issuetype,labels,duedate,"
+    "created,updated,assignee,parent,issuelinks,"
+    "timeoriginalestimate,timetracking"
+)
 
 # Search rows are per-issue in a board-wide sweep, so they carry the cheap
 # scalars and only a link COUNT — the full link list would blow the agent's
 # token budget and get string-truncated, which reads as "no more links" and is
 # worse than an honest count. Drill into a specific issue with getIssue.
-SEARCH_FIELDS = ["summary", "status", "issuetype", "labels", "duedate",
-                 "updated", "assignee", "parent", "issuelinks",
-                 "priority", "timeoriginalestimate", "timetracking"]
+SEARCH_FIELDS = [
+    "summary",
+    "status",
+    "issuetype",
+    "labels",
+    "duedate",
+    "updated",
+    "assignee",
+    "parent",
+    "issuelinks",
+    "priority",
+    "timeoriginalestimate",
+    "timetracking",
+]
 
 # The native ORIGINAL ESTIMATE (2026-11-18, the EA planning design D3), read as
 # `estimate_hours`. Cloud names the system field `timeoriginalestimate`, a
@@ -84,11 +97,11 @@ MAX_LINKS = 25
 # Added 2026-08-11: the operator created four cost/benefit fields, populated
 # them, and jira-expert could not see them at all, because FIELDS/SEARCH_FIELDS
 # are an allowlist and Jira returns exactly what you ask for.
-CUSTOM_FIELDS_TTL = 300.0   # seconds; a field added in the UI is visible within
-                            # 5 minutes, WITHOUT a cc-uvicorn restart — the
-                            # whole point is that the operator's new field shows
-                            # up. Process-lifetime caching would reproduce the
-                            # bug for anyone who never restarts.
+CUSTOM_FIELDS_TTL = 300.0  # seconds; a field added in the UI is visible within
+# 5 minutes, WITHOUT a cc-uvicorn restart — the
+# whole point is that the operator's new field shows
+# up. Process-lifetime caching would reproduce the
+# bug for anyone who never restarts.
 _custom_fields_cache: tuple[float, list[dict]] | None = None
 # Issue types are PER-PROJECT, so the read tool's cache is too: project key ->
 # (monotonic time, [{id, name, subtask}]). Same TTL, same reason as the custom
@@ -141,9 +154,17 @@ class TransitionUnavailable(JiraError):
     honest for every other caller of `transition_issue`. `updated` is the
     issue's own stamp as Jira wrote it (None when the read carried none)."""
 
-    def __init__(self, message: str, *, issue_key: str, transition: str,
-                 available: list[str], status: str | None, updated: str | None,
-                 status_code: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        issue_key: str,
+        transition: str,
+        available: list[str],
+        status: str | None,
+        updated: str | None,
+        status_code: int | None = None,
+    ):
         super().__init__(message, status_code=status_code)
         self.issue_key = issue_key
         self.transition = transition
@@ -159,14 +180,18 @@ class TransitionMoved(TransitionUnavailable, WorldMoved):
 
     def __init__(self, unavailable: TransitionUnavailable):
         TransitionUnavailable.__init__(
-            self, str(unavailable), issue_key=unavailable.issue_key,
-            transition=unavailable.transition, available=unavailable.available,
-            status=unavailable.status, updated=unavailable.updated,
-            status_code=unavailable.status_code)
+            self,
+            str(unavailable),
+            issue_key=unavailable.issue_key,
+            transition=unavailable.transition,
+            available=unavailable.available,
+            status=unavailable.status,
+            updated=unavailable.updated,
+            status_code=unavailable.status_code,
+        )
         self.target = f"jira:issue:{unavailable.issue_key}"
         self.expected = unavailable.transition
-        self.actual = {"available": list(unavailable.available),
-                       "status": unavailable.status}
+        self.actual = {"available": list(unavailable.available), "status": unavailable.status}
         names = ", ".join(unavailable.available) or "(none)"
         self.what_moved = (
             f"issue {unavailable.issue_key} is now {unavailable.status!r} "
@@ -237,7 +262,9 @@ def _date(value: str, op: str, key: str) -> str:
     try:
         date(y, m, d)
     except ValueError:
-        raise JiraError(f"{op} for {key} — due_date {value!r} is not a real calendar date") from None
+        raise JiraError(
+            f"{op} for {key} — due_date {value!r} is not a real calendar date"
+        ) from None
     return value
 
 
@@ -325,9 +352,7 @@ async def _cross_check_flavor() -> None:
     if reported is None:
         return
     low = reported.strip().lower()
-    if (_flavor() == "cloud" and low == "server") or (
-        _flavor() == "server" and low == "cloud"
-    ):
+    if (_flavor() == "cloud" and low == "server") or (_flavor() == "server" and low == "cloud"):
         raise _flavor_mismatch(reported)
 
 
@@ -359,8 +384,7 @@ async def _verify_auth_once() -> None:
 
 def _preflight_path(path: str) -> bool:
     """Paths the auth check itself uses — they must not recurse into it."""
-    return path in (_myself_path(), _api("/serverInfo"),
-                    _api("/serverInfo", "server"))
+    return path in (_myself_path(), _api("/serverInfo"), _api("/serverInfo", "server"))
 
 
 async def _call(method: str, path: str, json_body: dict | None = None) -> httpx.Response:
@@ -383,7 +407,10 @@ def _check(resp: httpx.Response, op: str, key: str | None = None) -> None:
     if st == 404:
         raise JiraError(f"{op} — not found{ref}", status_code=st)
     if st in (401, 403):
-        raise JiraError(f"{op} — auth failed ({st}){ref} — check CC_JIRA_EMAIL/CC_JIRA_API_TOKEN", status_code=st)
+        raise JiraError(
+            f"{op} — auth failed ({st}){ref} — check CC_JIRA_EMAIL/CC_JIRA_API_TOKEN",
+            status_code=st,
+        )
     if st == 429:
         raise JiraError(f"{op} — rate limited{ref} — retry later", status_code=st)
     raise JiraError(f"{op} — provider rejected the request ({st}){ref}: {detail}", status_code=st)
@@ -413,16 +440,27 @@ def _adf_to_text(node) -> str:
     if t == "inlineCard":
         return attrs.get("url") or ""
     inner = _adf_to_text(node.get("content"))
-    block = {"doc", "paragraph", "heading", "blockquote", "codeBlock", "listItem",
-             "bulletList", "orderedList", "panel", "table", "tableRow", "rule"}
+    block = {
+        "doc",
+        "paragraph",
+        "heading",
+        "blockquote",
+        "codeBlock",
+        "listItem",
+        "bulletList",
+        "orderedList",
+        "panel",
+        "table",
+        "tableRow",
+        "rule",
+    }
     return inner + "\n" if t in block else inner
 
 
 def _adf(text: str) -> dict:
     """Plain text → the minimal ADF document REST v3 write endpoints require."""
     paragraphs = [
-        {"type": "paragraph",
-         "content": [{"type": "text", "text": p}] if p else []}
+        {"type": "paragraph", "content": [{"type": "text", "text": p}] if p else []}
         for p in text.split("\n")
     ]
     return {"type": "doc", "version": 1, "content": paragraphs}
@@ -465,8 +503,11 @@ def _estimate_hours(fields: dict) -> float | None:
     provider's data, and a planning rule must not rank on a guess."""
     raw = fields.get("timeoriginalestimate")
     if raw is None:
-        raw = (fields.get("timetracking") or {}).get("originalEstimateSeconds") \
-            if isinstance(fields.get("timetracking"), dict) else None
+        raw = (
+            (fields.get("timetracking") or {}).get("originalEstimateSeconds")
+            if isinstance(fields.get("timetracking"), dict)
+            else None
+        )
     if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw < 0:
         return None
     return round(raw / 3600.0, 4)
@@ -476,8 +517,7 @@ def _parent(fields: dict) -> dict | None:
     p = fields.get("parent")
     if not isinstance(p, dict) or not p.get("key"):
         return None
-    return {"issue_key": p["key"],
-            "summary": ((p.get("fields") or {}).get("summary"))}
+    return {"issue_key": p["key"], "summary": ((p.get("fields") or {}).get("summary"))}
 
 
 def _links(fields: dict) -> tuple[list[dict], int]:
@@ -503,14 +543,16 @@ def _links(fields: dict) -> tuple[list[dict], int]:
         if not isinstance(other, dict) or not other.get("key"):
             continue  # a link whose other end we cannot name is not actionable
         of = other.get("fields") or {}
-        out.append({
-            "relation": t.get(direction) or t.get("name"),
-            "type": t.get("name"),
-            "direction": direction,
-            "issue_key": other["key"],
-            "summary": of.get("summary"),
-            "status": (of.get("status") or {}).get("name"),
-        })
+        out.append(
+            {
+                "relation": t.get(direction) or t.get("name"),
+                "type": t.get("name"),
+                "direction": direction,
+                "issue_key": other["key"],
+                "summary": of.get("summary"),
+                "status": (of.get("status") or {}).get("name"),
+            }
+        )
     return out[:MAX_LINKS], max(0, len(out) - MAX_LINKS)
 
 
@@ -540,9 +582,12 @@ async def _custom_fields() -> list[dict]:
     resp = await _call("GET", _api("/field"))
     _check(resp, "listFields")
     fields = [
-        {"id": f["id"], "name": f.get("name"),
-         "type": (f.get("schema") or {}).get("custom", "").rsplit(":", 1)[-1] or None,
-         "writable": _shape_of(f.get("schema")) is not None}
+        {
+            "id": f["id"],
+            "name": f.get("name"),
+            "type": (f.get("schema") or {}).get("custom", "").rsplit(":", 1)[-1] or None,
+            "writable": _shape_of(f.get("schema")) is not None,
+        }
         for f in resp.json()
         if isinstance(f, dict) and f.get("custom") and f.get("id")
     ]
@@ -574,9 +619,10 @@ def _custom_value(raw):
         # wiki-markup STRING on Data Center — both are "the field's text".
         return _clip_custom(re.sub(r"\n{3,}", "\n\n", raw).strip() or None)
     if isinstance(raw, dict):
-        if raw.get("type") == "doc":            # rich text (textarea) — the
-            return _clip_custom(               # cost/benefit fields' shape
-                re.sub(r"\n{3,}", "\n\n", _adf_to_text(raw)).strip() or None)
+        if raw.get("type") == "doc":  # rich text (textarea) — the
+            return _clip_custom(  # cost/benefit fields' shape
+                re.sub(r"\n{3,}", "\n\n", _adf_to_text(raw)).strip() or None
+            )
         for k in ("value", "displayName", "name", "text"):
             if isinstance(raw.get(k), str) and raw[k]:
                 return raw[k]
@@ -596,7 +642,7 @@ def _custom_values(fields: dict, declared: list[dict], *, only_set: bool) -> dic
     out = {}
     for f in declared:
         if f["id"] not in fields:
-            continue    # not requested, or not on this issue's screen
+            continue  # not requested, or not on this issue's screen
         value = _custom_value(fields.get(f["id"]))
         if value is None and only_set:
             continue
@@ -644,7 +690,7 @@ async def get_issue(issue_key: str) -> dict:
         "estimate_hours": _estimate_hours(f),
         "created": f.get("created"),
         "updated": f.get("updated"),
-        "assignee": _assignee(f),   # None == unassigned, not "unknown"
+        "assignee": _assignee(f),  # None == unassigned, not "unknown"
         "parent": _parent(f),
         "links": links,
         "url": settings.jira_base_url.rstrip("/") + "/browse/" + str(raw.get("key")),
@@ -679,8 +725,7 @@ async def search_issues(jql: str, limit: int | None = None) -> dict:
     issues, token, start, more = [], None, 0, False
     for _ in range(10):  # page cap — never an unbounded crawl
         if _flavor() == "server":
-            body = {"jql": jql, "startAt": start,
-                    "maxResults": bound, "fields": asked}
+            body = {"jql": jql, "startAt": start, "maxResults": bound, "fields": asked}
             resp = await _call("POST", _api("/search"), body)
         else:
             body = {"jql": jql, "maxResults": bound, "fields": asked}
@@ -700,25 +745,27 @@ async def search_issues(jql: str, limit: int | None = None) -> dict:
             # per declared field per row. Absent here means empty, and
             # jira.list_fields is where "what fields exist" is answered.
             row_custom = _custom_values(f, declared, only_set=True)
-            issues.append({
-                "issue_key": it["key"],
-                "summary": f.get("summary"),
-                "status": (f.get("status") or {}).get("name"),
-                "status_category": _status_category(f),
-                "issue_type": (f.get("issuetype") or {}).get("name"),
-                "labels": f.get("labels") if isinstance(f.get("labels"), list) else [],
-                "due_date": f.get("duedate"),
-                "estimate_hours": _estimate_hours(f),
-                "priority": (f.get("priority") or {}).get("name"),
-                "updated": f.get("updated"),
-                "assignee": _assignee(f),   # None == unassigned
-                "parent": (_parent(f) or {}).get("issue_key"),
-                # Count only, by design (see SEARCH_FIELDS): enough to spot
-                # orphans and hubs, then getIssue for the actual dependencies.
-                "link_count": len(row_links) + row_dropped,
-                "url": settings.jira_base_url.rstrip("/") + "/browse/" + it["key"],
-                **({"custom_fields": row_custom} if row_custom else {}),
-            })
+            issues.append(
+                {
+                    "issue_key": it["key"],
+                    "summary": f.get("summary"),
+                    "status": (f.get("status") or {}).get("name"),
+                    "status_category": _status_category(f),
+                    "issue_type": (f.get("issuetype") or {}).get("name"),
+                    "labels": f.get("labels") if isinstance(f.get("labels"), list) else [],
+                    "due_date": f.get("duedate"),
+                    "estimate_hours": _estimate_hours(f),
+                    "priority": (f.get("priority") or {}).get("name"),
+                    "updated": f.get("updated"),
+                    "assignee": _assignee(f),  # None == unassigned
+                    "parent": (_parent(f) or {}).get("issue_key"),
+                    # Count only, by design (see SEARCH_FIELDS): enough to spot
+                    # orphans and hubs, then getIssue for the actual dependencies.
+                    "link_count": len(row_links) + row_dropped,
+                    "url": settings.jira_base_url.rstrip("/") + "/browse/" + it["key"],
+                    **({"custom_fields": row_custom} if row_custom else {}),
+                }
+            )
         # 100 is Jira's per-page maxResults cap, NOT a result ceiling: page until
         # `limit` is satisfied. This used to break on the first page whenever a
         # limit was passed — and jira_search_issues always passes one — so
@@ -734,12 +781,17 @@ async def search_issues(jql: str, limit: int | None = None) -> dict:
         if not more or (limit is not None and len(issues) >= limit):
             break
     out = issues[:limit] if limit else issues
-    return {"ok": True, "kind": "jira", "operation": "searchIssues",
-            "issues": out, "count": len(out),
-            **({"custom_fields_error": note} if note else {}),
-            # More rows the 10-page cap (or `limit`) did not return. Say so —
-            # a reader that cannot tell a full result from a cut one invents facts.
-            "truncated": bool(more) or len(issues) > len(out)}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "searchIssues",
+        "issues": out,
+        "count": len(out),
+        **({"custom_fields_error": note} if note else {}),
+        # More rows the 10-page cap (or `limit`) did not return. Say so —
+        # a reader that cannot tell a full result from a cut one invents facts.
+        "truncated": bool(more) or len(issues) > len(out),
+    }
 
 
 @_requires_native
@@ -748,14 +800,18 @@ async def get_transitions(issue_key: str) -> dict:
     resp = await _call("GET", _api(f"/issue/{key}/transitions"))
     _check(resp, "getTransitions", key)
     transitions = [
-        {"id": t.get("id"), "name": t.get("name"),
-         "to_status": (t.get("to") or {}).get("name")}
+        {"id": t.get("id"), "name": t.get("name"), "to_status": (t.get("to") or {}).get("name")}
         for t in resp.json().get("transitions") or []
         if t.get("id") and t.get("name")
     ]
-    return {"ok": True, "kind": "jira", "operation": "getTransitions",
-            "issue": {"issue_key": key}, "transitions": transitions,
-            "count": len(transitions)}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "getTransitions",
+        "issue": {"issue_key": key},
+        "transitions": transitions,
+        "count": len(transitions),
+    }
 
 
 # --- writes (Executor only, post-approval) ------------------------------------
@@ -767,16 +823,25 @@ async def set_due_date(issue_key: str, due_date: str) -> dict:
     d = _date(due_date, "setDueDate", key)
     resp = await _call("PUT", _api(f"/issue/{key}"), {"fields": {"duedate": d}})
     _check(resp, "setDueDate", key)
-    return {"ok": True, "kind": "jira", "operation": "setDueDate",
-            "issue": {"issue_key": key, "due_date": d}}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "setDueDate",
+        "issue": {"issue_key": key, "due_date": d},
+    }
 
 
 @_requires_native
 async def create_issue(
-    project_key: str, summary: str, issue_type: str,
-    description: str | None = None, due_date: str | None = None,
-    labels: list[str] | None = None, parent: str | None = None,
-    custom_fields: dict | None = None, assignee: str | None = None,
+    project_key: str,
+    summary: str,
+    issue_type: str,
+    description: str | None = None,
+    due_date: str | None = None,
+    labels: list[str] | None = None,
+    parent: str | None = None,
+    custom_fields: dict | None = None,
+    assignee: str | None = None,
     estimate_hours: float | None = None,
 ) -> dict:
     """Create a new issue — the capability the 2026-07-20 charter-v2 incident
@@ -805,7 +870,9 @@ async def create_issue(
     shape both the Cloud v3 reference and the vendored Data Center 9.17
     reference show (see `_estimate_duration`)."""
     if not isinstance(project_key, str) or not PROJECT_RE.match(project_key or ""):
-        raise JiraError(f"createIssue — bad project_key {project_key!r} — must match [A-Z][A-Z0-9_]*")
+        raise JiraError(
+            f"createIssue — bad project_key {project_key!r} — must match [A-Z][A-Z0-9_]*"
+        )
     if not isinstance(summary, str) or not summary.strip() or len(summary) > 255:
         raise JiraError("createIssue — summary must be a non-empty string under 255 chars")
     if due_date is not None:
@@ -816,8 +883,11 @@ async def create_issue(
         raise JiraError("createIssue — labels must be a list of strings")
     if parent is not None:
         parent = _key(parent, "parent")
-    estimate = (_estimate_duration(estimate_hours, "createIssue", project_key)
-                if estimate_hours is not None else None)
+    estimate = (
+        _estimate_duration(estimate_hours, "createIssue", project_key)
+        if estimate_hours is not None
+        else None
+    )
     custom_payload, custom_applied = {}, {}
     if custom_fields is not None:
         custom_payload, custom_applied = await _resolve_custom_writes(
@@ -847,18 +917,23 @@ async def create_issue(
     resp = await _call("POST", _api("/issue"), {"fields": fields})
     _check(resp, "createIssue", project_key)
     key = resp.json().get("key")
-    return {"ok": True, "kind": "jira", "operation": "createIssue", "issue": {
-        "issue_key": key,
-        "summary": summary.strip(),
-        "issue_type": issue_type,
-        "due_date": due_date,
-        "labels": labels or [],
-        "parent": parent,
-        **({"assignee": assignee} if assignee is not None else {}),
-        **({"estimate_hours": estimate_hours} if estimate else {}),
-        "url": settings.jira_base_url.rstrip("/") + "/browse/" + str(key),
-        **({"custom_fields": custom_applied} if custom_applied else {}),
-    }}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "createIssue",
+        "issue": {
+            "issue_key": key,
+            "summary": summary.strip(),
+            "issue_type": issue_type,
+            "due_date": due_date,
+            "labels": labels or [],
+            "parent": parent,
+            **({"assignee": assignee} if assignee is not None else {}),
+            **({"estimate_hours": estimate_hours} if estimate else {}),
+            "url": settings.jira_base_url.rstrip("/") + "/browse/" + str(key),
+            **({"custom_fields": custom_applied} if custom_applied else {}),
+        },
+    }
 
 
 # One comment's text as an agent is shown it. A comment is free text of any
@@ -901,8 +976,7 @@ async def list_comments(issue_key: str, limit: int = 5, offset: int = 0) -> dict
     limit = max(1, min(int(limit), COMMENTS_PAGE_MAX))
     offset = max(0, int(offset))
     base = f"/issue/{key}/comment"
-    resp = await _call(
-        "GET", _api(f"{base}?orderBy=-created&startAt={offset}&maxResults={limit}"))
+    resp = await _call("GET", _api(f"{base}?orderBy=-created&startAt={offset}&maxResults={limit}"))
     _check(resp, "getComments", key)
     page = resp.json()
     total = int(page.get("total") or 0)
@@ -918,10 +992,18 @@ async def list_comments(issue_key: str, limit: int = 5, offset: int = 0) -> dict
         raw = list(reversed(resp.json().get("comments") or []))
     comments = [_comment_row(c) for c in raw]
     older = max(0, total - offset - len(comments))
-    return {"ok": True, "kind": "jira", "operation": "getComments",
-            "issue": {"issue_key": key}, "total": total, "offset": offset,
-            "comments": comments, "count": len(comments), "older": older,
-            **({"next_offset": offset + len(comments)} if older else {})}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "getComments",
+        "issue": {"issue_key": key},
+        "total": total,
+        "offset": offset,
+        "comments": comments,
+        "count": len(comments),
+        "older": older,
+        **({"next_offset": offset + len(comments)} if older else {}),
+    }
 
 
 @_requires_native
@@ -931,9 +1013,13 @@ async def add_comment(issue_key: str, body: str) -> dict:
         raise JiraError(f"addComment for {key} — body must be a non-empty string")
     resp = await _call("POST", _api(f"/issue/{key}/comment"), {"body": _rich(body)})
     _check(resp, "addComment", key)
-    return {"ok": True, "kind": "jira", "operation": "addComment",
-            "issue": {"issue_key": key},
-            "comment": {"id": resp.json().get("id")}}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "addComment",
+        "issue": {"issue_key": key},
+        "comment": {"id": resp.json().get("id")},
+    }
 
 
 _UNSET = object()
@@ -941,7 +1027,10 @@ _UNSET = object()
 
 @_requires_native
 async def update_attributes(
-    issue_key: str, priority=_UNSET, due_date=_UNSET, labels=_UNSET,
+    issue_key: str,
+    priority=_UNSET,
+    due_date=_UNSET,
+    labels=_UNSET,
 ) -> dict:
     """A PARTIAL edit of the three built-in attributes: only what is passed is
     sent, so an attribute the proposal does not name is left exactly as it is.
@@ -957,26 +1046,33 @@ async def update_attributes(
     fields: dict = {}
     if priority is not _UNSET:
         if not isinstance(priority, str) or not priority.strip():
-            raise JiraError(f"updateAttributes for {key} — priority must be a priority NAME "
-                            "(it can be changed, not cleared)")
+            raise JiraError(
+                f"updateAttributes for {key} — priority must be a priority NAME "
+                "(it can be changed, not cleared)"
+            )
         fields["priority"] = {"name": priority.strip()}
     if due_date is not _UNSET:
-        fields["duedate"] = (None if due_date is None
-                             else _date(due_date, "updateAttributes", key))
+        fields["duedate"] = None if due_date is None else _date(due_date, "updateAttributes", key)
     if labels is not _UNSET:
         if not isinstance(labels, list) or not all(isinstance(x, str) for x in labels):
-            raise JiraError(f"updateAttributes for {key} — labels must be the full "
-                            "replacement list of strings ([] clears them)")
+            raise JiraError(
+                f"updateAttributes for {key} — labels must be the full "
+                "replacement list of strings ([] clears them)"
+            )
         fields["labels"] = labels
     if not fields:
-        raise JiraError(f"updateAttributes for {key} — name at least one of priority, "
-                        "due_date, labels")
+        raise JiraError(
+            f"updateAttributes for {key} — name at least one of priority, due_date, labels"
+        )
     resp = await _call("PUT", _api(f"/issue/{key}"), {"fields": fields})
     _check(resp, "updateAttributes", key)
     changed = {"priority": priority, "due_date": due_date, "labels": labels}
-    return {"ok": True, "kind": "jira", "operation": "updateAttributes",
-            "issue": {"issue_key": key,
-                      **{k: v for k, v in changed.items() if v is not _UNSET}}}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "updateAttributes",
+        "issue": {"issue_key": key, **{k: v for k, v in changed.items() if v is not _UNSET}},
+    }
 
 
 def _user_ref(user_id: str | None) -> dict | None:
@@ -990,8 +1086,9 @@ def _user_ref(user_id: str | None) -> dict | None:
     if not isinstance(user_id, str) or not user_id.strip() or user_id.strip() == "-1":
         # "-1" means "the project's default assignee" on both products — a
         # person nobody named. Assign someone found with jira_find_users.
-        raise JiraError(f"bad assignee {user_id!r} — use a user_id from "
-                        "jira_find_users, or null to unassign")
+        raise JiraError(
+            f"bad assignee {user_id!r} — use a user_id from jira_find_users, or null to unassign"
+        )
     uid = user_id.strip()
     return {"name": uid} if _flavor() == "server" else {"accountId": uid}
 
@@ -1028,11 +1125,22 @@ async def find_users(query: str, project_key: str | None = None) -> dict:
         uid = u.get("name") if _flavor() == "server" else u.get("accountId")
         if not uid:
             continue
-        users.append({"user_id": uid, "display_name": u.get("displayName"),
-                      "email": u.get("emailAddress") or None,  # Cloud may hide it
-                      "active": u.get("active")})
-    return {"ok": True, "kind": "jira", "operation": "findUsers",
-            "query": q, "project_key": project_key, "users": users}
+        users.append(
+            {
+                "user_id": uid,
+                "display_name": u.get("displayName"),
+                "email": u.get("emailAddress") or None,  # Cloud may hide it
+                "active": u.get("active"),
+            }
+        )
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "findUsers",
+        "query": q,
+        "project_key": project_key,
+        "users": users,
+    }
 
 
 @_requires_native
@@ -1042,12 +1150,19 @@ async def assign_issue(issue_key: str, assignee: str | None) -> dict:
     (see `_user_ref`)."""
     key = _key(issue_key)
     ref = _user_ref(assignee)
-    body = ref if ref is not None else (
-        {"name": None} if _flavor() == "server" else {"accountId": None})
+    body = (
+        ref
+        if ref is not None
+        else ({"name": None} if _flavor() == "server" else {"accountId": None})
+    )
     resp = await _call("PUT", _api(f"/issue/{key}/assignee"), body)
     _check(resp, "assignIssue", key)
-    return {"ok": True, "kind": "jira", "operation": "assignIssue",
-            "issue": {"issue_key": key, "assignee": assignee}}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "assignIssue",
+        "issue": {"issue_key": key, "assignee": assignee},
+    }
 
 
 async def _stored_links(key: str) -> list[dict]:
@@ -1065,8 +1180,14 @@ async def _stored_links(key: str) -> list[dict]:
         for side, direction in (("outwardIssue", "outward"), ("inwardIssue", "inward")):
             other = link.get(side)
             if isinstance(other, dict) and other.get("key"):
-                out.append({"id": str(link.get("id")), "type": t.get("name"),
-                            "direction": direction, "other": other["key"]})
+                out.append(
+                    {
+                        "id": str(link.get("id")),
+                        "type": t.get("name"),
+                        "direction": direction,
+                        "other": other["key"],
+                    }
+                )
                 break
     return out
 
@@ -1101,12 +1222,17 @@ async def link_issues(from_key: str, to_key: str, link_type: str) -> dict:
         raise JiraError(f"linkIssues — from_key and to_key are the same issue {fk!r}")
     _link_type(link_type, "linkIssues")
     before = {lk["id"] for lk in await _stored_links(fk)}
-    resp = await _call("POST", _api("/issueLink"), {
-        "type": {"name": link_type},
-        "inwardIssue": {"key": fk}, "outwardIssue": {"key": tk}})
+    resp = await _call(
+        "POST",
+        _api("/issueLink"),
+        {"type": {"name": link_type}, "inwardIssue": {"key": fk}, "outwardIssue": {"key": tk}},
+    )
     _check(resp, "linkIssues", fk)
-    made = [lk for lk in await _stored_links(fk)
-            if lk["id"] not in before and lk["other"] == tk and lk["type"] == link_type]
+    made = [
+        lk
+        for lk in await _stored_links(fk)
+        if lk["id"] not in before and lk["other"] == tk and lk["type"] == link_type
+    ]
     if any(lk["direction"] == "outward" for lk in made):
         verified = True
     elif made:
@@ -1122,9 +1248,17 @@ async def link_issues(from_key: str, to_key: str, link_type: str) -> dict:
         # Relates is symmetric in meaning but still stored with a side; a link
         # we cannot find again was still created — say so, never claim more.
         verified = False
-    return {"ok": True, "kind": "jira", "operation": "linkIssues",
-            "link": {"from_key": fk, "to_key": tk, "link_type": link_type,
-                     "direction_verified": verified}}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "linkIssues",
+        "link": {
+            "from_key": fk,
+            "to_key": tk,
+            "link_type": link_type,
+            "direction_verified": verified,
+        },
+    }
 
 
 @_requires_native
@@ -1139,12 +1273,19 @@ async def delete_link(from_key: str, to_key: str, link_type: str) -> dict:
     fk, tk = _key(from_key, "from_key"), _key(to_key, "to_key")
     _link_type(link_type, "deleteLink")
     stored = await _stored_links(fk)
-    match = [lk for lk in stored if lk["other"] == tk and lk["type"] == link_type
-             and lk["direction"] == "outward"]
+    match = [
+        lk
+        for lk in stored
+        if lk["other"] == tk and lk["type"] == link_type and lk["direction"] == "outward"
+    ]
     if not match:
-        seen = ", ".join(
-            f"{fk} {'→' if lk['direction'] == 'outward' else '←'} {lk['other']} ({lk['type']})"
-            for lk in stored) or "none"
+        seen = (
+            ", ".join(
+                f"{fk} {'→' if lk['direction'] == 'outward' else '←'} {lk['other']} ({lk['type']})"
+                for lk in stored
+            )
+            or "none"
+        )
         raise JiraError(
             f"deleteLink — {fk} has no {link_type} link to {tk} in that direction "
             f"(links on {fk}: {seen}; → means {fk} is the outward side)"
@@ -1152,9 +1293,12 @@ async def delete_link(from_key: str, to_key: str, link_type: str) -> dict:
     for lk in match:
         resp = await _call("DELETE", _api(f"/issueLink/{lk['id']}"))
         _check(resp, "deleteLink", fk)
-    return {"ok": True, "kind": "jira", "operation": "deleteLink",
-            "link": {"from_key": fk, "to_key": tk, "link_type": link_type,
-                     "removed": len(match)}}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "deleteLink",
+        "link": {"from_key": fk, "to_key": tk, "link_type": link_type, "removed": len(match)},
+    }
 
 
 @_requires_native
@@ -1169,9 +1313,13 @@ async def delete_issue(issue_key: str) -> dict:
     line is the only record of the issue left in this system. Same endpoint
     on Cloud and Data Center."""
     key = _key(issue_key)
-    resp = await _call("GET", _api(
-        f"/issue/{key}?fields=summary,status,issuetype,labels,duedate,"
-        "assignee,priority,subtasks,parent,description"))
+    resp = await _call(
+        "GET",
+        _api(
+            f"/issue/{key}?fields=summary,status,issuetype,labels,duedate,"
+            "assignee,priority,subtasks,parent,description"
+        ),
+    )
     _check(resp, "deleteIssue", key)
     f = resp.json().get("fields") or {}
     subtasks = [st.get("key") for st in (f.get("subtasks") or []) if isinstance(st, dict)]
@@ -1222,9 +1370,7 @@ async def resolve_transition(issue_key: str, transition: str) -> dict:
     if not isinstance(transition, str) or not transition.strip():
         raise JiraError(f"transitionIssue for {key} — transition must be a non-empty name")
     avail = (await get_transitions(key))["transitions"]
-    match = next(
-        (t for t in avail if t["name"].lower() == transition.strip().lower()), None
-    )
+    match = next((t for t in avail if t["name"].lower() == transition.strip().lower()), None)
     if match is None:
         names = ", ".join(t["name"] for t in avail) or "(none)"
         # Read the issue for the facts the Executor needs to tell a drafting
@@ -1233,9 +1379,11 @@ async def resolve_transition(issue_key: str, transition: str) -> dict:
         raise TransitionUnavailable(
             f"transitionIssue for {key} — transition {transition!r} is not available "
             f"from the issue's current status (available: {names})",
-            issue_key=key, transition=transition.strip(),
+            issue_key=key,
+            transition=transition.strip(),
             available=[t["name"] for t in avail],
-            status=issue.get("status"), updated=issue.get("updated"),
+            status=issue.get("status"),
+            updated=issue.get("updated"),
         )
     return match
 
@@ -1247,11 +1395,16 @@ async def transition_issue(issue_key: str, transition: str) -> dict:
     available set, never a guess."""
     key = _key(issue_key)
     match = await resolve_transition(key, transition)
-    resp = await _call("POST", _api(f"/issue/{key}/transitions"),
-                       {"transition": {"id": match["id"]}})
+    resp = await _call(
+        "POST", _api(f"/issue/{key}/transitions"), {"transition": {"id": match["id"]}}
+    )
     _check(resp, "transitionIssue", key)
-    return {"ok": True, "kind": "jira", "operation": "transitionIssue",
-            "issue": {"issue_key": key, "transition": match["name"]}}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "transitionIssue",
+        "issue": {"issue_key": key, "transition": match["name"]},
+    }
 
 
 # --- custom fields, filters, dashboards & gadgets (native only) ---------------
@@ -1275,9 +1428,7 @@ def _require_cloud(op: str) -> None:
     already drops these from an agent's surface under `server`, and this is the
     same refusal for a proposal that arrives by API."""
     if _flavor() == "server":
-        raise JiraError(
-            f"{op} — not available on Jira Data Center (Cloud-only REST endpoint)"
-        )
+        raise JiraError(f"{op} — not available on Jira Data Center (Cloud-only REST endpoint)")
 
 
 def match_field_name(configured: str, declared: list[dict]) -> str | None:
@@ -1301,8 +1452,13 @@ async def list_fields() -> dict:
     Jira have a field called X, and can I write it?"."""
     _require_native("listFields")
     fields = await _custom_fields()
-    return {"ok": True, "kind": "jira", "operation": "listFields",
-            "fields": fields, "count": len(fields)}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "listFields",
+        "fields": fields,
+        "count": len(fields),
+    }
 
 
 def _coerce_custom(name: str, shape: str, value, op: str = "setFields"):
@@ -1313,7 +1469,7 @@ def _coerce_custom(name: str, shape: str, value, op: str = "setFields"):
     """
     bad = f"{op} — {name!r} "
     if value is None:
-        return None                      # explicit clear
+        return None  # explicit clear
     if shape == "doc":
         if not isinstance(value, str):
             raise JiraError(bad + "is a rich-text field — value must be a string")
@@ -1340,7 +1496,7 @@ def _coerce_custom(name: str, shape: str, value, op: str = "setFields"):
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise JiraError(bad + "is a labels field — value must be a list of strings")
         return value
-    raise JiraError(bad + f"has an unsupported write shape {shape!r}")   # unreachable
+    raise JiraError(bad + f"has an unsupported write shape {shape!r}")  # unreachable
 
 
 async def _resolve_custom_writes(fields: dict, op: str, ref: str) -> tuple[dict, dict]:
@@ -1360,8 +1516,7 @@ async def _resolve_custom_writes(fields: dict, op: str, ref: str) -> tuple[dict,
         if f is None:
             known = ", ".join(sorted(d["name"] for d in declared if d.get("name"))) or "(none)"
             raise JiraError(
-                f"{op} for {ref} — no custom field named {name!r}. This "
-                f"instance declares: {known}"
+                f"{op} for {ref} — no custom field named {name!r}. This instance declares: {known}"
             )
         if not f["writable"]:
             raise JiraError(
@@ -1390,8 +1545,12 @@ async def set_fields(issue_key: str, fields: dict) -> dict:
     payload, applied = await _resolve_custom_writes(fields, "setFields", key)
     resp = await _call("PUT", _api(f"/issue/{key}"), {"fields": payload})
     _check(resp, "setFields", key)
-    return {"ok": True, "kind": "jira", "operation": "setFields",
-            "issue": {"issue_key": key, "fields": applied}}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "setFields",
+        "issue": {"issue_key": key, "fields": applied},
+    }
 
 
 def _estimate_duration(hours, op: str, ref: str) -> str:
@@ -1402,16 +1561,23 @@ def _estimate_duration(hours, op: str, ref: str) -> str:
     time-tracking settings (hours per day, days per week), so `"1d"` is eight
     hours on one Jira and six on another; minutes mean the same everywhere.
     Rounded to the nearest minute, never below one."""
-    if (isinstance(hours, bool) or not isinstance(hours, (int, float))
-            or not math.isfinite(hours) or hours <= 0):
-        raise JiraError(f"{op} for {ref} — estimate_hours must be a number of hours "
-                        f"above 0, got {hours!r}")
+    if (
+        isinstance(hours, bool)
+        or not isinstance(hours, (int, float))
+        or not math.isfinite(hours)
+        or hours <= 0
+    ):
+        raise JiraError(
+            f"{op} for {ref} — estimate_hours must be a number of hours above 0, got {hours!r}"
+        )
     return f"{max(1, round(hours * 60))}m"
 
 
 async def set_planning_fields(
-    issue_key: str, custom_fields: dict | None = None,
-    estimate_hours: float | None = None, due_date: str | None = None,
+    issue_key: str,
+    custom_fields: dict | None = None,
+    estimate_hours: float | None = None,
+    due_date: str | None = None,
 ) -> dict:
     """The planning fields of one issue (the EA planning design, D3; DL-221
     step 4b), in ONE edit: custom fields by NAME (resolved and shape-checked by
@@ -1431,15 +1597,23 @@ async def set_planning_fields(
     payload: dict = {}
     applied: dict = {}
     if custom_fields:
-        payload, applied = await _resolve_custom_writes(
-            custom_fields, "setPlanningFields", key)
+        payload, applied = await _resolve_custom_writes(custom_fields, "setPlanningFields", key)
     if due_date is not None:
         payload["duedate"] = _date(due_date, "setPlanningFields", key)
         applied["due_date"] = payload["duedate"]
     body: dict = {}
     if estimate_hours is not None:
-        body["update"] = {"timetracking": [{"edit": {
-            "originalEstimate": _estimate_duration(estimate_hours, "setPlanningFields", key)}}]}
+        body["update"] = {
+            "timetracking": [
+                {
+                    "edit": {
+                        "originalEstimate": _estimate_duration(
+                            estimate_hours, "setPlanningFields", key
+                        )
+                    }
+                }
+            ]
+        }
         applied["estimate_hours"] = estimate_hours
     if payload:
         body["fields"] = payload
@@ -1447,8 +1621,12 @@ async def set_planning_fields(
         raise JiraError(f"setPlanningFields for {key} — name at least one planning field")
     resp = await _call("PUT", _api(f"/issue/{key}"), body)
     _check(resp, "setPlanningFields", key)
-    return {"ok": True, "kind": "jira", "operation": "setPlanningFields",
-            "issue": {"issue_key": key, "fields": applied}}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "setPlanningFields",
+        "issue": {"issue_key": key, "fields": applied},
+    }
 
 
 async def list_filters(query: str | None = None) -> dict:
@@ -1457,6 +1635,7 @@ async def list_filters(query: str | None = None) -> dict:
     path = _api("/filter/search?expand=jql,description,owner")
     if query:
         from urllib.parse import quote
+
         path += f"&filterName={quote(query)}"
     resp = await _call("GET", path)
     _check(resp, "listFilters")
@@ -1464,12 +1643,22 @@ async def list_filters(query: str | None = None) -> dict:
     # total/isLast, but a bounded read is enough for "does this already exist".
     values = resp.json().get("values") or []
     filters = [
-        {"id": f.get("id"), "name": f.get("name"), "jql": f.get("jql"),
-         "description": f.get("description"), "owner": (f.get("owner") or {}).get("displayName")}
+        {
+            "id": f.get("id"),
+            "name": f.get("name"),
+            "jql": f.get("jql"),
+            "description": f.get("description"),
+            "owner": (f.get("owner") or {}).get("displayName"),
+        }
         for f in values
     ]
-    return {"ok": True, "kind": "jira", "operation": "listFilters",
-            "filters": filters, "count": len(filters)}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "listFilters",
+        "filters": filters,
+        "count": len(filters),
+    }
 
 
 async def list_dashboards(query: str | None = None) -> dict:
@@ -1478,17 +1667,27 @@ async def list_dashboards(query: str | None = None) -> dict:
     path = _api("/dashboard/search?expand=description")
     if query:
         from urllib.parse import quote
+
         path += f"&dashboardName={quote(query)}"
     resp = await _call("GET", path)
     _check(resp, "listDashboards")
     values = resp.json().get("values") or []
     dashboards = [
-        {"id": d.get("id"), "name": d.get("name"), "description": d.get("description"),
-         "view": d.get("view")}
+        {
+            "id": d.get("id"),
+            "name": d.get("name"),
+            "description": d.get("description"),
+            "view": d.get("view"),
+        }
         for d in values
     ]
-    return {"ok": True, "kind": "jira", "operation": "listDashboards",
-            "dashboards": dashboards, "count": len(dashboards)}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "listDashboards",
+        "dashboards": dashboards,
+        "count": len(dashboards),
+    }
 
 
 async def list_gadgets() -> dict:
@@ -1501,8 +1700,13 @@ async def list_gadgets() -> dict:
         {"title": g.get("title"), "uri": g.get("uri"), "module_key": g.get("moduleKey")}
         for g in raw
     ]
-    return {"ok": True, "kind": "jira", "operation": "listGadgets",
-            "gadgets": gadgets, "count": len(gadgets)}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "listGadgets",
+        "gadgets": gadgets,
+        "count": len(gadgets),
+    }
 
 
 async def list_projects() -> dict:
@@ -1527,22 +1731,23 @@ async def list_projects() -> dict:
     _require_native("listProjects")
 
     def _row(p: dict) -> dict:
-        return {"key": p.get("key"), "name": p.get("name"),
-                "id": p.get("id"), "type": p.get("projectTypeKey")}
+        return {
+            "key": p.get("key"),
+            "name": p.get("name"),
+            "id": p.get("id"),
+            "type": p.get("projectTypeKey"),
+        }
 
     projects: list[dict] = []
     if _flavor() == "server":
         resp = await _call("GET", _api("/project"))
         _check(resp, "listProjects")
         body = resp.json()
-        projects = [_row(p) for p in body if isinstance(p, dict)] \
-            if isinstance(body, list) else []
+        projects = [_row(p) for p in body if isinstance(p, dict)] if isinstance(body, list) else []
     else:
         start = 0
         while True:
-            resp = await _call(
-                "GET", _api(f"/project/search?maxResults=100&startAt={start}")
-            )
+            resp = await _call("GET", _api(f"/project/search?maxResults=100&startAt={start}"))
             _check(resp, "listProjects")
             body = resp.json()
             values = body.get("values") or []
@@ -1550,8 +1755,13 @@ async def list_projects() -> dict:
             if body.get("isLast", True) or not values:
                 break
             start += len(values)
-    return {"ok": True, "kind": "jira", "operation": "listProjects",
-            "projects": projects, "count": len(projects)}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "listProjects",
+        "projects": projects,
+        "count": len(projects),
+    }
 
 
 async def list_issue_types(project_key: str) -> dict:
@@ -1597,16 +1807,27 @@ async def list_issue_types(project_key: str) -> dict:
             page = body.get("issueTypes") or body.get("values") or []
             types += [
                 {"id": t.get("id"), "name": t.get("name"), "subtask": bool(t.get("subtask"))}
-                for t in page if isinstance(t, dict)
+                for t in page
+                if isinstance(t, dict)
             ]
             start += len(page)
             total = body.get("total")
-            if (not page or body.get("last") is True or body.get("isLast") is True
-                    or (isinstance(total, int) and start >= total)):
+            if (
+                not page
+                or body.get("last") is True
+                or body.get("isLast") is True
+                or (isinstance(total, int) and start >= total)
+            ):
                 break
         _issue_types_cache[project_key] = (now, types)
-    return {"ok": True, "kind": "jira", "operation": "listIssueTypes",
-            "project_key": project_key, "issue_types": types, "count": len(types)}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "listIssueTypes",
+        "project_key": project_key,
+        "issue_types": types,
+        "count": len(types),
+    }
 
 
 def _filter_or_dashboard_name(name: str, op: str) -> str:
@@ -1627,10 +1848,17 @@ async def create_filter(name: str, jql: str, description: str | None = None) -> 
     _check(resp, "createFilter")
     out = resp.json()
     fid = out.get("id")
-    return {"ok": True, "kind": "jira", "operation": "createFilter", "filter": {
-        "id": fid, "name": out.get("name", name), "jql": jql,
-        "url": settings.jira_base_url.rstrip("/") + "/issues/?filter=" + str(fid),
-    }}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "createFilter",
+        "filter": {
+            "id": fid,
+            "name": out.get("name", name),
+            "jql": jql,
+            "url": settings.jira_base_url.rstrip("/") + "/issues/?filter=" + str(fid),
+        },
+    }
 
 
 def _gadget_ref(spec: dict) -> tuple[str, str]:
@@ -1752,8 +1980,9 @@ async def _prepare_gadget_configs(gadgets: list[dict]) -> None:
                         f"{len(matches)} filters (need exactly 1); nothing was created"
                     )
                 value = f"filter-{matches[0]['id']}"
-            config["projectOrFilterId" if prefs and "projectOrFilterId" in prefs
-                   else "filterId"] = value
+            config[
+                "projectOrFilterId" if prefs and "projectOrFilterId" in prefs else "filterId"
+            ] = value
         if not prefs:
             continue
         unknown = sorted(set(config) - prefs)
@@ -1807,9 +2036,7 @@ async def create_dashboard(
             "position": spec.get("position", {"row": i, "column": 0}),
         }
         try:
-            gresp = await _call(
-                "POST", _api(f"/dashboard/{dash_id}/gadget"), gadget_body
-            )
+            gresp = await _call("POST", _api(f"/dashboard/{dash_id}/gadget"), gadget_body)
             _check(gresp, "createDashboard.gadget")
             gadget_id = gresp.json().get("id")
             if spec.get("config"):
@@ -1825,11 +2052,17 @@ async def create_dashboard(
             # rest — the dashboard itself already exists and stands.
             outcomes.append({"title": spec.get("title"), "ok": False, "error": str(e)})
 
-    return {"ok": True, "kind": "jira", "operation": "createDashboard", "dashboard": {
-        "id": dash_id, "name": dash.get("name", name),
-        "url": settings.jira_base_url.rstrip("/") + "/jira/dashboards/" + str(dash_id),
-        "gadgets": outcomes,
-    }}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "createDashboard",
+        "dashboard": {
+            "id": dash_id,
+            "name": dash.get("name", name),
+            "url": settings.jira_base_url.rstrip("/") + "/jira/dashboards/" + str(dash_id),
+            "gadgets": outcomes,
+        },
+    }
 
 
 # --- project creation (jira-expert only; see gateway/capabilities.py) ---------
@@ -1880,7 +2113,14 @@ async def create_project(key: str, name: str, project_type_key: str = "software"
     _check(resp, "createProject")
     out = resp.json()
     project_key = out.get("key", key)
-    return {"ok": True, "kind": "jira", "operation": "createProject", "project": {
-        "key": project_key, "id": out.get("id"), "name": name.strip(),
-        "url": settings.jira_base_url.rstrip("/") + "/projects/" + str(project_key),
-    }}
+    return {
+        "ok": True,
+        "kind": "jira",
+        "operation": "createProject",
+        "project": {
+            "key": project_key,
+            "id": out.get("id"),
+            "name": name.strip(),
+            "url": settings.jira_base_url.rstrip("/") + "/projects/" + str(project_key),
+        },
+    }

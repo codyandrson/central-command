@@ -50,7 +50,11 @@ def checkout(tmp_path, monkeypatch):
     root = (tmp_path / "checkout").resolve()
     a = f"skills/{ALPHA}"
     _release(root, "1")
-    _write(root, f"{a}/SKILL.md", "---\nname: alpha\ndescription: a test skill\n---\n\n# Alpha\nsteps\n")
+    _write(
+        root,
+        f"{a}/SKILL.md",
+        "---\nname: alpha\ndescription: a test skill\n---\n\n# Alpha\nsteps\n",
+    )
     _write(root, f"{a}/references/one.md", "---\ntitle: a reference\n---\n\n" + ONE_V1)
     _write(root, f"{a}/references/two.md", "# Two\nstays the same\n")
     _write(root, f"{a}/references/gone.md", "# Gone\nremoved by release 2\n")
@@ -105,7 +109,8 @@ async def _flags(skill_id: str = ALPHA) -> list[dict]:
     conn = await repo._conn()
     try:
         rows = await conn.fetch(
-            "select * from skill_doc_flag where skill_id = $1 order by doc_key, release", skill_id,
+            "select * from skill_doc_flag where skill_id = $1 order by doc_key, release",
+            skill_id,
         )
         return [dict(r) for r in rows]
     finally:
@@ -143,7 +148,7 @@ async def test_a_doc_nobody_edited_follows_the_release(clean_skills, checkout):
     assert one["content"] == ONE_V2
     assert one["added_by"] == "updater"
     assert one["bundled_release"] == "2" and one["bundled_hash"] == bundled_text_hash(ONE_V2)
-    assert await _base("one") == ONE_V2                      # the base moved with it
+    assert await _base("one") == ONE_V2  # the base moved with it
     assert _mine(result["flagged"]) == [] and _mine(result["failed"]) == []
     assert await _flags() == []
 
@@ -163,14 +168,16 @@ async def test_an_edited_doc_the_release_did_not_change_is_left_alone(clean_skil
 
 @needs_pg
 @pytest.mark.asyncio
-async def test_an_edited_doc_the_release_changed_is_kept_based_anew_and_flagged(clean_skills, checkout):
+async def test_an_edited_doc_the_release_changed_is_kept_based_anew_and_flagged(
+    clean_skills, checkout
+):
     await _seed(checkout)
     await _hand_post("one", MINE)
     _to_release_2(checkout)
     result = await refresh.sync()
 
     one = await _current("one")
-    assert one["content"] == MINE                            # an edit is never overwritten
+    assert one["content"] == MINE  # an edit is never overwritten
     assert one["bundled_hash"] == bundled_text_hash(ONE_V2)  # the new base is recorded
     assert await _base("one") == ONE_V2
     [flag] = [f for f in await _flags() if f["doc_key"] == "one"]
@@ -289,7 +296,7 @@ async def test_a_doc_already_at_the_release_text_catches_its_base_up_without_a_f
     clean_skills, checkout
 ):
     await _seed(checkout)
-    await _hand_post("one", ONE_V2)                         # taken by hand before the release
+    await _hand_post("one", ONE_V2)  # taken by hand before the release
     _to_release_2(checkout)
     await refresh.sync()
     assert (await _current("one"))["content"] == ONE_V2
@@ -318,7 +325,7 @@ async def test_an_overlay_render_is_what_is_compared(clean_skills, checkout, tmp
     await _seed(checkout)
     assert "the first site" in (await _current("two"))["content"]
     (tmp_path / "overlay" / "site.md").write_text("the second site\n")
-    await refresh.sync()                                    # nobody edited it: it follows
+    await refresh.sync()  # nobody edited it: it follows
     assert "the second site" in (await _current("two"))["content"]
 
 
@@ -337,7 +344,9 @@ async def test_a_tree_with_no_bundled_skills_refuses_rather_than_retiring_everyt
 
 @needs_pg
 @pytest.mark.asyncio
-async def test_an_edit_landing_while_it_runs_is_never_overwritten(clean_skills, checkout, monkeypatch):
+async def test_an_edit_landing_while_it_runs_is_never_overwritten(
+    clean_skills, checkout, monkeypatch
+):
     """The read said nobody edited `one`; an edit lands before the write. The
     write re-checks under its lock and refuses, and the rest go on."""
     await _seed(checkout)
@@ -353,7 +362,7 @@ async def test_an_edit_landing_while_it_runs_is_never_overwritten(clean_skills, 
     result = await refresh.sync()
     assert (await _current("one"))["content"] == MINE
     assert [f["doc"] for f in _mine(result["failed"])] == [f"{ALPHA}/one"]
-    assert await _current("gone") is None                   # the others went on
+    assert await _current("gone") is None  # the others went on
 
 
 @needs_pg
@@ -375,7 +384,7 @@ async def test_the_event_counts_and_names_never_carry_doc_text(clean_skills, che
 
 
 def test_two_files_on_one_doc_key_raise_as_an_import_does(checkout):
-    _write(checkout, f"skills/{ALPHA}/references/one_.md", "# clash\n")   # slugs to `one` too
+    _write(checkout, f"skills/{ALPHA}/references/one_.md", "# clash\n")  # slugs to `one` too
     with pytest.raises(ValueError, match="collide"):
         refresh.read_disk(checkout, {})
 
@@ -404,7 +413,8 @@ async def _open_item(doc_key: str = "one") -> dict:
 async def _decide(decision: str, content: str | None = None, doc_key: str = "one") -> dict:
     item = await _open_item(doc_key)
     return await routes.resolve_skill_release_flag_route(
-        ALPHA, doc_key,
+        ALPHA,
+        doc_key,
         routes.SkillFlagResolveIn(decision=decision, content=content, ours_hash=item["ours_hash"]),
     )
 
@@ -446,7 +456,11 @@ async def test_keep_mine_writes_nothing_but_the_decision(clean_skills, checkout)
     assert (await _current("one"))["content"] == MINE
     assert await _versions("one") == before
     assert [f["decision"] for f in await _flags()] == ["keep_mine"]
-    assert [i for i in (await routes.list_skill_release_flags_route())["items"] if i["skill_id"] == ALPHA] == []
+    assert [
+        i
+        for i in (await routes.list_skill_release_flags_route())["items"]
+        if i["skill_id"] == ALPHA
+    ] == []
 
 
 @needs_pg
@@ -456,7 +470,7 @@ async def test_edit_posts_the_operators_text(clean_skills, checkout):
     await _decide("edit", "# One\nboth, merged by hand\n")
     one = await _current("one")
     assert one["content"] == "# One\nboth, merged by hand\n" and one["added_by"] == "operator"
-    assert await _base("one") == ONE_V2                     # the base stays the release's text
+    assert await _base("one") == ONE_V2  # the base stays the release's text
 
 
 @needs_pg
@@ -478,7 +492,8 @@ async def test_a_decision_over_a_moved_text_is_a_409_and_writes_nothing(clean_sk
     await _hand_post("one", "# One\nchanged again meanwhile\n")
     with pytest.raises(HTTPException) as e:
         await routes.resolve_skill_release_flag_route(
-            ALPHA, "one",
+            ALPHA,
+            "one",
             routes.SkillFlagResolveIn(decision="take_release", ours_hash=item["ours_hash"]),
         )
     assert e.value.status_code == 409
@@ -488,7 +503,9 @@ async def test_a_decision_over_a_moved_text_is_a_409_and_writes_nothing(clean_sk
 
 @needs_pg
 @pytest.mark.asyncio
-async def test_take_release_refuses_when_the_disk_no_longer_ships_the_flagged_text(clean_skills, checkout):
+async def test_take_release_refuses_when_the_disk_no_longer_ships_the_flagged_text(
+    clean_skills, checkout
+):
     await _flagged(checkout)
     _write(checkout, f"skills/{ALPHA}/references/one.md", "# One\nsomething else\n")
     with pytest.raises(HTTPException) as e:
@@ -503,7 +520,9 @@ async def test_a_doc_with_no_open_flag_is_a_404_and_a_bad_shape_a_422(clean_skil
     await _flagged(checkout)
     with pytest.raises(HTTPException) as e:
         await routes.resolve_skill_release_flag_route(
-            ALPHA, "two", routes.SkillFlagResolveIn(decision="keep_mine", ours_hash=None),
+            ALPHA,
+            "two",
+            routes.SkillFlagResolveIn(decision="keep_mine", ours_hash=None),
         )
     assert e.value.status_code == 404
     # A bad shape never reaches the handler: the request model refuses it (over
@@ -520,8 +539,12 @@ async def test_a_doc_with_no_open_flag_is_a_404_and_a_bad_shape_a_422(clean_skil
             routes.SkillFlagResolveIn.from_params(params)
         assert e.value.status_code == 422
     assert "only with an edit" in str(
-        pytest.raises(HTTPException, routes.SkillFlagResolveIn.from_params,
-                      {"decision": "edit", "ours_hash": None}).value.detail)
+        pytest.raises(
+            HTTPException,
+            routes.SkillFlagResolveIn.from_params,
+            {"decision": "edit", "ours_hash": None},
+        ).value.detail
+    )
 
 
 @needs_pg
@@ -535,9 +558,15 @@ async def test_the_rpc_methods_answer_like_the_routes(clean_skills, checkout):
     listed = await rpc("skills.release_flags")
     assert [i["doc_key"] for i in listed["items"] if i["skill_id"] == ALPHA] == ["one"]
     item = listed["items"][0]
-    out = await rpc("skills.release_flag_resolve", {
-        "skill_id": ALPHA, "doc_key": "one", "decision": "keep_mine", "ours_hash": item["ours_hash"],
-    })
+    out = await rpc(
+        "skills.release_flag_resolve",
+        {
+            "skill_id": ALPHA,
+            "doc_key": "one",
+            "decision": "keep_mine",
+            "ours_hash": item["ours_hash"],
+        },
+    )
     assert out["decision"] == "keep_mine"
 
 
@@ -555,7 +584,10 @@ def _cli(root: Path, *args: str, cwd: Path, database_url: str | None = None):
     }
     return subprocess.run(
         [sys.executable, "-m", "central_command.skills.refresh", *args],
-        capture_output=True, text=True, env=env, cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=cwd,
     )
 
 
@@ -578,14 +610,18 @@ async def test_the_old_updaters_apply_command_runs_the_comparison(clean_skills, 
     """What v2.126.0's updater calls after the merge (`refresh._LEGACY`)."""
     await _seed(checkout)
     _to_release_2(checkout)
-    done = _cli(checkout, "apply", "--target", "2", "--ref", "v2", "--actor", "updater", cwd=tmp_path)
+    done = _cli(
+        checkout, "apply", "--target", "2", "--ref", "v2", "--actor", "updater", cwd=tmp_path
+    )
     assert done.returncode == 0, done.stderr
     assert (await _current("one"))["content"] == ONE_V2
 
 
 def test_sync_exits_2_when_the_database_is_down(checkout, tmp_path):
     done = _cli(
-        checkout, "sync", cwd=tmp_path,
+        checkout,
+        "sync",
+        cwd=tmp_path,
         database_url="postgresql://nobody:nothing@127.0.0.1:1/nothing",
     )
     assert done.returncode == 2, done.stdout + done.stderr

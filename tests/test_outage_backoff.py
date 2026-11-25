@@ -64,7 +64,7 @@ from tests.test_resume_parking import _boom_on_build, _pending
 pytestmark = needs_pg
 
 CAP = 300
-EXPECTED = [60, 120, 240, 300, 300, 300, 300, 300]   # eight failures
+EXPECTED = [60, 120, 240, 300, 300, 300, 300, 300]  # eight failures
 
 
 @pytest.fixture(autouse=True)
@@ -88,8 +88,9 @@ async def clean_ledger_rows():
 
 
 async def _payloads(ref_id: str, kind: str) -> list[dict]:
-    return [e["payload"] for e in await repo.list_events(ref_id=ref_id, limit=1000)
-            if e["kind"] == kind]
+    return [
+        e["payload"] for e in await repo.list_events(ref_id=ref_id, limit=1000) if e["kind"] == kind
+    ]
 
 
 def _gap(record: dict) -> int:
@@ -102,7 +103,8 @@ async def _operator_items(session_id: str) -> int:
     conn = await repo._conn()
     try:
         return await conn.fetchval(
-            "select count(*) from operator_item where session_id = $1", session_id)
+            "select count(*) from operator_item where session_id = $1", session_id
+        )
     finally:
         await conn.close()
 
@@ -141,10 +143,10 @@ async def test_a_session_resume_backs_off_and_never_exhausts(monkeypatch):
 
     monkeypatch.setattr(gateway, "resume", resume_boom)
     await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
-    gaps = [_gap(await _pending(run["session_id"]))]               # failure 1
+    gaps = [_gap(await _pending(run["session_id"]))]  # failure 1
     from central_command.runtime import agent
 
-    for _ in range(7):                                              # failures 2..8
+    for _ in range(7):  # failures 2..8
         _boom_on_build(monkeypatch, agent, OUTAGE)
         out = await orchestration.resume_parked_session(run["session_id"], model=model)
         assert out["parked"] is True
@@ -159,9 +161,9 @@ async def test_a_session_resume_backs_off_and_never_exhausts(monkeypatch):
 
 
 async def test_an_approved_execution_backs_off_and_never_exhausts(monkeypatch):
-    parked = await _parked_run(monkeypatch)                         # failure 1
+    parked = await _parked_run(monkeypatch)  # failure 1
     gaps = [_gap((await repo.load_proposal(parked["proposal_id"]))["retry_state"])]
-    for _ in range(7):                                              # failures 2..8
+    for _ in range(7):  # failures 2..8
         _graph_spy(monkeypatch, fail=OUTAGE_TEXT)
         out = await gateway.retry_execution(parked["proposal_id"], model=parked["model"])
         assert out["execution"] == "parked"
@@ -186,9 +188,9 @@ async def test_a_task_backs_off_and_never_exhausts(monkeypatch):
     await repo.create_task(task_id, "backoff test", "x", "jira-expert")
     task = await repo.get_task(task_id)
 
-    await routes._run_assigned_task_detached(task, "operator")      # failure 1
+    await routes._run_assigned_task_detached(task, "operator")  # failure 1
     gaps = [_gap((await repo.get_task(task_id))["retry_state"])]
-    for _ in range(7):                                              # failures 2..8
+    for _ in range(7):  # failures 2..8
         out = await orchestration.retry_parked_task(task_id)
         assert out["parked"] is True
         gaps.append(_gap((await repo.get_task(task_id))["retry_state"]))
@@ -205,9 +207,11 @@ async def test_a_task_backs_off_and_never_exhausts(monkeypatch):
 
 async def test_a_ledger_item_backs_off_and_never_fails(monkeypatch):
     _boom_handler(monkeypatch, OUTAGE)
-    raw = (f"Message-ID: <cc-backoff-{uuid.uuid4().hex[:8]}@example.com>\n"
-           "From: sender@example.com\nSubject: Backoff test\n"
-           "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n")
+    raw = (
+        f"Message-ID: <cc-backoff-{uuid.uuid4().hex[:8]}@example.com>\n"
+        "From: sender@example.com\nSubject: Backoff test\n"
+        "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n"
+    )
     await ledger.enroll_email(raw)
     item_id = None
     for _ in range(8):
@@ -219,8 +223,10 @@ async def test_a_ledger_item_backs_off_and_never_fails(monkeypatch):
         # Due-ness is a timestamp, not a sleep: make it claimable again.
         conn = await repo._conn()
         try:
-            await conn.execute("update work_item set not_before = now() - interval '1 second' "
-                               "where id = $1", item_id)
+            await conn.execute(
+                "update work_item set not_before = now() - interval '1 second' where id = $1",
+                item_id,
+            )
         finally:
             await conn.close()
 
@@ -242,7 +248,9 @@ async def test_a_probe_gated_sweep_leaves_attempts_and_not_before(monkeypatch):
         await conn.execute(
             "update proposal set retry_state = jsonb_set(retry_state, '{not_before}', "
             "to_jsonb($2::text)) where id = $1",
-            pid, (datetime.now(UTC) - timedelta(seconds=1)).isoformat())
+            pid,
+            (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+        )
     finally:
         await conn.close()
     before = (await repo.load_proposal(pid))["retry_state"]
@@ -264,7 +272,7 @@ async def test_a_probe_gated_sweep_leaves_attempts_and_not_before(monkeypatch):
 async def test_the_recurring_sweep_does_not_offer_a_unit_before_its_not_before(
     monkeypatch,
 ):
-    parked = await _parked_run(monkeypatch)                         # not_before = +60 s
+    parked = await _parked_run(monkeypatch)  # not_before = +60 s
 
     async def _must_not_run(*a, **k):
         raise AssertionError("the sweep offered a proposal still inside its backoff")
@@ -290,8 +298,14 @@ async def test_a_unit_failing_despite_a_healthy_probe_is_reported_once(monkeypat
     failing = await repo.units_failing_despite_probe(settings.retry_loud_after_attempts)
     mine = [u for u in failing if u["id"] == task_id]
     assert [{k: v for k, v in u.items() if k != "episode"} for u in mine] == [
-        {"unit": "task", "id": task_id, "failures": 3,
-         "dependencies": ["llm"], "last_error": str(deny)[:500]}]
+        {
+            "unit": "task",
+            "id": task_id,
+            "failures": 3,
+            "dependencies": ["llm"],
+            "last_error": str(deny)[:500],
+        }
+    ]
     assert mine[0]["episode"] is not None
 
     first = await orchestration.retry_sweep()
@@ -317,7 +331,8 @@ async def test_a_unit_that_clears_and_fails_again_is_reported_twice():
         episode = None
         for attempt in (1, 2, 3):
             assert await orchestration.park_task_retry(
-                task_id, deny, attempts=attempt, episode_at=episode)
+                task_id, deny, attempts=attempt, episode_at=episode
+            )
             if episode is None:
                 episode = (await repo.get_task(task_id))["retry_state"]["episode_at"]
         return episode
@@ -350,12 +365,14 @@ async def test_an_event_reported_before_episodes_existed_covers_its_streak():
     deny = ModelHTTPError(403, "cc-default", body="denied by the edge firewall")
     episode = None
     for attempt in (1, 2, 3):
-        await orchestration.park_task_retry(task_id, deny, attempts=attempt,
-                                            episode_at=episode)
+        await orchestration.park_task_retry(task_id, deny, attempts=attempt, episode_at=episode)
         episode = episode or (await repo.get_task(task_id))["retry_state"]["episode_at"]
-    await events.emit("retry.failing_despite_probe", ref_id=task_id,
-                      payload={"unit": "task", "failures": 3, "dependencies": ["llm"],
-                               "last_error": "legacy"}, actor="system")
+    await events.emit(
+        "retry.failing_despite_probe",
+        ref_id=task_id,
+        payload={"unit": "task", "failures": 3, "dependencies": ["llm"], "last_error": "legacy"},
+        actor="system",
+    )
     await orchestration._report_failing_despite_probe()
     assert len(await _payloads(task_id, "retry.failing_despite_probe")) == 1
 
@@ -372,7 +389,8 @@ async def test_a_unit_whose_dependency_is_down_is_not_failing_despite_the_probe(
     await repo.create_task(task_id, "loud test 2", "x", "jira-expert")
     for attempt in (1, 2, 3):
         assert await orchestration.park_task_retry(
-            task_id, ConnectionError("Connection refused"), attempts=attempt)
+            task_id, ConnectionError("Connection refused"), attempts=attempt
+        )
     await repo.record_dependency_probe("llm", False, "refused")
 
     failing = await repo.units_failing_despite_probe(3)
@@ -384,7 +402,8 @@ async def test_below_the_threshold_nothing_is_failing():
     await repo.create_task(task_id, "loud test 3", "x", "jira-expert")
     for attempt in (1, 2):
         assert await orchestration.park_task_retry(
-            task_id, ConnectionError("Connection refused"), attempts=attempt)
+            task_id, ConnectionError("Connection refused"), attempts=attempt
+        )
     assert task_id not in [u["id"] for u in await repo.units_failing_despite_probe(3)]
 
 
@@ -397,8 +416,11 @@ async def test_a_semantic_execution_failure_lands_failed_on_the_first_attempt(mo
 
 
 async def test_a_semantic_task_failure_lands_failed_on_the_first_attempt(monkeypatch):
-    monkeypatch.setattr(routes, "resolve_model", aresolve(
-        lambda *a, **k: _model_that_raises(RuntimeError("field 'due' is not a date"))))
+    monkeypatch.setattr(
+        routes,
+        "resolve_model",
+        aresolve(lambda *a, **k: _model_that_raises(RuntimeError("field 'due' is not a date"))),
+    )
     task_id = "task_" + uuid.uuid4().hex[:12]
     await repo.create_task(task_id, "semantic test", "x", "jira-expert")
     await routes._run_assigned_task_detached(await repo.get_task(task_id), "operator")
@@ -427,9 +449,11 @@ async def test_a_semantic_resume_failure_is_terminal_on_the_first_attempt(monkey
 async def test_a_semantic_ledger_failure_is_capped_by_dispatch_max_attempts(monkeypatch):
     monkeypatch.setattr(settings, "dispatch_max_attempts", 1)
     _boom_handler(monkeypatch, RuntimeError("field 'due_date' is not a valid date"))
-    raw = (f"Message-ID: <cc-backoff-{uuid.uuid4().hex[:8]}@example.com>\n"
-           "From: sender@example.com\nSubject: Semantic test\n"
-           "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n")
+    raw = (
+        f"Message-ID: <cc-backoff-{uuid.uuid4().hex[:8]}@example.com>\n"
+        "From: sender@example.com\nSubject: Semantic test\n"
+        "Date: Wed, 1 Jul 2026 09:00:00 +0000\n\nBody.\n"
+    )
     await ledger.enroll_email(raw)
     item = await repo.claim_next_work_item("sess_semantic")
     await dispatcher.process_claimed(item)
@@ -444,17 +468,24 @@ def test_the_retired_limits_are_gone_from_the_tree():
     central_command/ and tests/ finds nothing. The patterns are assembled so
     this file does not match itself; the startup warning names the ENV keys in
     upper case (CC_..._LIMIT), which a case-sensitive grep does not match."""
-    names = ["resume" + "_retry_limit", "execution" + "_retry_limit",
-             "task" + "_retry_limit", "_promote" + "_exhausted",
-             "session.resume" + "_exhausted", "proposal.execution" + "_exhausted",
-             "task.run" + "_exhausted"]
+    names = [
+        "resume" + "_retry_limit",
+        "execution" + "_retry_limit",
+        "task" + "_retry_limit",
+        "_promote" + "_exhausted",
+        "session.resume" + "_exhausted",
+        "proposal.execution" + "_exhausted",
+        "task.run" + "_exhausted",
+    ]
     pattern = re.compile("|".join(re.escape(n) for n in names))
     root = Path(__file__).resolve().parents[1]
-    hits = [f"{p.relative_to(root)}:{i}"
-            for base in ("central_command", "tests")
-            for p in (root / base).rglob("*.py")
-            for i, line in enumerate(p.read_text(errors="ignore").splitlines(), 1)
-            if pattern.search(line)]
+    hits = [
+        f"{p.relative_to(root)}:{i}"
+        for base in ("central_command", "tests")
+        for p in (root / base).rglob("*.py")
+        for i, line in enumerate(p.read_text(errors="ignore").splitlines(), 1)
+        if pattern.search(line)
+    ]
     assert hits == []
 
 

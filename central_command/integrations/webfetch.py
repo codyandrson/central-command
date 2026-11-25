@@ -29,7 +29,13 @@ from central_command.integrations import http as http_client
 _NOISE_TAGS = ("script", "style", "nav", "noscript")
 
 # Content-types returned as-is (already text a model can read).
-_PASSTHROUGH_PREFIXES = ("text/plain", "application/json", "text/csv", "text/xml", "application/xml")
+_PASSTHROUGH_PREFIXES = (
+    "text/plain",
+    "application/json",
+    "text/csv",
+    "text/xml",
+    "application/xml",
+)
 
 
 def _cert_allowed_for(host: str) -> bool:

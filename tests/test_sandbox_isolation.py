@@ -72,17 +72,27 @@ _UNITS_AND_DRIVERS = (".service", ".service.in", ".conf.in", ".sh", ".yaml", ".y
 def test_the_walks_see_the_seven_unit_templates():
     """R6. Matched on the suffix alone, a template would silently leave the walks."""
     seen = {p.name for p in _shipped_files(*_UNITS_AND_DRIVERS)}
-    assert {"cc-uvicorn.service.in", "cc-nerve.service.in", "cc-sandbox-runner.service.in",
-            "cc-backup.service.in", "cc-update.service.in", "cc-update-stage.service.in",
-            "cc-update-tmpfiles.conf.in"} <= seen
+    assert {
+        "cc-uvicorn.service.in",
+        "cc-nerve.service.in",
+        "cc-sandbox-runner.service.in",
+        "cc-backup.service.in",
+        "cc-update.service.in",
+        "cc-update-stage.service.in",
+        "cc-update-tmpfiles.conf.in",
+    } <= seen
 
 
 # ── the API, the sandbox runner and the cockpit bind loopback ───────────────
 
-@pytest.mark.parametrize(("path", "module"), [
-    ("deploy/k3s/cc-uvicorn.service", "central_command.api.app:app"),
-    ("deploy/k3s/cc-sandbox-runner.service", "central_command.sandbox.runner:app"),
-])
+
+@pytest.mark.parametrize(
+    ("path", "module"),
+    [
+        ("deploy/k3s/cc-uvicorn.service", "central_command.api.app:app"),
+        ("deploy/k3s/cc-sandbox-runner.service", "central_command.sandbox.runner:app"),
+    ],
+)
 def test_the_k3s_units_bind_loopback(path, module):
     exec_lines = [ln for ln in shipped_text(path).splitlines() if ln.startswith("ExecStart=")]
     assert len(exec_lines) == 1 and module in exec_lines[0], path
@@ -96,8 +106,10 @@ def test_the_single_node_boot_phase_binds_loopback_for_the_api_and_the_runner():
         for module in ("central_command.api.app:app", "central_command.sandbox.runner:app"):
             if module in line and "PROC_CMD=" in line:
                 by_module[module] = _bind_hosts(line)
-    assert by_module == {"central_command.api.app:app": ["127.0.0.1"],
-                         "central_command.sandbox.runner:app": ["127.0.0.1"]}
+    assert by_module == {
+        "central_command.api.app:app": ["127.0.0.1"],
+        "central_command.sandbox.runner:app": ["127.0.0.1"],
+    }
 
 
 def test_no_shipped_uvicorn_command_binds_anything_but_loopback():
@@ -116,14 +128,19 @@ def test_the_bind_check_catches_a_unit_edited_to_listen_on_every_interface():
 def test_nothing_binds_from_settings_api_host():
     """`settings.api_host` defaults to 0.0.0.0 and is DISPLAY only (the Systems
     page): a unit or driver that fed it to a listener would open the API."""
-    allowed = {ROOT / "central_command" / "config.py", ROOT / "central_command" / "api" / "systems.py"}
+    allowed = {
+        ROOT / "central_command" / "config.py",
+        ROOT / "central_command" / "api" / "systems.py",
+    }
     for p in (ROOT / "central_command").rglob("*.py"):
         if p not in allowed:
             assert "api_host" not in p.read_text(), f"{p.relative_to(ROOT)} reads api_host"
     for p in _shipped_files(*_UNITS_AND_DRIVERS):
         # CC_API_HOST is the env spelling of the setting (resolve-images.sh has an
         # unrelated registry helper that happens to be called api_host).
-        assert not re.search(r"CC_API_HOST|settings\.api_host", p.read_text(errors="replace")), p.relative_to(ROOT)
+        assert not re.search(r"CC_API_HOST|settings\.api_host", p.read_text(errors="replace")), (
+            p.relative_to(ROOT)
+        )
 
 
 def test_the_cockpit_defaults_to_loopback_and_refuses_every_interface_without_auth():
@@ -131,8 +148,11 @@ def test_the_cockpit_defaults_to_loopback_and_refuses_every_interface_without_au
     assert re.search(r"DEFAULT_HOST\s*=\s*'127\.0\.0\.1'", constants)
     config = (ROOT / "web/server/lib/config.ts").read_text()
     assert re.search(r"host:\s*process\.env\.HOST\s*\|\|\s*DEFAULT_HOST", config)
-    refusal = re.search(r"if \(config\.host === '0\.0\.0\.0' && !config\.auth\) \{.*?process\.exit\(1\)",
-                        config, re.DOTALL)
+    refusal = re.search(
+        r"if \(config\.host === '0\.0\.0\.0' && !config\.auth\) \{.*?process\.exit\(1\)",
+        config,
+        re.DOTALL,
+    )
     assert refusal, "the cockpit no longer refuses HOST=0.0.0.0 without auth"
     assert "NERVE_ALLOW_INSECURE" in refusal.group(0)  # the one explicit override
 
@@ -145,10 +165,12 @@ def test_no_unit_or_driver_sets_the_cockpits_host_to_every_interface():
             assert not re.search(r"\bHOST\s*=\s*['\"]?0\.0\.0\.0", line), p.relative_to(ROOT)
     for rel in ("deploy/k3s/cc-nerve.service", "deploy/single/phases/boot.sh"):
         assert not re.search(r"(?m)^[^#\n]*\bHOST=", shipped_text(rel)), (
-            f"{rel} sets HOST: the cockpit's loopback default must stand")
+            f"{rel} sets HOST: the cockpit's loopback default must stand"
+        )
 
 
 # ── a sandbox pod holds nothing and shares nothing with the host ────────────
+
 
 def _walk(node, key):
     """Every value stored under `key`, at any depth."""
@@ -180,11 +202,14 @@ def test_the_runner_job_manifest_gives_the_pod_no_host_reach_no_token_no_env_no_
     assert spec["volumes"], "the workspace volume is expected"
     for v in spec["volumes"]:
         kinds = set(v) - {"name"}
-        assert kinds == {"emptyDir"}, f"volume {v['name']} is {sorted(kinds)}: only emptyDir is allowed"
+        assert kinds == {"emptyDir"}, (
+            f"volume {v['name']} is {sorted(kinds)}: only emptyDir is allowed"
+        )
     assert not list(_walk(manifest, "secretKeyRef")) and not list(_walk(manifest, "secretRef"))
 
 
 # ── 60-sandbox.yaml and the rest of the manifests ───────────────────────────
+
 
 def _docs(path: Path) -> list[dict]:
     return [d for d in yaml.safe_load_all(path.read_text()) if d]
@@ -192,13 +217,19 @@ def _docs(path: Path) -> list[dict]:
 
 def test_the_sandbox_manifest_denies_ingress_and_publishes_nothing():
     docs = _docs(K3S / "60-sandbox.yaml")
-    deny = [d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "default-deny-ingress"]
+    deny = [
+        d
+        for d in docs
+        if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "default-deny-ingress"
+    ]
     assert len(deny) == 1
     (policy,) = deny
     assert policy["metadata"]["namespace"] == "cc-sandbox"
     assert policy["spec"]["podSelector"] == {}
     assert "Ingress" in policy["spec"]["policyTypes"]
-    assert not policy["spec"].get("ingress"), "an ingress rule would let something reach INTO a sandbox"
+    assert not policy["spec"].get("ingress"), (
+        "an ingress rule would let something reach INTO a sandbox"
+    )
     for d in docs:
         assert not [v for v in _walk(d, "hostNetwork") if v], d["metadata"]["name"]
         assert not list(_walk(d, "hostPort")), d["metadata"]["name"]
@@ -224,6 +255,7 @@ def test_no_manifest_exposes_the_apis_port():
 
 # ── the live drill is written down, with no deployment fact ─────────────────
 
+
 def _drill() -> str:
     readme = (K3S / "README.md").read_text()
     m = re.search(r"^### Sandbox reach drill\b.*?(?=^#{1,3} )", readme, re.MULTILINE | re.DOTALL)
@@ -234,9 +266,9 @@ def _drill() -> str:
 def test_the_readme_carries_the_drill_for_all_three_targets():
     drill = _drill()
     assert "cc-sandbox" in drill and "curl" in drill
-    assert "<anchor-address>:8080" in drill          # the API's port
-    assert "<anchor-address>:3080" in drill          # the cockpit's port
-    assert "<cockpit-tailnet-url>" in drill          # the tailscale serve front
+    assert "<anchor-address>:8080" in drill  # the API's port
+    assert "<anchor-address>:3080" in drill  # the cockpit's port
+    assert "<cockpit-tailnet-url>" in drill  # the tailscale serve front
     assert "tailscale serve" in drill
     assert re.search(r"delete pod", drill), "the drill must delete its pod"
     assert "never run by pytest" in drill.lower()
@@ -251,4 +283,3 @@ def test_the_drill_names_no_deployment_fact():
 def test_the_test_sweep_skill_points_at_the_drill():
     text = (ROOT / ".claude/skills/cc-test-sweep/SKILL.md").read_text()
     assert "Sandbox reach drill" in text and "deploy/k3s/README.md" in text
-

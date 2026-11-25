@@ -4,6 +4,7 @@ via the same `work_items_for_sessions` batch lookup the Decisions Inbox uses
 for asks (see test_discussion_stall.py's sibling test). The cockpit
 hand-declares this field, so only a backend test catches it going silent.
 """
+
 from __future__ import annotations
 
 from central_command.api import routes
@@ -16,21 +17,39 @@ async def _async(value):
 
 async def test_tasks_list_carries_source_email_from_the_parent_session(monkeypatch):
     task_with_parent = {
-        "id": "task_1", "title": "Follow up", "instructions": "…",
-        "agent_id": "jira-expert", "status": "ASSIGNED", "session_id": None,
-        "parent_session_id": "sess_email", "outcome": None,
-        "created_at": None, "started_at": None, "terminal_at": None,
-        "session_status": None, "stopped": False,
+        "id": "task_1",
+        "title": "Follow up",
+        "instructions": "…",
+        "agent_id": "jira-expert",
+        "status": "ASSIGNED",
+        "session_id": None,
+        "parent_session_id": "sess_email",
+        "outcome": None,
+        "created_at": None,
+        "started_at": None,
+        "terminal_at": None,
+        "session_status": None,
+        "stopped": False,
     }
     task_without_parent = {
-        "id": "task_2", "title": "Operator ask", "instructions": "…",
-        "agent_id": "jira-expert", "status": "NEW", "session_id": None,
-        "parent_session_id": None, "outcome": None,
-        "created_at": None, "started_at": None, "terminal_at": None,
-        "session_status": None, "stopped": False,
+        "id": "task_2",
+        "title": "Operator ask",
+        "instructions": "…",
+        "agent_id": "jira-expert",
+        "status": "NEW",
+        "session_id": None,
+        "parent_session_id": None,
+        "outcome": None,
+        "created_at": None,
+        "started_at": None,
+        "terminal_at": None,
+        "session_status": None,
+        "stopped": False,
     }
     email = {
-        "id": "wi_1", "kind": "email", "session_id": "sess_email",
+        "id": "wi_1",
+        "kind": "email",
+        "session_id": "sess_email",
         "subject": "Reminder: renew the domain",
         "payload": {"from": "billing@example.com", "text": "please renew"},
     }

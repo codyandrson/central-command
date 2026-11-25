@@ -165,9 +165,20 @@ class Person(BaseModel):
 
     # Measured verbatim on the live extraction model (2026-11); every field is
     # Optional, so graphiti's 250-char cap applies and none can grow unbounded.
-    birth_date: str | None = Field(None, max_length=10, description="The person's date of birth as an ISO 8601 date (YYYY-MM-DD). Only when the text states this person's own birth date.")
-    phone: str | None = Field(None, max_length=40, description="This person's own current phone number, as written in the text.")
-    aliases: list[str] | None = Field(None, description="Other names the text uses for this same person: nicknames, short names, full legal name, maiden name. Never a role word such as 'Mom' and never another person's name.")
+    birth_date: str | None = Field(
+        None,
+        max_length=10,
+        description="The person's date of birth as an ISO 8601 date (YYYY-MM-DD). Only when the text states this person's own birth date.",
+    )
+    phone: str | None = Field(
+        None,
+        max_length=40,
+        description="This person's own current phone number, as written in the text.",
+    )
+    aliases: list[str] | None = Field(
+        None,
+        description="Other names the text uses for this same person: nicknames, short names, full legal name, maiden name. Never a role word such as 'Mom' and never another person's name.",
+    )
 
 
 class Preference(BaseModel):
@@ -236,6 +247,6 @@ ENTITY_TYPE_NAMES: tuple[str, ...] = tuple(ENTITY_TYPES)
 EXTRACTION_INSTRUCTIONS = (
     "Standing rules, policies, procedures, schedules and preferences that a "
     "named person sets ARE entities here: extract each one as a Procedure or "
-    "Preference with a specific, self-describing name (e.g. \"EA morning brief "
-    "at 06:00\"), so that a fact can link the person to the rule."
+    'Preference with a specific, self-describing name (e.g. "EA morning brief '
+    'at 06:00"), so that a fact can link the person to the rule.'
 )

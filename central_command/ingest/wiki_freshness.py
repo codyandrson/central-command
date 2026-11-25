@@ -65,13 +65,15 @@ def repair_brief(page_ref: str, entries: list[dict]) -> str:
         "You are repairing a wiki page whose recorded evidence has moved on.",
         f"Page: {page_ref}",
         "",
-        ("Read the page (confluence_get_page), re-read the evidence below in "
-         "the catalog (catalog_get_document), and propose ONE "
-         "confluence.update_page that states what the sources say NOW — "
-         "citing them again so the claims ledger is rewritten against the "
-         "current versions. A claim whose source is RESCINDED cannot be "
-         "re-verified: rewrite it on other evidence you actually read, or "
-         "remove it. Never restate a claim you did not re-check."),
+        (
+            "Read the page (confluence_get_page), re-read the evidence below in "
+            "the catalog (catalog_get_document), and propose ONE "
+            "confluence.update_page that states what the sources say NOW — "
+            "citing them again so the claims ledger is rewritten against the "
+            "current versions. A claim whose source is RESCINDED cannot be "
+            "re-verified: rewrite it on other evidence you actually read, or "
+            "remove it. Never restate a claim you did not re-check."
+        ),
         "",
         "--- claims needing repair ---",
     ]
@@ -132,7 +134,7 @@ def splice(body: str, panel: str) -> str:
     start = body.find(START)
     end = body.find(END)
     if start != -1 and end != -1 and end > start:
-        return body[:start] + panel + body[end + len(END):]
+        return body[:start] + panel + body[end + len(END) :]
     return panel + body
 
 
@@ -152,14 +154,18 @@ async def annotate_page(page_ref: str, entries: list[dict]) -> dict:
     if new_body == body:
         return {"page_ref": page_ref, "changed": False}
     await confluence.update_page(
-        page_ref, page["title"], new_body, page["version"],
+        page_ref,
+        page["title"],
+        new_body,
+        page["version"],
     )
     await events.emit(
         "wiki.page.annotated",
         ref_id=page_ref,
-        payload={"stale": sum(1 for e in entries if e["state"] == "stale"),
-                 "unsupported": sum(1 for e in entries
-                                    if e["state"] == "unsupported")},
+        payload={
+            "stale": sum(1 for e in entries if e["state"] == "stale"),
+            "unsupported": sum(1 for e in entries if e["state"] == "unsupported"),
+        },
         actor="system:wiki-freshness",
     )
     return {"page_ref": page_ref, "changed": True}
@@ -170,7 +176,10 @@ async def annotate_page(page_ref: str, entries: list[dict]) -> dict:
 
 async def _already_emitted(page_ref: str, digest: str) -> bool:
     prior = await repo.list_events(
-        kind="wiki.claims.stale", ref_id=page_ref, newest_first=True, limit=1,
+        kind="wiki.claims.stale",
+        ref_id=page_ref,
+        newest_first=True,
+        limit=1,
     )
     return bool(prior) and (prior[0]["payload"] or {}).get("hash") == digest
 
@@ -201,8 +210,7 @@ async def sweep(limit: int = DEFAULT_PAGE_CAP) -> dict:
                 payload={
                     "hash": digest,
                     "stale": sum(1 for e in entries if e["state"] == "stale"),
-                    "unsupported": sum(1 for e in entries
-                                       if e["state"] == "unsupported"),
+                    "unsupported": sum(1 for e in entries if e["state"] == "unsupported"),
                     "claim_ids": claim_ids,
                 },
                 actor="system:wiki-freshness",
@@ -212,8 +220,7 @@ async def sweep(limit: int = DEFAULT_PAGE_CAP) -> dict:
         created = await repo.enroll_work_item(
             "wi_" + uuid.uuid4().hex[:12],
             repair_message_id(page_ref, claim_ids),
-            {"text": repair_brief(page_ref, entries),
-             "page_ref": page_ref, "claim_ids": claim_ids},
+            {"text": repair_brief(page_ref, entries), "page_ref": page_ref, "claim_ids": claim_ids},
             # The lineage IS the thread (Decision 5/9): the repair queues
             # behind the steward's item for the same document, so the graph is
             # current before the page is repaired. No catalog evidence — the
@@ -235,6 +242,9 @@ async def sweep(limit: int = DEFAULT_PAGE_CAP) -> dict:
                 log.warning("wiki annotation failed for %s: %s", page_ref, e)
 
     return {
-        "pages": len(by_page), "examined": len(pages), "emitted": emitted,
-        "enrolled": enrolled, "annotated": annotated,
+        "pages": len(by_page),
+        "examined": len(pages),
+        "emitted": emitted,
+        "enrolled": enrolled,
+        "annotated": annotated,
     }

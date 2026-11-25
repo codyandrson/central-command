@@ -45,14 +45,22 @@ _BAD_ARGS = {"summary": "EA scope — operator contact doctrine …"}
 _CONFIDENCE = {"level": "high", "rationale": "The operator stated the doctrine outright."}
 
 
-def _proposal(arguments: dict, capability: str = "graph.add_episode",
-              confidence: dict | None = _CONFIDENCE) -> Proposal:
+def _proposal(
+    arguments: dict, capability: str = "graph.add_episode", confidence: dict | None = _CONFIDENCE
+) -> Proposal:
     return Proposal(
-        intent="record the contact doctrine", expected_effect="graph episode",
-        evidence=[], confidence=confidence,
-        actions=[Action(capability=capability, arguments=arguments,
-                        target_ref={"system": "graphiti", "id": "central_command"},
-                        reversibility=Reversibility.reversible)],
+        intent="record the contact doctrine",
+        expected_effect="graph episode",
+        evidence=[],
+        confidence=confidence,
+        actions=[
+            Action(
+                capability=capability,
+                arguments=arguments,
+                target_ref={"system": "graphiti", "id": "central_command"},
+                reversibility=Reversibility.reversible,
+            )
+        ],
     )
 
 
@@ -88,9 +96,13 @@ def _subscripted_keys(fn) -> set[str]:
     tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
     keys = set()
     for node in ast.walk(tree):
-        if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
-                and node.value.id == "args" and isinstance(node.slice, ast.Constant)
-                and isinstance(node.slice.value, str)):
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "args"
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ):
             keys.add(node.slice.value)
     return keys
 
@@ -124,12 +136,21 @@ def test_every_subscripted_argument_has_a_spec():
 def test_update_attributes_is_a_partial_edit():
     """The shape the 2026-09-29 draft had — date and labels, no priority —
     is valid now; naming nothing is not; null/[] count as naming."""
-    assert validate_action_args("jira.update_attributes", {
-        "issue_key": "TASKS-21", "due_date": "2026-10-11", "labels": ["cayenne"]}) == []
-    assert validate_action_args("jira.update_attributes", {
-        "issue_key": "TASKS-21", "due_date": None}) == []
-    assert validate_action_args("jira.update_attributes", {
-        "issue_key": "TASKS-21", "labels": []}) == []
+    assert (
+        validate_action_args(
+            "jira.update_attributes",
+            {"issue_key": "TASKS-21", "due_date": "2026-10-11", "labels": ["cayenne"]},
+        )
+        == []
+    )
+    assert (
+        validate_action_args("jira.update_attributes", {"issue_key": "TASKS-21", "due_date": None})
+        == []
+    )
+    assert (
+        validate_action_args("jira.update_attributes", {"issue_key": "TASKS-21", "labels": []})
+        == []
+    )
     (problem,) = validate_action_args("jira.update_attributes", {"issue_key": "TASKS-21"})
     assert "priority, labels, due_date" in problem
 
@@ -141,9 +162,15 @@ def test_all_problems_are_reported_at_once():
     assert len(problems) == 1
     assert "name, episode_body, scope, reference_time" in problems[0]
     assert "present: summary" in problems[0]
-    assert validate_action_args("graph.add_episode@v1", {"scope": "team", "name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z"}) == [
-        "graph.add_episode@v1: scope='team' is not one of shared, private"
-    ]
+    assert validate_action_args(
+        "graph.add_episode@v1",
+        {
+            "scope": "team",
+            "name": "n",
+            "episode_body": "b",
+            "reference_time": "2026-01-01T00:00:00Z",
+        },
+    ) == ["graph.add_episode@v1: scope='team' is not one of shared, private"]
     assert validate_action_args("no.such_capability", {}) == []  # no spec = no guess
 
 
@@ -170,14 +197,22 @@ async def test_executor_refuses_the_same_shape_before_any_action_runs(monkeypatc
     the runtime checked (an API-submitted proposal skips the tool path). Every
     action is checked before the FIRST runs, so the failure carries an empty
     completed-cursor and no handler is ever called."""
+
     async def explode(*a, **k):
         raise AssertionError("handler ran on a malformed action")
 
     monkeypatch.setattr(graphiti_ingest, "enqueue", explode)
-    good = Action(capability="graph.add_episode",
-                  arguments={"name": "n", "episode_body": "b", "reference_time": "2026-01-01T00:00:00Z", "scope": "shared"},
-                  target_ref={"system": "graphiti", "id": "central_command"},
-                  reversibility=Reversibility.reversible)
+    good = Action(
+        capability="graph.add_episode",
+        arguments={
+            "name": "n",
+            "episode_body": "b",
+            "reference_time": "2026-01-01T00:00:00Z",
+            "scope": "shared",
+        },
+        target_ref={"system": "graphiti", "id": "central_command"},
+        reversibility=Reversibility.reversible,
+    )
     bad = _proposal(_BAD_ARGS).actions[0]
     with pytest.raises(executor.ExecutionFailed) as excinfo:
         await executor.execute([good, bad], approver="human:lee", source_refs=[])
@@ -223,8 +258,9 @@ _CHARTER_NO_RATIONALE = {"agent_id": "a", "content": "c"}
 def test_a_charter_update_without_rationale_is_named_by_the_one_list():
     (problem,) = validate_action_args("charter.update", _CHARTER_NO_RATIONALE)
     assert "rationale" in problem and "present: agent_id, content" in problem
-    assert validate_action_args("charter.update", {**_CHARTER_NO_RATIONALE,
-                                                   "rationale": "why"}) == []
+    assert (
+        validate_action_args("charter.update", {**_CHARTER_NO_RATIONALE, "rationale": "why"}) == []
+    )
 
 
 @needs_pg
@@ -244,8 +280,12 @@ async def test_a_coach_run_drafting_without_rationale_is_handed_back_and_redraft
     retries: list[str] = []
 
     def respond(messages, info):
-        sent_back = [p for m in messages for p in getattr(m, "parts", [])
-                     if durable.retry_text(p) is not None]
+        sent_back = [
+            p
+            for m in messages
+            for p in getattr(m, "parts", [])
+            if durable.retry_text(p) is not None
+        ]
         retries[:] = [str(p.content) for p in sent_back]
         response = spike_model._respond_coach(messages, info)
         if not sent_back:
@@ -267,17 +307,20 @@ async def test_a_coach_run_drafting_without_rationale_is_handed_back_and_redraft
     assert len(mine) == 1 and "rationale" in mine[0]["payload"]["problems"][0]
 
 
-async def test_the_executor_refuses_a_charter_update_without_rationale_before_it_runs(
-        monkeypatch):
+async def test_the_executor_refuses_a_charter_update_without_rationale_before_it_runs(monkeypatch):
     """The Executor half: an API-submitted charter edit skips the runtime, so
     the same list refuses it before the handler writes a version."""
+
     async def explode(*a, **k):
         raise AssertionError("the charter handler ran on a rationale-less edit")
 
     monkeypatch.setitem(executor.HANDLERS, "charter.update", explode)
-    action = Action(capability="charter.update", arguments=dict(_CHARTER_NO_RATIONALE),
-                    target_ref={"system": "central_command", "id": "a"},
-                    reversibility=Reversibility.reversible)
+    action = Action(
+        capability="charter.update",
+        arguments=dict(_CHARTER_NO_RATIONALE),
+        target_ref={"system": "central_command", "id": "a"},
+        reversibility=Reversibility.reversible,
+    )
     with pytest.raises(executor.ExecutionFailed) as excinfo:
         await executor.execute([action], approver="human:lee", source_refs=[])
     assert excinfo.value.completed == []
@@ -287,13 +330,18 @@ async def test_the_executor_refuses_a_charter_update_without_rationale_before_it
 def test_validate_proposal_shape_names_a_missing_or_empty_confidence():
     assert validate_proposal_shape(_proposal({}, confidence=None))[0].startswith("confidence:")
     (problem,) = validate_proposal_shape(
-        _proposal({}, confidence={"level": "low", "rationale": "  "}))
+        _proposal({}, confidence={"level": "low", "rationale": "  "})
+    )
     assert problem.startswith("confidence.rationale")
     assert validate_proposal_shape(_proposal({})) == []
 
 
-_GOOD_EPISODE = {"name": "n", "episode_body": "b", "scope": "shared",
-                 "reference_time": "2026-01-01T00:00:00Z"}
+_GOOD_EPISODE = {
+    "name": "n",
+    "episode_body": "b",
+    "scope": "shared",
+    "reference_time": "2026-01-01T00:00:00Z",
+}
 
 
 @needs_pg
@@ -316,8 +364,12 @@ async def test_a_server_built_mail_send_without_confidence_still_parks():
     ctx = SimpleNamespace(deps=TriageDeps(agent_id="ea", session_id="sess_test_mail"))
     with pytest.raises(CallDeferred) as excinfo:
         await tools_mod.propose_mail_send(
-            ctx, to=["jane.doe@example.com"], subject="Thursday",
-            body="Thursday works.", rationale="She asked for a time.")
+            ctx,
+            to=["jane.doe@example.com"],
+            subject="Thursday",
+            body="Thursday works.",
+            rationale="She asked for a time.",
+        )
     assert excinfo.value.metadata["proposal"]["confidence"] is None
 
 
@@ -329,15 +381,19 @@ def test_the_agent_authored_set_is_exactly_the_proposal_arg_tools():
     import re
 
     authored = {
-        name for name, fn in inspect.getmembers(tools_mod, inspect.iscoroutinefunction)
+        name
+        for name, fn in inspect.getmembers(tools_mod, inspect.iscoroutinefunction)
         if name.startswith("propose_")
-        and any(p.annotation in (tools_mod.ProposalArg, "ProposalArg")
-                for p in inspect.signature(fn).parameters.values())
+        and any(
+            p.annotation in (tools_mod.ProposalArg, "ProposalArg")
+            for p in inspect.signature(fn).parameters.values()
+        )
     }
     assert authored == packs.AGENT_AUTHORED_PROPOSE_TOOLS
     for name, fn in inspect.getmembers(tools_mod, inspect.iscoroutinefunction):
-        flags = re.findall(r"_validate_proposal\(ctx, proposal, agent_authored=(\w+)\)",
-                           inspect.getsource(fn))
+        flags = re.findall(
+            r"_validate_proposal\(ctx, proposal, agent_authored=(\w+)\)", inspect.getsource(fn)
+        )
         if name.startswith("propose_") and flags:
             assert flags == [str(name in authored)], (name, flags)
 

@@ -9,6 +9,7 @@ connection ... OSError('No data')") and the managed transaction retries. Both
 construction sites — the reader/writer pool and graphiti-core's client, which
 its constructor builds with the defaults — take `bolt_driver_kwargs()`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,7 +31,10 @@ async def test_a_driver_built_with_them_has_the_check_in_its_pool_config():
         "bolt://127.0.0.1:1", auth=("neo4j", "x"), **neo4j_reader.bolt_driver_kwargs()
     )
     try:
-        assert driver._pool.pool_config.liveness_check_timeout == neo4j_reader.BOLT_LIVENESS_CHECK_SECONDS
+        assert (
+            driver._pool.pool_config.liveness_check_timeout
+            == neo4j_reader.BOLT_LIVENESS_CHECK_SECONDS
+        )
     finally:
         await driver.close()
 
@@ -53,7 +57,10 @@ async def test_graphiti_s_client_is_swapped_for_one_with_the_check(monkeypatch):
     graphiti_client._give_bolt_liveness_check(fake)
     try:
         assert fake.client is not default
-        assert fake.client._pool.pool_config.liveness_check_timeout == neo4j_reader.BOLT_LIVENESS_CHECK_SECONDS
+        assert (
+            fake.client._pool.pool_config.liveness_check_timeout
+            == neo4j_reader.BOLT_LIVENESS_CHECK_SECONDS
+        )
     finally:
         await fake.client.close()
 

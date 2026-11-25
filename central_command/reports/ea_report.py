@@ -79,7 +79,8 @@ async def snapshot(since: datetime) -> dict:
     # event says. Read once for the whole window, so a day of questions cannot
     # read as a day of open gaps (the digest re-asked answered questions).
     asked_status = await repo.operator_item_statuses(
-        [r["ref_id"] for r in grouped.get(ASKED_KIND, []) if r.get("ref_id")])
+        [r["ref_id"] for r in grouped.get(ASKED_KIND, []) if r.get("ref_id")]
+    )
 
     def _asked_state(ref_id) -> str:
         status = asked_status.get(ref_id)
@@ -95,32 +96,34 @@ async def snapshot(since: datetime) -> dict:
         by_kind[kind] = {
             "count": len(rows),
             "truncated": max(0, len(rows) - len(shown)),
-            "examples": [{
-                "event_id": r["id"],
-                "ref_id": r["ref_id"],
-                "actor": r["actor"],
-                "at": _iso(r["created_at"]),
-                # One human-facing line per kind, chosen from the payload the
-                # emitter actually writes. Never the whole payload: a block
-                # that pastes every field is the log browser STATUS rejected.
-                "summary": _summarise(kind, r.get("payload") or {}),
-                **({"state": _asked_state(r["ref_id"])}
-                   if kind == ASKED_KIND else {}),
-            } for r in shown],
+            "examples": [
+                {
+                    "event_id": r["id"],
+                    "ref_id": r["ref_id"],
+                    "actor": r["actor"],
+                    "at": _iso(r["created_at"]),
+                    # One human-facing line per kind, chosen from the payload the
+                    # emitter actually writes. Never the whole payload: a block
+                    # that pastes every field is the log browser STATUS rejected.
+                    "summary": _summarise(kind, r.get("payload") or {}),
+                    **({"state": _asked_state(r["ref_id"])} if kind == ASKED_KIND else {}),
+                }
+                for r in shown
+            ],
         }
         if kind == ASKED_KIND:
             # Over ALL the window's asked events, not only the examples shown.
             # An item that cannot be found reads "unknown" and is not open.
             by_kind[kind]["still_open"] = sum(
-                1 for r in rows if _asked_state(r["ref_id"]) == "open")
+                1 for r in rows if _asked_state(r["ref_id"]) == "open"
+            )
 
     open_items = await repo.list_operator_items("OPEN")
     awaiting = await repo.list_proposals("AWAITING_HUMAN")
     discussions = await repo.list_open_discussions()
 
     return {
-        "window": {"since": _iso(since),
-                   "until": _iso(datetime.now(UTC))},
+        "window": {"since": _iso(since), "until": _iso(datetime.now(UTC))},
         # CURRENT STATE (not windowed) — the depths that matter right now.
         "queues": {
             "proposals_awaiting_decision": await repo.count_awaiting_human(),
@@ -134,33 +137,47 @@ async def snapshot(since: datetime) -> dict:
         # Every task not yet terminal — who owes what inside the control
         # plane. Titles only: the instructions are one read away.
         "open_tasks": [
-            {"task_id": t["id"], "title": (t.get("title") or "")[:160],
-             "agent_id": t.get("agent_id"), "status": t["status"],
-             "created_at": _iso(t.get("created_at"))}
+            {
+                "task_id": t["id"],
+                "title": (t.get("title") or "")[:160],
+                "agent_id": t.get("agent_id"),
+                "status": t["status"],
+                "created_at": _iso(t.get("created_at")),
+            }
             for t in await repo.list_tasks(limit=0)
             if t["status"] not in repo.TASK_TERMINAL
         ],
         # WINDOWED — what changed since `since`.
         "activity": by_kind,
         "awaiting_decision": [
-            {"proposal_id": p["id"], "agent_id": p["agent_id"],
-             "intent": (p.get("intent") or "")[:300],
-             "created_at": _iso(p["created_at"])}
+            {
+                "proposal_id": p["id"],
+                "agent_id": p["agent_id"],
+                "intent": (p.get("intent") or "")[:300],
+                "created_at": _iso(p["created_at"]),
+            }
             for p in awaiting
         ],
         "open_operator_items": [
-            {"item_id": i["id"], "kind": i.get("kind"),
-             "agent_id": i.get("agent_id"), "task_id": i.get("task_id"),
-             "body": (i.get("body") or "")[:300],
-             "has_discussion": bool(i.get("discussion_session_id")),
-             "created_at": _iso(i.get("created_at"))}
+            {
+                "item_id": i["id"],
+                "kind": i.get("kind"),
+                "agent_id": i.get("agent_id"),
+                "task_id": i.get("task_id"),
+                "body": (i.get("body") or "")[:300],
+                "has_discussion": bool(i.get("discussion_session_id")),
+                "created_at": _iso(i.get("created_at")),
+            }
             for i in open_items
         ],
         "open_discussions": [
-            {"item_id": d["id"], "agent_id": d.get("agent_id"),
-             "task_id": d.get("task_id"),
-             "discussion_session_id": d.get("discussion_session_id"),
-             "last_moved_at": _iso(d.get("session_updated_at"))}
+            {
+                "item_id": d["id"],
+                "agent_id": d.get("agent_id"),
+                "task_id": d.get("task_id"),
+                "discussion_session_id": d.get("discussion_session_id"),
+                "last_moved_at": _iso(d.get("session_updated_at")),
+            }
             for d in discussions
         ],
         # CURRENT STATE — the operator's active lines of effort and each one's
@@ -177,14 +194,20 @@ async def _lines_of_effort() -> list[dict]:
     for row in await repo.list_loes():
         latest = await repo.list_loe_checkins(row["id"], limit=1)
         last = latest[0] if latest else None
-        out.append({
-            "loe_id": row["id"], "name": row["name"], "cadence": row["cadence"],
-            "last_check_in": None if last is None else {
-                "at": _iso(last.get("created_at")),
-                "light": last.get("light"),
-                "summary": (last.get("summary") or "")[:300],
-            },
-        })
+        out.append(
+            {
+                "loe_id": row["id"],
+                "name": row["name"],
+                "cadence": row["cadence"],
+                "last_check_in": None
+                if last is None
+                else {
+                    "at": _iso(last.get("created_at")),
+                    "light": last.get("light"),
+                    "summary": (last.get("summary") or "")[:300],
+                },
+            }
+        )
     return out
 
 

@@ -48,8 +48,7 @@ def test_heartbeat_never_imports_the_gate():
         source = py.read_text(encoding="utf-8")
         stripped = source.replace(ALLOWED_GATEWAY_IMPORT, "")
         assert "central_command.gateway" not in stripped, (
-            f"{py.name} imports the gateway tier beyond the allowed "
-            f"agreement_report read"
+            f"{py.name} imports the gateway tier beyond the allowed agreement_report read"
         )
         for banned in ("approve_and_execute", "executor.execute", "audit_dismissal"):
             assert banned not in source, f"{py.name} references {banned}"
@@ -66,7 +65,9 @@ def test_runs_as_pins_the_agent_the_action_actually_tasks():
     assert hb_actions.ACTIONS["ea.contact"].runs_as == ea.AGENT_ID
     for kind, spec in hb_actions.ACTIONS.items():
         if "agent_id" in spec.params:
-            assert spec.runs_as is None, f"{kind} picks its agent from params — runs_as must not claim one"
+            assert spec.runs_as is None, (
+                f"{kind} picks its agent from params — runs_as must not claim one"
+            )
 
 
 def test_action_registry_parity_with_the_lever_allowlist():
@@ -74,37 +75,37 @@ def test_action_registry_parity_with_the_lever_allowlist():
     explicit allowlist. Extending the registry means extending this test in
     the same commit — reviewable, like a pack change."""
     allowlist = {
-        "ingest.feed.poll_once",            # idempotent enrollment
-        "ingest.dispatcher.start",          # bounded drain window...
-        "ingest.dispatcher.stop",           # ...that closes itself
-        "api.routes.create_and_run_task",   # THE task-create path
-        "gateway.auditor.agreement_report", # pure read (the one exemption)
-        "runtime.converse.conversation_turn", # the S2 nudge: one ordinary turn
-        "api.orchestration.retry_sweep",    # re-drives units parked by an outage
-                                            # through their EXISTING drivers
-        "api.orchestration.graph_verify_sweep", # audits approved graph episodes
-                                            # post-ingestion; opens no gate —
-                                            # it reads the graph, records
-                                            # verdicts, and parks rows for the
-                                            # operator
-        "integrations.sandbox_client.exec_cmd", # runs an already-synced script
-                                            # in the owning agent's own sandbox
-        "integrations.litellm_credstore.list_provider_credentials", # LiteLLM's
-                                            # OWN stored credentials, decrypted
-        "integrations.litellm.provider_catalog", # a credential's own live catalog
+        "ingest.feed.poll_once",  # idempotent enrollment
+        "ingest.dispatcher.start",  # bounded drain window...
+        "ingest.dispatcher.stop",  # ...that closes itself
+        "api.routes.create_and_run_task",  # THE task-create path
+        "gateway.auditor.agreement_report",  # pure read (the one exemption)
+        "runtime.converse.conversation_turn",  # the S2 nudge: one ordinary turn
+        "api.orchestration.retry_sweep",  # re-drives units parked by an outage
+        # through their EXISTING drivers
+        "api.orchestration.graph_verify_sweep",  # audits approved graph episodes
+        # post-ingestion; opens no gate —
+        # it reads the graph, records
+        # verdicts, and parks rows for the
+        # operator
+        "integrations.sandbox_client.exec_cmd",  # runs an already-synced script
+        # in the owning agent's own sandbox
+        "integrations.litellm_credstore.list_provider_credentials",  # LiteLLM's
+        # OWN stored credentials, decrypted
+        "integrations.litellm.provider_catalog",  # a credential's own live catalog
         "integrations.litellm.list_models",  # the proxy's configured deployments
-        "integrations.litellm.check_model_health", # per-deployment health
-        "integrations.litellm.probe_model", # measures undeclared capabilities
-        "ingest.watcher.walk_source",       # deterministic inventory: stat +
-                                            # extract, no LLM, no ledger writes
-        "ingest.catalog_enroll.enroll_pending", # the catalog backlog onto the
-                                            # ordinary ledger, at the source's
-                                            # own pace
-        "ingest.wiki_freshness.sweep",      # compares recorded evidence
-                                            # versions against the catalog and
-                                            # enrolls one repair item per
-                                            # stale page — deterministic, no
-                                            # LLM, no gate opened
+        "integrations.litellm.check_model_health",  # per-deployment health
+        "integrations.litellm.probe_model",  # measures undeclared capabilities
+        "ingest.watcher.walk_source",  # deterministic inventory: stat +
+        # extract, no LLM, no ledger writes
+        "ingest.catalog_enroll.enroll_pending",  # the catalog backlog onto the
+        # ordinary ledger, at the source's
+        # own pace
+        "ingest.wiki_freshness.sweep",  # compares recorded evidence
+        # versions against the catalog and
+        # enrolls one repair item per
+        # stale page — deterministic, no
+        # LLM, no gate opened
     }
     seen = set()
     for kind, spec in hb_actions.ACTIONS.items():
@@ -151,14 +152,10 @@ def test_enum_params_are_enforced_mechanically():
 def test_schedule_math_and_validation():
     now = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
 
-    assert compute_next_due("every", {"every_seconds": 300}, now) == now + timedelta(
-        seconds=300
-    )
+    assert compute_next_due("every", {"every_seconds": 300}, now) == now + timedelta(seconds=300)
     # 02:00 America/Denver = 08:00 UTC (MDT): asked at noon UTC, the next
     # occurrence is tomorrow's — cron math is timezone-honest.
-    nxt = compute_next_due(
-        "cron", {"expr": "0 2 * * *", "tz": "America/Denver"}, now
-    )
+    nxt = compute_next_due("cron", {"expr": "0 2 * * *", "tz": "America/Denver"}, now)
     assert nxt == datetime(2026, 7, 24, 8, 0, tzinfo=UTC)
     # A future one-shot is due at its moment; a passed one is NEVER due again —
     # this None is the skip-missed policy for one-shots.
@@ -185,23 +182,35 @@ def test_seeds_are_born_disabled_and_reseed_safe():
     # jira-hygiene mission text legitimately contains one.
     seed_end = SCHEMA.index("on conflict (id) do nothing", seed_start)
     seed_sql = SCHEMA[seed_start:seed_end]
-    for sid in ("mail-poll", "drain-window", "jira-hygiene", "audit-agreement",
-                "discussion-sweep", "ea-morning-report", "ea-checkin",
-                "ea-digest"):
+    for sid in (
+        "mail-poll",
+        "drain-window",
+        "jira-hygiene",
+        "audit-agreement",
+        "discussion-sweep",
+        "ea-morning-report",
+        "ea-checkin",
+        "ea-digest",
+    ):
         assert f"'{sid}'" in seed_sql, f"seed {sid} missing"
     # `enabled` is absent from the insert column list, so every seed takes the
     # column default (false) — and a re-seed can never re-enable or overwrite.
     assert "enabled" not in seed_sql.split("values")[0]
     # Every seeded action kind must exist in the registry (executable truth).
-    for kind in ("feed.poll", "dispatch.window", "task.create",
-                 "report.audit_agreement", "discussion.sweep", "ea.contact"):
+    for kind in (
+        "feed.poll",
+        "dispatch.window",
+        "task.create",
+        "report.audit_agreement",
+        "discussion.sweep",
+        "ea.contact",
+    ):
         assert kind in hb_actions.ACTIONS
         assert f"'{kind}'" in seed_sql
     # A seeded enum param must be a value the action can actually render — the
     # seed goes in with `on conflict do nothing` and nothing validates it on
     # the way, so a typo would first surface at 07:30 in a background loop.
-    for params in ('{"kind": "morning_report"}', '{"kind": "check_in"}',
-                   '{"kind": "digest"}'):
+    for params in ('{"kind": "morning_report"}', '{"kind": "check_in"}', '{"kind": "digest"}'):
         assert params in seed_sql
         hb_actions.validate_action("ea.contact", json.loads(params))
 
@@ -238,18 +247,24 @@ async def test_fired_is_recorded_before_the_action_runs(monkeypatch):
         return {"ok": True}
 
     monkeypatch.setitem(
-        hb_actions.ACTIONS, "stub.action",
+        hb_actions.ACTIONS,
+        "stub.action",
         hb_actions.ActionSpec(
-            kind="stub.action", description="test stub", params={},
-            required=(), levers=("ingest.feed.poll_once",), run=_stub_action,
+            kind="stub.action",
+            description="test stub",
+            params={},
+            required=(),
+            levers=("ingest.feed.poll_once",),
+            run=_stub_action,
         ),
     )
-    result = await fire(
-        {"id": "s1", "action_kind": "stub.action", "action_params": {}}
-    )
+    result = await fire({"id": "s1", "action_kind": "stub.action", "action_params": {}})
     assert result["ok"]
     assert rec.kinds == [
-        "heartbeat.fired", "touch:last_fired", "action:ran", "heartbeat.completed",
+        "heartbeat.fired",
+        "touch:last_fired",
+        "action:ran",
+        "heartbeat.completed",
     ]
 
 
@@ -267,10 +282,15 @@ async def test_a_failing_action_lands_error_and_still_stamps_fired(monkeypatch):
         raise RuntimeError("provider flap")
 
     monkeypatch.setitem(
-        hb_actions.ACTIONS, "stub.boom",
+        hb_actions.ACTIONS,
+        "stub.boom",
         hb_actions.ActionSpec(
-            kind="stub.boom", description="test stub", params={},
-            required=(), levers=("ingest.feed.poll_once",), run=_boom,
+            kind="stub.boom",
+            description="test stub",
+            params={},
+            required=(),
+            levers=("ingest.feed.poll_once",),
+            run=_boom,
         ),
     )
     result = await fire({"id": "s1", "action_kind": "stub.boom", "action_params": {}})
@@ -290,57 +310,57 @@ def test_quiet_eligibility_is_an_explicit_allowlist():
     self-recording (whatever it actually does emits its own event).
     """
     quiet_allowlist = {
-        "feed.poll",        # enrollment only; new mail emits work.enrolled itself
+        "feed.poll",  # enrollment only; new mail emits work.enrolled itself
         "dispatch.window",  # a window that did not open touched nothing
-        "discussion.sweep", # a sweep with nothing stalled read rows and stopped;
-                            # every flag emits its own discussion.stalled, and a
-                            # nudge (an agent turn) is never immaterial
-        "retry.sweep",      # NON-AUTHORISING: every unit it re-drives was
-                            # authorised before it parked (an approved
-                            # proposal's decision, an operator's task, a resume
-                            # already under way) and it opens no gate.
-                            # SELF-RECORDING: each driver emits its own
-                            # session.resume_retried / proposal.execution_retried
-                            # / task.run_retried. Nothing parked — the common
-                            # tick — must cost no history.
-        "sandbox.run_script", # NON-AUTHORISING: the script runs ungated, under
-                            # grants the agent already holds, exactly like the
-                            # sandbox pack's own tools. SELF-RECORDING: only
-                            # material when it created the evaluation task, and
-                            # that creation emits task.created itself.
-        "graph.verify_sweep", # NON-AUTHORISING: it opens no gate — reads the
-                            # graph, records verdicts, parks rows; its one
-                            # close (active mode, aligned, addition-only) is a
-                            # verification bookkeeping flip, never a world
-                            # change. SELF-RECORDING: every parked row emits
-                            # graph.verification.parked, every verdict
-                            # graph.audit.verdict, every auto-close
-                            # graph.verification.confirmed. The common tick
-                            # finds no due rows and must write nothing.
-        "litellm.discovery", # NON-AUTHORISING: the diff is plain code and opens
-                            # no gate; the task it may create runs the
-                            # litellm-manager under its own existing grants.
-                            # SELF-RECORDING: task creation emits task.created
-                            # itself. The common tick — nothing enrolled, or
-                            # nothing drifted — costs no history.
-        "source.walk",      # NON-AUTHORISING: it writes inventory rows and
-                            # enrolls ledger items — nothing is WORKED until
-                            # the dispatcher's valves say so, and every
-                            # proposal that follows still gates.
-                            # SELF-RECORDING: the walk emits
-                            # catalog.walk.completed, the sweep
-                            # catalog.enrolled / catalog.version.autofolded.
-                            # A tree nobody touched must cost no history.
-        "wiki.freshness",   # NON-AUTHORISING: it enrolls repair items —
-                            # nothing is WORKED until the dispatcher's valves
-                            # say so, and the repair proposal still gates. The
-                            # 'auto' annotation it may write is the operator's
-                            # own graduated action class (CC_WIKI_ANNOTATION_
-                            # MODE), off by default. SELF-RECORDING: a changed
-                            # stale set emits wiki.claims.stale, an enrollment
-                            # work.enrolled, a panel wiki.page.annotated. A
-                            # wiki whose sources have not moved must cost no
-                            # history.
+        "discussion.sweep",  # a sweep with nothing stalled read rows and stopped;
+        # every flag emits its own discussion.stalled, and a
+        # nudge (an agent turn) is never immaterial
+        "retry.sweep",  # NON-AUTHORISING: every unit it re-drives was
+        # authorised before it parked (an approved
+        # proposal's decision, an operator's task, a resume
+        # already under way) and it opens no gate.
+        # SELF-RECORDING: each driver emits its own
+        # session.resume_retried / proposal.execution_retried
+        # / task.run_retried. Nothing parked — the common
+        # tick — must cost no history.
+        "sandbox.run_script",  # NON-AUTHORISING: the script runs ungated, under
+        # grants the agent already holds, exactly like the
+        # sandbox pack's own tools. SELF-RECORDING: only
+        # material when it created the evaluation task, and
+        # that creation emits task.created itself.
+        "graph.verify_sweep",  # NON-AUTHORISING: it opens no gate — reads the
+        # graph, records verdicts, parks rows; its one
+        # close (active mode, aligned, addition-only) is a
+        # verification bookkeeping flip, never a world
+        # change. SELF-RECORDING: every parked row emits
+        # graph.verification.parked, every verdict
+        # graph.audit.verdict, every auto-close
+        # graph.verification.confirmed. The common tick
+        # finds no due rows and must write nothing.
+        "litellm.discovery",  # NON-AUTHORISING: the diff is plain code and opens
+        # no gate; the task it may create runs the
+        # litellm-manager under its own existing grants.
+        # SELF-RECORDING: task creation emits task.created
+        # itself. The common tick — nothing enrolled, or
+        # nothing drifted — costs no history.
+        "source.walk",  # NON-AUTHORISING: it writes inventory rows and
+        # enrolls ledger items — nothing is WORKED until
+        # the dispatcher's valves say so, and every
+        # proposal that follows still gates.
+        # SELF-RECORDING: the walk emits
+        # catalog.walk.completed, the sweep
+        # catalog.enrolled / catalog.version.autofolded.
+        # A tree nobody touched must cost no history.
+        "wiki.freshness",  # NON-AUTHORISING: it enrolls repair items —
+        # nothing is WORKED until the dispatcher's valves
+        # say so, and the repair proposal still gates. The
+        # 'auto' annotation it may write is the operator's
+        # own graduated action class (CC_WIKI_ANNOTATION_
+        # MODE), off by default. SELF-RECORDING: a changed
+        # stale set emits wiki.claims.stale, an enrollment
+        # work.enrolled, a panel wiki.page.annotated. A
+        # wiki whose sources have not moved must cost no
+        # history.
     }
     quiet = {k for k, s in hb_actions.ACTIONS.items() if s.material is not None}
     assert quiet == quiet_allowlist, (
@@ -366,15 +386,19 @@ def test_quiet_eligibility_is_an_explicit_allowlist():
     assert sweep({"checked": 3, "stalled": ["item_1"], "nudged": []})
     assert sweep({"checked": 3, "stalled": [], "nudged": ["item_1"]})
     retry = hb_actions.ACTIONS["retry.sweep"].material
-    zero = {"resumed": [], "retried_executions": [], "retried_tasks": [],
-            "skipped_gated": [], "errors": []}
+    zero = {
+        "resumed": [],
+        "retried_executions": [],
+        "retried_tasks": [],
+        "skipped_gated": [],
+        "errors": [],
+    }
     assert not retry(zero)
     # A tick that ONLY skipped gated units did nothing either: no attempt was
     # spent, and the outage is already on the log from the failures that parked
     # the units. The skip list rides the result for the ticks that ARE material.
     assert not retry({**zero, "skipped_gated": [{"unit": "session", "id": "s"}]})
-    for did_something in ("resumed", "retried_executions", "retried_tasks",
-                          "errors"):
+    for did_something in ("resumed", "retried_executions", "retried_tasks", "errors"):
         assert retry({**zero, did_something: ["x"]}), did_something
     run_script = hb_actions.ACTIONS["sandbox.run_script"].material
     assert not run_script({"exit_code": 0, "success": True})
@@ -400,10 +424,15 @@ async def _fire_quiet_stub(monkeypatch, result, *, material):
         return result
 
     monkeypatch.setitem(
-        hb_actions.ACTIONS, "stub.quiet",
+        hb_actions.ACTIONS,
+        "stub.quiet",
         hb_actions.ActionSpec(
-            kind="stub.quiet", description="quiet-eligible test stub", params={},
-            required=(), levers=("ingest.feed.poll_once",), run=_stub_action,
+            kind="stub.quiet",
+            description="quiet-eligible test stub",
+            params={},
+            required=(),
+            levers=("ingest.feed.poll_once",),
+            run=_stub_action,
             material=material,
         ),
     )
@@ -451,15 +480,20 @@ async def test_a_quiet_recovery_clears_a_recorded_error_in_the_crons_view(monkey
     failed_at = datetime(2026, 7, 25, 10, 0, tzinfo=UTC)
 
     async def _events(**kwargs):
-        return [{
-            "kind": "heartbeat.error", "created_at": failed_at,
-            "payload": {"error": "provider flap"},
-        }]
+        return [
+            {
+                "kind": "heartbeat.error",
+                "created_at": failed_at,
+                "payload": {"error": "provider flap"},
+            }
+        ]
 
     monkeypatch.setattr(repo, "list_events", _events)
     base = {
-        "id": "mail-poll", "schedule_kind": "every",
-        "schedule": {"every_seconds": 300}, "action_kind": "feed.poll",
+        "id": "mail-poll",
+        "schedule_kind": "every",
+        "schedule": {"every_seconds": 300},
+        "action_kind": "feed.poll",
     }
 
     # Nothing has fired since the failure: the error still stands.
@@ -480,9 +514,12 @@ async def test_missed_fires_are_skipped_never_replayed(monkeypatch):
     times when the engine first sees it — next due is computed from now."""
     rec = _Recorder(monkeypatch)
     stale = {
-        "id": "mail-poll", "schedule_kind": "every",
-        "schedule": {"every_seconds": 300}, "action_kind": "feed.poll",
-        "action_params": {}, "enabled": True,
+        "id": "mail-poll",
+        "schedule_kind": "every",
+        "schedule": {"every_seconds": 300},
+        "action_kind": "feed.poll",
+        "action_params": {},
+        "enabled": True,
         "updated_at": datetime(2026, 1, 1, tzinfo=UTC),
         "last_fired_at": datetime(2026, 1, 1, tzinfo=UTC),
     }
@@ -504,6 +541,7 @@ async def test_a_schedule_fires_once_at_a_time(monkeypatch):
     """Two run-now presses two seconds apart ran a sweep twice concurrently
     (2026-09-19); the second firing is skipped while the first runs."""
     import importlib
+
     hb_engine = importlib.import_module("central_command.heartbeat.engine")
     started = asyncio.Event()
     release = asyncio.Event()
@@ -518,9 +556,19 @@ async def test_a_schedule_fires_once_at_a_time(monkeypatch):
     async def noop(*a, **kw):
         return None
 
-    monkeypatch.setitem(hb_actions.ACTIONS, "test.slow", hb_actions.ActionSpec(
-        kind="test.slow", description="", params={}, required=(), levers=(), run=slow_run,
-        material=lambda r: False))
+    monkeypatch.setitem(
+        hb_actions.ACTIONS,
+        "test.slow",
+        hb_actions.ActionSpec(
+            kind="test.slow",
+            description="",
+            params={},
+            required=(),
+            levers=(),
+            run=slow_run,
+            material=lambda r: False,
+        ),
+    )
     monkeypatch.setattr(hb_engine.repo, "touch_heartbeat_fired", noop)
     sched = {"id": "s-slow", "action_kind": "test.slow", "action_params": {}}
     first = asyncio.create_task(hb_engine.fire(sched, trigger="run-now"))
@@ -550,10 +598,15 @@ async def test_run_now_works_with_the_engine_stopped(monkeypatch):
         return {"ran": True}
 
     monkeypatch.setitem(
-        hb_actions.ACTIONS, "stub.now",
+        hb_actions.ACTIONS,
+        "stub.now",
         hb_actions.ActionSpec(
-            kind="stub.now", description="test stub", params={},
-            required=(), levers=("ingest.feed.poll_once",), run=_stub,
+            kind="stub.now",
+            description="test stub",
+            params={},
+            required=(),
+            levers=("ingest.feed.poll_once",),
+            run=_stub,
         ),
     )
     engine = HeartbeatEngine()
@@ -603,8 +656,7 @@ async def test_second_heartbeat_is_refused_while_the_lease_is_held(monkeypatch):
 
 
 def _ea_schedule(schedule_id="ea-digest", kind="digest"):
-    return {"id": schedule_id, "action_kind": "ea.contact",
-            "action_params": {"kind": kind}}
+    return {"id": schedule_id, "action_kind": "ea.contact", "action_params": {"kind": kind}}
 
 
 @pytest.fixture()
@@ -628,16 +680,17 @@ async def ea_stubs(monkeypatch):
 
     async def fake_snapshot(since):
         calls["snapshots"].append(since)
-        return {"window": {"since": since.isoformat(), "until": "now"},
-                "queues": {"proposals_awaiting_decision": 2},
-                "activity": {"proposal.created": {"count": 1, "examples": [],
-                                                  "truncated": 0}}}
+        return {
+            "window": {"since": since.isoformat(), "until": "now"},
+            "queues": {"proposals_awaiting_decision": 2},
+            "activity": {"proposal.created": {"count": 1, "examples": [], "truncated": 0}},
+        }
 
     async def fake_create(instructions, title, agent_id, actor="operator", **kw):
-        calls["tasks"].append({"instructions": instructions, "title": title,
-                               "agent_id": agent_id, "actor": actor})
-        return {"task_id": "task_ea_stub", "session_id": "sess_ea_stub",
-                "deferred": False}
+        calls["tasks"].append(
+            {"instructions": instructions, "title": title, "agent_id": agent_id, "actor": actor}
+        )
+        return {"task_id": "task_ea_stub", "session_id": "sess_ea_stub", "deferred": False}
 
     monkeypatch.setattr(ea, "ensure_registered", fake_ensure)
     monkeypatch.setattr(ea_report, "snapshot", fake_snapshot)
@@ -682,9 +735,7 @@ def test_no_framing_invites_re_asking_another_agents_question():
 
 @pytest.mark.graph_live
 @needs_pg
-async def test_the_brief_explains_asked_state_and_does_not_report_the_budget(
-    monkeypatch, ea_stubs
-):
+async def test_the_brief_explains_asked_state_and_does_not_report_the_budget(monkeypatch, ea_stubs):
     """`open_operator_items` is the only list of what waits on the operator, and
     the brief says so; the contact budget no longer rides the brief."""
     out = await fire(_ea_schedule())
@@ -709,19 +760,20 @@ async def test_the_window_anchors_on_delivery_not_on_last_fired(monkeypatch, ea_
     from central_command.db import repo
 
     anchor = await events.emit(
-        "ea.contact_delivered", ref_id="ea-digest",
-        payload={"kind": "digest"}, actor="heartbeat",
+        "ea.contact_delivered",
+        ref_id="ea-digest",
+        payload={"kind": "digest"},
+        actor="heartbeat",
     )
     # Another kind's delivery must NOT move the digest's window.
-    await events.emit("ea.contact_delivered", ref_id="ea-checkin",
-                      payload={"kind": "check_in"}, actor="heartbeat")
+    await events.emit(
+        "ea.contact_delivered", ref_id="ea-checkin", payload={"kind": "check_in"}, actor="heartbeat"
+    )
 
     await fire(_ea_schedule())
     used = ea_stubs["snapshots"][-1]
     row = await repo.get_event(anchor["id"])
-    assert used == row["created_at"], (
-        "the window must start at this kind's newest delivery"
-    )
+    assert used == row["created_at"], "the window must start at this kind's newest delivery"
 
 
 @needs_pg
@@ -745,9 +797,9 @@ async def test_a_deferred_contact_spends_nothing(monkeypatch, ea_stubs):
     assert ea_stubs["tasks"] == [], "a task was created over budget"
     deferred = await repo.list_events(since_id=since_id, kind="ea.contact_deferred")
     assert deferred and deferred[0]["payload"]["budget"] == 3
-    assert not await repo.list_events(
-        since_id=since_id, kind="ea.contact_delivered"
-    ), "a deferral must not stamp the delivery anchor"
+    assert not await repo.list_events(since_id=since_id, kind="ea.contact_delivered"), (
+        "a deferral must not stamp the delivery anchor"
+    )
     # And the firing itself is still LOUD — the operator wondering where the
     # digest went finds it on the log.
     assert await repo.list_events(since_id=since_id, kind="heartbeat.fired")
@@ -774,8 +826,11 @@ def sandbox_stubs(monkeypatch):
 
     async def fake_exec_cmd(sandbox_id, command, timeout=None):
         calls["exec"].append(command)
-        return {"exit_code": state["exit_code"], "stdout": state["stdout"],
-                "stderr": state["stderr"]}
+        return {
+            "exit_code": state["exit_code"],
+            "stdout": state["stdout"],
+            "stderr": state["stderr"],
+        }
 
     async def fake_read_file(sandbox_id, path):
         if state["result_json"] is None:
@@ -785,8 +840,9 @@ def sandbox_stubs(monkeypatch):
         return {"content": json.dumps(state["result_json"]), "truncated": False}
 
     async def fake_create(instructions, title, agent_id, actor="operator", **kw):
-        calls["tasks"].append({"instructions": instructions, "title": title,
-                               "agent_id": agent_id, "actor": actor})
+        calls["tasks"].append(
+            {"instructions": instructions, "title": title, "agent_id": agent_id, "actor": actor}
+        )
         return {"task_id": "task_eval_stub", "session_id": "sess_eval_stub"}
 
     monkeypatch.setattr(sandbox_client, "create_session", fake_create_session)
@@ -798,24 +854,24 @@ def sandbox_stubs(monkeypatch):
 
 
 def _run_script_params(**extra):
-    return {"agent_id": "jira-expert", "session_id": "sess-1",
-            "command": "python3 script.py", **extra}
+    return {
+        "agent_id": "jira-expert",
+        "session_id": "sess-1",
+        "command": "python3 script.py",
+        **extra,
+    }
 
 
 async def test_a_failing_run_always_creates_the_task(sandbox_stubs):
     sandbox_stubs["state"]["exit_code"] = 1
-    out = await hb_actions.ACTIONS["sandbox.run_script"].run(
-        "s1", _run_script_params()
-    )
+    out = await hb_actions.ACTIONS["sandbox.run_script"].run("s1", _run_script_params())
     assert out["success"] is False and out["task_id"] == "task_eval_stub"
     assert sandbox_stubs["tasks"][0]["agent_id"] == "jira-expert"
     assert sandbox_stubs["tasks"][0]["actor"] == "heartbeat:s1"
 
 
 async def test_a_clean_run_with_the_flag_off_creates_no_task(sandbox_stubs):
-    out = await hb_actions.ACTIONS["sandbox.run_script"].run(
-        "s1", _run_script_params()
-    )
+    out = await hb_actions.ACTIONS["sandbox.run_script"].run("s1", _run_script_params())
     assert out["success"] is True and "task_id" not in out
     assert sandbox_stubs["tasks"] == []
 
@@ -831,18 +887,14 @@ async def test_a_clean_run_with_the_flag_on_still_creates_the_task(sandbox_stubs
 async def test_result_json_rides_the_report_when_the_script_wrote_one(sandbox_stubs):
     sandbox_stubs["state"]["exit_code"] = 1
     sandbox_stubs["state"]["result_json"] = {"passed": 3, "failed": 1}
-    out = await hb_actions.ACTIONS["sandbox.run_script"].run(
-        "s1", _run_script_params()
-    )
+    out = await hb_actions.ACTIONS["sandbox.run_script"].run("s1", _run_script_params())
     assert out["result_json"] == {"passed": 3, "failed": 1}
     assert '"passed": 3' in sandbox_stubs["tasks"][0]["instructions"]
 
 
 async def test_missing_result_json_is_not_an_error(sandbox_stubs):
     """Not every script writes one — a failed read must not crash the run."""
-    out = await hb_actions.ACTIONS["sandbox.run_script"].run(
-        "s1", _run_script_params()
-    )
+    out = await hb_actions.ACTIONS["sandbox.run_script"].run("s1", _run_script_params())
     assert out["result_json"] is None
 
 
@@ -865,10 +917,13 @@ async def test_a_raising_exec_call_is_material_through_fire(monkeypatch, sandbox
 
     monkeypatch.setattr(repo, "touch_heartbeat_fired", _touch)
 
-    out = await fire({
-        "id": "s1", "action_kind": "sandbox.run_script",
-        "action_params": _run_script_params(),
-    })
+    out = await fire(
+        {
+            "id": "s1",
+            "action_kind": "sandbox.run_script",
+            "action_params": _run_script_params(),
+        }
+    )
     assert not out["ok"]
     assert rec.kinds == ["touch:last_fired", "heartbeat.error"], (
         "sandbox.run_script is quiet-eligible, so heartbeat.fired stays "
@@ -891,10 +946,13 @@ async def test_a_material_run_is_recorded_through_fire(monkeypatch, sandbox_stub
 
     monkeypatch.setattr(repo, "touch_heartbeat_fired", _touch)
 
-    out = await fire({
-        "id": "s1", "action_kind": "sandbox.run_script",
-        "action_params": _run_script_params(),
-    })
+    out = await fire(
+        {
+            "id": "s1",
+            "action_kind": "sandbox.run_script",
+            "action_params": _run_script_params(),
+        }
+    )
     assert out["ok"]
     assert rec.kinds == ["touch:last_fired", "heartbeat.completed"], (
         "a run that created a task is material and must land on the log"
@@ -914,9 +972,13 @@ async def test_a_material_drift_is_recorded_through_fire(monkeypatch, discovery_
 
     monkeypatch.setattr(repo, "touch_heartbeat_fired", _touch)
 
-    out = await fire({
-        "id": "s1", "action_kind": "litellm.discovery", "action_params": {},
-    })
+    out = await fire(
+        {
+            "id": "s1",
+            "action_kind": "litellm.discovery",
+            "action_params": {},
+        }
+    )
     assert out["ok"]
     assert rec.kinds == ["touch:last_fired", "heartbeat.completed"], (
         "real drift is material and must land on the log"
@@ -963,23 +1025,33 @@ def test_compute_discovery_drift_missing_stale_skip_and_hand_configured():
     deployments = [
         # OUR managed deployment (tied to this credential) for a model the
         # catalog no longer lists.
-        {"model_name": "cc-managed-retired", "provider": "anthropic",
-         "provider_model": "anthropic/claude-retired",
-         "credential_name": "anthropic-main"},
+        {
+            "model_name": "cc-managed-retired",
+            "provider": "anthropic",
+            "provider_model": "anthropic/claude-retired",
+            "credential_name": "anthropic-main",
+        },
         # A HAND-TUNED deployment for claude-old — configured, but not ours
         # (no credential_name); claude-old must not show up as missing (it
         # already exists) and cc-managed-retired, not this row, is what goes
         # stale.
-        {"model_name": "cc-hand-tuned", "provider": "anthropic",
-         "provider_model": "anthropic/claude-old",
-         "credential_name": None},
+        {
+            "model_name": "cc-hand-tuned",
+            "provider": "anthropic",
+            "provider_model": "anthropic/claude-old",
+            "credential_name": None,
+        },
     ]
     unhealthy = [
         {"model": "cc-managed-retired", "error": "timeout"},
         {"model": "cc-hand-tuned", "error": "timeout"},  # must be ignored: not managed
     ]
     drift = hb_actions.compute_discovery_drift(
-        "anthropic-main", "anthropic", catalog, deployments, unhealthy,
+        "anthropic-main",
+        "anthropic",
+        catalog,
+        deployments,
+        unhealthy,
         skip=["claude-skipped"],
     )
     assert [m["id"] for m in drift["missing"]] == ["claude-new"]
@@ -996,28 +1068,50 @@ def test_compute_discovery_drift_sees_a_gateway_credentials_deployments():
     hand-registered id from reading as 'free'."""
     catalog = [{"id": "kilo-auto/free"}, {"id": "vendor/model"}, {"id": "vendor/new"}]
     deployments = [
-        {"model_name": "kilo-auto/free", "provider": "openai",
-         "provider_model": "kilo-auto/free", "credential_name": "Kilo.ai"},
-        {"model_name": "model", "provider": None,
-         "provider_model": "openai/vendor/model", "credential_name": "Kilo.ai"},
-        {"model_name": "gone", "provider": None,
-         "provider_model": "openai/vendor/retired", "credential_name": "Kilo.ai"},
+        {
+            "model_name": "kilo-auto/free",
+            "provider": "openai",
+            "provider_model": "kilo-auto/free",
+            "credential_name": "Kilo.ai",
+        },
+        {
+            "model_name": "model",
+            "provider": None,
+            "provider_model": "openai/vendor/model",
+            "credential_name": "Kilo.ai",
+        },
+        {
+            "model_name": "gone",
+            "provider": None,
+            "provider_model": "openai/vendor/retired",
+            "credential_name": "Kilo.ai",
+        },
     ]
     unhealthy = [{"model": "kilo-auto/free", "error": "429"}, {"model": "cc-default", "error": "x"}]
     drift = hb_actions.compute_discovery_drift(
-        "Kilo.ai", "openai_compatible", catalog, deployments, unhealthy, [])
+        "Kilo.ai", "openai_compatible", catalog, deployments, unhealthy, []
+    )
     assert [m["id"] for m in drift["missing"]] == ["vendor/new"]
     assert [d["model_name"] for d in drift["stale"]] == ["gone"]
     assert hb_actions._candidate_ids("openai/chat_completions/vendor/m") == {
-        "openai/chat_completions/vendor/m", "chat_completions/vendor/m", "openai/vendor/m", "vendor/m"}
+        "openai/chat_completions/vendor/m",
+        "chat_completions/vendor/m",
+        "openai/vendor/m",
+        "vendor/m",
+    }
     assert [u["model"] for u in drift["unhealthy"]] == ["kilo-auto/free"]
 
 
 def test_compute_discovery_drift_quiet_when_nothing_moved():
     catalog = [{"id": "claude-x"}]
-    deployments = [{"model_name": "cc-x", "provider": "anthropic",
-                    "provider_model": "anthropic/claude-x",
-                    "credential_name": "anthropic-main"}]
+    deployments = [
+        {
+            "model_name": "cc-x",
+            "provider": "anthropic",
+            "provider_model": "anthropic/claude-x",
+            "credential_name": "anthropic-main",
+        }
+    ]
     drift = hb_actions.compute_discovery_drift(
         "anthropic-main", "anthropic", catalog, deployments, unhealthy=[], skip=[]
     )
@@ -1031,9 +1125,14 @@ def test_compute_discovery_drift_matches_on_model_prefix_when_provider_unset():
     # configured (not re-proposed as missing) and as OURS when its
     # credential_name matches.
     catalog = [{"id": "claude-x"}]
-    deployments = [{"model_name": "cc-x", "provider": None,
-                    "provider_model": "anthropic/claude-x",
-                    "credential_name": "anthropic-main"}]
+    deployments = [
+        {
+            "model_name": "cc-x",
+            "provider": None,
+            "provider_model": "anthropic/claude-x",
+            "credential_name": "anthropic-main",
+        }
+    ]
     unhealthy = [{"model": "cc-x", "error": "timeout"}]
     drift = hb_actions.compute_discovery_drift(
         "anthropic-main", "anthropic", catalog, deployments, unhealthy, skip=[]
@@ -1052,11 +1151,16 @@ def discovery_stubs(monkeypatch):
     calls: dict = {"tasks": []}
     state = {
         "credentials": [
-            {"credential_name": "anthropic-main", "provider": "anthropic",
-             "values": {"api_key": "sk-ant-stub"}},
+            {
+                "credential_name": "anthropic-main",
+                "provider": "anthropic",
+                "values": {"api_key": "sk-ant-stub"},
+            },
         ],
         "decisions": {"skip": []},
-        "deployments": [], "unhealthy": [], "catalog": [],
+        "deployments": [],
+        "unhealthy": [],
+        "catalog": [],
         "open_counts": {},  # credential_name -> count, generation-guard input
         "snapshot": {},  # autodiscovery_snapshot app_setting, written back by the action
         "prior_tasks": [],  # rows for tasks_with_title_prefix / get_task
@@ -1122,17 +1226,23 @@ def discovery_stubs(monkeypatch):
     async def fake_create(instructions, title, agent_id, actor="operator", background=False, **kw):
         assert background is True  # discovery tasks always run detached
         task_id = f"task_discovery_stub_{len(calls['tasks'])}"
-        calls["tasks"].append({"instructions": instructions, "title": title,
-                               "agent_id": agent_id, "actor": actor})
+        calls["tasks"].append(
+            {"instructions": instructions, "title": title, "agent_id": agent_id, "actor": actor}
+        )
         return {"task_id": task_id}
 
-    monkeypatch.setattr(litellm_credstore, "list_provider_credentials", fake_list_provider_credentials)
+    monkeypatch.setattr(
+        litellm_credstore, "list_provider_credentials", fake_list_provider_credentials
+    )
     monkeypatch.setattr(repo, "get_app_setting", fake_get_app_setting)
     monkeypatch.setattr(repo, "set_app_setting", fake_set_app_setting)
     monkeypatch.setattr(repo, "tasks_with_title_prefix", fake_tasks_with_title_prefix)
     monkeypatch.setattr(repo, "get_task", fake_get_task)
-    monkeypatch.setattr(repo, "count_nonterminal_tasks_with_title_prefix",
-                        fake_count_nonterminal_tasks_with_title_prefix)
+    monkeypatch.setattr(
+        repo,
+        "count_nonterminal_tasks_with_title_prefix",
+        fake_count_nonterminal_tasks_with_title_prefix,
+    )
     monkeypatch.setattr(litellm_client, "list_models", fake_list_models)
     monkeypatch.setattr(litellm_client, "check_model_health", fake_check_model_health)
     monkeypatch.setattr(litellm_client, "provider_catalog", fake_provider_catalog)
@@ -1148,8 +1258,13 @@ def _reviewed(stubs, credential="anthropic-main", review_id="t-review"):
     """Pretend the credential's review task finished DONE: every pending entry
     the last pass tasked for review now resolves as `reviewed` next pass."""
     stubs["state"]["prior_tasks"].append(
-        {"id": review_id, "status": "DONE", "instructions": "",
-         "title": f"LiteLLM autodiscovery: {credential} review"})
+        {
+            "id": review_id,
+            "status": "DONE",
+            "instructions": "",
+            "title": f"LiteLLM autodiscovery: {credential} review",
+        }
+    )
     for entry in stubs["state"]["snapshot"].get(credential, {}).values():
         if entry.get("disposition") == "pending":
             entry["review_task_id"] = review_id
@@ -1193,8 +1308,12 @@ async def test_credstore_unconfigured_is_quiet_but_broken_is_loud(discovery_stub
 async def test_no_drift_creates_no_task(discovery_stubs):
     discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
     discovery_stubs["state"]["deployments"] = [
-        {"model_name": "cc-x", "provider": "anthropic",
-         "provider_model": "anthropic/claude-x", "credential_name": None},
+        {
+            "model_name": "cc-x",
+            "provider": "anthropic",
+            "provider_model": "anthropic/claude-x",
+            "credential_name": None,
+        },
     ]
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out == {"drift": False}
@@ -1212,8 +1331,9 @@ async def test_new_models_go_to_one_review_task_that_registers_nothing(discovery
     assert "autodiscovery.skip" in task["instructions"]
     assert "claude-11 — Claude 11" in task["instructions"]
     snap = state["snapshot"]["anthropic-main"]
-    assert all(e["review_task_id"] == "task_discovery_stub_0" and "task_id" not in e
-               for e in snap.values())
+    assert all(
+        e["review_task_id"] == "task_discovery_stub_0" and "task_id" not in e for e in snap.values()
+    )
 
     # Review still open tomorrow: nothing new, the outstanding count reported.
     state["open_reviews"] = {"anthropic-main": 1}
@@ -1230,16 +1350,25 @@ async def test_a_done_review_turns_the_survivors_into_add_tasks(discovery_stubs)
     state["catalog"] = [{"id": f"claude-{i}"} for i in range(12)]
     await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     _reviewed(discovery_stubs)
-    state["decisions"] = {"skip": [], "skip_by_credential": {
-        "anthropic-main": ["claude-0", "claude-1"], "other-cred": ["claude-2"]}}
+    state["decisions"] = {
+        "skip": [],
+        "skip_by_credential": {
+            "anthropic-main": ["claude-0", "claude-1"],
+            "other-cred": ["claude-2"],
+        },
+    }
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {"batch_size": "5"})
     assert out["queued"] == 2 and "backlog" not in out
     titles = sorted(t["title"] for t in discovery_stubs["tasks"])
-    assert titles == ["LiteLLM autodiscovery: anthropic-main batch 1/2",
-                      "LiteLLM autodiscovery: anthropic-main batch 2/2"]
+    assert titles == [
+        "LiteLLM autodiscovery: anthropic-main batch 1/2",
+        "LiteLLM autodiscovery: anthropic-main batch 2/2",
+    ]
     tasked = sorted(
-        m["id"] for t in discovery_stubs["tasks"]
-        for m in json.loads(t["instructions"].rsplit("```json\n", 1)[1].rstrip("`\n")))
+        m["id"]
+        for t in discovery_stubs["tasks"]
+        for m in json.loads(t["instructions"].rsplit("```json\n", 1)[1].rstrip("`\n"))
+    )
     assert tasked == sorted(f"claude-{i}" for i in range(2, 12))  # other-cred's skip is not ours
     snap = state["snapshot"]["anthropic-main"]
     assert "claude-0" not in snap  # skipped ids are the operator's, not tracked
@@ -1247,16 +1376,27 @@ async def test_a_done_review_turns_the_survivors_into_add_tasks(discovery_stubs)
     assert snap["claude-5"]["review_task_id"] == "t-review"
 
     # A FAILED add re-offers the id straight to an add-task, never to review.
-    state["prior_tasks"].append({"id": snap["claude-5"]["task_id"], "status": "FAILED",
-                                 "title": "LiteLLM autodiscovery: anthropic-main batch 1/2",
-                                 "instructions": ""})
-    state["prior_tasks"].append({"id": snap["claude-10"]["task_id"], "status": "DONE",
-                                 "title": "LiteLLM autodiscovery: anthropic-main batch 2/2",
-                                 "instructions": ""})
+    state["prior_tasks"].append(
+        {
+            "id": snap["claude-5"]["task_id"],
+            "status": "FAILED",
+            "title": "LiteLLM autodiscovery: anthropic-main batch 1/2",
+            "instructions": "",
+        }
+    )
+    state["prior_tasks"].append(
+        {
+            "id": snap["claude-10"]["task_id"],
+            "status": "DONE",
+            "title": "LiteLLM autodiscovery: anthropic-main batch 2/2",
+            "instructions": "",
+        }
+    )
     discovery_stubs["tasks"].clear()
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {"batch_size": "5"})
     assert [t["title"] for t in discovery_stubs["tasks"]] == [
-        "LiteLLM autodiscovery: anthropic-main batch 1/1"]
+        "LiteLLM autodiscovery: anthropic-main batch 1/1"
+    ]
     assert "review" not in discovery_stubs["tasks"][0]["title"]
     assert state["snapshot"]["anthropic-main"]["claude-10"]["disposition"] == "skipped"
 
@@ -1265,9 +1405,14 @@ async def test_a_failed_review_is_reviewed_again(discovery_stubs):
     state = discovery_stubs["state"]
     state["catalog"] = [{"id": "claude-a"}]
     await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
-    state["prior_tasks"] = [{"id": "task_discovery_stub_0", "status": "CANCELLED",
-                             "title": "LiteLLM autodiscovery: anthropic-main review",
-                             "instructions": ""}]
+    state["prior_tasks"] = [
+        {
+            "id": "task_discovery_stub_0",
+            "status": "CANCELLED",
+            "title": "LiteLLM autodiscovery: anthropic-main review",
+            "instructions": "",
+        }
+    ]
     discovery_stubs["tasks"].clear()
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out["queued"] == 1
@@ -1314,11 +1459,18 @@ async def test_health_is_probed_per_managed_alias_only(discovery_stubs, monkeypa
     monkeypatch.setattr(litellm_client, "check_model_health", fake_health)
     discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
     discovery_stubs["state"]["deployments"] = [
-        {"model_name": "cc-x", "provider": "anthropic",
-         "provider_model": "anthropic/claude-x",
-         "credential_name": "anthropic-main"},
-        {"model_name": "cc-hand-tuned", "provider": "anthropic",
-         "provider_model": "anthropic/claude-x", "credential_name": None},
+        {
+            "model_name": "cc-x",
+            "provider": "anthropic",
+            "provider_model": "anthropic/claude-x",
+            "credential_name": "anthropic-main",
+        },
+        {
+            "model_name": "cc-hand-tuned",
+            "provider": "anthropic",
+            "provider_model": "anthropic/claude-x",
+            "credential_name": None,
+        },
     ]
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert probed == ["cc-x"]  # never the hand-tuned alias
@@ -1330,10 +1482,16 @@ async def test_one_bad_credential_does_not_block_the_rest(discovery_stubs, monke
     from central_command.integrations import litellm as litellm_client
 
     discovery_stubs["state"]["credentials"] = [
-        {"credential_name": "anthropic-main", "provider": "anthropic",
-         "values": {"api_key": "sk-ant-stub"}},
-        {"credential_name": "broken-cred", "provider": "anthropic",
-         "values": {"api_key": "sk-ant-bad"}},
+        {
+            "credential_name": "anthropic-main",
+            "provider": "anthropic",
+            "values": {"api_key": "sk-ant-stub"},
+        },
+        {
+            "credential_name": "broken-cred",
+            "provider": "anthropic",
+            "values": {"api_key": "sk-ant-bad"},
+        },
     ]
     discovery_stubs["state"]["catalog"] = [{"id": "claude-new"}]
 
@@ -1407,7 +1565,10 @@ async def test_large_missing_list_chunks_into_all_tasks_no_cap(discovery_stubs):
         "LiteLLM autodiscovery: anthropic-main batch 2/3",
         "LiteLLM autodiscovery: anthropic-main batch 3/3",
     ]
-    sizes = sorted(json.loads(t["instructions"].rsplit("```json\n", 1)[1].rstrip("`\n")).__len__() for t in discovery_stubs["tasks"])
+    sizes = sorted(
+        json.loads(t["instructions"].rsplit("```json\n", 1)[1].rstrip("`\n")).__len__()
+        for t in discovery_stubs["tasks"]
+    )
     assert sizes == [2, 5, 5]
 
 
@@ -1417,10 +1578,16 @@ async def test_maintenance_task_created_first(discovery_stubs, monkeypatch):
     from central_command.integrations import litellm as litellm_client
 
     discovery_stubs["state"]["credentials"] = [
-        {"credential_name": "anthropic-main", "provider": "anthropic",
-         "values": {"api_key": "sk-ant-stub"}},
-        {"credential_name": "broken-cred", "provider": "anthropic",
-         "values": {"api_key": "sk-ant-bad"}},
+        {
+            "credential_name": "anthropic-main",
+            "provider": "anthropic",
+            "values": {"api_key": "sk-ant-stub"},
+        },
+        {
+            "credential_name": "broken-cred",
+            "provider": "anthropic",
+            "values": {"api_key": "sk-ant-bad"},
+        },
     ]
     discovery_stubs["state"]["catalog"] = [{"id": f"claude-{i}"} for i in range(12)]
 
@@ -1454,18 +1621,25 @@ async def test_generation_guard_skips_credential_with_open_batch_task(discovery_
     assert discovery_stubs["tasks"] == []
 
 
-def _managed_deployment(alias, *, capabilities=None, provider_model="anthropic/claude-x",
-                        provider="anthropic"):
+def _managed_deployment(
+    alias, *, capabilities=None, provider_model="anthropic/claude-x", provider="anthropic"
+):
     """A MANAGED deployment row shaped like `list_models()`'s output, quiet on
     the catalog diff (its provider_model already matches a configured catalog
     entry) so tests can isolate the undeclared-capability probe."""
     return {
-        "model_name": alias, "model_id": f"{alias}-id",
-        "credential_name": "anthropic-main", "provider": provider,
+        "model_name": alias,
+        "model_id": f"{alias}-id",
+        "credential_name": "anthropic-main",
+        "provider": provider,
         "provider_model": provider_model,
-        "capabilities": capabilities if capabilities is not None else {
-            "mode": None, "supports_function_calling": None,
-            "supports_response_schema": None, "supports_vision": True,
+        "capabilities": capabilities
+        if capabilities is not None
+        else {
+            "mode": None,
+            "supports_function_calling": None,
+            "supports_response_schema": None,
+            "supports_vision": True,
         },
     }
 
@@ -1489,9 +1663,7 @@ async def test_undeclared_alias_is_probed_and_lands_in_the_maintenance_brief(dis
 
 async def test_probe_batch_caps_how_many_undeclared_aliases_are_probed(discovery_stubs):
     discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
-    discovery_stubs["state"]["deployments"] = [
-        _managed_deployment(f"cc-{i}") for i in range(5)
-    ]
+    discovery_stubs["state"]["deployments"] = [_managed_deployment(f"cc-{i}") for i in range(5)]
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {"probe_batch": "2"})
     assert len(discovery_stubs["probed"]) == 2
     # Nothing suggested by the default stub probe, so this pass is quiet.
@@ -1506,8 +1678,9 @@ async def test_health_batch_walks_each_credential_in_rotating_windows(discovery_
     st["catalog"] = [{"id": "claude-x"}]
     st["deployments"] = [_managed_deployment(f"cc-{i}") for i in range(5)]
     st["deployments"].append({**_managed_deployment("other-a"), "credential_name": "other"})
-    st["credentials"].append({"credential_name": "other", "provider": "anthropic",
-                              "values": {"api_key": "k"}})
+    st["credentials"].append(
+        {"credential_name": "other", "provider": "anthropic", "values": {"api_key": "k"}}
+    )
     run = hb_actions.ACTIONS["litellm.discovery"].run
     seen = []
     for _ in range(3):
@@ -1516,18 +1689,27 @@ async def test_health_batch_walks_each_credential_in_rotating_windows(discovery_
         seen.append(sorted(discovery_stubs["health_calls"]))
     # anthropic-main walks two per tick and wraps; the other credential has
     # its own window, so a big fleet never starves a small one.
-    assert seen == [["cc-0", "cc-1", "other-a"], ["cc-2", "cc-3", "other-a"],
-                    ["cc-0", "cc-4", "other-a"]]
+    assert seen == [
+        ["cc-0", "cc-1", "other-a"],
+        ["cc-2", "cc-3", "other-a"],
+        ["cc-0", "cc-4", "other-a"],
+    ]
     assert st["health_cursor"] == {"anthropic-main": "cc-0", "other": "other-a"}
 
 
 async def test_declared_and_bridge_aliases_are_never_probed(discovery_stubs):
-    declared = _managed_deployment("cc-declared", capabilities={
-        "mode": "chat", "supports_function_calling": True,
-        "supports_response_schema": True, "supports_vision": False,
-    })
+    declared = _managed_deployment(
+        "cc-declared",
+        capabilities={
+            "mode": "chat",
+            "supports_function_calling": True,
+            "supports_response_schema": True,
+            "supports_vision": False,
+        },
+    )
     bridge = _managed_deployment(
-        "cc-bridge", provider_model="openai/chat_completions/claude-x",
+        "cc-bridge",
+        provider_model="openai/chat_completions/claude-x",
         provider="openai",  # the bridge prefix is routing, not id: still claude-x
     )
     discovery_stubs["state"]["catalog"] = [{"id": "claude-x"}]
@@ -1538,7 +1720,8 @@ async def test_declared_and_bridge_aliases_are_never_probed(discovery_stubs):
 
 
 async def test_a_probe_or_health_exception_is_the_ticks_own_error_not_agent_work(
-        discovery_stubs, monkeypatch):
+    discovery_stubs, monkeypatch
+):
     """2026-09-14: the probe refused a slashed alias the proxy serves, the
     brief told the agent a probe error is a mechanism failure to surface via
     ask_operator, and a code bug became a question the operator had to
@@ -1556,8 +1739,10 @@ async def test_a_probe_or_health_exception_is_the_ticks_own_error_not_agent_work
     monkeypatch.setattr(litellm_client, "check_model_health", health_raises)
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out["drift"] is False
-    assert out["errors"] == {"probe:cc-x": "RuntimeError: provider flap",
-                             "health:cc-x": "LiteLLMError: bad model_name"}
+    assert out["errors"] == {
+        "probe:cc-x": "RuntimeError: provider flap",
+        "health:cc-x": "LiteLLMError: bad model_name",
+    }
     assert discovery_stubs["tasks"] == []
     assert hb_actions.ACTIONS["litellm.discovery"].material(out), "an error is material"
     assert "probe `error`" not in hb_actions._maintenance_brief({"x": {"stale": []}})
@@ -1597,17 +1782,21 @@ def test_reconcile_only_new_changed_or_failed_reach_the_agent():
     configured = {"m-registered", "m-registered-same"}
     missing = {m["id"] for m in catalog} - configured
     rec = hb_actions.reconcile_snapshot(
-        previous, catalog, missing, configured,
+        previous,
+        catalog,
+        missing,
+        configured,
         {"t-open": "REVIEW", "t-done": "DONE", "t-failed": "FAILED"},
     )
-    assert sorted(m["id"] for m in rec["to_task"]) == [
-        "m-changed", "m-new", "m-pending-failed"]
+    assert sorted(m["id"] for m in rec["to_task"]) == ["m-changed", "m-new", "m-pending-failed"]
     snap = rec["snapshot"]
     assert snap["m-skipped"]["disposition"] == "skipped"
     assert snap["m-pending-open"] == previous["m-pending-open"]
     assert snap["m-pending-done"]["disposition"] == "skipped", "DONE without registering = skipped"
     assert snap["m-registered"]["disposition"] == "registered"
-    assert [c["id"] for c in rec["changed"]] == ["m-registered"], "a registered id that moved is a maintenance finding"
+    assert [c["id"] for c in rec["changed"]] == ["m-registered"], (
+        "a registered id that moved is a maintenance finding"
+    )
     assert "m-gone" not in snap, "an id the catalog dropped is forgotten"
     for m in rec["to_task"]:
         assert snap[m["id"]]["disposition"] == "pending"
@@ -1623,14 +1812,23 @@ def test_reconcile_reoffers_a_registered_model_that_left_the_proxy():
     assert [m["id"] for m in rec["to_task"]] == ["m-x"]
     assert rec["snapshot"]["m-x"] == {
         "fp": hb_actions.catalog_fingerprint({"id": "m-x"}),
-        "disposition": "pending", "reason": "removed"}
+        "disposition": "pending",
+        "reason": "removed",
+    }
 
 
 def test_review_brief_is_grouped_by_vendor_and_the_agent_answers_by_group():
-    brief = hb_actions._review_brief("Kilo.ai", [
-        {"id": "openai/gpt-a"}, {"id": "anthropic/claude-b"}, {"id": "openai/gpt-c"},
-        {"id": "bare-id"}, {"id": "anthropic/claude-d", "shutdown_date": "2026-12-01"},
-    ], removed_ids={"bare-id"})
+    brief = hb_actions._review_brief(
+        "Kilo.ai",
+        [
+            {"id": "openai/gpt-a"},
+            {"id": "anthropic/claude-b"},
+            {"id": "openai/gpt-c"},
+            {"id": "bare-id"},
+            {"id": "anthropic/claude-d", "shutdown_date": "2026-12-01"},
+        ],
+        removed_ids={"bare-id"},
+    )
     assert "5 catalog model(s) in 3 vendor group(s)" in brief
     assert "openai (2): openai/gpt-a, openai/gpt-c" in brief
     assert "anthropic (2): anthropic/claude-b, anthropic/claude-d (shutdown 2026-12-01)" in brief
@@ -1638,7 +1836,10 @@ def test_review_brief_is_grouped_by_vendor_and_the_agent_answers_by_group():
     assert "`vendors` = exactly the agreed skip groups" in brief
     assert "resolve each pattern to exact ids yourself" not in brief
     assert hb_actions.group_by_vendor(["a/1", "b/2", "a/3", "c"]) == {
-        "a": ["a/1", "a/3"], "b": ["b/2"], hb_actions.NO_VENDOR: ["c"]}
+        "a": ["a/1", "a/3"],
+        "b": ["b/2"],
+        hb_actions.NO_VENDOR: ["c"],
+    }
 
 
 def test_reconcile_adopts_a_bootstrapped_fingerprint_without_retasking():
@@ -1650,11 +1851,13 @@ def test_reconcile_adopts_a_bootstrapped_fingerprint_without_retasking():
 
 def test_bootstrap_snapshot_reads_prior_add_tasks():
     brief = lambda ids: "x\n```json\n" + json.dumps([{"id": i} for i in ids]) + "\n```"
-    snap = hb_actions.bootstrap_snapshot([
-        {"id": "t1", "status": "DONE", "instructions": brief(["a", "b"])},
-        {"id": "t2", "status": "REVIEW", "instructions": brief(["c"])},
-        {"id": "t3", "status": "FAILED", "instructions": brief(["d"])},
-    ])
+    snap = hb_actions.bootstrap_snapshot(
+        [
+            {"id": "t1", "status": "DONE", "instructions": brief(["a", "b"])},
+            {"id": "t2", "status": "REVIEW", "instructions": brief(["c"])},
+            {"id": "t3", "status": "FAILED", "instructions": brief(["d"])},
+        ]
+    )
     assert snap == {
         "a": {"fp": None, "disposition": "skipped"},
         "b": {"fp": None, "disposition": "skipped"},
@@ -1677,9 +1880,14 @@ async def test_a_second_pass_does_not_retask_examined_models(discovery_stubs):
     assert snap["disposition"] == "pending" and snap["task_id"] == "task_discovery_stub_0"
 
     # The task finished; the agent proposed nothing.
-    state["prior_tasks"].append({"id": "task_discovery_stub_0", "status": "DONE",
-                                 "title": "LiteLLM autodiscovery: anthropic-main batch 1/1",
-                                 "instructions": ""})
+    state["prior_tasks"].append(
+        {
+            "id": "task_discovery_stub_0",
+            "status": "DONE",
+            "title": "LiteLLM autodiscovery: anthropic-main batch 1/1",
+            "instructions": "",
+        }
+    )
     discovery_stubs["tasks"].clear()
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out == {"drift": False}
@@ -1700,9 +1908,14 @@ async def test_a_second_pass_does_not_retask_examined_models(discovery_stubs):
 
 async def test_a_registered_model_whose_entry_moved_is_a_maintenance_finding(discovery_stubs):
     state = discovery_stubs["state"]
-    state["deployments"] = [{"model_name": "cc-x", "provider": "anthropic",
-                             "provider_model": "anthropic/claude-x",
-                             "credential_name": "anthropic-main"}]
+    state["deployments"] = [
+        {
+            "model_name": "cc-x",
+            "provider": "anthropic",
+            "provider_model": "anthropic/claude-x",
+            "credential_name": "anthropic-main",
+        }
+    ]
     state["catalog"] = [{"id": "claude-x", "display_name": "Claude X"}]
     assert await hb_actions.ACTIONS["litellm.discovery"].run("s1", {}) == {"drift": False}
     state["catalog"] = [{"id": "claude-x", "display_name": "Claude X (deprecated)"}]
@@ -1717,9 +1930,14 @@ async def test_a_credential_without_a_snapshot_bootstraps_from_prior_tasks(disco
     state = discovery_stubs["state"]
     state["catalog"] = [{"id": "claude-a"}, {"id": "claude-b"}]
     brief = "x\n```json\n" + json.dumps([{"id": "claude-a"}]) + "\n```"
-    state["prior_tasks"] = [{"id": "t-old", "status": "DONE",
-                             "title": "LiteLLM autodiscovery: anthropic-main batch 1/1",
-                             "instructions": brief}]
+    state["prior_tasks"] = [
+        {
+            "id": "t-old",
+            "status": "DONE",
+            "title": "LiteLLM autodiscovery: anthropic-main batch 1/1",
+            "instructions": brief,
+        }
+    ]
     out = await hb_actions.ACTIONS["litellm.discovery"].run("s1", {})
     assert out["queued"] == 1
     assert "claude-b" in discovery_stubs["tasks"][0]["instructions"]

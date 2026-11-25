@@ -45,8 +45,7 @@ async def isolated_jobs():
     try:
         before = await conn.fetchval("select coalesce(max(id), 0) from graph_ingest_job")
         await conn.execute(
-            f"update graph_ingest_job set status = '{PARKED}' "
-            "where status in ('QUEUED', 'RUNNING')"
+            f"update graph_ingest_job set status = '{PARKED}' where status in ('QUEUED', 'RUNNING')"
         )
     finally:
         await conn.close()
@@ -108,8 +107,13 @@ async def _enqueue(name: str, group: str) -> dict:
     pid = f"p-{_uuid.uuid4().hex[:10]}"
     marker = f"proposal={pid}"
     return await graphiti_ingest.enqueue(
-        name, f"{name} body", f"src | trust=human-approved | approver=human:doe | {marker}",
-        group, reference_time="2026-01-01T00:00:00Z", proposal_id=pid, scope="shared",
+        name,
+        f"{name} body",
+        f"src | trust=human-approved | approver=human:doe | {marker}",
+        group,
+        reference_time="2026-01-01T00:00:00Z",
+        proposal_id=pid,
+        scope="shared",
         marker=marker,
     )
 
@@ -141,11 +145,14 @@ async def test_the_queue_summary_counts_open_work_and_names_the_retry_reason(fak
     try:
         await conn.execute(
             "update graph_ingest_job set status = 'QUEUED', attempts = 4, started_at = now(), "
-            "last_error = $2 where id = $1", b["job"]["id"], "Error code: 403 - key not allowed",
+            "last_error = $2 where id = $1",
+            b["job"]["id"],
+            "Error code: 403 - key not allowed",
         )
         await conn.execute(
             "update graph_ingest_job set status = 'FAILED', attempts = 1, last_error = 'boom' "
-            "where id = $1", c["job"]["id"],
+            "where id = $1",
+            c["job"]["id"],
         )
     finally:
         await conn.close()
@@ -167,7 +174,8 @@ async def test_enqueue_writes_the_verification_row_and_the_job_together():
     assert job["status"] == "QUEUED" and job["kind"] == "add_episode"
     assert job["verification_id"] == ver["id"]
     assert job["payload"] == {
-        "name": "alpha", "episode_body": "alpha body",
+        "name": "alpha",
+        "episode_body": "alpha body",
         "source_description": f"src | trust=human-approved | approver=human:doe | {ver['marker']}",
         "reference_time": "2026-01-01T00:00:00Z",
     }
@@ -177,8 +185,12 @@ async def test_a_failed_job_insert_leaves_no_verification_row():
     pid = f"p-{_uuid.uuid4().hex[:10]}"
     with pytest.raises(TypeError):
         await repo.create_graph_verification_with_job(
-            proposal_id=pid, episode_name="x", group_id=_group(), scope="shared",
-            marker=f"proposal={pid}", payload={"unserialisable": object()},
+            proposal_id=pid,
+            episode_name="x",
+            group_id=_group(),
+            scope="shared",
+            marker=f"proposal={pid}",
+            payload={"unserialisable": object()},
         )
     assert await repo.graph_verification_for_proposal(pid) is None
 
@@ -192,7 +204,8 @@ async def test_the_database_refuses_two_running_jobs_in_one_group():
         await conn.execute("update graph_ingest_job set status = 'RUNNING' where id = $1", a["id"])
         with pytest.raises(asyncpg.UniqueViolationError):
             await conn.execute(
-                "update graph_ingest_job set status = 'RUNNING' where id = $1", b["id"])
+                "update graph_ingest_job set status = 'RUNNING' where id = $1", b["id"]
+            )
     finally:
         await conn.close()
 
@@ -255,7 +268,8 @@ async def test_a_backed_off_head_holds_its_whole_group(fake):
     try:
         await conn.execute(
             "update graph_ingest_job set not_before = now() + interval '1 hour' where id = $1",
-            head["id"])
+            head["id"],
+        )
     finally:
         await conn.close()
     assert await graphiti_ingest.IngestWorker().tick() == []
@@ -283,8 +297,9 @@ def _openai_503():
     return openai.InternalServerError("busy", response=httpx.Response(503, request=req), body=None)
 
 
-@pytest.mark.parametrize("make", [_openai_connection_error, _neo4j_down, _openai_503,
-                                  lambda: TimeoutError()])
+@pytest.mark.parametrize(
+    "make", [_openai_connection_error, _neo4j_down, _openai_503, lambda: TimeoutError()]
+)
 async def test_a_transient_failure_requeues_with_backoff(fake, make):
     group = _group()
     out = await _enqueue("tr", group)
@@ -306,8 +321,9 @@ async def test_only_the_first_transient_failure_is_an_event(fake):
     for _ in range(2):
         conn = await repo._conn()
         try:
-            await conn.execute("update graph_ingest_job set not_before = null where id = $1",
-                               out["job"]["id"])
+            await conn.execute(
+                "update graph_ingest_job set not_before = null where id = $1", out["job"]["id"]
+            )
         finally:
             await conn.close()
         (job,) = await repo.claim_ingest_jobs()
@@ -505,9 +521,11 @@ async def test_index_ddl_and_the_cutover_run_once(fake):
 def test_patches_ok_reads_the_installed_package(monkeypatch):
     from central_command.integrations import graphiti_client, graphiti_patches
 
-    monkeypatch.setattr(graphiti_patches, "patch_state",
-                        lambda: {"a.patch": "patched", "b.patch": "patched"})
+    monkeypatch.setattr(
+        graphiti_patches, "patch_state", lambda: {"a.patch": "patched", "b.patch": "patched"}
+    )
     assert graphiti_client.patches_ok() is True
-    monkeypatch.setattr(graphiti_patches, "patch_state",
-                        lambda: {"a.patch": "patched", "b.patch": "unknown"})
+    monkeypatch.setattr(
+        graphiti_patches, "patch_state", lambda: {"a.patch": "patched", "b.patch": "unknown"}
+    )
     assert graphiti_client.patches_ok() is False

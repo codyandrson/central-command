@@ -118,7 +118,7 @@ def _iter_sections(text: str):
     pos = 0
     for m in _SECTION.finditer(text):
         if m.start() > pos:
-            yield text[pos:m.start()], None
+            yield text[pos : m.start()], None
         yield "", m.group(1)
         pos = m.end()
     if pos < len(text):
@@ -130,7 +130,7 @@ class HireTemplate:
     id: str
     label: str
     description: str
-    charter: str                    # skeleton; {name} and {mission} are filled at hire
+    charter: str  # skeleton; {name} and {mission} are filled at hire
     default_packs: tuple[str, ...]
     taskable: bool = True
     conversational: bool = True
@@ -200,9 +200,18 @@ TEMPLATES: dict[str, HireTemplate] = {
             "specialists. Taskable and conversational."
         ),
         charter=HIRED_AGENT_CHARTER,
-        default_packs=("jira-read", "jira-propose", "graph-read",
-                       "graph-propose", "consult", "task-create",
-                       "ask-operator", "session-recall", "skill-propose", "note-propose"),
+        default_packs=(
+            "jira-read",
+            "jira-propose",
+            "graph-read",
+            "graph-propose",
+            "consult",
+            "task-create",
+            "ask-operator",
+            "session-recall",
+            "skill-propose",
+            "note-propose",
+        ),
     ),
     "analyst": HireTemplate(
         id="analyst",
@@ -215,8 +224,15 @@ TEMPLATES: dict[str, HireTemplate] = {
             "changes. Taskable and conversational."
         ),
         charter=HIRED_AGENT_CHARTER,
-        default_packs=("jira-read", "graph-read", "task-create", "ask-operator",
-                       "session-recall", "skill-propose", "note-propose"),
+        default_packs=(
+            "jira-read",
+            "graph-read",
+            "task-create",
+            "ask-operator",
+            "session-recall",
+            "skill-propose",
+            "note-propose",
+        ),
     ),
     # The staffing agent (2026-11-19, the EA planning design D10 on the
     # 2026-08-21 staffing record, DL-176). In the hire menu, unlike the
@@ -248,9 +264,17 @@ TEMPLATES: dict[str, HireTemplate] = {
             "take what. One per team. Taskable and consultable."
         ),
         charter=_staffing.CHARTER,
-        default_packs=("graph-read", "jira-read", "jira-propose", "ask-operator",
-                       "record-read", "task-create", "session-recall",
-                       "skill-propose", "note-propose"),
+        default_packs=(
+            "graph-read",
+            "jira-read",
+            "jira-propose",
+            "ask-operator",
+            "record-read",
+            "task-create",
+            "session-recall",
+            "skill-propose",
+            "note-propose",
+        ),
         role=_staffing.ROLE,
         consultable=True,
         one_per_team=True,
@@ -280,8 +304,15 @@ GRAPH_CURATOR_TEMPLATE = HireTemplate(
         "never re-ingestion."
     ),
     charter="",  # unused: the curator's charter is a finished document
-    default_packs=("graph-read", "graph-curate", "ask-operator", "task-create",
-                   "session-recall", "skill-propose", "note-propose"),
+    default_packs=(
+        "graph-read",
+        "graph-curate",
+        "ask-operator",
+        "task-create",
+        "session-recall",
+        "skill-propose",
+        "note-propose",
+    ),
     taskable=True,
     conversational=True,
 )
@@ -308,9 +339,19 @@ STEWARD_TEMPLATE = HireTemplate(
     # finding written where the catalog can act on it. Gated like everything
     # else; Decision 7's auditor-agreement autonomy for this class graduates
     # later, on evidence.
-    default_packs=("graph-read", "graph-propose", "consult", "ask-operator",
-                   "web-read", "web-search", "skill-propose", "catalog-propose",
-                   "task-create", "session-recall", "note-propose"),
+    default_packs=(
+        "graph-read",
+        "graph-propose",
+        "consult",
+        "ask-operator",
+        "web-read",
+        "web-search",
+        "skill-propose",
+        "catalog-propose",
+        "task-create",
+        "session-recall",
+        "note-propose",
+    ),
     taskable=False,
     conversational=True,
 )
@@ -359,10 +400,25 @@ EA_TEMPLATE = HireTemplate(
     # jira-comment-propose added 2026-11-20 (DL-222): the reason behind a
     # decision about an issue is a comment on the issue, never a graph episode.
     # NOT seeded in schema.sql either, for the same reason.
-    default_packs=("record-read", "activity-read", "graph-read", "graph-propose",
-                   "ask-operator", "consult", "calendar-read", "calendar-propose",
-                   "loe-read", "task-create", "mail-read", "session-recall", "skill-propose", "note-propose",
-                   "jira-read", "plan-propose", "jira-comment-propose"),
+    default_packs=(
+        "record-read",
+        "activity-read",
+        "graph-read",
+        "graph-propose",
+        "ask-operator",
+        "consult",
+        "calendar-read",
+        "calendar-propose",
+        "loe-read",
+        "task-create",
+        "mail-read",
+        "session-recall",
+        "skill-propose",
+        "note-propose",
+        "jira-read",
+        "plan-propose",
+        "jira-comment-propose",
+    ),
     taskable=True,
     conversational=True,
 )
@@ -385,8 +441,17 @@ MCP_MANAGER_TEMPLATE = HireTemplate(
         "Taskable and conversational."
     ),
     charter="",  # unused: the MCP manager's charter is a finished document
-    default_packs=("sandbox", "mcp-propose", "ask-operator", "web-read", "consult",
-                   "task-create", "session-recall", "skill-propose", "note-propose"),
+    default_packs=(
+        "sandbox",
+        "mcp-propose",
+        "ask-operator",
+        "web-read",
+        "consult",
+        "task-create",
+        "session-recall",
+        "skill-propose",
+        "note-propose",
+    ),
     taskable=True,
     conversational=True,
 )
@@ -416,8 +481,14 @@ EDITOR_TEMPLATE = HireTemplate(
         "conversational."
     ),
     charter="",  # unused: the editor's charter is a finished document
-    default_packs=("jira-read", "graph-read", "record-read", "ask-operator",
-                   "task-create", "session-recall"),
+    default_packs=(
+        "jira-read",
+        "graph-read",
+        "record-read",
+        "ask-operator",
+        "task-create",
+        "session-recall",
+    ),
     taskable=True,
     conversational=True,
 )
@@ -449,8 +520,17 @@ ACCOUNTABILITY_TEMPLATE = HireTemplate(
     # jira-read + calendar-read added 2026-08-18 (evidence at check-in time,
     # The operator): the agent reads what the calendar and the board actually show for
     # a line before asking, and cites it — ungated reads, no new writes.
-    default_packs=("loe-propose", "ask-operator", "task-create", "consult",
-                   "jira-read", "calendar-read", "session-recall", "skill-propose", "note-propose"),
+    default_packs=(
+        "loe-propose",
+        "ask-operator",
+        "task-create",
+        "consult",
+        "jira-read",
+        "calendar-read",
+        "session-recall",
+        "skill-propose",
+        "note-propose",
+    ),
     taskable=True,
     conversational=True,
 )

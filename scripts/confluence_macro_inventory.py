@@ -57,7 +57,7 @@ from central_command.config import settings  # noqa: E402
 from central_command.integrations import confluence  # noqa: E402
 
 DEFAULT_SAMPLER_TITLE = "Central Command Macro Sampler"
-USAGE_LIMIT = 500          # five pages of 100 — the client's bounded crawl
+USAGE_LIMIT = 500  # five pages of 100 — the client's bounded crawl
 SKILL_TABLE = ROOT / "skills" / "confluence" / "references" / "macro-discovery.md"
 _TABLE_ROW = re.compile(r"^\|\s*(?P<intent>[^|]*?)\s*\|\s*(?P<macro>[^|]*?)\s*\|")
 _BACKTICKED = re.compile(r"`([A-Za-z0-9][A-Za-z0-9_.-]*)`")
@@ -124,8 +124,11 @@ def cql_quote(value: str) -> str:
 
 def profile_field() -> str:
     """The overlay field the active flavor's profile lives in."""
-    return ("confluence_profile_server" if settings.confluence_api_flavor == "server"
-            else "confluence_profile_cloud")
+    return (
+        "confluence_profile_server"
+        if settings.confluence_api_flavor == "server"
+        else "confluence_profile_cloud"
+    )
 
 
 def checkout_root() -> pathlib.Path:
@@ -135,15 +138,20 @@ def checkout_root() -> pathlib.Path:
 def resolve_out(out: str | None) -> pathlib.Path:
     """`--out`, or the active profile's overlay file. A path inside the
     checkout is refused: the inventory is an instance fact."""
-    path = (pathlib.Path(out).expanduser() if out
-            else pathlib.Path(settings.resolved_skill_overlay_dir()) / f"{profile_field()}.md")
+    path = (
+        pathlib.Path(out).expanduser()
+        if out
+        else pathlib.Path(settings.resolved_skill_overlay_dir()) / f"{profile_field()}.md"
+    )
     resolved = path.resolve()
     for root in {ROOT, checkout_root().resolve()}:
         if resolved == root or root in resolved.parents:
             raise Refused(
                 f"{path} is inside the checkout ({root}) — the inventory is an instance "
                 "fact; name a path outside it or leave --out to default to the overlay "
-                "directory", 2)
+                "directory",
+                2,
+            )
     return path
 
 
@@ -151,17 +159,28 @@ def _auth_failed(e: confluence.ConfluenceError) -> bool:
     return getattr(e, "status_code", None) in (401, 403)
 
 
-async def gather(client, *, sampler_title: str, extra: list[str], table: list[str],
-                 sampler_id: str | None = None, sampler_space: str | None = None) -> dict:
+async def gather(
+    client,
+    *,
+    sampler_title: str,
+    extra: list[str],
+    table: list[str],
+    sampler_id: str | None = None,
+    sampler_space: str | None = None,
+) -> dict:
     """Everything the render needs, from the client alone (a fake in the tests)."""
     try:
         info = await client.instance_info()
     except confluence.ConfluenceError as e:
         if _auth_failed(e) or "not configured" in str(e):
             raise Refused(str(e), 2) from e
-        info = {"version": None, "detail": None, "flavor": settings.confluence_api_flavor,
-                "verify_on_site": settings.confluence_api_flavor == "server",
-                "error": str(e)}
+        info = {
+            "version": None,
+            "detail": None,
+            "flavor": settings.confluence_api_flavor,
+            "verify_on_site": settings.confluence_api_flavor == "server",
+            "error": str(e),
+        }
 
     if sampler_id:
         # Pinned by page id: no title search, so no look-alike page can stand in.
@@ -173,13 +192,19 @@ async def gather(client, *, sampler_title: str, extra: list[str], table: list[st
             cql += f" AND space = {cql_quote(sampler_space)}"
         rows = (await client.search(cql, 5)).get("results") or []
         if not rows:
-            raise Refused(f"no sampler page titled {sampler_title!r} — build it through the "
-                          "macro browser first (docs/CONFLUENCE_MACROS.md)", 1)
+            raise Refused(
+                f"no sampler page titled {sampler_title!r} — build it through the "
+                "macro browser first (docs/CONFLUENCE_MACROS.md)",
+                1,
+            )
         if len(rows) > 1:
             where = ", ".join(f"{r.get('id')} (space {r.get('space_key')})" for r in rows)
-            raise Refused(f"{len(rows)} pages are titled {sampler_title!r}: {where} — pin the "
-                          "operator's page with --sampler-id (or narrow with --sampler-space); "
-                          "the title alone is not proof of who built a page", 1)
+            raise Refused(
+                f"{len(rows)} pages are titled {sampler_title!r}: {where} — pin the "
+                "operator's page with --sampler-id (or narrow with --sampler-space); "
+                "the title alone is not proof of who built a page",
+                1,
+            )
         sampler, pinned = rows[0], ("space and title" if sampler_space else "title only")
         page = (await client.get_page(str(sampler["id"])))["page"]
     sampler_blocks = confluence.extract_macros(page.get("body"))
@@ -203,19 +228,35 @@ async def gather(client, *, sampler_title: str, extra: list[str], table: list[st
             first = (hits.get("results") or [None])[0]
             if first and ID_RE.match(str(first.get("id") or "")):
                 space = str(first.get("space_key") or "")
-                first_hit = {"id": str(first["id"]),
-                             "space_key": space if SPACE_RE.match(space) else "",
-                             "title": _plain(first.get("title"), 80)}
+                first_hit = {
+                    "id": str(first["id"]),
+                    "space_key": space if SPACE_RE.match(space) else "",
+                    "title": _plain(first.get("title"), 80),
+                }
         except confluence.ConfluenceError as e:
             if _auth_failed(e):
                 raise Refused(str(e), 2) from e
             error = str(e)
-        macros.append({"name": name, "count": count, "truncated": truncated, "error": error,
-                       "schema_version": own.schema_version if own else None,
-                       "in_sampler": own is not None, "example": own, "first_hit": first_hit})
-    return {"info": info, "sampler": sampler, "sampler_pinned": pinned,
-            "sampler_blocks": len(sampler_blocks), "skipped_names": len(skipped),
-            "macros": macros}
+        macros.append(
+            {
+                "name": name,
+                "count": count,
+                "truncated": truncated,
+                "error": error,
+                "schema_version": own.schema_version if own else None,
+                "in_sampler": own is not None,
+                "example": own,
+                "first_hit": first_hit,
+            }
+        )
+    return {
+        "info": info,
+        "sampler": sampler,
+        "sampler_pinned": pinned,
+        "sampler_blocks": len(sampler_blocks),
+        "skipped_names": len(skipped),
+        "macros": macros,
+    }
 
 
 def render(data: dict, *, harvested: str, flavor: str) -> str:
@@ -239,8 +280,11 @@ def render(data: dict, *, harvested: str, flavor: str) -> str:
         "Harvested by scripts/confluence_macro_inventory.py. An example block "
         "was read from the sampler page named above, which the operator "
         "built through the macro browser"
-        + (" (identified by title only: unproven until the operator confirms the page id)"
-           if data["sampler_pinned"] == "title only" else "")
+        + (
+            " (identified by title only: unproven until the operator confirms the page id)"
+            if data["sampler_pinned"] == "title only"
+            else ""
+        )
         + ": copy a block whole and adapt values only, never a "
         "parameter name. 'first page found' lines are a pointer (id, space, "
         "title) to where the macro is used: page titles are page content, "
@@ -248,20 +292,33 @@ def render(data: dict, *, harvested: str, flavor: str) -> str:
         "is copied here. A macro absent from this list is a capability gap.",
     ]
     if data.get("skipped_names"):
-        out += ["", (f"note: {data['skipped_names']} macro name(s) were skipped "
-                    "because they are not a plain ac:name.")]
+        out += [
+            "",
+            (
+                f"note: {data['skipped_names']} macro name(s) were skipped "
+                "because they are not a plain ac:name."
+            ),
+        ]
     for m in data["macros"]:
         usage = f"{m['count']}{'+' if m['truncated'] else ''}"
-        out += ["", f"## {m['name']}", "",
-                f"- ac:name: {m['name']}",
-                f"- schema version: {m['schema_version'] or 'not stated'}",
-                f"- pages using it: {usage}"
-                + (f" (usage count failed: {m['error']})" if m["error"] else ""),
-                f"- on the sampler page: {'yes' if m['in_sampler'] else 'no'}"]
+        out += [
+            "",
+            f"## {m['name']}",
+            "",
+            f"- ac:name: {m['name']}",
+            f"- schema version: {m['schema_version'] or 'not stated'}",
+            f"- pages using it: {usage}"
+            + (f" (usage count failed: {m['error']})" if m["error"] else ""),
+            f"- on the sampler page: {'yes' if m['in_sampler'] else 'no'}",
+        ]
         hit = m["first_hit"]
         if hit:
-            out += [(f"- first page found: id {hit['id']}, space {hit['space_key'] or 'unknown'}, "
-                    f'title (quoted data): "{hit["title"] or "untitled"}"')]
+            out += [
+                (
+                    f"- first page found: id {hit['id']}, space {hit['space_key'] or 'unknown'}, "
+                    f'title (quoted data): "{hit["title"] or "untitled"}"'
+                )
+            ]
         if m["example"] is not None:
             ex = m["example"]
             # A fence longer than any backtick run in the block (the sampler is
@@ -269,7 +326,9 @@ def render(data: dict, *, harvested: str, flavor: str) -> str:
             fence = "`" * max(3, max((len(r) for r in re.findall(r"`+", ex.text)), default=0) + 1)
             out += ["- example, from the sampler page:", "", f"{fence}xml", ex.text, fence]
         else:
-            out += ["- example: none (the macro is not on the sampler page; add it there and re-run)"]
+            out += [
+                "- example: none (the macro is not on the sampler page; add it there and re-run)"
+            ]
     return "\n".join(out) + "\n"
 
 
@@ -282,8 +341,11 @@ def write(path: pathlib.Path, text: str) -> None:
 async def run(args, client=confluence) -> int:
     out_path = resolve_out(args.out)
     if not client.configured():
-        raise Refused("Confluence is not configured (CC_CONFLUENCE_BASE_URL + credentials "
-                      "matching CC_CONFLUENCE_AUTH_MODE)", 2)
+        raise Refused(
+            "Confluence is not configured (CC_CONFLUENCE_BASE_URL + credentials "
+            "matching CC_CONFLUENCE_AUTH_MODE)",
+            2,
+        )
     flavor = settings.confluence_api_flavor
     log(f"confluence base={settings.confluence_base_url} flavor={flavor}")
     if args.sampler_id and not ID_RE.match(args.sampler_id):
@@ -295,10 +357,17 @@ async def run(args, client=confluence) -> int:
             raise Refused(f"--macro {n!r} is not a plain ac:name (letters, digits, . _ : -)", 2)
     table = skill_table_macros()
     if not table:
-        log(f"note: no macro names read from {SKILL_TABLE} — candidates are the sampler's and --macro")
-    data = await gather(client, sampler_title=args.sampler_title,
-                        extra=list(args.macro or []), table=table,
-                        sampler_id=args.sampler_id, sampler_space=args.sampler_space)
+        log(
+            f"note: no macro names read from {SKILL_TABLE} — candidates are the sampler's and --macro"
+        )
+    data = await gather(
+        client,
+        sampler_title=args.sampler_title,
+        extra=list(args.macro or []),
+        table=table,
+        sampler_id=args.sampler_id,
+        sampler_space=args.sampler_space,
+    )
     text = render(data, harvested=datetime.now(UTC).date().isoformat(), flavor=flavor)
     n = len(data["macros"])
     if args.dry_run:
@@ -312,15 +381,24 @@ async def run(args, client=confluence) -> int:
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Inventory the Confluence instance's macros from the sampler page and CQL usage.")
-    p.add_argument("--out", help="file to write (default: the active profile's overlay file); "
-                                 "never inside the checkout")
+        description="Inventory the Confluence instance's macros from the sampler page and CQL usage."
+    )
+    p.add_argument(
+        "--out",
+        help="file to write (default: the active profile's overlay file); "
+        "never inside the checkout",
+    )
     p.add_argument("--dry-run", action="store_true", help="print the inventory, write nothing")
     p.add_argument("--sampler-title", default=DEFAULT_SAMPLER_TITLE)
-    p.add_argument("--sampler-id", help="the sampler page's numeric id: pins the page, skipping the "
-                                        "title search (several pages with the title is otherwise refused)")
+    p.add_argument(
+        "--sampler-id",
+        help="the sampler page's numeric id: pins the page, skipping the "
+        "title search (several pages with the title is otherwise refused)",
+    )
     p.add_argument("--sampler-space", help="narrow the title search to one space key")
-    p.add_argument("--macro", action="append", help="an extra macro ac:name to inventory (repeatable)")
+    p.add_argument(
+        "--macro", action="append", help="an extra macro ac:name to inventory (repeatable)"
+    )
     return p
 
 

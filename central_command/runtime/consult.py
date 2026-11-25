@@ -181,7 +181,12 @@ def consult_wait_of(result, call) -> dict | None:
 
 
 async def park_consult_wait(
-    *, session_id: str, agent_id: str, result, call, task_id: str | None = None,
+    *,
+    session_id: str,
+    agent_id: str,
+    result,
+    call,
+    task_id: str | None = None,
     chain: tuple[str, ...] = (),
 ) -> dict:
     """THE park path for an asker waiting on a specialist it consulted —
@@ -244,7 +249,11 @@ async def park_consult_wait(
 
 
 async def _park_mid_chain(
-    *, agent_id: str, result, call, chain: tuple[str, ...],
+    *,
+    agent_id: str,
+    result,
+    call,
+    chain: tuple[str, ...],
     caller_session_id: str | None = None,
 ) -> dict | None:
     """Persist a consulted specialist that is itself waiting one level deeper,
@@ -272,9 +281,13 @@ async def _park_mid_chain(
         # (it resumes as a full agent) finds the asker's task chain
         # (`api/backstops.py` walks `session.parent_session_id`).
         await repo.create_running_session(
-            mid_session, agent_id, parent_session_id=caller_session_id)
+            mid_session, agent_id, parent_session_id=caller_session_id
+        )
         await park_consult_wait(
-            session_id=mid_session, agent_id=agent_id, result=result, call=call,
+            session_id=mid_session,
+            agent_id=agent_id,
+            result=result,
+            call=call,
             chain=chain,
         )
     except Exception:  # no durable record, so no wait to keep
@@ -324,8 +337,13 @@ def task_wait_of(result, call) -> dict | None:
 
 
 async def park_task_wait(
-    *, session_id: str, agent_id: str, tool_call_id: str, task_id: str,
-    proposal_id: str | None = None, run_state: dict | None = None,
+    *,
+    session_id: str,
+    agent_id: str,
+    tool_call_id: str,
+    task_id: str,
+    proposal_id: str | None = None,
+    run_state: dict | None = None,
 ) -> dict:
     """The low-level park for a creator awaiting the result of the task it
     created (`await_result=True`, doctrine Decision 5) — sibling of
@@ -345,25 +363,36 @@ async def park_task_wait(
     from central_command.db import repo
 
     block = {
-        "tool_call_id": tool_call_id, "task_id": task_id,
+        "tool_call_id": tool_call_id,
+        "task_id": task_id,
         "proposal_id": proposal_id,
     }
-    await repo.park_session_awaiting_agents(
-        session_id, {**(run_state or {}), "task_wait": block})
+    await repo.park_session_awaiting_agents(session_id, {**(run_state or {}), "task_wait": block})
     # A wait finished earlier on this session leaves its key behind (run_state
     # merges); the sweep dispatches on the first key it finds, so clear it.
     await repo.drop_session_run_state_keys(session_id, ["consult_wait"])
     await events.emit(
-        "agent.task_waiting", ref_id=session_id,
-        payload={"agent_id": agent_id, **block}, actor=f"agent:{agent_id}",
+        "agent.task_waiting",
+        ref_id=session_id,
+        payload={"agent_id": agent_id, **block},
+        actor=f"agent:{agent_id}",
     )
-    return {"deferred": True, "task_waiting": True, "session_id": session_id,
-            "task_id": task_id, "proposal_id": None,
-            "intent": f"waiting on task {task_id}"}
+    return {
+        "deferred": True,
+        "task_waiting": True,
+        "session_id": session_id,
+        "task_id": task_id,
+        "proposal_id": None,
+        "intent": f"waiting on task {task_id}",
+    }
 
 
 async def park_task_wait_deferred(
-    *, session_id: str, agent_id: str, result, call,
+    *,
+    session_id: str,
+    agent_id: str,
+    result,
+    call,
 ) -> dict:
     """THE park path for a running agent that called `create_task(
     await_result=True)` — the non-gateway entry (story 4.8). The tool created
@@ -384,8 +413,10 @@ async def park_task_wait_deferred(
     if block is None:
         raise ValueError("a deferred create_task carried no task_wait block")
     parked = await park_task_wait(
-        session_id=session_id, agent_id=agent_id,
-        tool_call_id=call.tool_call_id, task_id=block["task_id"],
+        session_id=session_id,
+        agent_id=agent_id,
+        tool_call_id=call.tool_call_id,
+        task_id=block["task_id"],
         run_state=dump_run_state(result, call.tool_call_id),
     )
     from central_command.db import repo
@@ -410,7 +441,9 @@ async def consultable_ids() -> tuple[str, ...]:
 
 
 async def refusal_for(
-    agent_id: str, caller_id: str | None, chain: tuple[str, ...] = (),
+    agent_id: str,
+    caller_id: str | None,
+    chain: tuple[str, ...] = (),
 ) -> str | None:
     """The mechanical refusal for an unconsultable target, a chain already 2
     deep, a cycle, or self — or None to proceed.
@@ -448,10 +481,7 @@ async def refusal_for(
         else "No agent on the roster is currently consultable."
     )
     if caller_id and agent_id == caller_id:
-        return (
-            f"refused: you ARE {agent_id} — consulting yourself adds nothing. "
-            f"{directory}"
-        )
+        return f"refused: you ARE {agent_id} — consulting yourself adds nothing. {directory}"
     if agent_id in consultable:
         return None
     known = {a.id: a for a in await roster(include_retired=True)}
@@ -491,8 +521,12 @@ async def _consult_model(agent_id: str, model=None):
 
 
 async def build_advisory_agent(
-    agent_id: str, charter: str, packs=(), capabilities=None,
-    skills_catalog: str = "", model=None,
+    agent_id: str,
+    charter: str,
+    packs=(),
+    capabilities=None,
+    skills_catalog: str = "",
+    model=None,
 ) -> Agent:
     """The specialist, built for a consultation: its governed charter and the
     packs a consultation can drive — which, since depth 2 (2026-08-22),
@@ -522,16 +556,15 @@ async def build_advisory_agent(
             f"refusing to build an advisory {agent_id!r} with no charter — a "
             "fresh run must load the governed charter"
         )
-    output_type = (
-        [str, DeferredToolRequests] if packs_mod.has_advisory_deferral(packs) else str
-    )
+    output_type = [str, DeferredToolRequests] if packs_mod.has_advisory_deferral(packs) else str
     return Agent(
         await _consult_model(agent_id, model),
         name=agent_id,
         system_prompt=(
             build_charter(charter, packs, team_section=await standing_sections(agent_id))
             + (("\n\n" + skills_catalog) if skills_catalog else "")
-            + "\n\n" + _ADVISORY_FRAMING
+            + "\n\n"
+            + _ADVISORY_FRAMING
         ),
         deps_type=TriageDeps,
         output_type=output_type,
@@ -559,9 +592,14 @@ async def _charter_for(agent_id: str) -> str | None:
 
 
 async def consult(
-    agent_id: str, question: str, model=None, usage=None,
-    session_id: str | None = None, caller_id: str | None = None,
-    outcome: dict | None = None, chain: tuple[str, ...] = (),
+    agent_id: str,
+    question: str,
+    model=None,
+    usage=None,
+    session_id: str | None = None,
+    caller_id: str | None = None,
+    outcome: dict | None = None,
+    chain: tuple[str, ...] = (),
 ) -> str:
     """One consultation turn with `agent_id`: sub-run under the specialist's
     governed charter, capped text answer — or a proposal it drafted itself.
@@ -655,8 +693,12 @@ async def consult(
     advisory = packs_mod.advisory_packs(granted)
     caps, catalog = await skills_mod.loadout(agent_id)
     agent = await build_advisory_agent(
-        agent_id, charter, packs=advisory, capabilities=caps,
-        skills_catalog=catalog, model=model,
+        agent_id,
+        charter,
+        packs=advisory,
+        capabilities=caps,
+        skills_catalog=catalog,
+        model=model,
     )
     # The caller's usage accumulator rides along (agent-delegation pattern),
     # so an ABSOLUTE request_limit here would charge the specialist for every
@@ -669,7 +711,9 @@ async def consult(
     result = await agent.run(
         question,
         deps=TriageDeps(
-            agent_id=agent_id, session_id=session_id, consult_chain=new_chain,
+            agent_id=agent_id,
+            session_id=session_id,
+            consult_chain=new_chain,
         ),
         usage=usage,
         usage_limits=UsageLimits(request_limit=already_spent + REQUEST_LIMIT),
@@ -689,7 +733,10 @@ async def consult(
         # parked on the inner one, and we signal upward exactly like a draft
         # does, so our caller parks on US with the existing machinery.
         parked = await _park_mid_chain(
-            agent_id=agent_id, result=result, call=call, chain=new_chain,
+            agent_id=agent_id,
+            result=result,
+            call=call,
+            chain=new_chain,
             caller_session_id=session_id,
         )
         if parked is not None:

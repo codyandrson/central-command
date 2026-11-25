@@ -28,12 +28,34 @@ K3S = ROOT / "deploy" / "k3s"
 
 # What B deleted: the duplicate live set A kept for one release, the retired
 # Compose stack, and the directory's README.
-LIVE_DUPLICATES = ("litellm/config.yaml", "litellm/model-preferences.yaml", "litellm/policy.py",
-                   "litellm/register-models.py", "litellm/checks.sh", "cc-nerve.service", ".env.example")
-RETIRED = ("docker-compose.yml", "cc-uvicorn.service", "backup.sh", "cc-backup.service", "cc-backup.timer",
-           "verify.sh", "migrate-from-desktop.sh", "n8n/calendar-facade-writes.md")
-ENV_READERS = ("init-env.sh", "make-secrets.sh", "mint-keys.sh", "backup.sh", "cc-update.sh",
-               "verify.sh", "setup.sh")
+LIVE_DUPLICATES = (
+    "litellm/config.yaml",
+    "litellm/model-preferences.yaml",
+    "litellm/policy.py",
+    "litellm/register-models.py",
+    "litellm/checks.sh",
+    "cc-nerve.service",
+    ".env.example",
+)
+RETIRED = (
+    "docker-compose.yml",
+    "cc-uvicorn.service",
+    "backup.sh",
+    "cc-backup.service",
+    "cc-backup.timer",
+    "verify.sh",
+    "migrate-from-desktop.sh",
+    "n8n/calendar-facade-writes.md",
+)
+ENV_READERS = (
+    "init-env.sh",
+    "make-secrets.sh",
+    "mint-keys.sh",
+    "backup.sh",
+    "cc-update.sh",
+    "verify.sh",
+    "setup.sh",
+)
 
 
 def _code(path: Path) -> str:
@@ -42,15 +64,18 @@ def _code(path: Path) -> str:
 
 
 def _non_comment(path: Path) -> list[str]:
-    return [l for l in path.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#")]
+    return [
+        l for l in path.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#")
+    ]
 
 
 # ── release B deleted deploy/pi/ whole ──────────────────────────────────────
 
 
 def test_nothing_under_deploy_pi_is_tracked():
-    out = subprocess.run(["git", "ls-files", "deploy/pi"], cwd=ROOT, check=True,
-                         capture_output=True, text=True).stdout
+    out = subprocess.run(
+        ["git", "ls-files", "deploy/pi"], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout
     assert out.strip() == "", out
 
 
@@ -76,7 +101,9 @@ def test_every_k3s_env_reader_goes_through_the_resolver():
     # release A) and the n8n workflow installer's --k3s arm (release A's move
     # table missed it; it read deploy/pi/.env through the symlink).
     checks = _code(SHARED / "checks.sh")
-    assert "env-path.sh" in checks and "cc_k3s_env_file" in checks and '"$HERE/../.env"' not in checks
+    assert (
+        "env-path.sh" in checks and "cc_k3s_env_file" in checks and '"$HERE/../.env"' not in checks
+    )
     n8n = _code(ROOT / "deploy" / "n8n" / "apply-workflows.sh")
     assert "env-path.sh" in n8n and 'DB_ENV="$(cc_k3s_env_file "$REPO")"' in n8n
 
@@ -86,15 +113,22 @@ def _tracked_shell_scripts() -> list[Path]:
     appears — not a directory glob, so the next reader added anywhere under
     the tree is scanned too (deploy/n8n/apply-workflows.sh slipped past the
     deploy/k3s-only scan in release A)."""
-    out = subprocess.run(["git", "ls-files", "--", "*.sh", "setup.sh", "update.sh"], cwd=ROOT,
-                         check=True, capture_output=True, text=True).stdout
+    out = subprocess.run(
+        ["git", "ls-files", "--", "*.sh", "setup.sh", "update.sh"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
     return [ROOT / rel for rel in out.splitlines() if rel]
 
 
 def test_no_script_reads_the_old_env_path_directly():
     """The literal old path survives only inside the resolver's fallback and
     in operator-facing messages — never as a path a script opens."""
-    opens = re.compile(r'(\$\{?\w+\}?/deploy/pi/\.env|(?<![\w/])deploy/pi/\.env\s*\]\]|\.\s+deploy/pi/\.env)')
+    opens = re.compile(
+        r"(\$\{?\w+\}?/deploy/pi/\.env|(?<![\w/])deploy/pi/\.env\s*\]\]|\.\s+deploy/pi/\.env)"
+    )
     scripts = _tracked_shell_scripts()
     assert ROOT / "deploy" / "n8n" / "apply-workflows.sh" in scripts
     assert ROOT / "deploy" / "shared" / "litellm" / "checks.sh" in scripts
@@ -107,17 +141,21 @@ def test_no_script_reads_the_old_env_path_directly():
 
 def test_the_updater_names_the_new_paths_and_carries_the_move():
     upd = (K3S / "cc-update.sh").read_text(encoding="utf-8")
-    cm = upd[upd.index("<<'CM'"):]
-    cm = cm[:cm.index("\nCM\n")]
+    cm = upd[upd.index("<<'CM'") :]
+    cm = cm[: cm.index("\nCM\n")]
     assert "deploy/shared/litellm/config.yaml|cc-litellm-config" in cm and "deploy/pi" not in cm
-    units = upd[upd.index("changed_units=\"$(changed_between"):]
-    units = units[:units.index(')"')]
-    assert "deploy/pi" not in units            # cc-nerve.service is matched by deploy/k3s/*.service now
+    units = upd[upd.index('changed_units="$(changed_between') :]
+    units = units[: units.index(')"')]
+    assert "deploy/pi" not in units  # cc-nerve.service is matched by deploy/k3s/*.service now
     # The policy layer is cut (DL-226): no update step pushes per-model values.
     assert "policy.py" not in _code(K3S / "cc-update.sh")
     assert "\nmigrate_k3s_env() {" in upd
-    main = upd[upd.index("\nmain() {"):]
-    assert main.index('phase "merging') < main.index("migrate_k3s_env") < main.index('phase "applying schema')
+    main = upd[upd.index("\nmain() {") :]
+    assert (
+        main.index('phase "merging')
+        < main.index("migrate_k3s_env")
+        < main.index('phase "applying schema')
+    )
 
 
 def test_the_other_k3s_scripts_name_the_shared_litellm_files_and_the_moved_unit():
@@ -133,8 +171,12 @@ def test_the_app_and_the_single_profile_name_the_shared_files():
     assert "deploy/pi/litellm" not in tools
     llm = _code(ROOT / "deploy" / "single" / "phases" / "llm.sh")
     assert "deploy/shared/litellm/register-models.py" in llm and "deploy/pi" not in llm
-    for rel in ("central_command/gateway/capabilities.py", "central_command/runtime/packs.py",
-                "central_command/runtime/litellm_manager_profile.py", "central_command/api/systems.py"):
+    for rel in (
+        "central_command/gateway/capabilities.py",
+        "central_command/runtime/packs.py",
+        "central_command/runtime/litellm_manager_profile.py",
+        "central_command/api/systems.py",
+    ):
         assert "deploy/pi/" not in (ROOT / rel).read_text(encoding="utf-8"), rel
 
 
@@ -151,8 +193,10 @@ def test_operator_tooling_resolves_the_env_like_the_resolver():
     environment, so the file fallback is load-bearing: release B's first
     story deleted the test that pinned the two shared files, and flipping
     their order or dropping is_symlink() passed the suite until this."""
-    fallback_kept = ("the resolver's deploy/pi fallback is kept by decision until a release drops it "
-                     "from the mirror and this test together")
+    fallback_kept = (
+        "the resolver's deploy/pi fallback is kept by decision until a release drops it "
+        "from the mirror and this test together"
+    )
     for path in PYTHON_RESOLVER_MIRRORS:
         src = path.read_text(encoding="utf-8")
         name = str(path.relative_to(ROOT))
@@ -200,6 +244,7 @@ def _block(start: str):
     """Lines from the one starting with `start` up to (not including) the next
     column-0 non-blank line — the next heading or bullet in Markdown, the next
     top-level statement in Python."""
+
     def pred(lines: list[str], i: int) -> bool:
         for j in range(i, -1, -1):
             if lines[j].startswith(start):
@@ -207,6 +252,7 @@ def _block(start: str):
             if lines[j] and not lines[j][0].isspace():
                 return False
         return False
+
     return pred
 
 
@@ -214,6 +260,7 @@ def _heading_range(first: str, stop: str | None = None):
     """Lines from the heading `first` up to the heading `stop` (to the end of
     the file when there is none). Both headings must exist, or a renumbering
     would silently widen the range."""
+
     def pred(lines: list[str], i: int) -> bool:
         assert any(l.startswith(first) for l in lines), f"heading {first!r} not found"
         assert stop is None or any(l.startswith(stop) for l in lines), f"heading {stop!r} not found"
@@ -224,6 +271,7 @@ def _heading_range(first: str, stop: str | None = None):
             if lines[j].startswith(first):
                 seen = True
         return seen
+
     return pred
 
 
@@ -242,29 +290,61 @@ def _message(lines: list[str], i: int) -> bool:
 # path or directory prefix → (reason, line predicate or None for the whole file)
 ALLOWED = {
     "CHANGELOG.md": ("release history names the paths each release changed", None),
-    "docs/superpowers/": ("design records are dated history; their As-built headers point at live files", None),
+    "docs/superpowers/": (
+        "design records are dated history; their As-built headers point at live files",
+        None,
+    ),
     "docs/archive/": ("archived records are history, kept as they were", None),
     "docs/decisions/process.md": ("the decision log recounts the v2.61.0 Graphiti deletion", None),
-    "deploy/k3s/env-path.sh": ("the resolver's fallback and the one-time move (kept through B by decision)", None),
-    "deploy/shared/litellm/register-models.py": ("the resolver's Python mirror", _block("def _env_path(")),
+    "deploy/k3s/env-path.sh": (
+        "the resolver's fallback and the one-time move (kept through B by decision)",
+        None,
+    ),
+    "deploy/shared/litellm/register-models.py": (
+        "the resolver's Python mirror",
+        _block("def _env_path("),
+    ),
     "tests/test_k3s_env_path.py": ("exercises the resolver and the move in every layout", None),
     "deploy/k3s/cc-update.sh": ("operator-facing fallback message", _message),
     "deploy/k3s/init-env.sh": ("operator-facing fallback message", _message),
     "deploy/k3s/setup.sh": ("operator-facing fallback message", _message),
-    "deploy/k3s/README.md": (("sections 0a/0b are the dated history of the two boundary updates; "
-                             "section 10 reaches the retired stack through git and says which "
-                             "env to copy to the old path before the Compose fallback can start"),
-                             lambda lines, i: _heading_range("## 0a.", "## 1.")(lines, i)
-                             or (_heading_range("## 10.")(lines, i)
-                                 and (_contains("git show v2.65.3:deploy/pi/")(lines, i)
-                                      or _contains("deploy/k3s/.env", "deploy/pi/.env")(lines, i)))),
-    "docs/ARCHITECTURE.md": ("the D9 / Story 2.1 provenance row names the retired image's files",
-                             _contains("D9 / Story 2.1")),
-    ".claude/rules/deploy-k3s.md": ("the dated v2.66.0 bite mark on the env move",
-                                    _block("- **The containers' env is")),
-    "deploy/shared/README.md": ("past tense: where these files lived until v2.66.0", _contains("lived in", "v2.66.0")),
-    "tests/test_deploy_pi_boundary.py": ("this guard: its docstrings, regexes and negative assertions name the path", None),
-    "tests/test_graphiti_server_boundary.py": ("the Graphiti removal's guard asserts deploy/pi/graphiti is never named", None),
+    "deploy/k3s/README.md": (
+        (
+            "sections 0a/0b are the dated history of the two boundary updates; "
+            "section 10 reaches the retired stack through git and says which "
+            "env to copy to the old path before the Compose fallback can start"
+        ),
+        lambda lines, i: (
+            _heading_range("## 0a.", "## 1.")(lines, i)
+            or (
+                _heading_range("## 10.")(lines, i)
+                and (
+                    _contains("git show v2.65.3:deploy/pi/")(lines, i)
+                    or _contains("deploy/k3s/.env", "deploy/pi/.env")(lines, i)
+                )
+            )
+        ),
+    ),
+    "docs/ARCHITECTURE.md": (
+        "the D9 / Story 2.1 provenance row names the retired image's files",
+        _contains("D9 / Story 2.1"),
+    ),
+    ".claude/rules/deploy-k3s.md": (
+        "the dated v2.66.0 bite mark on the env move",
+        _block("- **The containers' env is"),
+    ),
+    "deploy/shared/README.md": (
+        "past tense: where these files lived until v2.66.0",
+        _contains("lived in", "v2.66.0"),
+    ),
+    "tests/test_deploy_pi_boundary.py": (
+        "this guard: its docstrings, regexes and negative assertions name the path",
+        None,
+    ),
+    "tests/test_graphiti_server_boundary.py": (
+        "the Graphiti removal's guard asserts deploy/pi/graphiti is never named",
+        None,
+    ),
 }
 
 
@@ -286,8 +366,14 @@ def test_no_tracked_file_names_deploy_pi_outside_history_and_the_kept_seam():
     so the next reference anywhere else fails here naming its file and line."""
     # The path itself, not a prefix of another (deploy/pipeline). The
     # segment-built form `"deploy" / "pi"` is not seen here; the next test is.
-    r = subprocess.run(["git", "grep", "-n", "-I", "-E", "-e", r"deploy/pi([^A-Za-z0-9_-]|$)"], cwd=ROOT,
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    r = subprocess.run(
+        ["git", "grep", "-n", "-I", "-E", "-e", r"deploy/pi([^A-Za-z0-9_-]|$)"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     assert r.returncode in (0, 1), r.stderr
     hits: dict[str, list[int]] = {}
     for row in r.stdout.split("\n"):
@@ -307,12 +393,21 @@ def test_no_tracked_file_names_deploy_pi_outside_history_and_the_kept_seam():
 
 # path → (reason, line predicate or None for the whole file)
 SEGMENT_ALLOWED = {
-    "deploy/shared/litellm/register-models.py": ("the resolver's Python mirror", _block("def _env_path(")),
+    "deploy/shared/litellm/register-models.py": (
+        "the resolver's Python mirror",
+        _block("def _env_path("),
+    ),
     "tests/test_k3s_env_path.py": ("builds every env layout under tmp_path", None),
     "tests/test_k3s_mint_key_scope.py": ("builds the pre-move layout under tmp_path", None),
     "tests/test_k3s_reset_phase.py": ("builds the pre-move layout under tmp_path", None),
-    "tests/test_k3s_compute_ssh.py": ("builds the pre-move layout under tmp_path, to prove the resolver reads the file through env-path.sh", None),
-    "tests/test_deploy_pi_boundary.py": ("this guard: it names the shape it greps for and asserts the path is gone", None),
+    "tests/test_k3s_compute_ssh.py": (
+        "builds the pre-move layout under tmp_path, to prove the resolver reads the file through env-path.sh",
+        None,
+    ),
+    "tests/test_deploy_pi_boundary.py": (
+        "this guard: it names the shape it greps for and asserts the path is gone",
+        None,
+    ),
     "tests/test_graphiti_server_boundary.py": ("asserts deploy/pi/graphiti is gone", None),
 }
 
@@ -326,9 +421,25 @@ def test_no_tracked_code_builds_deploy_pi_from_segments_outside_the_allowlist():
     with its reason — the resolver mirror's _env_path block and the
     tests that lay the old tree out under tmp_path or assert it is gone — so
     the shape planted anywhere else fails here naming its file and line."""
-    r = subprocess.run(["git", "grep", "-n", "-I", "-E", "-e",
-                        r"""["']deploy["']\s*(/|,)\s*["']pi["']""", "--", "*.py", "*.sh"],
-                       cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    r = subprocess.run(
+        [
+            "git",
+            "grep",
+            "-n",
+            "-I",
+            "-E",
+            "-e",
+            r"""["']deploy["']\s*(/|,)\s*["']pi["']""",
+            "--",
+            "*.py",
+            "*.sh",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     assert r.returncode in (0, 1), r.stderr
     hits: dict[str, list[int]] = {}
     for row in r.stdout.split("\n"):
@@ -339,8 +450,9 @@ def test_no_tracked_code_builds_deploy_pi_from_segments_outside_the_allowlist():
     # the canary: the grep sees what the literal guard could not. It holds as
     # long as the resolver's fallback is kept (by decision); the release that
     # drops it from the mirror retires this line with it.
-    assert "deploy/shared/litellm/register-models.py" in hits, \
+    assert "deploy/shared/litellm/register-models.py" in hits, (
         "canary gone: the segment grep no longer matches register-models.py"
+    )
     offenders = []
     for path, numbers in sorted(hits.items()):
         lines = (ROOT / path).read_text(encoding="utf-8", errors="replace").split("\n")
@@ -348,4 +460,6 @@ def test_no_tracked_code_builds_deploy_pi_from_segments_outside_the_allowlist():
         for n in numbers:
             if pred is False or (pred is not None and not pred(lines, n - 1)):
                 offenders.append(f"{path}:{n}: {lines[n - 1].strip()}")
-    assert not offenders, "deploy/pi built from segments outside the allowlist:\n  " + "\n  ".join(offenders)
+    assert not offenders, "deploy/pi built from segments outside the allowlist:\n  " + "\n  ".join(
+        offenders
+    )

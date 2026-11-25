@@ -40,12 +40,16 @@ async def test_tts_forwards_to_the_alias_and_returns_audio(client, monkeypatch):
 
     _stub_upstream(monkeypatch, handler)
     async with client:
-        r = await client.post("/api/tts", json={"text": "read this", "provider": "edge", "model": "ignored"})
+        r = await client.post(
+            "/api/tts", json={"text": "read this", "provider": "edge", "model": "ignored"}
+        )
     assert r.status_code == 200 and r.content == b"ID3mp3"
     assert r.headers["content-type"] == "audio/mpeg"
     assert seen["url"] == "http://litellm.test:4000/v1/audio/speech"
     assert seen["auth"] == "Bearer sk-virtual"
-    assert b'"model":"cc-tts"' in seen["body"].replace(b" ", b"")  # the alias, never the client's model
+    assert b'"model":"cc-tts"' in seen["body"].replace(
+        b" ", b""
+    )  # the alias, never the client's model
     # A voice is REQUIRED on the wire (LiteLLM's Router.aspeech() and the speaches
     # engine both reject its absence — 2026-09-03 Windows run), so the default
     # goes out whenever the cockpit names none.
@@ -62,7 +66,9 @@ async def test_transcribe_forwards_the_file_and_returns_text(client, monkeypatch
 
     _stub_upstream(monkeypatch, handler)
     async with client:
-        r = await client.post("/api/transcribe", files={"file": ("audio.webm", b"RIFFxxxx", "audio/webm")})
+        r = await client.post(
+            "/api/transcribe", files={"file": ("audio.webm", b"RIFFxxxx", "audio/webm")}
+        )
     assert r.status_code == 200 and r.json() == {"text": "hello there"}
     assert seen["url"] == "http://litellm.test:4000/v1/audio/transcriptions"
     assert b"cc-stt" in seen["body"] and b"RIFFxxxx" in seen["body"]

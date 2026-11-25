@@ -50,8 +50,11 @@ UPDATER = (K3S / "cc-update.sh").read_text(encoding="utf-8")
 
 
 def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-C", str(cwd), *args],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-C", str(cwd), *args],
+        check=True,
+        capture_output=True,
+    )
 
 
 def _clean_env(stubs: Path | None = None, **extra: str) -> dict[str, str]:
@@ -104,8 +107,13 @@ def _script(tree: Path) -> Path:
 
 
 def _call(fn: str, path: object, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", "-c", '. "$1"; "$2" "$3"', "_", str(LIB), fn, str(path)],
-                          env=env if env is not None else _clean_env(), capture_output=True, text=True, timeout=30)
+    return subprocess.run(
+        ["bash", "-c", '. "$1"; "$2" "$3"', "_", str(LIB), fn, str(path)],
+        env=env if env is not None else _clean_env(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
 
 
 def _me(tree: Path) -> tuple[str, str, str]:
@@ -119,8 +127,12 @@ def _me(tree: Path) -> tuple[str, str, str]:
 
 def test_each_resolver_returns_that_tree_user_group_and_home(tree: Path):
     owner, group, home = _me(tree)
-    for fn, want in (("cc_k3s_checkout", str(tree)), ("cc_k3s_owner", owner),
-                     ("cc_k3s_group", group), ("cc_k3s_home", home)):
+    for fn, want in (
+        ("cc_k3s_checkout", str(tree)),
+        ("cc_k3s_owner", owner),
+        ("cc_k3s_group", group),
+        ("cc_k3s_home", home),
+    ):
         r = _call(fn, _script(tree))
         assert (r.returncode, r.stdout.strip()) == (0, want), fn + ": " + r.stderr
 
@@ -128,15 +140,22 @@ def test_each_resolver_returns_that_tree_user_group_and_home(tree: Path):
 @pytest.mark.parametrize("relative", [False, True])
 def test_with_no_argument_each_resolver_uses_the_calling_script(tree: Path, relative: bool):
     owner, group, home = _me(tree)
-    probe = _exe(_script(tree), '. "$(dirname "${BASH_SOURCE[0]}")/instance-lib.sh"\n'
-                                "cc_k3s_checkout; cc_k3s_owner; cc_k3s_group; cc_k3s_home; cc_k3s_backup_dir\n")
+    probe = _exe(
+        _script(tree),
+        '. "$(dirname "${BASH_SOURCE[0]}")/instance-lib.sh"\n'
+        "cc_k3s_checkout; cc_k3s_owner; cc_k3s_group; cc_k3s_home; cc_k3s_backup_dir\n",
+    )
     arg, cwd = ("deploy/k3s/some-script.sh", tree) if relative else (str(probe), Path("/"))
-    r = subprocess.run(["bash", arg], cwd=cwd, env=_clean_env(), capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        ["bash", arg], cwd=cwd, env=_clean_env(), capture_output=True, text=True, timeout=30
+    )
     assert r.returncode == 0, r.stderr
     assert r.stdout.split("\n")[:5] == [str(tree), owner, group, home, f"{home}/cc-backups"]
 
 
-def test_a_second_worktree_resolves_to_itself_and_the_checkout_to_itself(tree: Path, tmp_path: Path):
+def test_a_second_worktree_resolves_to_itself_and_the_checkout_to_itself(
+    tree: Path, tmp_path: Path
+):
     # The shape of cc-update.sh's build worktree: detached, beside the checkout.
     wt = tmp_path / "build-worktree"
     _git(tree, "worktree", "add", "-q", "--detach", str(wt))
@@ -161,7 +180,13 @@ def test_a_caller_with_cdpath_set_gets_one_clean_line(tree: Path):
 def test_no_git_is_ever_called(tree: Path, stubs: Path):
     log = tree.parent / "git-called"
     _exe(stubs / "git", f'echo called >> "{log}"\nexit 99\n')
-    for fn in ("cc_k3s_checkout", "cc_k3s_owner", "cc_k3s_group", "cc_k3s_home", "cc_k3s_backup_dir"):
+    for fn in (
+        "cc_k3s_checkout",
+        "cc_k3s_owner",
+        "cc_k3s_group",
+        "cc_k3s_home",
+        "cc_k3s_backup_dir",
+    ):
         assert _call(fn, _script(tree), _clean_env(stubs)).returncode == 0, fn
     assert not log.exists()
 
@@ -182,7 +207,10 @@ def test_the_primary_group_is_the_owners_not_the_checkouts(tree: Path, stubs: Pa
 
 def test_the_primary_group_of_the_real_owner_is_read_with_no_stub(tree: Path):
     r = _call("cc_k3s_owner_primary_group", _script(tree))
-    assert (r.returncode, r.stdout.strip()) == (0, grp.getgrgid(pwd.getpwuid(tree.stat().st_uid).pw_gid).gr_name)
+    assert (r.returncode, r.stdout.strip()) == (
+        0,
+        grp.getgrgid(pwd.getpwuid(tree.stat().st_uid).pw_gid).gr_name,
+    )
 
 
 @pytest.mark.parametrize("answer", ["exit 1\n", "exit 0\n"])
@@ -200,8 +228,13 @@ def test_an_unreadable_owner_fails_the_primary_group_naming_the_owner(tree: Path
     assert "the owner of" in r.stderr, r.stderr
 
 
-def test_the_backup_dir_is_the_key_when_set_else_under_the_owners_home(tree: Path, fake_home: Path, stubs: Path):
-    assert _call("cc_k3s_backup_dir", _script(tree), _clean_env(stubs)).stdout.strip() == f"{fake_home}/cc-backups"
+def test_the_backup_dir_is_the_key_when_set_else_under_the_owners_home(
+    tree: Path, fake_home: Path, stubs: Path
+):
+    assert (
+        _call("cc_k3s_backup_dir", _script(tree), _clean_env(stubs)).stdout.strip()
+        == f"{fake_home}/cc-backups"
+    )
     r = _call("cc_k3s_backup_dir", _script(tree), _clean_env(stubs, CC_BACKUP_DIR="/srv/backups"))
     assert r.stdout.strip() == "/srv/backups"
 
@@ -215,23 +248,30 @@ def test_the_key_needs_no_account_at_all(tree: Path, stubs: Path):
 # ── failing loud ────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(("fn", "body", "named"), [
-    # GNU stat prints UNKNOWN and exits 0 for a uid with no account.
-    ("cc_k3s_owner", "echo UNKNOWN\n", "owner"),
-    ("cc_k3s_group", "echo UNKNOWN\n", "group"),
-    ("cc_k3s_home", "echo UNKNOWN\n", "owner"),
-    ("cc_k3s_owner", "exit 1\n", "owner"),
-    ("cc_k3s_group", "exit 1\n", "group"),
-    ("cc_k3s_backup_dir", "exit 1\n", "owner"),
-])
-def test_an_unreadable_owner_or_group_fails_loud(tree: Path, stubs: Path, fn: str, body: str, named: str):
+@pytest.mark.parametrize(
+    ("fn", "body", "named"),
+    [
+        # GNU stat prints UNKNOWN and exits 0 for a uid with no account.
+        ("cc_k3s_owner", "echo UNKNOWN\n", "owner"),
+        ("cc_k3s_group", "echo UNKNOWN\n", "group"),
+        ("cc_k3s_home", "echo UNKNOWN\n", "owner"),
+        ("cc_k3s_owner", "exit 1\n", "owner"),
+        ("cc_k3s_group", "exit 1\n", "group"),
+        ("cc_k3s_backup_dir", "exit 1\n", "owner"),
+    ],
+)
+def test_an_unreadable_owner_or_group_fails_loud(
+    tree: Path, stubs: Path, fn: str, body: str, named: str
+):
     _exe(stubs / "stat", body)
     r = _call(fn, _script(tree), _clean_env(stubs))
     assert r.returncode != 0 and r.stdout == ""
     assert f"the {named} of" in r.stderr, r.stderr
 
 
-@pytest.mark.parametrize("fn", ["cc_k3s_owner", "cc_k3s_owner_primary_group", "cc_k3s_home", "cc_k3s_backup_dir"])
+@pytest.mark.parametrize(
+    "fn", ["cc_k3s_owner", "cc_k3s_owner_primary_group", "cc_k3s_home", "cc_k3s_backup_dir"]
+)
 def test_a_root_owned_checkout_is_refused(tree: Path, stubs: Path, fn: str):
     # The updater's RUNAS is this owner: a root-owned checkout would make it root.
     _exe(stubs / "stat", "echo root\n")
@@ -240,10 +280,14 @@ def test_a_root_owned_checkout_is_refused(tree: Path, stubs: Path, fn: str):
     assert "owned by root" in r.stderr, r.stderr
 
 
-def test_the_updater_stops_at_resolve_on_a_root_owned_checkout(tree: Path, stubs: Path, tmp_path: Path):
+def test_the_updater_stops_at_resolve_on_a_root_owned_checkout(
+    tree: Path, stubs: Path, tmp_path: Path
+):
     script = _updater_head(tree, tmp_path / "state")
     _exe(stubs / "stat", "echo root\n")
-    r = subprocess.run([str(script)], env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        [str(script)], env=_clean_env(stubs), capture_output=True, text=True, timeout=30
+    )
     assert r.returncode == 1, r.stdout
     assert "runuser" not in r.stdout
     status = json.loads((tmp_path / "state" / "status.json").read_text())
@@ -265,8 +309,13 @@ def test_a_path_that_does_not_exist_fails_naming_the_checkout(tmp_path: Path):
 
 
 def test_no_path_and_no_calling_script_fails_rather_than_resolving_the_library():
-    r = subprocess.run(["bash", "-c", '. "$1"; cc_k3s_checkout', "_", str(LIB)],
-                       env=_clean_env(), capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        ["bash", "-c", '. "$1"; cc_k3s_checkout', "_", str(LIB)],
+        env=_clean_env(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     assert r.returncode != 0 and r.stdout == ""
     assert "no script path" in r.stderr
 
@@ -278,28 +327,48 @@ def test_env_path_does_not_carry_the_helper_and_the_helper_sets_nothing(tmp_path
     # The installed updater sources the MERGED env-path.sh after the stop.
     assert "instance-lib" not in (K3S / "env-path.sh").read_text(encoding="utf-8")
     # The first pipeline sets PIPESTATUS itself, so it runs before the first snapshot.
-    script = (': | :; compgen -v | sort > "$2/a"; declare -F | sort > "$2/fa"; . "$1"; '
-              'compgen -v | sort > "$2/b"; declare -F | sort > "$2/fb"')
+    script = (
+        ': | :; compgen -v | sort > "$2/a"; declare -F | sort > "$2/fa"; . "$1"; '
+        'compgen -v | sort > "$2/b"; declare -F | sort > "$2/fb"'
+    )
     subprocess.run(["bash", "-c", script, "_", str(LIB), str(tmp_path)], check=True, timeout=30)
     assert (tmp_path / "a").read_text() == (tmp_path / "b").read_text()
-    new = set((tmp_path / "fb").read_text().splitlines()) - set((tmp_path / "fa").read_text().splitlines())
+    new = set((tmp_path / "fb").read_text().splitlines()) - set(
+        (tmp_path / "fa").read_text().splitlines()
+    )
     assert {line.split()[-1] for line in new} == {
-        "cc_k3s_checkout", "cc_k3s_owner", "cc_k3s_group", "cc_k3s_home", "cc_k3s_backup_dir", "_cc_k3s_stat",
-        "cc_k3s_owner_primary_group", "cc_k3s_render_unit",  # R6, tests/test_k3s_unit_templates.py
+        "cc_k3s_checkout",
+        "cc_k3s_owner",
+        "cc_k3s_group",
+        "cc_k3s_home",
+        "cc_k3s_backup_dir",
+        "_cc_k3s_stat",
+        "cc_k3s_owner_primary_group",
+        "cc_k3s_render_unit",  # R6, tests/test_k3s_unit_templates.py
         "cc_k3s_compute_ssh",  # R7, tests/test_k3s_compute_ssh.py
     }
 
 
 def test_each_value_has_one_resolver_across_the_k3s_scripts():
-    code = {p.name: [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines() if not ln.lstrip().startswith("#")]
-            for p in K3S.glob("*.sh")}
+    code = {
+        p.name: [
+            ln.strip()
+            for ln in p.read_text(encoding="utf-8").splitlines()
+            if not ln.lstrip().startswith("#")
+        ]
+        for p in K3S.glob("*.sh")
+    }
     for name, lines in code.items():
         if name == LIB.name:
             continue
         for line in lines:
-            assert not re.search(r"stat -c %[UG]|getent passwd|id -gn|SUDO_USER|\$\{?USER\b|/cc-backups", line), f"{name}: {line}"
+            assert not re.search(
+                r"stat -c %[UG]|getent passwd|id -gn|SUDO_USER|\$\{?USER\b|/cc-backups", line
+            ), f"{name}: {line}"
             if "BASH_SOURCE" in line:
-                assert line.startswith(("REPO_ROOT=", "HERE=", "cd ", 'SELF="${BASH_SOURCE[0]}"')), f"{name}: {line}"
+                assert line.startswith(
+                    ("REPO_ROOT=", "HERE=", "cd ", 'SELF="${BASH_SOURCE[0]}"')
+                ), f"{name}: {line}"
     for name in ("setup.sh", "cc-update.sh"):
         assert sum("cc_k3s_render_unit " in line for line in code[name]) == 1, name
 
@@ -309,51 +378,73 @@ def test_each_value_has_one_resolver_across_the_k3s_scripts():
 
 def _updater_head(tree: Path, statedir: Path) -> Path:
     """The real text of cc-update.sh down to phase(), run from `tree`'s script path."""
-    head = UPDATER[:UPDATER.index("\nphase() {")]
+    head = UPDATER[: UPDATER.index("\nphase() {")]
     assert "STATEDIR=/var/lib/cc-update\n" in head
     head = head.replace("STATEDIR=/var/lib/cc-update\n", f"STATEDIR='{statedir}'\n")
     k3s = tree / "deploy" / "k3s"
     shutil.copy(K3S / "env-path.sh", k3s / "env-path.sh")
     shutil.copy(LIB, k3s / "instance-lib.sh")
     script = k3s / "cc-update.sh"
-    script.write_text(head + '\nprintf "%s\\n" "$REPO" "${RUNAS[*]}" "$OWNER" "$OWNER_GROUP" "$OWNER_HOME" "$BACKUPS"\n')
+    script.write_text(
+        head
+        + '\nprintf "%s\\n" "$REPO" "${RUNAS[*]}" "$OWNER" "$OWNER_GROUP" "$OWNER_HOME" "$BACKUPS"\n'
+    )
     script.chmod(0o755)
     return script
 
 
-def test_the_updater_derives_everything_from_the_script_the_unit_ran(tree: Path, fake_home: Path, stubs: Path, tmp_path: Path):
+def test_the_updater_derives_everything_from_the_script_the_unit_ran(
+    tree: Path, fake_home: Path, stubs: Path, tmp_path: Path
+):
     script = _updater_head(tree, tmp_path / "state")
-    r = subprocess.run([str(script)], cwd="/", env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        [str(script)], cwd="/", env=_clean_env(stubs), capture_output=True, text=True, timeout=30
+    )
     assert r.returncode == 0, r.stderr
     owner, group, _home = _me(tree)
     assert r.stdout.splitlines() == [
-        str(tree), f"runuser -u {owner} --", owner, group, str(fake_home), f"{fake_home}/cc-backups",
+        str(tree),
+        f"runuser -u {owner} --",
+        owner,
+        group,
+        str(fake_home),
+        f"{fake_home}/cc-backups",
     ]
 
 
-def test_the_updater_reads_the_backup_key_from_the_env_file(tree: Path, fake_home: Path, stubs: Path, tmp_path: Path):
+def test_the_updater_reads_the_backup_key_from_the_env_file(
+    tree: Path, fake_home: Path, stubs: Path, tmp_path: Path
+):
     script = _updater_head(tree, tmp_path / "state")
     (tree / "deploy" / "k3s" / ".env").write_text("CC_BACKUP_DIR=/srv/from-the-file\n")
-    r = subprocess.run([str(script)], env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        [str(script)], env=_clean_env(stubs), capture_output=True, text=True, timeout=30
+    )
     assert r.returncode == 0, r.stderr
     assert r.stdout.splitlines()[-1] == "/srv/from-the-file"
 
 
-@pytest.mark.parametrize(("args", "written", "untouched"), [
-    ([], "status.json", "stage.json"),
-    (["stage"], "stage.json", "status.json"),
-])
+@pytest.mark.parametrize(
+    ("args", "written", "untouched"),
+    [
+        ([], "status.json", "stage.json"),
+        (["stage"], "stage.json", "status.json"),
+    ],
+)
 def test_a_failed_derivation_stops_the_updater_and_reaches_the_cockpit(
-        tree: Path, stubs: Path, tmp_path: Path, args: list[str], written: str, untouched: str):
+    tree: Path, stubs: Path, tmp_path: Path, args: list[str], written: str, untouched: str
+):
     import json
 
     state = tmp_path / "state"
     script = _updater_head(tree, state)
     _exe(stubs / "stat", "echo UNKNOWN\n")
-    r = subprocess.run([str(script), *args], env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        [str(script), *args], env=_clean_env(stubs), capture_output=True, text=True, timeout=30
+    )
     assert r.returncode == 1
-    assert "the owner of" in r.stderr, r.stderr            # the journal names the role
-    assert "runuser" not in r.stdout                       # it never reached the print
+    assert "the owner of" in r.stderr, r.stderr  # the journal names the role
+    assert "runuser" not in r.stdout  # it never reached the print
     status = json.loads((state / written).read_text())
     assert (status["state"], status["phase"]) == ("failed", "resolve")
     assert not (state / untouched).exists()
@@ -362,13 +453,15 @@ def test_a_failed_derivation_stops_the_updater_and_reaches_the_cockpit(
 def test_a_missing_helper_stops_the_updater(tree: Path, stubs: Path, tmp_path: Path):
     script = _updater_head(tree, tmp_path / "state")
     (tree / "deploy" / "k3s" / "instance-lib.sh").unlink()
-    r = subprocess.run([str(script)], env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        [str(script)], env=_clean_env(stubs), capture_output=True, text=True, timeout=30
+    )
     assert r.returncode == 1 and "instance-lib.sh could not be read" in r.stdout
 
 
 def _fn(name: str) -> str:
     start = UPDATER.index(f"\n{name}() {{") + 1
-    return UPDATER[start:UPDATER.index("\n}\n", start) + 3]
+    return UPDATER[start : UPDATER.index("\n}\n", start) + 3]
 
 
 def test_the_rebuild_finds_uv_under_the_owners_home(tmp_path: Path, stubs: Path):
@@ -376,36 +469,47 @@ def test_the_rebuild_finds_uv_under_the_owners_home(tmp_path: Path, stubs: Path)
     (repo / "web").mkdir(parents=True)
     _exe(home / ".local" / "bin" / "uv", f'echo "uv $VIRTUAL_ENV" >> "{log}"\n')
     _exe(stubs / "npm", f'echo "npm $*" >> "{log}"\n')
-    script = "\n".join([
-        "set -uo pipefail",
-        'note() { printf "%s\\n" "$*"; }',
-        "RUNAS=()",
-        f"REPO='{repo}'",
-        f"OWNER_HOME='{home}'",
-        _fn("patch_graphiti"),
-        _fn("python_extras"),
-        _fn("rebuild"),
-        "rebuild",
-    ])
-    r = subprocess.run(["bash", "-c", script], env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            'note() { printf "%s\\n" "$*"; }',
+            "RUNAS=()",
+            f"REPO='{repo}'",
+            f"OWNER_HOME='{home}'",
+            _fn("patch_graphiti"),
+            _fn("python_extras"),
+            _fn("rebuild"),
+            "rebuild",
+        ]
+    )
+    r = subprocess.run(
+        ["bash", "-c", script], env=_clean_env(stubs), capture_output=True, text=True, timeout=30
+    )
     assert r.returncode == 0, r.stderr
     # The cockpit resolves package.json's ranges and never reads or writes the lockfile.
     assert log.read_text().splitlines() == [
-        f"uv {repo}/.venv", "npm install --no-package-lock", "npm run build"]
+        f"uv {repo}/.venv",
+        "npm install --no-package-lock",
+        "npm run build",
+    ]
 
 
 def _npm_gate(stubs: Path, version: str) -> subprocess.CompletedProcess:
     _exe(stubs / "npm", f'[ "$1" = "-v" ] && echo {version}\n')
-    script = "\n".join([
-        "set -uo pipefail",
-        "RUNAS=()",
-        'OWNER=tester',
-        'die() { echo "DIED at $1: $2"; exit 1; }',
-        _fn("refuse_if_npm_too_old"),
-        "refuse_if_npm_too_old resolve",
-        "echo passed",
-    ])
-    return subprocess.run(["bash", "-c", script], env=_clean_env(stubs), capture_output=True, text=True, timeout=30)
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            "RUNAS=()",
+            "OWNER=tester",
+            'die() { echo "DIED at $1: $2"; exit 1; }',
+            _fn("refuse_if_npm_too_old"),
+            "refuse_if_npm_too_old resolve",
+            "echo passed",
+        ]
+    )
+    return subprocess.run(
+        ["bash", "-c", script], env=_clean_env(stubs), capture_output=True, text=True, timeout=30
+    )
 
 
 def test_the_updater_refuses_npm_10_with_the_fix_named(stubs: Path):
@@ -425,10 +529,16 @@ def test_the_npm_gate_runs_before_anything_is_checkpointed_built_or_stopped():
     """The refusal must land while the services are up: main() asks it before the
     checkpoint tag, the prebuild and the stop, so an npm-10 host is refused
     cleanly instead of failing in the rebuild with the services down."""
-    main = UPDATER[UPDATER.index("\nmain() {"):]
+    main = UPDATER[UPDATER.index("\nmain() {") :]
     gate = main.index("refuse_if_npm_too_old resolve")
-    for later in ('PHASE_NOW=checkpoint', 'PHASE_NOW=prebuild', 'PHASE_NOW=db-backup',
-                  'systemctl stop cc-uvicorn', 'git -C "$REPO" merge', "rebuild ||"):
+    for later in (
+        "PHASE_NOW=checkpoint",
+        "PHASE_NOW=prebuild",
+        "PHASE_NOW=db-backup",
+        "systemctl stop cc-uvicorn",
+        'git -C "$REPO" merge',
+        "rebuild ||",
+    ):
         assert gate < main.index(later), later
 
 
@@ -459,20 +569,28 @@ def backup_tree(tree: Path, stubs: Path) -> Path:
     (tree / ".env").write_text("X=1\n")
     (tree / "web").mkdir()
     (tree / "web" / ".env").write_text("X=1\n")
-    _exe(stubs / "k3s", "exit 1\n")    # every store fails; the run still reaches the env copies
+    _exe(stubs / "k3s", "exit 1\n")  # every store fails; the run still reaches the env copies
     return tree
 
 
 def _backup(tree: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
     # An absolute path from `/`, as cc-backup.service runs it, and no REPO in the env.
-    return subprocess.run([str(tree / "deploy" / "k3s" / "backup.sh")], cwd="/", env=env,
-                          capture_output=True, text=True, timeout=120)
+    return subprocess.run(
+        [str(tree / "deploy" / "k3s" / "backup.sh")],
+        cwd="/",
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
 
 
-def test_backup_with_nothing_set_derives_the_checkout_and_the_owners_dir(backup_tree: Path, fake_home: Path, stubs: Path):
+def test_backup_with_nothing_set_derives_the_checkout_and_the_owners_dir(
+    backup_tree: Path, fake_home: Path, stubs: Path
+):
     (backup_tree / "deploy" / "k3s" / "backup.sh").chmod(0o755)
     r = _backup(backup_tree, _clean_env(stubs))
-    assert r.returncode != 0                               # the k3s stub fails every store
+    assert r.returncode != 0  # the k3s stub fails every store
     out = fake_home / "cc-backups"
     assert stat.S_IMODE(out.stat().st_mode) == 0o700
     # The three copies were read from the derived checkout.
@@ -481,7 +599,8 @@ def test_backup_with_nothing_set_derives_the_checkout_and_the_owners_dir(backup_
 
 
 def test_backup_reads_the_key_from_the_env_file_and_the_environment_beats_it(
-        backup_tree: Path, fake_home: Path, stubs: Path, tmp_path: Path):
+    backup_tree: Path, fake_home: Path, stubs: Path, tmp_path: Path
+):
     (backup_tree / "deploy" / "k3s" / "backup.sh").chmod(0o755)
     from_file, from_env = tmp_path / "from-file", tmp_path / "from-env"
     with (backup_tree / "deploy" / "k3s" / ".env").open("a") as f:
@@ -492,7 +611,9 @@ def test_backup_reads_the_key_from_the_env_file_and_the_environment_beats_it(
     assert list(from_env.glob("env_*.env"))
 
 
-def test_backup_fails_loud_when_the_owner_cannot_be_resolved(backup_tree: Path, stubs: Path, fake_home: Path):
+def test_backup_fails_loud_when_the_owner_cannot_be_resolved(
+    backup_tree: Path, stubs: Path, fake_home: Path
+):
     (backup_tree / "deploy" / "k3s" / "backup.sh").chmod(0o755)
     _exe(stubs / "stat", "echo UNKNOWN\n")
     r = _backup(backup_tree, _clean_env(stubs))
@@ -501,7 +622,9 @@ def test_backup_fails_loud_when_the_owner_cannot_be_resolved(backup_tree: Path, 
     assert not (fake_home / "cc-backups").exists()
 
 
-def test_backup_takes_the_owner_from_repo_when_repo_is_given(backup_tree: Path, fake_home: Path, stubs: Path, tmp_path: Path):
+def test_backup_takes_the_owner_from_repo_when_repo_is_given(
+    backup_tree: Path, fake_home: Path, stubs: Path, tmp_path: Path
+):
     # The script is run from one tree, REPO names another: the env it copies and
     # the owner it asks about both follow REPO.
     other = tmp_path / "elsewhere" / "deploy" / "k3s"
@@ -521,19 +644,30 @@ def test_backup_takes_the_owner_from_repo_when_repo_is_given(backup_tree: Path, 
 # ── the kubeconfig scripts, for real ────────────────────────────────────────
 
 
-@pytest.mark.parametrize(("script", "outputs"), [
-    ("make-litellm-kubeconfig.sh", [".cc-litellm-logreader.kubeconfig"]),
-    ("make-mcp-kubeconfig.sh", [".cc-mcp-deployer.kubeconfig"]),
-    ("make-sandbox-kubeconfig.sh", [".cc-sandbox-runner.kubeconfig"]),
-])
-def test_a_kubeconfig_lands_in_the_owners_home_at_0600(tree: Path, stubs: Path, fake_home: Path, script: str, outputs: list[str]):
+@pytest.mark.parametrize(
+    ("script", "outputs"),
+    [
+        ("make-litellm-kubeconfig.sh", [".cc-litellm-logreader.kubeconfig"]),
+        ("make-mcp-kubeconfig.sh", [".cc-mcp-deployer.kubeconfig"]),
+        ("make-sandbox-kubeconfig.sh", [".cc-sandbox-runner.kubeconfig"]),
+    ],
+)
+def test_a_kubeconfig_lands_in_the_owners_home_at_0600(
+    tree: Path, stubs: Path, fake_home: Path, script: str, outputs: list[str]
+):
     k3s = tree / "deploy" / "k3s"
     shutil.copy(K3S / script, k3s / script)
-    _exe(stubs / "sudo", 'echo Zm9v\n')                    # the Secret reads; base64 for the CA
+    _exe(stubs / "sudo", "echo Zm9v\n")  # the Secret reads; base64 for the CA
     _exe(stubs / "kubectl", "exit 0\n")
     owner = _me(tree)[0]
-    r = subprocess.run(["bash", str(k3s / script)], cwd="/", env=_clean_env(stubs, USER=owner, SUDO_USER=owner),
-                       capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        ["bash", str(k3s / script)],
+        cwd="/",
+        env=_clean_env(stubs, USER=owner, SUDO_USER=owner),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     assert r.returncode == 0, r.stdout + r.stderr
     for name in outputs:
         assert stat.S_IMODE((fake_home / name).stat().st_mode) == 0o600, name
@@ -545,8 +679,13 @@ def test_a_kubeconfig_script_stops_when_the_home_cannot_be_resolved(tree: Path, 
     called = tree.parent / "sudo-called"
     _exe(stubs / "sudo", f'echo called >> "{called}"\n')
     _exe(stubs / "getent", "exit 2\n")
-    r = subprocess.run(["bash", str(k3s / "make-mcp-kubeconfig.sh")], env=_clean_env(stubs),
-                       capture_output=True, text=True, timeout=30)
+    r = subprocess.run(
+        ["bash", str(k3s / "make-mcp-kubeconfig.sh")],
+        env=_clean_env(stubs),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     assert r.returncode != 0 and "the home of account" in r.stderr
     assert not called.exists()
 
@@ -562,18 +701,22 @@ def _setup_rows() -> str:
 
 
 def _run_rows(tree: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
-    script = "\n".join([
-        "set -uo pipefail",
-        f"HERE='{tree}/deploy/k3s'",
-        'APP_ENV=unused',
-        'fail() { printf "FAIL %s\\n" "$1"; }',
-        'set_kv_if_unset() { printf "%s=%s\\n" "$2" "$3"; }',
-        "rows() {",
-        _setup_rows(),
-        "}",
-        'rows; echo "rc=$?"',
-    ])
-    return subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=30)
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            f"HERE='{tree}/deploy/k3s'",
+            "APP_ENV=unused",
+            'fail() { printf "FAIL %s\\n" "$1"; }',
+            'set_kv_if_unset() { printf "%s=%s\\n" "$2" "$3"; }',
+            "rows() {",
+            _setup_rows(),
+            "}",
+            'rows; echo "rc=$?"',
+        ]
+    )
+    return subprocess.run(
+        ["bash", "-c", script], env=env, capture_output=True, text=True, timeout=30
+    )
 
 
 def test_setup_writes_the_two_paths_under_the_owners_home(tree: Path, stubs: Path, fake_home: Path):
@@ -585,7 +728,9 @@ def test_setup_writes_the_two_paths_under_the_owners_home(tree: Path, stubs: Pat
     ], r.stderr
 
 
-def test_setup_fails_the_phase_and_writes_no_row_when_the_home_cannot_be_resolved(tree: Path, stubs: Path):
+def test_setup_fails_the_phase_and_writes_no_row_when_the_home_cannot_be_resolved(
+    tree: Path, stubs: Path
+):
     _exe(stubs / "getent", "exit 2\n")
     r = _run_rows(tree, _clean_env(stubs))
     assert r.stdout.splitlines() == ["FAIL app-owner-home", "rc=1"]

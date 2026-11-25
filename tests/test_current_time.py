@@ -16,8 +16,7 @@ from central_command.runtime.tools import current_time
 
 RUNTIME = Path(__file__).resolve().parent.parent / "central_command" / "runtime"
 
-WEEKDAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
-            "Saturday", "Sunday"}
+WEEKDAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
 
 
 def test_current_time_returns_a_parseable_now():

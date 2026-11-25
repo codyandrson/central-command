@@ -162,7 +162,8 @@ def _budget(timeout: float) -> float:
         pytest.fail(
             f"{getattr(item, 'nodeid', item)} runs the real installer but is not marked "
             "@drives_installer (tests/installer_source.py): under the suite's 120 s "
-            "ceiling it would, on Windows, end the whole pytest session")
+            "ceiling it would, on Windows, end the whole pytest session"
+        )
     left = ceiling - (time.monotonic() - started) - _MARGIN
     return max(1.0, min(timeout, left))
 
@@ -172,8 +173,12 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     children holding the output pipes, and reading them would then block
     forever — the very hang this exists to end."""
     if os.name == "nt":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                       capture_output=True, timeout=60, check=False)
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
     else:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(proc.pid, signal.SIGKILL)
@@ -181,20 +186,34 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         proc.kill()
 
 
-def run_driver(argv: list[str], *, cwd: Path, env: dict[str, str] | None = None,
-               timeout: float = DRIVER_RUN_TIMEOUT,
-               input: str | None = None) -> subprocess.CompletedProcess:
+def run_driver(
+    argv: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    timeout: float = DRIVER_RUN_TIMEOUT,
+    input: str | None = None,
+) -> subprocess.CompletedProcess:
     """`subprocess.run(argv, capture_output=True, text=True)` for a real
     installer invocation, with stdin closed (or fed `input`) — but a timeout
     kills the process tree and FAILS the calling test instead of hanging it."""
     limit = _budget(timeout)
     proc = subprocess.Popen(
-        argv, cwd=cwd, env=env, text=True, encoding="utf-8", errors="replace",
+        argv,
+        cwd=cwd,
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
         stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         # Its own process group / session, so the tree can be killed as one.
-        **({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
-           else {"start_new_session": True}),
+        **(
+            {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+            if os.name == "nt"
+            else {"start_new_session": True}
+        ),
     )
     try:
         out, err = proc.communicate(input=input, timeout=limit)
@@ -207,7 +226,8 @@ def run_driver(argv: list[str], *, cwd: Path, env: dict[str, str] | None = None,
         pytest.fail(
             f"{' '.join(map(str, argv))} (in {cwd}) did not finish within {limit:.0f} s — "
             f"killed with its children.\n--- stdout (tail)\n{(out or '')[-4000:]}"
-            f"\n--- stderr (tail)\n{(err or '')[-4000:]}")
+            f"\n--- stderr (tail)\n{(err or '')[-4000:]}"
+        )
     return subprocess.CompletedProcess(argv, proc.returncode, out, err)
 
 
@@ -272,9 +292,11 @@ def python_shim(stub_dir: Path) -> Path:
     2026-10-02 testbed run's second pass: the mint-key harness read no key out
     of the stub proxy's JSON, and no scope). With this shim first on PATH
     (`with_stub_path`), `$PY` is a real interpreter on every host."""
-    return write_lf(stub_dir / "python3",
-                    f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
-                    mode=0o755)
+    return write_lf(
+        stub_dir / "python3",
+        f'#!/usr/bin/env bash\nexec "{Path(sys.executable).as_posix()}" "$@"\n',
+        mode=0o755,
+    )
 
 
 def env_path(path: Path | str) -> str:

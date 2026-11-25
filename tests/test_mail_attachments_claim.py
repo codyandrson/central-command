@@ -50,17 +50,27 @@ async def _wipe():
 
 def _message(uuid: str, attachments: list[dict]) -> dict:
     return {
-        "uuid": uuid, "conversation_id": f"thread{uuid}",
-        "from": "Jane Doe <jane.doe@example.com>", "subject": "Planning review",
-        "date": "2026-03-02T18:00:00.000Z", "snippet": "",
-        "body_text": "", "body_html": "", "attachments": attachments,
+        "uuid": uuid,
+        "conversation_id": f"thread{uuid}",
+        "from": "Jane Doe <jane.doe@example.com>",
+        "subject": "Planning review",
+        "date": "2026-03-02T18:00:00.000Z",
+        "snippet": "",
+        "body_text": "",
+        "body_html": "",
+        "attachments": attachments,
         "has_attachments": bool(attachments),
     }
 
 
 def _invite_att(attachment_id: str = "ATT1") -> dict:
-    return {"filename": "invite.ics", "mime_type": "text/calendar", "size": len(INVITE),
-            "attachment_id": attachment_id, "is_inline": False}
+    return {
+        "filename": "invite.ics",
+        "mime_type": "text/calendar",
+        "size": len(INVITE),
+        "attachment_id": attachment_id,
+        "is_inline": False,
+    }
 
 
 async def _row(uuid: str) -> dict:
@@ -73,7 +83,9 @@ async def _row(uuid: str) -> dict:
     finally:
         await conn.close()
     out = dict(row)
-    out["payload"] = out["payload"] if isinstance(out["payload"], dict) else json.loads(out["payload"])
+    out["payload"] = (
+        out["payload"] if isinstance(out["payload"], dict) else json.loads(out["payload"])
+    )
     return out
 
 
@@ -96,7 +108,9 @@ def _mailbox(monkeypatch, message: dict, files: dict[str, bytes | Exception]):
     return calls
 
 
-async def test_a_live_mail_with_an_attachment_is_marked_at_enrollment_and_read_at_claim(monkeypatch):
+async def test_a_live_mail_with_an_attachment_is_marked_at_enrollment_and_read_at_claim(
+    monkeypatch,
+):
     """The shape that started this: a subject, an empty body, and invite.ics."""
     message = _message("attclive", [_invite_att()])
     calls = _mailbox(monkeypatch, message, {"ATT1": INVITE.encode()})
@@ -111,9 +125,15 @@ async def test_a_live_mail_with_an_attachment_is_marked_at_enrollment_and_read_a
 
     stored = (await _row("attclive"))["payload"]
     assert "attachments_pending" not in stored
-    assert stored["text_body"].startswith("From: Jane Doe") and "ATTACHMENTS" not in stored["text_body"]
+    assert (
+        stored["text_body"].startswith("From: Jane Doe")
+        and "ATTACHMENTS" not in stored["text_body"]
+    )
     assert "--- ATTACHMENTS (1)" in stored["text"]
-    assert "Title: Planning review" in stored["text"] and "Where: Room 4, Example House" in stored["text"]
+    assert (
+        "Title: Planning review" in stored["text"]
+        and "Where: Room 4, Example House" in stored["text"]
+    )
     assert stored["attachments"][0]["status"] == "read"
     assert stored["attachments"][0]["reader"] == "icalendar"
     assert calls["attachments"] == ["ATT1"]
@@ -136,7 +156,9 @@ async def test_a_backlog_reference_gets_its_body_and_its_attachments_in_one_clai
     message = _message("attcbacklog", [_invite_att()])
     calls = _mailbox(monkeypatch, message, {"ATT1": INVITE.encode()})
 
-    await ledger.enroll_provider_ref({"uuid": "attcbacklog", "conversation_id": "threadattcbacklog"})
+    await ledger.enroll_provider_ref(
+        {"uuid": "attcbacklog", "conversation_id": "threadattcbacklog"}
+    )
     out = await dispatcher.dispatch_once(model=make_spike_model())
     assert out["ok"] is True
 
@@ -150,7 +172,9 @@ async def test_a_backlog_reference_gets_its_body_and_its_attachments_in_one_clai
 
 async def test_a_mailbox_outage_during_the_read_leaves_the_row_marked_for_the_retry(monkeypatch):
     message = _message("attcdown", [_invite_att()])
-    down = email_facade.EmailFacadeError("email façade attachment failed: HTTP 503", status_code=503)
+    down = email_facade.EmailFacadeError(
+        "email façade attachment failed: HTTP 503", status_code=503
+    )
     assert is_transient(down)
     _mailbox(monkeypatch, message, {"ATT1": down})
 
@@ -191,9 +215,13 @@ async def test_a_body_rule_matches_the_body_alone_in_sql_too(monkeypatch):
         try:
             params: list = []
             where = repo._rule_where({"body_contains": phrase}, {}, params)
-            return bool(await conn.fetchval(
-                f"select count(*) from work_item w where w.id = ${len(params) + 1} and {where}",
-                *params, enrolled["id"]))
+            return bool(
+                await conn.fetchval(
+                    f"select count(*) from work_item w where w.id = ${len(params) + 1} and {where}",
+                    *params,
+                    enrolled["id"],
+                )
+            )
         finally:
             await conn.close()
 

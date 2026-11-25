@@ -25,9 +25,9 @@ from dataclasses import dataclass
 class AgentDef:
     id: str
     name: str
-    role: str                 # one line for the roster/profile header
-    taskable: bool = False    # accepts direct operator tasks (SC-2)
-    consultable: bool = False # advisory sub-runs for other agents
+    role: str  # one line for the roster/profile header
+    taskable: bool = False  # accepts direct operator tasks (SC-2)
+    consultable: bool = False  # advisory sub-runs for other agents
     # Uniform management is the DEFAULT. Any False capability above must say
     # why — the deviation is on the record, and the guard test enforces it.
     deviations: str = ""
@@ -35,8 +35,8 @@ class AgentDef:
     # so its absence needs no recorded reason: a multi-turn conversational lane
     # on the Agent Workspace. Set where "work with it iteratively" is the point.
     conversational: bool = False
-    status: str = "ACTIVE"    # ACTIVE | RETIRED (D24 lifecycle)
-    model: str = ""           # the operator's per-agent model; "" = unset
+    status: str = "ACTIVE"  # ACTIVE | RETIRED (D24 lifecycle)
+    model: str = ""  # the operator's per-agent model; "" = unset
 
 
 SEED: tuple[AgentDef, ...] = (
@@ -199,8 +199,7 @@ async def team_section(agent_id: str) -> str:
     ]
     teammates = [a for a in await roster() if a.id != agent_id]
     for a in teammates:
-        markers = [m for m, on in (("consultable", a.consultable),
-                                    ("taskable", a.taskable)) if on]
+        markers = [m for m, on in (("consultable", a.consultable), ("taskable", a.taskable)) if on]
         marker_str = f" ({', '.join(markers)})" if markers else ""
         lines.append(f"- {a.id}: {a.role}{marker_str}")
     if not teammates:

@@ -54,15 +54,27 @@ LOCAL = "local"
 # THE list of dependency names — every tuple in this module, every recorded park
 # and every `dependency_probe` row uses one of these and nothing else. `local`
 # is Postgres: it is never probed and never gated (nothing waits for it).
-DEPENDENCIES = (LLM, EMBEDDER, GRAPH, LITELLM, N8N, CALENDAR, GOOGLE, JIRA,
-                CONFLUENCE, FORGE, SANDBOX, LOCAL)
+DEPENDENCIES = (
+    LLM,
+    EMBEDDER,
+    GRAPH,
+    LITELLM,
+    N8N,
+    CALENDAR,
+    GOOGLE,
+    JIRA,
+    CONFLUENCE,
+    FORGE,
+    SANDBOX,
+    LOCAL,
+)
 
 # What a probe exists for: every name but `local`. `heartbeat/probes.py` keys
 # its probe table by exactly these (a parity test pins it).
 PROBED = tuple(d for d in DEPENDENCIES if d != LOCAL)
 
 _GRAPH_AND_EMBEDDER = ("graph", "embedder")  # embeds its query, then reads Neo4j
-_GRAPH = ("graph",)                          # lists or fetches by id: bolt only
+_GRAPH = ("graph",)  # lists or fetches by id: bolt only
 
 TOOL_DEPENDENCY: dict[str, tuple[str, ...]] = {
     # --- the knowledge graph (integrations/graphiti.py; reads over bolt) ------
@@ -170,10 +182,16 @@ TOOL_DEPENDENCY: dict[str, tuple[str, ...]] = {
 # work or drive a project), so they have no entry above. The parity test walks
 # every pack tool name and requires it to be a key of TOOL_DEPENDENCY, a
 # `propose_*` tool, or one of these.
-NOT_READS = frozenset({
-    "ask_operator", "assign_work", "conclude_discussion", "create_task",
-    "record_progress", "submit_plan",
-})
+NOT_READS = frozenset(
+    {
+        "ask_operator",
+        "assign_work",
+        "conclude_discussion",
+        "create_task",
+        "record_progress",
+        "submit_plan",
+    }
+)
 
 
 def is_parkable(dependencies: tuple[str, ...] | None) -> bool:
@@ -246,19 +264,23 @@ _GRAPH_AND_EMBEDDER_NAMES = (
 CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
     **_each(_GRAPH_AND_EMBEDDER, _GRAPH_AND_EMBEDDER_NAMES),
     **_each(_GRAPH, "graph.get_status"),
-    **_each((JIRA,),
-            "jira.set_due_date jira.create_issue jira.add_comment "
-            "jira.update_attributes jira.set_fields jira.set_planning_fields "
-            "jira.planning_gaps jira.team_load jira.link_issues "
-            "jira.delete_link jira.assign_issue jira.delete_issue "
-            "jira.transition_issue jira.create_filter jira.create_dashboard "
-            "jira.create_project jira.get_issue jira.search_issues "
-            "jira.find_users jira.get_transitions jira.get_comments jira.list_fields jira.list_issue_types "
-            "jira.list_filters jira.list_dashboards jira.list_gadgets"),
-    **_each((CONFLUENCE,),
-            "confluence.create_page confluence.update_page confluence.move_page "
-            "confluence.trash_page confluence.upload_attachment "
-            "confluence.set_labels confluence.create_space"),
+    **_each(
+        (JIRA,),
+        "jira.set_due_date jira.create_issue jira.add_comment "
+        "jira.update_attributes jira.set_fields jira.set_planning_fields "
+        "jira.planning_gaps jira.team_load jira.link_issues "
+        "jira.delete_link jira.assign_issue jira.delete_issue "
+        "jira.transition_issue jira.create_filter jira.create_dashboard "
+        "jira.create_project jira.get_issue jira.search_issues "
+        "jira.find_users jira.get_transitions jira.get_comments jira.list_fields jira.list_issue_types "
+        "jira.list_filters jira.list_dashboards jira.list_gadgets",
+    ),
+    **_each(
+        (CONFLUENCE,),
+        "confluence.create_page confluence.update_page confluence.move_page "
+        "confluence.trash_page confluence.upload_attachment "
+        "confluence.set_labels confluence.create_space",
+    ),
     # `calendar.create_event` with a work-block `plan` also reads the issue from
     # the tracker before it creates anything (DL-221), and so does
     # `calendar.update_event` on a work block. The registry has no per-argument
@@ -267,45 +289,55 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
     # below does: the retry then waits on Jira, not on the calendar.
     # `plan.remove_finished_block` always needs both.
     **_each((JIRA, CALENDAR), "plan.remove_finished_block"),
-    **_each((CALENDAR,),
-            "calendar.create_event calendar.update_event calendar.delete_event "
-            "calendar.adopt_event calendar.list_events"),
-    **_each((N8N,),
-            "mail.create_rule mail.report_spam mail.unsubscribe mail.send "
-            "mail.move email.list_refs email.get_message email.get_attachment"),
-    **_each((LITELLM,),
-            "litellm.add_model litellm.update_model litellm.delete_model "
-            "litellm.create_key litellm.update_key litellm.create_team "
-            "litellm.delete_team litellm.delete_key litellm.set_fallbacks "
-            "litellm.delete_fallbacks "
-            "autodiscovery.skip litellm.list_models litellm.list_credentials "
-            "litellm.list_keys litellm.get_routing litellm.list_teams "
-            "litellm.get_health litellm.check_model_health litellm.get_spend "
-            "litellm.list_mcp_servers litellm.register_mcp_server "
-            # An existing server registered or unregistered by URL (DL-233)
-            # touches the proxy alone: no sandbox, no cluster.
-            "mcp.server_register mcp.server_unregister"),
+    **_each(
+        (CALENDAR,),
+        "calendar.create_event calendar.update_event calendar.delete_event "
+        "calendar.adopt_event calendar.list_events",
+    ),
+    **_each(
+        (N8N,),
+        "mail.create_rule mail.report_spam mail.unsubscribe mail.send "
+        "mail.move email.list_refs email.get_message email.get_attachment",
+    ),
+    **_each(
+        (LITELLM,),
+        "litellm.add_model litellm.update_model litellm.delete_model "
+        "litellm.create_key litellm.update_key litellm.create_team "
+        "litellm.delete_team litellm.delete_key litellm.set_fallbacks "
+        "litellm.delete_fallbacks "
+        "autodiscovery.skip litellm.list_models litellm.list_credentials "
+        "litellm.list_keys litellm.get_routing litellm.list_teams "
+        "litellm.get_health litellm.check_model_health litellm.get_spend "
+        "litellm.list_mcp_servers litellm.register_mcp_server "
+        # An existing server registered or unregistered by URL (DL-233)
+        # touches the proxy alone: no sandbox, no cluster.
+        "mcp.server_register mcp.server_unregister",
+    ),
     # A file in this checkout, and the cluster's pod logs: same as the tools.
     **_each((LOCAL,), "litellm.read_config"),
     **_each((), "litellm.read_logs web.fetch"),
-    **_each((SANDBOX,),
-            "sandbox.exec sandbox.write_file sandbox.read_file sandbox.copy_in "
-            "sandbox.reset mcp.sync_source mcp.build_image mcp.server_deploy "
-            "mcp.server_remove mcp.tool_call"),
-    **_each((LOCAL,),
-            "catalog.tag charter.update skill.create skill.doc_add "
-            "memory.note_add memory.note_retire "
-            "loe.record_checkin loe.create loe.update loe.list work.bulk_dismiss "
-            # The stored day plan and its outcomes are Central Command's own
-            # tables (DL-221 step 4a). `plan.record_day` also re-reads the
-            # tracker for the planning numbers; a DOWN tracker there stamps
-            # `jira` on the error it re-raises, so the retry waits on Jira.
-            "plan.record_day plan.record_review "
-            # Releasing an event from the plan ledger reads and changes nothing
-            # on the calendar: it retires a Postgres row.
-            "calendar.release_event"
-            # What Central Command's own MCP tables record (DL-233).
-            " mcp.list_servers"),
+    **_each(
+        (SANDBOX,),
+        "sandbox.exec sandbox.write_file sandbox.read_file sandbox.copy_in "
+        "sandbox.reset mcp.sync_source mcp.build_image mcp.server_deploy "
+        "mcp.server_remove mcp.tool_call",
+    ),
+    **_each(
+        (LOCAL,),
+        "catalog.tag charter.update skill.create skill.doc_add "
+        "memory.note_add memory.note_retire "
+        "loe.record_checkin loe.create loe.update loe.list work.bulk_dismiss "
+        # The stored day plan and its outcomes are Central Command's own
+        # tables (DL-221 step 4a). `plan.record_day` also re-reads the
+        # tracker for the planning numbers; a DOWN tracker there stamps
+        # `jira` on the error it re-raises, so the retry waits on Jira.
+        "plan.record_day plan.record_review "
+        # Releasing an event from the plan ledger reads and changes nothing
+        # on the calendar: it retires a Postgres row.
+        "calendar.release_event"
+        # What Central Command's own MCP tables record (DL-233).
+        " mcp.list_servers",
+    ),
 }
 
 
@@ -334,8 +366,9 @@ def waited_on(dependencies) -> tuple[str, ...]:
     return tuple(d for d in recorded_dependencies(dependencies) if d != LOCAL) or (LLM,)
 
 
-def failed_dependencies(exc: BaseException | None,
-                        default: tuple[str, ...] = (LLM,)) -> tuple[str, ...]:
+def failed_dependencies(
+    exc: BaseException | None, default: tuple[str, ...] = (LLM,)
+) -> tuple[str, ...]:
     """What a park stamps for the failure it is recording: the typed error's own
     tuple, else `default` — the model, since a run that died transiently died
     on its model turn. THE one place that stamping default lives."""

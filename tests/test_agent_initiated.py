@@ -14,6 +14,7 @@ gateway never sends is invisible to `tsc` AND to every frontend test — the
 chip and the toast would simply never appear. Assert the exact camelCase keys
 here, on the backend, where it can actually fail.
 """
+
 from datetime import UTC, datetime
 
 from central_command.api import nerve_gateway
@@ -42,6 +43,7 @@ def _session(sess_id: str, agent_id: str = "jira-expert", status: str = "AWAITIN
 def _wire(monkeypatch, *, sessions, operator_items, titles=None):
     """Stub every store `_sessions_list` reads, so the test asserts the SHAPE
     of the payload rather than the contents of the dev database."""
+
     async def fake_list_sessions(_limit=50, **_kw):
         return list(sessions)
 
@@ -69,10 +71,15 @@ async def test_sessions_list_marks_an_agent_opened_lane(monkeypatch):
     _wire(
         monkeypatch,
         sessions=[_session("sess_agent"), _session("sess_operator")],
-        operator_items=[{
-            "id": "item_1", "status": "OPEN", "session_id": "sess_task",
-            "discussion_session_id": "sess_agent", "task_id": "task_9",
-        }],
+        operator_items=[
+            {
+                "id": "item_1",
+                "status": "OPEN",
+                "session_id": "sess_task",
+                "discussion_session_id": "sess_agent",
+                "task_id": "task_9",
+            }
+        ],
         titles={"task_9": "Reconcile the sprint board"},
     )
 
@@ -97,10 +104,15 @@ async def test_an_answered_ask_no_longer_marks_its_lane(monkeypatch):
     _wire(
         monkeypatch,
         sessions=[_session("sess_agent")],
-        operator_items=[{
-            "id": "item_1", "status": "ANSWERED", "session_id": "sess_task",
-            "discussion_session_id": "sess_agent", "task_id": None,
-        }],
+        operator_items=[
+            {
+                "id": "item_1",
+                "status": "ANSWERED",
+                "session_id": "sess_task",
+                "discussion_session_id": "sess_agent",
+                "task_id": None,
+            }
+        ],
     )
 
     rows = (await nerve_gateway._sessions_list({}))["sessions"]
@@ -113,10 +125,15 @@ async def test_an_ask_without_a_task_still_marks_the_lane(monkeypatch):
     _wire(
         monkeypatch,
         sessions=[_session("sess_agent")],
-        operator_items=[{
-            "id": "item_1", "status": "OPEN", "session_id": "sess_task",
-            "discussion_session_id": "sess_agent", "task_id": None,
-        }],
+        operator_items=[
+            {
+                "id": "item_1",
+                "status": "OPEN",
+                "session_id": "sess_task",
+                "discussion_session_id": "sess_agent",
+                "task_id": None,
+            }
+        ],
     )
 
     row = (await nerve_gateway._sessions_list({}))["sessions"][0]
@@ -130,10 +147,15 @@ async def test_composer_is_enabled_on_an_agent_opened_lane(monkeypatch):
     conversation — a chip pointing at a read-only box would be worse than no
     chip at all. (`_COMPOSER_DISABLING` is an allowlist; nothing here belongs
     on it.)"""
+
     async def fake_get(_sid):
-        return {"id": "sess_agent", "agent_id": "jira-expert",
-                "mode": "conversation", "status": "AWAITING_OPERATOR",
-                "closed_reason": None}
+        return {
+            "id": "sess_agent",
+            "agent_id": "jira-expert",
+            "mode": "conversation",
+            "status": "AWAITING_OPERATOR",
+            "closed_reason": None,
+        }
 
     monkeypatch.setattr(repo, "get_session", fake_get)
     state = await nerve_gateway._composer_state("agent:jira-expert:sess_agent")

@@ -27,8 +27,16 @@ NOW = datetime(2026, 8, 30, 9, 0, tzinfo=UTC)
 # on purpose: the email row is synthesized, and a divergence here is what
 # would force the panel into two types.
 SOURCE_KEYS = {
-    "id", "kind", "name", "read_only", "enabled", "config", "cursor",
-    "last_polled_at", "overview", "feed_overview",
+    "id",
+    "kind",
+    "name",
+    "read_only",
+    "enabled",
+    "config",
+    "cursor",
+    "last_polled_at",
+    "overview",
+    "feed_overview",
 }
 
 
@@ -49,24 +57,63 @@ def stub(monkeypatch):
     monkeypatch.setattr(settings, "feed_poll_seconds", 60.0)
     monkeypatch.setattr(settings, "backlog_query", "in:inbox")
     monkeypatch.setattr(settings, "backlog_window_days", 30)
-    monkeypatch.setattr(repo, "list_sources", lambda: _async([{
-        "id": "docs-drive", "kind": "filesystem", "name": "Docs drive",
-        "config": {"root": "/srv/docs"}, "enabled": True,
-        "cursor": {"last_walk_at": "2026-08-30T08:00:00+00:00"},
-        "created_at": NOW, "updated_at": NOW,
-    }]))
-    monkeypatch.setattr(repo, "catalog_overview", lambda sid: _async({
-        "documents": 3, "rescinded": 1, "versions": 5, "locations": 4, "missing": 2,
-        "unenrolled": 2,
-    }))
-    monkeypatch.setattr(repo, "count_work_items_by_state", lambda kind: _async({
-        "UNPROCESSED": 2, "CLAIMED": 1, "FOLD_PENDING": 1, "DISMISS_PENDING": 1,
-        "PROCESSED": 7, "FOLDED": 3, "FAILED": 2,
-    }))
+    monkeypatch.setattr(
+        repo,
+        "list_sources",
+        lambda: _async(
+            [
+                {
+                    "id": "docs-drive",
+                    "kind": "filesystem",
+                    "name": "Docs drive",
+                    "config": {"root": "/srv/docs"},
+                    "enabled": True,
+                    "cursor": {"last_walk_at": "2026-08-30T08:00:00+00:00"},
+                    "created_at": NOW,
+                    "updated_at": NOW,
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        repo,
+        "catalog_overview",
+        lambda sid: _async(
+            {
+                "documents": 3,
+                "rescinded": 1,
+                "versions": 5,
+                "locations": 4,
+                "missing": 2,
+                "unenrolled": 2,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        repo,
+        "count_work_items_by_state",
+        lambda kind: _async(
+            {
+                "UNPROCESSED": 2,
+                "CLAIMED": 1,
+                "FOLD_PENDING": 1,
+                "DISMISS_PENDING": 1,
+                "PROCESSED": 7,
+                "FOLDED": 3,
+                "FAILED": 2,
+            }
+        ),
+    )
     monkeypatch.setattr(repo, "get_feed_state", lambda key: _async({"cursor": "2026-08-01"}))
-    monkeypatch.setattr(repo, "list_heartbeat_schedules", lambda **k: _async([
-        {"id": "mail-poll", "action_kind": "feed.poll", "last_fired_at": NOW},
-    ]))
+    monkeypatch.setattr(
+        repo,
+        "list_heartbeat_schedules",
+        lambda **k: _async(
+            [
+                {"id": "mail-poll", "action_kind": "feed.poll", "last_fired_at": NOW},
+            ]
+        ),
+    )
 
 
 async def test_sources_list_carries_every_key_the_panel_reads(stub):
@@ -84,8 +131,10 @@ async def test_sources_list_carries_every_key_the_panel_reads(stub):
     assert email["id"] == "email-feed" and email["kind"] == "email"
     assert email["read_only"] is True and email["enabled"] is True
     assert email["config"] == {
-        "query": "in:inbox newer_than:1d", "poll_seconds": 60.0,
-        "backlog_query": "in:inbox", "backlog_window_days": 30,
+        "query": "in:inbox newer_than:1d",
+        "poll_seconds": 60.0,
+        "backlog_query": "in:inbox",
+        "backlog_window_days": 30,
     }
     assert email["cursor"] == {"cursor": "2026-08-01"}
     assert email["last_polled_at"] == NOW
@@ -93,7 +142,10 @@ async def test_sources_list_carries_every_key_the_panel_reads(stub):
     # enrolled = all states; pending = the four non-terminal ones; processed =
     # PROCESSED+FOLDED; failed = FAILED. The list row's count strip.
     assert email["feed_overview"] == {
-        "enrolled": 17, "processed": 10, "pending": 5, "failed": 2,
+        "enrolled": 17,
+        "processed": 10,
+        "pending": 5,
+        "failed": 2,
     }
 
     # The filesystem row keeps its slice-1 shape and gains the two new keys.
@@ -101,17 +153,35 @@ async def test_sources_list_carries_every_key_the_panel_reads(stub):
     assert fs["last_polled_at"] == "2026-08-30T08:00:00+00:00"
     assert fs["feed_overview"] is None
     assert set(fs["overview"]) == {
-        "documents", "rescinded", "versions", "locations", "missing", "unenrolled",
+        "documents",
+        "rescinded",
+        "versions",
+        "locations",
+        "missing",
+        "unenrolled",
     }
 
 
 async def test_source_with_no_cursor_still_reports_last_polled_at(monkeypatch, stub):
     """`cursor` is null until the first walk — the row must still render."""
-    monkeypatch.setattr(repo, "list_sources", lambda: _async([{
-        "id": "docs-drive", "kind": "filesystem", "name": "Docs drive",
-        "config": {"root": "/srv/docs"}, "enabled": False, "cursor": None,
-        "created_at": NOW, "updated_at": NOW,
-    }]))
+    monkeypatch.setattr(
+        repo,
+        "list_sources",
+        lambda: _async(
+            [
+                {
+                    "id": "docs-drive",
+                    "kind": "filesystem",
+                    "name": "Docs drive",
+                    "config": {"root": "/srv/docs"},
+                    "enabled": False,
+                    "cursor": None,
+                    "created_at": NOW,
+                    "updated_at": NOW,
+                }
+            ]
+        ),
+    )
 
     fs = (await routes.list_sources())["sources"][1]
 
@@ -146,7 +216,9 @@ async def test_count_work_items_by_state_groups_by_state():
                 await conn.execute(
                     "insert into work_item (id, message_id, feed, source, state, payload, kind)"
                     " values ($1, $1, 'live', 'fixture', $2, '{}'::jsonb, $3)",
-                    f"wire-{marker}-{state}-{i}", state, f"email-{marker}",
+                    f"wire-{marker}-{state}-{i}",
+                    state,
+                    f"email-{marker}",
                 )
         # Scoped to this test's rows: the dev DB is shared, so a global count
         # would be someone else's queue depth.
@@ -156,10 +228,9 @@ async def test_count_work_items_by_state_groups_by_state():
         )
         assert {r["state"]: r["n"] for r in rows} == {"UNPROCESSED": 2, "PROCESSED": 1}
         assert await repo.count_work_items_by_state(f"email-{marker}") == {
-            "UNPROCESSED": 2, "PROCESSED": 1,
+            "UNPROCESSED": 2,
+            "PROCESSED": 1,
         }
     finally:
-        await conn.execute(
-            "delete from work_item where kind = $1", f"email-{marker}"
-        )
+        await conn.execute("delete from work_item where kind = $1", f"email-{marker}")
         await conn.close()

@@ -273,8 +273,21 @@ def no_python_path(tmp_path: Path) -> str:
     fake = tmp_path / "fakebin"
     fake.mkdir()
     needed = (
-        "bash", "sed", "grep", "git", "cat", "printf", "tr", "mkdir",
-        "chmod", "head", "base64", "mktemp", "rm", "mv", "cp",
+        "bash",
+        "sed",
+        "grep",
+        "git",
+        "cat",
+        "printf",
+        "tr",
+        "mkdir",
+        "chmod",
+        "head",
+        "base64",
+        "mktemp",
+        "rm",
+        "mv",
+        "cp",
     )
     for name in needed:
         real = shutil.which(name)
@@ -300,7 +313,8 @@ def test_fallback_parser_still_denies_tracked_file(deployment, no_python_path):
     probe = subprocess.run(
         [bash(), "-c", "command -v python3 || command -v python"],
         env={**os.environ, "PATH": no_python_path},
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert probe.returncode != 0, f"python still reachable: {probe.stdout!r}"
 

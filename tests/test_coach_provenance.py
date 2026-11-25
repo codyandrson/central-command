@@ -31,32 +31,44 @@ def pinned(monkeypatch):
     # charter.update writes only the (test) DB, so its real handler runs here.
 
 
-async def _seed_charter_proposal(drafter: str, target: str, extra_args: dict | None = None) -> tuple[str, str]:
+async def _seed_charter_proposal(
+    drafter: str, target: str, extra_args: dict | None = None
+) -> tuple[str, str]:
     """A proposal DRAFTED BY `drafter` that edits `target`'s charter."""
     sid = "sess_prov_" + uuid.uuid4().hex[:8]
     pid = "prop_prov_" + uuid.uuid4().hex[:8]
     await repo.upsert_agent(drafter, drafter, "demo", "c")
     await repo.upsert_agent(target, target, "demo", "c")
-    await repo.save_charter_version(target, "CHARTER before coaching.", "seed",
-                                    created_by="operator")
+    await repo.save_charter_version(
+        target, "CHARTER before coaching.", "seed", created_by="operator"
+    )
     await repo.save_paused_session(sid, drafter, {})
     await repo.save_proposal(
-        proposal_id=pid, session_id=sid, agent_id=drafter,
+        proposal_id=pid,
+        session_id=sid,
+        agent_id=drafter,
         intent=f"Charter edit for {target}",
-        actions=[{
-            "capability": "charter.update",
-            "arguments": {
-                "agent_id": target,
-                "content": "CHARTER before coaching.\n\nCOACHED RULE: check first.",
-                "rationale": "Encodes recurring operator feedback.",
-                **(extra_args or {}),
-            },
-            "target_ref": {"system": "central_command", "id": target,
-                           "read_version": "unknown"},
-            "reversibility": "reversible",
-        }],
-        evidence=[], expected_effect=f"{target} charter gains a rule",
-        idempotency_key=f"{pid}:0", status="AWAITING_HUMAN",
+        actions=[
+            {
+                "capability": "charter.update",
+                "arguments": {
+                    "agent_id": target,
+                    "content": "CHARTER before coaching.\n\nCOACHED RULE: check first.",
+                    "rationale": "Encodes recurring operator feedback.",
+                    **(extra_args or {}),
+                },
+                "target_ref": {
+                    "system": "central_command",
+                    "id": target,
+                    "read_version": "unknown",
+                },
+                "reversibility": "reversible",
+            }
+        ],
+        evidence=[],
+        expected_effect=f"{target} charter gains a rule",
+        idempotency_key=f"{pid}:0",
+        status="AWAITING_HUMAN",
     )
     return sid, pid
 
@@ -85,8 +97,7 @@ async def test_the_charter_updated_event_separates_proposer_from_target():
 
     await gateway.approve_and_execute(sid, pid, approver="human:lee")
 
-    evs = [e for e in await repo.list_events_of_kinds(["charter.updated"])
-           if e["ref_id"] == target]
+    evs = [e for e in await repo.list_events_of_kinds(["charter.updated"]) if e["ref_id"] == target]
     assert evs, "no charter.updated event for the target"
     payload = evs[-1]["payload"]
     assert payload["proposed_by"] == f"agent:{drafter}"
@@ -99,7 +110,9 @@ async def test_a_proposer_claimed_in_action_args_never_overrides_the_row():
     suffix = uuid.uuid4().hex[:6]
     drafter, target = f"prov-spoof-{suffix}", f"prov-victim-{suffix}"
     sid, pid = await _seed_charter_proposal(
-        drafter, target, extra_args={"proposer": "human:lee"},
+        drafter,
+        target,
+        extra_args={"proposer": "human:lee"},
     )
 
     await gateway.approve_and_execute(sid, pid, approver="human:lee")

@@ -39,8 +39,11 @@ def offenders(source: str, filename: str = "<src>") -> list[str]:
             bound |= {t.id for t in targets if isinstance(t, ast.Name)}
     out = []
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "search"):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "search"
+        ):
             continue
         recv = node.func.value
         if (isinstance(recv, ast.Name) and recv.id in bound) or _factory_call(recv):

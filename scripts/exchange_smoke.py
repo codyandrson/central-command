@@ -74,17 +74,24 @@ def report(ok: bool | None, check: str, detail: str = "") -> None:
 
 def check_config() -> bool:
     if not exchange.configured():
-        missing = [name for name, value in (
-            ("CC_EXCHANGE_URL", settings.exchange_url),
-            ("CC_EXCHANGE_USERNAME", settings.exchange_username),
-            ("CC_EXCHANGE_PASSWORD", settings.exchange_password),
-        ) if not value]
+        missing = [
+            name
+            for name, value in (
+                ("CC_EXCHANGE_URL", settings.exchange_url),
+                ("CC_EXCHANGE_USERNAME", settings.exchange_username),
+                ("CC_EXCHANGE_PASSWORD", settings.exchange_password),
+            )
+            if not value
+        ]
         report(False, "config", f"unset: {', '.join(missing)}")
         return False
-    report(True, "config",
-           f"endpoint {settings.exchange_url}, user "
-           f"{settings.exchange_username.split('@')[0].split(chr(92))[-1]}@…, "
-           f"mailbox {settings.exchange_email or '(from username)'}")
+    report(
+        True,
+        "config",
+        f"endpoint {settings.exchange_url}, user "
+        f"{settings.exchange_username.split('@')[0].split(chr(92))[-1]}@…, "
+        f"mailbox {settings.exchange_email or '(from username)'}",
+    )
 
     # Which of the three trust answers is actually in effect. An operator who
     # set a CA bundle AND left CC_TLS_INSECURE=1 on should see both, and see
@@ -116,11 +123,11 @@ def check_tls() -> None:
         with socket.create_connection((host, port), timeout=20) as raw:  # noqa: SIM117 — merging re-indents the block; formatting is a later release
             with context.wrap_socket(raw, server_hostname=host) as tls:
                 peer = tls.getpeercert() or {}
-                issuer = ", ".join(
-                    v for rdn in peer.get("issuer", ()) for _, v in rdn
-                ) or "(not reported — verification is off)"
-                report(True, "tls",
-                       f"{host}:{port} handshake ok, {tls.version()}, issuer {issuer}")
+                issuer = (
+                    ", ".join(v for rdn in peer.get("issuer", ()) for _, v in rdn)
+                    or "(not reported — verification is off)"
+                )
+                report(True, "tls", f"{host}:{port} handshake ok, {tls.version()}, issuer {issuer}")
     except Exception as e:  # noqa: BLE001 — every failure here is one report line
         report(False, "tls", f"{host}:{port}: {type(e).__name__}: {e}")
 
@@ -140,9 +147,11 @@ def check_auth():
 def check_inbox(account):
     try:
         inbox = account.inbox
-        report(True, "inbox",
-               f"{inbox.absolute} — {inbox.total_count} item(s), "
-               f"{inbox.unread_count} unread")
+        report(
+            True,
+            "inbox",
+            f"{inbox.absolute} — {inbox.total_count} item(s), {inbox.unread_count} unread",
+        )
         return inbox
     except Exception as e:  # noqa: BLE001
         report(False, "inbox", f"{type(e).__name__}: {e}")
@@ -171,10 +180,12 @@ def check_calendar(account) -> None:
     start = datetime.now(UTC)
     end = start + timedelta(days=7)
     try:
-        events = list(account.calendar.view(
-            start=EWSDateTime.from_datetime(start),
-            end=EWSDateTime.from_datetime(end),
-        )[:500])
+        events = list(
+            account.calendar.view(
+                start=EWSDateTime.from_datetime(start),
+                end=EWSDateTime.from_datetime(end),
+            )[:500]
+        )
         report(True, "calendar", f"7-day CalendarView → {len(events)} event(s)")
     except Exception as e:  # noqa: BLE001
         report(False, "calendar", f"{type(e).__name__}: {e}")
@@ -183,8 +194,9 @@ def check_calendar(account) -> None:
 def check_version(account) -> None:
     try:
         version = account.version
-        report(True, "server",
-               f"{version.fullname} — API {version.api_version}, build {version.build}")
+        report(
+            True, "server", f"{version.fullname} — API {version.api_version}, build {version.build}"
+        )
     except Exception as e:  # noqa: BLE001
         report(False, "server", f"{type(e).__name__}: {e}")
 
@@ -205,19 +217,28 @@ def check_headers(inbox) -> None:
         return
     item = newest[0]
     message_id = (getattr(item, "message_id", "") or "").strip()
-    report(bool(message_id), "headers.internet_message_id",
-           message_id or "ABSENT — enrollment would fall back to the uuid-derived id")
+    report(
+        bool(message_id),
+        "headers.internet_message_id",
+        message_id or "ABSENT — enrollment would fall back to the uuid-derived id",
+    )
     names = sorted({(h.name or "").lower() for h in (getattr(item, "headers", None) or [])})
     if not names:
-        report(None, "headers.authentication_results",
-               "the item exposed NO InternetMessageHeaders at all — the field may "
-               "need an explicit only()/ItemShape on this server")
+        report(
+            None,
+            "headers.authentication_results",
+            "the item exposed NO InternetMessageHeaders at all — the field may "
+            "need an explicit only()/ItemShape on this server",
+        )
         return
     has_auth = "authentication-results" in names
-    report(None, "headers.authentication_results",
-           ("present" if has_auth else "absent")
-           + f" ({len(names)} header(s) exposed; mail.unsubscribe stays withheld "
-             "on Exchange either way)")
+    report(
+        None,
+        "headers.authentication_results",
+        ("present" if has_auth else "absent")
+        + f" ({len(names)} header(s) exposed; mail.unsubscribe stays withheld "
+        "on Exchange either way)",
+    )
 
 
 def main() -> int:

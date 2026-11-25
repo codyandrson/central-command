@@ -52,7 +52,7 @@ class Provenance:
     @property
     def creator_agent(self) -> str | None:
         if self.created_by.startswith(AGENT_PREFIX):
-            return self.created_by[len(AGENT_PREFIX):]
+            return self.created_by[len(AGENT_PREFIX) :]
         return None
 
     @property
@@ -96,8 +96,12 @@ async def derive_provenance(actor: str, parent_session_id: str | None) -> Proven
     # The ancestor task is also the parent: the specialist's creations count
     # toward that task's fan-out and a refusal hangs on it.
     inherited, ancestor_task = await _inherited_chain(parent_session_id)
-    return Provenance(f"{AGENT_PREFIX}{creator}", ancestor_task,
-                      inherited + (creator,), ancestor_task or parent_session_id)
+    return Provenance(
+        f"{AGENT_PREFIX}{creator}",
+        ancestor_task,
+        inherited + (creator,),
+        ancestor_task or parent_session_id,
+    )
 
 
 _ANCESTOR_HOPS = 16
@@ -115,8 +119,7 @@ async def _inherited_chain(session_id: str) -> tuple[tuple[str, ...], str | None
     current = session_id
     for _ in range(_ANCESTOR_HOPS):
         row = await repo.get_session(current)
-        nxt = (row or {}).get("parent_session_id") or (
-            await repo.consult_caller_session(current))
+        nxt = (row or {}).get("parent_session_id") or (await repo.consult_caller_session(current))
         if not nxt or nxt in seen:
             return (), None
         seen.add(nxt)
@@ -127,8 +130,7 @@ async def _inherited_chain(session_id: str) -> tuple[tuple[str, ...], str | None
     return (), None
 
 
-async def check(prov: Provenance, agent_id: str | None, *,
-                pending: int = 0) -> Refusal | None:
+async def check(prov: Provenance, agent_id: str | None, *, pending: int = 0) -> Refusal | None:
     """The first backstop the creation trips, or None. Operator and heartbeat
     creations are roots and are never refused here.
 
@@ -181,9 +183,11 @@ async def check(prov: Provenance, agent_id: str | None, *,
     )
     if created + pending >= limit:
         scope = "task" if prov.parent_task_id else "conversation"
-        made = (f"has already created {created} tasks" if not pending else
-                f"has created {created} tasks and this batch plans {pending} "
-                f"before this one")
+        made = (
+            f"has already created {created} tasks"
+            if not pending
+            else f"has created {created} tasks and this batch plans {pending} before this one"
+        )
         return Refusal(
             FAN_OUT,
             f"this {scope} {made} — fan-out is "
@@ -199,13 +203,13 @@ async def _alternatives(prov: Provenance) -> str:
 
     options = [a for a in await taskable_agent_ids() if a not in prov.chain]
     if not options:
-        return ("No other taskable teammate is outside this chain: do the "
-                "work yourself or report back.")
+        return (
+            "No other taskable teammate is outside this chain: do the work yourself or report back."
+        )
     return "Taskable teammates you may assign instead: " + ", ".join(options) + "."
 
 
-async def refuse(prov: Provenance, agent_id: str | None, refusal: Refusal,
-                 actor: str) -> None:
+async def refuse(prov: Provenance, agent_id: str | None, refusal: Refusal, actor: str) -> None:
     """Record the refusal on the event log, before anything it concerns runs."""
     await events.emit(
         "task.refused",

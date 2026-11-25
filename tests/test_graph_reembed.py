@@ -79,16 +79,20 @@ class World:
         self.elements = {"entity": {}, "edge": {}, "community": {}}
         for i in range(entities):
             self.elements["entity"][f"e{i:02}"] = {
-                "name": f"Person {i}", "summary": f"Summary {i}", "group_id": "central_command",
+                "name": f"Person {i}",
+                "summary": f"Summary {i}",
+                "group_id": "central_command",
                 "vector": _vector("old", f"entity {i}"),
             }
         for i in range(communities):
             self.elements["community"][f"c{i:02}"] = {
-                "name": f"Community {i}", "vector": _vector("old", f"community {i}"),
+                "name": f"Community {i}",
+                "vector": _vector("old", f"community {i}"),
             }
         for i in range(edges):
             self.elements["edge"][f"r{i:02}"] = {
-                "fact": f"Fact number {i}", "group_id": "central_command",
+                "fact": f"Fact number {i}",
+                "group_id": "central_command",
                 "vector": _vector("old", f"edge {i}"),
             }
         self.record: dict | None = None
@@ -104,9 +108,14 @@ class World:
         self.ledger_cleared = 0
         self.running_jobs = 0
         self.sleeps: list[float] = []
-        self.cache = _Response(200, {"litellm_cache_params": {
-            "supported_call_types": "['completion', 'acompletion']",
-        }})
+        self.cache = _Response(
+            200,
+            {
+                "litellm_cache_params": {
+                    "supported_call_types": "['completion', 'acompletion']",
+                }
+            },
+        )
         self.read_error = None
         self.events: list[dict] = []
 
@@ -149,22 +158,30 @@ class World:
                 return [{"n": len(self.elements[kind])}]
             if query == graph_reembed._PAGE[kind]:
                 uuids = sorted(u for u in self.elements[kind] if u > params["after"])
-                return [{"uuid": u, **{k: v for k, v in self.elements[kind][u].items()
-                                       if k != "vector"}}
-                        for u in uuids[:params["limit"]]]
+                return [
+                    {
+                        "uuid": u,
+                        **{k: v for k, v in self.elements[kind][u].items() if k != "vector"},
+                    }
+                    for u in uuids[: params["limit"]]
+                ]
             if query == graph_reembed._IDENTICAL[kind]:
                 by_vector: dict[tuple, set] = {}
                 for element in self.elements[kind].values():
                     if element.get("vector") is not None:
                         by_vector.setdefault(tuple(element["vector"]), set()).add(
-                            _text(kind, element))
+                            _text(kind, element)
+                        )
                 return [{"texts": len(t)} for t in by_vector.values() if len(t) > 1]
             head = graph_reembed._TARGET[kind][0]
             if query.startswith(head):
                 assert "uuid" in params
                 if "CALL db.create." in query:
-                    procedure = ("setRelationshipVectorProperty" if kind == "edge"
-                                 else "setNodeVectorProperty")
+                    procedure = (
+                        "setRelationshipVectorProperty"
+                        if kind == "edge"
+                        else "setNodeVectorProperty"
+                    )
                     assert f"db.create.{procedure}" in query, "only through the procedures"
                     assert "$vector" in query
                     self.elements[kind][params["uuid"]]["vector"] = params["vector"]
@@ -177,9 +194,17 @@ class World:
         if query == graph_reembed._SAMPLE_ENTITIES:
             rows = sorted(
                 (u, e) for u, e in self.elements["entity"].items() if e.get("vector") is not None
-            )[:params["limit"]]
-            return [{"uuid": u, "name": e["name"], "summary": e["summary"],
-                     "group_id": e["group_id"], "vector": e["vector"]} for u, e in rows]
+            )[: params["limit"]]
+            return [
+                {
+                    "uuid": u,
+                    "name": e["name"],
+                    "summary": e["summary"],
+                    "group_id": e["group_id"],
+                    "vector": e["vector"],
+                }
+                for u, e in rows
+            ]
         if query == graph_reembed._SAMPLE_FACT:
             rows = sorted(self.elements["edge"].items())[:1]
             return [{"fact": e["fact"], "group_id": e["group_id"]} for _, e in rows]
@@ -194,10 +219,17 @@ class World:
             for element in elements.values():
                 element["vector"] = _vector(model, _text(kind, element))
         self.record = {
-            "key": "embedder", "alias": ALIAS, "dimensions": DIMS, "epoch": epoch,
-            "text_recipe": TEXT_RECIPE, "state": "stable", "canary_texts": list(CANARY_TEXTS),
+            "key": "embedder",
+            "alias": ALIAS,
+            "dimensions": DIMS,
+            "epoch": epoch,
+            "text_recipe": TEXT_RECIPE,
+            "state": "stable",
+            "canary_texts": list(CANARY_TEXTS),
             "canary_vectors": json.dumps([_vector(model, t) for t in CANARY_TEXTS]),
-            "upstream_model": f"openai/{model}", "history": ["an earlier run"], **fields,
+            "upstream_model": f"openai/{model}",
+            "history": ["an earlier run"],
+            **fields,
         }
 
     # the embedder ---------------------------------------------------------------
@@ -208,7 +240,10 @@ class World:
 
 def _text(kind: str, element: dict) -> str:
     return embedding_text(
-        kind, name=element.get("name"), summary=element.get("summary"), fact=element.get("fact"),
+        kind,
+        name=element.get("name"),
+        summary=element.get("summary"),
+        fact=element.get("fact"),
     )
 
 
@@ -342,7 +377,8 @@ def _gate(world) -> embedder_record.Verdict:
 def _vectors_are(world, model: str, width: int = DIMS) -> bool:
     return all(
         element["vector"] == _vector(model, _text(kind, element), width)
-        for kind, elements in world.elements.items() for element in elements.values()
+        for kind, elements in world.elements.items()
+        for element in elements.values()
     )
 
 
@@ -459,6 +495,7 @@ def test_check_on_a_down_embedder_could_not_run(world, capsys, status):
 
 def test_check_on_a_misaligned_probe_exits_one(world, capsys):
     """The 2026-09-01 incident: a miss row received a neighbour's vector."""
+
     def shifted(texts, vectors):
         return [vectors[0], vectors[0], vectors[2], vectors[3], vectors[4], vectors[5]]
 
@@ -475,9 +512,14 @@ def test_check_on_a_short_batch_exits_one(world, capsys):
 
 
 def test_check_on_a_cache_that_covers_embeddings_exits_one(world, capsys):
-    world.cache = _Response(200, {"litellm_cache_params": {
-        "supported_call_types": "['completion', 'embedding', 'aembedding']",
-    }})
+    world.cache = _Response(
+        200,
+        {
+            "litellm_cache_params": {
+                "supported_call_types": "['completion', 'embedding', 'aembedding']",
+            }
+        },
+    )
     assert _main(world, "check") == 1
     assert "the LiteLLM cache covers embeddings" in capsys.readouterr().out
 
@@ -488,10 +530,16 @@ def test_check_with_the_cache_off_is_clear(world, capsys):
     assert "the LiteLLM cache is off" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("cache", [
-    _Response(401, {}), _Response(200, {}), _Response(200, {"litellm_cache_params": "text"}),
-    _Response(200, {"litellm_cache_params": "[1]"}), _Response(200, {"litellm_cache_params": "{}"}),
-])
+@pytest.mark.parametrize(
+    "cache",
+    [
+        _Response(401, {}),
+        _Response(200, {}),
+        _Response(200, {"litellm_cache_params": "text"}),
+        _Response(200, {"litellm_cache_params": "[1]"}),
+        _Response(200, {"litellm_cache_params": "{}"}),
+    ],
+)
 def test_a_cache_config_that_cannot_be_read_exits_three(world, capsys, cache):
     world.cache = cache
     assert _main(world, "check") == 3
@@ -507,7 +555,9 @@ def test_no_admin_key_exits_three_naming_it(world, capsys, monkeypatch):
 def test_a_width_that_differs_is_reported_and_is_no_refusal(world, capsys):
     world.width = 8
     assert _main(world, "check") == 0
-    assert "at width 8, CC_EMBED_DIM is 4: a run will end awaiting_config" in capsys.readouterr().out
+    assert (
+        "at width 8, CC_EMBED_DIM is 4: a run will end awaiting_config" in capsys.readouterr().out
+    )
 
 
 def test_an_upstream_model_the_proxy_will_not_name_is_no_refusal(world, capsys, monkeypatch):
@@ -550,9 +600,18 @@ def test_no_dump_at_all_refuses(world, capsys):
 
 
 def test_a_backup_dir_that_is_not_there_refuses(world, capsys, tmp_path):
-    assert graph_reembed.main([
-        "check", "--backup-dir", str(tmp_path / "nothing"), "--report-dir", str(tmp_path / "r"),
-    ]) == 3
+    assert (
+        graph_reembed.main(
+            [
+                "check",
+                "--backup-dir",
+                str(tmp_path / "nothing"),
+                "--report-dir",
+                str(tmp_path / "r"),
+            ]
+        )
+        == 3
+    )
 
 
 def test_a_pre_update_dump_is_not_the_backup(world, capsys):
@@ -621,11 +680,24 @@ def test_the_backup_dir_defaults_to_the_setting_then_the_home(monkeypatch, tmp_p
     assert graph_reembed._backup_dir(args).name == "cc-backups"
 
 
-@pytest.mark.parametrize("hour,minute,inside", [
-    (2, 44, False), (2, 45, True), (3, 0, True), (3, 15, True), (3, 16, False), (12, 0, False),
-])
+@pytest.mark.parametrize(
+    "hour,minute,inside",
+    [
+        (2, 44, False),
+        (2, 45, True),
+        (3, 0, True),
+        (3, 15, True),
+        (3, 16, False),
+        (12, 0, False),
+    ],
+)
 def test_the_backup_window_is_fifteen_minutes_either_side(
-    world, capsys, monkeypatch, hour, minute, inside,
+    world,
+    capsys,
+    monkeypatch,
+    hour,
+    minute,
+    inside,
 ):
     now = datetime(2026, 11, 1, hour, minute, tzinfo=UTC)
     monkeypatch.setattr(graph_reembed, "_localnow", lambda: now)
@@ -639,8 +711,9 @@ def test_the_window_comes_from_the_timer_and_wraps_midnight(monkeypatch, tmp_pat
     timer = tmp_path / "cc-backup.timer"
     timer.write_text("[Timer]\nOnCalendar=*-*-* 00:05:00\n")
     monkeypatch.setattr(graph_reembed, "TIMER_FILE", timer)
-    monkeypatch.setattr(graph_reembed, "_localnow",
-                        lambda: datetime(2026, 11, 1, 23, 55, tzinfo=UTC))
+    monkeypatch.setattr(
+        graph_reembed, "_localnow", lambda: datetime(2026, 11, 1, 23, 55, tzinfo=UTC)
+    )
     assert graph_reembed._check_window(False).level == graph_reembed.ACTION
     timer.unlink()
     assert graph_reembed._timer_time() == (3, 0)
@@ -699,8 +772,13 @@ def test_an_undeclared_graph_gets_an_interim_record_then_its_first(world, capsys
 
     def spying(query, **params):
         if query == embedder_record._UPDATE_RECORD and "state" in params["fields"]:
-            states.append((params["fields"]["state"], params["fields"].get("alias"),
-                           params["fields"].get("epoch")))
+            states.append(
+                (
+                    params["fields"]["state"],
+                    params["fields"].get("alias"),
+                    params["fields"].get("epoch"),
+                )
+            )
         return real(query, **params)
 
     world._answer = spying
@@ -957,7 +1035,11 @@ def test_the_model_moving_mid_run_fails_the_canaries_and_the_sample(world, capsy
         # Single calls after the pass: the fresh canaries for the record, then the
         # verification's, which must disagree.
         calls.append(text)
-        if world.record and world.record.get("canary_vectors") and world.record["state"] == "migrating":
+        if (
+            world.record
+            and world.record.get("canary_vectors")
+            and world.record["state"] == "migrating"
+        ):
             return _vector("model-moved", text)
         return real(text)
 
@@ -1031,8 +1113,9 @@ def test_the_failure_names_every_line_not_only_the_first(world, capsys):
 def test_the_report_holds_counts_and_never_graph_text(world, capsys):
     world.declare(model="model-old", epoch=3)
     assert _main(world, "run") == 0
-    reports = [p for p in (world.backup_dir / "reembed").glob("*.md")
-               if not p.name.endswith("-check.md")]
+    reports = [
+        p for p in (world.backup_dir / "reembed").glob("*.md") if not p.name.endswith("-check.md")
+    ]
     assert len(reports) == 1
     text = reports[0].read_text()
     assert "epoch: 3 -> 4" in text
@@ -1165,10 +1248,19 @@ def test_the_cache_params_the_proxy_double_encodes_are_read(world, capsys):
     # The in-memory cache's answer (DL-225): LiteLLM's `/cache/ping` for a
     # non-redis cache is 200 with `cache_type` and the double-encoded params,
     # and no ping fields — it still counts as "cache on".
-    world.cache = _Response(200, {"status": "healthy", "cache_type": "local",
-                                  "litellm_cache_params": json.dumps({
-        "supported_call_types": ["completion", "acompletion"], "type": "local",
-    })})
+    world.cache = _Response(
+        200,
+        {
+            "status": "healthy",
+            "cache_type": "local",
+            "litellm_cache_params": json.dumps(
+                {
+                    "supported_call_types": ["completion", "acompletion"],
+                    "type": "local",
+                }
+            ),
+        },
+    )
     assert _main(world, "check") == 0
     assert (
         "ok: the LiteLLM cache excludes embeddings (['completion', 'acompletion'])"
@@ -1177,10 +1269,19 @@ def test_the_cache_params_the_proxy_double_encodes_are_read(world, capsys):
 
 
 def test_double_encoded_cache_params_that_cover_embeddings_exit_one(world, capsys):
-    world.cache = _Response(200, {"status": "healthy", "cache_type": "local",
-                                  "litellm_cache_params": json.dumps({
-        "supported_call_types": ["completion", "embedding", "aembedding"], "type": "local",
-    })})
+    world.cache = _Response(
+        200,
+        {
+            "status": "healthy",
+            "cache_type": "local",
+            "litellm_cache_params": json.dumps(
+                {
+                    "supported_call_types": ["completion", "embedding", "aembedding"],
+                    "type": "local",
+                }
+            ),
+        },
+    )
     assert _main(world, "check") == 1
     assert "the LiteLLM cache covers embeddings" in capsys.readouterr().out
 
@@ -1196,7 +1297,8 @@ def _notifications_level():
 
 
 def test_the_cli_quiets_the_drivers_notifications_before_any_graph_call(
-    monkeypatch, _notifications_level,
+    monkeypatch,
+    _notifications_level,
 ):
     seen = []
 

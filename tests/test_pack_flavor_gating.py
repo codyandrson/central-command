@@ -22,9 +22,15 @@ from central_command.config import settings
 from central_command.runtime import packs
 
 CLOUD_ONLY_TOOLS = {"jira_list_filters", "jira_list_dashboards", "jira_list_gadgets"}
-DATA_CENTER_TOOLS = {"jira_get_issue", "jira_get_comments", "jira_search_issues",
-                     "jira_get_transitions",
-                     "jira_list_projects", "jira_list_issue_types", "jira_list_fields"}
+DATA_CENTER_TOOLS = {
+    "jira_get_issue",
+    "jira_get_comments",
+    "jira_search_issues",
+    "jira_get_transitions",
+    "jira_list_projects",
+    "jira_list_issue_types",
+    "jira_list_fields",
+}
 
 
 @pytest.fixture
@@ -78,18 +84,21 @@ def test_granted_capability_names_drops_it_but_known_names_keep_it(flavor):
 
 def test_the_default_flavor_changes_nothing(flavor):
     flavor("cloud")
-    assert packs.PACKS["jira-read"].tool_names == tuple(
-        packs._offered(packs.PACKS["jira-read"])[0]
-    )
+    assert packs.PACKS["jira-read"].tool_names == tuple(packs._offered(packs.PACKS["jira-read"])[0])
 
 
 def test_create_filter_tells_the_agent_it_cannot_check_for_duplicates():
-    cap = next(c for c in packs.PACKS["jira-propose"].capabilities
-               if c.name == "jira.create_filter")
+    cap = next(
+        c for c in packs.PACKS["jira-propose"].capabilities if c.name == "jira.create_filter"
+    )
     assert "Data Center" in cap.notes and "duplicates" in cap.notes
 
 
 def test_only_create_dashboard_is_flavor_restricted():
-    restricted = {c.name for p in packs.PACKS.values() for c in p.capabilities
-                  if c.flavors != ("cloud", "server")}
+    restricted = {
+        c.name
+        for p in packs.PACKS.values()
+        for c in p.capabilities
+        if c.flavors != ("cloud", "server")
+    }
     assert restricted == {"jira.create_dashboard"}

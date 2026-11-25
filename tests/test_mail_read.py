@@ -19,24 +19,41 @@ async def test_mail_search_reports_queue_state_per_match(monkeypatch):
     async def items(message_ids):
         assert message_ids == [provider_message_id(u) for u in ("u1", "u2", "u3")]
         return [
-            {"id": "wi_1", "message_id": provider_message_id("u1"),
-             "state": "PROCESSED", "received_at": "2026-03-01",
-             "sender": "Jane Doe <jane@example.com>", "subject": "Data",
-             "session_id": "sess_a", "folded_into": None,
-             "dismissal_rationale": "nothing to do"},
-            {"id": "wi_2", "message_id": provider_message_id("u2"),
-             "state": "UNPROCESSED", "received_at": "2026-03-02",
-             "sender": "Jane Doe <jane@example.com>", "subject": "Code",
-             "session_id": None, "folded_into": None, "dismissal_rationale": None},
+            {
+                "id": "wi_1",
+                "message_id": provider_message_id("u1"),
+                "state": "PROCESSED",
+                "received_at": "2026-03-01",
+                "sender": "Jane Doe <jane@example.com>",
+                "subject": "Data",
+                "session_id": "sess_a",
+                "folded_into": None,
+                "dismissal_rationale": "nothing to do",
+            },
+            {
+                "id": "wi_2",
+                "message_id": provider_message_id("u2"),
+                "state": "UNPROCESSED",
+                "received_at": "2026-03-02",
+                "sender": "Jane Doe <jane@example.com>",
+                "subject": "Code",
+                "session_id": None,
+                "folded_into": None,
+                "dismissal_rationale": None,
+            },
         ]
 
     fetched = []
 
     async def get_message(uuid):
         fetched.append(uuid)
-        return {"date": "2026-03-03", "from": "Sam Rivers <sam@example.com>",
-                "to": "Jane Doe <jane@example.com>", "subject": "Re: Data",
-                "snippet": "Sent  it\nyesterday."}
+        return {
+            "date": "2026-03-03",
+            "from": "Sam Rivers <sam@example.com>",
+            "to": "Jane Doe <jane@example.com>",
+            "subject": "Re: Data",
+            "snippet": "Sent  it\nyesterday.",
+        }
 
     monkeypatch.setattr(email_facade, "list_refs", list_refs)
     monkeypatch.setattr(email_facade, "get_message", get_message)
@@ -48,8 +65,10 @@ async def test_mail_search_reports_queue_state_per_match(monkeypatch):
     # operator what the mailbox already says (replay 2026-11-19).
     assert fetched == ["u3"]
     assert "Not in the queue (1 of 1 shown):" in out
-    assert ("- u3 [not in the queue] 2026-03-03 from Sam Rivers <sam@example.com> "
-            "to Jane Doe <jane@example.com>: Re: Data — Sent it yesterday.") in out
+    assert (
+        "- u3 [not in the queue] 2026-03-03 from Sam Rivers <sam@example.com> "
+        "to Jane Doe <jane@example.com>: Re: Data — Sent it yesterday."
+    ) in out
     assert "3 message(s) match" in out and "2 of them are in the queue" in out
     assert "1 never enrolled" in out
     assert "wi_1 [PROCESSED]" in out and "session=sess_a" in out
@@ -63,13 +82,22 @@ async def test_mail_read_returns_the_message_as_fed_with_locators(monkeypatch):
 
     async def item(ref):
         assert ref == "wi_1"
-        return {"id": "wi_1", "message_id": "<m1>", "state": "PROCESSED",
-                "received_at": "2026-03-01", "sender": "Jane Doe <jane@example.com>",
-                "subject": "Data", "session_id": "sess_a", "folded_into": None,
-                "terminal_at": "2026-03-01", "provider_uuid": "u1",
-                "dismissal_rationale": None, "operator_note": None,
-                "audit": {"verdict": "concur", "rationale": "casual share"},
-                "text": "From: Jane Doe\nSubject: Data\n\nhello"}
+        return {
+            "id": "wi_1",
+            "message_id": "<m1>",
+            "state": "PROCESSED",
+            "received_at": "2026-03-01",
+            "sender": "Jane Doe <jane@example.com>",
+            "subject": "Data",
+            "session_id": "sess_a",
+            "folded_into": None,
+            "terminal_at": "2026-03-01",
+            "provider_uuid": "u1",
+            "dismissal_rationale": None,
+            "operator_note": None,
+            "audit": {"verdict": "concur", "rationale": "casual share"},
+            "text": "From: Jane Doe\nSubject: Data\n\nhello",
+        }
 
     monkeypatch.setattr(repo, "mail_item", item)
     out = (await tools.mail_read(None, "wi_1")).return_value
@@ -105,17 +133,33 @@ async def test_mail_read_fetches_an_unhydrated_backlog_row_from_the_mailbox(monk
     from central_command.integrations import email_facade
 
     async def item(ref):
-        return {"id": "wi_7", "message_id": "<m7>", "state": "UNPROCESSED",
-                "received_at": None, "sender": None, "subject": None,
-                "session_id": None, "folded_into": None, "terminal_at": None,
-                "provider_uuid": "u7", "dismissal_rationale": None,
-                "operator_note": None, "audit": None, "text": None}
+        return {
+            "id": "wi_7",
+            "message_id": "<m7>",
+            "state": "UNPROCESSED",
+            "received_at": None,
+            "sender": None,
+            "subject": None,
+            "session_id": None,
+            "folded_into": None,
+            "terminal_at": None,
+            "provider_uuid": "u7",
+            "dismissal_rationale": None,
+            "operator_note": None,
+            "audit": None,
+            "text": None,
+        }
 
     async def get_message(uuid):
         assert uuid == "u7"
-        return {"uuid": "u7", "conversation_id": "c7", "from": "Jane Doe <jane@example.com>",
-                "subject": "Session", "date": "2026-09-08T22:31:35Z",
-                "body_text": "Here's the link"}
+        return {
+            "uuid": "u7",
+            "conversation_id": "c7",
+            "from": "Jane Doe <jane@example.com>",
+            "subject": "Session",
+            "date": "2026-09-08T22:31:35Z",
+            "body_text": "Here's the link",
+        }
 
     monkeypatch.setattr(repo, "mail_item", item)
     monkeypatch.setattr(email_facade, "get_message", get_message)
@@ -139,8 +183,10 @@ async def test_a_provider_refusal_reaches_the_agent_as_text_and_an_outage_still_
     async def refused(query):
         raise email_facade.EmailFacadeError(
             'email façade list failed: HTTP 422 {"message":"lib-email-provider: list '
-            'pagination cap hit (5 pages fetched, more remain) - refusing to silently '
-            'truncate; narrow scope_query"}', status_code=422)
+            "pagination cap hit (5 pages fetched, more remain) - refusing to silently "
+            'truncate; narrow scope_query"}',
+            status_code=422,
+        )
 
     monkeypatch.setattr(email_facade, "list_refs", refused)
     out = (await tools.mail_search(None, "from:myprotein")).return_value
@@ -151,7 +197,8 @@ async def test_a_provider_refusal_reaches_the_agent_as_text_and_an_outage_still_
         raise email_facade.EmailFacadeError(
             'email façade list failed: HTTP 503 {"message":"lib-email-provider: '
             'provider auth failed (401) - check the shared email credential"}',
-            status_code=503)
+            status_code=503,
+        )
 
     monkeypatch.setattr(email_facade, "list_refs", down)
     # Outside a parkable run (no deps on the ctx) the wrapper re-raises the
@@ -182,8 +229,13 @@ async def test_mail_search_bounds_the_matches_it_lists_from_outside_the_queue(mo
         fetched.append(uuid)
         if uuid == "u1":
             raise email_facade.EmailFacadeError("message gone", status_code=422)
-        return {"date": "2026-03-03", "from": "a@example.com", "to": "b@example.com",
-                "subject": None, "snippet": ""}
+        return {
+            "date": "2026-03-03",
+            "from": "a@example.com",
+            "to": "b@example.com",
+            "subject": None,
+            "snippet": "",
+        }
 
     monkeypatch.setattr(email_facade, "list_refs", list_refs)
     monkeypatch.setattr(email_facade, "get_message", get_message)
@@ -192,7 +244,10 @@ async def test_mail_search_bounds_the_matches_it_lists_from_outside_the_queue(mo
     assert len(fetched) == tools._MAIL_OUTSIDE_SHOWN == 8
     assert "Not in the queue (8 of 12 shown):" in out
     assert "- u1 [not in the queue] could not be fetched (message gone)" in out
-    assert "- u0 [not in the queue] 2026-03-03 from a@example.com to b@example.com: (no subject)" in out
+    assert (
+        "- u0 [not in the queue] 2026-03-03 from a@example.com to b@example.com: (no subject)"
+        in out
+    )
 
     async def down(uuid):
         raise email_facade.EmailFacadeError("façade down", status_code=503)

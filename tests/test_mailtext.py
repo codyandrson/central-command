@@ -13,7 +13,13 @@ from central_command.ingest import dispatcher, ledger, mailtext
 
 
 def _layout_mail(rows: int = 400) -> str:
-    cell = "<tr><td>\n" + " " * 60 + "<table><tr><td>\n" + " " * 60 + "&nbsp;</td></tr></table></td></tr>"
+    cell = (
+        "<tr><td>\n"
+        + " " * 60
+        + "<table><tr><td>\n"
+        + " " * 60
+        + "&nbsp;</td></tr></table></td></tr>"
+    )
     return (
         '<?xml version="1.0" encoding="UTF-8"?><html><head><style>'
         + "td{font-family:Arial;color:#111}" * 200
@@ -22,7 +28,9 @@ def _layout_mail(rows: int = 400) -> str:
         + "<tr><td>Depart:</td><td>5/23/2026 11:59 PM</td></tr>"
         + "<tr><td>AMOUNT PAID:</td><td>$582.96</td></tr>"
         + cell * rows
-        + '</table><a href="https://click.example.com/' + "t" * 300 + '">Manage booking</a>'
+        + '</table><a href="https://click.example.com/'
+        + "t" * 300
+        + '">Manage booking</a>'
         + "</body></html>"
     )
 
@@ -84,13 +92,17 @@ def test_the_first_prompt_is_bounded_and_says_so(monkeypatch):
 
 
 def test_an_overflow_is_recognised_by_the_proxys_words_only():
-    assert is_context_overflow(RuntimeError(
-        "status_code: 400, body: litellm.ContextWindowExceededError: request (84314 tokens) "
-        "exceeds the available context size (81920 tokens)"))
+    assert is_context_overflow(
+        RuntimeError(
+            "status_code: 400, body: litellm.ContextWindowExceededError: request (84314 tokens) "
+            "exceeds the available context size (81920 tokens)"
+        )
+    )
     assert not is_context_overflow(RuntimeError("status_code: 400, invalid tool schema"))
     # A reasoning model spending its OUTPUT cap can differ on a retry.
-    assert not is_context_overflow(RuntimeError(
-        "Model token limit (262144) exceeded before any response was generated"))
+    assert not is_context_overflow(
+        RuntimeError("Model token limit (262144) exceeded before any response was generated")
+    )
     assert not is_context_overflow(None)
 
 
@@ -110,8 +122,13 @@ def test_nothing_reads_a_mail_body_except_through_the_converter():
     # 2026-09-25). `integrations/google.py` is the third provider for the same
     # reason: it builds the pair from a Gmail `format=full` read, the record the
     # n8n Normalize node built (DL-234), and reads neither for a model.
-    allowed = {"ingest/ledger.py", "ingest/mailtext.py", "integrations/email_facade.py",
-               "integrations/exchange.py", "integrations/google.py"}
+    allowed = {
+        "ingest/ledger.py",
+        "ingest/mailtext.py",
+        "integrations/email_facade.py",
+        "integrations/exchange.py",
+        "integrations/google.py",
+    }
     # `.as_posix()`, not `str()`: on Windows `str(relative_to(...))` is
     # `ingest\ledger.py`, which matches nothing in `allowed`, so the allowlist
     # empties and every legitimate reader is reported as an offender. The

@@ -68,8 +68,11 @@ async def test_land_session_writes_done_and_emits_completed():
     await land_session(session_id, agent_id="inbox-triage")
 
     assert await repo.session_status(session_id) == "DONE"
-    matches = [e for e in await repo.list_events(since_id=since)
-               if e["kind"] == "session.completed" and e["ref_id"] == session_id]
+    matches = [
+        e
+        for e in await repo.list_events(since_id=since)
+        if e["kind"] == "session.completed" and e["ref_id"] == session_id
+    ]
     assert len(matches) == 1
     assert matches[0]["payload"]["agent_id"] == "inbox-triage"
 
@@ -84,7 +87,10 @@ async def test_land_session_failed_writes_failed_and_emits_failed():
     await land_session(session_id, failed=True, reason="boom")
 
     assert await repo.session_status(session_id) == "FAILED"
-    matches = [e for e in await repo.list_events(since_id=since)
-               if e["kind"] == "session.failed" and e["ref_id"] == session_id]
+    matches = [
+        e
+        for e in await repo.list_events(since_id=since)
+        if e["kind"] == "session.failed" and e["ref_id"] == session_id
+    ]
     assert len(matches) == 1
     assert matches[0]["payload"]["reason"] == "boom"

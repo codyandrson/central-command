@@ -21,7 +21,8 @@ def test_the_only_ingest_setting_is_the_on_off_switch():
 def test_no_setting_caps_graph_concurrency():
     words = ("concurren", "parallel", "max_jobs", "workers", "cap")
     suspects = sorted(
-        name for name in Settings.model_fields
+        name
+        for name in Settings.model_fields
         if name.startswith("graph_") and any(w in name for w in words)
     )
     assert suspects == [], suspects

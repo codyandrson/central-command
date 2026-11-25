@@ -38,8 +38,13 @@ def _lib():
         node_search_filter_query_constructor,
     )
 
-    return GraphProvider, recipes, ComparisonOperator, edge_search_filter_query_constructor, \
-        node_search_filter_query_constructor
+    return (
+        GraphProvider,
+        recipes,
+        ComparisonOperator,
+        edge_search_filter_query_constructor,
+        node_search_filter_query_constructor,
+    )
 
 
 class _Fake:
@@ -69,10 +74,13 @@ def fake(monkeypatch):
     return f
 
 
-@pytest.mark.parametrize("rerank,edge,node", [
-    ("", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
-    ("cc-rerank", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
-])
+@pytest.mark.parametrize(
+    "rerank,edge,node",
+    [
+        ("", "EDGE_HYBRID_SEARCH_RRF", "NODE_HYBRID_SEARCH_RRF"),
+        ("cc-rerank", "EDGE_HYBRID_SEARCH_CROSS_ENCODER", "NODE_HYBRID_SEARCH_CROSS_ENCODER"),
+    ],
+)
 async def test_no_filter_makes_exactly_the_old_call(fake, monkeypatch, rerank, edge, node):
     _, recipes, *_ = _lib()
     monkeypatch.setattr(settings, "graph_rerank_alias", rerank)
@@ -81,9 +89,11 @@ async def test_no_filter_makes_exactly_the_old_call(fake, monkeypatch, rerank, e
     (fact_call, node_call) = fake.calls
     assert set(fact_call) == {"config", "group_ids"} and set(node_call) == {"config", "group_ids"}
     assert fact_call["config"].model_dump(exclude={"limit"}) == getattr(recipes, edge).model_dump(
-        exclude={"limit"})
+        exclude={"limit"}
+    )
     assert node_call["config"].model_dump(exclude={"limit"}) == getattr(recipes, node).model_dump(
-        exclude={"limit"})
+        exclude={"limit"}
+    )
 
 
 @pytest.mark.parametrize("rerank", ["", "cc-rerank"])
@@ -95,10 +105,12 @@ async def test_a_centre_node_uses_the_node_distance_recipes(fake, monkeypatch, r
     await graphiti.search_nodes("q", max_nodes=15, group_ids=["g"], center_node_uuid="n1")
     (fact_call, node_call) = fake.calls
     assert fact_call["center_node_uuid"] == node_call["center_node_uuid"] == "n1"
-    assert fact_call["config"].model_dump(exclude={"limit"}) == \
-        recipes.EDGE_HYBRID_SEARCH_NODE_DISTANCE.model_dump(exclude={"limit"})
-    assert node_call["config"].model_dump(exclude={"limit"}) == \
-        recipes.NODE_HYBRID_SEARCH_NODE_DISTANCE.model_dump(exclude={"limit"})
+    assert fact_call["config"].model_dump(
+        exclude={"limit"}
+    ) == recipes.EDGE_HYBRID_SEARCH_NODE_DISTANCE.model_dump(exclude={"limit"})
+    assert node_call["config"].model_dump(
+        exclude={"limit"}
+    ) == recipes.NODE_HYBRID_SEARCH_NODE_DISTANCE.model_dump(exclude={"limit"})
     assert recipes.EDGE_HYBRID_SEARCH_NODE_DISTANCE.limit == before  # a copy, never the recipe
 
 
@@ -116,8 +128,11 @@ def test_a_date_field_never_has_two_parameter_carrying_or_groups(window):
     filters = graphiti.fact_filters(**window)
     for field in ("valid_at", "invalid_at", "created_at", "expired_at"):
         groups = getattr(filters, field) or []
-        carrying = [g for g in groups
-                    if any(d.comparison_operator not in (Op.is_null, Op.is_not_null) for d in g)]
+        carrying = [
+            g
+            for g in groups
+            if any(d.comparison_operator not in (Op.is_null, Op.is_not_null) for d in g)
+        ]
         assert len(carrying) <= 1, f"{field}: {len(carrying)} parameter-carrying OR groups"
         assert all(len(g) == 1 for g in groups)
     clauses, params = edge_q(filters, GraphProvider.NEO4J)
@@ -143,8 +158,12 @@ def test_two_parameter_groups_would_collide_which_is_why_we_never_build_them():
     GraphProvider, _, Op, edge_q, _ = _lib()
     from graphiti_core.search.search_filters import DateFilter, SearchFilters
 
-    bad = SearchFilters(valid_at=[[DateFilter(date=T, comparison_operator=Op.greater_than)],
-                                  [DateFilter(date=U, comparison_operator=Op.less_than)]])
+    bad = SearchFilters(
+        valid_at=[
+            [DateFilter(date=T, comparison_operator=Op.greater_than)],
+            [DateFilter(date=U, comparison_operator=Op.less_than)],
+        ]
+    )
     _, params = edge_q(bad, GraphProvider.NEO4J)
     assert params == {"valid_at_0": U}  # T is gone
 
@@ -208,11 +227,14 @@ async def test_the_fact_tool_parses_instants(captured):
     assert captured["facts"] == {"after": T, "before": U}
 
 
-@pytest.mark.parametrize("kw,match", [
-    ({"as_of": "today"}, "not an ISO-8601 instant"),
-    ({"as_of": "2025-03-01", "after": "2025-01-01"}, "EITHER as_of"),
-    ({"after": "2025-09-01", "before": "2025-03-01"}, "earlier than"),
-])
+@pytest.mark.parametrize(
+    "kw,match",
+    [
+        ({"as_of": "today"}, "not an ISO-8601 instant"),
+        ({"as_of": "2025-03-01", "after": "2025-01-01"}, "EITHER as_of"),
+        ({"after": "2025-09-01", "before": "2025-03-01"}, "earlier than"),
+    ],
+)
 async def test_the_fact_tool_hands_bad_windows_back(captured, kw, match):
     with pytest.raises(ModelRetry, match=match):
         await tools.search_knowledge_graph(None, "q", **kw)
@@ -229,11 +251,15 @@ async def test_the_entity_tool_names_the_valid_types(captured):
 
 
 async def test_the_group_search_takes_the_same_filters(captured):
-    await tools.search_graph_group(None, "g", "q", before="2025-09-01", entity_types=["Topic"],
-                                   center_entity_uuid="n1")
+    await tools.search_graph_group(
+        None, "g", "q", before="2025-09-01", entity_types=["Topic"], center_entity_uuid="n1"
+    )
     assert captured["facts"] == {"group_ids": ["g"], "before": U, "center_node_uuid": "n1"}
-    assert captured["nodes"] == {"group_ids": ["g"], "entity_types": ["Topic"],
-                                 "center_node_uuid": "n1"}
+    assert captured["nodes"] == {
+        "group_ids": ["g"],
+        "entity_types": ["Topic"],
+        "center_node_uuid": "n1",
+    }
 
 
 # --- the embedding-stamp leak (design record D8, release 2) ------------------------------
@@ -245,11 +271,26 @@ def test_fact_attributes_no_longer_carry_the_embedding_stamps():
     from graphiti_core.nodes import EntityNode
 
     stamps = {"embedding_model": "cc-embedding", "embedding_dimensions": 1024}
-    edge = EntityEdge(uuid="e", group_id="g", source_node_uuid="a", target_node_uuid="b",
-                      created_at=T, name="KNOWS", fact="Jane Doe knows Sam Rivers",
-                      episodes=["ep"], attributes={**stamps, "since": "2020"})
-    node = EntityNode(uuid="n", name="Jane Doe", group_id="g", labels=["Entity"], created_at=T,
-                      summary="", attributes={**stamps, "role": "lead"})
+    edge = EntityEdge(
+        uuid="e",
+        group_id="g",
+        source_node_uuid="a",
+        target_node_uuid="b",
+        created_at=T,
+        name="KNOWS",
+        fact="Jane Doe knows Sam Rivers",
+        episodes=["ep"],
+        attributes={**stamps, "since": "2020"},
+    )
+    node = EntityNode(
+        uuid="n",
+        name="Jane Doe",
+        group_id="g",
+        labels=["Entity"],
+        created_at=T,
+        summary="",
+        attributes={**stamps, "role": "lead"},
+    )
     # Before v2.61.0 the fact kept both stamps (model_dump of attributes); the
     # node result already dropped keys containing 'embedding'.
     assert graphiti.fact_result(edge)["attributes"] == {"since": "2020"}

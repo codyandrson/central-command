@@ -50,7 +50,7 @@ from central_command.integrations import http as http_client
 
 ID_RE = re.compile(r"^\d+$")
 MAX_CQL_CHARS = 2000
-MAX_PAGES = 5          # a bounded crawl — never an unbounded one
+MAX_PAGES = 5  # a bounded crawl — never an unbounded one
 DEFAULT_PAGE_LIMIT = 25
 
 # Exposed as a module attribute so tests can monkeypatch it without a real
@@ -68,8 +68,15 @@ class ConfluenceStale(ConfluenceError, WorldMoved):
     keeps catching it; `actual` is None when a 409 named a conflict without
     the current number."""
 
-    def __init__(self, message: str, *, page_id: str, expected: int,
-                 actual: int | None, status_code: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        page_id: str,
+        expected: int,
+        actual: int | None,
+        status_code: int | None = None,
+    ):
         ConfluenceError.__init__(self, message, status_code=status_code)
         self.target = f"confluence:page:{page_id}"
         self.expected = expected
@@ -190,7 +197,9 @@ def _space_key(value: str) -> str:
 
 def _filename(value: str) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > MAX_FILENAME_CHARS:
-        raise ConfluenceError(f"filename must be a non-empty string under {MAX_FILENAME_CHARS} chars")
+        raise ConfluenceError(
+            f"filename must be a non-empty string under {MAX_FILENAME_CHARS} chars"
+        )
     return value
 
 
@@ -287,7 +296,9 @@ def _check(resp: httpx.Response, op: str, ref: str | None = None) -> None:
         )
     if st == 429:
         raise ConfluenceError(f"{op} — rate limited{r} — retry later", status_code=st)
-    raise ConfluenceError(f"{op} — provider rejected the request ({st}){r}: {detail}", status_code=st)
+    raise ConfluenceError(
+        f"{op} — provider rejected the request ({st}){r}: {detail}", status_code=st
+    )
 
 
 # --- endpoint seam (flavor -> base path) ---------------------------------------
@@ -329,7 +340,9 @@ def _contextualize(path: str) -> str:
 # --- pagination (shared: both v2 cursors and v1 offsets expose _links.next) ---
 
 
-async def _paginate(first_path: str, limit: int | None, key: str = "results") -> tuple[list[dict], bool]:
+async def _paginate(
+    first_path: str, limit: int | None, key: str = "results"
+) -> tuple[list[dict], bool]:
     """GET `first_path`, then follow `_links.next` up to MAX_PAGES or until
     `limit` items are collected. Returns (items, truncated) — `truncated`
     means more rows exist than what's returned, the same honesty rule
@@ -428,10 +441,18 @@ def _version_row(v: dict) -> dict:
 async def list_spaces(limit: int | None = None) -> dict:
     _require_configured("listSpaces")
     bound = _limit(limit)
-    path = _crud(f"/space?limit={bound}") if _flavor() == "server" else _crud(f"/spaces?limit={bound}")
+    path = (
+        _crud(f"/space?limit={bound}") if _flavor() == "server" else _crud(f"/spaces?limit={bound}")
+    )
     rows, truncated = await _paginate(path, limit)
-    return {"ok": True, "kind": "confluence", "operation": "listSpaces",
-            "spaces": [_space_row(s) for s in rows], "count": len(rows), "truncated": truncated}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "listSpaces",
+        "spaces": [_space_row(s) for s in rows],
+        "count": len(rows),
+        "truncated": truncated,
+    }
 
 
 async def get_page(page_id: str) -> dict:
@@ -443,8 +464,12 @@ async def get_page(page_id: str) -> dict:
         path = _crud(f"/pages/{pid}?body-format=storage")
     resp = await _call("GET", path)
     _check(resp, "getPage", pid)
-    return {"ok": True, "kind": "confluence", "operation": "getPage",
-            "page": _page_row(resp.json(), with_body=True)}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "getPage",
+        "page": _page_row(resp.json(), with_body=True),
+    }
 
 
 async def search(cql: str, limit: int | None = None) -> dict:
@@ -465,8 +490,15 @@ async def search(cql: str, limit: int | None = None) -> dict:
         # — the field the catalog watcher's incremental cursor advances on.
         row["last_modified"] = r.get("lastModified")
         results.append(row)
-    return {"ok": True, "kind": "confluence", "operation": "search",
-            "cql": q, "results": results, "count": len(results), "truncated": truncated}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "search",
+        "cql": q,
+        "results": results,
+        "count": len(results),
+        "truncated": truncated,
+    }
 
 
 async def instance_info() -> dict:
@@ -489,9 +521,15 @@ async def instance_info() -> dict:
     else:
         version = "cloud"
         detail = body.get("commitHash")
-    return {"ok": True, "kind": "confluence", "operation": "instanceInfo",
-            "flavor": _flavor(), "version": str(version) if version else None,
-            "detail": str(detail) if detail else None, "verify_on_site": server}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "instanceInfo",
+        "flavor": _flavor(),
+        "version": str(version) if version else None,
+        "detail": str(detail) if detail else None,
+        "verify_on_site": server,
+    }
 
 
 # --- macros in storage format (pure) ---------------------------------------
@@ -512,7 +550,7 @@ class MacroBlock:
 
 
 _MACRO_TOKEN = re.compile(
-    r"<!\[CDATA\[.*?\]\]>"                      # skipped: its text is not markup
+    r"<!\[CDATA\[.*?\]\]>"  # skipped: its text is not markup
     r"|<!--.*?-->"
     r"|<ac:structured-macro\b(?P<attrs>[^>]*?)(?P<selfclose>/?)>"
     r"|(?P<close></ac:structured-macro\s*>)",
@@ -562,16 +600,17 @@ def extract_macros(storage: str | None) -> list[MacroBlock]:
             cursor = ke
         own.append(storage[cursor:end])
         params = tuple(
-            (a if a is not None else b, v)
-            for a, b, v in _PARAMETER.findall("".join(own))
+            (a if a is not None else b, v) for a, b, v in _PARAMETER.findall("".join(own))
         )
-        blocks.append(MacroBlock(
-            name=name,
-            schema_version=attrs.get("ac:schema-version"),
-            macro_id=attrs.get("ac:macro-id"),
-            parameters=params,
-            text=storage[start:end],
-        ))
+        blocks.append(
+            MacroBlock(
+                name=name,
+                schema_version=attrs.get("ac:schema-version"),
+                macro_id=attrs.get("ac:macro-id"),
+                parameters=params,
+                text=storage[start:end],
+            )
+        )
     return blocks
 
 
@@ -584,9 +623,15 @@ async def list_children(page_id: str, limit: int | None = None) -> dict:
     else:
         path = _crud(f"/pages/{pid}/children?limit={bound}")
     rows, truncated = await _paginate(path, limit)
-    return {"ok": True, "kind": "confluence", "operation": "listChildren",
-            "page_id": pid, "children": [_page_row(c) for c in rows],
-            "count": len(rows), "truncated": truncated}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "listChildren",
+        "page_id": pid,
+        "children": [_page_row(c) for c in rows],
+        "count": len(rows),
+        "truncated": truncated,
+    }
 
 
 async def list_attachments(page_id: str, limit: int | None = None) -> dict:
@@ -597,9 +642,15 @@ async def list_attachments(page_id: str, limit: int | None = None) -> dict:
     bound = _limit(limit)
     path = _v1(f"/content/{pid}/child/attachment?limit={bound}")
     rows, truncated = await _paginate(path, limit)
-    return {"ok": True, "kind": "confluence", "operation": "listAttachments",
-            "page_id": pid, "attachments": [_attachment_row(a) for a in rows],
-            "count": len(rows), "truncated": truncated}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "listAttachments",
+        "page_id": pid,
+        "attachments": [_attachment_row(a) for a in rows],
+        "count": len(rows),
+        "truncated": truncated,
+    }
 
 
 async def list_labels(page_id: str, limit: int | None = None) -> dict:
@@ -611,9 +662,15 @@ async def list_labels(page_id: str, limit: int | None = None) -> dict:
     else:
         path = _crud(f"/pages/{pid}/labels?limit={bound}")
     rows, truncated = await _paginate(path, limit)
-    return {"ok": True, "kind": "confluence", "operation": "listLabels",
-            "page_id": pid, "labels": [_label_row(l) for l in rows],
-            "count": len(rows), "truncated": truncated}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "listLabels",
+        "page_id": pid,
+        "labels": [_label_row(l) for l in rows],
+        "count": len(rows),
+        "truncated": truncated,
+    }
 
 
 async def get_page_versions(page_id: str, limit: int | None = None) -> dict:
@@ -625,9 +682,15 @@ async def get_page_versions(page_id: str, limit: int | None = None) -> dict:
     else:
         path = _crud(f"/pages/{pid}/versions?limit={bound}")
     rows, truncated = await _paginate(path, limit)
-    return {"ok": True, "kind": "confluence", "operation": "getPageVersions",
-            "page_id": pid, "versions": [_version_row(v) for v in rows],
-            "count": len(rows), "truncated": truncated}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "getPageVersions",
+        "page_id": pid,
+        "versions": [_version_row(v) for v in rows],
+        "count": len(rows),
+        "truncated": truncated,
+    }
 
 
 # --- writes (Phase 2, Executor-called, credential-holding side) ---------------
@@ -668,7 +731,9 @@ async def create_page(
     pid = _id(parent_id, "parent_id") if parent_id else None
     if _flavor() == "server":
         payload: dict = {
-            "type": "page", "title": t, "space": {"key": space_ref},
+            "type": "page",
+            "title": t,
+            "space": {"key": space_ref},
             "body": {"storage": {"value": b, "representation": "storage"}},
         }
         if pid:
@@ -677,14 +742,21 @@ async def create_page(
     else:
         sid = await _resolve_space_id(space_ref)
         payload = {
-            "spaceId": sid, "status": "current", "title": t,
+            "spaceId": sid,
+            "status": "current",
+            "title": t,
             "body": {"representation": "storage", "value": b},
         }
         if pid:
             payload["parentId"] = pid
         resp = await _call("POST", _crud("/pages"), json=payload)
     _check(resp, "createPage")
-    return {"ok": True, "kind": "confluence", "operation": "createPage", "page": _page_row(resp.json())}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "createPage",
+        "page": _page_row(resp.json()),
+    }
 
 
 async def check_version(page_id: str, expected_version: int) -> dict:
@@ -706,7 +778,8 @@ async def check_version(page_id: str, expected_version: int) -> dict:
         raise ConfluencePageGone(
             f"updatePage — page {pid} no longer exists: this proposal was "
             f"approved against version {ev}. Nothing was written.",
-            page_id=pid, expected=ev,
+            page_id=pid,
+            expected=ev,
         ) from e
     actual = page["version"]
     if actual != ev:
@@ -715,7 +788,9 @@ async def check_version(page_id: str, expected_version: int) -> dict:
             f"approved against version {ev}, but the current version is "
             f"{actual}. Read the page again and redraft — executing over a "
             "newer version would silently overwrite an edit nobody reviewed.",
-            page_id=pid, expected=ev, actual=actual,
+            page_id=pid,
+            expected=ev,
+            actual=actual,
         )
     return page
 
@@ -734,7 +809,9 @@ async def update_page(page_id: str, title: str, body_storage: str, expected_vers
     new_version = ev + 1
     if _flavor() == "server":
         payload = {
-            "id": pid, "type": "page", "title": t,
+            "id": pid,
+            "type": "page",
+            "title": t,
             "space": {"key": page["space_key"]},
             "body": {"storage": {"value": b, "representation": "storage"}},
             "version": {"number": new_version},
@@ -742,7 +819,9 @@ async def update_page(page_id: str, title: str, body_storage: str, expected_vers
         resp = await _call("PUT", _crud(f"/content/{pid}"), json=payload)
     else:
         payload = {
-            "id": pid, "status": "current", "title": t,
+            "id": pid,
+            "status": "current",
+            "title": t,
             "spaceId": page["space_id"],
             "body": {"representation": "storage", "value": b},
             "version": {"number": new_version},
@@ -754,10 +833,18 @@ async def update_page(page_id: str, title: str, body_storage: str, expected_vers
             f"updatePage — version conflict for page {pid}: this proposal was "
             f"approved against version {ev}, and the page moved before the "
             f"write landed: {resp.text[:300]}",
-            page_id=pid, expected=ev, actual=None, status_code=409,
+            page_id=pid,
+            expected=ev,
+            actual=None,
+            status_code=409,
         )
     _check(resp, "updatePage", pid)
-    return {"ok": True, "kind": "confluence", "operation": "updatePage", "page": _page_row(resp.json())}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "updatePage",
+        "page": _page_row(resp.json()),
+    }
 
 
 async def move_page(page_id: str, new_parent_id: str) -> dict:
@@ -773,7 +860,9 @@ async def move_page(page_id: str, new_parent_id: str) -> dict:
     new_version = page["version"] + 1
     if _flavor() == "server":
         payload = {
-            "id": pid, "type": "page", "title": page["title"],
+            "id": pid,
+            "type": "page",
+            "title": page["title"],
             "space": {"key": page["space_key"]},
             "body": {"storage": {"value": page["body"], "representation": "storage"}},
             "version": {"number": new_version},
@@ -782,14 +871,22 @@ async def move_page(page_id: str, new_parent_id: str) -> dict:
         resp = await _call("PUT", _crud(f"/content/{pid}"), json=payload)
     else:
         payload = {
-            "id": pid, "status": "current", "title": page["title"],
-            "spaceId": page["space_id"], "parentId": npid,
+            "id": pid,
+            "status": "current",
+            "title": page["title"],
+            "spaceId": page["space_id"],
+            "parentId": npid,
             "body": {"representation": "storage", "value": page["body"]},
             "version": {"number": new_version},
         }
         resp = await _call("PUT", _crud(f"/pages/{pid}"), json=payload)
     _check(resp, "movePage", pid)
-    return {"ok": True, "kind": "confluence", "operation": "movePage", "page": _page_row(resp.json())}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "movePage",
+        "page": _page_row(resp.json()),
+    }
 
 
 async def trash_page(page_id: str) -> dict:
@@ -814,15 +911,18 @@ async def upload_attachment(page_id: str, filename: str, content_bytes: bytes) -
     if not isinstance(content_bytes, (bytes, bytearray)):
         raise ConfluenceError("uploadAttachment — content_bytes must be bytes")
     if len(content_bytes) > MAX_ATTACHMENT_BYTES:
-        raise ConfluenceError(
-            f"uploadAttachment — attachment exceeds {MAX_ATTACHMENT_BYTES} bytes"
-        )
-    resp = await _call_multipart(_v1(f"/content/{pid}/child/attachment"), fname, bytes(content_bytes))
+        raise ConfluenceError(f"uploadAttachment — attachment exceeds {MAX_ATTACHMENT_BYTES} bytes")
+    resp = await _call_multipart(
+        _v1(f"/content/{pid}/child/attachment"), fname, bytes(content_bytes)
+    )
     _check(resp, "uploadAttachment", pid)
     rows = resp.json().get("results") or []
     return {
-        "ok": True, "kind": "confluence", "operation": "uploadAttachment",
-        "page_id": pid, "attachment": _attachment_row(rows[0]) if rows else None,
+        "ok": True,
+        "kind": "confluence",
+        "operation": "uploadAttachment",
+        "page_id": pid,
+        "attachment": _attachment_row(rows[0]) if rows else None,
     }
 
 
@@ -838,8 +938,11 @@ async def set_labels(page_id: str, labels: list[str]) -> dict:
     _check(resp, "setLabels", pid)
     rows = resp.json().get("results") or []
     return {
-        "ok": True, "kind": "confluence", "operation": "setLabels",
-        "page_id": pid, "labels": [_label_row(r) for r in rows] if rows else labs,
+        "ok": True,
+        "kind": "confluence",
+        "operation": "setLabels",
+        "page_id": pid,
+        "labels": [_label_row(r) for r in rows] if rows else labs,
     }
 
 
@@ -852,7 +955,13 @@ async def remove_labels(page_id: str, labels: list[str]) -> dict:
     for name in labs:
         resp = await _call("DELETE", _v1(f"/content/{pid}/label/{name}"))
         _check(resp, "removeLabels", pid)
-    return {"ok": True, "kind": "confluence", "operation": "removeLabels", "page_id": pid, "removed": labs}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "removeLabels",
+        "page_id": pid,
+        "removed": labs,
+    }
 
 
 async def create_space(key: str, name: str, description: str = "") -> dict:
@@ -865,9 +974,18 @@ async def create_space(key: str, name: str, description: str = "") -> dict:
     nm = _title(name, field="name")
     path = _crud("/space") if _flavor() == "server" else _crud("/spaces")
     resp = await _call(
-        "POST", path,
-        json={"key": k, "name": nm,
-              "description": {"plain": {"value": description or "", "representation": "plain"}}},
+        "POST",
+        path,
+        json={
+            "key": k,
+            "name": nm,
+            "description": {"plain": {"value": description or "", "representation": "plain"}},
+        },
     )
     _check(resp, "createSpace", k)
-    return {"ok": True, "kind": "confluence", "operation": "createSpace", "space": _space_row(resp.json())}
+    return {
+        "ok": True,
+        "kind": "confluence",
+        "operation": "createSpace",
+        "space": _space_row(resp.json()),
+    }

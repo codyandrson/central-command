@@ -36,8 +36,18 @@ ROOT = Path(__file__).resolve().parents[1]
 STEPS = ROOT / "deploy" / "single" / "steps.tsv"
 
 _DEBRIS = shutil.ignore_patterns(
-    "NUL", "nul", "CON", "con", "AUX", "aux", "PRN", "prn",
-    ".env", ".env.*", "__pycache__", "*.pyc",
+    "NUL",
+    "nul",
+    "CON",
+    "con",
+    "AUX",
+    "aux",
+    "PRN",
+    "prn",
+    ".env",
+    ".env.*",
+    "__pycache__",
+    "*.pyc",
 )
 
 # Nothing listens on the discard port; a GET there is refused at once. Keeps
@@ -87,8 +97,9 @@ def _manifest() -> list[tuple[str, str]]:
     return out
 
 
-def _rows_through(phases: set[str], *, also: tuple[str, ...] = (),
-                  without: tuple[str, ...] = ()) -> list[tuple[str, str]]:
+def _rows_through(
+    phases: set[str], *, also: tuple[str, ...] = (), without: tuple[str, ...] = ()
+) -> list[tuple[str, str]]:
     """`done` rows for every manifest step of <phases>, plus <also>, minus <without>."""
     keep = [f"{p}/{s}" for p, s in _manifest() if p in phases] + list(also)
     return [(q, "done") for q in keep if q not in without]
@@ -107,18 +118,23 @@ def tree(tmp_path: Path) -> Path:
     shutil.copy2(ROOT / "VERSION", repo / "VERSION")
     shutil.copy2(ROOT / ".gitignore", repo / ".gitignore")
     (repo / "central_command" / "db").mkdir(parents=True)
-    shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
-                 repo / "central_command" / "db" / "schema.sql")
+    shutil.copy2(
+        ROOT / "central_command" / "db" / "schema.sql",
+        repo / "central_command" / "db" / "schema.sql",
+    )
     (tmp_path / "home").mkdir()
     state = tmp_path / "state"
     state.mkdir()
-    _set(repo / ".env", {
-        "CC_STATE_DIR": env_path(state),
-        "CC_LITELLM_PORT": NOWHERE_PORT,
-        "CC_LLM_BASE_URL": f"http://127.0.0.1:{NOWHERE_PORT}",
-        # P2's acceptance input: the spine key is EMPTY.
-        "CC_LLM_API_KEY": "",
-    })
+    _set(
+        repo / ".env",
+        {
+            "CC_STATE_DIR": env_path(state),
+            "CC_LITELLM_PORT": NOWHERE_PORT,
+            "CC_LLM_BASE_URL": f"http://127.0.0.1:{NOWHERE_PORT}",
+            # P2's acceptance input: the spine key is EMPTY.
+            "CC_LLM_API_KEY": "",
+        },
+    )
     # verify.sh is the deployment's own proof and needs a stack; in this copy
     # it passes, so the phase reaches the self-check — the thing under test.
     stub = repo / "deploy" / "single" / "verify.sh"
@@ -178,12 +194,17 @@ def _calls(repo: Path) -> list[tuple[str, str]]:
 def _run(repo: Path, *args: str, env_extra: dict[str, str] | None = None):
     env = dict(os.environ)
     home = repo.parent / "home"
-    env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"),
-               CC_VERIFY_MAX_WAIT="1")
-    for stale in ("CC_STATE_DIR", "CC_ENABLE_SPEECH", "CC_LLM_UPSTREAM_BASE_URL",
-                  "CC_LLM_PROXY_ADMIN_KEY", "CC_LLM_API_KEY",
-                  "CC_LITELLM_PORT", "CC_LLM_BASE_URL",
-                  "VIRTUAL_ENV"):
+    env.update(HOME=str(home), XDG_STATE_HOME=str(home / "state"), CC_VERIFY_MAX_WAIT="1")
+    for stale in (
+        "CC_STATE_DIR",
+        "CC_ENABLE_SPEECH",
+        "CC_LLM_UPSTREAM_BASE_URL",
+        "CC_LLM_PROXY_ADMIN_KEY",
+        "CC_LLM_API_KEY",
+        "CC_LITELLM_PORT",
+        "CC_LLM_BASE_URL",
+        "VIRTUAL_ENV",
+    ):
         env.pop(stale, None)
     env.update(env_extra or {})
     return run_driver([_bash_exe(), "setup.sh", *args], cwd=repo / "deploy" / "single", env=env)
@@ -207,15 +228,14 @@ def _ledger_status(repo: Path, step: str) -> str | None:
 
 
 def _protocol(out: str) -> list[str]:
-    return [l for l in out.splitlines()
-            if l.startswith(("PASS ", "WARN ", "FAIL ", "USERACTION "))]
+    return [l for l in out.splitlines() if l.startswith(("PASS ", "WARN ", "FAIL ", "USERACTION "))]
 
 
 # ── the manifest ────────────────────────────────────────────────────────────
 
 
 def test_boot_and_demo_require_the_selfcheck_row():
-    """"boot and demo require it" (D4) — as data, so the driver's ONE refusal
+    """ "boot and demo require it" (D4) — as data, so the driver's ONE refusal
     rule enforces it rather than a special case."""
     rows = {}
     for raw in STEPS.read_text(encoding="utf-8").splitlines():
@@ -240,8 +260,12 @@ def test_an_empty_spine_key_cannot_reach_boot(tree: Path):
     """Everything up to `verify` is recorded done — the exact 2026-10-01 shape,
     where the earlier rows were green and the key was empty — and `boot` is
     refused, naming the row that stands between them."""
-    _write_ledger(tree, _rows_through(
-        BEFORE_VERIFY, also=("verify/verify-deployed", "verify/verify-live", "test/test")))
+    _write_ledger(
+        tree,
+        _rows_through(
+            BEFORE_VERIFY, also=("verify/verify-deployed", "verify/verify-live", "test/test")
+        ),
+    )
 
     r = _run(tree, "boot")
 
@@ -309,14 +333,18 @@ def test_the_modules_lines_are_reemitted_counted_and_logged(tree: Path):
     assert "WARN selfcheck-graph: CC_NEO4J_URL answered slowly" in lines, lines
     # A fresh install's graph-embedder row passes with no record: it is counted
     # like any other and does not fail the installer's verify.
-    assert ("PASS selfcheck-graph-embedder: the graph holds no vectors and no embedder "
-            "record yet") in lines, lines
+    assert (
+        "PASS selfcheck-graph-embedder: the graph holds no vectors and no embedder record yet"
+    ) in lines, lines
     row = [l for l in lines if l.startswith("PASS selfcheck:")]
     assert row and "3 check(s) passed, 1 warned" in row[0], lines
     # The phase itself raised no FAIL for the row. The only FAIL selfcheck
     # line allowed is the ledger's own net (below), never the phase's.
-    assert all("phase reported success but verify/selfcheck" in l
-               for l in lines if l.startswith("FAIL selfcheck:")), lines
+    assert all(
+        "phase reported success but verify/selfcheck" in l
+        for l in lines
+        if l.startswith("FAIL selfcheck:")
+    ), lines
     # Chatter is detail: stderr, never a protocol line.
     assert "some chatter" in r.stderr
     log = (_state_dir(tree) / "setup-log.txt").read_text(encoding="utf-8")
@@ -325,8 +353,9 @@ def test_the_modules_lines_are_reemitted_counted_and_logged(tree: Path):
     # The row's PROBE still holds it back: the key is empty, so a passing
     # module cannot write verify/selfcheck done on its own say-so — the
     # ledger names that as the step nobody told you about.
-    assert any(l.startswith("FAIL selfcheck: phase reported success but verify/selfcheck")
-               for l in lines), lines
+    assert any(
+        l.startswith("FAIL selfcheck: phase reported success but verify/selfcheck") for l in lines
+    ), lines
     assert _ledger_status(tree, "verify/selfcheck") != "done"
 
 
@@ -335,8 +364,7 @@ def test_a_module_that_prints_nothing_is_a_fail(tree: Path):
     """An import error — the module absent from the install, a syntax error —
     is not "no checks failed"."""
     _write_ledger(tree, _rows_through(BEFORE_VERIFY))
-    _fake_module(tree, "", rc=1,
-                 stderr="/x/python: No module named central_command.selfcheck\n")
+    _fake_module(tree, "", rc=1, stderr="/x/python: No module named central_command.selfcheck\n")
 
     r = _run(tree, "verify")
 
@@ -374,7 +402,7 @@ def test_no_venv_is_a_fail_naming_it(tree: Path):
 
 @drives_installer
 def test_status_runs_the_module_without_pre_boot(tree: Path):
-    """"status prints the ledger and the self-check" (D3) — after boot the
+    """ "status prints the ledger and the self-check" (D3) — after boot the
     cockpit and the sandbox are part of what the agents rely on, so status
     asks for every check, never the installer's --pre-boot mode."""
     _write_ledger(tree, [("check/tree-pristine", "done")])
@@ -420,7 +448,11 @@ def test_the_report_carries_the_selfcheck_lines(tree: Path):
     assert "--pre-boot" not in args.split()
     assert "--timeout" in args.split()
     # Ledger, then the self-check, then the log (D8's order).
-    assert body.index("== the ledger") < body.index("== the self-check") < body.index("== the whole log")
+    assert (
+        body.index("== the ledger")
+        < body.index("== the self-check")
+        < body.index("== the whole log")
+    )
 
 
 @drives_installer

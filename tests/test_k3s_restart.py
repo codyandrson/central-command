@@ -37,7 +37,7 @@ UPDATER = (ROOT / "deploy" / "k3s" / "cc-update.sh").read_text(encoding="utf-8")
 
 def _fn(name: str) -> str:
     start = UPDATER.index(f"\n{name}() {{") + 1
-    return UPDATER[start:UPDATER.index("\n}\n", start) + 3]
+    return UPDATER[start : UPDATER.index("\n}\n", start) + 3]
 
 
 @pytest.fixture
@@ -48,9 +48,17 @@ def box(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _run(box: Path, entry: str, request: object | None = None, *, sessions: int = 0,
-         health_rc: int = 0, systemctl_rc: int = 0, status: dict | None = None,
-         raw_request: str | None = None) -> subprocess.CompletedProcess:
+def _run(
+    box: Path,
+    entry: str,
+    request: object | None = None,
+    *,
+    sessions: int = 0,
+    health_rc: int = 0,
+    systemctl_rc: int = 0,
+    status: dict | None = None,
+    raw_request: str | None = None,
+) -> subprocess.CompletedProcess:
     if raw_request is not None:
         (box / "request.json").write_text(raw_request)
     elif request is not None:
@@ -58,36 +66,38 @@ def _run(box: Path, entry: str, request: object | None = None, *, sessions: int 
     if status is not None:
         (box / "state" / "status.json").write_text(json.dumps(status))
     rows = ", ".join('{"agent_id": "ea"}' for _ in range(sessions))
-    script = "\n".join([
-        "set -uo pipefail",
-        f"B='{box}'",
-        'STATEDIR="$B/state"; STATUS="$STATEDIR/status.json"; RESTART_STATUS="$STATEDIR/restart.json"',
-        'REQUEST="$B/request.json"; STARTED_AT=2026-11-16T10:00:00Z',
-        "FORCE=0; RESTART_MODE=0; STOPPED=0; STAGE_MODE=0",
-        'note() { printf "%s\\n" "$*"; }',
-        'systemctl() { echo "systemctl $*" >>"$B/calls"; return ' + str(systemctl_rc) + "; }",
-        'start_services() { echo start_services >>"$B/calls"; }',
-        'sleep() { :; }',
-        "curl() {",
-        '  case "$*" in',
-        f'    *sessions*) echo \'{{"sessions": [{rows}]}}\' ;;',
-        f"    *health*) return {health_rc} ;;",
-        "  esac",
-        "}",
-        'require_compute_ssh() { echo "require_compute_ssh" >>"$B/calls"; exit 99; }',
-        _fn("write_status"),
-        _fn("running_sessions"),
-        _fn("refuse_if_busy"),
-        _fn("healthy"),
-        _fn("apply_in_flight"),
-        _fn("die"),
-        _fn("request_action"),
-        _fn("write_restart"),
-        _fn("restart_main"),
-        _fn("main"),
-        _fn("dispatch"),
-        entry,
-    ])
+    script = "\n".join(
+        [
+            "set -uo pipefail",
+            f"B='{box}'",
+            'STATEDIR="$B/state"; STATUS="$STATEDIR/status.json"; RESTART_STATUS="$STATEDIR/restart.json"',
+            'REQUEST="$B/request.json"; STARTED_AT=2026-11-16T10:00:00Z',
+            "FORCE=0; RESTART_MODE=0; STOPPED=0; STAGE_MODE=0",
+            'note() { printf "%s\\n" "$*"; }',
+            'systemctl() { echo "systemctl $*" >>"$B/calls"; return ' + str(systemctl_rc) + "; }",
+            'start_services() { echo start_services >>"$B/calls"; }',
+            "sleep() { :; }",
+            "curl() {",
+            '  case "$*" in',
+            f"    *sessions*) echo '{{\"sessions\": [{rows}]}}' ;;",
+            f"    *health*) return {health_rc} ;;",
+            "  esac",
+            "}",
+            'require_compute_ssh() { echo "require_compute_ssh" >>"$B/calls"; exit 99; }',
+            _fn("write_status"),
+            _fn("running_sessions"),
+            _fn("refuse_if_busy"),
+            _fn("healthy"),
+            _fn("apply_in_flight"),
+            _fn("die"),
+            _fn("request_action"),
+            _fn("write_restart"),
+            _fn("restart_main"),
+            _fn("main"),
+            _fn("dispatch"),
+            entry,
+        ]
+    )
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=60)
 
 
@@ -100,7 +110,12 @@ def _restart(box: Path) -> dict:
     return json.loads((box / "state" / "restart.json").read_text())
 
 
-REQ = {"target": "", "force": False, "action": "restart", "requested_at": "2026-11-16T09:59:00+00:00"}
+REQ = {
+    "target": "",
+    "force": False,
+    "action": "restart",
+    "requested_at": "2026-11-16T09:59:00+00:00",
+}
 
 
 # ── what a restart does ─────────────────────────────────────────────────────
@@ -112,7 +127,9 @@ def test_a_restart_restarts_only_the_api_and_records_its_own_outcome(box: Path):
     assert _calls(box) == ["systemctl restart cc-uvicorn"]
     out = _restart(box)
     assert out["state"] == "restarted" and out["forced"] is False
-    assert out["requested_at"] == REQ["requested_at"], "the cockpit tells its own request from an older one by this"
+    assert out["requested_at"] == REQ["requested_at"], (
+        "the cockpit tells its own request from an older one by this"
+    )
     assert {"message", "started_at", "updated_at", "finished_at"} <= set(out)
     assert not (box / "state" / "status.json").exists(), "status.json is the last UPDATE's result"
     assert not (box / "request.json").exists(), "consumed, so a hand-started run does not replay it"
@@ -140,7 +157,9 @@ def test_the_busy_gate_refuses_unforced_and_forced_goes_on_naming_the_cost(box: 
 def test_an_unhealthy_api_is_reported_never_rolled_back(box: Path):
     r = _run(box, "dispatch", REQ, health_rc=1)
     assert r.returncode == 1
-    assert _calls(box) == ["systemctl restart cc-uvicorn"], "no second restart, no start_services, no rollback"
+    assert _calls(box) == ["systemctl restart cc-uvicorn"], (
+        "no second restart, no start_services, no rollback"
+    )
     out = _restart(box)
     assert out["state"] == "failed" and "journalctl -u cc-uvicorn" in out["message"]
     assert not (box / "state" / "status.json").exists()
@@ -149,17 +168,27 @@ def test_an_unhealthy_api_is_reported_never_rolled_back(box: Path):
 def test_a_failed_systemctl_is_a_failed_restart(box: Path):
     r = _run(box, "dispatch", REQ, systemctl_rc=1)
     assert r.returncode == 1
-    assert _restart(box)["state"] == "failed" and "journalctl -u cc-uvicorn" in _restart(box)["message"]
+    assert (
+        _restart(box)["state"] == "failed"
+        and "journalctl -u cc-uvicorn" in _restart(box)["message"]
+    )
     assert "start_services" not in _calls(box)
 
 
 def test_an_update_in_flight_refuses_the_restart_and_a_stale_record_does_not(box: Path):
-    fresh = {"state": "running", "phase": "rebuild",
-             "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()}
+    fresh = {
+        "state": "running",
+        "phase": "rebuild",
+        "updated_at": __import__("datetime")
+        .datetime.now(__import__("datetime").timezone.utc)
+        .isoformat(),
+    }
     r = _run(box, "dispatch", REQ, status=fresh)
     assert r.returncode == 1 and _calls(box) == []
     assert _restart(box)["state"] == "refused" and "update is in flight" in _restart(box)["message"]
-    assert json.loads((box / "state" / "status.json").read_text()) == fresh, "left exactly as the update wrote it"
+    assert json.loads((box / "state" / "status.json").read_text()) == fresh, (
+        "left exactly as the update wrote it"
+    )
 
     stale = {"state": "running", "phase": "rebuild", "updated_at": "2020-01-01T00:00:00+00:00"}
     r = _run(box, "dispatch", REQ, status=stale)
@@ -169,13 +198,18 @@ def test_an_update_in_flight_refuses_the_restart_and_a_stale_record_does_not(box
 # ── what is an update and what is not ───────────────────────────────────────
 
 
-@pytest.mark.parametrize("request_body", [
-    {"target": "2.0.0", "force": False},                       # absent action: today's request
-    {"target": "2.0.0", "force": False, "action": "update"},
-])
+@pytest.mark.parametrize(
+    "request_body",
+    [
+        {"target": "2.0.0", "force": False},  # absent action: today's request
+        {"target": "2.0.0", "force": False, "action": "update"},
+    ],
+)
 def test_an_absent_or_update_action_takes_the_update_path(box: Path, request_body: dict):
     r = _run(box, "dispatch", request_body)
-    assert r.returncode == 99, r.stdout + r.stderr   # the require_compute_ssh stub: the update's first step
+    assert r.returncode == 99, (
+        r.stdout + r.stderr
+    )  # the require_compute_ssh stub: the update's first step
     assert _calls(box) == ["require_compute_ssh"]
     assert not (box / "state" / "restart.json").exists()
 
@@ -204,9 +238,27 @@ def test_any_other_action_dies_at_resolve_and_changes_nothing(box: Path, action)
 def test_the_restart_branch_is_the_api_alone_and_comes_first():
     body = _fn("restart_main")
     assert re.findall(r"systemctl\s+\S+\s+\S+", body) == ["systemctl restart cc-uvicorn"]
-    for forbidden in ("cc-nerve", "cc-sandbox-runner", "start_services", "kubectl", "k3s", "${K[@]}",
-                      "COMPUTE_SSH", "ssh", "git ", "fetch", "CKPT", "worktree", "backup", "dump",
-                      "prebuild", "write_status", "phase ", "rollback", "reset"):
+    for forbidden in (
+        "cc-nerve",
+        "cc-sandbox-runner",
+        "start_services",
+        "kubectl",
+        "k3s",
+        "${K[@]}",
+        "COMPUTE_SSH",
+        "ssh",
+        "git ",
+        "fetch",
+        "CKPT",
+        "worktree",
+        "backup",
+        "dump",
+        "prebuild",
+        "write_status",
+        "phase ",
+        "rollback",
+        "reset",
+    ):
         assert forbidden not in body, forbidden
     assert "refuse_if_busy busy" in body and "healthy" in body and "apply_in_flight" in body
     # The action is dispatched before main, whose first act stays the compute-node
@@ -230,5 +282,11 @@ def test_a_restart_has_its_own_status_file_and_die_reports_there():
 def test_the_unit_files_are_untouched_the_seam_is_the_existing_one():
     # No new unit, path unit, sudoers or polkit rule: the request rides cc-update.path.
     names = sorted(p.name for p in (ROOT / "deploy" / "k3s").glob("cc-update*"))
-    assert names == ["cc-update-stage.path", "cc-update-stage.service.in", "cc-update-tmpfiles.conf.in",
-                     "cc-update.path", "cc-update.service.in", "cc-update.sh"]
+    assert names == [
+        "cc-update-stage.path",
+        "cc-update-stage.service.in",
+        "cc-update-tmpfiles.conf.in",
+        "cc-update.path",
+        "cc-update.service.in",
+        "cc-update.sh",
+    ]

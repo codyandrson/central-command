@@ -49,7 +49,9 @@ def test_the_coach_is_seeded_in_schema_sql():
     2026-07-26 clean-database failure)."""
     from pathlib import Path
 
-    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
     assert "('coach'," in schema
     assert "where id = 'coach' and role = ''" in schema
     for pack in ("record-read", "charter-propose"):
@@ -85,7 +87,9 @@ async def test_the_coachs_governed_charter_is_its_system_prompt():
 
     marker = "COACH-MARKER-" + uuid.uuid4().hex[:8]
     await repo.save_charter_version(
-        "coach", f"You are the team's coach.\n\n{marker}", "prompt test",
+        "coach",
+        f"You are the team's coach.\n\n{marker}",
+        "prompt test",
         created_by="operator",
     )
     agent = await build_coach_agent(await _coach_loadout())
@@ -116,10 +120,13 @@ async def test_a_coach_run_parks_the_proposal_under_the_coach():
 
     target = "coach-target-" + uuid.uuid4().hex[:6]
     await repo.upsert_agent(target, target, "demo", "c")
-    await repo.save_charter_version(target, "CHARTER for a coaching test.",
-                                    "seed", created_by="operator")
+    await repo.save_charter_version(
+        target, "CHARTER for a coaching test.", "seed", created_by="operator"
+    )
     out = await run_coach(
-        target, model=make_coach_model(), note="Check for an existing link first.",
+        target,
+        model=make_coach_model(),
+        note="Check for an existing link first.",
         note_event_id=(await _note_event(target))["id"],
     )
 
@@ -142,13 +149,15 @@ async def test_a_coach_ask_carries_the_task_id_to_the_operator_item():
 
     target = "coach-ask-" + uuid.uuid4().hex[:6]
     await repo.upsert_agent(target, target, "demo", "c")
-    await repo.save_charter_version(target, "CHARTER for a coaching test.",
-                                    "seed", created_by="operator")
+    await repo.save_charter_version(
+        target, "CHARTER for a coaching test.", "seed", created_by="operator"
+    )
     task_id = "task_ca_" + uuid.uuid4().hex[:8]
     await repo.create_task(task_id, "Coach " + target, "coach it", "coach")
 
     out = await run_coach(
-        target, model=make_deferred_tool_model("ask_operator"),
+        target,
+        model=make_deferred_tool_model("ask_operator"),
         note="Is the charter adequate?",
         note_event_id=(await _note_event(target))["id"],
         task_id=task_id,
@@ -165,7 +174,8 @@ async def _note_event(target: str) -> dict:
     from central_command import events
 
     return await events.emit(
-        "agent.coach_requested", ref_id=target,
+        "agent.coach_requested",
+        ref_id=target,
         payload={"signal_ids": [], "note": "Check for an existing link first."},
         actor="operator",
     )

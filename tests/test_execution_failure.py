@@ -120,9 +120,7 @@ async def test_failed_execution_releases_folds(monkeypatch):
             run["proposal_id"],
         )
         await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
-        state = await conn.fetchval(
-            "select state from work_item where id = 'wi_test_fold'"
-        )
+        state = await conn.fetchval("select state from work_item where id = 'wi_test_fold'")
         assert state == "UNPROCESSED"
     finally:
         await conn.execute("delete from work_item where id = 'wi_test_fold'")
@@ -155,9 +153,10 @@ async def test_final_failure_flips_the_email_off_processed(monkeypatch):
 
         # The operator's redo: requeue puts it back for a fresh run.
         assert await repo.requeue_failed_work_item("wi_test_flip") is True
-        assert await conn.fetchval(
-            "select state from work_item where id = 'wi_test_flip'"
-        ) == "UNPROCESSED"
+        assert (
+            await conn.fetchval("select state from work_item where id = 'wi_test_flip'")
+            == "UNPROCESSED"
+        )
     finally:
         await conn.execute("delete from work_item where id = 'wi_test_flip'")
         await conn.close()
@@ -205,9 +204,7 @@ async def test_acknowledge_closes_a_failure_without_rewriting_history():
                values ('wi_test_ack', '<cc-test-ack@x>', 'live', 'api', '{}'::jsonb, 'FAILED')""",
         )
         assert (await routes.acknowledge_failure("wi_test_ack"))["ok"] is True
-        row = await conn.fetchrow(
-            "select state, payload from work_item where id = 'wi_test_ack'"
-        )
+        row = await conn.fetchrow("select state, payload from work_item where id = 'wi_test_ack'")
         import json as _json
 
         assert row["state"] == "FAILED"  # the record is the truth — state unchanged

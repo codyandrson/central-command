@@ -63,7 +63,11 @@ def _run(scratch: Path, proxy: str) -> tuple[subprocess.CompletedProcess, Path, 
     (tmp / "home").mkdir(exist_ok=True)
     r = subprocess.run(
         ["bash", str(scratch / "deploy" / "discover.sh"), "probe", "--out", str(out)],
-        capture_output=True, text=True, env=env, timeout=180, cwd=scratch,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=180,
+        cwd=scratch,
     )
     return r, out, log
 
@@ -94,10 +98,13 @@ def test_credentialed_proxy_with_no_port_or_path_is_refused_too(scratch: Path):
     assert LOGIN not in r.stdout + r.stderr and not out.exists()
 
 
-@pytest.mark.parametrize("proxy", [
-    f"{LOGIN}:{SECRET}@proxy.example.com:8080",          # no scheme: curl accepts it
-    f"http://{LOGIN}:{SECRET}/x@proxy.example.com:8080",  # a '/' inside the password
-])
+@pytest.mark.parametrize(
+    "proxy",
+    [
+        f"{LOGIN}:{SECRET}@proxy.example.com:8080",  # no scheme: curl accepts it
+        f"http://{LOGIN}:{SECRET}/x@proxy.example.com:8080",  # a '/' inside the password
+    ],
+)
 def test_credentialed_proxy_the_userinfo_regex_would_miss_is_refused(scratch: Path, proxy: str):
     r, out, log = _run(scratch, proxy)
     assert r.returncode == 3 and "USERACTION proxy-credentials" in r.stdout, r.stdout + r.stderr

@@ -64,9 +64,7 @@ class _Spy:
         return out
 
 
-async def test_transient_then_success_retries_once_and_returns_the_result(
-    monkeypatch, no_wait
-):
+async def test_transient_then_success_retries_once_and_returns_the_result(monkeypatch, no_wait):
     spy = _Spy(_transient(), {"key": "TASKS-1", "status": "To Do"})
     monkeypatch.setattr(jira, "get_issue", spy)
 
@@ -83,9 +81,7 @@ async def test_transient_then_success_retries_once_and_returns_the_result(
     assert no_wait == [0.5]
 
 
-async def test_transient_twice_is_an_outage_not_a_degradation_text(
-    monkeypatch, no_wait
-):
+async def test_transient_twice_is_an_outage_not_a_degradation_text(monkeypatch, no_wait):
     """Two attempts, then the OUTAGE doctrine (FR-40, epic-outage-doctrine): no
     "proceed without it" for a DOWN dependency. With no landing tail (`ctx`
     None here) the original transient failure re-raises into the unit's own
@@ -102,9 +98,7 @@ async def test_transient_twice_is_an_outage_not_a_degradation_text(
     assert no_wait == [0.5]
 
 
-async def test_a_page_that_is_not_a_dependency_keeps_its_degradation_text(
-    monkeypatch, no_wait
-):
+async def test_a_page_that_is_not_a_dependency_keeps_its_degradation_text(monkeypatch, no_wait):
     """`fetch_url` reads the open web: a 503 from a site is that site's answer,
     not an outage of anything we probe, so its text stays — even in a run that
     may park."""
@@ -160,9 +154,7 @@ async def test_the_graph_and_litellm_reads_carry_the_same_bound(monkeypatch, no_
     assert no_wait == [0.5, 0.5]
 
 
-async def test_a_semantic_graph_failure_still_returns_the_honest_text(
-    monkeypatch, no_wait
-):
+async def test_a_semantic_graph_failure_still_returns_the_honest_text(monkeypatch, no_wait):
     """A NO from the graph is the graph answering: one call, no retry, and an
     honest text that quotes what it said — only an OUTAGE stopped degrading."""
     graph = _Spy(_semantic())

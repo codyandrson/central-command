@@ -47,7 +47,8 @@ async def test_error_and_warning_records_become_events(bridged):
     # promises is that WARNING+ arrives and INFO does not; asserting a
     # between-record order asserts something it never offered.
     rows = [
-        r for r in await repo.list_events(since_id=bridged, kind="log")
+        r
+        for r in await repo.list_events(since_id=bridged, kind="log")
         if r["payload"].get("logger") == "central_command.test.bridge"
     ]
     assert sorted(r["kind"] for r in rows) == ["log.error", "log.warning"]

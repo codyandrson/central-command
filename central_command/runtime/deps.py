@@ -36,7 +36,7 @@ class TriageDeps:
     # (`record_progress` appends; the driver reads them for stall detection).
     session_id: str | None = None
     progress_ledger: list[dict] = field(default_factory=list)
-    agent_id: str | None = None    # who is running — declare_gap records it
+    agent_id: str | None = None  # who is running — declare_gap records it
     # The work item this triage run is handling (2026-09-12): the mail-action
     # tools default to it, so the agent can act on "this email" without an id
     # it was never shown (agent_input carries From/Subject/Date only).

@@ -57,11 +57,13 @@ def test_the_seam_emits_the_event_it_promises():
     src = (SRC / "runtime" / "proposals.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     fn = next(
-        n for n in ast.walk(tree)
+        n
+        for n in ast.walk(tree)
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "park_proposal"
     )
     calls = [
-        c.func.attr for c in ast.walk(fn)
+        c.func.attr
+        for c in ast.walk(fn)
         if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
     ]
     assert "save_proposal" in calls
@@ -74,8 +76,9 @@ def _emits(src: str, kind: str) -> bool:
     for node in ast.walk(ast.parse(src)):
         if not isinstance(node, ast.Call):
             continue
-        name = (node.func.attr if isinstance(node.func, ast.Attribute)
-                else getattr(node.func, "id", ""))
+        name = (
+            node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+        )
         if name != "emit":
             continue
         args = list(node.args) + [k.value for k in node.keywords]
@@ -148,12 +151,12 @@ def _unmapped(found: list[str]) -> list[str]:
     from central_command.gateway.overrides import PARK_SITES
 
     return sorted(set(found) - set(PARK_SITES)) + sorted(
-        s for s in set(found) if found.count(s) > 1)
+        s for s in set(found) if found.count(s) > 1
+    )
 
 
 def _tree_sources() -> dict[str, str]:
-    return {p.relative_to(SRC).as_posix(): p.read_text(encoding="utf-8")
-            for p in SRC.rglob("*.py")}
+    return {p.relative_to(SRC).as_posix(): p.read_text(encoding="utf-8") for p in SRC.rglob("*.py")}
 
 
 def test_the_park_site_table_equals_the_source_walk():
@@ -165,7 +168,8 @@ def test_the_park_site_table_equals_the_source_walk():
     found = _park_sites(_tree_sources())
     assert found == sorted(PARK_SITES), (
         "park_proposal call sites and overrides.PARK_SITES disagree — map the "
-        f"new site to the caller that runs the decide hook: {found}")
+        f"new site to the caller that runs the decide hook: {found}"
+    )
     assert all(kind in (HOOK, EXEMPT, SWEEP_ONLY) and why for kind, why in PARK_SITES.values())
     # + reflection._propose_skill_correction (DL-215), + reflection._propose_note (DL-217)
     assert len(found) == 14

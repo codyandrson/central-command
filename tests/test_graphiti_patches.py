@@ -26,7 +26,17 @@ SCRIPT = ROOT / "scripts" / "apply_graphiti_patches.py"
 # The target and edit are tiny and distinctive; the second file keeps the
 # "nothing written anywhere on failure" check honest.
 ALPHA_OLD = ["import os", "", "def one():", "    return 1", "", "def two():", "    return 2", ""]
-ALPHA_NEW = ["import os", "import re", "", "def one():", "    return 1", "", "def two():", "    return 22", ""]
+ALPHA_NEW = [
+    "import os",
+    "import re",
+    "",
+    "def one():",
+    "    return 1",
+    "",
+    "def two():",
+    "    return 22",
+    "",
+]
 BETA_OLD = ["x = 1", "y = 2", "z = 3", ""]
 BETA_NEW = ["x = 1", "y = 20", "z = 3", ""]
 
@@ -96,7 +106,9 @@ def _tree(tmp_path: Path, *, version: str = gp.PINNED_VERSION, beta: list[str] =
     (site / "pkg" / "delta.py").write_text("\n".join(DELTA_OLD))
     dist = site / f"graphiti_core-{version}.dist-info"
     dist.mkdir()
-    (dist / "METADATA").write_text(f"Metadata-Version: 2.4\nName: graphiti-core\nVersion: {version}\n\nbody\n")
+    (dist / "METADATA").write_text(
+        f"Metadata-Version: 2.4\nName: graphiti-core\nVersion: {version}\n\nbody\n"
+    )
     pdir = tmp_path / "patches"
     pdir.mkdir()
     # The applier reads the real names; here they carry the synthetic diffs.
@@ -118,8 +130,12 @@ def test_apply_patches_every_hunk_and_reports_each_file(tmp_path):
     assert gp.patch_state(site, pdir) == {n: "pristine" for n in gp.PATCH_FILES}
     lines = gp.apply_patches(site, pdir)
     assert [(f, s) for _, f, s in lines] == [
-        ("pkg/alpha.py", "patched"), ("pkg/beta.py", "patched"), ("pkg/gamma.py", "patched"),
-        ("pkg/delta.py", "patched"), ("pkg/delta.py", "patched")]
+        ("pkg/alpha.py", "patched"),
+        ("pkg/beta.py", "patched"),
+        ("pkg/gamma.py", "patched"),
+        ("pkg/delta.py", "patched"),
+        ("pkg/delta.py", "patched"),
+    ]
     assert _read(site, "alpha.py") == "\n".join(ALPHA_NEW)
     assert _read(site, "beta.py") == "\n".join(BETA_NEW)
     assert _read(site, "gamma.py") == "\n".join(GAMMA_NEW)
@@ -244,13 +260,17 @@ def test_the_real_patches_parse_to_the_expected_files():
     patches = gp._load_patches(gp.PATCH_DIR)
     got = {name: [(f.path, len(f.hunks)) for f in files] for name, files in patches}
     assert got == {
-        "1729-invalidation-scope.patch": [("graphiti_core/utils/maintenance/edge_operations.py", 3)],
+        "1729-invalidation-scope.patch": [
+            ("graphiti_core/utils/maintenance/edge_operations.py", 3)
+        ],
         "1666-reasoning-first-dedupe.patch": [("graphiti_core/prompts/dedupe_edges.py", 1)],
         "0003-entity-embedding-name-summary.patch": [("graphiti_core/nodes.py", 1)],
         "0004-dedupe-name-candidates.patch": [
-            ("graphiti_core/utils/maintenance/node_operations.py", 2)],
+            ("graphiti_core/utils/maintenance/node_operations.py", 2)
+        ],
         "0005-dedupe-alias-candidates.patch": [
-            ("graphiti_core/utils/maintenance/node_operations.py", 1)],
+            ("graphiti_core/utils/maintenance/node_operations.py", 1)
+        ],
     }
 
 
@@ -304,13 +324,13 @@ def _patched_create_entity_node_embeddings(tmp_path: Path):
     # after every update); "before" must be the upstream seam either way, so on
     # a patched copy the patch's one hunk is reversed (new lines back to old).
     if gp.patch_state(site)[ENTITY_PATCH] == "patched":
-        (_, files), = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == ENTITY_PATCH]
+        ((_, files),) = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == ENTITY_PATCH]
         for fp in files:
             lines = (site / fp.path).read_text().split("\n")
             for h in fp.hunks:
                 n = len(h.new)
-                at = next(i for i in range(len(lines) - n + 1) if tuple(lines[i:i + n]) == h.new)
-                lines[at:at + n] = list(h.old)
+                at = next(i for i in range(len(lines) - n + 1) if tuple(lines[i : i + n]) == h.new)
+                lines[at : at + n] = list(h.old)
             (site / fp.path).write_text("\n".join(lines))
         assert gp.patch_state(site)[ENTITY_PATCH] == "pristine"
     before = (site / "graphiti_core" / "nodes.py").read_text()
@@ -318,8 +338,11 @@ def _patched_create_entity_node_embeddings(tmp_path: Path):
 
     def lift(text: str):
         tree = ast.parse(text)
-        fn = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef)
-                  and n.name == "create_entity_node_embeddings")
+        fn = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "create_entity_node_embeddings"
+        )
         scope = {"EmbedderClient": object, "EntityNode": object}
         exec(compile(ast.Module([fn], []), "nodes.py", "exec"), scope)
         return scope["create_entity_node_embeddings"]
@@ -348,8 +371,13 @@ async def test_the_patched_entity_embedding_input_is_embedding_text(tmp_path):
     from central_command.contract.embedding_text import embedding_text
 
     unpatched, patched = _patched_create_entity_node_embeddings(tmp_path)
-    cases = [("Jane Doe", "Approved the storage renewal."), ("Acme", None), ("Acme", ""),
-             ("  Padded  ", "  and a summary\nover two lines  "), ("Solo", "x")]
+    cases = [
+        ("Jane Doe", "Approved the storage renewal."),
+        ("Acme", None),
+        ("Acme", ""),
+        ("  Padded  ", "  and a summary\nover two lines  "),
+        ("Solo", "x"),
+    ]
     nodes = [_Node(n, s) for n, s in cases] + [_Node("", "no name: filtered out")]
 
     embedder = _Embedder()
@@ -365,14 +393,19 @@ async def test_the_patched_entity_embedding_input_is_embedding_text(tmp_path):
 
 
 def test_the_third_patch_has_one_hunk_at_the_one_seam_and_names_the_left_alone_one():
-    (_name, files), = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == ENTITY_PATCH]
+    ((_name, files),) = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == ENTITY_PATCH]
     assert [(f.path, len(f.hunks)) for f in files] == [("graphiti_core/nodes.py", 1)]
-    header = " ".join(ln.lstrip("# ") for ln in (gp.PATCH_DIR / ENTITY_PATCH).read_text().splitlines()
-                      if ln.startswith("#"))
+    header = " ".join(
+        ln.lstrip("# ")
+        for ln in (gp.PATCH_DIR / ENTITY_PATCH).read_text().splitlines()
+        if ln.startswith("#")
+    )
     assert "generate_name_embedding" in header and "NOT on the add_episode path" in header
 
 
-def test_the_ingest_gate_refuses_extraction_while_the_third_patch_is_pristine(tmp_path, monkeypatch):
+def test_the_ingest_gate_refuses_extraction_while_the_third_patch_is_pristine(
+    tmp_path, monkeypatch
+):
     """The first two applied, the third not: `patches_ok()` is False, so the worker
     takes no extraction (the same gate as with the two)."""
     from central_command.integrations import graphiti_client, graphiti_ingest
@@ -384,9 +417,13 @@ def test_the_ingest_gate_refuses_extraction_while_the_third_patch_is_pristine(tm
     (site / "pkg" / "gamma.py").write_text("\n".join(GAMMA_OLD))
 
     state = gp.patch_state(site, pdir)
-    assert state == {gp.PATCH_FILES[0]: "patched", gp.PATCH_FILES[1]: "patched",
-                     gp.PATCH_FILES[2]: "pristine", gp.PATCH_FILES[3]: "patched",
-                     gp.PATCH_FILES[4]: "patched"}
+    assert state == {
+        gp.PATCH_FILES[0]: "patched",
+        gp.PATCH_FILES[1]: "patched",
+        gp.PATCH_FILES[2]: "pristine",
+        gp.PATCH_FILES[3]: "patched",
+        gp.PATCH_FILES[4]: "patched",
+    }
     monkeypatch.setattr(gp, "patch_state", lambda: state)
     assert graphiti_client.patches_ok() is False
     monkeypatch.setattr(gp, "patch_state", lambda: {**state, gp.PATCH_FILES[2]: "patched"})
@@ -420,14 +457,26 @@ def _patched_name_lane(tmp_path: Path) -> dict:
         pytest.skip("installed graphiti-core is not the pinned version")
     gp.apply_patches(site)
     text = (site / "graphiti_core/utils/maintenance/node_operations.py").read_text()
-    wanted = {"_name_tokens", "_rank_name_candidates", "_name_candidate_search",
-              "_collect_candidate_nodes", "_merge_candidate_nodes"}
+    wanted = {
+        "_name_tokens",
+        "_rank_name_candidates",
+        "_name_candidate_search",
+        "_collect_candidate_nodes",
+        "_merge_candidate_nodes",
+    }
     tree = ast.parse(text)
-    body = [n for n in tree.body
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in wanted]
+    body = [
+        n
+        for n in tree.body
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in wanted
+    ]
     assert {n.name for n in body} == wanted
-    limit = next(n for n in tree.body if isinstance(n, ast.Assign)
-                 and getattr(n.targets[0], "id", "") == "NAME_DEDUP_CANDIDATE_LIMIT")
+    limit = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.Assign)
+        and getattr(n.targets[0], "id", "") == "NAME_DEDUP_CANDIDATE_LIMIT"
+    )
 
     async def gather(*coros):
         return await asyncio.gather(*coros)
@@ -450,9 +499,12 @@ class _NameDriver:
 
     async def execute_query(self, query, **params):
         self.queries.append((query, params))
-        rows = [{"uuid": e.uuid, "name": e.name} for e in self.stored
-                if e.group_id == params["group_id"]
-                and any(t in e.name.lower() for t in params["tokens"])]
+        rows = [
+            {"uuid": e.uuid, "name": e.name}
+            for e in self.stored
+            if e.group_id == params["group_id"]
+            and any(t in e.name.lower() for t in params["tokens"])
+        ]
         return rows, None, None
 
 
@@ -462,9 +514,13 @@ async def test_the_name_lane_offers_the_full_name_for_a_short_one(tmp_path):
     lane ranked it past its limit. By name it is offered, ahead of the vector hits,
     and names that merely share a word with other words of their own are not."""
     scope = _patched_name_lane(tmp_path)
-    stored = [_Entity("u-full", "Jane Rivers Doe"), _Entity("u-poss", "Rivers's work deployment"),
-              _Entity("u-other", "Jane Doe"), _Entity("u-part", "Rivers Lee"),
-              _Entity("u-far", "Jane Rivers Doe", group_id="elsewhere")]
+    stored = [
+        _Entity("u-full", "Jane Rivers Doe"),
+        _Entity("u-poss", "Rivers's work deployment"),
+        _Entity("u-other", "Jane Doe"),
+        _Entity("u-part", "Rivers Lee"),
+        _Entity("u-far", "Jane Rivers Doe", group_id="elsewhere"),
+    ]
 
     class _Loaded:
         @classmethod
@@ -483,8 +539,10 @@ async def test_the_name_lane_offers_the_full_name_for_a_short_one(tmp_path):
         driver = _NameDriver(stored)
 
     got = await scope["_collect_candidate_nodes"](
-        _Clients, [_Entity("new-1", "Rivers"), _Entity("new-2", "Rivers Doe"),
-                   _Entity("new-3", "Acme")], None)
+        _Clients,
+        [_Entity("new-1", "Rivers"), _Entity("new-2", "Rivers Doe"), _Entity("new-3", "Acme")],
+        None,
+    )
     # Closest word overlap first ("Rivers Lee" holds every word of "Rivers" too); a tie
     # is broken by uuid so the order is stable.
     assert [e.uuid for e in got[0]] == ["u-part", "u-full", "u-poss", "u-vec"]
@@ -526,13 +584,13 @@ def _scratch_node_ops(tmp_path: Path) -> Path:
 
 
 def _reverse(site: Path, patch_name: str) -> None:
-    (_, files), = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == patch_name]
+    ((_, files),) = [p for p in gp._load_patches(gp.PATCH_DIR) if p[0] == patch_name]
     for fp in files:
         lines = (site / fp.path).read_text().split("\n")
         for h in fp.hunks:
             n = len(h.new)
-            at = next(i for i in range(len(lines) - n + 1) if tuple(lines[i:i + n]) == h.new)
-            lines[at:at + n] = list(h.old)
+            at = next(i for i in range(len(lines) - n + 1) if tuple(lines[i : i + n]) == h.new)
+            lines[at : at + n] = list(h.old)
         (site / fp.path).write_text("\n".join(lines))
 
 
@@ -545,15 +603,28 @@ def _patched_alias_lane(tmp_path: Path) -> dict:
     site = _scratch_node_ops(tmp_path)
     gp.apply_patches(site)
     tree = ast.parse((site / _NODE_OPS).read_text())
-    wanted = {"_name_tokens", "_rank_name_candidates", "_name_candidate_search",
-              "_collect_candidate_nodes", "_merge_candidate_nodes",
-              "_rank_name_and_alias_candidates", "_name_and_alias_candidate_search"}
-    body = [n for n in tree.body
-            if (isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in wanted)
-            or (isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") in {
-                "NAME_DEDUP_CANDIDATE_LIMIT", "_name_candidate_search"})]
+    wanted = {
+        "_name_tokens",
+        "_rank_name_candidates",
+        "_name_candidate_search",
+        "_collect_candidate_nodes",
+        "_merge_candidate_nodes",
+        "_rank_name_and_alias_candidates",
+        "_name_and_alias_candidate_search",
+    }
+    body = [
+        n
+        for n in tree.body
+        if (isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in wanted)
+        or (
+            isinstance(n, ast.Assign)
+            and getattr(n.targets[0], "id", "")
+            in {"NAME_DEDUP_CANDIDATE_LIMIT", "_name_candidate_search"}
+        )
+    ]
     assert {getattr(n, "name", None) or n.targets[0].id for n in body} == wanted | {
-        "NAME_DEDUP_CANDIDATE_LIMIT"}
+        "NAME_DEDUP_CANDIDATE_LIMIT"
+    }
 
     async def gather(*coros):
         return await asyncio.gather(*coros)
@@ -577,21 +648,26 @@ class _AliasDriver(_NameDriver):
         rows = []
         for e in self.stored:
             forms = [e.name, *(e.aliases or [])]
-            if e.group_id == params["group_id"] and e.uuid != params["uuid"] and any(
-                    t in f.lower() for t in params["tokens"] for f in forms):
+            if (
+                e.group_id == params["group_id"]
+                and e.uuid != params["uuid"]
+                and any(t in f.lower() for t in params["tokens"] for f in forms)
+            ):
                 rows.append({"uuid": e.uuid, "name": e.name, "aliases": list(e.aliases or [])})
         return rows, None, None
 
 
 @pytest.mark.skipif(not _INSTALLED, reason="graphiti-core is not installed")
 async def test_the_alias_lane_offers_an_entity_known_by_another_name(tmp_path):
-    """"Jane R. Doe" shares no word-set relation with "Jane Rivers Doe", but the entity's
+    """ "Jane R. Doe" shares no word-set relation with "Jane Rivers Doe", but the entity's
     aliases hold it: the extended lane offers it first, ahead of the vector hits."""
     scope = _patched_alias_lane(tmp_path)
     assert scope["_name_candidate_search"] is scope["_name_and_alias_candidate_search"]
-    stored = [_AliasEntity("u-jane", "Jane Rivers Doe", ["Jane R. Doe", "JRD"]),
-              _AliasEntity("u-barb", "Barbara Doe", None),
-              _AliasEntity("u-far", "Jane Rivers Doe", ["JRD"], group_id="elsewhere")]
+    stored = [
+        _AliasEntity("u-jane", "Jane Rivers Doe", ["Jane R. Doe", "JRD"]),
+        _AliasEntity("u-barb", "Barbara Doe", None),
+        _AliasEntity("u-far", "Jane Rivers Doe", ["JRD"], group_id="elsewhere"),
+    ]
 
     class _Loaded:
         @classmethod
@@ -610,8 +686,14 @@ async def test_the_alias_lane_offers_an_entity_known_by_another_name(tmp_path):
         driver = _AliasDriver(stored)
 
     got = await scope["_collect_candidate_nodes"](
-        _Clients, [_AliasEntity("new-1", "Jane R. Doe"), _AliasEntity("new-2", "jrd"),
-                   _AliasEntity("new-3", "Acme")], None)
+        _Clients,
+        [
+            _AliasEntity("new-1", "Jane R. Doe"),
+            _AliasEntity("new-2", "jrd"),
+            _AliasEntity("new-3", "Acme"),
+        ],
+        None,
+    )
     assert [e.uuid for e in got[0]] == ["u-jane", "u-vec"]
     assert [e.uuid for e in got[1]] == ["u-jane", "u-vec"]
     assert [e.uuid for e in got[2]] == ["u-vec"]
@@ -624,8 +706,12 @@ async def test_the_alias_lane_offers_an_entity_known_by_another_name(tmp_path):
 def test_the_alias_ranking_takes_the_best_form_and_an_exact_alias_ties_an_exact_name(tmp_path):
     scope = _patched_alias_lane(tmp_path)
     rank, limit = scope["_rank_name_and_alias_candidates"], scope["NAME_DEDUP_CANDIDATE_LIMIT"]
-    rows = [("a-name", "Jane Doe", []), ("b-alias", "Jane Rivers Doe", ["  JANE   doe "]),
-            ("c-part", "Jane Doe Rivers Smith", []), ("d-none", "Barbara Doe", ["Barb"])]
+    rows = [
+        ("a-name", "Jane Doe", []),
+        ("b-alias", "Jane Rivers Doe", ["  JANE   doe "]),
+        ("c-part", "Jane Doe Rivers Smith", []),
+        ("d-none", "Barbara Doe", ["Barb"]),
+    ]
     # Both exact forms score 1.0 (tie broken by uuid); the partial name scores its overlap.
     assert rank("Jane Doe", rows, limit) == ["a-name", "b-alias", "c-part"]
     # The best form wins: a weak name match is lifted by an exact alias.
@@ -668,8 +754,11 @@ def test_the_fifth_patch_applies_over_the_previous_fourth_and_leaves_it_recognis
 
 def test_the_fifth_patch_comes_after_the_fourth_and_its_header_says_why():
     assert gp.PATCH_FILES.index(ALIAS_PATCH) == gp.PATCH_FILES.index(NAME_PATCH) + 1
-    header = " ".join(ln.lstrip("# ") for ln in (gp.PATCH_DIR / ALIAS_PATCH).read_text().splitlines()
-                      if ln.startswith("#"))
+    header = " ".join(
+        ln.lstrip("# ")
+        for ln in (gp.PATCH_DIR / ALIAS_PATCH).read_text().splitlines()
+        if ln.startswith("#")
+    )
     assert "aliases" in header and "rebinds" in header and "NEW block" in header
 
 
@@ -689,8 +778,11 @@ def test_an_exact_alias_is_indexed_like_an_exact_name(tmp_path):
     text = (site / _NODE_OPS).read_text()
     assert "\n_build_candidate_indexes = _build_alias_candidate_indexes\n" in text
     tree = ast.parse(text)
-    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
-              and n.name == "_build_alias_candidate_indexes")
+    fn = next(
+        n
+        for n in tree.body
+        if isinstance(n, ast.FunctionDef) and n.name == "_build_alias_candidate_indexes"
+    )
 
     def upstream(existing):
         index = defaultdict(list)
@@ -698,9 +790,12 @@ def test_an_exact_alias_is_indexed_like_an_exact_name(tmp_path):
             index[" ".join(node.name.lower().split())].append(node)
         return SimpleNamespace(normalized_existing=index)
 
-    scope: dict = {"EntityNode": object, "DedupCandidateIndexes": object,
-                   "_upstream_build_candidate_indexes": upstream,
-                   "_normalize_string_exact": lambda name: " ".join(name.lower().split())}
+    scope: dict = {
+        "EntityNode": object,
+        "DedupCandidateIndexes": object,
+        "_upstream_build_candidate_indexes": upstream,
+        "_normalize_string_exact": lambda name: " ".join(name.lower().split()),
+    }
     exec(compile(ast.Module([fn], []), "node_operations.py", "exec"), scope)
 
     def node(uuid, name, aliases):
@@ -713,10 +808,17 @@ def test_an_exact_alias_is_indexed_like_an_exact_name(tmp_path):
     bare = SimpleNamespace(uuid="u-bare", name="Initech", attributes=None)
 
     index = scope["_build_alias_candidate_indexes"](
-        [jane, barbara, other_barb, odd, bare]).normalized_existing
+        [jane, barbara, other_barb, odd, bare]
+    ).normalized_existing
     assert [n.uuid for n in index["jane rivers doe"]] == ["u-jane"]
     assert [n.uuid for n in index["jane doe"]] == ["u-jane"]
-    assert [n.uuid for n in index["jane"]] == ["u-jane"], "an alias equal to the name is not listed twice"
-    assert [n.uuid for n in index["barb"]] == ["u-barbara", "u-other"], "two holders: the prompt decides"
-    assert [n.uuid for n in index["acme"]] == ["u-odd"] and [n.uuid for n in index["initech"]] == ["u-bare"]
+    assert [n.uuid for n in index["jane"]] == ["u-jane"], (
+        "an alias equal to the name is not listed twice"
+    )
+    assert [n.uuid for n in index["barb"]] == ["u-barbara", "u-other"], (
+        "two holders: the prompt decides"
+    )
+    assert [n.uuid for n in index["acme"]] == ["u-odd"] and [n.uuid for n in index["initech"]] == [
+        "u-bare"
+    ]
     assert "7" not in index and "" not in index

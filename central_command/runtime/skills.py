@@ -52,9 +52,11 @@ def format_hits(hits: list[dict]) -> str:
     documents and when the copy was taken, not just what it says.
     """
     if not hits:
-        return ("no matching passage in this skill's reference documents — "
-                "if the subject genuinely is not covered, declare a gap "
-                "rather than guessing")
+        return (
+            "no matching passage in this skill's reference documents — "
+            "if the subject genuinely is not covered, declare a gap "
+            "rather than guessing"
+        )
     out = []
     for h in hits:
         meta = [h["title"]]
@@ -129,7 +131,11 @@ async def capabilities_for(agent_id: str) -> list[Capability]:
             log.warning(
                 "skill %r derives the tool name %r already taken by skill %r; "
                 "not offering %r to %r — rename one of them",
-                skill_id, tool_name, claimed[tool_name], skill_id, agent_id,
+                skill_id,
+                tool_name,
+                claimed[tool_name],
+                skill_id,
+                agent_id,
             )
             continue
         docs = await repo.list_skill_docs(skill_id)
@@ -139,8 +145,9 @@ async def capabilities_for(agent_id: str) -> list[Capability]:
             # loaded is worse than no entry, and the operator needs to know the
             # skill they granted is empty.
             log.warning(
-                "skill %r is granted to %r but has no current guidance document; "
-                "not offering it", skill_id, agent_id,
+                "skill %r is granted to %r but has no current guidance document; not offering it",
+                skill_id,
+                agent_id,
             )
             continue
 
@@ -195,11 +202,13 @@ async def catalog_line(agent_id: str) -> str:
     others = [s for s in await repo.list_skills() if s["id"] not in granted_ids]
 
     lines = [
-        ("YOUR SKILLS — subject knowledge held by the team, GENERATED from your "
-        "grants. Load a skill with `load_capability(<id>)` BEFORE working in its "
-        "subject; its guidance and reference search become available then. "
-        "Loading costs little; guessing in a subject you hold a skill for is a "
-        "mistake."),
+        (
+            "YOUR SKILLS — subject knowledge held by the team, GENERATED from your "
+            "grants. Load a skill with `load_capability(<id>)` BEFORE working in its "
+            "subject; its guidance and reference search become available then. "
+            "Loading costs little; guessing in a subject you hold a skill for is a "
+            "mistake."
+        ),
     ]
     if granted:
         for g in granted:

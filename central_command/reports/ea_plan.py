@@ -163,8 +163,15 @@ async def planning_numbers(issue_keys: list[str]) -> dict[str, dict]:
 
     nulls = {n: None for n in PLANNED_NUMBERS}
     if not jira.configured():
-        return {k: {"readable": False, "unreadable_reason": "the tracker is not configured",
-                    "summary": None, **nulls} for k in issue_keys}
+        return {
+            k: {
+                "readable": False,
+                "unreadable_reason": "the tracker is not configured",
+                "summary": None,
+                **nulls,
+            }
+            for k in issue_keys
+        }
     names = await ea_backlog.tracker_field_names()
     today = ea_backlog._today()
     pad = (await padding(today))["ratio"]
@@ -174,26 +181,38 @@ async def planning_numbers(issue_keys: list[str]) -> dict[str, dict]:
             issue = (await jira.get_issue(key))["issue"]
         except Exception as e:  # noqa: BLE001 — a NO is recorded, an outage raises
             if is_down(e):
-                raise _down_on_jira(e)  # no `from`: the same exception, stamped; `from` would overwrite its own cause
-            out[key] = {"readable": False, "unreadable_reason": _reason(e), "summary": None,
-                        **nulls}
+                raise _down_on_jira(
+                    e
+                )  # no `from`: the same exception, stamped; `from` would overwrite its own cause
+            out[key] = {
+                "readable": False,
+                "unreadable_reason": _reason(e),
+                "summary": None,
+                **nulls,
+            }
             continue
         if issue.get("custom_fields_error"):
-            out[key] = {"readable": False,
-                        "unreadable_reason": str(issue["custom_fields_error"])[:300],
-                        "summary": ea_backlog._clip(issue.get("summary"), ea_backlog.SUMMARY_CHARS),
-                        **nulls}
+            out[key] = {
+                "readable": False,
+                "unreadable_reason": str(issue["custom_fields_error"])[:300],
+                "summary": ea_backlog._clip(issue.get("summary"), ea_backlog.SUMMARY_CHARS),
+                **nulls,
+            }
             continue
         custom = issue.get("custom_fields") or {}
-        row = {"issue_key": issue.get("issue_key") or key, "summary": issue.get("summary"),
-               "status": issue.get("status"), "priority": issue.get("priority"),
-               "assignee": issue.get("assignee"), "due_date": issue.get("due_date"),
-               "estimate_hours": issue.get("estimate_hours"),
-               **{field: custom.get(name) for field, name in names.items()}}
+        row = {
+            "issue_key": issue.get("issue_key") or key,
+            "summary": issue.get("summary"),
+            "status": issue.get("status"),
+            "priority": issue.get("priority"),
+            "assignee": issue.get("assignee"),
+            "due_date": issue.get("due_date"),
+            "estimate_hours": issue.get("estimate_hours"),
+            **{field: custom.get(name) for field, name in names.items()},
+        }
         ranked = ea_backlog.rank([row], today, settings.plan_hours_per_day, pad)
         (r,) = [r for t in ea_backlog.TIERS for r in ranked["tiers"][t]]
-        out[key] = {"readable": True, "summary": r["summary"],
-                    **{n: r[n] for n in PLANNED_NUMBERS}}
+        out[key] = {"readable": True, "summary": r["summary"], **{n: r[n] for n in PLANNED_NUMBERS}}
     return out
 
 
@@ -204,7 +223,9 @@ async def _tracker_call(call):
         return await call
     except Exception as e:  # a NO propagates as it is, an outage is stamped
         if is_down(e):
-            raise _down_on_jira(e)  # no `from`: the same exception, stamped; `from` would overwrite its own cause
+            raise _down_on_jira(
+                e
+            )  # no `from`: the same exception, stamped; `from` would overwrite its own cause
         raise
 
 
@@ -213,9 +234,19 @@ async def _tracker_call(call):
 # The fields a snapshot carries and `snapshot_changes` compares, in the order a
 # change is reported. `status_category`, `description_hash`, `updated` and
 # `comments` ride beside them (see `snapshot_of`).
-SNAPSHOT_FIELDS = ("summary", "status", "due_date", "priority", "estimate_hours",
-                   "assignee", "labels", "stakes", "value", "lateness_loss",
-                   "deadline_type")
+SNAPSHOT_FIELDS = (
+    "summary",
+    "status",
+    "due_date",
+    "priority",
+    "estimate_hours",
+    "assignee",
+    "labels",
+    "stakes",
+    "value",
+    "lateness_loss",
+    "deadline_type",
+)
 
 # How many new comments one block's change carries, and how much of each.
 CHANGE_COMMENTS = 3
@@ -236,9 +267,11 @@ def comment_marker(page: dict | None) -> dict | None:
     if page is None:
         return None
     newest = (page.get("comments") or [None])[0]
-    return {"count": page.get("total", 0),
-            "latest_id": newest.get("id") if newest else None,
-            "latest_created": newest.get("created") if newest else None}
+    return {
+        "count": page.get("total", 0),
+        "latest_id": newest.get("id") if newest else None,
+        "latest_created": newest.get("created") if newest else None,
+    }
 
 
 def snapshot_of(issue: dict, names: dict, page: dict | None = None) -> dict:
@@ -251,10 +284,13 @@ def snapshot_of(issue: dict, names: dict, page: dict | None = None) -> dict:
     `updated` (the tracker's stamp) and `comments` (`comment_marker` of `page`)."""
     labels = issue.get("labels")
     snap = {
-        "summary": issue.get("summary"), "status": issue.get("status"),
+        "summary": issue.get("summary"),
+        "status": issue.get("status"),
         "status_category": issue.get("status_category"),
-        "due_date": issue.get("due_date"), "priority": issue.get("priority"),
-        "estimate_hours": issue.get("estimate_hours"), "assignee": issue.get("assignee"),
+        "due_date": issue.get("due_date"),
+        "priority": issue.get("priority"),
+        "estimate_hours": issue.get("estimate_hours"),
+        "assignee": issue.get("assignee"),
         "labels": sorted(str(x) for x in labels) if isinstance(labels, list) else None,
         "description_hash": _description_hash(issue.get("description")),
         "updated": issue.get("updated"),
@@ -274,19 +310,27 @@ def snapshot_changes(old: dict, new: dict) -> list[dict]:
     in `SNAPSHOT_FIELDS` order, a description edit last (the hash proves an edit
     and the text is not kept). A field one side does not carry is not compared:
     absent is "not recorded", never "empty"."""
-    out = [{"field": f, "was": old[f], "now": new[f]}
-           for f in SNAPSHOT_FIELDS if f in old and f in new and old[f] != new[f]]
+    out = [
+        {"field": f, "was": old[f], "now": new[f]}
+        for f in SNAPSHOT_FIELDS
+        if f in old and f in new and old[f] != new[f]
+    ]
     was, now = old.get("description_hash"), new.get("description_hash")
     if "description_hash" in old and "description_hash" in new and was != now:
-        out.append({"field": "description", "was": "an earlier version",
-                    "now": "edited (the text is not kept here; read the issue)"})
+        out.append(
+            {
+                "field": "description",
+                "was": "an earlier version",
+                "now": "edited (the text is not kept here; read the issue)",
+            }
+        )
     return out
 
 
 def _comment_is_newer(comment: dict, marker: dict) -> bool:
     latest = marker.get("latest_id")
     if latest is None:
-        return True                              # there were no comments then
+        return True  # there were no comments then
     cid = comment.get("id")
     try:
         return int(cid) > int(latest)
@@ -305,9 +349,14 @@ def new_comments(page_comments: list[dict], old: dict | None, now: dict | None) 
     shown = []
     for c in newer[:CHANGE_COMMENTS]:
         body = str(c.get("body") or "")
-        shown.append({"author": c.get("author"), "created": c.get("created"),
-                      "text": body[:COMMENT_QUOTE_CHARS],
-                      **({"text_truncated": True} if len(body) > COMMENT_QUOTE_CHARS else {})})
+        shown.append(
+            {
+                "author": c.get("author"),
+                "created": c.get("created"),
+                "text": body[:COMMENT_QUOTE_CHARS],
+                **({"text_truncated": True} if len(body) > COMMENT_QUOTE_CHARS else {}),
+            }
+        )
     delta = 0
     if now is not None and isinstance(old.get("count"), int) and isinstance(now.get("count"), int):
         delta = now["count"] - old["count"]
@@ -329,8 +378,10 @@ async def issue_state(issue_key: str, *, full: bool = True) -> dict:
         return {"status_category": issue.get("status_category"), "snapshot": None}
     names = await _tracker_call(ea_backlog.tracker_field_names())
     page = await _tracker_call(jira.list_comments(issue_key, limit=CHANGE_COMMENTS))
-    return {"status_category": issue.get("status_category"),
-            "snapshot": snapshot_of(issue, names, page)}
+    return {
+        "status_category": issue.get("status_category"),
+        "snapshot": snapshot_of(issue, names, page),
+    }
 
 
 # --- the brief form of the stored plan ---------------------------------------------
@@ -346,11 +397,20 @@ async def brief(plan_date=None) -> dict:
     if plan is None:
         return {"available": False, "reason": "no plan stored", "date": plan_date.isoformat()}
     return {
-        "available": True, "date": plan_date.isoformat(),
-        "proposal_id": plan.get("proposal_id"), "stored_at": plan.get("created_at"),
-        "items": [{"rank": i.get("rank"), "issue_key": i.get("issue_key"),
-                   "reason": i.get("reason"), "estimate_hours": i.get("estimate_hours"),
-                   "tier": i.get("tier")} for i in plan.get("items") or []],
+        "available": True,
+        "date": plan_date.isoformat(),
+        "proposal_id": plan.get("proposal_id"),
+        "stored_at": plan.get("created_at"),
+        "items": [
+            {
+                "rank": i.get("rank"),
+                "issue_key": i.get("issue_key"),
+                "reason": i.get("reason"),
+                "estimate_hours": i.get("estimate_hours"),
+                "tier": i.get("tier"),
+            }
+            for i in plan.get("items") or []
+        ],
     }
 
 
@@ -365,21 +425,30 @@ async def _tracker_status(key: str) -> dict:
             raise
         return {"readable": False, "reason": _reason(e), "done": None}
     category = issue.get("status_category")
-    return {"readable": True, "status": issue.get("status"), "status_category": category,
-            "done": (category == "done") if category else None}
+    return {
+        "readable": True,
+        "status": issue.get("status"),
+        "status_category": category,
+        "done": (category == "done") if category else None,
+    }
 
 
 async def _block_now(row: dict, plan_date: date) -> dict:
     out = {"event_id": row["event_id"], "issue_key": row.get("issue_key")}
     if row.get("retired_at") is not None:
-        return {**out, "state": "retired", "retired_at": row["retired_at"],
-                "retired_by": row.get("retired_by")}
+        return {
+            **out,
+            "state": "retired",
+            "retired_at": row["retired_at"],
+            "retired_by": row.get("retired_by"),
+        }
     out["state"] = "active"
     if not calendar_facade.provider_configured():
         return {**out, "calendar": "not configured"}
     try:
-        ev = await calendar_facade.get_event(row["event_id"],
-                                             calendar_id=row.get("calendar_id") or "primary")
+        ev = await calendar_facade.get_event(
+            row["event_id"], calendar_id=row.get("calendar_id") or "primary"
+        )
     except Exception as e:  # a NO is said, an outage raises
         if is_down(e):
             raise
@@ -387,8 +456,11 @@ async def _block_now(row: dict, plan_date: date) -> dict:
     out.update({"start": ev.get("start"), "end": ev.get("end")})
     try:
         start = datetime.fromisoformat(str(ev.get("start")))
-        local = (start.astimezone(ZoneInfo(settings.ea_timezone)).date()
-                 if start.tzinfo else start.date())
+        local = (
+            start.astimezone(ZoneInfo(settings.ea_timezone)).date()
+            if start.tzinfo
+            else start.date()
+        )
         if local != plan_date:
             out["moved_off_day"] = local.isoformat()
     except (TypeError, ValueError):
@@ -401,11 +473,15 @@ def _done_jql(plan_date: date) -> tuple[str | None, str | None]:
     if re.search(r"\border\s+by\b", base, re.IGNORECASE):
         return None, "the backlog JQL has an ORDER BY, so it cannot be narrowed safely"
     if len(_OPEN_CLAUSE.findall(base)) != 1:
-        return None, ("the backlog JQL has no single `statusCategory != Done` clause to "
-                      "turn into `statusCategory = Done`")
+        return None, (
+            "the backlog JQL has no single `statusCategory != Done` clause to "
+            "turn into `statusCategory = Done`"
+        )
     after = plan_date + timedelta(days=1)
-    return (f"({_OPEN_CLAUSE.sub('statusCategory = Done', base)}) AND "
-            f'resolved >= "{plan_date.isoformat()}" AND resolved < "{after.isoformat()}"'), None
+    return (
+        f"({_OPEN_CLAUSE.sub('statusCategory = Done', base)}) AND "
+        f'resolved >= "{plan_date.isoformat()}" AND resolved < "{after.isoformat()}"'
+    ), None
 
 
 async def _unplanned_done(plan_date: date, planned: set[str]) -> dict:
@@ -418,17 +494,24 @@ async def _unplanned_done(plan_date: date, planned: set[str]) -> dict:
         if is_down(e):
             raise
         return {"unplanned_done_omitted": f"the tracker refused the search: {_reason(e)}"}
-    rows = [{"issue_key": i.get("issue_key"), "summary": i.get("summary"),
-             "status": i.get("status")}
-            for i in out.get("issues") or [] if i.get("issue_key") not in planned]
-    return {"unplanned_done": {"asked": jql, "issues": rows,
-                               "truncated": bool(out.get("truncated"))}}
+    rows = [
+        {"issue_key": i.get("issue_key"), "summary": i.get("summary"), "status": i.get("status")}
+        for i in out.get("issues") or []
+        if i.get("issue_key") not in planned
+    ]
+    return {
+        "unplanned_done": {"asked": jql, "issues": rows, "truncated": bool(out.get("truncated"))}
+    }
 
 
 def _outcome(row: dict) -> dict:
-    return {"done": row["done"], "actual_hours": row.get("actual_hours"),
-            "note": row.get("note"), "recorded_at": row.get("created_at"),
-            "proposal_id": row.get("proposal_id")}
+    return {
+        "done": row["done"],
+        "actual_hours": row.get("actual_hours"),
+        "note": row.get("note"),
+        "recorded_at": row.get("created_at"),
+        "proposal_id": row.get("proposal_id"),
+    }
 
 
 async def review(plan_date) -> dict:
@@ -450,28 +533,43 @@ async def review(plan_date) -> dict:
     rows = []
     for item in items:
         key = str(item.get("issue_key"))
-        tracker = (await _tracker_status(key) if tracker_on else
-                   {"readable": False, "reason": "the tracker is not configured", "done": None})
-        rows.append({
-            "rank": item.get("rank"), "issue_key": key, "reason": item.get("reason"),
-            "summary": item.get("summary"),
-            "planned": {n: item.get(n) for n in PLANNED_NUMBERS},
-            **({"planned_unreadable": item.get("unreadable_reason")}
-               if item.get("readable") is False else {}),
-            "tracker": tracker,
-            "blocks": [await _block_now(b, plan_date) for b in blocks
-                       if b.get("issue_key") == key],
-            "outcome": _outcome(outcomes[key]) if key in outcomes else None,
-        })
+        tracker = (
+            await _tracker_status(key)
+            if tracker_on
+            else {"readable": False, "reason": "the tracker is not configured", "done": None}
+        )
+        rows.append(
+            {
+                "rank": item.get("rank"),
+                "issue_key": key,
+                "reason": item.get("reason"),
+                "summary": item.get("summary"),
+                "planned": {n: item.get(n) for n in PLANNED_NUMBERS},
+                **(
+                    {"planned_unreadable": item.get("unreadable_reason")}
+                    if item.get("readable") is False
+                    else {}
+                ),
+                "tracker": tracker,
+                "blocks": [
+                    await _block_now(b, plan_date) for b in blocks if b.get("issue_key") == key
+                ],
+                "outcome": _outcome(outcomes[key]) if key in outcomes else None,
+            }
+        )
 
     out = {
-        "available": True, "date": plan_date.isoformat(),
-        "proposal_id": plan.get("proposal_id"), "stored_at": plan.get("created_at"),
+        "available": True,
+        "date": plan_date.isoformat(),
+        "proposal_id": plan.get("proposal_id"),
+        "stored_at": plan.get("created_at"),
         "items": rows,
-        "blocks_not_on_plan": [await _block_now(b, plan_date) for b in blocks
-                               if b.get("issue_key") not in planned],
-        "unplanned_outcomes": [{"issue_key": k, **_outcome(r)} for k, r in outcomes.items()
-                               if not r.get("planned")],
+        "blocks_not_on_plan": [
+            await _block_now(b, plan_date) for b in blocks if b.get("issue_key") not in planned
+        ],
+        "unplanned_outcomes": [
+            {"issue_key": k, **_outcome(r)} for k, r in outcomes.items() if not r.get("planned")
+        ],
     }
     if tracker_on:
         out.update(await _unplanned_done(plan_date, planned))
@@ -496,8 +594,9 @@ def _serves(block: dict, today: date, due: date) -> bool:
     return planned is not None and today <= planned <= due
 
 
-def deadline_coverage(rows: list[dict], blocks: list[dict], today: date, days: int,
-                      padding: float = 1.0) -> dict:
+def deadline_coverage(
+    rows: list[dict], blocks: list[dict], today: date, days: int, padding: float = 1.0
+) -> dict:
     """PURE. For each issue in `rows` (`ea_backlog.rank()` rows, any tier) due
     from `today` through `today + days`, the work-block minutes the plan ledger
     holds for it against its padded estimate, soonest due first, then key.
@@ -527,17 +626,24 @@ def deadline_coverage(rows: list[dict], blocks: list[dict], today: date, days: i
             needed, coverage = None, "unestimated"
         else:
             needed = math.ceil(estimate * pad * 60)
-            coverage = ("covered" if minutes >= needed else "partly" if minutes > 0
-                        else "none")
-        out.append({
-            "issue_key": key, "summary": r.get("summary"), "due_date": due.isoformat(),
-            "deadline_type": r.get("deadline_type"), "tier": r.get("tier"),
-            "value": r.get("value"), "lateness_loss": r.get("lateness_loss"),
-            "estimate_hours": estimate or None,
-            "needed_minutes": needed, "block_minutes": minutes, "blocks": len(mine),
-            **({"blocks_unread": unread} if unread else {}),
-            "coverage": coverage,
-        })
+            coverage = "covered" if minutes >= needed else "partly" if minutes > 0 else "none"
+        out.append(
+            {
+                "issue_key": key,
+                "summary": r.get("summary"),
+                "due_date": due.isoformat(),
+                "deadline_type": r.get("deadline_type"),
+                "tier": r.get("tier"),
+                "value": r.get("value"),
+                "lateness_loss": r.get("lateness_loss"),
+                "estimate_hours": estimate or None,
+                "needed_minutes": needed,
+                "block_minutes": minutes,
+                "blocks": len(mine),
+                **({"blocks_unread": unread} if unread else {}),
+                "coverage": coverage,
+            }
+        )
     out.sort(key=lambda i: (i["due_date"], str(i["issue_key"] or "")))
     return {
         "window": {"from": today.isoformat(), "to": end.isoformat(), "days": int(days)},
@@ -554,8 +660,9 @@ async def _block_minutes(row: dict) -> dict:
     if not calendar_facade.provider_configured():
         return {**out, "minutes": None, "unread": "calendar not configured"}
     try:
-        ev = await calendar_facade.get_event(row["event_id"],
-                                             calendar_id=row.get("calendar_id") or "primary")
+        ev = await calendar_facade.get_event(
+            row["event_id"], calendar_id=row.get("calendar_id") or "primary"
+        )
     except Exception as e:  # a NO is said, an outage raises
         if is_down(e):
             raise
@@ -585,17 +692,27 @@ async def deadlines(days: int) -> dict:
     rows = [r for t in ea_backlog.TIERS for r in read["ranked"]["tiers"][t]]
     today = ea_backlog._today()
     end = today + timedelta(days=max(0, int(days)))
-    due = {r["issue_key"]: _as_date(r["due_date"]) for r in rows
-           if r.get("due_date") and today <= _as_date(r["due_date"]) <= end}
+    due = {
+        r["issue_key"]: _as_date(r["due_date"])
+        for r in rows
+        if r.get("due_date") and today <= _as_date(r["due_date"]) <= end
+    }
     blocks = []
     for b in await repo.list_active_work_blocks_from(today):
         if b.get("issue_key") in due and _serves(b, today, due[b["issue_key"]]):
-            blocks.append(await _block_minutes(b))     # one read at a time
+            blocks.append(await _block_minutes(b))  # one read at a time
     out = deadline_coverage(rows, blocks, today, days, read["padding"]["ratio"])
-    unread = [{"event_id": b["event_id"], "issue_key": b.get("issue_key"),
-               "reason": b["unread"]} for b in blocks if b.get("minutes") is None]
-    return {"available": True, **out, "truncated": read["truncated"],
-            **({"blocks_unread": unread} if unread else {})}
+    unread = [
+        {"event_id": b["event_id"], "issue_key": b.get("issue_key"), "reason": b["unread"]}
+        for b in blocks
+        if b.get("minutes") is None
+    ]
+    return {
+        "available": True,
+        **out,
+        "truncated": read["truncated"],
+        **({"blocks_unread": unread} if unread else {}),
+    }
 
 
 # --- work blocks whose issue moved (DL-221) ---------------------------------------------
@@ -638,8 +755,12 @@ def blocks_to_review(blocks: list[dict], current: dict, today: date) -> dict:
         if key not in current:
             continue
         cur = current[key]
-        row = {"event_id": b["event_id"], "calendar_id": b.get("calendar_id") or "primary",
-               "issue_key": key, "plan_date": planned.isoformat()}
+        row = {
+            "event_id": b["event_id"],
+            "calendar_id": b.get("calendar_id") or "primary",
+            "issue_key": key,
+            "plan_date": planned.isoformat(),
+        }
         if cur is None:
             finished.append({**row, "reason": "issue_missing"})
             continue
@@ -651,18 +772,37 @@ def blocks_to_review(blocks: list[dict], current: dict, today: date) -> dict:
             continue
         old = b.get("issue_snapshot")
         if old is None:
-            advance.append({"event_id": b["event_id"], "calendar_id": row["calendar_id"],
-                            "from": None, "to": fresh})
+            advance.append(
+                {
+                    "event_id": b["event_id"],
+                    "calendar_id": row["calendar_id"],
+                    "from": None,
+                    "to": fresh,
+                }
+            )
             continue
         changes = snapshot_changes(old, fresh)
-        shown, omitted = new_comments(cur.get("comments") or [], old.get("comments"),
-                                      fresh.get("comments"))
+        shown, omitted = new_comments(
+            cur.get("comments") or [], old.get("comments"), fresh.get("comments")
+        )
         if changes or shown:
-            changed.append({**row, "changes": changes, "comments": shown,
-                            **({"comments_omitted": omitted} if omitted else {})})
+            changed.append(
+                {
+                    **row,
+                    "changes": changes,
+                    "comments": shown,
+                    **({"comments_omitted": omitted} if omitted else {}),
+                }
+            )
         if fresh != old:
-            advance.append({"event_id": b["event_id"], "calendar_id": row["calendar_id"],
-                            "from": old, "to": fresh})
+            advance.append(
+                {
+                    "event_id": b["event_id"],
+                    "calendar_id": row["calendar_id"],
+                    "from": old,
+                    "to": fresh,
+                }
+            )
     order = lambda r: (r["plan_date"], str(r["issue_key"]), str(r["event_id"]))
     finished.sort(key=order)
     changed.sort(key=order)
@@ -702,7 +842,9 @@ async def _read_issues_by_key(keys: list[str]) -> tuple[dict, list[dict]]:
         out = await jira.search_issues(jql, limit=len(keys))
     except Exception as e:  # noqa: BLE001 — a NO falls back to per-key reads, an outage raises
         if is_down(e):
-            raise _down_on_jira(e)  # no `from`: the same exception, stamped; `from` would overwrite its own cause
+            raise _down_on_jira(
+                e
+            )  # no `from`: the same exception, stamped; `from` would overwrite its own cause
         rows = []
     else:
         rows = out.get("issues") or []
@@ -744,7 +886,7 @@ async def block_review(today: date | None = None) -> dict:
     rows = await repo.list_active_work_blocks_from(today)
     base = {"available": True, "as_of": today.isoformat(), "blocks_checked": len(rows)}
     keys: list[str] = []
-    for r in rows:                              # soonest block first, each key once
+    for r in rows:  # soonest block first, each key once
         key = r.get("issue_key")
         if key and key not in keys:
             keys.append(key)
@@ -773,12 +915,14 @@ async def block_review(today: date | None = None) -> dict:
             if issue.get("status_category") == "done":
                 current[key] = {"status_category": "done"}
                 continue
-            stale = any(b.get("issue_snapshot") is None
-                        or b["issue_snapshot"].get("updated") != issue.get("updated")
-                        for b in rows if b.get("issue_key") == key)
+            stale = any(
+                b.get("issue_snapshot") is None
+                or b["issue_snapshot"].get("updated") != issue.get("updated")
+                for b in rows
+                if b.get("issue_key") == key
+            )
             if not stale:
-                current[key] = {"status_category": issue.get("status_category"),
-                                "snapshot": None}
+                current[key] = {"status_category": issue.get("status_category"), "snapshot": None}
                 continue
             try:
                 if names is None:
@@ -793,15 +937,21 @@ async def block_review(today: date | None = None) -> dict:
                 else:
                     unread.append({"issue_key": key, "reason": _reason(e)})
                 continue
-            current[key] = {"status_category": full.get("status_category"),
-                            "snapshot": snapshot_of(full, names, page),
-                            "comments": page.get("comments") or []}
+            current[key] = {
+                "status_category": full.get("status_category"),
+                "snapshot": snapshot_of(full, names, page),
+                "comments": page.get("comments") or [],
+            }
     out = blocks_to_review(rows, current, today)
-    return {**base, "complete": not unread,
-            "counts": {"finished": len(out["finished"]), "changed": len(out["changed"])},
-            "finished": out["finished"], "changed": out["changed"],
-            **({"issues_not_read": unread} if unread else {}),
-            "_advance": out["advance"]}
+    return {
+        **base,
+        "complete": not unread,
+        "counts": {"finished": len(out["finished"]), "changed": len(out["changed"])},
+        "finished": out["finished"],
+        "changed": out["changed"],
+        **({"issues_not_read": unread} if unread else {}),
+        "_advance": out["advance"],
+    }
 
 
 # --- the time audit, from the record (DL-221 step 5) -------------------------------------
@@ -810,24 +960,30 @@ SLIP_LIMIT = 10
 UNPLANNED_LISTED = 20
 
 
-def audit_from(plans: list[dict], outcomes: list[dict], blocks: list[dict],
-               since: date, until: date, min_samples: int) -> dict:
+def audit_from(
+    plans: list[dict],
+    outcomes: list[dict],
+    blocks: list[dict],
+    since: date,
+    until: date,
+    min_samples: int,
+) -> dict:
     """PURE. The time audit of `[since, until]` from the stored plans, the
     recorded outcomes and the ledger's work blocks created in the window
     (`created_for` set from the creating proposal). See `audit()`."""
-    window = {"from": since.isoformat(), "to": until.isoformat(),
-              "days": (until - since).days + 1}
+    window = {"from": since.isoformat(), "to": until.isoformat(), "days": (until - since).days + 1}
     created = len(blocks)
     known = [b for b in blocks if b.get("created_for")]
-    moved = [b for b in known
-             if str(b.get("plan_date")) != str(b.get("created_for"))]
+    moved = [b for b in known if str(b.get("plan_date")) != str(b.get("created_for"))]
     retired = [b for b in blocks if b.get("retired_at") is not None]
     block_part = {
-        "what": ("work blocks the plan ledger recorded as created in the window; "
-                 "`moved_off_day` counts those whose plan date now differs from "
-                 "the date their creating proposal gave them, `retired` those since "
-                 "deleted or released, `origin_unknown` those whose creating "
-                 "proposal is not on record"),
+        "what": (
+            "work blocks the plan ledger recorded as created in the window; "
+            "`moved_off_day` counts those whose plan date now differs from "
+            "the date their creating proposal gave them, `retired` those since "
+            "deleted or released, `origin_unknown` those whose creating "
+            "proposal is not on record"
+        ),
         "created": created,
         "moved_off_day": len(moved),
         "retired": len(retired),
@@ -837,18 +993,33 @@ def audit_from(plans: list[dict], outcomes: list[dict], blocks: list[dict],
     unplanned_part = {
         "what": "outcomes the operator recorded for work that was not on that day's plan",
         "count": len(unplanned),
-        "issues": [{"date": str(o["plan_date"]), "issue_key": o["issue_key"],
-                    "done": o["done"], "actual_hours": o.get("actual_hours")}
-                   for o in unplanned[:UNPLANNED_LISTED]],
+        "issues": [
+            {
+                "date": str(o["plan_date"]),
+                "issue_key": o["issue_key"],
+                "done": o["done"],
+                "actual_hours": o.get("actual_hours"),
+            }
+            for o in unplanned[:UNPLANNED_LISTED]
+        ],
     }
-    base = {"available": True, "window": window, "days_with_plan": len(plans),
-            "days_without_plan": window["days"] - len(plans),
-            "blocks": block_part, "unplanned_outcomes": unplanned_part}
+    base = {
+        "available": True,
+        "window": window,
+        "days_with_plan": len(plans),
+        "days_without_plan": window["days"] - len(plans),
+        "blocks": block_part,
+        "unplanned_outcomes": unplanned_part,
+    }
     if not plans:
-        return {**base, "no_record": (
-            f"No day plan was stored on any of the {window['days']} days from "
-            f"{window['from']} to {window['to']}, so there is no record of planned "
-            "time to audit. This is an absence of record, not a clean one.")}
+        return {
+            **base,
+            "no_record": (
+                f"No day plan was stored on any of the {window['days']} days from "
+                f"{window['from']} to {window['to']}, so there is no record of planned "
+                "time to audit. This is an absence of record, not a clean one."
+            ),
+        }
 
     by_day = {(str(o["plan_date"]), o["issue_key"]): o for o in outcomes}
     items = {"planned": 0, "done": 0, "not_done": 0, "unknown": 0}
@@ -862,12 +1033,12 @@ def audit_from(plans: list[dict], outcomes: list[dict], blocks: list[dict],
             key = str(item.get("issue_key"))
             outcome = by_day.get((day, key))
             items["planned"] += 1
-            state = ("unknown" if outcome is None else
-                     "done" if outcome["done"] else "not_done")
+            state = "unknown" if outcome is None else "done" if outcome["done"] else "not_done"
             items[state] += 1
             tier = item.get("tier") or "unread"
-            t = tiers.setdefault(tier, {"planned": 0, "done": 0, "estimated_hours": 0.0,
-                                        "actual_hours": 0.0})
+            t = tiers.setdefault(
+                tier, {"planned": 0, "done": 0, "estimated_hours": 0.0, "actual_hours": 0.0}
+            )
             t["planned"] += 1
             t["done"] += state == "done"
             estimate = _positive(item.get("estimate_hours"))
@@ -879,50 +1050,82 @@ def audit_from(plans: list[dict], outcomes: list[dict], blocks: list[dict],
                 hours["actual_reported_planned"] += actual
                 t["actual_hours"] += actual
             samples.append({"actual_hours": actual, "estimate_hours": estimate})
-            issue = per_issue.setdefault(key, {"issue_key": key,
-                                               "summary": item.get("summary"),
-                                               "planned_days": 0, "slipped_days": 0,
-                                               "slipped_on": []})
+            issue = per_issue.setdefault(
+                key,
+                {
+                    "issue_key": key,
+                    "summary": item.get("summary"),
+                    "planned_days": 0,
+                    "slipped_days": 0,
+                    "slipped_on": [],
+                },
+            )
             issue["planned_days"] += 1
             if state != "done":
                 issue["slipped_days"] += 1
                 issue["slipped_on"].append(day)
 
-    both = [(s["actual_hours"], s["estimate_hours"]) for s in samples
-            if s["actual_hours"] is not None and s["estimate_hours"]]
+    both = [
+        (s["actual_hours"], s["estimate_hours"])
+        for s in samples
+        if s["actual_hours"] is not None and s["estimate_hours"]
+    ]
     matched_actual = sum(a for a, _ in both)
     matched_estimate = sum(e for _, e in both)
-    slipped = sorted((i for i in per_issue.values() if i["slipped_days"]),
-                     key=lambda i: (-i["slipped_days"], -i["planned_days"], i["issue_key"]))
+    slipped = sorted(
+        (i for i in per_issue.values() if i["slipped_days"]),
+        key=lambda i: (-i["slipped_days"], -i["planned_days"], i["issue_key"]),
+    )
     return {
         **base,
-        "items": {"what": ("planned items across the stored plans (one per issue per "
-                           "day); done and not done are the outcomes the operator "
-                           "recorded, unknown means no outcome was recorded"), **items},
+        "items": {
+            "what": (
+                "planned items across the stored plans (one per issue per "
+                "day); done and not done are the outcomes the operator "
+                "recorded, unknown means no outcome was recorded"
+            ),
+            **items,
+        },
         "hours": {
-            "what": ("`estimated_planned` sums the estimates stored with the planned "
-                     "items; `actual_reported_planned` sums the actual hours the "
-                     "operator reported for them; the ratio is actual over estimate "
-                     "across the items that carry both"),
+            "what": (
+                "`estimated_planned` sums the estimates stored with the planned "
+                "items; `actual_reported_planned` sums the actual hours the "
+                "operator reported for them; the ratio is actual over estimate "
+                "across the items that carry both"
+            ),
             "estimated_planned": round(hours["estimated_planned"], 2),
             "actual_reported_planned": round(hours["actual_reported_planned"], 2),
             "items_with_both": len(both),
             "estimate_of_those": round(matched_estimate, 2),
             "actual_of_those": round(matched_actual, 2),
-            "actual_over_estimate": (round(matched_actual / matched_estimate, 4)
-                                     if matched_estimate else None),
+            "actual_over_estimate": (
+                round(matched_actual / matched_estimate, 4) if matched_estimate else None
+            ),
             "padding_from_these": padding_ratio(samples, min_samples)["ratio"],
         },
-        "by_tier": {"what": ("planned items by the tier they held when the plan was "
-                             "stored (`unread`: the tracker could not read the issue)"),
-                    **{k: {**v, "estimated_hours": round(v["estimated_hours"], 2),
-                           "actual_hours": round(v["actual_hours"], 2)}
-                       for k, v in sorted(tiers.items())}},
-        "slipped": {"what": ("issues planned on a day with no done outcome that day "
-                             "(recorded not done, or nothing recorded), most often "
-                             f"first; at most {SLIP_LIMIT}"),
-                    "issues_slipping": len(slipped),
-                    "issues": slipped[:SLIP_LIMIT]},
+        "by_tier": {
+            "what": (
+                "planned items by the tier they held when the plan was "
+                "stored (`unread`: the tracker could not read the issue)"
+            ),
+            **{
+                k: {
+                    **v,
+                    "estimated_hours": round(v["estimated_hours"], 2),
+                    "actual_hours": round(v["actual_hours"], 2),
+                }
+                for k, v in sorted(tiers.items())
+            },
+        },
+        "slipped": {
+            "what": (
+                "issues planned on a day with no done outcome that day "
+                "(recorded not done, or nothing recorded), most often "
+                f"first; at most {SLIP_LIMIT}"
+            ),
+            "issues_slipping": len(slipped),
+            "issues": slipped[:SLIP_LIMIT],
+        },
     }
 
 
@@ -944,5 +1147,4 @@ async def audit(days_back: int, today: date | None = None) -> dict:
     plans = await repo.list_day_plans_between(since, until)
     outcomes = await repo.list_day_plan_outcomes_between(since, until)
     blocks = await repo.list_work_blocks_created_between(start, end)
-    return audit_from(plans, outcomes, blocks, since, until,
-                      settings.plan_padding_min_samples)
+    return audit_from(plans, outcomes, blocks, since, until, settings.plan_padding_min_samples)

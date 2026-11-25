@@ -73,6 +73,8 @@ def _image_k8s() -> str:
 
 def _image_podman() -> str:
     return os.environ.get("CC_SANDBOX_IMAGE", "").strip() or _IMAGE_PODMAN_DEFAULT
+
+
 # runner.py -> sandbox/ -> central_command/ -> repo root.
 _DEFAULT_COPY_ROOT = Path(__file__).resolve().parents[2]
 _OUTPUT_CAP = 20_000
@@ -156,9 +158,7 @@ async def _run_podman(
     return await _run(["podman", *args], input_data, timeout)
 
 
-async def _run(
-    cmd: list[str], input_data: bytes | None, timeout: float
-) -> tuple[int, str, str]:
+async def _run(cmd: list[str], input_data: bytes | None, timeout: float) -> tuple[int, str, str]:
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdin=asyncio.subprocess.PIPE if input_data is not None else None,
@@ -166,9 +166,7 @@ async def _run(
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(input_data), timeout=timeout
-        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(input_data), timeout=timeout)
     except TimeoutError:
         proc.kill()
         await proc.wait()
@@ -239,9 +237,7 @@ def _job_manifest(name: str, agent_id: str) -> dict:
                             # everything that actually happens inside it.
                             "command": ["sleep", str(ttl)],
                             "workingDir": "/workspace",
-                            "volumeMounts": [
-                                {"name": "workspace", "mountPath": "/workspace"}
-                            ],
+                            "volumeMounts": [{"name": "workspace", "mountPath": "/workspace"}],
                             "resources": {
                                 "requests": {"memory": "512Mi", "cpu": "250m"},
                                 "limits": {"memory": "1Gi", "cpu": "1000m"},
@@ -266,9 +262,7 @@ async def _pod_for_job(name: str) -> str | None:
     return items[0]["metadata"]["name"] if items else None
 
 
-async def _exec_script(
-    sandbox_id: str, script: str, timeout: float = 30.0
-) -> tuple[int, str, str]:
+async def _exec_script(sandbox_id: str, script: str, timeout: float = 30.0) -> tuple[int, str, str]:
     """The ONE exec seam both backends share, so exec/write/read run byte-
     identical script bodies on either. kubectl needs the Job's pod resolved
     first; podman execs the container NAME, which IS the sandbox id — nothing
@@ -354,12 +348,25 @@ async def _create_session_podman(name: str, agent_id: str) -> dict:
     rc, _out, _err = await _run_podman(["container", "exists", name])
     if rc != 0:
         ttl = _ttl_seconds()
-        rc, _out, err = await _run_podman([
-            "run", "-d", "--name", name,
-            "--label", "app=cc-sandbox", "--label", f"cc-agent={agent_id}",
-            "--memory", "1g", "--cpus", "1",
-            _image_podman(), "sleep", str(ttl),
-        ])
+        rc, _out, err = await _run_podman(
+            [
+                "run",
+                "-d",
+                "--name",
+                name,
+                "--label",
+                "app=cc-sandbox",
+                "--label",
+                f"cc-agent={agent_id}",
+                "--memory",
+                "1g",
+                "--cpus",
+                "1",
+                _image_podman(),
+                "sleep",
+                str(ttl),
+            ]
+        )
         if rc != 0:
             raise HTTPException(502, f"podman run failed: {err.strip()}")
     return {"sandbox_id": name}

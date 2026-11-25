@@ -48,8 +48,18 @@ ENV_LIB = ROOT / "deploy" / "env-lib.sh"
 LABEL = "cc.build-inputs"
 
 _DEBRIS = shutil.ignore_patterns(
-    "NUL", "nul", "CON", "con", "AUX", "aux", "PRN", "prn",
-    ".env", ".env.*", "__pycache__", "*.pyc",
+    "NUL",
+    "nul",
+    "CON",
+    "con",
+    "AUX",
+    "aux",
+    "PRN",
+    "prn",
+    ".env",
+    ".env.*",
+    "__pycache__",
+    "*.pyc",
 )
 
 
@@ -64,6 +74,7 @@ def _bash() -> str:
 
 # ── the hash, as a pure function ─────────────────────────────────────────────
 
+
 def _hash(ca: str, args: str, *sources: Path, cwd: Path) -> subprocess.CompletedProcess:
     # The inputs travel in the ENVIRONMENT, never the argv: under Git Bash an
     # argv from Windows Python is re-parsed by the MSYS runtime, which splits
@@ -71,13 +82,18 @@ def _hash(ca: str, args: str, *sources: Path, cwd: Path) -> subprocess.Completed
     # argument's place — the helper then got a source named `PIP_INDEX_URL=`
     # and exited 1 with nothing on stdout or stderr (2026-10-02 testbed, F15).
     # A real build script calls it from bash, where no such re-parse happens.
-    script = (f'. "{ENV_LIB.as_posix()}"; '
-              'mapfile -t srcs <<<"$T_SRCS"; '
-              'cc_build_inputs_hash "$T_CA" "$T_ARGS" "${srcs[@]}"')
-    env = {**os.environ, "T_CA": Path(ca).as_posix() if ca else "", "T_ARGS": args,
-           "T_SRCS": "\n".join(s.as_posix() for s in sources)}
-    return subprocess.run([_bash(), "-c", script],
-                          capture_output=True, text=True, cwd=cwd, env=env)
+    script = (
+        f'. "{ENV_LIB.as_posix()}"; '
+        'mapfile -t srcs <<<"$T_SRCS"; '
+        'cc_build_inputs_hash "$T_CA" "$T_ARGS" "${srcs[@]}"'
+    )
+    env = {
+        **os.environ,
+        "T_CA": Path(ca).as_posix() if ca else "",
+        "T_ARGS": args,
+        "T_SRCS": "\n".join(s.as_posix() for s in sources),
+    }
+    return subprocess.run([_bash(), "-c", script], capture_output=True, text=True, cwd=cwd, env=env)
 
 
 def _h(ca: str, args: str, *sources: Path, cwd: Path) -> str:
@@ -147,7 +163,9 @@ def test_crlf_and_lf_checkouts_hash_the_same(tmp_path):
     assert (b / "Dockerfile").read_bytes() != (a / "Dockerfile").read_bytes()
     assert _h("", ARGS, a, cwd=tmp_path) == _h("", ARGS, b, cwd=tmp_path)
     # A single Dockerfile source (the sandbox's shape) too.
-    assert _h("", ARGS, a / "Dockerfile", cwd=tmp_path) == _h("", ARGS, b / "Dockerfile", cwd=tmp_path)
+    assert _h("", ARGS, a / "Dockerfile", cwd=tmp_path) == _h(
+        "", ARGS, b / "Dockerfile", cwd=tmp_path
+    )
 
 
 def test_the_build_args_and_the_ca_are_inputs(tmp_path):
@@ -155,8 +173,12 @@ def test_the_build_args_and_the_ca_are_inputs(tmp_path):
     base = _h("", ARGS, a, cwd=tmp_path)
     # A different resolved base ref, or a mirror seam, is a different image.
     assert base != _h("", ARGS.replace("3.12-slim", "3.12.8-slim"), a, cwd=tmp_path)
-    assert base != _h("", ARGS.replace("PIP_INDEX_URL=", "PIP_INDEX_URL=https://pypi.example.com/simple"),
-                      a, cwd=tmp_path)
+    assert base != _h(
+        "",
+        ARGS.replace("PIP_INDEX_URL=", "PIP_INDEX_URL=https://pypi.example.com/simple"),
+        a,
+        cwd=tmp_path,
+    )
     assert base != _h("", ARGS + "CC_TLS_INSECURE=1\n", a, cwd=tmp_path)
     # No CA and an EMPTY CA file stage the same empty cc-ca.crt: same image.
     empty = tmp_path / "empty.pem"
@@ -178,8 +200,10 @@ def test_python_bytecode_is_not_an_input(tmp_path):
     the crawler context; no Dockerfile COPYs it, and it must not rebuild the
     image on every run."""
     a = _ctx(tmp_path / "a", CTX)
-    b = _ctx(tmp_path / "b", {**CTX, "__pycache__/service.cpython-312.pyc": b"\x00\x01",
-                              "stray.pyc": b"\x02"})
+    b = _ctx(
+        tmp_path / "b",
+        {**CTX, "__pycache__/service.cpython-312.pyc": b"\x00\x01", "stray.pyc": b"\x02"},
+    )
     assert _h("", ARGS, a, cwd=tmp_path) == _h("", ARGS, b, cwd=tmp_path)
 
 
@@ -190,10 +214,25 @@ def test_an_unreadable_input_is_an_error_not_a_hash(tmp_path):
 
 
 def test_build_arg_values_come_out_of_the_argv():
-    script = (f'. "{ENV_LIB.as_posix()}"; cc_build_arg_values "$@"')
-    r = subprocess.run([_bash(), "-c", script, "x", "--build-arg", "A=1", "--tls-verify=false",
-                        "--build-arg", "B=", "--build-arg=C=3", "-t", "img"],
-                       capture_output=True, text=True)
+    script = f'. "{ENV_LIB.as_posix()}"; cc_build_arg_values "$@"'
+    r = subprocess.run(
+        [
+            _bash(),
+            "-c",
+            script,
+            "x",
+            "--build-arg",
+            "A=1",
+            "--tls-verify=false",
+            "--build-arg",
+            "B=",
+            "--build-arg=C=3",
+            "-t",
+            "img",
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
     assert r.stdout.splitlines() == ["A=1", "B=", "C=3"]
 
@@ -203,7 +242,7 @@ def test_build_arg_values_come_out_of_the_argv():
 # An image store in a directory: one file per ref, holding the label value
 # ("" = an image built without one). `podman images` lists refs, `image
 # inspect` fails for an absent ref, `build` records what it was asked for.
-_PODMAN = r'''#!/usr/bin/env bash
+_PODMAN = r"""#!/usr/bin/env bash
 echo "podman $*" >> "$STUB_LOG"
 key() { local k="${1//\//_}"; printf '%s' "${k//:/_}"; }
 case "$1" in
@@ -234,7 +273,7 @@ case "$1" in
     rm -f "$STUB_STORE/$(key "$3")"; exit 0 ;;
 esac
 exit 0
-'''
+"""
 
 SANDBOX = "localhost/cc-sandbox:1"
 
@@ -252,18 +291,25 @@ class Tree:
         self.store.mkdir()
         (tmp / "home").mkdir()
         shutil.copytree(ROOT / "deploy", self.repo / "deploy", ignore=_DEBRIS)
-        shutil.copytree(ROOT / "central_command" / "crawler",
-                        self.repo / "central_command" / "crawler", ignore=_DEBRIS)
+        shutil.copytree(
+            ROOT / "central_command" / "crawler",
+            self.repo / "central_command" / "crawler",
+            ignore=_DEBRIS,
+        )
         (self.repo / "central_command" / "db").mkdir()
-        shutil.copy2(ROOT / "central_command" / "db" / "schema.sql",
-                     self.repo / "central_command" / "db" / "schema.sql")
+        shutil.copy2(
+            ROOT / "central_command" / "db" / "schema.sql",
+            self.repo / "central_command" / "db" / "schema.sql",
+        )
         for f in (".env.example", "VERSION", ".gitignore"):
             shutil.copy2(ROOT / f, self.repo / f)
         env = (ROOT / ".env.example").read_text(encoding="utf-8")
         # Forward slashes: setup.sh SOURCES .env, and bash drops the unquoted
         # backslashes of a Windows spelling.
-        env += (f"\nCC_STATE_DIR={self.state.as_posix()}\nCC_ENABLE_SANDBOX=1\nCC_ENABLE_CRAWLER=1\n"
-                "CC_TLS_INSECURE=0\nCC_CA_BUNDLE=\n")
+        env += (
+            f"\nCC_STATE_DIR={self.state.as_posix()}\nCC_ENABLE_SANDBOX=1\nCC_ENABLE_CRAWLER=1\n"
+            "CC_TLS_INSECURE=0\nCC_CA_BUNDLE=\n"
+        )
         write_lf(self.repo / ".env", env)
         setup = self.single / "setup.sh"
         text = setup.read_text(encoding="utf-8")
@@ -274,7 +320,7 @@ class Tree:
         b = tmp / "bin"
         b.mkdir()
         write_lf(b / "podman", _PODMAN, mode=0o755)
-        python_shim(b)   # $PY must be a real interpreter (no python3 in Git's /usr/bin)
+        python_shim(b)  # $PY must be a real interpreter (no python3 in Git's /usr/bin)
 
     @property
     def script(self) -> str:
@@ -282,23 +328,38 @@ class Tree:
 
     def env(self) -> dict[str, str]:
         return with_stub_path(
-            {"PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
-             "HOME": str(self.tmp / "home"), "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
-             "STUB_LOG": self.log.as_posix(), "STUB_STORE": self.store.as_posix(), "LANG": "C.UTF-8"},
-            self.tmp / "bin")
+            {
+                "PATH": os.pathsep.join([str(self.tmp / "bin"), "/usr/bin", "/bin"]),
+                "HOME": str(self.tmp / "home"),
+                "XDG_STATE_HOME": str(self.tmp / "home" / "state"),
+                "STUB_LOG": self.log.as_posix(),
+                "STUB_STORE": self.store.as_posix(),
+                "LANG": "C.UTF-8",
+            },
+            self.tmp / "bin",
+        )
 
     def call(self, *args: str, staged: bool = False) -> subprocess.CompletedProcess:
         # staged=True is update.sh apply's acquisition: CC_STAGED_FOR names the
         # deployment (here the same temp tree), which setup.sh AND the build
         # script it runs both read.
         extra = {"CC_STAGED_FOR": str(self.repo)} if staged else {}
-        return run_driver([_bash(), str(self.single / "setup.sh"), *args], cwd=self.single,
-                          env={**self.env(), "__CALL": "1", **extra})
+        return run_driver(
+            [_bash(), str(self.single / "setup.sh"), *args],
+            cwd=self.single,
+            env={**self.env(), "__CALL": "1", **extra},
+        )
 
     def inputs_hash(self) -> str:
-        r = subprocess.run([_bash(), self.script, "--inputs-hash"], cwd=self.single,
-                           capture_output=True, text=True, timeout=60,
-                           stdin=subprocess.DEVNULL, env=self.env())
+        r = subprocess.run(
+            [_bash(), self.script, "--inputs-hash"],
+            cwd=self.single,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            stdin=subprocess.DEVNULL,
+            env=self.env(),
+        )
         assert r.returncode == 0, r.stdout + r.stderr
         return r.stdout.strip()
 
@@ -317,8 +378,9 @@ class Tree:
         return [l for l in self.log.read_text().splitlines() if l.startswith("podman build")]
 
     def fetch(self, staged: bool = False) -> subprocess.CompletedProcess:
-        return self.call("fetch_local", "image-sandbox", SANDBOX, self.script, "SEAMS",
-                         staged=staged)
+        return self.call(
+            "fetch_local", "image-sandbox", SANDBOX, self.script, "SEAMS", staged=staged
+        )
 
     def refs(self) -> list[str]:
         f = self.store / "refs"
@@ -337,7 +399,9 @@ def tree(tmp_path: Path) -> Tree:
 
 
 def _pass_line(out: str) -> str:
-    lines = [l for l in out.splitlines() if l.startswith(("PASS image-sandbox:", "FAIL image-sandbox:"))]
+    lines = [
+        l for l in out.splitlines() if l.startswith(("PASS image-sandbox:", "FAIL image-sandbox:"))
+    ]
     assert len(lines) == 1, out
     return lines[0]
 
@@ -370,18 +434,23 @@ def test_a_matching_label_is_not_rebuilt(tree: Tree):
     tree.seed(SANDBOX, tree.inputs_hash())
     assert tree.probe()
     r = tree.fetch()
-    assert _pass_line(r.stdout) == f"PASS image-sandbox: {SANDBOX} present and built from these inputs", r.stdout
+    assert (
+        _pass_line(r.stdout) == f"PASS image-sandbox: {SANDBOX} present and built from these inputs"
+    ), r.stdout
     assert tree.builds() == [], "an image built from these inputs was rebuilt"
 
 
 @drives_installer
 def test_a_different_label_is_rebuilt_with_the_new_hash(tree: Tree):
     tree.seed(SANDBOX, "0" * 64)
-    assert not tree.probe(), "the probe passed on a STALE image — a changed Dockerfile would never re-run the row"
+    assert not tree.probe(), (
+        "the probe passed on a STALE image — a changed Dockerfile would never re-run the row"
+    )
     r = tree.fetch()
     line = _pass_line(r.stdout)
-    assert line == (f"PASS image-sandbox: {SANDBOX} rebuilt — build inputs changed since the image "
-                    "was made"), r.stdout
+    assert line == (
+        f"PASS image-sandbox: {SANDBOX} rebuilt — build inputs changed since the image was made"
+    ), r.stdout
     builds = tree.builds()
     assert len(builds) == 1 and f"--label {LABEL}={tree.inputs_hash()}" in builds[0], builds
     assert tree.probe()
@@ -406,11 +475,17 @@ def test_need_image_compares_the_label_and_never_builds(tree: Tree):
     """stack's assertion keeps its meaning — never a build mid-deploy — and
     agrees with the stack rows' probe, which is the same p_image_* function."""
     r = tree.call("need_image", "image-sandbox", SANDBOX, tree.script)
-    assert r.returncode == 1 and "is not in local storage — run: ./setup.sh (it resumes at fetch)" in r.stdout, r.stdout
+    assert (
+        r.returncode == 1
+        and "is not in local storage — run: ./setup.sh (it resumes at fetch)" in r.stdout
+    ), r.stdout
     tree.seed(SANDBOX, "f" * 64)
     r = tree.call("need_image", "image-sandbox", SANDBOX, tree.script)
     assert r.returncode == 1, r.stdout
-    assert "was not built from this tree's build inputs" in r.stdout and "./setup.sh, which resumes at fetch" in r.stdout
+    assert (
+        "was not built from this tree's build inputs" in r.stdout
+        and "./setup.sh, which resumes at fetch" in r.stdout
+    )
     assert tree.builds() == [], "need_image built an image"
     tree.seed(SANDBOX, tree.inputs_hash())
     r = tree.call("need_image", "image-sandbox", SANDBOX, tree.script)
@@ -421,7 +496,7 @@ def test_need_image_compares_the_label_and_never_builds(tree: Tree):
 def test_a_changed_dockerfile_rebuilds_and_a_rollback_rebuilds_the_old_one(tree: Tree):
     """The release case and the rollback case are one mechanism: the label is
     compared with the hash of the tree checked out NOW."""
-    dockerfile = tree.repo / "deploy" / "k3s" / "sandbox.Dockerfile"   # the temp COPY
+    dockerfile = tree.repo / "deploy" / "k3s" / "sandbox.Dockerfile"  # the temp COPY
     old_text = dockerfile.read_text(encoding="utf-8")
     tree.fetch()
     old_hash = tree.label(SANDBOX)
@@ -474,15 +549,24 @@ def test_a_failed_rebuild_is_a_fail_and_the_probe_stays_false(tree: Tree):
 
 
 @drives_installer
-@pytest.mark.parametrize("script,ref", [
-    ("build-crawler-image.sh", "localhost/cc-crawler:1"),
-])
+@pytest.mark.parametrize(
+    "script,ref",
+    [
+        ("build-crawler-image.sh", "localhost/cc-crawler:1"),
+    ],
+)
 def test_the_other_build_carries_the_label_too(tree: Tree, script, ref):
     path = str(tree.single / script)
     r = tree.call("fetch_local", "image-x", ref, path, "SEAMS")
     assert f"PASS image-x: {ref} built" in r.stdout, r.stdout + r.stderr
-    want = subprocess.run([_bash(), path, "--inputs-hash"], cwd=tree.single, capture_output=True,
-                          text=True, env=tree.env(), stdin=subprocess.DEVNULL).stdout.strip()
+    want = subprocess.run(
+        [_bash(), path, "--inputs-hash"],
+        cwd=tree.single,
+        capture_output=True,
+        text=True,
+        env=tree.env(),
+        stdin=subprocess.DEVNULL,
+    ).stdout.strip()
     assert len(want) == 64 and tree.label(ref) == want
     assert tree.call("p_image_crawler").returncode == 0
 
@@ -542,8 +626,9 @@ def test_a_staged_run_builds_nothing_when_the_live_image_already_matches(tree: T
     the one it needs, so there is nothing to prove and no aside tag to leave."""
     tree.seed(SANDBOX, tree.inputs_hash())
     r = tree.fetch(staged=True)
-    assert _pass_line(r.stdout) == (f"PASS image-sandbox: {SANDBOX} present and built from this "
-                                    "release's inputs already"), r.stdout
+    assert _pass_line(r.stdout) == (
+        f"PASS image-sandbox: {SANDBOX} present and built from this release's inputs already"
+    ), r.stdout
     assert tree.builds() == []
     assert ASIDE not in tree.refs()
 
@@ -555,15 +640,19 @@ def test_a_rerun_staged_acquisition_reuses_its_aside_build(tree: Tree):
     tree.seed(SANDBOX, "0" * 64)
     tree.fetch(staged=True)
     r = tree.fetch(staged=True)
-    assert _pass_line(r.stdout).startswith(f"PASS image-sandbox: {ASIDE} present and built from "
-                                           "these inputs"), r.stdout
+    assert _pass_line(r.stdout).startswith(
+        f"PASS image-sandbox: {ASIDE} present and built from these inputs"
+    ), r.stdout
     assert len(tree.builds()) == 1
 
 
 @drives_installer
-@pytest.mark.parametrize("script,ref", [
-    ("build-crawler-image.sh", "localhost/cc-crawler:1"),
-])
+@pytest.mark.parametrize(
+    "script,ref",
+    [
+        ("build-crawler-image.sh", "localhost/cc-crawler:1"),
+    ],
+)
 def test_the_other_build_tags_aside_when_staged(tree: Tree, script, ref):
     path = str(tree.single / script)
     r = tree.call("fetch_local", "image-x", ref, path, "SEAMS", staged=True)

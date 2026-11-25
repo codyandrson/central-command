@@ -69,9 +69,7 @@ def validate_schedule(schedule_kind: str, schedule: dict) -> None:
         raise ValueError(f"unknown schedule kind {schedule_kind!r} (cron|every|at)")
 
 
-def compute_next_due(
-    schedule_kind: str, schedule: dict, after: datetime
-) -> datetime | None:
+def compute_next_due(schedule_kind: str, schedule: dict, after: datetime) -> datetime | None:
     """The next occurrence strictly after `after` (UTC). None = never again —
     which is how a one-shot whose moment has passed gets skipped, not replayed."""
     if schedule_kind == "cron":
@@ -139,8 +137,12 @@ async def _fire(schedule: dict, spec, trigger: str) -> dict:
         await events.emit(
             "heartbeat.error",
             ref_id=schedule["id"],
-            payload={"action": schedule["action_kind"], "trigger": trigger,
-                     "error": str(e)[:300], "transient": is_transient(e)},
+            payload={
+                "action": schedule["action_kind"],
+                "trigger": trigger,
+                "error": str(e)[:300],
+                "transient": is_transient(e),
+            },
             actor="heartbeat",
         )
         return {"ok": False, "error": str(e)}
@@ -151,8 +153,7 @@ async def _fire(schedule: dict, spec, trigger: str) -> dict:
     await events.emit(
         "heartbeat.completed",
         ref_id=schedule["id"],
-        payload={"action": schedule["action_kind"], "trigger": trigger,
-                 "result": result},
+        payload={"action": schedule["action_kind"], "trigger": trigger, "result": result},
         actor="heartbeat",
     )
     return {"ok": True, "result": result}
@@ -182,9 +183,7 @@ class HeartbeatEngine:
             return True
         conn = await repo._conn()
         try:
-            got = await conn.fetchval(
-                "select pg_try_advisory_lock($1)", HEARTBEAT_LEASE_KEY
-            )
+            got = await conn.fetchval("select pg_try_advisory_lock($1)", HEARTBEAT_LEASE_KEY)
         except Exception:
             await conn.close()
             raise
@@ -198,9 +197,7 @@ class HeartbeatEngine:
         if self._lease_conn is None:
             return
         try:
-            await self._lease_conn.execute(
-                "select pg_advisory_unlock($1)", HEARTBEAT_LEASE_KEY
-            )
+            await self._lease_conn.execute("select pg_advisory_unlock($1)", HEARTBEAT_LEASE_KEY)
         finally:
             await self._lease_conn.close()
             self._lease_conn = None
@@ -240,8 +237,7 @@ class HeartbeatEngine:
             await events.emit("heartbeat.stopped", actor="heartbeat")
 
     async def _loop(self) -> None:
-        log.info("heartbeat: tick loop started (every %.0fs)",
-                 settings.heartbeat_tick_seconds)
+        log.info("heartbeat: tick loop started (every %.0fs)", settings.heartbeat_tick_seconds)
         while not self._stopping.is_set():
             try:
                 await self._tick()
@@ -281,14 +277,14 @@ class HeartbeatEngine:
                 await events.emit(
                     "heartbeat.skipped",
                     ref_id=sid,
-                    payload={"late_seconds": int(late),
-                             "note": "firing once now; missed occurrences are not replayed"},
+                    payload={
+                        "late_seconds": int(late),
+                        "note": "firing once now; missed occurrences are not replayed",
+                    },
                     actor="heartbeat",
                 )
             await fire(s)
-            nxt = compute_next_due(
-                s["schedule_kind"], s["schedule"], datetime.now(UTC)
-            )
+            nxt = compute_next_due(s["schedule_kind"], s["schedule"], datetime.now(UTC))
             self._next_due[sid] = nxt
             if nxt is None:
                 await self._retire_one_shot(sid, "one-shot fired")
@@ -322,8 +318,7 @@ class HeartbeatEngine:
             "reason": self.last_reason,
             "tick_seconds": settings.heartbeat_tick_seconds,
             "next_due": {
-                sid: due.isoformat() if due else None
-                for sid, due in sorted(self._next_due.items())
+                sid: due.isoformat() if due else None for sid, due in sorted(self._next_due.items())
             },
         }
 

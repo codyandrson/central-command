@@ -20,9 +20,14 @@ async def test_decisions_history_carries_status_and_decided_at(monkeypatch):
     """The history pane is meaningless without knowing WHAT happened and
     WHEN — a row missing status/decided_at renders as an unlabeled ghost."""
     row = {
-        "id": "prop_1", "session_id": "sess_1", "agent_id": "ea",
-        "intent": "reply to thread", "status": "EXECUTED",
-        "created_at": None, "decided_at": None, "origin": None,
+        "id": "prop_1",
+        "session_id": "sess_1",
+        "agent_id": "ea",
+        "intent": "reply to thread",
+        "status": "EXECUTED",
+        "created_at": None,
+        "decided_at": None,
+        "origin": None,
     }
 
     async def fake_history(limit, offset):
@@ -93,8 +98,7 @@ async def test_decisions_history_carries_processed_work_items(monkeypatch):
     async def fake_history(limit, offset):
         return [], False
 
-    item = {"id": "wi_1", "subject": "Renew warranty?", "source": "fixture",
-            "terminal_at": None}
+    item = {"id": "wi_1", "subject": "Renew warranty?", "source": "fixture", "terminal_at": None}
 
     async def fake_processed(limit):
         return [item]
@@ -112,9 +116,14 @@ async def test_decisions_history_rows_stay_light_and_carry_no_actions(monkeypatc
     proposal DETAIL, which is what a history row opens; the row itself carries no
     actions and adds none (tests/test_overrides_wire.py pins the detail)."""
     row = {
-        "id": "prop_1", "session_id": "sess_1", "agent_id": "ea",
-        "intent": "send it", "status": "EXECUTED",
-        "created_at": None, "decided_at": None, "origin": None,
+        "id": "prop_1",
+        "session_id": "sess_1",
+        "agent_id": "ea",
+        "intent": "send it",
+        "status": "EXECUTED",
+        "created_at": None,
+        "decided_at": None,
+        "origin": None,
     }
 
     async def fake_history(limit, offset):

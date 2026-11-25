@@ -101,8 +101,9 @@ async def test_cloud_uses_v2_paths_for_spaces_and_pages(monkeypatch):
         seen.append(request.url.path)
         if "/spaces" in request.url.path:
             return httpx.Response(200, json={"results": []})
-        return httpx.Response(200, json={"id": "1", "title": "Home",
-                                          "body": {"storage": {"value": "<p>hi</p>"}}})
+        return httpx.Response(
+            200, json={"id": "1", "title": "Home", "body": {"storage": {"value": "<p>hi</p>"}}}
+        )
 
     _patch_client(monkeypatch, handler)
     await confluence.list_spaces()
@@ -119,8 +120,9 @@ async def test_server_uses_v1_paths_for_spaces_and_pages(monkeypatch):
         seen.append(request.url.path)
         if "/space" in request.url.path:
             return httpx.Response(200, json={"results": []})
-        return httpx.Response(200, json={"id": "1", "title": "Home",
-                                          "body": {"storage": {"value": "<p>hi</p>"}}})
+        return httpx.Response(
+            200, json={"id": "1", "title": "Home", "body": {"storage": {"value": "<p>hi</p>"}}}
+        )
 
     _patch_client(monkeypatch, handler)
     await confluence.list_spaces()
@@ -204,13 +206,20 @@ async def test_cloud_next_link_is_rejoined_under_wiki_context(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
         if len(seen) == 1:
-            return httpx.Response(200, json={
-                "results": [{"content": {"id": "1", "title": "A"}}],
-                "_links": {"next": "/rest/api/search?cursor=abc&cql=type%3Dpage"},
-            })
-        return httpx.Response(200, json={
-            "results": [{"content": {"id": "2", "title": "B"}}], "_links": {},
-        })
+            return httpx.Response(
+                200,
+                json={
+                    "results": [{"content": {"id": "1", "title": "A"}}],
+                    "_links": {"next": "/rest/api/search?cursor=abc&cql=type%3Dpage"},
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [{"content": {"id": "2", "title": "B"}}],
+                "_links": {},
+            },
+        )
 
     _patch_client(monkeypatch, handler)
     out = await confluence.search("type=page", limit=5)
@@ -239,8 +248,8 @@ async def test_429_is_retried_once_then_succeeds(monkeypatch):
     _patch_client(monkeypatch, handler)
     out = await confluence.list_spaces()
     assert out["ok"] is True
-    assert calls["n"] == 2          # exactly one retry
-    assert slept == [2.0]           # Retry-After respected
+    assert calls["n"] == 2  # exactly one retry
+    assert slept == [2.0]  # Retry-After respected
 
 
 async def test_429_that_persists_is_the_final_error(monkeypatch):
@@ -262,12 +271,18 @@ async def test_429_that_persists_is_the_final_error(monkeypatch):
 
 async def test_get_page_normalizes_storage_body_and_url(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "id": "42", "title": "Roadmap", "status": "current",
-            "spaceId": "9", "version": {"number": 3},
-            "body": {"storage": {"value": "<p>plan</p>", "representation": "storage"}},
-            "_links": {"webui": "/spaces/OPS/pages/42/Roadmap"},
-        })
+        return httpx.Response(
+            200,
+            json={
+                "id": "42",
+                "title": "Roadmap",
+                "status": "current",
+                "spaceId": "9",
+                "version": {"number": 3},
+                "body": {"storage": {"value": "<p>plan</p>", "representation": "storage"}},
+                "_links": {"webui": "/spaces/OPS/pages/42/Roadmap"},
+            },
+        )
 
     _patch_client(monkeypatch, handler)
     out = await confluence.get_page("42")
@@ -281,17 +296,34 @@ async def test_get_page_normalizes_storage_body_and_url(monkeypatch):
 
 async def test_list_spaces_normalizes_rows(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"results": [
-            {"id": "9", "key": "OPS", "name": "Operations", "type": "global",
-             "status": "current", "_links": {"webui": "/spaces/OPS"}},
-        ]})
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "id": "9",
+                        "key": "OPS",
+                        "name": "Operations",
+                        "type": "global",
+                        "status": "current",
+                        "_links": {"webui": "/spaces/OPS"},
+                    },
+                ]
+            },
+        )
 
     _patch_client(monkeypatch, handler)
     out = await confluence.list_spaces()
-    assert out["spaces"] == [{
-        "id": "9", "key": "OPS", "name": "Operations", "type": "global",
-        "status": "current", "url": "https://example.atlassian.net/wiki/spaces/OPS",
-    }]
+    assert out["spaces"] == [
+        {
+            "id": "9",
+            "key": "OPS",
+            "name": "Operations",
+            "type": "global",
+            "status": "current",
+            "url": "https://example.atlassian.net/wiki/spaces/OPS",
+        }
+    ]
 
 
 # --- confluence-read pack: every tool_name is real ------------------------------
@@ -320,12 +352,14 @@ async def test_create_page_cloud_resolves_key_to_id_and_posts_v2(monkeypatch):
         assert request.url.path == "/wiki/api/v2/pages"
         body = request.read()
         import json as _json
+
         payload = _json.loads(body)
         assert payload["spaceId"] == "9"
         assert payload["title"] == "New Page"
         assert payload["body"] == {"representation": "storage", "value": "<p>hi</p>"}
-        return httpx.Response(200, json={"id": "55", "title": "New Page",
-                                          "spaceId": "9", "version": {"number": 1}})
+        return httpx.Response(
+            200, json={"id": "55", "title": "New Page", "spaceId": "9", "version": {"number": 1}}
+        )
 
     _patch_client(monkeypatch, handler)
     out = await confluence.create_page("OPS", "New Page", "<p>hi</p>")
@@ -340,8 +374,9 @@ async def test_create_page_cloud_skips_resolution_for_numeric_space_id(monkeypat
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request.url.path)
-        return httpx.Response(200, json={"id": "55", "title": "New Page",
-                                          "spaceId": "9", "version": {"number": 1}})
+        return httpx.Response(
+            200, json={"id": "55", "title": "New Page", "spaceId": "9", "version": {"number": 1}}
+        )
 
     _patch_client(monkeypatch, handler)
     await confluence.create_page("9", "New Page", "<p>hi</p>")
@@ -355,11 +390,19 @@ async def test_create_page_server_posts_v1_content_with_space_key(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append((request.method, request.url.path))
         import json as _json
+
         payload = _json.loads(request.read())
         assert payload["type"] == "page"
         assert payload["space"] == {"key": "OPS"}
-        return httpx.Response(200, json={"id": "55", "title": "New Page",
-                                          "space": {"key": "OPS"}, "version": {"number": 1}})
+        return httpx.Response(
+            200,
+            json={
+                "id": "55",
+                "title": "New Page",
+                "space": {"key": "OPS"},
+                "version": {"number": 1},
+            },
+        )
 
     _patch_client(monkeypatch, handler)
     out = await confluence.create_page("OPS", "New Page", "<p>hi</p>")
@@ -375,11 +418,16 @@ async def test_create_page_rejects_oversized_body():
 async def test_update_page_refuses_a_stale_expected_version(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         # get_page for the version check
-        return httpx.Response(200, json={
-            "id": "42", "title": "Roadmap", "spaceId": "9",
-            "version": {"number": 5},
-            "body": {"storage": {"value": "<p>current</p>"}},
-        })
+        return httpx.Response(
+            200,
+            json={
+                "id": "42",
+                "title": "Roadmap",
+                "spaceId": "9",
+                "version": {"number": 5},
+                "body": {"storage": {"value": "<p>current</p>"}},
+            },
+        )
 
     _patch_client(monkeypatch, handler)
     with pytest.raises(confluence.ConfluenceError, match="stale version"):
@@ -392,17 +440,24 @@ async def test_update_page_submits_version_plus_one_when_current(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] == 1:
-            return httpx.Response(200, json={
-                "id": "42", "title": "Roadmap", "spaceId": "9",
-                "version": {"number": 5},
-                "body": {"storage": {"value": "<p>current</p>"}},
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "id": "42",
+                    "title": "Roadmap",
+                    "spaceId": "9",
+                    "version": {"number": 5},
+                    "body": {"storage": {"value": "<p>current</p>"}},
+                },
+            )
         assert request.method == "PUT"
         import json as _json
+
         payload = _json.loads(request.read())
         assert payload["version"] == {"number": 6}
-        return httpx.Response(200, json={"id": "42", "title": "Roadmap",
-                                          "spaceId": "9", "version": {"number": 6}})
+        return httpx.Response(
+            200, json={"id": "42", "title": "Roadmap", "spaceId": "9", "version": {"number": 6}}
+        )
 
     _patch_client(monkeypatch, handler)
     out = await confluence.update_page("42", "Roadmap", "<p>new</p>", expected_version=5)
@@ -415,17 +470,24 @@ async def test_move_page_repoints_parent_and_bumps_version(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
         if calls["n"] == 1:
-            return httpx.Response(200, json={
-                "id": "42", "title": "Roadmap", "spaceId": "9",
-                "version": {"number": 2},
-                "body": {"storage": {"value": "<p>x</p>"}},
-            })
+            return httpx.Response(
+                200,
+                json={
+                    "id": "42",
+                    "title": "Roadmap",
+                    "spaceId": "9",
+                    "version": {"number": 2},
+                    "body": {"storage": {"value": "<p>x</p>"}},
+                },
+            )
         import json as _json
+
         payload = _json.loads(request.read())
         assert payload["parentId"] == "7"
         assert payload["version"] == {"number": 3}
-        return httpx.Response(200, json={"id": "42", "title": "Roadmap",
-                                          "spaceId": "9", "version": {"number": 3}})
+        return httpx.Response(
+            200, json={"id": "42", "title": "Roadmap", "spaceId": "9", "version": {"number": 3}}
+        )
 
     _patch_client(monkeypatch, handler)
     out = await confluence.move_page("42", "7")
@@ -464,9 +526,14 @@ async def test_upload_attachment_sends_multipart_with_no_check_header(monkeypatc
         assert request.headers.get("x-atlassian-token") == "no-check"
         assert b'name="file"' in request.content
         assert b"notes.txt" in request.content
-        return httpx.Response(200, json={"results": [
-            {"id": "att1", "title": "notes.txt", "metadata": {"mediaType": "text/plain"}},
-        ]})
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": "att1", "title": "notes.txt", "metadata": {"mediaType": "text/plain"}},
+                ]
+            },
+        )
 
     _patch_client(monkeypatch, handler)
     out = await confluence.upload_attachment("42", "notes.txt", b"hello")
@@ -490,6 +557,7 @@ async def test_set_labels_posts_v1_add_only(monkeypatch):
         assert request.method == "POST"
         assert request.url.path == "/wiki/rest/api/content/42/label"
         import json as _json
+
         payload = _json.loads(request.read())
         assert payload == [{"prefix": "global", "name": "roadmap"}]
         return httpx.Response(200, json={"results": [{"id": "l1", "name": "roadmap"}]})
@@ -542,8 +610,12 @@ def test_confluence_propose_pack_capabilities_are_all_registered():
 
     names = {c.name for c in packs.PACKS["confluence-propose"].capabilities}
     assert names == {
-        "confluence.create_page", "confluence.update_page", "confluence.move_page",
-        "confluence.trash_page", "confluence.upload_attachment", "confluence.set_labels",
+        "confluence.create_page",
+        "confluence.update_page",
+        "confluence.move_page",
+        "confluence.trash_page",
+        "confluence.upload_attachment",
+        "confluence.set_labels",
     }
     assert names <= gated_write_names()
     assert names <= set(executor_mod.HANDLERS)

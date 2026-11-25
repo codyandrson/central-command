@@ -72,8 +72,11 @@ def _function_source(text: str, name: str, cls: str | None = None) -> str:
     scope = tree
     if cls is not None:
         scope = next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == cls)
-    fn = next(n for n in ast.walk(scope)
-              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name)
+    fn = next(
+        n
+        for n in ast.walk(scope)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name
+    )
     return ast.get_source_segment(text, fn)
 
 
@@ -89,11 +92,14 @@ def test_our_deletion_rule_is_pinned_to_the_installed_remove_episode():
         "match it, then re-pin REMOVE_EPISODE_SHA256.\n\n" + src
     )
     # The lines the rule IS, asserted by content too, so the failure says which.
-    assert "for edge in edges:" in src and "edge.episodes and edge.episodes[0] == episode.uuid" in src
+    assert (
+        "for edge in edges:" in src and "edge.episodes and edge.episodes[0] == episode.uuid" in src
+    )
     assert "EntityEdge.get_by_uuids(self.driver, episode.entity_edges)" in src
     assert "get_mentioned_nodes(self.driver, [episode])" in src
-    assert ("MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) "
-            "RETURN count(*) AS episode_count") in src
+    assert (
+        "MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) RETURN count(*) AS episode_count"
+    ) in src
     assert "record['episode_count'] == 1" in src
     assert "Node.delete_by_uuids" in src and "episode.delete(self.driver)" in src
 
@@ -127,10 +133,10 @@ def test_our_queries_mirror_upstreams_reads():
 
 def test_the_deletion_set_is_first_created_facts_and_singly_mentioned_entities():
     edges = [
-        {"uuid": "f1", "episodes": ["X"]},          # created by X
-        {"uuid": "f2", "episodes": ["Y", "X"]},     # X only CITES it
-        {"uuid": "f3", "episodes": ["X", "Y"]},     # created by X, cited by Y
-        {"uuid": "f4", "episodes": []},             # broken provenance: never ours to delete
+        {"uuid": "f1", "episodes": ["X"]},  # created by X
+        {"uuid": "f2", "episodes": ["Y", "X"]},  # X only CITES it
+        {"uuid": "f3", "episodes": ["X", "Y"]},  # created by X, cited by Y
+        {"uuid": "f4", "episodes": []},  # broken provenance: never ours to delete
     ]
     mentioned = [
         {"uuid": "A", "mentions": 1},
@@ -147,42 +153,70 @@ class FakeGraph:
     every write query the deletion runs."""
 
     def __init__(self, episodes: dict, facts: dict, mentions: list[tuple[str, str]], names=None):
-        self.episodes = episodes        # uuid -> {"name", "group_id", "entity_edges"}
-        self.facts = facts              # uuid -> {"src", "dst", "episodes"}
-        self.mentions = mentions        # (episode uuid, entity uuid)
+        self.episodes = episodes  # uuid -> {"name", "group_id", "entity_edges"}
+        self.facts = facts  # uuid -> {"src", "dst", "episodes"}
+        self.mentions = mentions  # (episode uuid, entity uuid)
         self.names = names or {}
         self.writes: list[str] = []
 
     def _fact_row(self, u):
         f = self.facts[u]
-        return {"uuid": u, "name": "REL", "fact": f"fact {u}", "episodes": list(f["episodes"]),
-                "source": f["src"], "source_name": self.names.get(f["src"], f["src"]),
-                "target": f["dst"], "target_name": self.names.get(f["dst"], f["dst"])}
+        return {
+            "uuid": u,
+            "name": "REL",
+            "fact": f"fact {u}",
+            "episodes": list(f["episodes"]),
+            "source": f["src"],
+            "source_name": self.names.get(f["src"], f["src"]),
+            "target": f["dst"],
+            "target_name": self.names.get(f["dst"], f["dst"]),
+        }
 
     async def run(self, query: str, **p):
         if query == neo4j_reader.PREVIEW_EPISODE:
             ep = self.episodes.get(p["uuid"])
             if ep is None:
                 return []
-            return [{"uuid": p["uuid"], "name": ep["name"], "content": "body",
-                     "group_id": ep["group_id"], "source_description": "src",
-                     "created_at": None, "valid_at": None,
-                     "entity_edges": list(ep["entity_edges"])}]
+            return [
+                {
+                    "uuid": p["uuid"],
+                    "name": ep["name"],
+                    "content": "body",
+                    "group_id": ep["group_id"],
+                    "source_description": "src",
+                    "created_at": None,
+                    "valid_at": None,
+                    "entity_edges": list(ep["entity_edges"]),
+                }
+            ]
         if query == neo4j_reader.PREVIEW_EDGES:
             return [self._fact_row(u) for u in p["uuids"] if u in self.facts]
         if query == neo4j_reader.PREVIEW_MENTIONED:
             ents = sorted({n for e, n in self.mentions if e == p["uuid"]})
-            return [{"uuid": n, "name": self.names.get(n, n), "labels": ["Entity"],
-                     "group_id": "g", "mentions": sum(1 for _, m in self.mentions if m == n)}
-                    for n in ents]
+            return [
+                {
+                    "uuid": n,
+                    "name": self.names.get(n, n),
+                    "labels": ["Entity"],
+                    "group_id": "g",
+                    "mentions": sum(1 for _, m in self.mentions if m == n),
+                }
+                for n in ents
+            ]
         if query == neo4j_reader.PREVIEW_INCIDENT:
-            return [self._fact_row(u) for u, f in self.facts.items()
-                    if f["src"] in p["entities"] or f["dst"] in p["entities"]]
+            return [
+                self._fact_row(u)
+                for u, f in self.facts.items()
+                if f["src"] in p["entities"] or f["dst"] in p["entities"]
+            ]
         if query == neo4j_reader.PREVIEW_CITING:
             return [self._fact_row(u) for u, f in self.facts.items() if p["uuid"] in f["episodes"]]
         if query == neo4j_reader.PREVIEW_OTHER_EPISODES:
-            return [{"uuid": u} for u, ep in self.episodes.items()
-                    if u != p["uuid"] and set(ep["entity_edges"]) & set(p["dead"])]
+            return [
+                {"uuid": u}
+                for u, ep in self.episodes.items()
+                if u != p["uuid"] and set(ep["entity_edges"]) & set(p["dead"])
+            ]
         self.writes.append(query)
         if query == neo4j_writer.DELETE_FACTS:
             for u in p["facts"]:
@@ -212,13 +246,17 @@ def _fixture() -> FakeGraph:
     # The same fixture the scratch-Neo4j differential run used against
     # upstream's remove_episode (survivors there: B, C, Y; f2, m3, m4).
     return FakeGraph(
-        episodes={"X": {"name": "ep X", "group_id": "g", "entity_edges": ["f1", "f2", "f3", "f5"]},
-                  "Y": {"name": "ep Y", "group_id": "g", "entity_edges": ["f2", "f4", "f3"]}},
-        facts={"f1": {"src": "A", "dst": "B", "episodes": ["X"]},
-               "f2": {"src": "B", "dst": "C", "episodes": ["Y", "X"]},
-               "f3": {"src": "A", "dst": "C", "episodes": ["X", "Y"]},
-               "f4": {"src": "C", "dst": "D", "episodes": ["Y"]},
-               "f5": {"src": "B", "dst": "D", "episodes": ["X"]}},
+        episodes={
+            "X": {"name": "ep X", "group_id": "g", "entity_edges": ["f1", "f2", "f3", "f5"]},
+            "Y": {"name": "ep Y", "group_id": "g", "entity_edges": ["f2", "f4", "f3"]},
+        },
+        facts={
+            "f1": {"src": "A", "dst": "B", "episodes": ["X"]},
+            "f2": {"src": "B", "dst": "C", "episodes": ["Y", "X"]},
+            "f3": {"src": "A", "dst": "C", "episodes": ["X", "Y"]},
+            "f4": {"src": "C", "dst": "D", "episodes": ["Y"]},
+            "f5": {"src": "B", "dst": "D", "episodes": ["X"]},
+        },
         mentions=[("X", "A"), ("X", "B"), ("Y", "B"), ("Y", "C"), ("X", "D")],
         names={"A": "Jane Doe", "B": "Sam Rivers", "C": "Example Co", "D": "Lee Doe"},
     )
@@ -228,14 +266,20 @@ async def test_the_preview_lists_what_goes_flags_collateral_and_lost_provenance(
     g = _fixture()
     preview = await neo4j_reader.compute_delete_preview(g.run, "X")
     sets = neo4j_reader.preview_sets(preview)
-    assert sets == {"episode": "X", "facts": ["f1", "f3", "f5"],
-                    "collateral_facts": ["f4"], "entities": ["A", "D"]}
+    assert sets == {
+        "episode": "X",
+        "facts": ["f1", "f3", "f5"],
+        "collateral_facts": ["f4"],
+        "entities": ["A", "D"],
+    }
     # f2 survives (Y created it) and only loses X as a source.
     assert [f["uuid"] for f in preview["provenance_facts"]] == ["f2"]
     assert preview["episodes_losing_fact_refs"] == ["Y"]
     assert preview["facts"][0]["source_name"] == "Jane Doe"
     assert preview["episode"]["name"] == "ep X" and preview["episode"]["content"] == "body"
-    assert preview["digest"] == neo4j_reader.preview_digest("X", ["f1", "f3", "f5"], ["f4"], ["A", "D"])
+    assert preview["digest"] == neo4j_reader.preview_digest(
+        "X", ["f1", "f3", "f5"], ["f4"], ["A", "D"]
+    )
     json.dumps(preview)  # it rides inside a proposal
 
 
@@ -278,15 +322,18 @@ async def test_the_deletion_removes_the_set_and_cleans_provenance(fake_tx):
     approved = await neo4j_reader.compute_delete_preview(g.run, "X")
     result = await neo4j_writer.delete_episode("X", expected=approved)
     assert set(g.facts) == {"f2"} and set(g.episodes) == {"Y"}
-    assert g.facts["f2"]["episodes"] == ["Y"]          # the dead uuid left it
-    assert g.episodes["Y"]["entity_edges"] == ["f2"]   # deleted facts left Y's list
+    assert g.facts["f2"]["episodes"] == ["Y"]  # the dead uuid left it
+    assert g.episodes["Y"]["entity_edges"] == ["f2"]  # deleted facts left Y's list
     assert result["facts_deleted"] == ["f1", "f3", "f5"]
     assert result["collateral_deleted"] == ["f4"]
     assert result["entities_deleted"] == ["A", "D"]
     assert result["already_absent"] is False
     # The order is upstream's: facts, then entities (DETACH), then the episode.
-    assert g.writes[:3] == [neo4j_writer.DELETE_FACTS, neo4j_writer.DELETE_ENTITIES,
-                            neo4j_writer.DELETE_EPISODE]
+    assert g.writes[:3] == [
+        neo4j_writer.DELETE_FACTS,
+        neo4j_writer.DELETE_ENTITIES,
+        neo4j_writer.DELETE_EPISODE,
+    ]
 
 
 async def test_a_changed_set_is_refused_and_nothing_is_deleted(fake_tx):
@@ -353,7 +400,8 @@ async def test_the_executor_refuses_when_the_set_changed(preview_now):
     preview_now["preview"] = await neo4j_reader.compute_delete_preview(g.run, "X")
     with pytest.raises(WorldMoved, match="changed since") as ei:
         await executor._graph_delete_episode(
-            {"episode_uuid": "X", "preview": approved}, "human:doe", "graph-curator")
+            {"episode_uuid": "X", "preview": approved}, "human:doe", "graph-curator"
+        )
     assert preview_now["queued"] == []
     # The typed verdict carries both digests: what was approved, what is there now.
     assert ei.value.target == "graph:episode:X"
@@ -365,7 +413,8 @@ async def test_the_executor_refuses_an_episode_that_is_already_gone(preview_now)
     approved = await neo4j_reader.compute_delete_preview(_fixture().run, "X")
     with pytest.raises(WorldMoved, match="already") as ei:
         await executor._graph_delete_episode(
-            {"episode_uuid": "X", "preview": approved}, "human:doe", None)
+            {"episode_uuid": "X", "preview": approved}, "human:doe", None
+        )
     assert preview_now["queued"] == []
     assert (ei.value.expected, ei.value.actual) == (approved["digest"], None)
 
@@ -374,7 +423,8 @@ async def test_the_executor_queues_an_unchanged_deletion_on_the_episodes_group(p
     approved = await neo4j_reader.compute_delete_preview(_fixture().run, "X")
     preview_now["preview"] = approved
     out = await executor._graph_delete_episode(
-        {"episode_uuid": "X", "preview": approved}, "human:doe", "graph-curator")
+        {"episode_uuid": "X", "preview": approved}, "human:doe", "graph-curator"
+    )
     assert "queued for deletion (ingest job 77)" in out
     ((uuid, group, preview, by),) = preview_now["queued"]
     assert (uuid, group, by) == ("X", "g", "human:doe")
@@ -529,13 +579,15 @@ async def test_run_read_by_name_re_executes_the_propose_tool(monkeypatch):
     _down_preview(monkeypatch)
     with pytest.raises(DependencyDown) as down:
         await tools.run_read_by_name(
-            "propose_delete_episode", {"episode_uuid": "X", "rationale": "why"}, deps)
+            "propose_delete_episode", {"episode_uuid": "X", "rationale": "why"}, deps
+        )
     assert down.value.dependencies == ("graph",)
 
     monkeypatch.setattr(graphiti, "episode_delete_preview", up)
     with pytest.raises(CallDeferred) as raised:
         await tools.run_read_by_name(
-            "propose_delete_episode", {"episode_uuid": "X", "rationale": "why"}, deps)
+            "propose_delete_episode", {"episode_uuid": "X", "rationale": "why"}, deps
+        )
     (action,) = raised.value.metadata["proposal"]["actions"]
     assert action["capability"] == "graph.delete_episode@v1"
     assert action["arguments"]["preview"]["digest"] == approved["digest"]
@@ -546,14 +598,20 @@ def _two_calls():
 
     return [
         ModelRequest(parts=[UserPromptPart(content="tidy the graph")]),
-        ModelResponse(parts=[
-            ToolCallPart(tool_name="propose_delete_episode",
-                         args={"episode_uuid": "X", "rationale": "why"},
-                         tool_call_id="call_del"),
-            ToolCallPart(tool_name="search_graph_group",
-                         args={"group_id": "g", "query": "q"},
-                         tool_call_id="call_read"),
-        ]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="propose_delete_episode",
+                    args={"episode_uuid": "X", "rationale": "why"},
+                    tool_call_id="call_del",
+                ),
+                ToolCallPart(
+                    tool_name="search_graph_group",
+                    args={"group_id": "g", "query": "q"},
+                    tool_call_id="call_read",
+                ),
+            ]
+        ),
     ]
 
 
@@ -575,14 +633,16 @@ async def test_a_decided_deletion_proposals_siblings_get_the_ordinary_text():
     # returned text): the sibling read is told to call again.
     assert durable.tool_call_id_is_read(messages, "call_del", {"kind": "read"})
     results = await durable.deferred_results(
-        messages, "call_del", "knowledge graph read failed", decided_metadata={"kind": "read"})
+        messages, "call_del", "knowledge graph read failed", decided_metadata={"kind": "read"}
+    )
     bounce = results.calls["call_read"]
     assert bounce.message == durable.SIBLING_READ_NOT_RUN.format(tool="search_graph_group")
 
     # A deletion proposal as the SIBLING of a parked read keeps the ordinary
     # text: by name it is a proposal, and a sibling's pause is not persisted.
     results = await durable.deferred_results(
-        messages, "call_read", "facts", decided_metadata={"kind": "read"})
+        messages, "call_read", "facts", decided_metadata={"kind": "read"}
+    )
     bounce = results.calls["call_del"]
     assert bounce.message == durable.SIBLING_NOT_PARKED.format(tool="propose_delete_episode")
 
@@ -626,9 +686,15 @@ def deleter(monkeypatch):
         calls.append((episode_uuid, expected, list(known_dead_facts)))
         if "raise" in behaviour:
             raise behaviour["raise"]
-        return {"uuid": episode_uuid, "already_absent": False, "facts_deleted": ["f1"],
-                "collateral_deleted": [], "entities_deleted": ["A"],
-                "facts_unlinked": 0, "episodes_updated": 0}
+        return {
+            "uuid": episode_uuid,
+            "already_absent": False,
+            "facts_deleted": ["f1"],
+            "collateral_deleted": [],
+            "entities_deleted": ["A"],
+            "facts_unlinked": 0,
+            "episodes_updated": 0,
+        }
 
     monkeypatch.setattr(graphiti_ingest, "_deleter", lambda: fake_delete)
     monkeypatch.setattr(graphiti_ingest, "_patches_ok", lambda: True)
@@ -641,9 +707,13 @@ def _group() -> str:
 
 
 def _preview(episode: str, group: str) -> dict:
-    return {"episode": {"uuid": episode, "name": f"ep {episode}", "group_id": group},
-            "facts": [{"uuid": "f1"}], "collateral_facts": [], "entities": [{"uuid": "A"}],
-            "digest": "d"}
+    return {
+        "episode": {"uuid": episode, "name": f"ep {episode}", "group_id": group},
+        "facts": [{"uuid": "f1"}],
+        "collateral_facts": [],
+        "entities": [{"uuid": "A"}],
+        "digest": "d",
+    }
 
 
 @needs_pg
@@ -655,8 +725,9 @@ async def test_a_deletion_job_runs_and_records_what_it_removed(isolated_jobs, de
 
     monkeypatch.setattr(graphiti_ingest.events, "emit", emit)
     group = _group()
-    job = await graphiti_ingest.enqueue_delete("EP1", group, preview=_preview("EP1", group),
-                                               requested_by="operator")
+    job = await graphiti_ingest.enqueue_delete(
+        "EP1", group, preview=_preview("EP1", group), requested_by="operator"
+    )
     assert job["kind"] == "remove_episode" and job["verification_id"] is None
     (claimed,) = await repo.claim_ingest_jobs()
     assert await graphiti_ingest.run_job(claimed) == "done"
@@ -666,8 +737,8 @@ async def test_a_deletion_job_runs_and_records_what_it_removed(isolated_jobs, de
     ((uuid, expected, dead),) = deleter["calls"]
     assert uuid == "EP1" and dead == ["f1"]
     assert [f["uuid"] for f in expected["facts"]] == ["f1"]
-    assert expected["digest"] == "d"   # carried for a typed refusal's `expected` (R26)
-    (_kind, kw), = [e for e in seen if e[0] == "graph.episode.deleted"]
+    assert expected["digest"] == "d"  # carried for a typed refusal's `expected` (R26)
+    ((_kind, kw),) = [e for e in seen if e[0] == "graph.episode.deleted"]
     assert kw["ref_id"] == "EP1" and kw["payload"]["requested_by"] == "operator"
     assert (await repo.episode_deletion_job("EP1"))["id"] == job["id"]
     assert "EP1" in await repo.deleted_episode_uuids(["EP1", "other"])
@@ -682,21 +753,29 @@ async def test_a_refused_deletion_fails_loudly(isolated_jobs, deleter, monkeypat
 
     monkeypatch.setattr(graphiti_ingest.events, "emit", emit)
     deleter["behaviour"]["raise"] = neo4j_writer.PreviewChanged(
-        "the graph changed", episode_uuid="EP2", expected="d-approved", actual="d-now",
-        what_moved="fact f9 joined the set")
+        "the graph changed",
+        episode_uuid="EP2",
+        expected="d-approved",
+        actual="d-now",
+        what_moved="fact f9 joined the set",
+    )
     group = _group()
-    job = await graphiti_ingest.enqueue_delete("EP2", group, preview=_preview("EP2", group),
-                                               requested_by="human:doe")
+    job = await graphiti_ingest.enqueue_delete(
+        "EP2", group, preview=_preview("EP2", group), requested_by="human:doe"
+    )
     (claimed,) = await repo.claim_ingest_jobs()
     assert await graphiti_ingest.run_job(claimed) == "failed"
     assert (await repo.get_ingest_job(job["id"]))["status"] == "FAILED"
-    (_kind, kw), = [e for e in seen if e[0] == "graph.ingest.failed"]
+    ((_kind, kw),) = [e for e in seen if e[0] == "graph.ingest.failed"]
     assert kw["payload"]["kind"] == "remove_episode" and kw["payload"]["episode_uuid"] == "EP2"
     # R26: the typed payload, as `proposal.failed` carries it; no redraft (the
     # proposal was EXECUTED when the job was queued).
     assert kw["payload"]["world_moved"] == {
-        "target": "graph:episode:EP2", "expected": "d-approved", "actual": "d-now",
-        "what_moved": "fact f9 joined the set"}
+        "target": "graph:episode:EP2",
+        "expected": "d-approved",
+        "actual": "d-now",
+        "what_moved": "fact f9 joined the set",
+    }
     assert kw["payload"]["error_type"] == "PreviewChanged"
 
 
@@ -705,11 +784,18 @@ async def test_a_deletion_waits_behind_an_extraction_in_its_group(isolated_jobs,
     group = _group()
     pid = f"p-{_uuid.uuid4().hex[:8]}"
     await graphiti_ingest.enqueue(
-        "first", "body", f"src | proposal={pid}", group, reference_time="2026-01-01T00:00:00Z",
-        proposal_id=pid, scope="shared", marker=f"proposal={pid}",
+        "first",
+        "body",
+        f"src | proposal={pid}",
+        group,
+        reference_time="2026-01-01T00:00:00Z",
+        proposal_id=pid,
+        scope="shared",
+        marker=f"proposal={pid}",
     )
-    await graphiti_ingest.enqueue_delete("EP3", group, preview=_preview("EP3", group),
-                                         requested_by="operator")
+    await graphiti_ingest.enqueue_delete(
+        "EP3", group, preview=_preview("EP3", group), requested_by="operator"
+    )
     (head,) = await repo.claim_ingest_jobs()
     assert head["kind"] == "add_episode"
     assert await repo.claim_ingest_jobs() == []  # the deletion waits its turn
@@ -729,11 +815,18 @@ async def test_the_patch_gate_does_not_hold_a_deletion(isolated_jobs, deleter, m
     add_group, del_group = _group(), _group()
     pid = f"p-{_uuid.uuid4().hex[:8]}"
     await graphiti_ingest.enqueue(
-        "held", "body", f"src | proposal={pid}", add_group, reference_time="2026-01-01T00:00:00Z",
-        proposal_id=pid, scope="shared", marker=f"proposal={pid}",
+        "held",
+        "body",
+        f"src | proposal={pid}",
+        add_group,
+        reference_time="2026-01-01T00:00:00Z",
+        proposal_id=pid,
+        scope="shared",
+        marker=f"proposal={pid}",
     )
-    job = await graphiti_ingest.enqueue_delete("EP4", del_group, preview=_preview("EP4", del_group),
-                                               requested_by="operator")
+    job = await graphiti_ingest.enqueue_delete(
+        "EP4", del_group, preview=_preview("EP4", del_group), requested_by="operator"
+    )
     claimed = await w.tick()
     await w.settle()
     assert claimed == [job["id"]]
@@ -741,15 +834,17 @@ async def test_the_patch_gate_does_not_hold_a_deletion(isolated_jobs, deleter, m
 
 
 @needs_pg
-async def test_recovery_reruns_a_running_deletion_without_a_marker_lookup(isolated_jobs, deleter,
-                                                                          monkeypatch):
+async def test_recovery_reruns_a_running_deletion_without_a_marker_lookup(
+    isolated_jobs, deleter, monkeypatch
+):
     async def never(*a, **k):
         raise AssertionError("a deletion is never settled by marker")
 
     monkeypatch.setattr(neo4j_reader, "episode_by_marker", never)
     group = _group()
-    job = await graphiti_ingest.enqueue_delete("EP5", group, preview=_preview("EP5", group),
-                                               requested_by="operator", proposal_id="p-1")
+    job = await graphiti_ingest.enqueue_delete(
+        "EP5", group, preview=_preview("EP5", group), requested_by="operator", proposal_id="p-1"
+    )
     await repo.claim_ingest_jobs()
     out = await graphiti_ingest.recover()
     assert job["id"] in out["requeued"]
@@ -817,7 +912,7 @@ async def test_a_confirmed_deletion_is_recorded_before_it_is_queued(route_world,
     monkeypatch.setattr(graphiti_ingest, "wait_for_job", done)
     out = await routes.graph_episode_delete("X", digest=state["preview"]["digest"])
     assert out == {"status": "done", "job_id": 9, "result": {"entities_deleted": ["A", "D"]}}
-    (kind, kw, queued_before), = state["emitted"]
+    ((kind, kw, queued_before),) = state["emitted"]
     assert kind == "graph.curated" and kw["payload"]["op"] == "episode.delete"
     assert queued_before == 0  # the authorising record precedes the job
     assert state["queued"] == [("X", "g", "operator")]
@@ -834,7 +929,8 @@ async def test_a_deletion_still_waiting_answers_202_queued(route_world, monkeypa
     resp = await routes.graph_episode_delete("X", digest=state["preview"]["digest"])
     assert resp.status_code == 202
     assert json.loads(resp.body) == {
-        "status": "queued", "job_id": 9,
+        "status": "queued",
+        "job_id": 9,
         "detail": "queued behind earlier work in this group; it runs in order",
     }
 
@@ -908,10 +1004,24 @@ async def test_the_verify_worklist_marks_rows_whose_episode_was_deleted(monkeypa
 async def test_the_preview_wire_shape_is_what_the_cockpit_declares():
     """web/src/features/graph/useGraph.ts: EpisodeDeletePreview / PreviewFact."""
     preview = await neo4j_reader.compute_delete_preview(_fixture().run, "X")
-    assert set(preview) == {"episode", "facts", "entities", "collateral_facts",
-                            "provenance_facts", "episodes_losing_fact_refs", "digest"}
-    assert set(preview["episode"]) == {"uuid", "name", "group_id", "content",
-                                       "source_description", "created_at", "valid_at"}
+    assert set(preview) == {
+        "episode",
+        "facts",
+        "entities",
+        "collateral_facts",
+        "provenance_facts",
+        "episodes_losing_fact_refs",
+        "digest",
+    }
+    assert set(preview["episode"]) == {
+        "uuid",
+        "name",
+        "group_id",
+        "content",
+        "source_description",
+        "created_at",
+        "valid_at",
+    }
     fact_keys = {"uuid", "name", "fact", "source", "source_name", "target", "target_name"}
     for key in ("facts", "collateral_facts", "provenance_facts"):
         assert all(set(f) == fact_keys for f in preview[key])
@@ -920,14 +1030,24 @@ async def test_the_preview_wire_shape_is_what_the_cockpit_declares():
 
 async def test_the_audit_reports_broken_provenance_beside_the_other_findings(monkeypatch):
     """web/src/features/graph/useGraph.ts: GraphAudit.health."""
+
     async def rows(query, **params):
         if query.startswith(neo4j_reader.AUDIT_BROKEN_FACT_PROVENANCE) and "count(e)" in query:
             return [{"c": 3}]
         if query.startswith(neo4j_reader.AUDIT_STALE_EPISODE_REFS) and "count(ep)" in query:
             return [{"c": 1}]
         if query.startswith(neo4j_reader.AUDIT_BROKEN_FACT_PROVENANCE):
-            return [{"uuid": "f", "name": "R", "fact": "x", "source_name": "a",
-                     "target_name": "b", "episodes": [], "missing_episodes": []}]
+            return [
+                {
+                    "uuid": "f",
+                    "name": "R",
+                    "fact": "x",
+                    "source_name": "a",
+                    "target_name": "b",
+                    "episodes": [],
+                    "missing_episodes": [],
+                }
+            ]
         if query.startswith(neo4j_reader.AUDIT_STALE_EPISODE_REFS):
             return [{"uuid": "ep", "name": "n", "group_id": "g", "missing_facts": ["f0"]}]
         return [{"c": 0}] if "count(" in query else []
@@ -938,8 +1058,20 @@ async def test_the_audit_reports_broken_provenance_beside_the_other_findings(mon
     assert health["counts"]["broken_fact_provenance"] == 3
     assert health["counts"]["stale_episode_fact_refs"] == 1
     assert set(health["broken_fact_provenance"][0]) == {
-        "uuid", "name", "fact", "source_name", "target_name", "episodes", "missing_episodes"}
-    assert set(health["stale_episode_fact_refs"][0]) == {"uuid", "name", "group_id", "missing_facts"}
+        "uuid",
+        "name",
+        "fact",
+        "source_name",
+        "target_name",
+        "episodes",
+        "missing_episodes",
+    }
+    assert set(health["stale_episode_fact_refs"][0]) == {
+        "uuid",
+        "name",
+        "group_id",
+        "missing_facts",
+    }
 
 
 def test_every_pack_propose_tool_resumes_as_a_proposal():

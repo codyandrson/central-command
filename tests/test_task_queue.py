@@ -136,18 +136,21 @@ def test_lock_registry_is_touched_only_by_the_task_run_entry():
     src = inspect.getsource(routes)
     assert src.count("_agent_task_lock(") == 2  # the def, and the one call site
     call_sites = [
-        line for line in src.splitlines()
+        line
+        for line in src.splitlines()
         if "_agent_task_lock(" in line and "def _agent_task_lock" not in line
     ]
     assert len(call_sites) == 1
-    assert "async with _agent_task_lock(task[\"agent_id\"]):" in call_sites[0]
+    assert 'async with _agent_task_lock(task["agent_id"]):' in call_sites[0]
 
 
 # --- startup sweep ------------------------------------------------------------
 
 
 @needs_pg
-async def test_startup_sweep_relaunches_plain_assigned_in_created_order(monkeypatch, _cleanup_tasks):
+async def test_startup_sweep_relaunches_plain_assigned_in_created_order(
+    monkeypatch, _cleanup_tasks
+):
     agent_id = "jira-expert"
     plain_ids = []
     for i in range(3):
@@ -163,7 +166,8 @@ async def test_startup_sweep_relaunches_plain_assigned_in_created_order(monkeypa
         for i, task_id in enumerate(plain_ids):
             await conn.execute(
                 "update task set created_at = now() - ($2 || ' seconds')::interval where id = $1",
-                task_id, str(10 - i),
+                task_id,
+                str(10 - i),
             )
     finally:
         await conn.close()

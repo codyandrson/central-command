@@ -73,8 +73,7 @@ async def test_unassigned_task_parks_awaiting_orchestrator(monkeypatch):
 async def test_assigned_task_runs_to_review_and_approval_completes_it(monkeypatch):
     since = await repo.latest_event_id()
     out = await create_task(
-        TaskCreateIn(instructions="Add a dependency note to TASKS-12.",
-                     agent_id="jira-expert")
+        TaskCreateIn(instructions="Add a dependency note to TASKS-12.", agent_id="jira-expert")
     )
     assert out["deferred"] is True
 
@@ -103,8 +102,7 @@ async def test_assigned_task_runs_to_review_and_approval_completes_it(monkeypatc
 
 async def test_text_answer_completes_the_task_on_the_spot():
     out = await create_task(
-        TaskCreateIn(instructions="no change needed — just advice please",
-                     agent_id="jira-expert")
+        TaskCreateIn(instructions="no change needed — just advice please", agent_id="jira-expert")
     )
     assert out["deferred"] is False
     task = await repo.get_task(out["task_id"])
@@ -184,8 +182,11 @@ async def _wait_until(pred, timeout=5.0):
 async def test_background_create_returns_before_the_run_lands():
     since = await repo.latest_event_id()
     out = await create_task(
-        TaskCreateIn(instructions="Add a dependency note to TASKS-12.",
-                     agent_id="jira-expert", background=True)
+        TaskCreateIn(
+            instructions="Add a dependency note to TASKS-12.",
+            agent_id="jira-expert",
+            background=True,
+        )
     )
     # The POST answered before the run resolved: no proposal/session keys yet.
     assert out["background"] is True and out["deferred"] is None
@@ -214,9 +215,7 @@ async def test_background_create_returns_before_the_run_lands():
 
 
 async def _poll_status(task_id: str, status: str, timeout=5.0) -> dict:
-    return await _wait_until(
-        lambda: _task_if_status(task_id, status), timeout=timeout
-    )
+    return await _wait_until(lambda: _task_if_status(task_id, status), timeout=timeout)
 
 
 async def _task_if_status(task_id: str, status: str):
@@ -234,6 +233,7 @@ async def _poll_events(task_id: str, kind: str, since: int, timeout=5.0) -> list
     it, and the ref_id scope keeps a concurrent background task from bleeding
     into the assertion.
     """
+
     async def mine():
         rows = await repo.list_events(since_id=since, kind=kind)
         return [e for e in rows if e["ref_id"] == task_id] or None
@@ -248,8 +248,7 @@ async def test_background_run_failure_fails_the_task(monkeypatch):
     monkeypatch.setattr(routes, "resolve_model", explode)
     since = await repo.latest_event_id()
     out = await create_task(
-        TaskCreateIn(instructions="Comment on TASKS-12.",
-                     agent_id="jira-expert", background=True)
+        TaskCreateIn(instructions="Comment on TASKS-12.", agent_id="jira-expert", background=True)
     )
     assert out["background"] is True
 
@@ -276,6 +275,7 @@ async def test_list_tasks_filters_by_agent(monkeypatch):
     """The workspace Tasks panel scopes the board to its selected agent, so
     `/api/tasks?agent_id=` must filter — asserted on rows this test created,
     never on global counts (the dev DB is shared)."""
+
     async def explode(*a, **k):
         raise AssertionError("these tasks must not run an agent")
 

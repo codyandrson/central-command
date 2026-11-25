@@ -57,7 +57,9 @@ def _append_stubs(repo: Path, stubs: str) -> None:
 
 def _ledger(repo: Path) -> dict[str, list[str]]:
     led = (_state_dir(repo) / "ledger.tsv").read_text(encoding="utf-8")
-    return {l.split("\t")[0]: l.split("\t") for l in led.splitlines() if l and not l.startswith("#")}
+    return {
+        l.split("\t")[0]: l.split("\t") for l in led.splitlines() if l and not l.startswith("#")
+    }
 
 
 def _lines(out: str, prefix: str) -> list[str]:
@@ -65,8 +67,11 @@ def _lines(out: str, prefix: str) -> list[str]:
 
 
 def _rows() -> list[list[str]]:
-    return [l.split("\t") for l in STEPS.read_text(encoding="utf-8").splitlines()
-            if l and not l.startswith("#")]
+    return [
+        l.split("\t")
+        for l in STEPS.read_text(encoding="utf-8").splitlines()
+        if l and not l.startswith("#")
+    ]
 
 
 def test_both_rows_are_declared_human_with_a_your_move_doc():
@@ -91,13 +96,24 @@ def test_the_ca_question_judges_the_shape_and_still_normalises_the_path():
     """The answer is a PATH (configure rewrites any v_path* answer for Windows,
     F33); whether a file is there is the row's business, so configure takes the
     path before the file arrives and check does not FAIL the answer."""
-    q = next(l.split("\t") for l in (ROOT / "deploy/single/questions.tsv").read_text(encoding="utf-8").splitlines()
-             if l.startswith("CC_CA_BUNDLE\t"))
+    q = next(
+        l.split("\t")
+        for l in (ROOT / "deploy/single/questions.tsv").read_text(encoding="utf-8").splitlines()
+        if l.startswith("CC_CA_BUNDLE\t")
+    )
     assert q[5] == "v_path", q
     import subprocess
+
     lib = (ROOT / "deploy" / "single" / "questions-lib.sh").as_posix()
-    r = subprocess.run([_bash_exe(), "-c", f'. "{lib}"; v_path /nowhere/yet.pem && echo ok; v_path https://ca.example.com/x.pem; echo "rc=$?"'],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [
+            _bash_exe(),
+            "-c",
+            f'. "{lib}"; v_path /nowhere/yet.pem && echo ok; v_path https://ca.example.com/x.pem; echo "rc=$?"',
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.stdout.splitlines()[0] == "ok", r.stdout
     assert "not a URL" in r.stdout and "rc=1" in r.stdout, r.stdout
 
@@ -130,7 +146,9 @@ def _check(repo: Path, ca: str | None):
 def test_ca_unset_is_done(tree: Path):
     r = _check(tree, None)
     assert r.returncode in (0, 2), r.stdout + r.stderr
-    assert any(l.startswith("PASS ca-bundle: CC_CA_BUNDLE is blank") for l in _protocol(r.stdout)), r.stdout
+    assert any(
+        l.startswith("PASS ca-bundle: CC_CA_BUNDLE is blank") for l in _protocol(r.stdout)
+    ), r.stdout
     assert _ledger(tree)["check/ca-bundle"][1] == "done"
 
 
@@ -164,10 +182,15 @@ def test_ca_set_and_empty_is_not_placed(tree: Path):
 @drives_installer
 def test_ca_placed_is_done_and_check_goes_on(tree: Path):
     pem = tree.parent / "corp-ca.pem"
-    pem.write_text("-----BEGIN CERTIFICATE-----\nMIIBplaceholder\n-----END CERTIFICATE-----\n", encoding="utf-8")
+    pem.write_text(
+        "-----BEGIN CERTIFICATE-----\nMIIBplaceholder\n-----END CERTIFICATE-----\n",
+        encoding="utf-8",
+    )
     r = _check(tree, pem.as_posix())
     assert r.returncode in (0, 2), r.stdout + r.stderr
-    assert any(l.startswith("PASS ca-bundle:") and pem.as_posix() in l for l in _protocol(r.stdout)), r.stdout
+    assert any(
+        l.startswith("PASS ca-bundle:") and pem.as_posix() in l for l in _protocol(r.stdout)
+    ), r.stdout
     assert "host-stub" in r.stdout
     assert _ledger(tree)["check/ca-bundle"][1] == "done"
 
@@ -177,7 +200,7 @@ def test_ca_placed_is_done_and_check_goes_on(tree: Path):
 # <stub>/creds (the names "present", one per line; absent file = none): the
 # probe's `count(distinct name) … in (…)` and the phase's per-name
 # `count(*) … where name = '…'`. Shared with tests/test_single_n8n_workflows_row.py.
-CRED_ANSWER = r'''
+CRED_ANSWER = r"""
 answer_creds() { # answer_creds <sql>
   local sql="$1" c n=0 want
   if [[ "$sql" == *"count(distinct name)"* ]]; then
@@ -188,20 +211,24 @@ answer_creds() { # answer_creds <sql>
     grep -qxF -- "$want" "$STUB/creds" 2>/dev/null && echo 1 || echo 0
   fi
 }
-'''
+"""
 
 # The stub podman: `machine list` answers nothing (no machine), `exec` logs its
 # argv and answers from <stub>/creds — unless <stub>/n8n-down, which fails it.
-_PODMAN = r'''#!/usr/bin/env bash
+_PODMAN = (
+    r"""#!/usr/bin/env bash
 echo "podman $*" >> "$STUB/log"
-''' + CRED_ANSWER + r'''
+"""
+    + CRED_ANSWER
+    + r"""
 case "$1" in
   exec) [[ -f "$STUB/n8n-down" ]] && exit 125
         answer_creds "${@: -1}"
         exit 0 ;;
 esac
 exit 0
-'''
+"""
+)
 
 # stack's image asserts, `compose up` and the catch-up are not under test;
 # neither are the probes of the rows they own.
@@ -229,8 +256,9 @@ p_n8n_workflows() { return 0; }
 GMAIL, CALENDAR = "Gmail account", "Google Calendar account"
 
 
-def _stack(repo: Path, *, n8n: str, creds: tuple[str, ...] = (), calendar: str = "",
-           down: bool = False):
+def _stack(
+    repo: Path, *, n8n: str, creds: tuple[str, ...] = (), calendar: str = "", down: bool = False
+):
     stub = repo.parent / "stub"
     stub.mkdir(exist_ok=True)
     bindir = repo.parent / "bin"
@@ -243,8 +271,16 @@ def _stack(repo: Path, *, n8n: str, creds: tuple[str, ...] = (), calendar: str =
     if down:
         (stub / "n8n-down").write_text("", encoding="utf-8")
     _append_stubs(repo, _STACK_STUBS + _WORKFLOWS_STUB)
-    _set(repo / ".env", {"CC_ENABLE_N8N": n8n, "CC_N8N_PORT": "5679", "CC_EMBED_DIM": "1024",
-                         "CC_POD_PREFIX": "cc-", "CC_CALENDAR_FACADE_TOKEN": calendar})
+    _set(
+        repo / ".env",
+        {
+            "CC_ENABLE_N8N": n8n,
+            "CC_N8N_PORT": "5679",
+            "CC_EMBED_DIM": "1024",
+            "CC_POD_PREFIX": "cc-",
+            "CC_CALENDAR_FACADE_TOKEN": calendar,
+        },
+    )
     # Every row before stack is done at this release, so the ledger lets it run.
     phases_before = ("check", "machine", "fetch", "llm")
     _write_ledger(repo, [(f"{r[0]}/{r[1]}", "done") for r in _rows() if r[0] in phases_before])
@@ -289,7 +325,9 @@ def test_n8n_on_without_the_credential_stops_naming_it_and_the_ui(tree: Path):
 def test_n8n_on_with_the_credential_is_done(tree: Path):
     r, _ = _stack(tree, n8n="1", creds=(GMAIL,))
     assert r.returncode == 0, r.stdout + r.stderr
-    assert any(l.startswith("PASS n8n-credential:") and "Gmail account" in l for l in _protocol(r.stdout)), r.stdout
+    assert any(
+        l.startswith("PASS n8n-credential:") and "Gmail account" in l for l in _protocol(r.stdout)
+    ), r.stdout
     assert _ledger(tree)["stack/n8n-credential"][1] == "done"
 
 
@@ -322,8 +360,10 @@ def test_calendar_token_and_both_credentials_is_done(tree: Path):
     # SELECT counting the distinct required names present.
     probe = [l for l in log.splitlines() if "count(distinct name)" in l]
     assert probe, log
-    assert all("from credentials_entity where name in ('Gmail account','Google Calendar account')" in l
-               for l in probe), probe
+    assert all(
+        "from credentials_entity where name in ('Gmail account','Google Calendar account')" in l
+        for l in probe
+    ), probe
 
 
 @drives_installer

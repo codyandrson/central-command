@@ -42,8 +42,13 @@ def pinned(monkeypatch):
     monkeypatch.setattr(settings, "confluence_api_flavor", "cloud")
 
 
-def _confluence_answers(monkeypatch, *, version: int, put: httpx.Response | None = None,
-                        get: httpx.Response | None = None):
+def _confluence_answers(
+    monkeypatch,
+    *,
+    version: int,
+    put: httpx.Response | None = None,
+    get: httpx.Response | None = None,
+):
     """A fake Confluence through the REAL `update_page`: the GET answers the
     page at `version` (or `get` — a 404 is the page deleted since the draft,
     R25); the PUT answers `put` (a 200 at version+1 by default). Returns the
@@ -55,15 +60,25 @@ def _confluence_answers(monkeypatch, *, version: int, put: httpx.Response | None
         if request.method == "GET" and get is not None:
             return get
         if request.method == "GET":
-            return httpx.Response(200, json={
-                "id": "42", "title": "Roadmap", "spaceId": "9",
-                "version": {"number": version},
-                "body": {"storage": {"value": "<p>current</p>"}},
-            })
-        return put or httpx.Response(200, json={
-            "id": "42", "title": "Roadmap", "spaceId": "9",
-            "version": {"number": version + 1},
-        })
+            return httpx.Response(
+                200,
+                json={
+                    "id": "42",
+                    "title": "Roadmap",
+                    "spaceId": "9",
+                    "version": {"number": version},
+                    "body": {"storage": {"value": "<p>current</p>"}},
+                },
+            )
+        return put or httpx.Response(
+            200,
+            json={
+                "id": "42",
+                "title": "Roadmap",
+                "spaceId": "9",
+                "version": {"number": version + 1},
+            },
+        )
 
     def factory(**kwargs):
         kwargs["transport"] = httpx.MockTransport(handler)
@@ -76,6 +91,7 @@ def _confluence_answers(monkeypatch, *, version: int, put: httpx.Response | None
 def _confluence_down(monkeypatch, calls: list | None = None):
     """A Confluence that cannot be reached: every request, the re-check's read
     included, raises a transport error (DOWN)."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         if calls is not None:
             calls.append((request.method, request.url.path))
@@ -91,17 +107,31 @@ def _confluence_down(monkeypatch, calls: list | None = None):
 def _page_update(expected_version: int) -> dict:
     return {
         "intent": "Update the roadmap page",
-        "actions": [{
-            "capability": "confluence.update_page",
-            "arguments": {"page_id": "42", "title": "Roadmap",
-                          "body_storage": "<p>new</p>",
-                          "expected_version": expected_version},
-            "target_ref": {"system": "confluence", "id": "42",
-                           "read_version": str(expected_version)},
-            "reversibility": "reversible",
-        }],
-        "evidence": [{"kind": "operator", "source_ref": "operator:task",
-                      "locator": "test task", "claim": "Operator tasked an edit."}],
+        "actions": [
+            {
+                "capability": "confluence.update_page",
+                "arguments": {
+                    "page_id": "42",
+                    "title": "Roadmap",
+                    "body_storage": "<p>new</p>",
+                    "expected_version": expected_version,
+                },
+                "target_ref": {
+                    "system": "confluence",
+                    "id": "42",
+                    "read_version": str(expected_version),
+                },
+                "reversibility": "reversible",
+            }
+        ],
+        "evidence": [
+            {
+                "kind": "operator",
+                "source_ref": "operator:task",
+                "locator": "test task",
+                "claim": "Operator tasked an edit.",
+            }
+        ],
         "expected_effect": "page 42 carries the new body",
         "confidence": {"level": "high", "rationale": "The test states it."},
     }
@@ -123,20 +153,26 @@ class _Drafter:
         if self.down_on_resume and any(isinstance(p, ToolReturnPart) for p in parts):
             self.down_on_resume -= 1
             raise httpx.ConnectError("connection refused")
-        self.seen.append({
-            "system": [p.content for p in parts if isinstance(p, SystemPromptPart)],
-            "returns": [str(p.content) for p in parts
-                        if isinstance(p, ToolReturnPart) and p.tool_name == "propose_action"],
-        })
-        made = sum(isinstance(p, ToolCallPart) and p.tool_name == "propose_action"
-                   for p in parts)
+        self.seen.append(
+            {
+                "system": [p.content for p in parts if isinstance(p, SystemPromptPart)],
+                "returns": [
+                    str(p.content)
+                    for p in parts
+                    if isinstance(p, ToolReturnPart) and p.tool_name == "propose_action"
+                ],
+            }
+        )
+        made = sum(isinstance(p, ToolCallPart) and p.tool_name == "propose_action" for p in parts)
         if made == 0:
-            return ModelResponse(parts=[ToolCallPart(
-                tool_name="propose_action", args={"proposal": self.first})])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="propose_action", args={"proposal": self.first})]
+            )
         last = self.seen[-1]["returns"]
         if made == 1 and last and "FAILED" in last[-1]:
-            return ModelResponse(parts=[ToolCallPart(
-                tool_name="propose_action", args={"proposal": self.second})])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="propose_action", args={"proposal": self.second})]
+            )
         return ModelResponse(parts=[TextPart(content="Closing out.")])
 
 
@@ -154,7 +190,9 @@ async def confluence_grant():
         try:
             await conn.execute(
                 "delete from agent_grant where agent_id = $1 and pack = $2",
-                AGENT, "confluence-propose")
+                AGENT,
+                "confluence-propose",
+            )
         finally:
             await conn.close()
 
@@ -167,8 +205,9 @@ async def _draft(monkeypatch, drafter: _Drafter) -> dict:
 
     monkeypatch.setattr(routes, "resolve_model", fixed_model)
     task_id = f"task_wm_{uuid.uuid4().hex[:10]}"
-    await repo.create_task(task_id, "edit the roadmap", "edit the page", AGENT,
-                           created_by="operator")
+    await repo.create_task(
+        task_id, "edit the roadmap", "edit the page", AGENT, created_by="operator"
+    )
     run = await routes._run_assigned_task(await repo.get_task(task_id))
     return await repo.load_proposal(run["proposal_id"])
 
@@ -177,8 +216,9 @@ async def _event(kind: str, ref_id: str) -> dict:
     return next(e for e in await repo.list_events(ref_id=ref_id) if e["kind"] == kind)
 
 
-def _counting_confluence(monkeypatch, *, version: int, down: bool = False,
-                         down_after_gets: int | None = None) -> dict:
+def _counting_confluence(
+    monkeypatch, *, version: int, down: bool = False, down_after_gets: int | None = None
+) -> dict:
     """A stateful fake Confluence: the page sits at `version` and every PUT
     moves it one on. `down` makes every request a transport error;
     `down_after_gets` answers that many GETs and then goes down. Returns the
@@ -192,11 +232,16 @@ def _counting_confluence(monkeypatch, *, version: int, down: bool = False,
             raise httpx.ConnectError("connection refused")
         if request.method == "PUT":
             state["version"] += 1
-        return httpx.Response(200, json={
-            "id": "42", "title": "Roadmap", "spaceId": "9",
-            "version": {"number": state["version"]},
-            "body": {"storage": {"value": "<p>current</p>"}},
-        })
+        return httpx.Response(
+            200,
+            json={
+                "id": "42",
+                "title": "Roadmap",
+                "spaceId": "9",
+                "version": {"number": state["version"]},
+                "body": {"storage": {"value": "<p>current</p>"}},
+            },
+        )
 
     def factory(**kwargs):
         kwargs["transport"] = httpx.MockTransport(handler)
@@ -229,19 +274,21 @@ class _Persistent:
 
     def _respond(self, messages, info: AgentInfo) -> ModelResponse:
         parts = [p for m in messages for p in getattr(m, "parts", [])]
-        made = sum(isinstance(p, ToolCallPart) and p.tool_name == "propose_action"
-                   for p in parts)
+        made = sum(isinstance(p, ToolCallPart) and p.tool_name == "propose_action" for p in parts)
         last = messages[-1]
-        fresh = [str(p.content) for p in (last.parts if isinstance(last, ModelRequest) else [])
-                 if isinstance(p, ToolReturnPart)  # a retry is one too, since pydantic-ai 2.60
-                 and p.tool_name == "propose_action"]
+        fresh = [
+            str(p.content)
+            for p in (last.parts if isinstance(last, ModelRequest) else [])
+            if isinstance(p, ToolReturnPart)  # a retry is one too, since pydantic-ai 2.60
+            and p.tool_name == "propose_action"
+        ]
         self.calls.append(fresh)
         if any("redraft limit" in r for r in fresh):
             return ModelResponse(parts=[TextPart(content="Understood — it is yours.")])
         if made == 0 or (fresh and made < self.cap):
-            return ModelResponse(parts=[ToolCallPart(
-                tool_name="propose_action",
-                args={"proposal": self.make(made)})])
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="propose_action", args={"proposal": self.make(made)})]
+            )
         return ModelResponse(parts=[TextPart(content="Closing out.")])
 
 
@@ -253,8 +300,9 @@ async def _task_session(monkeypatch, drafter: _Persistent) -> tuple[dict, str]:
 
     monkeypatch.setattr(routes, "resolve_model", fixed_model)
     task_id = f"task_wl_{uuid.uuid4().hex[:10]}"
-    await repo.create_task(task_id, "edit the roadmap", "edit the page", AGENT,
-                           created_by="operator")
+    await repo.create_task(
+        task_id, "edit the roadmap", "edit the page", AGENT, created_by="operator"
+    )
     run = await routes._run_assigned_task(await repo.get_task(task_id))
     return await repo.load_proposal(run["proposal_id"]), task_id
 
@@ -262,8 +310,7 @@ async def _task_session(monkeypatch, drafter: _Persistent) -> tuple[dict, str]:
 async def _redrafts_of(proposal_id: str) -> list[dict]:
     conn = await repo._conn()
     try:
-        rows = await conn.fetch(
-            "select id from proposal where redraft->>'of' = $1", proposal_id)
+        rows = await conn.fetch("select id from proposal where redraft->>'of' = $1", proposal_id)
     finally:
         await conn.close()
     return [await repo.load_proposal(r["id"]) for r in rows]
@@ -277,9 +324,13 @@ async def _count(kind: str, ref_id: str) -> int:
 
 
 def _preview(digest: str, facts=()) -> dict:
-    return {"episode": {"uuid": "X", "name": "e", "group_id": "g"}, "digest": digest,
-            "facts": [{"uuid": f} for f in facts], "collateral_facts": [],
-            "entities": []}
+    return {
+        "episode": {"uuid": "X", "name": "e", "group_id": "g"},
+        "digest": digest,
+        "facts": [{"uuid": f} for f in facts],
+        "collateral_facts": [],
+        "entities": [],
+    }
 
 
 @pytest.fixture
@@ -299,10 +350,12 @@ def graph_world(monkeypatch):
 
 
 def _delete_action(approved: dict) -> Action:
-    return Action(capability="graph.delete_episode",
-                  arguments={"episode_uuid": "X", "preview": approved},
-                  target_ref={"system": "graph", "id": "X", "read_version": approved["digest"]},
-                  reversibility="irreversible")
+    return Action(
+        capability="graph.delete_episode",
+        arguments={"episode_uuid": "X", "preview": approved},
+        target_ref={"system": "graph", "id": "X", "read_version": approved["digest"]},
+        reversibility="irreversible",
+    )
 
 
 # --- the coached charter edit's fakes (epic-small-fixes R24) ------------------------
@@ -331,18 +384,31 @@ class _Coach:
         self.model = FunctionModel(self._respond)
 
     def _proposal(self, base_text: str, n: int) -> dict:
-        args = {"agent_id": self.target,
-                "content": f"{base_text}\n\nCOACHED RULE {n}: answer briefly.",
-                "rationale": "Encodes the operator's note as a standing rule."}
+        args = {
+            "agent_id": self.target,
+            "content": f"{base_text}\n\nCOACHED RULE {n}: answer briefly.",
+            "rationale": "Encodes the operator's note as a standing rule.",
+        }
         if self.supplied_base is not None:
             args["base_version"] = self.supplied_base
         return {
             "intent": f"Charter edit for {self.target}",
-            "actions": [{"capability": "charter.update", "arguments": args,
-                         "target_ref": {"system": "central_command", "id": self.target},
-                         "reversibility": "reversible"}],
-            "evidence": [{"kind": "operator", "source_ref": "operator:task",
-                          "locator": "test", "claim": "The operator asked for brevity."}],
+            "actions": [
+                {
+                    "capability": "charter.update",
+                    "arguments": args,
+                    "target_ref": {"system": "central_command", "id": self.target},
+                    "reversibility": "reversible",
+                }
+            ],
+            "evidence": [
+                {
+                    "kind": "operator",
+                    "source_ref": "operator:task",
+                    "locator": "test",
+                    "claim": "The operator asked for brevity.",
+                }
+            ],
             "expected_effect": f"{self.target}'s charter gains a rule",
             "confidence": {"level": "medium", "rationale": "The test states it."},
         }
@@ -351,23 +417,35 @@ class _Coach:
         import re
 
         parts = [p for m in messages for p in getattr(m, "parts", [])]
-        made = sum(isinstance(p, ToolCallPart) and p.tool_name == "propose_action"
-                   for p in parts)
+        made = sum(isinstance(p, ToolCallPart) and p.tool_name == "propose_action" for p in parts)
         last = messages[-1]
-        fresh = [str(p.content) for p in (last.parts if isinstance(last, ModelRequest) else [])
-                 if isinstance(p, ToolReturnPart) and p.tool_name == "propose_action"]
+        fresh = [
+            str(p.content)
+            for p in (last.parts if isinstance(last, ModelRequest) else [])
+            if isinstance(p, ToolReturnPart) and p.tool_name == "propose_action"
+        ]
         self.reports.extend(fresh)
         if made == 0:
             prompt = " ".join(str(getattr(p, "content", "")) for p in parts)
             body = re.search(r"---\n(.*?)\n---", prompt, re.DOTALL)
-            return ModelResponse(parts=[ToolCallPart(
-                tool_name="propose_action",
-                args={"proposal": self._proposal(body.group(1) if body else "CHARTER", 0)})])
-        if fresh and "FAILED" in fresh[-1] and "redraft limit" not in fresh[-1] \
-                and made < self.cap:
-            shown = re.search(r"charter v\d+ ---\n(.*?)\n--- end of charter ---",
-                              fresh[-1], re.DOTALL)
-            return ModelResponse(parts=[ToolCallPart(
-                tool_name="propose_action",
-                args={"proposal": self._proposal(shown.group(1) if shown else "?", made)})])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="propose_action",
+                        args={"proposal": self._proposal(body.group(1) if body else "CHARTER", 0)},
+                    )
+                ]
+            )
+        if fresh and "FAILED" in fresh[-1] and "redraft limit" not in fresh[-1] and made < self.cap:
+            shown = re.search(
+                r"charter v\d+ ---\n(.*?)\n--- end of charter ---", fresh[-1], re.DOTALL
+            )
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="propose_action",
+                        args={"proposal": self._proposal(shown.group(1) if shown else "?", made)},
+                    )
+                ]
+            )
         return ModelResponse(parts=[TextPart(content="Closing out.")])

@@ -22,10 +22,16 @@ from tests.conftest import needs_pg
 from tests.test_no_live_world import _approve, _one_action_model
 
 URL = {
-    email_facade: ("email_facade_url", "email_facade_token",
-                   "http://n8n.example.com:5678/webhook/cc-email-facade"),
-    calendar_facade: ("calendar_facade_url", "calendar_facade_token",
-                      "http://n8n.example.com:5678/webhook/cc-calendar-facade"),
+    email_facade: (
+        "email_facade_url",
+        "email_facade_token",
+        "http://n8n.example.com:5678/webhook/cc-email-facade",
+    ),
+    calendar_facade: (
+        "calendar_facade_url",
+        "calendar_facade_token",
+        "http://n8n.example.com:5678/webhook/cc-calendar-facade",
+    ),
 }
 CALLS = {
     email_facade: lambda: email_facade._call({"mode": "report_spam"}),
@@ -39,8 +45,11 @@ CALLS = {
 # mail.send; `mail.report_spam` is the n8n mail write).
 APPROVALS = [
     ("mail.report_spam", {"provider_uuid": "msg-1"}, email_facade),
-    ("calendar.create_event", {"title": "Sync", "start": "2026-11-02T10:00:00Z",
-                               "end": "2026-11-02T10:30:00Z"}, calendar_facade),
+    (
+        "calendar.create_event",
+        {"title": "Sync", "start": "2026-11-02T10:00:00Z", "end": "2026-11-02T10:30:00Z"},
+        calendar_facade,
+    ),
 ]
 
 
@@ -75,8 +84,9 @@ def test_provider_configured_counts_either_provider(monkeypatch):
 
     # An Exchange site: no façade token, and `configured()` still says so.
     monkeypatch.setattr(settings, token_key, "")
-    monkeypatch.setattr(settings, "exchange_url", "https://mail.example.com/ews/exchange.asmx",
-                        raising=False)
+    monkeypatch.setattr(
+        settings, "exchange_url", "https://mail.example.com/ews/exchange.asmx", raising=False
+    )
     monkeypatch.setattr(settings, "exchange_username", "operator@example.com", raising=False)
     monkeypatch.setattr(settings, "exchange_password", "secret", raising=False)
     assert calendar_facade.configured() is False
@@ -94,8 +104,10 @@ async def test_unconfigured_raises_a_semantic_error_before_any_socket(module, mo
         raise AssertionError("an unconfigured façade must not open a client")
 
     monkeypatch.setattr(httpx, "AsyncClient", boom)
-    error = {email_facade: email_facade.EmailFacadeError,
-             calendar_facade: calendar_facade.CalendarFacadeError}[module]
+    error = {
+        email_facade: email_facade.EmailFacadeError,
+        calendar_facade: calendar_facade.CalendarFacadeError,
+    }[module]
     with pytest.raises(error, match="not configured") as caught:
         await CALLS[module]()
     assert failures.classify_failure(caught.value) == failures.SEMANTIC
@@ -110,7 +122,9 @@ async def test_configured_but_down_stays_transient(module, monkeypatch):
     monkeypatch.setattr(settings, token_key, "t")
 
     async def refuse(self, *a, **k):
-        raise httpx.ConnectError("All connection attempts failed")  # httpx's own text for a down host
+        raise httpx.ConnectError(
+            "All connection attempts failed"
+        )  # httpx's own text for a down host
 
     monkeypatch.setattr(httpx.AsyncClient, "post", refuse)
     with pytest.raises(Exception, match="unreachable at") as caught:
@@ -121,7 +135,9 @@ async def test_configured_but_down_stays_transient(module, monkeypatch):
 @needs_pg
 @pytest.mark.parametrize("capability, arguments, module", APPROVALS)
 async def test_an_unconfigured_facade_approval_lands_failed_not_configured(
-    capability, arguments, module,
+    capability,
+    arguments,
+    module,
 ):
     out, row = await _approve(_one_action_model(capability, arguments))
     assert out["ok"] is False and out["failed_capability"] == capability
@@ -132,7 +148,10 @@ async def test_an_unconfigured_facade_approval_lands_failed_not_configured(
 @needs_pg
 @pytest.mark.parametrize("capability, arguments, module", APPROVALS)
 async def test_a_configured_facade_with_n8n_down_parks_transient(
-    capability, arguments, module, monkeypatch,
+    capability,
+    arguments,
+    module,
+    monkeypatch,
 ):
     url_key, token_key, url = URL[module]
     monkeypatch.setattr(settings, url_key, url)

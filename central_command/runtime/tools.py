@@ -41,9 +41,10 @@ from central_command.runtime.deps import ThreadDecision, TriageDeps
 # so concurrent tool calls (pydantic-ai runs siblings as tasks) never see each
 # other's. Undecorated tools (`fetch_url`, the propose tools) see None and keep
 # their text.
-_READ_CTX: contextvars.ContextVar[tuple[tuple[str, ...], str] | None] = (
-    contextvars.ContextVar("cc_read_ctx", default=None)
+_READ_CTX: contextvars.ContextVar[tuple[tuple[str, ...], str] | None] = contextvars.ContextVar(
+    "cc_read_ctx", default=None
 )
+
 
 def parkable_read(fn=None, *, context: bool = True):
     """Mark a read tool as one the outage doctrine can park (FR-40).
@@ -64,6 +65,7 @@ def parkable_read(fn=None, *, context: bool = True):
     have. `context=False` is for `consult_agent`, whose sub-run executes OTHER
     tools inside the call and must not lend them this tool's tuple.
     """
+
     def wrap(fn):
         deps = TOOL_DEPENDENCY[fn.__name__]
         if not is_parkable(deps):
@@ -87,7 +89,6 @@ def parkable_read(fn=None, *, context: bool = True):
         return wrapper
 
     return wrap(fn) if fn is not None else wrap
-
 
 
 def current_time() -> str:
@@ -173,8 +174,11 @@ def _instant(name: str, value: str | None):
 
 
 def _window(as_of: str | None, after: str | None, before: str | None) -> dict:
-    when = {"as_of": _instant("as_of", as_of), "after": _instant("after", after),
-            "before": _instant("before", before)}
+    when = {
+        "as_of": _instant("as_of", as_of),
+        "after": _instant("after", after),
+        "before": _instant("before", before),
+    }
     if when["as_of"] and (when["after"] or when["before"]):
         raise ModelRetry(
             "give EITHER as_of (what was true at one instant) OR after/before (what was "
@@ -217,8 +221,12 @@ def _window_note(when: dict) -> str:
 
 @parkable_read
 async def search_knowledge_graph(
-    ctx: RunContext, query: str, as_of: str | None = None, after: str | None = None,
-    before: str | None = None, center_entity_uuid: str | None = None,
+    ctx: RunContext,
+    query: str,
+    as_of: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    center_entity_uuid: str | None = None,
 ) -> str:
     """Search the team's shared knowledge graph for facts about entities in the
     email — issues, services, people, dates, dependencies. Use it when prior
@@ -252,8 +260,9 @@ async def search_knowledge_graph(
         filters["center_node_uuid"] = center
     try:
         facts = await _read_with_retry(
-            lambda: graphiti.search_facts(query, max_facts=_GRAPH_MAX_FACTS, agent_id=agent_id,
-                                          **filters)
+            lambda: graphiti.search_facts(
+                query, max_facts=_GRAPH_MAX_FACTS, agent_id=agent_id, **filters
+            )
         )
     except Exception as e:  # noqa: BLE001 — an outage raised DependencyDown above
         return _read_failed("knowledge graph search", e)
@@ -276,7 +285,9 @@ async def search_knowledge_graph(
         rel = f" ({f['name']})" if f.get("name") else ""
         # The edge uuid leads: graph.update_edge / delete_edge take it, and a
         # holder with no way to read it invents one or asks (2026-08-31, 09-14).
-        lines.append(f"- {f.get('uuid')} | {f.get('fact', '')}{rel}{note}{_steward_note(f, stewards)}")
+        lines.append(
+            f"- {f.get('uuid')} | {f.get('fact', '')}{rel}{note}{_steward_note(f, stewards)}"
+        )
     return "\n".join(lines)
 
 
@@ -307,7 +318,9 @@ def _steward_note(item: dict, stewards: dict[str, str]) -> str:
 
 @parkable_read
 async def search_knowledge_graph_entities(
-    ctx: RunContext, query: str, entity_types: list[str] | None = None,
+    ctx: RunContext,
+    query: str,
+    entity_types: list[str] | None = None,
     center_entity_uuid: str | None = None,
 ) -> str:
     """Search the team's shared knowledge graph for ENTITIES — a person, service,
@@ -336,8 +349,9 @@ async def search_knowledge_graph_entities(
         filters["center_node_uuid"] = center
     try:
         nodes = await _read_with_retry(
-            lambda: graphiti.search_nodes(query, max_nodes=_GRAPH_MAX_NODES, agent_id=agent_id,
-                                          **filters)
+            lambda: graphiti.search_nodes(
+                query, max_nodes=_GRAPH_MAX_NODES, agent_id=agent_id, **filters
+            )
         )
     except Exception as e:  # noqa: BLE001 — any transport failure = "no context"
         return _read_failed("knowledge graph entity search", e)
@@ -348,7 +362,9 @@ async def search_knowledge_graph_entities(
     for n in nodes:
         summary = (n.get("summary") or "").strip() or "(no summary)"
         # Node uuid leads: graph.create_edge endpoints and every node edit take it.
-        lines.append(f"- {n.get('uuid')} | {n.get('name', '')}: {summary}{_steward_note(n, stewards)}")
+        lines.append(
+            f"- {n.get('uuid')} | {n.get('name', '')}: {summary}{_steward_note(n, stewards)}"
+        )
     return "\n".join(lines)
 
 
@@ -376,7 +392,9 @@ async def list_graph_groups(ctx: RunContext) -> str:
         if g in stewards:
             lines.append(f"- {g} (shared domain; steward {stewards[g]})")
         elif g.startswith(f"{_settings.graph_write_group}_"):
-            lines.append(f"- {g} (private partition of {g[len(_settings.graph_write_group) + 1:]})")
+            lines.append(
+                f"- {g} (private partition of {g[len(_settings.graph_write_group) + 1 :]})"
+            )
         else:
             lines.append(f"- {g} (shared)")
     return "\n".join(lines)
@@ -411,9 +429,14 @@ async def list_graph_group_episodes(ctx: RunContext, group_id: str, limit: int =
 
 @parkable_read
 async def search_graph_group(
-    ctx: RunContext, group_id: str, query: str, as_of: str | None = None,
-    after: str | None = None, before: str | None = None,
-    entity_types: list[str] | None = None, center_entity_uuid: str | None = None,
+    ctx: RunContext,
+    group_id: str,
+    query: str,
+    as_of: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+    entity_types: list[str] | None = None,
+    center_entity_uuid: str | None = None,
 ) -> str:
     """Search facts AND entities inside ONE group, whichever agent's it is.
     Use it to read what a partition actually says before proposing a move or
@@ -435,12 +458,14 @@ async def search_graph_group(
         fact_kw["center_node_uuid"] = node_kw["center_node_uuid"] = center
     try:
         facts = await _read_with_retry(
-            lambda: graphiti.search_facts(query, max_facts=_GRAPH_MAX_FACTS, group_ids=[group_id],
-                                          **fact_kw)
+            lambda: graphiti.search_facts(
+                query, max_facts=_GRAPH_MAX_FACTS, group_ids=[group_id], **fact_kw
+            )
         )
         nodes = await _read_with_retry(
-            lambda: graphiti.search_nodes(query, max_nodes=_GRAPH_MAX_NODES, group_ids=[group_id],
-                                          **node_kw)
+            lambda: graphiti.search_nodes(
+                query, max_nodes=_GRAPH_MAX_NODES, group_ids=[group_id], **node_kw
+            )
         )
     except Exception as e:  # noqa: BLE001
         return _read_failed("knowledge graph read", e)
@@ -510,6 +535,7 @@ def _mail_tool(fn):
     """Every answer of a mail read tool is a `ToolReturn[str]`: a plain-text
     answer (an error line, a miss) carries no mail text. The return annotation
     stays a string for the tool's schema."""
+
     @functools.wraps(fn)
     async def wrapper(ctx, *args, **kwargs):
         out = await fn(ctx, *args, **kwargs)
@@ -532,9 +558,10 @@ def _mail_return(head: str, mail: str) -> ToolReturn:
     if shown == full:
         seen = mail
     else:
-        seen = mail[:max(0, context.tool_result_ceiling() - (len(full) - len(mail)))]
-    return ToolReturn(return_value=shown,
-                      metadata={MAIL_TEXT_METADATA_KEY: [seen] if seen.strip() else []})
+        seen = mail[: max(0, context.tool_result_ceiling() - (len(full) - len(mail)))]
+    return ToolReturn(
+        return_value=shown, metadata={MAIL_TEXT_METADATA_KEY: [seen] if seen.strip() else []}
+    )
 
 
 def _clip(payload: str, limit: int | None = None) -> str:
@@ -548,7 +575,7 @@ def _clip(payload: str, limit: int | None = None) -> str:
     if len(payload) <= limit:
         return payload
     return payload[:limit] + (
-        f'\n… [TRUNCATED at {limit} chars — this is a PARTIAL result. Narrow the '
+        f"\n… [TRUNCATED at {limit} chars — this is a PARTIAL result. Narrow the "
         f"query (or read a specific issue) rather than concluding from it.]"
     )
 
@@ -576,8 +603,7 @@ async def read_team_roster(ctx: RunContext) -> str:
     lines = []
     for r in rows:
         try:
-            grants = [g["pack"] for g in await repo.list_grants(r["id"])
-                      if g["revoked_at"] is None]
+            grants = [g["pack"] for g in await repo.list_grants(r["id"]) if g["revoked_at"] is None]
         except Exception:  # noqa: BLE001
             grants = []
         lanes = [k for k in ("taskable", "consultable") if r.get(k)]
@@ -651,8 +677,11 @@ async def read_agent_record(ctx: RunContext, agent_id: str, limit: int = 500) ->
         if e["ref_id"] not in props:
             continue
         payload = e.get("payload") or {}
-        if (str(e.get("actor") or "").startswith("override:")
-                or payload.get("override_id") or payload.get("override_ids")):
+        if (
+            str(e.get("actor") or "").startswith("override:")
+            or payload.get("override_id")
+            or payload.get("override_ids")
+        ):
             # Decided by one or more operator-authored gate overrides, not by
             # the operator looking at it: no verdict on the agent's judgment.
             # The bare prefix test is `gateway/overrides.override_ids_of`'s own
@@ -684,7 +713,7 @@ async def read_record_event(ctx: RunContext, event_id: int) -> str:
     except Exception as e:  # noqa: BLE001
         return f"event unavailable ({type(e).__name__})"
     if row is None:
-        return (f"event:{event_id} does not exist in the record — do not cite it")
+        return f"event:{event_id} does not exist in the record — do not cite it"
     return _clip(
         f"event:{row['id']} kind={row['kind']} ref={row['ref_id']} "
         f"actor={row['actor']} at={row['created_at']}\npayload: {row['payload']}",
@@ -731,8 +760,8 @@ async def read_team_activity(ctx: RunContext, since_hours: int = 24) -> str:
         # reader agrees with the brief's block about what is still waiting.
         lines.append(
             f"- {kind}: {entry['count']}"
-            + (f" ({entry['still_open']} still open)"
-               if "still_open" in entry else ""))
+            + (f" ({entry['still_open']} still open)" if "still_open" in entry else "")
+        )
         for example in entry["examples"]:
             state = f" ({example['state']})" if "state" in example else ""
             lines.append(
@@ -750,8 +779,11 @@ async def read_team_activity(ctx: RunContext, since_hours: int = 24) -> str:
 
 
 async def search_my_sessions(
-    ctx: RunContext[TriageDeps], query: str = "", session_id: str = "",
-    around_message: int | None = None, limit: int = 10,
+    ctx: RunContext[TriageDeps],
+    query: str = "",
+    session_id: str = "",
+    around_message: int | None = None,
+    limit: int = 10,
 ) -> str:
     """Search and re-read YOUR OWN past sessions: what you were asked, what you
     read, what you did and what came back. Use it BEFORE asking the operator to
@@ -829,8 +861,10 @@ async def read_calendar(ctx: RunContext, day_offset: int = 0) -> str:
         return "day_offset must be a whole number of days from today (0-7)"
 
     def unknown(reason) -> str:
-        return (f"availability UNKNOWN for {ea_calendar.day_name(offset)}: {reason}; "
-                "do not treat it as free")
+        return (
+            f"availability UNKNOWN for {ea_calendar.day_name(offset)}: {reason}; "
+            "do not treat it as free"
+        )
 
     try:
         data = await _read_with_retry(lambda: ea_calendar.day(offset))
@@ -896,8 +930,10 @@ async def search_web(ctx: RunContext, query: str) -> str:
             response = await client.get(
                 _BRAVE_SEARCH_URL,
                 params={"q": query, "count": 8},
-                headers={"X-Subscription-Token": _settings.brave_api_key,
-                         "Accept": "application/json"},
+                headers={
+                    "X-Subscription-Token": _settings.brave_api_key,
+                    "Accept": "application/json",
+                },
             )
             response.raise_for_status()
             results = (response.json().get("web") or {}).get("results") or []
@@ -929,8 +965,12 @@ _ATTEMPTS_ATTR = "_cc_read_attempts"
 
 
 async def _read_with_retry(
-    op, *, attempts: int = 2, delay: float = 0.5,
-    dependency: tuple[str, ...] | None = None, tool: str | None = None,
+    op,
+    *,
+    attempts: int = 2,
+    delay: float = 0.5,
+    dependency: tuple[str, ...] | None = None,
+    tool: str | None = None,
 ):
     """One bounded retry for a TRANSIENT read failure — a blip should not hold
     a turn that a half-second's patience would have saved.
@@ -1002,8 +1042,9 @@ def _attributed(dependencies: tuple[str, ...], e: BaseException) -> tuple[str, .
     return dependencies
 
 
-def _raise_if_down(e: BaseException, dependencies: tuple[str, ...] | None = None,
-                   tool: str | None = None) -> None:
+def _raise_if_down(
+    e: BaseException, dependencies: tuple[str, ...] | None = None, tool: str | None = None
+) -> None:
     """Raise `DependencyDown` for an outage, else return (the caller then gives
     its honest NO text). Dependencies come from the running `@parkable_read`
     tool unless the caller names them (`_mail_target`, a helper of tools that
@@ -1044,16 +1085,16 @@ def _park_read_or_reraise(ctx, down: DependencyDown, args: dict):
     `args` are the tool's own arguments as the model sent them.
     """
     original = down.original
-    if is_parkable(down.dependencies) and getattr(
-        getattr(ctx, "deps", None), "park_reads", False
-    ):
-        raise CallDeferred(metadata={
-            "kind": "read",
-            "tool": down.tool_name,
-            "args": args,
-            "dependencies": list(down.dependencies),
-            "error": f"{type(original).__name__}: {original}"[:500],
-        }) from down
+    if is_parkable(down.dependencies) and getattr(getattr(ctx, "deps", None), "park_reads", False):
+        raise CallDeferred(
+            metadata={
+                "kind": "read",
+                "tool": down.tool_name,
+                "args": args,
+                "dependencies": list(down.dependencies),
+                "error": f"{type(original).__name__}: {original}"[:500],
+            }
+        ) from down
     if hasattr(original, "__dict__"):
         original.__dict__.setdefault(_DEPENDENCIES_ATTR, down.dependencies)
     raise original
@@ -1110,7 +1151,7 @@ async def run_read_by_name(name: str, args: dict, deps: TriageDeps) -> str:
 
 
 def _attempts_note(e: Exception) -> str:
-    """" after N attempts", but only when N > 1 — a single try says nothing."""
+    """ " after N attempts", but only when N > 1 — a single try says nothing."""
     n = getattr(e, _ATTEMPTS_ATTR, 1)
     return f" after {n} attempts" if isinstance(n, int) and n > 1 else ""
 
@@ -1182,15 +1223,15 @@ def _comment_pointer(page: dict) -> dict:
     pointer: dict = {"count": page.get("total", 0)}
     newest = (page.get("comments") or [None])[0]
     if newest:
-        pointer["latest"] = {"created": newest.get("created"),
-                             "author": newest.get("author")}
+        pointer["latest"] = {"created": newest.get("created"), "author": newest.get("author")}
         pointer["read_with"] = "jira_get_comments"
     return pointer
 
 
 @parkable_read
-async def jira_get_comments(ctx: RunContext, issue_key: str, limit: int = 5,
-                            offset: int = 0) -> str:
+async def jira_get_comments(
+    ctx: RunContext, issue_key: str, limit: int = 5, offset: int = 0
+) -> str:
     """Read an issue's comments, NEWEST FIRST: each with its id, author, time
     and text. One page at a time: `limit` comments (at most 20, 5 unless you
     ask), starting `offset` comments back from the newest. The answer gives
@@ -1206,7 +1247,8 @@ async def jira_get_comments(ctx: RunContext, issue_key: str, limit: int = 5,
     """
     try:
         data = await _read_with_retry(
-            lambda: jira.list_comments(issue_key, limit=limit, offset=offset))
+            lambda: jira.list_comments(issue_key, limit=limit, offset=offset)
+        )
     except Exception as e:  # noqa: BLE001
         return _read_failed("jira comments read", e)
     return _clip(json.dumps(data, default=str))
@@ -1369,8 +1411,7 @@ async def jira_find_users(ctx: RunContext, query: str, project_key: str = "") ->
     before concluding the person has no account. Read-only.
     """
     try:
-        data = await _read_with_retry(
-            lambda: jira.find_users(query, project_key or None))
+        data = await _read_with_retry(lambda: jira.find_users(query, project_key or None))
     except Exception as e:  # noqa: BLE001
         return _read_failed("jira user search", e)
     return _clip(json.dumps(data, default=str))
@@ -1502,7 +1543,9 @@ async def forge_get_issue(ctx: RunContext, instance: str, repo: str, number: int
 
 
 @parkable_read
-async def forge_list_merge_requests(ctx: RunContext, instance: str, repo: str, state: str = "open") -> str:
+async def forge_list_merge_requests(
+    ctx: RunContext, instance: str, repo: str, state: str = "open"
+) -> str:
     """List a repository's pull requests (GitHub) or merge requests (GitLab) —
     one tool covers both under a neutral name. `state` is 'open' (default),
     'closed', or 'all'. Read-only."""
@@ -1532,7 +1575,9 @@ async def forge_list_commits(
     is a branch/tag/commit to start from; omit it for the default branch.
     `limit` caps how many are returned (up to 100). Read-only."""
     try:
-        data = await _read_with_retry(lambda: forge.list_commits(instance, repo, ref or None, limit))
+        data = await _read_with_retry(
+            lambda: forge.list_commits(instance, repo, ref or None, limit)
+        )
     except Exception as e:  # noqa: BLE001
         return _read_failed("forge commits read", e)
     return _clip(json.dumps(data, default=str))
@@ -1761,7 +1806,8 @@ async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
     outcome: dict = {}
     try:
         answer = await consult_mod.consult(
-            agent_id, question,
+            agent_id,
+            question,
             usage=getattr(ctx, "usage", None),
             session_id=getattr(ctx.deps, "session_id", None),
             caller_id=caller_id,
@@ -1780,8 +1826,10 @@ async def consult_agent(ctx: RunContext, agent_id: str, question: str) -> str:
         dependencies = _consult_down(e)
         if dependencies:
             raise DependencyDown(dependencies, "consult_agent", e) from e
-        return (f"{agent_id} unavailable ({type(e).__name__}): the consult "
-                "failed, so say plainly that you have no specialist answer")
+        return (
+            f"{agent_id} unavailable ({type(e).__name__}): the consult "
+            "failed, so say plainly that you have no specialist answer"
+        )
     # The consult is already in this session's transcript (M15); the event
     # makes cross-agent flow visible on the audit trail too. The actor is the
     # REAL caller — it was hardcoded to `agent:inbox-triage` until 2026-07-29,
@@ -1897,10 +1945,13 @@ def _route_check(ctx: RunContext, proposal: Proposal) -> str | None:
         ref = _iso_day(args.get("reference_time"))
         if ref is None:
             continue
-        later = sorted({
-            d for d in _ISO_DAY_RE.findall(str(args.get("episode_body") or ""))
-            if (day := _iso_day(d)) is not None and day > ref
-        })
+        later = sorted(
+            {
+                d
+                for d in _ISO_DAY_RE.findall(str(args.get("episode_body") or ""))
+                if (day := _iso_day(d)) is not None and day > ref
+            }
+        )
         if later:
             found.append(f"'{args.get('name') or 'episode'}' ({', '.join(later)})")
     if not found:
@@ -1930,8 +1981,7 @@ TOOL_BUILT_ONLY = {
 }
 
 
-async def _validate_proposal(ctx: RunContext, proposal: Proposal, *,
-                             agent_authored: bool) -> None:
+async def _validate_proposal(ctx: RunContext, proposal: Proposal, *, agent_authored: bool) -> None:
     """Reject an invented capability or a malformed action IN-RUN, before the
     proposal parks — the model gets every problem at once as a tool error
     (ModelRetry) and redrafts in the same run; only a well-formed proposal
@@ -2074,31 +2124,41 @@ async def propose_delete_episode(ctx: RunContext, episode_uuid: str, rationale: 
         # a failure that is not an outage proposes nothing, and says why.
         _raise_if_down(e)
         reason = str(e).strip() or type(e).__name__
-        return (f"knowledge graph read failed ({type(e).__name__}): "
-                f'"{reason[:300]}"; nothing proposed')
+        return (
+            f'knowledge graph read failed ({type(e).__name__}): "{reason[:300]}"; nothing proposed'
+        )
     if preview is None:
         raise ModelRetry(
             f"no episode with uuid {uuid!r} — read list_graph_group_episodes for the "
             "episode you mean (it may already be deleted)"
         )
     ep = preview["episode"]
-    counts = (f"{len(preview['facts'])} fact(s), {len(preview['entities'])} entit(y/ies), "
-              f"{len(preview['collateral_facts'])} collateral fact(s)")
+    counts = (
+        f"{len(preview['facts'])} fact(s), {len(preview['entities'])} entit(y/ies), "
+        f"{len(preview['collateral_facts'])} collateral fact(s)"
+    )
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="graph.delete_episode@v1",
-            arguments={"episode_uuid": uuid, "preview": preview},
-            target_ref={"system": "graphiti", "id": uuid},
-            reversibility=Reversibility.irreversible,
-        )],
-        evidence=[Evidence(
-            kind="graph_fact", source_ref=uuid,
-            locator=f"Episodic node {uuid} in group {ep['group_id']}, read at propose time",
-            claim=f"episode '{ep['name']}': deleting it removes {counts}",
-        )],
-        expected_effect=(f"episode '{ep['name']}' ({ep['group_id']}) is deleted with {counts}; "
-                         f"{len(preview['provenance_facts'])} surviving fact(s) stop citing it"),
+        actions=[
+            Action(
+                capability="graph.delete_episode@v1",
+                arguments={"episode_uuid": uuid, "preview": preview},
+                target_ref={"system": "graphiti", "id": uuid},
+                reversibility=Reversibility.irreversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="graph_fact",
+                source_ref=uuid,
+                locator=f"Episodic node {uuid} in group {ep['group_id']}, read at propose time",
+                claim=f"episode '{ep['name']}': deleting it removes {counts}",
+            )
+        ],
+        expected_effect=(
+            f"episode '{ep['name']}' ({ep['group_id']}) is deleted with {counts}; "
+            f"{len(preview['provenance_facts'])} surviving fact(s) stop citing it"
+        ),
     )
     await _validate_proposal(ctx, proposal, agent_authored=False)
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
@@ -2124,8 +2184,14 @@ async def litellm_list_models(ctx: RunContext, name: str | None = None) -> str:
     # in the truncated text invented a model_id (seven sessions, 2026-09-18).
     if name and isinstance(data, dict) and isinstance(data.get("models"), list):
         needle = name.strip().lower()
-        rows = [m for m in data["models"] if needle in " ".join(
-            str(m.get(k) or "") for k in ("model_name", "model_id", "provider_model")).lower()]
+        rows = [
+            m
+            for m in data["models"]
+            if needle
+            in " ".join(
+                str(m.get(k) or "") for k in ("model_name", "model_id", "provider_model")
+            ).lower()
+        ]
         data = {**data, "models": rows, "count": len(rows), "filter": name}
     return _clip(json.dumps(data, default=str))
 
@@ -2147,7 +2213,9 @@ async def litellm_provider_catalog(ctx: RunContext, provider: str) -> str:
         return _read_failed("litellm provider catalog", e)
     match = next((c for c in creds if c.get("provider") == provider), None)
     if match is None:
-        return f"litellm provider catalog unavailable: no stored credential for provider {provider!r}"
+        return (
+            f"litellm provider catalog unavailable: no stored credential for provider {provider!r}"
+        )
     values = match["values"]
     try:
         data = await _read_with_retry(
@@ -2279,8 +2347,14 @@ async def litellm_read_config(ctx: RunContext, path: str) -> str:
 # seam idiom as sandbox/runner.py's _run_kubectl, kept separate because this
 # one reads a DIFFERENT (read-only) kubeconfig than the sandbox's.
 async def _run_log_kubectl(args: list[str], timeout: float = 20.0) -> tuple[int, str, str]:
-    cmd = ["kubectl", "--kubeconfig", _settings.litellm_log_kubeconfig,
-           "-n", "central-command", *args]
+    cmd = [
+        "kubectl",
+        "--kubeconfig",
+        _settings.litellm_log_kubeconfig,
+        "-n",
+        "central-command",
+        *args,
+    ]
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
@@ -2297,9 +2371,7 @@ async def _run_log_kubectl(args: list[str], timeout: float = 20.0) -> tuple[int,
     )
 
 
-async def litellm_read_logs(
-    ctx: RunContext, tail_lines: int = 200, previous: bool = False
-) -> str:
+async def litellm_read_logs(ctx: RunContext, tail_lines: int = 200, previous: bool = False) -> str:
     """Read recent log lines from the LiteLLM proxy pod (`deploy/cc-litellm`).
     Use `previous=True` to read the PRIOR container's logs — the way to
     diagnose a crash (CrashLoopBackOff, OOMKilled): the current container's
@@ -2404,8 +2476,8 @@ async def declare_gap(
 
     if kind == "stale_knowledge":
         missing = [
-            n for n, v in
-            (("doc_id", doc_id), ("doc_says", doc_says), ("observed", observed))
+            n
+            for n, v in (("doc_id", doc_id), ("doc_says", doc_says), ("observed", observed))
             if not (v or "").strip()
         ]
         if missing:
@@ -2429,8 +2501,12 @@ async def declare_gap(
         "gap.declared",
         ref_id=session_id,
         payload={
-            "kind": kind, "subject": subject, "need": need,
-            "doc_id": doc_id, "doc_says": doc_says, "observed": observed,
+            "kind": kind,
+            "subject": subject,
+            "need": need,
+            "doc_id": doc_id,
+            "doc_says": doc_says,
+            "observed": observed,
             "agent_id": agent_id,
         },
         actor=agent_id or "agent",
@@ -2461,7 +2537,9 @@ async def litellm_check_model_health(ctx: RunContext, model: str | None = None) 
 
 @parkable_read
 async def litellm_probe_model(
-    ctx: RunContext, model: str, measure_context: bool = False,
+    ctx: RunContext,
+    model: str,
+    measure_context: bool = False,
     battery: str | None = None,
 ) -> str:
     """MEASURE what a registered model can actually do — one small real request
@@ -2489,7 +2567,8 @@ async def litellm_probe_model(
     # would re-buy every request before it, not a half-second of patience.
     try:
         data = await litellm_client.probe_model(
-            model, measure_context=measure_context, battery=battery)
+            model, measure_context=measure_context, battery=battery
+        )
     except Exception as e:  # noqa: BLE001
         return _read_failed("litellm model probe", e)
     return _clip(json.dumps(data, default=str))
@@ -2533,6 +2612,7 @@ async def propose_loe(ctx: RunContext, proposal: ProposalArg) -> str:
 # (same query semantics `propose_bulk_dismiss` pins). No credential reaches
 # the agent; the façade holds the OAuth exactly as it does for the feed.
 
+
 def _mail_line(row: dict) -> str:
     locator = f" session={row['session_id']}" if row.get("session_id") else ""
     if row.get("folded_into"):
@@ -2547,11 +2627,15 @@ def _mail_line(row: dict) -> str:
         # A refs-only backlog row (`enroll_provider_ref`): the ledger knows the
         # uuid and nothing else until claim time. Say so — "? from ?" read to
         # the agent as a blank message it had no way to open (live 2026-09-09).
-        return (f"- {row['id']} [{row['state']}] not yet fetched from the "
-                f"mailbox (open it with mail_read){locator}{why}")
-    return (f"- {row['id']} [{row['state']}] {row.get('received_at') or '?'} "
-            f"from {row.get('sender') or '?'}: {row.get('subject') or '(no subject)'}"
-            f"{locator}{why}")
+        return (
+            f"- {row['id']} [{row['state']}] not yet fetched from the "
+            f"mailbox (open it with mail_read){locator}{why}"
+        )
+    return (
+        f"- {row['id']} [{row['state']}] {row.get('received_at') or '?'} "
+        f"from {row.get('sender') or '?'}: {row.get('subject') or '(no subject)'}"
+        f"{locator}{why}"
+    )
 
 
 # How many matches outside the queue one search lists: each costs one façade
@@ -2563,10 +2647,11 @@ def _outside_line(ref: dict, msg: dict) -> tuple[str, str]:
     """The line for a match outside the queue, and its snippet (the mail's own
     words the line shows, the quote check's source)."""
     snippet = " ".join(str(msg.get("snippet") or "").split())[:160]
-    return (f"- {ref['uuid']} [not in the queue] {msg.get('date') or '?'} "
-            f"from {msg.get('from') or '?'} to {msg.get('to') or '?'}: "
-            f"{msg.get('subject') or '(no subject)'}"
-            + (f" — {snippet}" if snippet else "")), snippet
+    return (
+        f"- {ref['uuid']} [not in the queue] {msg.get('date') or '?'} "
+        f"from {msg.get('from') or '?'} to {msg.get('to') or '?'}: "
+        f"{msg.get('subject') or '(no subject)'}" + (f" — {snippet}" if snippet else "")
+    ), snippet
 
 
 @parkable_read
@@ -2605,17 +2690,21 @@ async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str | Too
         refs = await email_facade.list_refs(query)
     except email_facade.EmailFacadeError as e:
         _raise_if_down(e)  # the façade is DOWN (n8n): park, never degrade
-        return (f"mail search failed ({e}). If the query matched too many "
-                "messages, narrow it with an explicit after:/before: window.")
+        return (
+            f"mail search failed ({e}). If the query matched too many "
+            "messages, narrow it with an explicit after:/before: window."
+        )
     ids = [ref_message_id(r) for r in refs]
     rows = await repo.mail_items_for_message_ids(ids)
     by_state: dict[str, int] = {}
     for r in rows:
         by_state[r["state"]] = by_state.get(r["state"], 0) + 1
-    head = (f"{len(refs)} message(s) match {query!r} in the mailbox; "
-            f"{len(rows)} of them are in the queue"
-            + (f" ({', '.join(f'{k}: {v}' for k, v in sorted(by_state.items()))})" if rows else "")
-            + f"; {len(refs) - len(rows)} never enrolled.")
+    head = (
+        f"{len(refs)} message(s) match {query!r} in the mailbox; "
+        f"{len(rows)} of them are in the queue"
+        + (f" ({', '.join(f'{k}: {v}' for k, v in sorted(by_state.items()))})" if rows else "")
+        + f"; {len(refs) - len(rows)} never enrolled."
+    )
     shown = rows[: max(1, limit)]
     lines = [_mail_line(r) for r in shown]
     if len(rows) > len(shown):
@@ -2628,8 +2717,9 @@ async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str | Too
     outside = [r for r in refs if ref_message_id(r) not in queued]
     snippets: list[tuple[str, str]] = []
     if outside:
-        lines.append(f"Not in the queue ({min(len(outside), _MAIL_OUTSIDE_SHOWN)} "
-                     f"of {len(outside)} shown):")
+        lines.append(
+            f"Not in the queue ({min(len(outside), _MAIL_OUTSIDE_SHOWN)} of {len(outside)} shown):"
+        )
         for ref in outside[:_MAIL_OUTSIDE_SHOWN]:
             try:
                 line, snippet = _outside_line(ref, await email_facade.get_message(ref["uuid"]))
@@ -2643,8 +2733,10 @@ async def mail_search(ctx: RunContext, query: str, limit: int = 40) -> str | Too
     shown = _clip("\n".join([head, *lines]))
     # Only a snippet whose whole line survived the clip was shown to the agent.
     kept = shown.splitlines()
-    return ToolReturn(return_value=shown, metadata={
-        MAIL_TEXT_METADATA_KEY: [snippet for line, snippet in snippets if line in kept]})
+    return ToolReturn(
+        return_value=shown,
+        metadata={MAIL_TEXT_METADATA_KEY: [snippet for line, snippet in snippets if line in kept]},
+    )
 
 
 def _attachment_brief(rec: dict) -> str:
@@ -2665,8 +2757,10 @@ def _unread_attachment_lines(msg: dict) -> str:
         f"{a.get('size') if a.get('size') is not None else '?'} bytes)"
         for a in atts
     )
-    return ("\n\nATTACHMENTS, listed but not read here (they are read when the "
-            "queue processes this mail):\n" + lines)
+    return (
+        "\n\nATTACHMENTS, listed but not read here (they are read when the "
+        "queue processes this mail):\n" + lines
+    )
 
 
 def _mail_attachment_page(row: dict, name: str, offset: int) -> str | tuple[str, str]:
@@ -2688,10 +2782,12 @@ def _mail_attachment_page(row: dict, name: str, offset: int) -> str | tuple[str,
     from central_command.runtime import context
 
     size = max(500, min(_MAIL_BODY_CEILING, context.tool_result_ceiling() - 400))
-    page = text[start:start + size]
+    page = text[start : start + size]
     end = start + len(page)
-    head = (f"attachment {match['name']!r} of {row['id']} — characters {start + 1:,}-{end:,} "
-            f"of {len(text):,}, read with {match.get('reader')}")
+    head = (
+        f"attachment {match['name']!r} of {row['id']} — characters {start + 1:,}-{end:,} "
+        f"of {len(text):,}, read with {match.get('reader')}"
+    )
     if end < len(text):
         head += f"; next page: offset={end}"
     elif match.get("stored_truncated"):
@@ -2703,7 +2799,9 @@ def _mail_attachment_page(row: dict, name: str, offset: int) -> str | tuple[str,
 
 @parkable_read
 @_mail_tool
-async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int = 0) -> str | ToolReturn:
+async def mail_read(
+    ctx: RunContext, ref: str, attachment: str = "", offset: int = 0
+) -> str | ToolReturn:
     """Read one mail record from the queue: the email exactly as it was fed to
     the agent that handled it (headers, body and the text of its attachments),
     its current state, the session and covering proposal that decided it, the
@@ -2733,15 +2831,16 @@ async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int
             _raise_if_down(e)
             return f"{ref!r} is not in the queue and the mailbox could not return it ({e})"
         if (attachment or "").strip():
-            return (f"{ref!r} is not in the queue, so its attachments have not been read: "
-                    "they are read when the queue processes a mail."
-                    + _unread_attachment_lines(msg))
+            return (
+                f"{ref!r} is not in the queue, so its attachments have not been read: "
+                "they are read when the queue processes a mail." + _unread_attachment_lines(msg)
+            )
         return _mail_return(
             "NOT ENROLLED in the queue (read from the mailbox)",
             f"From: {msg.get('from')}\nSubject: {msg.get('subject')}\n"
             f"Date: {msg.get('date')}\n\n"
             + _clip(ledger.provider_body(msg), _MAIL_BODY_CEILING)
-            + _unread_attachment_lines(msg)
+            + _unread_attachment_lines(msg),
         )
     if (attachment or "").strip():
         page = _mail_attachment_page(row, attachment.strip(), offset)
@@ -2749,8 +2848,10 @@ async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int
     audit = row.get("audit") or {}
     parts = [
         _mail_line(row),
-        (f"message_id={row['message_id']} provider_uuid={row.get('provider_uuid')} "
-        f"terminal_at={row.get('terminal_at')}"),
+        (
+            f"message_id={row['message_id']} provider_uuid={row.get('provider_uuid')} "
+            f"terminal_at={row.get('terminal_at')}"
+        ),
     ]
     if row.get("dismissal_rationale"):
         parts.append(f"dismissal rationale: {row['dismissal_rationale']}")
@@ -2767,14 +2868,17 @@ async def mail_read(ctx: RunContext, ref: str, attachment: str = "", offset: int
         # and leave the ledger row alone — this is a read tool.
         try:
             msg = await email_facade.get_message(row["provider_uuid"])
-            text = ("ENROLLED, not yet fetched by the queue (read from the mailbox)\n"
-                    + ledger.agent_input(ledger._provider_parsed(msg))
-                    + _unread_attachment_lines(msg))
+            text = (
+                "ENROLLED, not yet fetched by the queue (read from the mailbox)\n"
+                + ledger.agent_input(ledger._provider_parsed(msg))
+                + _unread_attachment_lines(msg)
+            )
         except email_facade.EmailFacadeError as e:
             _raise_if_down(e)
             text = f"(not yet fetched by the queue, and the mailbox could not return it: {e})"
-    return _mail_return("\n".join(parts),
-                        _clip(text or "(no message text recorded)", _MAIL_BODY_CEILING))
+    return _mail_return(
+        "\n".join(parts), _clip(text or "(no message text recorded)", _MAIL_BODY_CEILING)
+    )
 
 
 # --- bulk dismissal, agent path (2026-08-17 design, slice 2) ------------------
@@ -2863,33 +2967,37 @@ async def propose_bulk_dismiss(ctx: RunContext, query: str, rationale: str) -> s
 
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="work.bulk_dismiss@v1",
-            arguments={
-                "query": query,
-                "provider_matches": pinned["provider_matches"],
-                "unprocessed": pinned["unprocessed"],
-                "match_digest": pinned["match_digest"],
-                "samples": pinned["samples"],
-            },
-            target_ref={"system": "work_item", "id": query},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            # Not `email`: that kind means a QUOTE from a message the session
-            # was fed, re-checked verbatim at the park (`proposals.
-            # verified_email_evidence`, 2026-11-04). This claim is a count the
-            # tool computed from the mailbox and the ledger — nothing to quote,
-            # and the Executor re-derives the set at execution.
-            kind="mailbox",
-            source_ref=f"gmail-query:{query}",
-            locator="Gmail search via the email façade, cross-read against work_item state",
-            claim=(
-                f"{pinned['provider_matches']} message(s) match this query in "
-                f"the mailbox; {pinned['unprocessed']} of them are unprocessed "
-                "queue items"
-            ),
-        )],
+        actions=[
+            Action(
+                capability="work.bulk_dismiss@v1",
+                arguments={
+                    "query": query,
+                    "provider_matches": pinned["provider_matches"],
+                    "unprocessed": pinned["unprocessed"],
+                    "match_digest": pinned["match_digest"],
+                    "samples": pinned["samples"],
+                },
+                target_ref={"system": "work_item", "id": query},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                # Not `email`: that kind means a QUOTE from a message the session
+                # was fed, re-checked verbatim at the park (`proposals.
+                # verified_email_evidence`, 2026-11-04). This claim is a count the
+                # tool computed from the mailbox and the ledger — nothing to quote,
+                # and the Executor re-derives the set at execution.
+                kind="mailbox",
+                source_ref=f"gmail-query:{query}",
+                locator="Gmail search via the email façade, cross-read against work_item state",
+                claim=(
+                    f"{pinned['provider_matches']} message(s) match this query in "
+                    f"the mailbox; {pinned['unprocessed']} of them are unprocessed "
+                    "queue items"
+                ),
+            )
+        ],
         expected_effect=(
             f"the {pinned['unprocessed']} queue item(s) matching {query} are "
             "FOLDED (terminal, reopenable), and nothing outside Central Command changes"
@@ -2935,12 +3043,16 @@ async def propose_mail_rule(
     from central_command.ingest import mail_rules
 
     criteria = {
-        "from_address": from_address, "from_domain": from_domain,
-        "subject_contains": subject_contains, "body_contains": body_contains,
+        "from_address": from_address,
+        "from_domain": from_domain,
+        "subject_contains": subject_contains,
+        "body_contains": body_contains,
     }
     exceptions = {
-        "from_address": except_from_address, "from_domain": except_from_domain,
-        "subject_contains": except_subject_contains, "body_contains": except_body_contains,
+        "from_address": except_from_address,
+        "from_domain": except_from_domain,
+        "subject_contains": except_subject_contains,
+        "body_contains": except_body_contains,
     }
     try:
         criteria, exceptions = mail_rules.validate(criteria, exceptions)
@@ -2956,33 +3068,40 @@ async def propose_mail_rule(
     preview = await repo.mail_rule_matches(criteria, exceptions)
     proposal = Proposal(
         intent=(reason or "").strip(),
-        actions=[Action(
-            capability="mail.create_rule@v1",
-            arguments={
-                "criteria": criteria,
-                "exceptions": exceptions,
-                "description": description,
-                "reason": (reason or "").strip(),
-                "apply_to_queued": bool(apply_to_queued),
-                "queued_matches": preview["queued_matches"],
-                "samples": preview["samples"],
-            },
-            target_ref={"system": "mail_rule", "id": description},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="queue",
-            source_ref="work_item scan: " + json.dumps(criteria, sort_keys=True),
-            locator="repo.mail_rule_matches over UNPROCESSED rows at propose time",
-            claim=(
-                f"{preview['queued_matches']} unprocessed queue item(s) match "
-                "these criteria right now"
-            ),
-        )],
+        actions=[
+            Action(
+                capability="mail.create_rule@v1",
+                arguments={
+                    "criteria": criteria,
+                    "exceptions": exceptions,
+                    "description": description,
+                    "reason": (reason or "").strip(),
+                    "apply_to_queued": bool(apply_to_queued),
+                    "queued_matches": preview["queued_matches"],
+                    "samples": preview["samples"],
+                },
+                target_ref={"system": "mail_rule", "id": description},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="queue",
+                source_ref="work_item scan: " + json.dumps(criteria, sort_keys=True),
+                locator="repo.mail_rule_matches over UNPROCESSED rows at propose time",
+                claim=(
+                    f"{preview['queued_matches']} unprocessed queue item(s) match "
+                    "these criteria right now"
+                ),
+            )
+        ],
         expected_effect=(
             f"a standing rule exists: {description} "
-            + (f"The {preview['queued_matches']} matching queued item(s) are FOLDED on approval."
-               if apply_to_queued else "Queued mail is left for its own turn.")
+            + (
+                f"The {preview['queued_matches']} matching queued item(s) are FOLDED on approval."
+                if apply_to_queued
+                else "Queued mail is left for its own turn."
+            )
         ),
     )
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
@@ -3045,24 +3164,30 @@ async def propose_report_spam(ctx: RunContext, rationale: str, message_ref: str 
     uuid, sender, subject = await _mail_target(ctx, message_ref)
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mail.report_spam@v1",
-            arguments={"provider_uuid": uuid, "sender": sender, "subject": subject},
-            target_ref={"system": "mailbox", "id": uuid},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            # Not `email`: that kind means a passage QUOTED from a mail and is
-            # re-checked verbatim (`proposals.verified_email_evidence`). This
-            # line is a description the tool built from the message headers,
-            # never a quote, so it is neither checked nor flagged (DL-230;
-            # the `propose_bulk_dismiss` precedent).
-            kind="mailbox", source_ref=uuid,
-            locator="the message itself, as read from the mailbox",
-            claim=f"from {sender}: {subject}",
-        )],
-        expected_effect=(f"the message from {sender} ({subject!r}) moves to the "
-                         "Spam folder and out of the inbox"),
+        actions=[
+            Action(
+                capability="mail.report_spam@v1",
+                arguments={"provider_uuid": uuid, "sender": sender, "subject": subject},
+                target_ref={"system": "mailbox", "id": uuid},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                # Not `email`: that kind means a passage QUOTED from a mail and is
+                # re-checked verbatim (`proposals.verified_email_evidence`). This
+                # line is a description the tool built from the message headers,
+                # never a quote, so it is neither checked nor flagged (DL-230;
+                # the `propose_bulk_dismiss` precedent).
+                kind="mailbox",
+                source_ref=uuid,
+                locator="the message itself, as read from the mailbox",
+                claim=f"from {sender}: {subject}",
+            )
+        ],
+        expected_effect=(
+            f"the message from {sender} ({subject!r}) moves to the Spam folder and out of the inbox"
+        ),
     )
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
@@ -3093,29 +3218,38 @@ async def propose_unsubscribe(ctx: RunContext, rationale: str, message_ref: str 
         return f"could not read the message from the mailbox ({e}); nothing proposed"
     url, verdict = one_click_unsubscribe(msg)
     if url is None:
-        return (f"one-click unsubscribe is not available for this message: {verdict}. "
-                "Nothing proposed — say so in your dismissal; the operator can "
-                "use Gmail's own Unsubscribe button.")
+        return (
+            f"one-click unsubscribe is not available for this message: {verdict}. "
+            "Nothing proposed — say so in your dismissal; the operator can "
+            "use Gmail's own Unsubscribe button."
+        )
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mail.unsubscribe@v1",
-            arguments={"provider_uuid": uuid, "url": url, "sender": sender, "subject": subject},
-            target_ref={"system": "mailbox", "id": uuid},
-            reversibility=Reversibility.irreversible,
-        )],
-        evidence=[Evidence(
-            # Not `email`: that kind means a passage QUOTED from a mail and is
-            # re-checked verbatim (`proposals.verified_email_evidence`). This
-            # line is a description the tool built from the message headers,
-            # never a quote, so it is neither checked nor flagged (DL-230;
-            # the `propose_bulk_dismiss` precedent).
-            kind="mailbox", source_ref=uuid,
-            locator="List-Unsubscribe / List-Unsubscribe-Post headers, DKIM-verified by Gmail",
-            claim=f"{sender} offers one-click unsubscribe at {url} — {verdict}",
-        )],
-        expected_effect=(f"one HTTPS POST (List-Unsubscribe=One-Click) to the sender's "
-                         f"unsubscribe endpoint; {sender} stops sending to the operator"),
+        actions=[
+            Action(
+                capability="mail.unsubscribe@v1",
+                arguments={"provider_uuid": uuid, "url": url, "sender": sender, "subject": subject},
+                target_ref={"system": "mailbox", "id": uuid},
+                reversibility=Reversibility.irreversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                # Not `email`: that kind means a passage QUOTED from a mail and is
+                # re-checked verbatim (`proposals.verified_email_evidence`). This
+                # line is a description the tool built from the message headers,
+                # never a quote, so it is neither checked nor flagged (DL-230;
+                # the `propose_bulk_dismiss` precedent).
+                kind="mailbox",
+                source_ref=uuid,
+                locator="List-Unsubscribe / List-Unsubscribe-Post headers, DKIM-verified by Gmail",
+                claim=f"{sender} offers one-click unsubscribe at {url} — {verdict}",
+            )
+        ],
+        expected_effect=(
+            f"one HTTPS POST (List-Unsubscribe=One-Click) to the sender's "
+            f"unsubscribe endpoint; {sender} stops sending to the operator"
+        ),
     )
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
@@ -3156,9 +3290,15 @@ async def mail_list_folders(ctx: RunContext) -> str:
     return _clip("\n".join([f"{len(folders)} folder(s):", *lines]))
 
 
-async def propose_mail_send(ctx: RunContext, to: list[str], subject: str, body: str,
-                            rationale: str, cc: list[str] | None = None,
-                            reply_to_ref: str = "") -> str:
+async def propose_mail_send(
+    ctx: RunContext,
+    to: list[str],
+    subject: str,
+    body: str,
+    rationale: str,
+    cc: list[str] | None = None,
+    reply_to_ref: str = "",
+) -> str:
     """Propose sending one email as the operator. Once approved, the control
     plane sends EXACTLY the recipients, subject and body pinned here — you never
     touch the mailbox yourself, and nothing is edited between approval and
@@ -3194,36 +3334,52 @@ async def propose_mail_send(ctx: RunContext, to: list[str], subject: str, body: 
 
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mail.send@v1",
-            arguments={"to": recipients, "cc": copies, "subject": subject,
-                       "body": body, "reply_to_ref": in_reply_to},
-            target_ref={"system": "mailbox", "id": ", ".join(recipients)},
-            reversibility=Reversibility.irreversible,
-        )],
-        evidence=[Evidence(
-            # Not `email`: that kind means a passage QUOTED from a mail and is
-            # re-checked verbatim (`proposals.verified_email_evidence`). This
-            # line is a description the tool built from the message headers,
-            # never a quote, so it is neither checked nor flagged (DL-230;
-            # the `propose_bulk_dismiss` precedent).
-            kind="mailbox",
-            source_ref=in_reply_to or ", ".join(recipients),
-            locator=("the message being replied to, as read from the mailbox"
-                     if in_reply_to else "the message text pinned in this proposal"),
-            claim=(f"reply to {parent_sender}: {parent_subject}"
-                   if in_reply_to else f"to {', '.join(recipients)}: {subject}"),
-        )],
-        expected_effect=(f"one email goes out to {', '.join(recipients)}"
-                         + (f" (cc {', '.join(copies)})" if copies else "")
-                         + f" with the subject {subject!r}"),
+        actions=[
+            Action(
+                capability="mail.send@v1",
+                arguments={
+                    "to": recipients,
+                    "cc": copies,
+                    "subject": subject,
+                    "body": body,
+                    "reply_to_ref": in_reply_to,
+                },
+                target_ref={"system": "mailbox", "id": ", ".join(recipients)},
+                reversibility=Reversibility.irreversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                # Not `email`: that kind means a passage QUOTED from a mail and is
+                # re-checked verbatim (`proposals.verified_email_evidence`). This
+                # line is a description the tool built from the message headers,
+                # never a quote, so it is neither checked nor flagged (DL-230;
+                # the `propose_bulk_dismiss` precedent).
+                kind="mailbox",
+                source_ref=in_reply_to or ", ".join(recipients),
+                locator=(
+                    "the message being replied to, as read from the mailbox"
+                    if in_reply_to
+                    else "the message text pinned in this proposal"
+                ),
+                claim=(
+                    f"reply to {parent_sender}: {parent_subject}"
+                    if in_reply_to
+                    else f"to {', '.join(recipients)}: {subject}"
+                ),
+            )
+        ],
+        expected_effect=(
+            f"one email goes out to {', '.join(recipients)}"
+            + (f" (cc {', '.join(copies)})" if copies else "")
+            + f" with the subject {subject!r}"
+        ),
     )
     await _validate_proposal(ctx, proposal, agent_authored=False)
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 
-async def propose_mail_move(ctx: RunContext, message_ref: str, folder: str,
-                            rationale: str) -> str:
+async def propose_mail_move(ctx: RunContext, message_ref: str, folder: str, rationale: str) -> str:
     """Propose filing one email into a mailbox folder. Once approved, the
     control plane moves it out of its current folder and into `folder`.
 
@@ -3237,31 +3393,39 @@ async def propose_mail_move(ctx: RunContext, message_ref: str, folder: str,
     not mail you would rather not decide about.
     """
     if not (folder or "").strip():
-        raise ModelRetry(
-            "name the destination folder exactly as `mail_list_folders` shows it."
-        )
+        raise ModelRetry("name the destination folder exactly as `mail_list_folders` shows it.")
     uuid, sender, subject = await _mail_target(ctx, message_ref)
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mail.move@v1",
-            arguments={"provider_uuid": uuid, "folder": folder.strip(),
-                       "sender": sender, "subject": subject},
-            target_ref={"system": "mailbox", "id": uuid},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            # Not `email`: that kind means a passage QUOTED from a mail and is
-            # re-checked verbatim (`proposals.verified_email_evidence`). This
-            # line is a description the tool built from the message headers,
-            # never a quote, so it is neither checked nor flagged (DL-230;
-            # the `propose_bulk_dismiss` precedent).
-            kind="mailbox", source_ref=uuid,
-            locator="the message itself, as read from the mailbox",
-            claim=f"from {sender}: {subject}",
-        )],
-        expected_effect=(f"the message from {sender} ({subject!r}) moves to the "
-                         f"{folder.strip()} folder"),
+        actions=[
+            Action(
+                capability="mail.move@v1",
+                arguments={
+                    "provider_uuid": uuid,
+                    "folder": folder.strip(),
+                    "sender": sender,
+                    "subject": subject,
+                },
+                target_ref={"system": "mailbox", "id": uuid},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                # Not `email`: that kind means a passage QUOTED from a mail and is
+                # re-checked verbatim (`proposals.verified_email_evidence`). This
+                # line is a description the tool built from the message headers,
+                # never a quote, so it is neither checked nor flagged (DL-230;
+                # the `propose_bulk_dismiss` precedent).
+                kind="mailbox",
+                source_ref=uuid,
+                locator="the message itself, as read from the mailbox",
+                claim=f"from {sender}: {subject}",
+            )
+        ],
+        expected_effect=(
+            f"the message from {sender} ({subject!r}) moves to the {folder.strip()} folder"
+        ),
     )
     await _validate_proposal(ctx, proposal, agent_authored=False)
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
@@ -3280,22 +3444,27 @@ async def loe_list(ctx: RunContext) -> str:
         out = []
         for row in await repo.list_loes():
             history = await repo.list_loe_checkins(row["id"], limit=12)
-            out.append({
-                "id": row["id"],
-                "name": row["name"],
-                "cadence": row["cadence"],
-                "semantic": row["semantic"],
-                "semantic_version": row["semantic_version"],
-                "latest": history[0] if history else None,
-                "history": history,
-            })
+            out.append(
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "cadence": row["cadence"],
+                    "semantic": row["semantic"],
+                    "semantic_version": row["semantic_version"],
+                    "latest": history[0] if history else None,
+                    "history": history,
+                }
+            )
     except Exception as e:  # noqa: BLE001 — reads degrade the answer, never wedge the run
         return _read_failed("lines of effort read", e)
     return _clip(json.dumps(out, default=str))
 
 
 async def create_task(
-    ctx: RunContext[TriageDeps], agent_id: str, instructions: str, title: str = "",
+    ctx: RunContext[TriageDeps],
+    agent_id: str,
+    instructions: str,
+    title: str = "",
     await_result: bool = False,
 ) -> str:
     """Create a task on the board and assign it to a teammate — it starts
@@ -3321,9 +3490,11 @@ async def create_task(
     if not creator or not session_id:
         # Provenance is derived from the running session; without one the task
         # would be an unattributed creation.
-        return ("Task NOT created: this run has no agent session to record as "
-                "the task's creator. Say in your reply what needs doing and "
-                "for whom instead.")
+        return (
+            "Task NOT created: this run has no agent session to record as "
+            "the task's creator. Say in your reply what needs doing and "
+            "for whom instead."
+        )
     args = {"agent_id": agent_id, "instructions": instructions}
     if title:
         args["title"] = title
@@ -3339,16 +3510,21 @@ async def create_task(
 
     try:
         out = await create_and_run_task(
-            instructions, title or None, agent_id,
-            actor=f"agent:{creator}", background=True,
+            instructions,
+            title or None,
+            agent_id,
+            actor=f"agent:{creator}",
+            background=True,
             parent_session_id=session_id,
         )
     except HTTPException as exc:
         # A backstop refusal (already on the record as task.refused) or a
         # non-taskable assignee: the agent is told why, never retried.
         return f"Task NOT created — {exc.detail}"
-    created = (f"task {out['task_id']} created and assigned to {agent_id}; it is "
-               "running now and its outcome lands on the board.")
+    created = (
+        f"task {out['task_id']} created and assigned to {agent_id}; it is "
+        "running now and its outcome lands on the board."
+    )
     if not await_result:
         return created
     if getattr(deps, "consult_chain", ()):
@@ -3380,9 +3556,7 @@ async def submit_plan(ctx: RunContext, plan: str) -> str:
     raise CallDeferred(metadata={"kind": "submit_plan"})
 
 
-async def assign_work(
-    ctx: RunContext, agent_id: str, title: str, instructions: str
-) -> str:
+async def assign_work(ctx: RunContext, agent_id: str, title: str, instructions: str) -> str:
     """Assign a sub-task to a roster agent (from the AGENT CARDS in your
     briefing). The agent runs independently: an answer or review comes back to
     you directly; a proposal for a world change goes to the operator's
@@ -3399,9 +3573,11 @@ def _ask_handed_back(ctx: RunContext) -> bool:
     """Has this run already been handed an `ask_operator` call back?"""
     for message in getattr(ctx, "messages", None) or []:
         for part in getattr(message, "parts", None) or []:
-            if (getattr(part, "part_kind", "") == "tool-return"
-                    and getattr(part, "tool_name", "") == "ask_operator"
-                    and str(getattr(part, "content", "")).startswith("Not sent.")):
+            if (
+                getattr(part, "part_kind", "") == "tool-return"
+                and getattr(part, "tool_name", "") == "ask_operator"
+                and str(getattr(part, "content", "")).startswith("Not sent.")
+            ):
                 return True
     return False
 
@@ -3490,8 +3666,7 @@ async def record_progress(
     """
     from central_command import events
 
-    ledger = {"made_progress": made_progress, "in_a_loop": in_a_loop,
-              "next_step": next_step[:300]}
+    ledger = {"made_progress": made_progress, "in_a_loop": in_a_loop, "next_step": next_step[:300]}
     ctx.deps.progress_ledger.append(ledger)
     await events.emit(
         "orchestration.progress",
@@ -3732,7 +3907,9 @@ async def propose_mcp_sync_source(
     partial file — ask a narrower path instead.
     """
     if _settings.test_model:
-        return "(test model: propose_mcp_sync_source is a stub — no sandbox runs under the test model)"
+        return (
+            "(test model: propose_mcp_sync_source is a stub — no sandbox runs under the test model)"
+        )
 
     if not mcp_server_id_ok(server_id):
         return (
@@ -3777,32 +3954,42 @@ async def propose_mcp_sync_source(
     for f in files:
         target = root / server_id / f["path"]
         current = target.read_text(encoding="utf-8", errors="replace") if target.exists() else ""
-        diffs.append("".join(difflib.unified_diff(
-            current.splitlines(keepends=True),
-            f["content"].splitlines(keepends=True),
-            fromfile=f"a/servers/{server_id}/{f['path']}",
-            tofile=f"b/servers/{server_id}/{f['path']}",
-        )))
+        diffs.append(
+            "".join(
+                difflib.unified_diff(
+                    current.splitlines(keepends=True),
+                    f["content"].splitlines(keepends=True),
+                    fromfile=f"a/servers/{server_id}/{f['path']}",
+                    tofile=f"b/servers/{server_id}/{f['path']}",
+                )
+            )
+        )
     diff_text = "\n".join(diffs)
 
     agent_id, _session_id = _sandbox_identity(ctx)
     proposal = Proposal(
         intent=summary,
-        actions=[Action(
-            capability="mcp.sync_source@v1",
-            arguments={
-                "server_id": server_id, "files": files,
-                "summary": summary, "diff": diff_text,
-            },
-            target_ref={"system": "mcp_server", "id": server_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="sandbox",
-            source_ref=f"sandbox:{sandbox_id}",
-            locator=f"agent {agent_id}'s sandbox, read_file at propose time",
-            claim=f"the exact byte content of {len(files)} file(s), captured just now",
-        )],
+        actions=[
+            Action(
+                capability="mcp.sync_source@v1",
+                arguments={
+                    "server_id": server_id,
+                    "files": files,
+                    "summary": summary,
+                    "diff": diff_text,
+                },
+                target_ref={"system": "mcp_server", "id": server_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="sandbox",
+                source_ref=f"sandbox:{sandbox_id}",
+                locator=f"agent {agent_id}'s sandbox, read_file at propose time",
+                claim=f"the exact byte content of {len(files)} file(s), captured just now",
+            )
+        ],
         expected_effect=f"servers/{server_id}/ in the repo matches the {len(files)} captured file(s)",
     )
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
@@ -3840,21 +4027,24 @@ async def propose_mcp_build(ctx: RunContext, server_id: str, rationale: str) -> 
 
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mcp.build_image@v1",
-            arguments={"server_id": server_id},
-            target_ref={"system": "mcp_server", "id": server_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="mcp_server",
-            source_ref=f"mcp_server:{server_id}",
-            locator="mcp_server table, status column",
-            claim=f"{server_id} has passed sync review and is ready to build",
-        )],
+        actions=[
+            Action(
+                capability="mcp.build_image@v1",
+                arguments={"server_id": server_id},
+                target_ref={"system": "mcp_server", "id": server_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="mcp_server",
+                source_ref=f"mcp_server:{server_id}",
+                locator="mcp_server table, status column",
+                claim=f"{server_id} has passed sync review and is ready to build",
+            )
+        ],
         expected_effect=(
-            f"mcp_server '{server_id}' has status='built' with a recorded "
-            "image_ref and digest"
+            f"mcp_server '{server_id}' has status='built' with a recorded image_ref and digest"
         ),
     )
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
@@ -3883,18 +4073,22 @@ async def propose_mcp_deploy(ctx: RunContext, server_id: str, rationale: str) ->
 
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mcp.server_deploy@v1",
-            arguments={"server_id": server_id},
-            target_ref={"system": "mcp_server", "id": server_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="mcp_server",
-            source_ref=f"mcp_server:{server_id}",
-            locator="mcp_server table, status column",
-            claim=f"{server_id} has a built image ready to deploy",
-        )],
+        actions=[
+            Action(
+                capability="mcp.server_deploy@v1",
+                arguments={"server_id": server_id},
+                target_ref={"system": "mcp_server", "id": server_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="mcp_server",
+                source_ref=f"mcp_server:{server_id}",
+                locator="mcp_server table, status column",
+                claim=f"{server_id} has a built image ready to deploy",
+            )
+        ],
         expected_effect=(
             f"mcp_server '{server_id}' has status='deployed' in namespace "
             "cc-mcp, reachable at "
@@ -3937,18 +4131,22 @@ async def propose_mcp_register(
 
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="litellm.register_mcp_server@v1",
-            arguments={"server_id": server_id, "transport": transport},
-            target_ref={"system": "mcp_server", "id": server_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="mcp_server",
-            source_ref=f"mcp_server:{server_id}",
-            locator="mcp_server table, status column",
-            claim=f"{server_id} is deployed and ready to register with LiteLLM",
-        )],
+        actions=[
+            Action(
+                capability="litellm.register_mcp_server@v1",
+                arguments={"server_id": server_id, "transport": transport},
+                target_ref={"system": "mcp_server", "id": server_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="mcp_server",
+                source_ref=f"mcp_server:{server_id}",
+                locator="mcp_server table, status column",
+                claim=f"{server_id} is deployed and ready to register with LiteLLM",
+            )
+        ],
         expected_effect=(
             f"mcp_server '{server_id}' has status='registered' and its tools "
             "are reachable through the LiteLLM MCP gateway"
@@ -3985,18 +4183,22 @@ async def propose_mcp_remove(ctx: RunContext, server_id: str, rationale: str) ->
 
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mcp.server_remove@v1",
-            arguments={"server_id": server_id},
-            target_ref={"system": "mcp_server", "id": server_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="mcp_server",
-            source_ref=f"mcp_server:{server_id}",
-            locator="mcp_server table, status column",
-            claim=f"{server_id} should be torn down and retired",
-        )],
+        actions=[
+            Action(
+                capability="mcp.server_remove@v1",
+                arguments={"server_id": server_id},
+                target_ref={"system": "mcp_server", "id": server_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="mcp_server",
+                source_ref=f"mcp_server:{server_id}",
+                locator="mcp_server table, status column",
+                claim=f"{server_id} should be torn down and retired",
+            )
+        ],
         expected_effect=(
             f"mcp_server '{server_id}' has status='retired', its k8s "
             "objects are deleted, and it is deregistered from LiteLLM's MCP "
@@ -4033,17 +4235,22 @@ async def mcp_list_servers(ctx: RunContext) -> str:
     by_server: dict[str, list[dict]] = {}
     for t in tools:
         by_server.setdefault(t["server_id"], []).append(
-            {"tool_name": t["tool_name"], "default_gate": t["default_gate"],
-             "description": t.get("description") or ""}
+            {
+                "tool_name": t["tool_name"],
+                "default_gate": t["default_gate"],
+                "description": t.get("description") or "",
+            }
         )
     rows = []
     for s in servers:
         row = {
-            "server_id": s["id"], "status": s["status"],
+            "server_id": s["id"],
+            "status": s["status"],
             "source": s.get("source") or "pipeline",
             "display_name": s.get("display_name"),
             "description": s.get("description") or "",
-            "url": s.get("url"), "transport": s.get("transport"),
+            "url": s.get("url"),
+            "transport": s.get("transport"),
             "created_by": s.get("created_by"),
             "retired_at": s.get("retired_at"),
             "tools": by_server.get(s["id"], []),
@@ -4055,8 +4262,13 @@ async def mcp_list_servers(ctx: RunContext) -> str:
 
 
 async def propose_mcp_server_register(
-    ctx: RunContext, server_id: str, display_name: str, description: str,
-    url: str, transport: str, rationale: str,
+    ctx: RunContext,
+    server_id: str,
+    display_name: str,
+    description: str,
+    url: str,
+    transport: str,
+    rationale: str,
 ) -> str:
     """Propose registering an MCP server that ALREADY RUNS in its own
     container on LiteLLM's MCP gateway, by its URL. Reviewed and, once
@@ -4079,23 +4291,30 @@ async def propose_mcp_server_register(
     if _settings.test_model:
         return "(test model: propose_mcp_server_register is a stub — no registration runs under the test model)"
     args = {
-        "server_id": server_id, "display_name": display_name,
-        "description": description or "", "url": url, "transport": transport,
+        "server_id": server_id,
+        "display_name": display_name,
+        "description": description or "",
+        "url": url,
+        "transport": transport,
     }
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mcp.server_register@v1",
-            arguments=args,
-            target_ref={"system": "mcp_server", "id": server_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="mcp_server",
-            source_ref=url,
-            locator="the URL and transport named in this proposal",
-            claim=f"an MCP server ({transport}) answers at {url}",
-        )],
+        actions=[
+            Action(
+                capability="mcp.server_register@v1",
+                arguments=args,
+                target_ref={"system": "mcp_server", "id": server_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="mcp_server",
+                source_ref=url,
+                locator="the URL and transport named in this proposal",
+                claim=f"an MCP server ({transport}) answers at {url}",
+            )
+        ],
         expected_effect=(
             f"mcp_server '{server_id}' ({display_name}) is registered by URL at "
             f"{url} and its tools are discovered at 'human approval'"
@@ -4117,18 +4336,22 @@ async def propose_mcp_server_unregister(ctx: RunContext, server_id: str, rationa
         return "(test model: propose_mcp_server_unregister is a stub — no change runs under the test model)"
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mcp.server_unregister@v1",
-            arguments={"server_id": server_id},
-            target_ref={"system": "mcp_server", "id": server_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="mcp_server",
-            source_ref=f"mcp_server:{server_id}",
-            locator="mcp_server table, status and source columns",
-            claim=f"{server_id} is registered by URL and should come off the gateway",
-        )],
+        actions=[
+            Action(
+                capability="mcp.server_unregister@v1",
+                arguments={"server_id": server_id},
+                target_ref={"system": "mcp_server", "id": server_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="mcp_server",
+                source_ref=f"mcp_server:{server_id}",
+                locator="mcp_server table, status and source columns",
+                claim=f"{server_id} is registered by URL and should come off the gateway",
+            )
+        ],
         expected_effect=(
             f"mcp_server '{server_id}' has status='retired' and is no longer "
             "registered on LiteLLM's MCP gateway"
@@ -4151,7 +4374,11 @@ async def propose_mcp_server_unregister(ctx: RunContext, server_id: str, rationa
 
 
 async def propose_mcp_tool_call(
-    ctx: RunContext, server_id: str, tool_name: str, arguments: dict, rationale: str,
+    ctx: RunContext,
+    server_id: str,
+    tool_name: str,
+    arguments: dict,
+    rationale: str,
 ) -> str:
     """Propose calling a GATED tool served by a registered MCP server you
     have been granted access to. Reviewed and, once approved, invoked by the
@@ -4165,7 +4392,9 @@ async def propose_mcp_tool_call(
     call it directly instead of proposing it here.
     """
     if _settings.test_model:
-        return "(test model: propose_mcp_tool_call is a stub — no MCP calls run under the test model)"
+        return (
+            "(test model: propose_mcp_tool_call is a stub — no MCP calls run under the test model)"
+        )
 
     from central_command.db import repo
 
@@ -4193,21 +4422,27 @@ async def propose_mcp_tool_call(
 
     proposal = Proposal(
         intent=rationale,
-        actions=[Action(
-            capability="mcp.tool_call@v1",
-            arguments={
-                "server_id": server_id, "tool_name": tool_name,
-                "arguments": arguments or {}, "rationale": rationale,
-            },
-            target_ref={"system": "mcp_server", "id": server_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="mcp_server",
-            source_ref=f"mcp_server:{server_id}",
-            locator="mcp_tool table, default_gate/effective gate",
-            claim=f"{tool_name} on {server_id} is gated 'human approval' for {agent_id}",
-        )],
+        actions=[
+            Action(
+                capability="mcp.tool_call@v1",
+                arguments={
+                    "server_id": server_id,
+                    "tool_name": tool_name,
+                    "arguments": arguments or {},
+                    "rationale": rationale,
+                },
+                target_ref={"system": "mcp_server", "id": server_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="mcp_server",
+                source_ref=f"mcp_server:{server_id}",
+                locator="mcp_tool table, default_gate/effective gate",
+                claim=f"{tool_name} on {server_id} is gated 'human approval' for {agent_id}",
+            )
+        ],
         expected_effect=f"{server_id}.{tool_name} is invoked with the proposed arguments",
     )
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
@@ -4238,8 +4473,13 @@ def _sandbox_id_from_identity(agent_id: str, session_id: str) -> str:
 #    reason — so it goes out via CallDeferred(metadata=...) like the mcp family
 #    rather than through the generic propose_action shape.
 
+
 async def propose_skill_create(
-    ctx: RunContext, title: str, summary: str, guidance_content: str, describes: str = "",
+    ctx: RunContext,
+    title: str,
+    summary: str,
+    guidance_content: str,
+    describes: str = "",
 ) -> str:
     """Propose a NEW skill for the team's skills library: the title, a one-line
     summary of when to reach for it, and the guidance document an agent granted
@@ -4261,22 +4501,27 @@ async def propose_skill_create(
     agent_id = getattr(ctx.deps, "agent_id", "unknown")
     proposal = Proposal(
         intent=f"Add the skill '{title}' to the team's skills library",
-        actions=[Action(
-            capability="skill.create@v1",
-            arguments={
-                "title": title, "summary": summary,
-                "guidance_content": guidance_content,
-                **({"describes": describes} if describes else {}),
-            },
-            target_ref={"system": "central_command", "id": "skills"},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="authored",
-            source_ref=f"agent:{agent_id}",
-            locator="the proposal's guidance_content, reviewed as written",
-            claim=f"guidance for '{title}', drafted by this agent",
-        )],
+        actions=[
+            Action(
+                capability="skill.create@v1",
+                arguments={
+                    "title": title,
+                    "summary": summary,
+                    "guidance_content": guidance_content,
+                    **({"describes": describes} if describes else {}),
+                },
+                target_ref={"system": "central_command", "id": "skills"},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="authored",
+                source_ref=f"agent:{agent_id}",
+                locator="the proposal's guidance_content, reviewed as written",
+                claim=f"guidance for '{title}', drafted by this agent",
+            )
+        ],
         expected_effect=f"the skills library holds '{title}' with its guidance document at v1",
     )
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
@@ -4332,7 +4577,9 @@ async def propose_skill_doc(
 
     agent_id = getattr(ctx.deps, "agent_id", "unknown")
     arguments = {
-        "skill_id": skill_id, "doc_key": doc_key, "title": title,
+        "skill_id": skill_id,
+        "doc_key": doc_key,
+        "title": title,
         "content": content,
         **({"source_url": source_url} if source_url else {}),
         **({"describes": describes} if describes else {}),
@@ -4343,21 +4590,31 @@ async def propose_skill_doc(
         arguments["captured_at"] = captured_at
     proposal = Proposal(
         intent=f"Add the document '{doc_key}' to the skill '{skill_id}'",
-        actions=[Action(
-            capability="skill.doc_add@v1",
-            arguments=arguments,
-            target_ref={"system": "central_command", "id": skill_id},
-            reversibility=Reversibility.reversible,
-        )],
-        evidence=[Evidence(
-            kind="web" if captured_at else "authored",
-            source_ref=source_url or f"agent:{agent_id}",
-            locator=(f"fetched at propose time ({captured_at}); the proposal "
-                     "carries the captured text verbatim")
-            if captured_at else "the proposal's content, reviewed as written",
-            claim=(f"the captured content of {source_url}" if captured_at
-                   else f"'{doc_key}' for {skill_id}, drafted by this agent"),
-        )],
+        actions=[
+            Action(
+                capability="skill.doc_add@v1",
+                arguments=arguments,
+                target_ref={"system": "central_command", "id": skill_id},
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                kind="web" if captured_at else "authored",
+                source_ref=source_url or f"agent:{agent_id}",
+                locator=(
+                    f"fetched at propose time ({captured_at}); the proposal "
+                    "carries the captured text verbatim"
+                )
+                if captured_at
+                else "the proposal's content, reviewed as written",
+                claim=(
+                    f"the captured content of {source_url}"
+                    if captured_at
+                    else f"'{doc_key}' for {skill_id}, drafted by this agent"
+                ),
+            )
+        ],
         expected_effect=f"skill {skill_id} carries a new version of '{doc_key}'",
     )
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
@@ -4409,8 +4666,12 @@ async def propose_skill_correction(
     if refusal:
         return refusal
     out = await build_correction(
-        agent_id=agent_id, skill_id=skill_id,
-        doc_key=doc_key, find=find, replace=replace, why=why,
+        agent_id=agent_id,
+        skill_id=skill_id,
+        doc_key=doc_key,
+        find=find,
+        replace=replace,
+        why=why,
     )
     if isinstance(out, str):
         return out
@@ -4459,7 +4720,8 @@ async def propose_note(
     grounding, live, refusal, drafting = await resolve_grounding(
         session_id=getattr(deps, "session_id", None),
         quote_session_id=getattr(deps, "quote_session_id", None),
-        live_messages=getattr(ctx, "messages", None))
+        live_messages=getattr(ctx, "messages", None),
+    )
     if refusal:
         return refusal
     if drafting and (scope or "").strip() != "private":
@@ -4468,8 +4730,12 @@ async def propose_note(
         return DRAFTING_RETIRE_REFUSAL
     out = await build_note_proposal(
         agent_id=getattr(deps, "agent_id", None) or "unknown",
-        scope=scope, text=text, source_quote=source_quote, retire_ids=retire_ids,
-        grounding_session_id=grounding, live_messages=live,
+        scope=scope,
+        text=text,
+        source_quote=source_quote,
+        retire_ids=retire_ids,
+        grounding_session_id=grounding,
+        live_messages=live,
     )
     if isinstance(out, str):
         return out
@@ -4477,7 +4743,10 @@ async def propose_note(
 
 
 async def propose_note_retire(
-    ctx: RunContext, note_id: str, reason: str, source_quote: str | None = None,
+    ctx: RunContext,
+    note_id: str,
+    reason: str,
+    source_quote: str | None = None,
 ) -> str:
     """Propose retiring ONE standing note that no longer holds — your own
     private note, or an operator-scope note the operator asked to be
@@ -4496,15 +4765,19 @@ async def propose_note_retire(
     grounding, live, refusal, drafting = await resolve_grounding(
         session_id=getattr(deps, "session_id", None),
         quote_session_id=getattr(deps, "quote_session_id", None),
-        live_messages=getattr(ctx, "messages", None))
+        live_messages=getattr(ctx, "messages", None),
+    )
     if drafting:
         return DRAFTING_RETIRE_REFUSAL
     if refusal:
         return refusal
     out = await build_retire_proposal(
         agent_id=getattr(deps, "agent_id", None) or "unknown",
-        note_id=note_id, reason=reason, source_quote=source_quote,
-        grounding_session_id=grounding, live_messages=live,
+        note_id=note_id,
+        reason=reason,
+        source_quote=source_quote,
+        grounding_session_id=grounding,
+        live_messages=live,
     )
     if isinstance(out, str):
         return out

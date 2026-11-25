@@ -28,10 +28,16 @@ from tests.conftest import needs_pg
 _REAL_TRACKED = ea_followups.tracked
 
 _ISSUE = {
-    "issue_key": "TASKS-7", "summary": "Vendor owes the SLA answer",
-    "status": "To Do", "issue_type": "Task", "labels": ["follow-up"],
-    "due_date": "2026-10-09", "updated": "2026-10-02T10:00:00Z",
-    "assignee": None, "parent": None, "link_count": 0,
+    "issue_key": "TASKS-7",
+    "summary": "Vendor owes the SLA answer",
+    "status": "To Do",
+    "issue_type": "Task",
+    "labels": ["follow-up"],
+    "due_date": "2026-10-09",
+    "updated": "2026-10-02T10:00:00Z",
+    "assignee": None,
+    "parent": None,
+    "link_count": 0,
     "url": "https://jira.example.com/browse/TASKS-7",
 }
 
@@ -51,8 +57,8 @@ def _found(*issues):
     async def fake(jql, limit=None):
         assert ea_profile.FOLLOW_UP_LABEL in jql
         assert "statusCategory != Done" in jql
-        return {"ok": True, "issues": list(issues), "count": len(issues),
-                "truncated": False}
+        return {"ok": True, "issues": list(issues), "count": len(issues), "truncated": False}
+
     return fake
 
 
@@ -66,11 +72,16 @@ async def test_tracked_returns_a_compact_issue_list(monkeypatch):
         "available": True,
         "count": 1,
         "truncated": False,
-        "issues": [{"issue_key": "TASKS-7",
-                    "summary": "Vendor owes the SLA answer",
-                    "status": "To Do", "due_date": "2026-10-09",
-                    "assignee": None,
-                    "url": "https://jira.example.com/browse/TASKS-7"}],
+        "issues": [
+            {
+                "issue_key": "TASKS-7",
+                "summary": "Vendor owes the SLA answer",
+                "status": "To Do",
+                "due_date": "2026-10-09",
+                "assignee": None,
+                "url": "https://jira.example.com/browse/TASKS-7",
+            }
+        ],
     }
 
 
@@ -86,8 +97,7 @@ async def test_an_unconfigured_tracker_is_said_so_and_never_called(monkeypatch):
 
     monkeypatch.setattr(jira, "configured", lambda: False)
     monkeypatch.setattr(jira, "search_issues", _explode)
-    assert await ea_followups.tracked() == {
-        "available": False, "reason": "not configured"}
+    assert await ea_followups.tracked() == {"available": False, "reason": "not configured"}
 
 
 async def test_tracked_raises_on_a_transport_failure(monkeypatch):
@@ -125,9 +135,7 @@ def _block(brief: str) -> dict:
 
 
 @needs_pg
-async def test_the_brief_carries_tracked_follow_ups_and_open_tasks(
-    monkeypatch, stub_task
-):
+async def test_the_brief_carries_tracked_follow_ups_and_open_tasks(monkeypatch, stub_task):
     monkeypatch.setattr(jira, "search_issues", _found(_ISSUE))
 
     await hb_actions._ea_contact("sched_fu_ok", {"kind": "check_in"})
@@ -153,9 +161,7 @@ async def test_an_unconfigured_tracker_leaves_the_block_out(monkeypatch, stub_ta
 
 
 @needs_pg
-async def test_a_tracker_outage_degrades_the_contact_but_never_cancels_it(
-    monkeypatch, stub_task
-):
+async def test_a_tracker_outage_degrades_the_contact_but_never_cancels_it(monkeypatch, stub_task):
     async def boom(jql, limit=None):
         raise ConnectionError("tracker down")
 
@@ -219,8 +225,9 @@ def test_the_charter_routes_follow_ups_away_from_the_graph():
 
 
 def test_the_episode_pack_refuses_process_state_for_every_agent():
-    cap = next(c for c in packs.PACKS["graph-propose"].capabilities
-               if c.name == "graph.add_episode")
+    cap = next(
+        c for c in packs.PACKS["graph-propose"].capabilities if c.name == "graph.add_episode"
+    )
     assert "PROCESS STATE IS NEVER AN EPISODE, in any scope" in cap.notes
 
 
@@ -235,7 +242,8 @@ async def test_the_curator_brief_names_no_change_as_a_valid_outcome(monkeypatch)
 
     monkeypatch.setattr(graph_auditor, "_approved_episode_body", body)
     brief = await graph_auditor.remediation_instructions(
-        {"id": "ver_1", "group_id": "central_command_ea", "scope": "private",
-         "delta": {}}, "Should something have been created from this?")
+        {"id": "ver_1", "group_id": "central_command_ea", "scope": "private", "delta": {}},
+        "Should something have been created from this?",
+    )
     assert "NO CHANGE IS A VALID OUTCOME" in brief
     assert "propose nothing" in brief

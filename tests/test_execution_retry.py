@@ -90,9 +90,7 @@ async def _parked_run(monkeypatch, *, fail: str = OUTAGE_TEXT) -> dict:
     _graph_spy(monkeypatch, fail=fail)
     model = make_sc1_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
-    out = await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model
-    )
+    out = await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
     return {**run, "out": out, "jira_calls": jira, "model": model}
 
 
@@ -113,10 +111,10 @@ async def test_a_transient_execution_failure_parks_the_proposal(monkeypatch):
     assert out["failed_capability"] == "graph.add_episode"
 
     row = await repo.load_proposal(parked["proposal_id"])
-    assert row["status"] == "RETRY_PENDING"      # never terminal FAILED
+    assert row["status"] == "RETRY_PENDING"  # never terminal FAILED
     state = row["retry_state"]
     assert state["completed_results"] == ["DEMO-1 due_date set to 2026-08-03"]
-    assert state["next_action_index"] == 1       # the cursor: skip what landed
+    assert state["next_action_index"] == 1  # the cursor: skip what landed
     assert state["approver"] == "human:lee"
     assert state["attempts"] == 1
     assert "Connection refused" in state["last_error"]
@@ -127,7 +125,7 @@ async def test_a_transient_execution_failure_parks_the_proposal(monkeypatch):
     assert await repo.session_status(parked["session_id"]) == "AWAITING_HUMAN"
 
     kinds = await _kinds(parked["proposal_id"])
-    assert kinds.count("proposal.decided") == 1   # decided once, by the operator
+    assert kinds.count("proposal.decided") == 1  # decided once, by the operator
     assert "proposal.execution_parked" in kinds
     assert "proposal.failed" not in kinds
     assert "proposal.executed" not in kinds
@@ -153,12 +151,8 @@ async def test_a_parked_execution_does_not_release_its_folds(monkeypatch):
                        'FOLD_PENDING', $1)""",
             run["proposal_id"],
         )
-        await gateway.approve_and_execute(
-            run["session_id"], run["proposal_id"], model=model
-        )
-        state = await conn.fetchval(
-            "select state from work_item where id = 'wi_retry_fold'"
-        )
+        await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
+        state = await conn.fetchval("select state from work_item where id = 'wi_retry_fold'")
         assert state == "FOLD_PENDING"
         assert len(jira) == 1
     finally:
@@ -176,9 +170,7 @@ async def test_a_semantic_execution_failure_keeps_todays_behaviour(monkeypatch):
     model = make_spike_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
 
-    out = await gateway.approve_and_execute(
-        run["session_id"], run["proposal_id"], model=model
-    )
+    out = await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
 
     assert out["ok"] is False
     assert out["failed_capability"] == "jira.set_due_date"
@@ -186,15 +178,16 @@ async def test_a_semantic_execution_failure_keeps_todays_behaviour(monkeypatch):
     assert row["status"] == "FAILED"
     # Never parked: the row holds only the Executor's cursor (DL-218), which
     # names the action that failed; no park bookkeeping.
-    assert row["retry_state"] == {"completed_results": [], "next_action_index": 0,
-                                  "in_flight_index": 0,
-                                  "in_flight_capability": "jira.set_due_date"}
+    assert row["retry_state"] == {
+        "completed_results": [],
+        "next_action_index": 0,
+        "in_flight_index": 0,
+        "in_flight_capability": "jira.set_due_date",
+    }
     kinds = await _kinds(run["proposal_id"])
     assert "proposal.failed" in kinds
     assert "proposal.execution_parked" not in kinds
-    assert (await _event(run["proposal_id"], "proposal.failed"))["payload"][
-        "transient"
-    ] is False
+    assert (await _event(run["proposal_id"], "proposal.failed"))["payload"]["transient"] is False
 
 
 # --- 3: the retry converges, without re-running what landed ---------------------
@@ -220,7 +213,7 @@ async def test_the_retry_runs_only_the_remaining_actions(monkeypatch):
     row = await repo.load_proposal(parked["proposal_id"])
     assert row["status"] == "EXECUTED"
     assert row["provenance"]["approver"] == "human:lee"
-    assert row["provenance"]["executed_at"]        # stamped now; the record shows the outage
+    assert row["provenance"]["executed_at"]  # stamped now; the record shows the outage
     # The agent is told what its PROPOSAL did, not what the last attempt did.
     assert "DEMO-1 due_date set to 2026-08-03" in out["result_text"]
     assert "graph episode" in out["result_text"]
@@ -228,7 +221,7 @@ async def test_the_retry_runs_only_the_remaining_actions(monkeypatch):
     kinds = await _kinds(parked["proposal_id"])
     assert "proposal.execution_retried" in kinds
     assert "proposal.executed" in kinds
-    assert kinds.count("proposal.decided") == 1   # no second gate
+    assert kinds.count("proposal.decided") == 1  # no second gate
     # The drafter was resumed through the shared tail and the session closed out.
     assert await repo.session_status(parked["session_id"]) == "DONE"
 
@@ -247,14 +240,10 @@ async def test_a_retried_execution_commits_its_folds(monkeypatch):
                        'FOLD_PENDING', $1)""",
             run["proposal_id"],
         )
-        await gateway.approve_and_execute(
-            run["session_id"], run["proposal_id"], model=model
-        )
+        await gateway.approve_and_execute(run["session_id"], run["proposal_id"], model=model)
         _graph_spy(monkeypatch)
         await gateway.retry_execution(run["proposal_id"], model=model)
-        state = await conn.fetchval(
-            "select state from work_item where id = 'wi_retry_commit'"
-        )
+        state = await conn.fetchval("select state from work_item where id = 'wi_retry_commit'")
         assert state == "FOLDED"
         assert len(jira) == 1
     finally:
@@ -276,7 +265,7 @@ async def test_retries_never_exhaust_and_converge_when_the_dependency_is_back(
     parked = await _parked_run(monkeypatch)
     model = parked["model"]
 
-    for attempt in range(2, 8):                    # six more, past the old limit
+    for attempt in range(2, 8):  # six more, past the old limit
         _graph_spy(monkeypatch, fail=OUTAGE_TEXT)
         again = await gateway.retry_execution(parked["proposal_id"], model=model)
         assert again["execution"] == "parked"
@@ -285,15 +274,13 @@ async def test_retries_never_exhaust_and_converge_when_the_dependency_is_back(
     assert row["status"] == "RETRY_PENDING"
     assert row["retry_state"]["attempts"] == 7
     assert row["retry_state"]["next_action_index"] == 1
-    assert row["retry_state"]["completed_results"] == [
-        "DEMO-1 due_date set to 2026-08-03"
-    ]
+    assert row["retry_state"]["completed_results"] == ["DEMO-1 due_date set to 2026-08-03"]
     assert row["retry_state"]["not_before"]
     kinds = await _kinds(parked["proposal_id"])
     assert not [k for k in kinds if k.endswith("exhausted")]
     assert "proposal.failed" not in kinds
 
-    _graph_spy(monkeypatch)                        # the dependency is back
+    _graph_spy(monkeypatch)  # the dependency is back
     done = await gateway.retry_execution(parked["proposal_id"], model=model)
     assert done["retried"] is True
     assert (await repo.load_proposal(parked["proposal_id"]))["status"] == "EXECUTED"
@@ -311,14 +298,12 @@ async def test_a_semantic_failure_on_retry_fails_with_the_spliced_completed_list
     _graph_spy(monkeypatch, fail="400 invalid episode body")
     out = await gateway.retry_execution(parked["proposal_id"], model=parked["model"])
 
-    assert out["ok"] is False                      # not the outage — the answer
+    assert out["ok"] is False  # not the outage — the answer
     row = await repo.load_proposal(parked["proposal_id"])
     assert row["status"] == "FAILED"
     failed = await _event(parked["proposal_id"], "proposal.failed")
     # The Jira write from the FIRST attempt is still part of the truth.
-    assert failed["payload"]["completed_actions"] == [
-        "DEMO-1 due_date set to 2026-08-03"
-    ]
+    assert failed["payload"]["completed_actions"] == ["DEMO-1 due_date set to 2026-08-03"]
     assert failed["payload"]["transient"] is False
 
 
@@ -442,6 +427,7 @@ class _Up:
 def _http_503(monkeypatch, module, *, kwarg: str):
     """The provider answers 503 through the REAL `_check`: the status reaches
     the executor only as the error's typed `status_code`."""
+
     async def fake(*a, **k):
         return httpx.Response(503, text="<html>Service Unavailable</html>")
 
@@ -501,15 +487,27 @@ async def test_a_confluence_503_parks_the_proposal_and_the_sweep_re_drives_it(mo
     try:
         proposal = {
             "intent": "Update the roadmap page",
-            "actions": [{
-                "capability": "confluence.update_page",
-                "arguments": {"page_id": "42", "title": "Roadmap",
-                              "body_storage": "<p>new</p>", "expected_version": 3},
-                "target_ref": {"system": "confluence", "id": "42", "read_version": "3"},
-                "reversibility": "reversible",
-            }],
-            "evidence": [{"kind": "operator", "source_ref": "operator:task",
-                          "locator": "test task", "claim": "Operator tasked an edit."}],
+            "actions": [
+                {
+                    "capability": "confluence.update_page",
+                    "arguments": {
+                        "page_id": "42",
+                        "title": "Roadmap",
+                        "body_storage": "<p>new</p>",
+                        "expected_version": 3,
+                    },
+                    "target_ref": {"system": "confluence", "id": "42", "read_version": "3"},
+                    "reversibility": "reversible",
+                }
+            ],
+            "evidence": [
+                {
+                    "kind": "operator",
+                    "source_ref": "operator:task",
+                    "locator": "test task",
+                    "claim": "Operator tasked an edit.",
+                }
+            ],
             "expected_effect": "page 42 carries the new body",
             "confidence": {"level": "high", "rationale": "The test states it."},
         }
@@ -520,8 +518,9 @@ async def test_a_confluence_503_parks_the_proposal_and_the_sweep_re_drives_it(mo
 
         monkeypatch.setattr(routes, "resolve_model", fixed_model)
         task_id = f"task_c711_{uuid.uuid4().hex[:10]}"
-        await repo.create_task(task_id, "confluence 503", "edit the page", agent,
-                               created_by="operator")
+        await repo.create_task(
+            task_id, "confluence 503", "edit the page", agent, created_by="operator"
+        )
         run = await routes._run_assigned_task(await repo.get_task(task_id))
         pid = run["proposal_id"]
         row = await repo.load_proposal(pid)
@@ -553,6 +552,8 @@ async def test_a_confluence_503_parks_the_proposal_and_the_sweep_re_drives_it(mo
             try:
                 await conn.execute(
                     "delete from agent_grant where agent_id = $1 and pack = $2",
-                    agent, "confluence-propose")
+                    agent,
+                    "confluence-propose",
+                )
             finally:
                 await conn.close()

@@ -127,11 +127,15 @@ def selected() -> bool:
 
 def missing_settings() -> list[str]:
     """The `.env` keys a selected native client still needs, by name."""
-    return [key for key, value in (
-        ("CC_GOOGLE_CLIENT_ID", settings.google_client_id),
-        ("CC_GOOGLE_CLIENT_SECRET", settings.google_client_secret),
-        ("CC_GOOGLE_REFRESH_TOKEN", settings.google_refresh_token),
-    ) if not value]
+    return [
+        key
+        for key, value in (
+            ("CC_GOOGLE_CLIENT_ID", settings.google_client_id),
+            ("CC_GOOGLE_CLIENT_SECRET", settings.google_client_secret),
+            ("CC_GOOGLE_REFRESH_TOKEN", settings.google_refresh_token),
+        )
+        if not value
+    ]
 
 
 def configured() -> bool:
@@ -181,8 +185,7 @@ def _credentials():
     reused until it nears expiry and a changed setting starts afresh."""
     from google.oauth2.credentials import Credentials
 
-    key = (settings.google_client_id, settings.google_client_secret,
-           settings.google_refresh_token)
+    key = (settings.google_client_id, settings.google_client_secret, settings.google_refresh_token)
     with _creds_lock:
         if _creds_cache["key"] != key:
             _creds_cache["key"] = key
@@ -314,18 +317,31 @@ def _validate_mail(payload: dict) -> dict:
     """`Validate request` (lib-email-provider), for the fields the façade sends."""
     mode = payload.get("mode")
     if mode not in _MAIL_MODES:
-        raise _MailFail(_MAIL_PREFIX + f"bad or missing mode '{_js_str(mode) if mode is not None else 'undefined'}' "
-                        "(must be 'message', 'thread', 'list', 'report_spam', or 'attachment')")
+        raise _MailFail(
+            _MAIL_PREFIX
+            + f"bad or missing mode '{_js_str(mode) if mode is not None else 'undefined'}' "
+            "(must be 'message', 'thread', 'list', 'report_spam', or 'attachment')"
+        )
     ref = payload.get("source_ref") or {}
     if mode in ("message", "report_spam", "attachment") and not _id_ok(ref.get("uuid")):
-        raise _MailFail(_MAIL_PREFIX + f'mode "{mode}" requires source_ref.uuid (non-empty, [A-Za-z0-9_-] only)')
+        raise _MailFail(
+            _MAIL_PREFIX + f'mode "{mode}" requires source_ref.uuid (non-empty, [A-Za-z0-9_-] only)'
+        )
     if mode == "attachment" and not _id_ok(ref.get("attachment_id")):
-        raise _MailFail(_MAIL_PREFIX + 'mode "attachment" requires source_ref.attachment_id (non-empty, [A-Za-z0-9_-] only)')
+        raise _MailFail(
+            _MAIL_PREFIX
+            + 'mode "attachment" requires source_ref.attachment_id (non-empty, [A-Za-z0-9_-] only)'
+        )
     query = payload.get("scope_query")
     if mode == "list" and (not isinstance(query, str) or query.strip() == ""):
-        raise _MailFail(_MAIL_PREFIX + 'mode "list" requires scope_query (non-empty Gmail search string)')
+        raise _MailFail(
+            _MAIL_PREFIX + 'mode "list" requires scope_query (non-empty Gmail search string)'
+        )
     if mode == "thread" and not _id_ok(ref.get("conversation_id")):
-        raise _MailFail(_MAIL_PREFIX + 'mode "thread" requires source_ref.conversation_id (non-empty, [A-Za-z0-9_-] only)')
+        raise _MailFail(
+            _MAIL_PREFIX
+            + 'mode "thread" requires source_ref.conversation_id (non-empty, [A-Za-z0-9_-] only)'
+        )
     return ref
 
 
@@ -370,22 +386,57 @@ def _http_body(status: int, body, what: str):
 _WHATWG_ENCODINGS: tuple[tuple[str, str], ...] = (
     ("utf-8", "unicode-1-1-utf-8 unicode11utf8 unicode20utf8 utf-8 utf8 x-unicode20utf8"),
     ("cp866", "866 cp866 csibm866 ibm866"),
-    ("iso8859_2", ("csisolatin2 iso-8859-2 iso-ir-101 iso8859-2 iso88592 iso_8859-2 "
-                  "iso_8859-2:1987 l2 latin2")),
-    ("iso8859_3", ("csisolatin3 iso-8859-3 iso-ir-109 iso8859-3 iso88593 iso_8859-3 "
-                  "iso_8859-3:1988 l3 latin3")),
-    ("iso8859_4", ("csisolatin4 iso-8859-4 iso-ir-110 iso8859-4 iso88594 iso_8859-4 "
-                  "iso_8859-4:1988 l4 latin4")),
-    ("iso8859_5", ("csisolatincyrillic cyrillic iso-8859-5 iso-ir-144 iso8859-5 iso88595 "
-                  "iso_8859-5 iso_8859-5:1988")),
-    ("iso8859_6", ("arabic asmo-708 csiso88596e csiso88596i csisolatinarabic ecma-114 "
-                  "iso-8859-6 iso-8859-6-e iso-8859-6-i iso-ir-127 iso8859-6 iso88596 "
-                  "iso_8859-6 iso_8859-6:1987")),
-    ("iso8859_7", ("csisolatingreek ecma-118 elot_928 greek greek8 iso-8859-7 iso-ir-126 "
-                  "iso8859-7 iso88597 iso_8859-7 iso_8859-7:1987 sun_eu_greek")),
-    ("iso8859_8", ("csiso88598e csisolatinhebrew hebrew iso-8859-8 iso-8859-8-e iso-ir-138 "
-                  "iso8859-8 iso88598 iso_8859-8 iso_8859-8:1988 visual "
-                  "csiso88598i iso-8859-8-i logical")),
+    (
+        "iso8859_2",
+        (
+            "csisolatin2 iso-8859-2 iso-ir-101 iso8859-2 iso88592 iso_8859-2 "
+            "iso_8859-2:1987 l2 latin2"
+        ),
+    ),
+    (
+        "iso8859_3",
+        (
+            "csisolatin3 iso-8859-3 iso-ir-109 iso8859-3 iso88593 iso_8859-3 "
+            "iso_8859-3:1988 l3 latin3"
+        ),
+    ),
+    (
+        "iso8859_4",
+        (
+            "csisolatin4 iso-8859-4 iso-ir-110 iso8859-4 iso88594 iso_8859-4 "
+            "iso_8859-4:1988 l4 latin4"
+        ),
+    ),
+    (
+        "iso8859_5",
+        (
+            "csisolatincyrillic cyrillic iso-8859-5 iso-ir-144 iso8859-5 iso88595 "
+            "iso_8859-5 iso_8859-5:1988"
+        ),
+    ),
+    (
+        "iso8859_6",
+        (
+            "arabic asmo-708 csiso88596e csiso88596i csisolatinarabic ecma-114 "
+            "iso-8859-6 iso-8859-6-e iso-8859-6-i iso-ir-127 iso8859-6 iso88596 "
+            "iso_8859-6 iso_8859-6:1987"
+        ),
+    ),
+    (
+        "iso8859_7",
+        (
+            "csisolatingreek ecma-118 elot_928 greek greek8 iso-8859-7 iso-ir-126 "
+            "iso8859-7 iso88597 iso_8859-7 iso_8859-7:1987 sun_eu_greek"
+        ),
+    ),
+    (
+        "iso8859_8",
+        (
+            "csiso88598e csisolatinhebrew hebrew iso-8859-8 iso-8859-8-e iso-ir-138 "
+            "iso8859-8 iso88598 iso_8859-8 iso_8859-8:1988 visual "
+            "csiso88598i iso-8859-8-i logical"
+        ),
+    ),
     ("iso8859_10", "csisolatin6 iso-8859-10 iso-ir-157 iso8859-10 iso885910 l6 latin6"),
     ("iso8859_13", "iso-8859-13 iso8859-13 iso885913"),
     ("iso8859_14", "iso-8859-14 iso8859-14 iso885914"),
@@ -397,12 +448,22 @@ _WHATWG_ENCODINGS: tuple[tuple[str, str], ...] = (
     ("cp874", "dos-874 iso-8859-11 iso8859-11 iso885911 tis-620 windows-874"),
     ("cp1250", "cp1250 windows-1250 x-cp1250"),
     ("cp1251", "cp1251 windows-1251 x-cp1251"),
-    ("cp1252", ("ansi_x3.4-1968 ascii cp1252 cp819 csisolatin1 ibm819 iso-8859-1 iso-ir-100 "
-               "iso8859-1 iso88591 iso_8859-1 iso_8859-1:1987 l1 latin1 us-ascii "
-               "windows-1252 x-cp1252")),
+    (
+        "cp1252",
+        (
+            "ansi_x3.4-1968 ascii cp1252 cp819 csisolatin1 ibm819 iso-8859-1 iso-ir-100 "
+            "iso8859-1 iso88591 iso_8859-1 iso_8859-1:1987 l1 latin1 us-ascii "
+            "windows-1252 x-cp1252"
+        ),
+    ),
     ("cp1253", "cp1253 windows-1253 x-cp1253"),
-    ("cp1254", ("cp1254 csisolatin5 iso-8859-9 iso-ir-148 iso8859-9 iso88599 iso_8859-9 "
-               "iso_8859-9:1989 l5 latin5 windows-1254 x-cp1254")),
+    (
+        "cp1254",
+        (
+            "cp1254 csisolatin5 iso-8859-9 iso-ir-148 iso8859-9 iso88599 iso_8859-9 "
+            "iso_8859-9:1989 l5 latin5 windows-1254 x-cp1254"
+        ),
+    ),
     ("cp1255", "cp1255 windows-1255 x-cp1255"),
     ("cp1256", "cp1256 windows-1256 x-cp1256"),
     ("cp1257", "cp1257 windows-1257 x-cp1257"),
@@ -414,8 +475,13 @@ _WHATWG_ENCODINGS: tuple[tuple[str, str], ...] = (
     ("euc_jp", "cseucpkdfmtjapanese euc-jp x-euc-jp"),
     ("iso2022_jp", "csiso2022jp iso-2022-jp"),
     ("cp932", "csshiftjis ms932 ms_kanji shift-jis shift_jis sjis windows-31j x-sjis"),
-    ("cp949", ("cseuckr csksc56011987 euc-kr iso-ir-149 korean ks_c_5601-1987 ks_c_5601-1989 "
-              "ksc5601 ksc_5601 windows-949")),
+    (
+        "cp949",
+        (
+            "cseuckr csksc56011987 euc-kr iso-ir-149 korean ks_c_5601-1987 ks_c_5601-1989 "
+            "ksc5601 ksc_5601 windows-949"
+        ),
+    ),
     ("utf-16-be", "unicodefffe utf-16be"),
     ("utf-16-le", "csunicode iso-10646-ucs-2 ucs-2 unicode unicodefeff utf-16 utf-16le"),
 )
@@ -463,8 +529,11 @@ def _header_map(payload) -> dict:
 
 
 def _header_all(payload, name: str) -> list[str]:
-    return [str(h.get("value") or "") for h in _headers(payload)
-            if isinstance(h, dict) and h.get("name") and str(h["name"]).lower() == name]
+    return [
+        str(h.get("value") or "")
+        for h in _headers(payload)
+        if isinstance(h, dict) and h.get("name") and str(h["name"]).lower() == name
+    ]
 
 
 def _charset_of(part) -> str:
@@ -501,10 +570,15 @@ def _walk(part, acc: dict) -> None:
     body = _get(part, "body") or {}
     is_attachment, is_inline = _disposition_of(part)
     if _get(body, "attachmentId"):
-        acc["attachments"].append({
-            "filename": _get(part, "filename") or "", "mime_type": _get(part, "mimeType") or "",
-            "size": _size(body), "attachment_id": body["attachmentId"], "is_inline": is_inline,
-        })
+        acc["attachments"].append(
+            {
+                "filename": _get(part, "filename") or "",
+                "mime_type": _get(part, "mimeType") or "",
+                "size": _size(body),
+                "attachment_id": body["attachmentId"],
+                "is_inline": is_inline,
+            }
+        )
         if mime in ("text/plain", "text/html") and not is_attachment and not _get(body, "data"):
             acc["body_truncated"] = True
     elif mime == "text/plain" and _get(body, "data") and not is_attachment and not acc["body_text"]:
@@ -514,8 +588,13 @@ def _walk(part, acc: dict) -> None:
     elif mime == "text/calendar" and _get(body, "data"):
         text = _decode(body["data"], _charset_of(part))
         if text:
-            entry = {"filename": _get(part, "filename") or "invite.ics", "mime_type": "text/calendar",
-                     "size": _size(body, len(text)), "attachment_id": "", "is_inline": False}
+            entry = {
+                "filename": _get(part, "filename") or "invite.ics",
+                "mime_type": "text/calendar",
+                "size": _size(body, len(text)),
+                "attachment_id": "",
+                "is_inline": False,
+            }
             entry.update({"inline_text": text} if len(text) <= 200000 else {"too_large": True})
             acc["attachments"].append(entry)
     if mime == "message/rfc822":
@@ -603,18 +682,27 @@ def _mail_message(payload: dict, ref: dict, timeout: float) -> dict:
     → `Normalize response` → `Return envelope`."""
     status, body = _exec(_gmail(timeout).messages().get(userId="me", id=ref["uuid"], format="full"))
     msg = _http_body(status, body, "message")
-    return {"kind": "email", "mode": "message", "source_ref": payload.get("source_ref") or {},
-            "messages": [normalize_message(msg)]}
+    return {
+        "kind": "email",
+        "mode": "message",
+        "source_ref": payload.get("source_ref") or {},
+        "messages": [normalize_message(msg)],
+    }
 
 
 def _page_body(status: int, body):
     """`pageBody()` of `Build list envelope`."""
     if 200 <= status < 300:
         if not isinstance(body, dict):
-            raise _MailFail(_MAIL_PREFIX + "list page body is not a JSON object - refusing to treat as an empty page")
+            raise _MailFail(
+                _MAIL_PREFIX
+                + "list page body is not a JSON object - refusing to treat as an empty page"
+            )
         return body
     if status == 400:
-        raise _MailFail(_MAIL_PREFIX + "provider rejected the list query (400) - check scope_query syntax")
+        raise _MailFail(
+            _MAIL_PREFIX + "provider rejected the list query (400) - check scope_query syntax"
+        )
     if sentence := _auth_or_rate(status, _MAIL_REAUTH):
         raise _MailFail(_MAIL_PREFIX + sentence)
     raise _MailFail(_MAIL_PREFIX + f"provider list failed ({status})")
@@ -633,52 +721,77 @@ def _mail_list(payload: dict, timeout: float) -> dict:
         try:
             status, raw = _exec(request)
         except _Transport as e:
-            raise _MailFail(_MAIL_PREFIX + f"list request failed before a response (connection/transport): {e}") \
-                from e.__cause__
+            raise _MailFail(
+                _MAIL_PREFIX + f"list request failed before a response (connection/transport): {e}"
+            ) from e.__cause__
         body = _page_body(status, raw)
         bodies.append(body)
         request = messages_api.list_next(request, body)
         if request is None:
             break
     if bodies and bodies[-1].get("nextPageToken"):
-        raise _MailFail(_MAIL_PREFIX + f"list pagination cap hit ({len(bodies)} pages fetched, more remain) "
-                        "- refusing to silently truncate; narrow scope_query")
+        raise _MailFail(
+            _MAIL_PREFIX + f"list pagination cap hit ({len(bodies)} pages fetched, more remain) "
+            "- refusing to silently truncate; narrow scope_query"
+        )
     messages, dropped = [], 0
     for b in bodies:
-        for m in (b.get("messages") if isinstance(b.get("messages"), list) else []):
+        for m in b.get("messages") if isinstance(b.get("messages"), list) else []:
             if _id_ok(_get(m, "id")) and _id_ok(_get(m, "threadId")):
                 messages.append({"uuid": m["id"], "conversation_id": m["threadId"]})
             else:
                 dropped += 1
                 log.info("google: list dropped an out-of-alphabet entry")
     if dropped and not messages:
-        raise _MailFail(_MAIL_PREFIX + f"list dropped ALL {dropped} entries as out-of-alphabet - id shape breach, "
-                        "refusing to return an empty envelope")
-    return {"kind": "email", "mode": "list", "source_ref": {"scope_query": query},
-            "messages": messages, "dropped": dropped}
+        raise _MailFail(
+            _MAIL_PREFIX
+            + f"list dropped ALL {dropped} entries as out-of-alphabet - id shape breach, "
+            "refusing to return an empty envelope"
+        )
+    return {
+        "kind": "email",
+        "mode": "list",
+        "source_ref": {"scope_query": query},
+        "messages": messages,
+        "dropped": dropped,
+    }
 
 
 def _mail_report_spam(payload: dict, ref: dict, timeout: float) -> dict:
     """mode `report_spam`: `Report spam (Gmail API)` (messages.modify +SPAM
     −INBOX) → `Build spam envelope`. The one mail write; Executor-only."""
-    s, body = _exec(_gmail(timeout).messages().modify(
-        userId="me", id=ref["uuid"], body={"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]}))
+    s, body = _exec(
+        _gmail(timeout)
+        .messages()
+        .modify(
+            userId="me", id=ref["uuid"], body={"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]}
+        )
+    )
     if s == 404:
         raise _MailFail(_MAIL_PREFIX + "message not found for the given reference")
     if sentence := _auth_or_rate(s, _MAIL_REAUTH):
         raise _MailFail(_MAIL_PREFIX + sentence)
     if s < 200 or s >= 300:
         raise _MailFail(_MAIL_PREFIX + f"report_spam failed ({s})")
-    return {"kind": "email", "mode": "report_spam", "source_ref": payload.get("source_ref") or {},
-            "ok": True, "label_ids": _get(body, "labelIds") or []}
+    return {
+        "kind": "email",
+        "mode": "report_spam",
+        "source_ref": payload.get("source_ref") or {},
+        "ok": True,
+        "label_ids": _get(body, "labelIds") or [],
+    }
 
 
 def _mail_attachment(payload: dict, ref: dict, timeout: float) -> dict:
     """mode `attachment`: `Get attachment (Gmail API)` (messages.attachments.get,
     a JSON `MessagePartBody`, not a media download) → `Build attachment
     envelope` (base64url → standard, padded base64)."""
-    s, body = _exec(_gmail(timeout).messages().attachments().get(
-        userId="me", messageId=ref["uuid"], id=ref["attachment_id"]))
+    s, body = _exec(
+        _gmail(timeout)
+        .messages()
+        .attachments()
+        .get(userId="me", messageId=ref["uuid"], id=ref["attachment_id"])
+    )
     if s in (400, 404):
         raise _MailFail(_MAIL_PREFIX + f"attachment not found for the given reference ({s})")
     if sentence := _auth_or_rate(s, _MAIL_REAUTH):
@@ -687,13 +800,22 @@ def _mail_attachment(payload: dict, ref: dict, timeout: float) -> dict:
         raise _MailFail(_MAIL_PREFIX + f"attachment fetch failed ({s})")
     data = _get(body, "data")
     if not isinstance(data, str) or data == "":
-        raise _MailFail(_MAIL_PREFIX + "attachment fetch failed (the provider answered without data)")
+        raise _MailFail(
+            _MAIL_PREFIX + "attachment fetch failed (the provider answered without data)"
+        )
     try:
         b64 = base64.b64encode(_b64url_bytes(data)).decode("ascii")
     except ValueError:
-        raise _MailFail(_MAIL_PREFIX + "attachment fetch failed (the data is not base64url)") from None
-    return {"kind": "email", "mode": "attachment", "source_ref": payload.get("source_ref") or {},
-            "size": _size(body), "data_b64": b64}
+        raise _MailFail(
+            _MAIL_PREFIX + "attachment fetch failed (the data is not base64url)"
+        ) from None
+    return {
+        "kind": "email",
+        "mode": "attachment",
+        "source_ref": payload.get("source_ref") or {},
+        "size": _size(body),
+        "data_b64": b64,
+    }
 
 
 def _mail_sync(payload: dict, timeout: float) -> dict:
@@ -713,14 +835,18 @@ def _mail_sync(payload: dict, timeout: float) -> dict:
         message = str(e)[:500]
         raise GoogleError(message, status_code=_mail_status(message)) from e.__cause__
     except _TokenUnavailable as e:
-        message = (_MAIL_PREFIX + f"provider auth failed ({e}) - re-run "
-                   "python -m central_command.google_consent")[:500]
+        message = (
+            _MAIL_PREFIX + f"provider auth failed ({e}) - re-run "
+            "python -m central_command.google_consent"
+        )[:500]
         raise GoogleError(message, status_code=503) from e.__cause__
     except _Transport as e:
         # A request node without an error output: n8n threw, the classifier
         # did not know the sentence, the façade answered 503.
-        message = (_MAIL_PREFIX + f"{payload.get('mode')} request failed before a response "
-                   f"(connection/transport): {e}")[:500]
+        message = (
+            _MAIL_PREFIX + f"{payload.get('mode')} request failed before a response "
+            f"(connection/transport): {e}"
+        )[:500]
         raise GoogleError(message, status_code=503) from e.__cause__
     except Exception as e:
         message = (_MAIL_PREFIX + f"{payload.get('mode')} failed: {type(e).__name__}")[:500]
@@ -747,8 +873,7 @@ _CAL_ID = re.compile(r"[A-Za-z0-9._%+@#-]+")
 _EVENT_ID = re.compile(r"[A-Za-z0-9_@.-]{1,1024}")
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}")
 _CLIENT_EVENT_ID = re.compile(r"[a-v0-9]{5,1024}")
-_REAUTH = ("re-run python -m central_command.google_consent, the stored refresh token "
-           "looks stale")
+_REAUTH = "re-run python -m central_command.google_consent, the stored refresh token looks stale"
 
 
 class _CalFail(Exception):
@@ -784,7 +909,11 @@ def _validate_calendar(inp: dict) -> dict:
     calendar_id = inp.get("calendar_id")
     if calendar_id is None or calendar_id == "":
         calendar_id = "primary"
-    if not isinstance(calendar_id, str) or len(calendar_id) > 200 or not _CAL_ID.fullmatch(calendar_id):
+    if (
+        not isinstance(calendar_id, str)
+        or len(calendar_id) > 200
+        or not _CAL_ID.fullmatch(calendar_id)
+    ):
         _fail(f"'calendar_id' is not a valid calendar id, got '{_s(calendar_id)}'")
 
     def has(k):
@@ -801,11 +930,20 @@ def _validate_calendar(inp: dict) -> dict:
             _fail("time_max must be after time_min")
         raw = inp.get("max_results")
         max_results = 250 if raw is None else raw
-        if isinstance(max_results, bool) or not isinstance(max_results, (int, float)) \
-                or not float(max_results).is_integer() or max_results < 1:
+        if (
+            isinstance(max_results, bool)
+            or not isinstance(max_results, (int, float))
+            or not float(max_results).is_integer()
+            or max_results < 1
+        ):
             _fail(f"'max_results' must be an integer >= 1, got '{_s(raw)}'")
-        return {"mode": "list", "time_min": inp["time_min"], "time_max": inp["time_max"],
-                "calendar_id": calendar_id, "max_results": min(int(max_results), 250)}
+        return {
+            "mode": "list",
+            "time_min": inp["time_min"],
+            "time_max": inp["time_max"],
+            "calendar_id": calendar_id,
+            "max_results": min(int(max_results), 250),
+        }
 
     def event_id():
         v = inp.get("event_id")
@@ -839,8 +977,10 @@ def _validate_calendar(inp: dict) -> dict:
     def client_event_id():
         v = inp.get("client_event_id")
         if not isinstance(v, str) or not _CLIENT_EVENT_ID.fullmatch(v):
-            _fail("'client_event_id' must be 5 to 1024 characters of a-v and 0-9 (a Google base32hex "
-                  f"event id), got '{_s(v)}'")
+            _fail(
+                "'client_event_id' must be 5 to 1024 characters of a-v and 0-9 (a Google base32hex "
+                f"event id), got '{_s(v)}'"
+            )
         return v
 
     def when(f):
@@ -863,8 +1003,10 @@ def _validate_calendar(inp: dict) -> dict:
     if mode == "update_event":
         eid = event_id()
         if not [f for f in ("title", "start", "end", "description", "attendees") if has(f)]:
-            _fail("'update_event' needs at least one of title, start, end, description, attendees "
-                  "- a no-op write is a bug, not a success")
+            _fail(
+                "'update_event' needs at least one of title, start, end, description, attendees "
+                "- a no-op write is a bug, not a success"
+            )
         body = {}
         if has("title"):
             body["summary"] = title()
@@ -885,8 +1027,13 @@ def _validate_calendar(inp: dict) -> dict:
 def _detail_log(op: str, req: dict, status, detail) -> None:
     """The workflow's `console.log` of the provider detail: the worker log,
     never the message (the detail is Google's own text, not a secret)."""
-    log.info("google calendar provider detail [%s %s] status=%s :: %s",
-             op, _s(req.get("calendar_id"), 64), status, str(detail)[:300])
+    log.info(
+        "google calendar provider detail [%s %s] status=%s :: %s",
+        op,
+        _s(req.get("calendar_id"), 64),
+        status,
+        str(detail)[:300],
+    )
 
 
 def _cal_status(op: str, req: dict, answer, *, not_found: str | None):
@@ -894,7 +1041,9 @@ def _cal_status(op: str, req: dict, answer, *, not_found: str | None):
     (`answer` None) → fail; non-2xx → fail with the status's sentence. Returns
     the body on 2xx."""
     if answer is None:
-        _fail(f"{op} - provider call failed with no HTTP status - outcome unknown, see the worker log")
+        _fail(
+            f"{op} - provider call failed with no HTTP status - outcome unknown, see the worker log"
+        )
     status, body = answer
     if status < 200 or status >= 300:
         err = _get(body, "error") or {}
@@ -903,13 +1052,16 @@ def _cal_status(op: str, req: dict, answer, *, not_found: str | None):
             _fail(f"{op} - {sentence}")
         if status == 404 and not_found is not None:
             _fail(f"{op} - {not_found} for {_s(req.get('calendar_id'), 64)}")
-        _fail(f"{op} - provider call failed ({status}) - see the worker log for the provider detail")
+        _fail(
+            f"{op} - provider call failed ({status}) - see the worker log for the provider detail"
+        )
     return body if body != "" else {}
 
 
 def _short_event(ev) -> dict:
     out = {
-        "event_id": _get(ev, "id"), "html_link": _get(ev, "htmlLink") or "",
+        "event_id": _get(ev, "id"),
+        "html_link": _get(ev, "htmlLink") or "",
         "summary": _get(ev, "summary") or "",
         "start": (_get(_get(ev, "start"), "dateTime") or _get(_get(ev, "start"), "date")) or None,
         "end": (_get(_get(ev, "end"), "dateTime") or _get(_get(ev, "end"), "date")) or None,
@@ -938,8 +1090,10 @@ def _flags(ev) -> dict:
         or bool(creator and _get(creator, "self") and not organizer),
         "has_agenda": bool(description and _js_str(description).strip())
         or (isinstance(files, list) and len(files) > 0),
-        "declined": bool((me is not None and me.get("responseStatus") == "declined")
-                         or _get(ev, "status") == "cancelled"),
+        "declined": bool(
+            (me is not None and me.get("responseStatus") == "declined")
+            or _get(ev, "status") == "cancelled"
+        ),
     }
 
 
@@ -959,19 +1113,36 @@ def _events():
 
 def _cal_list(req: dict) -> dict:
     """`List events (GCal REST)` → `Return: list`."""
-    body = _cal_status("list", req, _cal_exec(_events().list(
-        calendarId=req["calendar_id"], timeMin=req["time_min"], timeMax=req["time_max"],
-        maxResults=req["max_results"], singleEvents=True, orderBy="startTime", showDeleted=False)),
-        not_found="calendar not found")
-    empty = _get(body, "kind") == "calendar#events" and (not isinstance(body, dict) or "items" not in body)
+    body = _cal_status(
+        "list",
+        req,
+        _cal_exec(
+            _events().list(
+                calendarId=req["calendar_id"],
+                timeMin=req["time_min"],
+                timeMax=req["time_max"],
+                maxResults=req["max_results"],
+                singleEvents=True,
+                orderBy="startTime",
+                showDeleted=False,
+            )
+        ),
+        not_found="calendar not found",
+    )
+    empty = _get(body, "kind") == "calendar#events" and (
+        not isinstance(body, dict) or "items" not in body
+    )
     items = _get(body, "items")
     if not isinstance(items, list) and not empty:
         _detail_log("list", req, 200, "2xx without an items array")
         return {"ok": False, "message": "list - provider answered 2xx without an items array"}
     raw = [] if empty else items
     events = [{"event_id": _get(ev, "id") or "", **_flags(ev)} for ev in raw]
-    return {"ok": True, "events": events,
-            "truncated": bool(_get(body, "nextPageToken")) or len(events) >= req["max_results"]}
+    return {
+        "ok": True,
+        "events": events,
+        "truncated": bool(_get(body, "nextPageToken")) or len(events) >= req["max_results"],
+    }
 
 
 def _cal_get(req: dict) -> dict:
@@ -984,15 +1155,23 @@ def _cal_get(req: dict) -> dict:
         _detail_log("get", req, answer[0], "2xx without an event id")
         return {"ok": False, "message": "get - provider answered 2xx without an event"}
     flags = _flags(ev)
-    return {"ok": True, "event": {
-        "event_id": ev["id"], "status": _get(ev, "status") or "",
-        "start": flags["start"], "end": flags["end"], "all_day": flags["all_day"],
-        "summary": flags["summary"], "location": flags["location"],
-        "attendee_count": flags["attendee_count"],
-        "organizer": _get(_get(ev, "organizer"), "email") or "",
-        "organizer_is_self": flags["organizer_is_self"], "has_agenda": flags["has_agenda"],
-        "declined": flags["declined"],
-    }}
+    return {
+        "ok": True,
+        "event": {
+            "event_id": ev["id"],
+            "status": _get(ev, "status") or "",
+            "start": flags["start"],
+            "end": flags["end"],
+            "all_day": flags["all_day"],
+            "summary": flags["summary"],
+            "location": flags["location"],
+            "attendee_count": flags["attendee_count"],
+            "organizer": _get(_get(ev, "organizer"), "email") or "",
+            "organizer_is_self": flags["organizer_is_self"],
+            "has_agenda": flags["has_agenda"],
+            "declined": flags["declined"],
+        },
+    }
 
 
 def _cal_create(req: dict) -> dict:
@@ -1000,8 +1179,9 @@ def _cal_create(req: dict) -> dict:
     (create answer)`: a 409 on OUR client id goes to `Get existing event` →
     `Return: create_event (existing)`; anything else to `Return: create_event`
     (DL-219)."""
-    answer = _cal_exec(_events().insert(calendarId=req["calendar_id"], body=req["__body"],
-                                        sendUpdates="all"))
+    answer = _cal_exec(
+        _events().insert(calendarId=req["calendar_id"], body=req["__body"], sendUpdates="all")
+    )
     if answer is not None and answer[0] == 409 and req["__body"].get("id"):
         return _cal_create_existing(req)
     ev = _cal_status("create", req, answer, not_found="calendar or event not found")
@@ -1011,28 +1191,45 @@ def _cal_create(req: dict) -> dict:
 def _cal_create_existing(req: dict) -> dict:
     answer = _cal_exec(_events().get(calendarId=req["calendar_id"], eventId=req["__body"]["id"]))
     if answer is None:
-        _fail("create - the event id was already taken and reading it back failed with no HTTP status "
-              "- outcome unknown, see the worker log")
+        _fail(
+            "create - the event id was already taken and reading it back failed with no HTTP status "
+            "- outcome unknown, see the worker log"
+        )
     if answer[0] in (404, 410):
-        return {"ok": False, "message": "create - the provider refused the event id as already taken (409) "
-                f"but holds no readable event under it ({answer[0]}) - nothing was created, "
-                "the operator decides"}
+        return {
+            "ok": False,
+            "message": "create - the provider refused the event id as already taken (409) "
+            f"but holds no readable event under it ({answer[0]}) - nothing was created, "
+            "the operator decides",
+        }
     ev = _cal_status("create", req, answer, not_found=None)
     if not _get(ev, "id"):
         _detail_log("create-existing", req, answer[0], "2xx without an event id")
-        return {"ok": False, "message": "create - the event id was already taken and the provider answered "
-                "2xx without an event - nothing was created, the operator decides"}
+        return {
+            "ok": False,
+            "message": "create - the event id was already taken and the provider answered "
+            "2xx without an event - nothing was created, the operator decides",
+        }
     if _get(ev, "status") == "cancelled":
-        return {"ok": False, "message": "create - this event was created by an earlier attempt of the same "
-                "approved action and has since been cancelled on the calendar - it was not created again, "
-                "the operator decides"}
+        return {
+            "ok": False,
+            "message": "create - this event was created by an earlier attempt of the same "
+            "approved action and has since been cancelled on the calendar - it was not created again, "
+            "the operator decides",
+        }
     return {"ok": True, "already_existed": True, "event": _short_event(ev)}
 
 
 def _cal_update(req: dict) -> dict:
     """`Update event (GCal REST)` (events.patch, sendUpdates=all) → `Return: update_event`."""
-    answer = _cal_exec(_events().patch(calendarId=req["calendar_id"], eventId=req["event_id"],
-                                       body=req["__body"], sendUpdates="all"))
+    answer = _cal_exec(
+        _events().patch(
+            calendarId=req["calendar_id"],
+            eventId=req["event_id"],
+            body=req["__body"],
+            sendUpdates="all",
+        )
+    )
     ev = _cal_status("update", req, answer, not_found="calendar or event not found")
     return {"ok": True, "event": _short_event(ev)}
 
@@ -1040,33 +1237,48 @@ def _cal_update(req: dict) -> dict:
 def _cal_delete(req: dict) -> dict:
     """`Delete event (GCal REST)` (events.delete, sendUpdates=all) → `Return:
     delete_event`; 410 (already gone) is success."""
-    answer = _cal_exec(_events().delete(calendarId=req["calendar_id"], eventId=req["event_id"],
-                                        sendUpdates="all"))
+    answer = _cal_exec(
+        _events().delete(calendarId=req["calendar_id"], eventId=req["event_id"], sendUpdates="all")
+    )
     if answer is not None and answer[0] == 410:
         return {"ok": True, "deleted": req["event_id"]}
     _cal_status("delete", req, answer, not_found="calendar or event not found")
     return {"ok": True, "deleted": req["event_id"]}
 
 
-_CAL_OP = {"list": "list", "get_event": "get", "create_event": "create",
-           "update_event": "update", "delete_event": "delete"}
+_CAL_OP = {
+    "list": "list",
+    "get_event": "get",
+    "create_event": "create",
+    "update_event": "update",
+    "delete_event": "delete",
+}
 
 
 def _calendar_sync(payload: dict) -> dict:
     try:
         req = _validate_calendar(payload)
-        handler = {"list": _cal_list, "get_event": _cal_get, "create_event": _cal_create,
-                   "update_event": _cal_update, "delete_event": _cal_delete}[req["mode"]]
+        handler = {
+            "list": _cal_list,
+            "get_event": _cal_get,
+            "create_event": _cal_create,
+            "update_event": _cal_update,
+            "delete_event": _cal_delete,
+        }[req["mode"]]
         try:
             return handler(req)
         except _TokenUnavailable as e:
-            raise _CalFail("lib-google-calendar: " + _neutral(
-                f"{_CAL_OP[req['mode']]} - provider auth failed ({e}) - {_REAUTH}")) from e.__cause__
+            raise _CalFail(
+                "lib-google-calendar: "
+                + _neutral(f"{_CAL_OP[req['mode']]} - provider auth failed ({e}) - {_REAUTH}")
+            ) from e.__cause__
         except _CalFail:
             raise
         except Exception as e:
-            raise _CalFail("lib-google-calendar: " + _neutral(
-                f"{_CAL_OP[req['mode']]} - provider call failed ({type(e).__name__})")) from e
+            raise _CalFail(
+                "lib-google-calendar: "
+                + _neutral(f"{_CAL_OP[req['mode']]} - provider call failed ({type(e).__name__})")
+            ) from e
     except _CalFail as e:
         raise GoogleError(str(e), status_code=500) from e.__cause__
 

@@ -49,8 +49,9 @@ class DependencyDown(Exception):
     sweep waits on every one of them before it re-executes the read.
     """
 
-    def __init__(self, dependencies: tuple[str, ...], tool_name: str | None,
-                 original: BaseException):
+    def __init__(
+        self, dependencies: tuple[str, ...], tool_name: str | None, original: BaseException
+    ):
         super().__init__(f"{tool_name or 'read'}: {type(original).__name__}: {original}")
         self.dependencies = tuple(dependencies)
         self.tool_name = tool_name
@@ -91,8 +92,14 @@ class WorldMoved(Exception):
     # Keywords default so a cooperative subclass (`ConfluenceStale` sits
     # behind `ProviderStatusError` in its MRO) can reach here with only the
     # message and set the four fields itself.
-    def __init__(self, *args: object, target: str = "", expected: object = None,
-                 actual: object = None, what_moved: str = ""):
+    def __init__(
+        self,
+        *args: object,
+        target: str = "",
+        expected: object = None,
+        actual: object = None,
+        what_moved: str = "",
+    ):
         super().__init__(*args)
         self.target = target
         self.expected = expected
@@ -142,6 +149,7 @@ class EmbedderMismatch(DependencyDown):
     def __str__(self) -> str:
         return self.reason
 
+
 # HTTP status codes that mean "come back later", not "no".
 #
 # 408 request timeout, 429 too many requests (LiteLLM's cooldown/no-deployment
@@ -181,8 +189,15 @@ _NETWORK_ERRNOS = frozenset(
     for e in (
         getattr(errno, n, None)
         for n in (
-            "ECONNREFUSED", "ECONNRESET", "ECONNABORTED", "EHOSTUNREACH",
-            "ENETUNREACH", "ENETDOWN", "ETIMEDOUT", "EPIPE", "EAGAIN",
+            "ECONNREFUSED",
+            "ECONNRESET",
+            "ECONNABORTED",
+            "EHOSTUNREACH",
+            "ENETUNREACH",
+            "ENETDOWN",
+            "ETIMEDOUT",
+            "EPIPE",
+            "EAGAIN",
         )
     )
     if e is not None
@@ -351,11 +366,7 @@ def classify_failure(exc: BaseException | None) -> str:
     # rule: transient only when every leaf is.
     leaves = _leaves(exc)
     if leaves:
-        return (
-            TRANSIENT
-            if all(classify_failure(e) == TRANSIENT for e in leaves)
-            else SEMANTIC
-        )
+        return TRANSIENT if all(classify_failure(e) == TRANSIENT for e in leaves) else SEMANTIC
 
     # `ModelAPIError` that is not an HTTP error is pydantic-ai's wrapper for a
     # provider APIConnectionError — the cause carries the truth.
@@ -449,6 +460,7 @@ def retry_backoff_seconds(prior_failures: int, cap: int | None = None) -> int:
     if n >= 32:  # 2**32 * 60 is already centuries past any cap; don't compute it
         return cap
     return min(RETRY_BACKOFF_BASE_SECONDS * (2**n), cap)
+
 
 # The proxy's own words for "this request is bigger than the model's window".
 # Phrases, not status codes: the status is a plain 400, which says nothing.

@@ -80,7 +80,8 @@ def _row_model(row: dict, agent_models: dict[str, str] | None = None) -> str:
 
     override = (row.get("model_override") or "").split(":")[-1]
     return override or configured_model_name(
-        row["agent_id"], (agent_models or {}).get(row["agent_id"]))
+        row["agent_id"], (agent_models or {}).get(row["agent_id"])
+    )
 
 
 def _row_label(row: dict, names: dict[str, str] | None) -> str:
@@ -165,7 +166,7 @@ def _session_row_dict(
         # window of THIS session's model (cached per model, see context.py).
         "totalTokens": row.get("token_estimate") or 0,
         "contextTokens": (windows or {}).get(_row_model(row, agent_models))
-                         or settings.context_window,
+        or settings.context_window,
         "intent": row.get("latest_intent"),
         "proposalCount": row.get("proposal_count", 0),
         "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
@@ -177,8 +178,7 @@ def _session_row_dict(
         # points at it via discussion_session_id. No schema change until a
         # second producer of agent-initiated contact exists; the wire name
         # survives that promotion.
-        "openedBy": "agent" if agent_lanes is not None and row["id"] in agent_lanes
-                    else "operator",
+        "openedBy": "agent" if agent_lanes is not None and row["id"] in agent_lanes else "operator",
         # The task the asking agent is blocked on, so the chip can say what the
         # answer unblocks without a second fetch from a different instant.
         "blockedTaskTitle": (agent_lanes or {}).get(row["id"]),
@@ -196,13 +196,14 @@ async def _agent_opened_lanes() -> dict[str, str | None]:
     session row's `openedBy` and `blockedTaskTitle` can never come from two
     different instants (same reason `_decisions_list` resolves titles inline).
     """
-    items = [i for i in await repo.list_operator_items("OPEN")
-             if i.get("discussion_session_id")]
+    items = [i for i in await repo.list_operator_items("OPEN") if i.get("discussion_session_id")]
     titles = await repo.task_titles([i["task_id"] for i in items if i.get("task_id")])
     return {i["discussion_session_id"]: titles.get(i.get("task_id")) for i in items}
 
 
-async def _windows_for(rows: list[dict], agent_models: dict[str, str] | None = None) -> dict[str, int]:
+async def _windows_for(
+    rows: list[dict], agent_models: dict[str, str] | None = None
+) -> dict[str, int]:
     """model -> context window, one lookup per DISTINCT model. `window_for`
     caches in-process, so a 50-row list costs at most one proxy call."""
     from central_command.runtime.context import window_for
@@ -218,8 +219,9 @@ async def _sessions_list(params: dict) -> dict:
     # an orchestration session are the runs it assigned (parent_session_id).
     if params.get("spawnedBy"):
         _, _, parent_sess = str(params["spawnedBy"]).rpartition(":")
-        rows = [r for r in await repo.list_sessions(limit)
-                if r.get("parent_session_id") == parent_sess]
+        rows = [
+            r for r in await repo.list_sessions(limit) if r.get("parent_session_id") == parent_sess
+        ]
         from central_command.runtime.roster import roster
 
         agents = await roster(include_retired=True)
@@ -227,10 +229,12 @@ async def _sessions_list(params: dict) -> dict:
         agent_models = {a.id: a.model for a in agents}
         windows = await _windows_for(rows, agent_models)
         source_emails = await repo.work_items_for_sessions([r["id"] for r in rows])
-        return {"sessions": [
-            _session_row_dict(r, agent_lanes, windows, names, source_emails, agent_models)
-            for r in rows
-        ]}
+        return {
+            "sessions": [
+                _session_row_dict(r, agent_lanes, windows, names, source_emails, agent_models)
+                for r in rows
+            ]
+        }
 
     # One synthetic root row per roster agent — the "agent:<id>:main" shape is
     # what the Sessions panel's agent grouping recognizes. The roster ROWS are
@@ -353,19 +357,26 @@ def _transcript_to_chat_messages(run_state: dict) -> list[dict]:
             elif pk == "tool-return" or retry_text(part) is not None:
                 retried = retry_text(part)
                 loaded = load_return_text(part, message.get("parts", []), load_ids)
-                out.append({
-                    "role": "toolResult",
-                    "content": (retried if retried is not None
-                                else loaded if loaded is not None else str(content)),
-                    "timestamp": ts,
-                    "toolCallId": part.get("tool_call_id"),
-                    "toolName": part.get("tool_name"),
-                })
+                out.append(
+                    {
+                        "role": "toolResult",
+                        "content": (
+                            retried
+                            if retried is not None
+                            else loaded
+                            if loaded is not None
+                            else str(content)
+                        ),
+                        "timestamp": ts,
+                        "toolCallId": part.get("tool_call_id"),
+                        "toolName": part.get("tool_name"),
+                    }
+                )
     return out
 
 
 def _parse_session_key(key: str) -> tuple[str, str]:
-    """"agent:<agent_id>:<lane>" -> (agent_id, lane); tolerant of other shapes."""
+    """ "agent:<agent_id>:<lane>" -> (agent_id, lane); tolerant of other shapes."""
     parts = key.split(":")
     if len(parts) >= 3 and parts[0] == "agent":
         return parts[1], ":".join(parts[2:])
@@ -424,9 +435,7 @@ async def _patch_session_model(key: str, model) -> dict:
     if not session_id:
         # The `:main` alias with no open lane — every one of this agent's
         # conversations is closed. Say what to do, not what is missing.
-        raise HTTPException(
-            409, "no open session to set a model on — press New session first"
-        )
+        raise HTTPException(409, "no open session to set a model on — press New session first")
     new = str(model).strip() if model else None
     if new:
         try:
@@ -436,8 +445,7 @@ async def _patch_session_model(key: str, model) -> dict:
         if new not in catalog:
             raise HTTPException(
                 422,
-                f"unknown model {new!r} — this deployment serves: "
-                f"{', '.join(catalog) or '(none)'}",
+                f"unknown model {new!r} — this deployment serves: {', '.join(catalog) or '(none)'}",
             )
     old = await repo.get_session_model_override(session_id)
     if not await repo.set_session_model_override(session_id, new):
@@ -469,8 +477,7 @@ async def _patch_session_thinking(key: str, level) -> dict:
     if new and new not in THINKING_LEVELS:
         raise HTTPException(
             422,
-            f"unknown thinking level {new!r} — this model accepts: "
-            f"{', '.join(THINKING_LEVELS)}",
+            f"unknown thinking level {new!r} — this model accepts: {', '.join(THINKING_LEVELS)}",
         )
     old = await repo.get_session_thinking_override(session_id)
     if not await repo.set_session_thinking_override(session_id, new):
@@ -493,6 +500,7 @@ SESSION_TITLE_MAX = 120
 class SessionLabelIn(BaseModel):
     """`sessions.patch {label}`: a string, or null (or empty) to clear the name.
     Any run of whitespace, a pasted newline included, is one space."""
+
     label: str | None = None
 
     @field_validator("label")
@@ -546,8 +554,7 @@ async def _patch_session_label(key: str, label) -> dict:
     await events.emit(
         "session.renamed",
         ref_id=lane,
-        payload={"session_id": lane, "agent_id": session.get("agent_id"),
-                 "old": old, "new": new},
+        payload={"session_id": lane, "agent_id": session.get("agent_id"), "old": old, "new": new},
         actor="operator",
     )
     return {"key": key, "sessionId": lane, "label": new}
@@ -573,10 +580,18 @@ async def _send_target(key: str) -> dict:
         session = await repo.get_session(lane)
         if session is None:
             waiting_on = await repo.rerun_waiting_on(lane)
-            return {"blocked": (404, "no_session", (
-                f"this re-run of {waiting_on} has not started yet: it is queued, and "
-                "starts when its agent's current work lands"
-                if waiting_on else f"no session {lane}"))}
+            return {
+                "blocked": (
+                    404,
+                    "no_session",
+                    (
+                        f"this re-run of {waiting_on} has not started yet: it is queued, and "
+                        "starts when its agent's current work lands"
+                        if waiting_on
+                        else f"no session {lane}"
+                    ),
+                )
+            }
         blocked = why_not_sendable(await _with_parked_on(session))
         if blocked:
             return {"blocked": (409, *blocked), "session": session}
@@ -594,10 +609,17 @@ async def _send_target(key: str) -> dict:
             return {"blocked": (409, *blocked), "session": row}
         return {"session": row, "session_id": row["id"]}
 
-    return {"blocked": (409, "no_lane",
-                        ("no Central Command session behind this key — select a session "
-                        "from the panel, or start a conversation with an active "
-                        f"roster agent ({', '.join(conversational)})"))}
+    return {
+        "blocked": (
+            409,
+            "no_lane",
+            (
+                "no Central Command session behind this key — select a session "
+                "from the panel, or start a conversation with an active "
+                f"roster agent ({', '.join(conversational)})"
+            ),
+        )
+    }
 
 
 # A send blocked by these codes is a state the operator can DO something about,
@@ -635,13 +657,14 @@ async def parked_proposal_wait_line(proposal_id: str) -> str:
     probes = await repo.dependency_probe_states()
     w = rest.waiting_facts(row.get("retry_state") or {}, probes, False)
     if w["interrupted"]:
-        return ("paused — its approved execution was interrupted by a process "
-                "restart; retry or dismiss it in the Decisions Inbox")
+        return (
+            "paused — its approved execution was interrupted by a process "
+            "restart; retry or dismiss it in the Decisions Inbox"
+        )
     deps = ", ".join(w["dependencies"])
     if w["down_since"]:
         since = _datetime.fromisoformat(w["down_since"]).astimezone().strftime("%Y-%m-%d %H:%M")
-        return (f"paused — its approved proposal is waiting on {deps} (down since "
-                f"{since}); retrying")
+        return f"paused — its approved proposal is waiting on {deps} (down since {since}); retrying"
     return f"paused — its approved proposal is waiting on {deps}; retrying"
 
 
@@ -655,29 +678,35 @@ async def _with_parked_on(session: dict) -> dict:
     return {**session, "parked_on": ", ".join(deps)}
 
 
-_COMPOSER_DISABLING = ("not_a_conversation", "pending_proposal", "failed",
-                       "no_session", "no_lane", "discussion_concluded",
-                       "update_hold",
-                       # A window-parked turn is exactly the "you can DO
-                       # something about this" case: the continue item is in the
-                       # Inbox. Absent from this tuple it would render an enabled
-                       # box that `_chat_send` 409s.
-                       "awaiting_continue",
-                       # Same rule for an operator-stopped lane: the lever is
-                       # Resume (or cancel the work), never another message.
-                       "stopped",
-                       # A conversation parked on a consult wait. The lever is
-                       # the specialist's proposal in the Inbox; the lane
-                       # resumes itself once it is decided. Sending here would
-                       # start a turn on a run paused mid-deferral.
-                       "awaiting_agents",
-                       # A lane parked on a DOWN dependency (story 6): the reply
-                       # is owed and the sweep lands it; a new message would
-                       # start a turn over the one still waiting to finish.
-                       "awaiting_resume",
-                       # Replaced by a re-run: the work carries on in the new
-                       # session, and nothing is listening in this one.
-                       "rerun")
+_COMPOSER_DISABLING = (
+    "not_a_conversation",
+    "pending_proposal",
+    "failed",
+    "no_session",
+    "no_lane",
+    "discussion_concluded",
+    "update_hold",
+    # A window-parked turn is exactly the "you can DO
+    # something about this" case: the continue item is in the
+    # Inbox. Absent from this tuple it would render an enabled
+    # box that `_chat_send` 409s.
+    "awaiting_continue",
+    # Same rule for an operator-stopped lane: the lever is
+    # Resume (or cancel the work), never another message.
+    "stopped",
+    # A conversation parked on a consult wait. The lever is
+    # the specialist's proposal in the Inbox; the lane
+    # resumes itself once it is decided. Sending here would
+    # start a turn on a run paused mid-deferral.
+    "awaiting_agents",
+    # A lane parked on a DOWN dependency (story 6): the reply
+    # is owed and the sweep lands it; a new message would
+    # start a turn over the one still waiting to finish.
+    "awaiting_resume",
+    # Replaced by a re-run: the work carries on in the new
+    # session, and nothing is listening in this one.
+    "rerun",
+)
 
 
 async def _run_session_context(session: dict) -> dict:
@@ -717,7 +746,8 @@ async def _run_session_context(session: dict) -> dict:
         # branch must check the proposal, or it tells the operator a decision
         # is owed that they already made.
         retrying = [
-            p for p in await repo.list_proposals("RETRY_PENDING")
+            p
+            for p in await repo.list_proposals("RETRY_PENDING")
             if p.get("session_id") == session_id
         ]
         if retrying:
@@ -740,11 +770,15 @@ async def _run_session_context(session: dict) -> dict:
         # (epic-outage-doctrine story 5), and "stopped by you" would be a lie.
         stop = ((await repo.get_session_run_state(session_id)) or {}).get("pending_stop") or {}
         if stop.get("reason") == "restart" and stop.get("task_id"):
-            waiting = (f"closed by a process restart — its task {stop['task_id']} "
-                       "was re-run as a new session")
+            waiting = (
+                f"closed by a process restart — its task {stop['task_id']} "
+                "was re-run as a new session"
+            )
         elif stop.get("reason") == "restart" and stop.get("resumable"):
-            waiting = ("interrupted by a process restart mid-turn — resume it to "
-                       "let the agent finish its turn")
+            waiting = (
+                "interrupted by a process restart mid-turn — resume it to "
+                "let the agent finish its turn"
+            )
         elif stop.get("reason") == "restart":
             waiting = "closed by a process restart"
         else:
@@ -758,7 +792,8 @@ async def _run_session_context(session: dict) -> dict:
         "kind": kind,
         "message": f"This is a{'n' if kind[0] in 'aeiou' else ''} {kind}, {waiting}.",
         "task": {"id": task["id"], "title": task["title"], "status": task["status"]}
-        if task else None,
+        if task
+        else None,
         "blocking": blocking,
     }
 
@@ -770,26 +805,31 @@ async def _composer_state(key: str) -> dict:
 
     target = await _send_target(key)
     session = target.get("session")
-    session_block = {
-        "id": session["id"],
-        "mode": session.get("mode"),
-        "status": session.get("status"),
-        "agentId": session.get("agent_id"),
-        # WHY it closed, not just that it did: 'concluded' (the agent ended its
-        # own clarification lane) reads differently from 'operator' (you closed
-        # it), and a DONE+'operator' lane is still writable. The cockpit's
-        # end-of-transcript divider needs the distinction, and taking it from
-        # here keeps it on the server's account rather than re-deriving it.
-        "closedReason": session.get("closed_reason"),
-        "rerunOf": session.get("rerun_of"),
-        "rerunBy": session.get("rerun_by"),
-        "charterVersion": session.get("charter_version"),
-        "charterCurrent": session.get("charter_current"),
-    } if session else None
+    session_block = (
+        {
+            "id": session["id"],
+            "mode": session.get("mode"),
+            "status": session.get("status"),
+            "agentId": session.get("agent_id"),
+            # WHY it closed, not just that it did: 'concluded' (the agent ended its
+            # own clarification lane) reads differently from 'operator' (you closed
+            # it), and a DONE+'operator' lane is still writable. The cockpit's
+            # end-of-transcript divider needs the distinction, and taking it from
+            # here keeps it on the server's account rather than re-deriving it.
+            "closedReason": session.get("closed_reason"),
+            "rerunOf": session.get("rerun_of"),
+            "rerunBy": session.get("rerun_by"),
+            "charterVersion": session.get("charter_version"),
+            "charterCurrent": session.get("charter_current"),
+        }
+        if session
+        else None
+    )
     # Whether Re-run is offered, on the server's account: the cockpit draws the
     # button from this and never from the status it can see.
-    rerun_state = (await rerun.eligibility(session) if session
-                   else {"eligible": False, "reason": None})
+    rerun_state = (
+        await rerun.eligibility(session) if session else {"eligible": False, "reason": None}
+    )
 
     if "blocked" not in target:
         return {"enabled": True, "session": session_block, "rerun": rerun_state}
@@ -961,7 +1001,8 @@ async def _chat_send(params: dict, notify) -> dict:
         try:
             if opener_agent:
                 out = await start_conversation(
-                    opener_agent, message=text, session_id=target_session)
+                    opener_agent, message=text, session_id=target_session
+                )
             else:
                 out = await conversation_turn(target_session, text)
         except Exception as exc:  # noqa: BLE001 — surfaced to this cockpit, never swallowed
@@ -985,8 +1026,7 @@ async def _chat_send(params: dict, notify) -> dict:
             await overrides.decide_landed(out)
 
     keep(asyncio.create_task(_run()))
-    return {"runId": f"new:{opener_agent}" if opener_agent else target_session,
-            "status": "started"}
+    return {"runId": f"new:{opener_agent}" if opener_agent else target_session, "status": "started"}
 
 
 async def _chat_abort(params: dict, notify) -> dict:
@@ -1024,16 +1064,20 @@ async def _chat_abort(params: dict, notify) -> dict:
             f"{await repo.session_status(session_id)}, not RUNNING — there is "
             "no live turn to stop",
         )
-    await notify({
-        "type": "event", "event": "chat",
-        "payload": {"sessionKey": key, "state": "aborted",
-                    "stopReason": "stopped by you"},
-    })
-    await notify({
-        "type": "event", "event": "agent",
-        "payload": {"sessionKey": key, "stream": "lifecycle",
-                    "data": {"phase": "end"}},
-    })
+    await notify(
+        {
+            "type": "event",
+            "event": "chat",
+            "payload": {"sessionKey": key, "state": "aborted", "stopReason": "stopped by you"},
+        }
+    )
+    await notify(
+        {
+            "type": "event",
+            "event": "agent",
+            "payload": {"sessionKey": key, "stream": "lifecycle", "data": {"phase": "end"}},
+        }
+    )
     return {"sessionId": session_id, "stopRequested": True}
 
 
@@ -1064,8 +1108,7 @@ async def _session_resume(params: dict, notify) -> dict:
     from central_command.api import routes as rest
 
     key = str(params.get("sessionKey") or "")
-    session_id = (await _resolve_history_session(key)
-                  or str(params.get("sessionId") or ""))
+    session_id = await _resolve_history_session(key) or str(params.get("sessionId") or "")
     if not session_id:
         raise HTTPException(404, f"no Central Command session behind {key!r}")
     if await repo.session_status(session_id) != "STOPPED":
@@ -1073,16 +1116,25 @@ async def _session_resume(params: dict, notify) -> dict:
 
     async def _run() -> None:
         async def lifecycle(phase: str) -> None:
-            await notify({"type": "event", "event": "agent",
-                          "payload": {"sessionKey": key, "stream": "lifecycle",
-                                      "data": {"phase": phase}}})
+            await notify(
+                {
+                    "type": "event",
+                    "event": "agent",
+                    "payload": {"sessionKey": key, "stream": "lifecycle", "data": {"phase": phase}},
+                }
+            )
 
         await lifecycle("start")
         try:
             await rest.resume_session(session_id)
         except Exception as exc:  # noqa: BLE001 — surfaced to this cockpit, never swallowed
-            await notify({"type": "event", "event": "cc.chat.error",
-                          "payload": {"sessionKey": key, "message": str(exc)}})
+            await notify(
+                {
+                    "type": "event",
+                    "event": "cc.chat.error",
+                    "payload": {"sessionKey": key, "message": str(exc)},
+                }
+            )
             await lifecycle("error")
         else:
             await lifecycle("end")
@@ -1117,7 +1169,8 @@ async def _close_conversation_for_key(key: str, *, require_explicit: bool) -> di
             raise HTTPException(404, f"no session {lane}")
         if session.get("mode") != "conversation":
             if session.get("exec_failure") and session.get("status") not in (
-                "DONE", "FAILED",
+                "DONE",
+                "FAILED",
             ):
                 # The ONE hand-closable run: a final execution failure rests
                 # its session OPEN and flagged (operator's rule, 2026-08-20 —
@@ -1128,9 +1181,10 @@ async def _close_conversation_for_key(key: str, *, require_explicit: bool) -> di
                 from central_command.runtime.converse import land_session
 
                 await land_session(
-                    lane, failed=True, agent_id=session.get("agent_id"),
-                    reason="operator closed after failed execution: "
-                           f"{session['exec_failure']}",
+                    lane,
+                    failed=True,
+                    agent_id=session.get("agent_id"),
+                    reason=f"operator closed after failed execution: {session['exec_failure']}",
                 )
                 return {"session_id": lane, "status": "FAILED"}
             raise HTTPException(
@@ -1182,9 +1236,7 @@ async def _decisions_list() -> dict:
     # showed the question with no email anywhere on screen). The link is
     # work_item.session_id — set when the dispatcher claimed the item for the
     # session that then asked.
-    source_emails = await repo.work_items_for_sessions(
-        [i["session_id"] for i in items]
-    )
+    source_emails = await repo.work_items_for_sessions([i["session_id"] for i in items])
     # A tier-3 lane is answerable from Chat only while its session is still
     # writable — the Inbox pane must know this to decide whether "Join the
     # discussion" is the primary door or the plain answer field is the only
@@ -1211,21 +1263,25 @@ async def _decisions_list() -> dict:
         # mail's own date (sent along as `received_at`, shown as context).
         "dismissals": sorted(
             await repo.list_work_items("DISMISS_PENDING", include_payload=True),
-            key=lambda d: d.get("parked_at") or d["enrolled_at"], reverse=True,
+            key=lambda d: d.get("parked_at") or d["enrolled_at"],
+            reverse=True,
         ),
         # Asks OF the operator — plan reviews, questions, stall escalations.
         # Since tier 2 (2026-07-25) ANY agent can ask, not just the orchestrator.
         # Answering resumes the parked run.
         "operatorItems": [
-            {**i, "created_at": i["created_at"].isoformat()
-             if i.get("created_at") else None,
-             "answered_at": i["answered_at"].isoformat()
-             if i.get("answered_at") else None,
-             "task_title": titles.get(i.get("task_id")),
-             "source_email": source_emails.get(i["session_id"]),
-             "lane_open": (lane_statuses.get(i["discussion_session_id"])
-                            not in (None, "DONE", "FAILED"))
-                          if i.get("discussion_session_id") else None}
+            {
+                **i,
+                "created_at": i["created_at"].isoformat() if i.get("created_at") else None,
+                "answered_at": i["answered_at"].isoformat() if i.get("answered_at") else None,
+                "task_title": titles.get(i.get("task_id")),
+                "source_email": source_emails.get(i["session_id"]),
+                "lane_open": (
+                    lane_statuses.get(i["discussion_session_id"]) not in (None, "DONE", "FAILED")
+                )
+                if i.get("discussion_session_id")
+                else None,
+            }
             for i in items
         ],
     }
@@ -1275,15 +1331,17 @@ async def _agents_roster() -> dict:
         t = tallies.get(a["id"], {})
         executed, rejected = t.get("EXECUTED", 0), t.get("REJECTED", 0)
         decided = executed + rejected + t.get("FAILED", 0)
-        agents.append({
-            **a,
-            "proposals": {"total": sum(t.values()), "decided": decided, **t},
-            "active_sessions": open_sessions.get(a["id"], 0),
-            # None, never 0, when nothing has been decided — an agent that has
-            # never proposed has no approval rate, and rendering one as 0%
-            # would read as a failing agent rather than a new one.
-            "approval_rate": round(executed / decided, 3) if decided else None,
-        })
+        agents.append(
+            {
+                **a,
+                "proposals": {"total": sum(t.values()), "decided": decided, **t},
+                "active_sessions": open_sessions.get(a["id"], 0),
+                # None, never 0, when nothing has been decided — an agent that has
+                # never proposed has no approval rate, and rendering one as 0%
+                # would read as a failing agent rather than a new one.
+                "approval_rate": round(executed / decided, 3) if decided else None,
+            }
+        )
     return {"agents": agents}
 
 
@@ -1335,7 +1393,7 @@ async def _agents_detail(agent_id: str) -> dict:
     try:
         signals = (await rest.coaching_signals(agent_id))["signals"]
     except Exception:  # noqa: BLE001 — a signal-gathering failure must not
-        signals = []   # blank the whole profile; the rest is still true.
+        signals = []  # blank the whole profile; the rest is still true.
 
     return {
         "agent": agent,
@@ -1422,12 +1480,14 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         # starting capability loadout, never an agent type) — a direct
         # operator action with an event record, through the SAME REST
         # handler (one source of truth for the invariant checks).
-        return await rest.hire_agent(rest.HireIn(
-            name=str(params.get("name") or ""),
-            mission=str(params.get("mission") or ""),
-            template=str(params.get("template") or "general"),
-            packs=params.get("packs"),
-        ))
+        return await rest.hire_agent(
+            rest.HireIn(
+                name=str(params.get("name") or ""),
+                mission=str(params.get("mission") or ""),
+                template=str(params.get("template") or "general"),
+                packs=params.get("packs"),
+            )
+        )
     if method == "agents.list":
         # The roster rows (D24) — the "+" dialog's assign path builds its
         # agent picker from taskability truth, never a hardcoded list.
@@ -1435,11 +1495,17 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
     if method == "agents.templates":
         from central_command.runtime.templates import TEMPLATES
 
-        return {"templates": [
-            {"id": t.id, "label": t.label, "description": t.description,
-             "packs": list(t.default_packs)}
-            for t in TEMPLATES.values()
-        ]}
+        return {
+            "templates": [
+                {
+                    "id": t.id,
+                    "label": t.label,
+                    "description": t.description,
+                    "packs": list(t.default_packs),
+                }
+                for t in TEMPLATES.values()
+            ]
+        }
     if method == "agents.roster":
         # The Agents page (management), distinct from `agents.list` (the
         # picker feed). Kept separate so the picker stays cheap.
@@ -1461,8 +1527,7 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         # `repo.set_agent_model` for why a partial write is the trap.
         return await rest.set_agent_model(
             str(params.get("id") or params.get("agentId") or ""),
-            rest.AgentModelIn(model=params.get("model"),
-                              thinking=params.get("thinking")),
+            rest.AgentModelIn(model=params.get("model"), thinking=params.get("thinking")),
         )
     if method == "agents.reactivate":
         return await rest.reactivate_agent(str(params.get("agentId") or ""))
@@ -1537,7 +1602,8 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         )
     if method == "agents.charter.revert":
         return await rest.revert_charter(
-            str(params.get("agentId") or ""), int(params.get("version") or 0),
+            str(params.get("agentId") or ""),
+            int(params.get("version") or 0),
         )
     if method == "skills.list":
         return await rest.list_skills_route()
@@ -1547,20 +1613,17 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         return await rest.create_skill_route(rest.SkillIn(**params))
     if method == "skills.add_doc":
         skill_id = params.pop("skill_id")
-        return await rest.add_skill_doc_route(
-            skill_id, rest.SkillDocIn(**params)
-        )
+        return await rest.add_skill_doc_route(skill_id, rest.SkillDocIn(**params))
     if method == "skills.history":
-        return await rest.skill_doc_history_route(
-            params["skill_id"], params["doc_key"]
-        )
+        return await rest.skill_doc_history_route(params["skill_id"], params["doc_key"])
     if method == "skills.retire":
         return await rest.retire_skill_route(
             params["skill_id"], rest.RetireIn(reason=params["reason"])
         )
     if method == "skills.retire_doc":
         return await rest.retire_skill_doc_route(
-            params["skill_id"], params["doc_key"],
+            params["skill_id"],
+            params["doc_key"],
             rest.RetireIn(reason=params["reason"]),
         )
     if method == "skills.reactivate":
@@ -1571,7 +1634,8 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         )
     if method == "skills.revoke":
         return await rest.revoke_skill_route(
-            params["agent_id"], params["skill_id"],
+            params["agent_id"],
+            params["skill_id"],
             rest.RetireIn(reason=params.get("reason", "")),
         )
     if method == "skills.import":
@@ -1580,25 +1644,22 @@ async def _dispatch(method: str, params: dict, notify) -> Any:
         return await rest.list_skill_release_flags_route()
     if method == "skills.release_flag_resolve":
         return await rest.resolve_skill_release_flag_route(
-            params["skill_id"], params["doc_key"],
+            params["skill_id"],
+            params["doc_key"],
             rest.SkillFlagResolveIn.from_params(params),
         )
     if method == "gaps.list":
         return await rest.list_gaps_route(params.get("limit", 100))
     if method == "sessions.patch":
         if "model" in params:
-            return await _patch_session_model(
-                str(params.get("key") or ""), params.get("model")
-            )
+            return await _patch_session_model(str(params.get("key") or ""), params.get("model"))
         if "thinkingLevel" in params:
             return await _patch_session_thinking(
                 str(params.get("key") or ""), params.get("thinkingLevel")
             )
         if "label" in params:
             # The sessions panel's rename (conversation rows only).
-            return await _patch_session_label(
-                str(params.get("key") or ""), params.get("label")
-            )
+            return await _patch_session_label(str(params.get("key") or ""), params.get("label"))
         return {}
     if method == "sessions.new":
         # Open an ADDITIONAL conversation with an agent — everything already
@@ -1789,8 +1850,11 @@ async def _tool_stream_frames(event: dict, cursors: dict) -> list[dict]:
             else:
                 continue
             frames += [
-                {"type": "event", "event": "agent",
-                 "payload": {"sessionKey": key, "stream": "tool", "data": data}}
+                {
+                    "type": "event",
+                    "event": "agent",
+                    "payload": {"sessionKey": key, "stream": "tool", "data": data},
+                }
                 for key in cursor["keys"]
             ]
     cursor["at"] = len(messages)
@@ -1875,12 +1939,24 @@ async def nerve_gateway(ws: WebSocket) -> None:
             except NotWired as exc:
                 reply = {"type": "res", "id": rid, "ok": False, "error": {"message": str(exc)}}
             except HTTPException as exc:
-                reply = {"type": "res", "id": rid, "ok": False, "error": {"message": str(exc.detail)}}
+                reply = {
+                    "type": "res",
+                    "id": rid,
+                    "ok": False,
+                    "error": {"message": str(exc.detail)},
+                }
             except Exception as exc:  # noqa: BLE001 — DB down etc. — fail the RPC, keep the socket
-                reply = {"type": "res", "id": rid, "ok": False, "error": {"message": f"{method} failed: {exc}"}}
+                reply = {
+                    "type": "res",
+                    "id": rid,
+                    "ok": False,
+                    "error": {"message": f"{method} failed: {exc}"},
+                }
             _log.info(
-                "rpc done %s %.0fms ok=%s", method,
-                (time.monotonic() - _t0) * 1000, reply.get("ok"),
+                "rpc done %s %.0fms ok=%s",
+                method,
+                (time.monotonic() - _t0) * 1000,
+                reply.get("ok"),
             )
             try:
                 async with send_lock:

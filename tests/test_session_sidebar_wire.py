@@ -84,8 +84,7 @@ async def test_a_session_row_carries_label_tokens_and_a_running_state(monkeypatc
     assert row["totalTokens"] == 12_000, "the context bar reads totalTokens"
     assert row["contextTokens"] == settings.context_window, "…over this maximum"
     assert row["state"] == "running", (
-        "the badge only recognises lowercase state/status — uppercase RUNNING "
-        "renders as IDLE"
+        "the badge only recognises lowercase state/status — uppercase RUNNING renders as IDLE"
     )
     assert row["status"] == "RUNNING", (
         "the uppercase vocabulary must survive: SessionList filters terminal "
@@ -94,8 +93,13 @@ async def test_a_session_row_carries_label_tokens_and_a_running_state(monkeypatc
 
 
 async def test_a_session_row_carries_the_rerun_link_both_ways(monkeypatch):
-    _wire(monkeypatch, [{**_row("sess_old"), "rerun_by": "sess_new"},
-                        {**_row("sess_new"), "rerun_of": "sess_old"}])
+    _wire(
+        monkeypatch,
+        [
+            {**_row("sess_old"), "rerun_by": "sess_new"},
+            {**_row("sess_new"), "rerun_of": "sess_old"},
+        ],
+    )
 
     old, new = (await nerve_gateway._sessions_list({}))["sessions"][:2]
 
@@ -104,8 +108,13 @@ async def test_a_session_row_carries_the_rerun_link_both_ways(monkeypatch):
 
 
 async def test_a_session_row_carries_its_charter_stamp_and_the_current_version(monkeypatch):
-    _wire(monkeypatch, [{**_row("sess_stale"), "charter_version": 3, "charter_current": 5},
-                        {**_row("sess_old"), "charter_version": None, "charter_current": 5}])
+    _wire(
+        monkeypatch,
+        [
+            {**_row("sess_stale"), "charter_version": 3, "charter_current": 5},
+            {**_row("sess_old"), "charter_version": None, "charter_current": 5},
+        ],
+    )
 
     stale, old = (await nerve_gateway._sessions_list({}))["sessions"][:2]
 
@@ -134,10 +143,13 @@ async def test_the_fallback_label_carries_no_server_rendered_time(monkeypatch):
     at 21:05 on Sep 20 in the operator's zone (2026-09-20). The instant goes
     over as ISO `createdAt`; `labelStamped` tells the cockpit to append it in
     the VIEWER's timezone. A titled lane is not stamped."""
-    _wire(monkeypatch, [
-        _row("sess_fallback", task_title=None),
-        _row("sess_titled", task_title="Reconcile the sprint board"),
-    ])
+    _wire(
+        monkeypatch,
+        [
+            _row("sess_fallback", task_title=None),
+            _row("sess_titled", task_title="Reconcile the sprint board"),
+        ],
+    )
 
     rows = {r["sessionKey"]: r for r in (await nerve_gateway._sessions_list({}))["sessions"]}
     fallback = rows["agent:jira-expert:sess_fallback"]
@@ -153,10 +165,16 @@ async def test_the_fallback_label_carries_no_server_rendered_time(monkeypatch):
 
 
 async def test_an_exec_failed_rest_carries_its_reason_to_the_sidebar(monkeypatch):
-    _wire(monkeypatch, [_row(
-        "sess_exec", status="AWAITING_OPERATOR",
-        exec_failure="Jira 400: no project SUPP",
-    )])
+    _wire(
+        monkeypatch,
+        [
+            _row(
+                "sess_exec",
+                status="AWAITING_OPERATOR",
+                exec_failure="Jira 400: no project SUPP",
+            )
+        ],
+    )
 
     row = (await nerve_gateway._sessions_list({}))["sessions"][0]
 
@@ -177,10 +195,10 @@ async def test_a_retired_agent_root_row_is_history_not_an_open_lane(monkeypatch)
 
     async def fake_roster(include_retired=False):
         return (
-            AgentDef(id="jira-expert", name="Jira Expert", role="jira",
-                     conversational=True),
-            AgentDef(id="old-timer", name="Old Timer", role="ops",
-                     conversational=True, status="RETIRED"),
+            AgentDef(id="jira-expert", name="Jira Expert", role="jira", conversational=True),
+            AgentDef(
+                id="old-timer", name="Old Timer", role="ops", conversational=True, status="RETIRED"
+            ),
         )
 
     monkeypatch.setattr(roster_mod, "roster", fake_roster)
@@ -210,8 +228,15 @@ async def test_a_session_and_its_root_report_the_agent_row_model_not_the_spine_d
     _wire(monkeypatch, [_row("sess_free"), _row("sess_pinned", model_override="openai/gpt-5.2")])
 
     async def fake_roster(include_retired=False):
-        return (AgentDef(id="jira-expert", name="Jira Expert", role="jira",
-                         conversational=True, model="kilo-auto/free"),)
+        return (
+            AgentDef(
+                id="jira-expert",
+                name="Jira Expert",
+                role="jira",
+                conversational=True,
+                model="kilo-auto/free",
+            ),
+        )
 
     monkeypatch.setattr(roster_mod, "roster", fake_roster)
 
@@ -293,7 +318,9 @@ async def test_a_session_spawned_from_an_email_carries_its_source(monkeypatch):
     _wire(monkeypatch, [_row("sess_from_email"), _row("sess_plain")])
 
     email = {
-        "id": "wi_1", "kind": "email", "session_id": "sess_from_email",
+        "id": "wi_1",
+        "kind": "email",
+        "session_id": "sess_from_email",
         "subject": "Reminder: Budget Ratification Meeting",
         "payload": {"from": "hoa@example.com", "text": "please attend"},
     }
@@ -305,9 +332,7 @@ async def test_a_session_spawned_from_an_email_carries_its_source(monkeypatch):
 
     monkeypatch.setattr(repo, "work_items_for_sessions", fake_work_items_for_sessions)
 
-    rows = {
-        r["sessionKey"]: r for r in (await nerve_gateway._sessions_list({}))["sessions"]
-    }
+    rows = {r["sessionKey"]: r for r in (await nerve_gateway._sessions_list({}))["sessions"]}
     assert sorted(captured["ids"]) == ["sess_from_email", "sess_plain"], (
         "must resolve for the whole page in one call, not per row"
     )
@@ -331,13 +356,18 @@ async def test_the_sidebar_list_keeps_a_finished_rerun_pair_on_the_wire():
             "($1, $4, 'DONE', 'oneshot', $2, null), "
             "($2, $4, 'DONE', 'oneshot', null, $1), "
             "($3, $4, 'DONE', 'oneshot', null, null)",
-            old, new, plain, agent_id,
+            old,
+            new,
+            plain,
+            agent_id,
         )
     finally:
         await conn.close()
 
-    rows = {r["id"]: r for r in await repo.list_sessions(
-        200, agent_id=agent_id, exclude_terminal_oneshot=True)}
+    rows = {
+        r["id"]: r
+        for r in await repo.list_sessions(200, agent_id=agent_id, exclude_terminal_oneshot=True)
+    }
 
     assert {old, new} <= set(rows) and plain not in rows
     wire = nerve_gateway._session_row_dict(rows[old])
@@ -360,7 +390,10 @@ async def test_exclude_terminal_oneshot_drops_done_but_keeps_running_and_convers
             "($1, $2, 'DONE', 'oneshot'), "
             "($3, $2, 'RUNNING', 'oneshot'), "
             "($4, $2, 'DONE', 'conversation')",
-            done_oneshot, agent_id, running_oneshot, closed_conversation,
+            done_oneshot,
+            agent_id,
+            running_oneshot,
+            closed_conversation,
         )
     finally:
         await conn.close()
@@ -371,12 +404,11 @@ async def test_exclude_terminal_oneshot_drops_done_but_keeps_running_and_convers
     )
 
     filtered_ids = {
-        r["id"] for r in
-        await repo.list_sessions(200, agent_id=agent_id, exclude_terminal_oneshot=True)
+        r["id"]
+        for r in await repo.list_sessions(200, agent_id=agent_id, exclude_terminal_oneshot=True)
     }
     assert filtered_ids == {running_oneshot, closed_conversation}, (
-        "a terminal oneshot is dropped; a running oneshot and a closed "
-        "conversation both stay"
+        "a terminal oneshot is dropped; a running oneshot and a closed conversation both stay"
     )
 
 
@@ -389,12 +421,21 @@ async def test_the_list_query_computes_a_title_and_a_token_estimate():
     await repo.upsert_agent(agent_id, "Sidebar Test", "sidebar", "")
     session_id = "sess_" + uuid.uuid4().hex[:12]
     await repo.create_running_session(session_id, agent_id)
-    await repo.save_paused_session(session_id, agent_id, {
-        "messages": [{"kind": "request", "parts": [
-            {"part_kind": "user-prompt", "content": "x" * 4_000}]}],
-        "archived": [{"kind": "request", "parts": [
-            {"part_kind": "user-prompt", "content": "y" * 40_000}]}],
-    })
+    await repo.save_paused_session(
+        session_id,
+        agent_id,
+        {
+            "messages": [
+                {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "x" * 4_000}]}
+            ],
+            "archived": [
+                {
+                    "kind": "request",
+                    "parts": [{"part_kind": "user-prompt", "content": "y" * 40_000}],
+                }
+            ],
+        },
+    )
     task_id = "task_" + uuid.uuid4().hex[:12]
     await repo.create_task(task_id, "Rename the widgets", "do it", agent_id)
     await repo.start_task(task_id, session_id)
@@ -418,7 +459,8 @@ async def test_exclude_terminal_oneshot_drops_a_restart_closed_run_but_keeps_a_s
     agent_id = "sidebar-stopped-agent"
     await repo.upsert_agent(agent_id, "Sidebar Stopped", "sidebar", "")
     restart_closed, restart_task, operator_stopped, restart_resumable, bare = (
-        "sess_" + uuid.uuid4().hex[:12] for _ in range(5))
+        "sess_" + uuid.uuid4().hex[:12] for _ in range(5)
+    )
     markers = {
         restart_closed: {"reason": "restart", "resumable": False, "task_id": None},
         restart_task: {"reason": "restart", "resumable": False, "task_id": "task_x"},
@@ -431,18 +473,22 @@ async def test_exclude_terminal_oneshot_drops_a_restart_closed_run_but_keeps_a_s
             await conn.execute(
                 "insert into session (id, agent_id, status, mode, run_state) values "
                 "($1, $2, 'STOPPED', 'oneshot', jsonb_build_object('pending_stop', $3::jsonb))",
-                sid, agent_id, json.dumps(marker),
+                sid,
+                agent_id,
+                json.dumps(marker),
             )
         await conn.execute(
             "insert into session (id, agent_id, status, mode) values "
-            "($1, $2, 'STOPPED', 'oneshot')", bare, agent_id,
+            "($1, $2, 'STOPPED', 'oneshot')",
+            bare,
+            agent_id,
         )
     finally:
         await conn.close()
 
     filtered_ids = {
-        r["id"] for r in
-        await repo.list_sessions(200, agent_id=agent_id, exclude_terminal_oneshot=True)
+        r["id"]
+        for r in await repo.list_sessions(200, agent_id=agent_id, exclude_terminal_oneshot=True)
     }
     assert filtered_ids == {operator_stopped, restart_resumable, bare}
 

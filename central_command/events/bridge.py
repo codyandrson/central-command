@@ -38,9 +38,7 @@ from central_command.events import log as event_log
 _SKIP_PREFIXES = ("central_command.events", "trafilatura")
 _TRACEBACK_LIMIT = 4000
 
-_bridging: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "cc_log_bridge", default=False
-)
+_bridging: contextvars.ContextVar[bool] = contextvars.ContextVar("cc_log_bridge", default=False)
 _handler: _EventLogHandler | None = None
 _tasks: set[asyncio.Task] = set()
 

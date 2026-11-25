@@ -47,7 +47,8 @@ async def cleanup():
             await conn.execute("delete from catalog_location where source_id = $1", sid)
         for sid in ids:
             doc_ids = [
-                d["id"] for d in await conn.fetch(
+                d["id"]
+                for d in await conn.fetch(
                     "select id from catalog_document where source_id = $1", sid
                 )
             ]
@@ -78,8 +79,11 @@ async def _make_source(cleanup, root, **config_extra) -> dict:
     sid = _sid()
     cleanup.append(sid)
     return await repo.upsert_source(
-        sid, "filesystem", "Enrollment test source",
-        {"root": str(root), **config_extra}, enabled=True,
+        sid,
+        "filesystem",
+        "Enrollment test source",
+        {"root": str(root), **config_extra},
+        enabled=True,
     )
 
 
@@ -98,16 +102,12 @@ async def _items(source_id: str) -> list[dict]:
 # --- Decision 4: cross-lineage exact dedupe -----------------------------------
 
 
-async def test_an_exact_duplicate_links_a_location_instead_of_a_new_lineage(
-    tmp_path, cleanup
-):
+async def test_an_exact_duplicate_links_a_location_instead_of_a_new_lineage(tmp_path, cleanup):
     """The same document circulating twice is one document at two locations."""
     a_root, b_root = tmp_path / "a", tmp_path / "b"
     a_root.mkdir(), b_root.mkdir()
     (a_root / "policy.txt").write_text("Expenses are approved by the team lead.")
-    (b_root / "exported-policy.txt").write_text(
-        "Expenses are approved by the team lead."
-    )
+    (b_root / "exported-policy.txt").write_text("Expenses are approved by the team lead.")
 
     a = await _make_source(cleanup, a_root)
     b = await _make_source(cleanup, b_root)
@@ -178,9 +178,7 @@ async def _two_versions(tmp_path, cleanup) -> dict:
     return source
 
 
-async def test_enrollment_keys_the_ledger_on_the_lineage_and_the_version(
-    tmp_path, cleanup
-):
+async def test_enrollment_keys_the_ledger_on_the_lineage_and_the_version(tmp_path, cleanup):
     source = await _two_versions(tmp_path, cleanup)
 
     summary = await enroll_pending(source)
@@ -205,7 +203,7 @@ async def test_enrollment_keys_the_ledger_on_the_lineage_and_the_version(
         # The lineage IS the thread: the relatedness lock serialises the
         # versions, which is what lets an older one read as a diff.
         assert item["thread_id"] == doc["id"]
-        assert item["feed"] == "backlog"     # live email always outranks it
+        assert item["feed"] == "backlog"  # live email always outranks it
         assert item["received_at"] == v["seen_at"]  # newest-first, for free
         assert item["payload"]["catalog"]["version_no"] == v["version_no"]
 
@@ -216,9 +214,7 @@ async def test_enrollment_keys_the_ledger_on_the_lineage_and_the_version(
     )
 
 
-async def test_the_head_reads_in_full_and_an_older_version_reads_as_a_diff(
-    tmp_path, cleanup
-):
+async def test_the_head_reads_in_full_and_an_older_version_reads_as_a_diff(tmp_path, cleanup):
     source = await _two_versions(tmp_path, cleanup)
     await enroll_pending(source)
 
@@ -249,8 +245,7 @@ async def test_a_rewrite_falls_back_to_the_older_version_in_full(tmp_path, clean
 
     await enroll_pending(source)
     older = next(
-        i for i in await _items(source["id"])
-        if i["payload"]["catalog"]["version_no"] == 1
+        i for i in await _items(source["id"]) if i["payload"]["catalog"]["version_no"] == 1
     )
 
     assert "REWRITE" in older["payload"]["text"]
@@ -299,7 +294,7 @@ async def test_a_whitespace_only_revision_autofolds(tmp_path, cleanup):
     summary = await enroll_pending(source)
 
     assert summary["autofolded"] == 1
-    assert summary["enrolled"] == 1   # v1 still enrolls, as the diff against v2
+    assert summary["enrolled"] == 1  # v1 still enrolls, as the diff against v2
     assert summary["remaining"] == 0
     items = await _items(source["id"])
     assert [i["payload"]["catalog"]["version_no"] for i in items] == [1]
@@ -316,22 +311,21 @@ async def test_a_whitespace_only_revision_autofolds(tmp_path, cleanup):
     assert (json.loads(meta) if isinstance(meta, str) else meta)["autofolded"] is True
 
     folded = [
-        e for e in await repo.list_events(since_id=before)
+        e
+        for e in await repo.list_events(since_id=before)
         if e["kind"] == "catalog.version.autofolded"
     ]
     assert len(folded) == 1
 
 
-async def test_a_version_with_no_extractable_text_is_skipped_and_stamped(
-    tmp_path, cleanup
-):
+async def test_a_version_with_no_extractable_text_is_skipped_and_stamped(tmp_path, cleanup):
     (tmp_path / "scan.png").write_bytes(JUNK_PNG)
     source = await _make_source(cleanup, tmp_path)
     await walk_source(source)
 
     summary = await enroll_pending(source)
     assert summary["skipped"] == 1 and summary["enrolled"] == 0
-    assert summary["remaining"] == 0    # stamped, so it never re-qualifies
+    assert summary["remaining"] == 0  # stamped, so it never re-qualifies
     assert await _items(source["id"]) == []
 
     # And a second sweep finds nothing left to skip.
@@ -375,9 +369,7 @@ async def test_the_source_walk_heartbeat_action_walks_and_enrolls(tmp_path, clea
     assert actions.ACTIONS["source.walk"].material(result) is True
 
 
-async def test_a_source_the_watcher_cannot_walk_records_an_error_not_a_raise(
-    cleanup
-):
+async def test_a_source_the_watcher_cannot_walk_records_an_error_not_a_raise(cleanup):
     from central_command.heartbeat import actions
 
     sid = _sid()
@@ -392,9 +384,7 @@ async def test_a_source_the_watcher_cannot_walk_records_an_error_not_a_raise(
 # --- the dispatcher end (no handler change was needed) -------------------------
 
 
-async def test_an_enrolled_catalog_item_flows_to_the_steward(
-    tmp_path, cleanup, monkeypatch
-):
+async def test_an_enrolled_catalog_item_flows_to_the_steward(tmp_path, cleanup, monkeypatch):
     """The whole point of building the diff at ENROLL time: `_handle_document`
     reads `payload['text']` and needs no knowledge of the catalog at all."""
     from central_command.ingest import dispatcher

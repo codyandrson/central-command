@@ -26,11 +26,17 @@ from central_command.db import repo
 from central_command.runtime.run import _cited_event_id, _verified_evidence
 
 SIGNALS = [
-    {"kind": "rejection", "event_id": 2453,
-     "feedback": "There is already a jira task for this, why didn't you notice this already?"},
-    {"kind": "reopen", "event_id": 2614,
-     "feedback": "Do we already have a jira task for this? If so then dismiss, if not, "
-                 "then create a jira task."},
+    {
+        "kind": "rejection",
+        "event_id": 2453,
+        "feedback": "There is already a jira task for this, why didn't you notice this already?",
+    },
+    {
+        "kind": "reopen",
+        "event_id": 2614,
+        "feedback": "Do we already have a jira task for this? If so then dismiss, if not, "
+        "then create a jira task.",
+    },
     {"kind": "note", "event_id": 3935, "feedback": "Check for an existing link first."},
 ]
 
@@ -42,15 +48,30 @@ def _ev(claim: str, source_ref: str, kind: str = "operator") -> Evidence:
 # The record the coach may have read past its selection into. Stubbed so this
 # suite stays pure — no Postgres, no model, always in the offline run.
 RECORD = {
-    7788: {"id": 7788, "kind": "proposal.decided", "ref_id": "prop_x",
-           "actor": "operator", "created_at": None,
-           "payload": {"verdict": "rejected",
-                       "feedback": "stop proposing dates you cannot source"}},
-    9001: {"id": 9001, "kind": "work.folded", "ref_id": "prop_y",
-           "actor": "system", "created_at": None, "payload": {"count": 3}},
-    8100: {"id": 8100, "kind": "proposal.created", "ref_id": "prop_z",
-           "actor": "agent:coach", "created_at": None,
-           "payload": {"intent": "stop proposing dates you cannot source"}},
+    7788: {
+        "id": 7788,
+        "kind": "proposal.decided",
+        "ref_id": "prop_x",
+        "actor": "operator",
+        "created_at": None,
+        "payload": {"verdict": "rejected", "feedback": "stop proposing dates you cannot source"},
+    },
+    9001: {
+        "id": 9001,
+        "kind": "work.folded",
+        "ref_id": "prop_y",
+        "actor": "system",
+        "created_at": None,
+        "payload": {"count": 3},
+    },
+    8100: {
+        "id": 8100,
+        "kind": "proposal.created",
+        "ref_id": "prop_z",
+        "actor": "agent:coach",
+        "created_at": None,
+        "payload": {"intent": "stop proposing dates you cannot source"},
+    },
 }
 
 
@@ -122,17 +143,13 @@ async def test_a_quote_cannot_verify_against_json_key_names():
     once made key names matchable: "feedback stop proposing dates" verified
     against {"feedback": "stop proposing dates..."} though nobody wrote it.
     Each value is now checked on its own."""
-    out = await _verified_evidence(
-        [_ev("feedback stop proposing dates", "event:7788")], SIGNALS
-    )
+    out = await _verified_evidence([_ev("feedback stop proposing dates", "event:7788")], SIGNALS)
     assert out[0]["claim_matches_source"] is False
     assert out[0]["citation"] == "discovered"
 
 
 async def test_a_quote_cannot_span_two_unrelated_payload_fields():
-    out = await _verified_evidence(
-        [_ev("rejected stop proposing dates", "event:7788")], SIGNALS
-    )
+    out = await _verified_evidence([_ev("rejected stop proposing dates", "event:7788")], SIGNALS)
     assert out[0]["claim_matches_source"] is False
 
 
@@ -176,7 +193,9 @@ async def test_quote_survives_punctuation_and_case_drift_but_not_paraphrase():
 async def test_the_operators_own_note_is_checkable_like_any_other_signal():
     # The note is logged as agent.coach_requested BEFORE the run precisely so
     # the coached charter can cite it — so it must be checkable too.
-    out = await _verified_evidence([_ev("Check for an existing link first.", "event:3935")], SIGNALS)
+    out = await _verified_evidence(
+        [_ev("Check for an existing link first.", "event:3935")], SIGNALS
+    )
     assert out[0]["claim_matches_source"] is True
 
 
@@ -222,9 +241,11 @@ async def test_none_is_never_written_by_this_checker():
     reads as 'nothing was verified'. Every operator entry this function
     touches must come out True or False."""
     out = await _verified_evidence(
-        [_ev(SIGNALS[0]["feedback"], "event:2453"),
-         _ev("invented", "event:99999"),
-         _ev("stop proposing dates you cannot source", "event:7788")],
+        [
+            _ev(SIGNALS[0]["feedback"], "event:2453"),
+            _ev("invented", "event:99999"),
+            _ev("stop proposing dates you cannot source", "event:7788"),
+        ],
         SIGNALS,
     )
     assert [e["claim_matches_source"] for e in out] == [True, False, True]
@@ -257,10 +278,13 @@ def test_both_tiers_share_one_checker():
 # than silently turning the Inbox's amber badge into noise.
 
 REJECTION = {
-    "kind": "rejection", "event_id": 2736,
+    "kind": "rejection",
+    "event_id": 2736,
     "intent": "Re-register the three Claude aliases with added metadata fields",
-    "feedback": ("You should add the new updated models first, only after they are "
-                 "added successfully should you remove the old models."),
+    "feedback": (
+        "You should add the new updated models first, only after they are "
+        "added successfully should you remove the old models."
+    ),
 }
 
 
@@ -268,6 +292,7 @@ def _quotable_span(rendered: str) -> str:
     """The one span the prompt marks as quotable — the curly-quoted text on the
     line after the label. This mirrors what a compliant agent copies."""
     import re as _re
+
     tail = rendered.split("THE OPERATOR'S EXACT WORDS", 1)[1]
     return _re.search(r"“([^”]*)”", tail).group(1)
 
@@ -304,9 +329,7 @@ async def test_quoting_the_whole_rendered_line_still_fails():
     is not a faithful citation and must stay flagged."""
     from central_command.runtime.run import _signal_line
 
-    out = await _verified_evidence(
-        [_ev(_signal_line(0, REJECTION), "event:2736")], [REJECTION]
-    )
+    out = await _verified_evidence([_ev(_signal_line(0, REJECTION), "event:2736")], [REJECTION])
     assert out[0]["claim_matches_source"] is False
 
 
@@ -317,7 +340,9 @@ async def test_quoting_the_whole_rendered_line_still_fails():
 # must fail exactly like citing an agent-authored event off the record does.
 
 TASK_SIGNAL = {
-    "kind": "task-outcome", "event_id": 4242, "author": "agent",
+    "kind": "task-outcome",
+    "event_id": 4242,
+    "author": "agent",
     "intent": "task_9885f870fa04 — register the alias",
     "feedback": "Closing as done; still unclear which region the alias belongs to.",
 }
@@ -360,6 +385,7 @@ async def test_agent_authored_signals_render_a_quotable_span():
         rendered = _signal_line(0, s)
         assert "THE OPERATOR'S EXACT WORDS" not in rendered, kind
         import re as _re
+
         quoted = _re.search(r"EXACT WORDS[^\n]*\n\s*“([^”]*)”", rendered).group(1)
         assert quoted == s["feedback"], kind
         out = await _verified_evidence([_ev(quoted, "event:4242", kind="record")], [s])
@@ -372,8 +398,14 @@ async def test_every_signal_kind_renders_a_quotable_span():
     the same checker."""
     from central_command.runtime.run import _signal_line
 
-    for kind in ("rejection", "reopen", "note", "audit-overcautious",
-                 "audit-miss", "route-override"):
+    for kind in (
+        "rejection",
+        "reopen",
+        "note",
+        "audit-overcautious",
+        "audit-miss",
+        "route-override",
+    ):
         s = {**REJECTION, "kind": kind}
         quoted = _quotable_span(_signal_line(0, s))
         assert quoted == s["feedback"], f"{kind}: labelled span is not the feedback"

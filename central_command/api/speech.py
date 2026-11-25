@@ -95,7 +95,11 @@ async def _speech_models_body() -> dict:
     lists, error = await _catalog()
     return {
         "tts": {"selected": chosen["tts"], "default": TTS_ALIAS, "models": lists["audio_speech"]},
-        "stt": {"selected": chosen["stt"], "default": STT_ALIAS, "models": lists["audio_transcription"]},
+        "stt": {
+            "selected": chosen["stt"],
+            "default": STT_ALIAS,
+            "models": lists["audio_transcription"],
+        },
         "error": error,
     }
 
@@ -130,7 +134,10 @@ async def set_speech_models(body: SpeechModelsIn) -> dict:
     stored = await repo.get_app_setting(SPEECH_SETTING, {})
     stored = dict(stored) if isinstance(stored, dict) else {}
     lists: dict[str, list[str]] | None = None
-    for key, mode, alias in (("tts", "audio_speech", TTS_ALIAS), ("stt", "audio_transcription", STT_ALIAS)):
+    for key, mode, alias in (
+        ("tts", "audio_speech", TTS_ALIAS),
+        ("stt", "audio_transcription", STT_ALIAS),
+    ):
         if key not in fields:
             continue
         value = (getattr(body, key) or "").strip()
@@ -162,7 +169,9 @@ def _headers() -> dict[str, str]:
 
 def _unconfigured() -> JSONResponse | None:
     if not settings.llm_base_url or not settings.llm_api_key:
-        return JSONResponse({"error": "CC_LLM_BASE_URL / CC_LLM_API_KEY are not set"}, status_code=503)
+        return JSONResponse(
+            {"error": "CC_LLM_BASE_URL / CC_LLM_API_KEY are not set"}, status_code=503
+        )
     return None
 
 
@@ -183,13 +192,23 @@ async def tts(req: TTSRequest, request: Request) -> Response:
             # Read inside the slot: the gate's order is arrival order, and a
             # read before it would let a slower read reorder the line.
             model = (await _chosen())["tts"]
-            body: dict = {"model": model, "voice": req.voice or settings.tts_voice, "input": req.text, "response_format": "mp3"}
+            body: dict = {
+                "model": model,
+                "voice": req.voice or settings.tts_voice,
+                "input": req.text,
+                "response_format": "mp3",
+            }
             async with httpx.AsyncClient(timeout=120, **http_client.client_kwargs()) as client:
-                resp = await client.post(f"{_base()}/v1/audio/speech", headers=_headers(), json=body)
+                resp = await client.post(
+                    f"{_base()}/v1/audio/speech", headers=_headers(), json=body
+                )
     except Disconnected:
         return _client_gone()
     if resp.status_code != 200:
-        return JSONResponse({"error": f"{model}: HTTP {resp.status_code}", "detail": resp.text[:500]}, status_code=502)
+        return JSONResponse(
+            {"error": f"{model}: HTTP {resp.status_code}", "detail": resp.text[:500]},
+            status_code=502,
+        )
     return Response(content=resp.content, media_type=resp.headers.get("content-type", "audio/mpeg"))
 
 
@@ -198,7 +217,11 @@ async def tts_config() -> dict:
     # The cockpit's Settings > Audio reads this shape (web/server/lib/tts-config.ts).
     return {
         "defaultProvider": "openai",
-        "openai": {"model": (await _chosen())["tts"], "voice": settings.tts_voice, "instructions": ""},
+        "openai": {
+            "model": (await _chosen())["tts"],
+            "voice": settings.tts_voice,
+            "instructions": "",
+        },
     }
 
 
@@ -212,7 +235,9 @@ async def transcribe(request: Request) -> Response:
         return JSONResponse({"error": "No file found in request"}, status_code=400)
     audio = await file.read()
     if len(audio) > MAX_AUDIO_BYTES:
-        return JSONResponse({"error": f"File too large (max {MAX_AUDIO_BYTES // 1024 // 1024}MB)"}, status_code=413)
+        return JSONResponse(
+            {"error": f"File too large (max {MAX_AUDIO_BYTES // 1024 // 1024}MB)"}, status_code=413
+        )
     if not audio:
         return JSONResponse({"error": "Empty audio"}, status_code=400)
     language = form.get("language")
@@ -227,12 +252,21 @@ async def transcribe(request: Request) -> Response:
                     f"{_base()}/v1/audio/transcriptions",
                     headers=_headers(),
                     data=data,
-                    files={"file": (file.filename or "audio.webm", audio, file.content_type or "application/octet-stream")},
+                    files={
+                        "file": (
+                            file.filename or "audio.webm",
+                            audio,
+                            file.content_type or "application/octet-stream",
+                        )
+                    },
                 )
     except Disconnected:
         return _client_gone()
     if resp.status_code != 200:
-        return JSONResponse({"error": f"{model}: HTTP {resp.status_code}", "detail": resp.text[:500]}, status_code=502)
+        return JSONResponse(
+            {"error": f"{model}: HTTP {resp.status_code}", "detail": resp.text[:500]},
+            status_code=502,
+        )
     return JSONResponse({"text": resp.json().get("text", "")})
 
 

@@ -43,7 +43,10 @@ async def runs():
             await conn.execute(
                 "insert into session (id, agent_id, status, mode, created_at)"
                 " values ($1, $2, $3, $4, now())",
-                sid, agent, status, mode,
+                sid,
+                agent,
+                status,
+                mode,
             )
         yield list(zip(ids, spec))
     finally:
@@ -71,7 +74,8 @@ async def test_keyset_paging_never_repeats_or_skips_a_row(runs):
     cursor = None
     for _ in range(10):
         page = await repo.list_sessions(
-            2, agent_id=None,
+            2,
+            agent_id=None,
             before=cursor[0] if cursor else None,
             before_id=cursor[1] if cursor else None,
         )
@@ -96,11 +100,16 @@ async def test_a_run_names_its_source_from_the_work_ledger(runs):
             "insert into work_item (id, message_id, feed, source, subject,"
             " payload, state, session_id)"
             " values ($1, $2, 'test', 'test', $3, '{}'::jsonb, 'PROCESSED', $4)",
-            item_id, f"<{item_id}@test>", "Scanned image from the library",
+            item_id,
+            f"<{item_id}@test>",
+            "Scanned image from the library",
             "sess_act_0",
         )
-        row = next(r for r in await repo.list_sessions(100, agent_id="act-alpha")
-                   if r["id"] == "sess_act_0")
+        row = next(
+            r
+            for r in await repo.list_sessions(100, agent_id="act-alpha")
+            if r["id"] == "sess_act_0"
+        )
         assert row["work_subject"] == "Scanned image from the library"
     finally:
         await conn.execute("delete from work_item where id = $1", item_id)
@@ -126,7 +135,8 @@ async def test_every_mode_and_status_combination_is_reachable(runs):
     cursor = None
     while True:
         page = await repo.list_sessions(
-            200, before=cursor[0] if cursor else None,
+            200,
+            before=cursor[0] if cursor else None,
             before_id=cursor[1] if cursor else None,
         )
         if not page:

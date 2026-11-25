@@ -65,16 +65,16 @@ def retired_settings_present() -> list[str]:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env", env_prefix="CC_", extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="CC_", extra="ignore")
 
     # Database — the framework spine.
     # 5442 = Central Command's own PG (docker-compose.yml). 5432 is n8n's nat-postgres.
     # 127.0.0.1, never localhost, in every default: Windows resolves localhost
     # to ::1 first and the podman machine publishes IPv4 only — 2.1 s per
     # connection, a 35-dot pytest in 25 minutes (2026-09-17 Windows run).
-    database_url: str = "postgresql://central_command:central_command@127.0.0.1:5442/central_command"
+    database_url: str = (
+        "postgresql://central_command:central_command@127.0.0.1:5442/central_command"
+    )
 
     # Provider:model string for Pydantic AI. Confirm the exact current id at M0.
     default_model: str = "anthropic:claude-sonnet-5"
@@ -334,10 +334,10 @@ class Settings(BaseSettings):
     # global CC_CA_BUNDLE / CC_CLIENT_CERT / CC_CLIENT_KEY / CC_TLS_INSECURE
     # surface (`ca_bundle`..`tls_insecure` below, read through
     # integrations/http.py:client_kwargs()), never a per-tool knob.
-    exchange_url: str = ""        # the EWS endpoint, e.g. https://mail.corp.example/ews/exchange.asmx
-    exchange_username: str = ""   # DOMAIN\\user or user@corp.example
+    exchange_url: str = ""  # the EWS endpoint, e.g. https://mail.corp.example/ews/exchange.asmx
+    exchange_username: str = ""  # DOMAIN\\user or user@corp.example
     exchange_password: str = ""
-    exchange_email: str = ""      # primary SMTP address; defaults to the username when it is a UPN
+    exchange_email: str = ""  # primary SMTP address; defaults to the username when it is a UPN
 
     # Native Google client (DL-234) — Gmail and Google Calendar over Google's
     # REST APIs from this process, in place of the two n8n façade workflows.
@@ -379,9 +379,9 @@ class Settings(BaseSettings):
     # uniformly because the target of each of those calls is one fixed,
     # operator-configured endpoint. Empty (default) = unchanged home-network
     # behavior — public CA verification, no client cert.
-    ca_bundle: str = ""       # path to a custom trust bundle (httpx `verify=`)
-    client_cert: str = ""     # path to a client cert, or a combined cert+key PEM
-    client_key: str = ""      # path to the client key, if not combined with client_cert above
+    ca_bundle: str = ""  # path to a custom trust bundle (httpx `verify=`)
+    client_cert: str = ""  # path to a client cert, or a combined cert+key PEM
+    client_key: str = ""  # path to the client key, if not combined with client_cert above
     # CC_TLS_INSECURE=1 turns verification OFF for EVERY client built from
     # integrations/http.py:client_kwargs() — Jira, Confluence, LiteLLM, the
     # graph, forge, speech, attachments, the self-check and Systems probes,
@@ -858,8 +858,7 @@ class Settings(BaseSettings):
     plan_team_jql: str = "statusCategory != Done AND assignee is not EMPTY"
     plan_team_limit: int = 500
     plan_delegated_jql: str = (
-        "reporter = currentUser() AND assignee != currentUser() "
-        "AND statusCategory != Done"
+        "reporter = currentUser() AND assignee != currentUser() AND statusCategory != Done"
     )
 
     # Sandbox slice 1 (D-sandbox): the runner is a SEPARATE, credential-free
@@ -886,7 +885,7 @@ class Settings(BaseSettings):
     # normalises a bare name to docker.io/library and cannot see `localhost/`,
     # podman resolves `localhost/` locally and would search registries for a
     # bare name. The local tags the build scripts produce are unchanged.
-    sandbox_image: str = "localhost/cc-sandbox:1"          # rootless-podman backend
+    sandbox_image: str = "localhost/cc-sandbox:1"  # rootless-podman backend
     sandbox_image_k8s: str = "docker.io/library/cc-sandbox:1"  # kubectl backend
 
     # Sandbox slice 2 (mcp.sync_source): the one gated exit from a sandbox into

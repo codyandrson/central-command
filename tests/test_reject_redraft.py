@@ -63,7 +63,8 @@ async def test_reject_with_instruction_persists_a_redraft(monkeypatch):
     # to what it replaces — the context had to survive the move to the one park
     # path (`runtime/proposals.park_proposal`, 2026-07-25).
     created = [
-        e for e in await repo.list_events_of_kinds(["proposal.created"])
+        e
+        for e in await repo.list_events_of_kinds(["proposal.created"])
         if e["ref_id"] == redraft_id
     ]
     assert len(created) == 1
@@ -121,9 +122,9 @@ def test_framed_denial_carries_the_words_and_both_branches():
     from central_command.runtime.resume_park import framed_denial
 
     text = framed_denial(FEEDBACK)
-    assert FEEDBACK in text          # verbatim, never paraphrased
+    assert FEEDBACK in text  # verbatim, never paraphrased
     assert "propose_action" in text  # branch 1: redraft
-    assert "NOT NEEDED" in text      # branch 2: stand down
+    assert "NOT NEEDED" in text  # branch 2: stand down
 
 
 async def test_the_resumed_agent_is_told_what_a_rejection_means():
@@ -146,13 +147,18 @@ async def test_the_resumed_agent_is_told_what_a_rejection_means():
             if isinstance(part, ToolReturnPart)
         }
         if "propose_action" not in returned:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name="propose_action", args={"proposal": _PROPOSAL}),
-            ])
-        seen.append("\n".join(
-            str(getattr(part, "content", ""))
-            for message in messages for part in getattr(message, "parts", [])
-        ))
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name="propose_action", args={"proposal": _PROPOSAL}),
+                ]
+            )
+        seen.append(
+            "\n".join(
+                str(getattr(part, "content", ""))
+                for message in messages
+                for part in getattr(message, "parts", [])
+            )
+        )
         return ModelResponse(parts=[TextPart(content="Understood.")])
 
     model = FunctionModel(_respond)
@@ -166,7 +172,8 @@ async def test_the_resumed_agent_is_told_what_a_rejection_means():
     assert "REJECTED" in seen[0] and "NOT NEEDED" in seen[0]
 
     decided = next(
-        e for e in await repo.list_events_of_kinds(["proposal.decided"])
+        e
+        for e in await repo.list_events_of_kinds(["proposal.decided"])
         if e["ref_id"] == run["proposal_id"]
     )
     assert decided["payload"]["feedback"] == FEEDBACK  # RAW on the record
@@ -188,9 +195,7 @@ async def test_rejecting_twice_is_refused():
     model = make_spike_model()
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
 
-    await gateway.reject_with_feedback(
-        run["session_id"], run["proposal_id"], "No.", model=model
-    )
+    await gateway.reject_with_feedback(run["session_id"], run["proposal_id"], "No.", model=model)
     with pytest.raises(gateway.GatewayError):
         await gateway.reject_with_feedback(
             run["session_id"], run["proposal_id"], "No again.", model=model
@@ -217,15 +222,23 @@ async def test_a_non_proposal_deferral_on_the_reject_path_resolves_mechanically(
             if isinstance(part, ToolReturnPart)
         }
         if "propose_action" not in returned:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name="propose_action",
-                             args={"proposal": _PROPOSAL}),
-            ])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name="propose_action", args={"proposal": _PROPOSAL}),
+                ]
+            )
         if "ask_operator" not in returned:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name="ask_operator",
-                             args={"searched": "no tool I hold records this", "question": "Which date did Dana mean?"}),
-            ])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="ask_operator",
+                        args={
+                            "searched": "no tool I hold records this",
+                            "question": "Which date did Dana mean?",
+                        },
+                    ),
+                ]
+            )
         return ModelResponse(parts=[TextPart(content="Understood — standing down.")])
 
     model = FunctionModel(_respond)
@@ -261,14 +274,20 @@ async def test_the_close_out_note_carries_the_unanswerable_question():
             if isinstance(part, ToolReturnPart)
         }
         if "propose_action" not in returned:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name="propose_action",
-                             args={"proposal": _PROPOSAL}),
-            ])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name="propose_action", args={"proposal": _PROPOSAL}),
+                ]
+            )
         # Never settles: reaches for the operator on every round.
-        return ModelResponse(parts=[
-            ToolCallPart(tool_name="ask_operator", args={"searched": "no tool I hold records this", "question": question}),
-        ])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="ask_operator",
+                    args={"searched": "no tool I hold records this", "question": question},
+                ),
+            ]
+        )
 
     model = FunctionModel(_respond)
     run = await ingest_and_propose("Dana: DEMO-1 slipped, due Aug 3.", model=model)
@@ -301,7 +320,8 @@ async def test_detached_reject_returns_recorded_and_the_redraft_still_lands():
 
     await asyncio.gather(*gateway._detached_resumes)
     redrafts = [
-        p for p in await repo.list_proposals("AWAITING_HUMAN")
+        p
+        for p in await repo.list_proposals("AWAITING_HUMAN")
         if p["session_id"] == run["session_id"]
     ]
     assert len(redrafts) == 1  # the redraft, awaiting its own review

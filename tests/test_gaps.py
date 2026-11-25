@@ -31,7 +31,9 @@ class _Ctx:
 @pytest.mark.asyncio
 async def test_missing_knowledge_is_recorded():
     out = await declare_gap(
-        _Ctx(), kind="missing_knowledge", subject="litellm",
+        _Ctx(),
+        kind="missing_knowledge",
+        subject="litellm",
         need="the LiteLLM proxy API reference for key management",
     )
     assert "recorded" in out.lower()
@@ -46,7 +48,9 @@ async def test_stale_knowledge_without_evidence_is_refused():
     """An agent must not be able to file 'this looks outdated'. The evidence is
     required by the tool, not requested by guidance that nothing enforces."""
     out = await declare_gap(
-        _Ctx(), kind="stale_knowledge", subject="litellm",
+        _Ctx(),
+        kind="stale_knowledge",
+        subject="litellm",
         need="refresh the key-management docs",
     )
     assert "requires" in out.lower()
@@ -66,11 +70,16 @@ async def test_stale_knowledge_without_evidence_is_refused():
 async def test_stale_knowledge_with_evidence_is_recorded():
     await repo.create_skill("cc-test-lite", "LiteLLM", "Proxy operations")
     doc = await repo.add_skill_doc(
-        "cc-test-lite", "keys", "reference", "Key management",
+        "cc-test-lite",
+        "keys",
+        "reference",
+        "Key management",
         "POST /key/generate accepts budget_duration.",
     )
     out = await declare_gap(
-        _Ctx(), kind="stale_knowledge", subject="litellm",
+        _Ctx(),
+        kind="stale_knowledge",
+        subject="litellm",
         need="refresh from the current LiteLLM release",
         doc_id=doc["id"],
         doc_says="POST /key/generate accepts budget_duration",
@@ -100,13 +109,16 @@ async def test_stale_knowledge_may_cite_an_ingested_document():
     enrolled = await ledger.enroll_document(
         f"gvtest gap doc {uuid.uuid4().hex[:8]}",
         "The proxy listens on port 4000.",
-        feed="backlog", source="test",
+        feed="backlog",
+        source="test",
     )
     item_id = enrolled["item_id"]
     assert item_id.startswith("wi_")
     try:
         out = await declare_gap(
-            _Ctx(), kind="stale_knowledge", subject="litellm",
+            _Ctx(),
+            kind="stale_knowledge",
+            subject="litellm",
             need="re-ingest the current runbook",
             doc_id=item_id,
             doc_says="the proxy listens on port 4000",
@@ -129,9 +141,13 @@ async def test_stale_knowledge_citing_an_unknown_doc_is_refused():
     """Citing a document that does not exist is the misquote case — the same
     discipline claim_supported() applies to operator claims."""
     out = await declare_gap(
-        _Ctx(), kind="stale_knowledge", subject="litellm",
-        need="refresh", doc_id="doc_doesnotexist",
-        doc_says="something", observed="something else",
+        _Ctx(),
+        kind="stale_knowledge",
+        subject="litellm",
+        need="refresh",
+        doc_id="doc_doesnotexist",
+        doc_says="something",
+        observed="something else",
     )
     assert "unknown document" in out.lower()
     # The refusal names BOTH citable sources — an agent told only half the rule
@@ -154,7 +170,9 @@ async def test_the_declaring_agent_is_recorded():
     blocked, not just that somebody is."""
     await declare_gap(
         _Ctx(session_id="sess_who", agent_id="jira-expert"),
-        kind="missing_tool", subject="confluence", need="a publish capability",
+        kind="missing_tool",
+        subject="confluence",
+        need="a publish capability",
     )
     payload = (await repo.list_events_of_kinds(["gap.declared"]))[-1]["payload"]
     assert payload["agent_id"] == "jira-expert"
@@ -171,8 +189,7 @@ class _StubAgent:
     # `usage_limits` since 2026-08-01: the resume leg carries the same loop
     # breaker every fresh run gets, and a stub that refuses it is a stub the
     # real call would fail against.
-    async def run(self, *, message_history, deferred_tool_results, model, deps,
-                  usage_limits=None):
+    async def run(self, *, message_history, deferred_tool_results, model, deps, usage_limits=None):
         self.received_deps = deps
         return "stub result"
 
@@ -192,7 +209,10 @@ async def test_resume_threads_the_agent_id_into_fresh_deps():
 
     stub = _StubAgent()
     await resume(
-        stub, messages=[], tool_call_id="call_1", executor_result="ok",
+        stub,
+        messages=[],
+        tool_call_id="call_1",
+        executor_result="ok",
         agent_id="jira-expert",
     )
     assert stub.received_deps.agent_id == "jira-expert"
@@ -211,10 +231,7 @@ def test_the_substring_match_is_gone():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1] / "central_command"
-    offenders = [
-        p for p in root.rglob("*.py")
-        if "CAPABILITY GAP" in p.read_text(encoding="utf-8")
-    ]
+    offenders = [p for p in root.rglob("*.py") if "CAPABILITY GAP" in p.read_text(encoding="utf-8")]
     assert not offenders, (
         "gap detection must read gap.declared events, not match prose: "
         + ", ".join(str(p) for p in offenders)
@@ -227,8 +244,10 @@ async def test_gap_queue_lists_newest_first():
     from central_command.api import routes
 
     await declare_gap(
-        _Ctx(session_id="sess_q1"), kind="missing_tool",
-        subject="confluence", need="a publish capability",
+        _Ctx(session_id="sess_q1"),
+        kind="missing_tool",
+        subject="confluence",
+        need="a publish capability",
     )
     out = await routes.list_gaps_route()
     assert out["gaps"][0]["subject"] == "confluence"
@@ -256,11 +275,12 @@ class _GapDeclaringAgent:
     # `usage_limits` since 2026-08-01: the resume leg carries the same loop
     # breaker every fresh run gets, and a stub that refuses it is a stub the
     # real call would fail against.
-    async def run(self, *, message_history, deferred_tool_results, model, deps,
-                  usage_limits=None):
+    async def run(self, *, message_history, deferred_tool_results, model, deps, usage_limits=None):
         ctx = type("C", (), {"deps": deps})()
         await declare_gap(
-            ctx, kind="missing_knowledge", subject="confluence",
+            ctx,
+            kind="missing_knowledge",
+            subject="confluence",
             need="a Confluence Cloud REST reference",
         )
         return "done"
@@ -275,8 +295,12 @@ async def test_resume_threads_the_session_id_into_fresh_deps():
 
     stub = _StubAgent()
     await resume(
-        stub, messages=[], tool_call_id="call_1", executor_result="ok",
-        agent_id="jira-expert", session_id="sess_resumed",
+        stub,
+        messages=[],
+        tool_call_id="call_1",
+        executor_result="ok",
+        agent_id="jira-expert",
+        session_id="sess_resumed",
     )
     assert stub.received_deps.session_id == "sess_resumed"
 
@@ -298,8 +322,12 @@ async def test_a_gap_declared_on_a_resumed_turn_is_escalatable():
 
     session_id = "sess_gaptest_" + uuid.uuid4().hex[:8]
     await resume_module.resume(
-        _GapDeclaringAgent(), messages=[], tool_call_id="call_1",
-        executor_result="ok", agent_id="jira-expert", session_id=session_id,
+        _GapDeclaringAgent(),
+        messages=[],
+        tool_call_id="call_1",
+        executor_result="ok",
+        agent_id="jira-expert",
+        session_id=session_id,
     )
 
     escalatable = await repo.gaps_for_session(session_id)

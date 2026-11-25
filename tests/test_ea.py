@@ -72,8 +72,7 @@ async def test_the_ea_is_hired_as_a_full_roster_member():
     assert first["consultable"] is True
     assert first["deviations"].strip()
 
-    grants = sorted(g["pack"] for g in await repo.list_grants(AGENT_ID)
-                    if g["revoked_at"] is None)
+    grants = sorted(g["pack"] for g in await repo.list_grants(AGENT_ID) if g["revoked_at"] is None)
     # calendar-propose granted 2026-08-06 (EA widening slice A): the EA can
     # PROPOSE a gated calendar create/update/delete — every one of them still
     # waits on the operator, and the write itself is Executor-only.
@@ -93,12 +92,25 @@ async def test_the_ea_is_hired_as_a_full_roster_member():
     # day plan and the evening review's outcomes, both gated.
     # jira-comment-propose granted 2026-11-20 (DL-222): the reason behind a
     # decision about an issue is a comment on it, never a graph episode.
-    assert grants == ["activity-read", "ask-operator", "calendar-propose",
-                      "calendar-read", "consult", "graph-propose", "graph-read",
-                      "jira-comment-propose",
-                      "jira-read", "loe-read", "mail-read", "note-propose", "plan-propose",
-                      "record-read", "session-recall",
-                      "skill-propose", "task-create"]
+    assert grants == [
+        "activity-read",
+        "ask-operator",
+        "calendar-propose",
+        "calendar-read",
+        "consult",
+        "graph-propose",
+        "graph-read",
+        "jira-comment-propose",
+        "jira-read",
+        "loe-read",
+        "mail-read",
+        "note-propose",
+        "plan-propose",
+        "record-read",
+        "session-recall",
+        "skill-propose",
+        "task-create",
+    ]
     assert "jira-propose" not in grants
 
     current = await repo.current_charter(AGENT_ID)
@@ -123,8 +135,7 @@ async def test_the_charter_writes_no_capability_list_of_its_own():
     assert "arguments  =" not in CHARTER
 
     await ea.ensure_registered()
-    grants = [g["pack"] for g in await repo.list_grants(AGENT_ID)
-              if g["revoked_at"] is None]
+    grants = [g["pack"] for g in await repo.list_grants(AGENT_ID) if g["revoked_at"] is None]
     assembled = build_charter(CHARTER, grants)
     assert assembled.count("YOUR GRANTED CAPABILITIES") == 1
     assert "capability = 'graph.add_episode'" in assembled
@@ -167,9 +178,12 @@ async def test_the_ea_is_not_seeded_in_the_schema():
     schema.sql's founding-roster seeds and their `role = ''` guards."""
     from pathlib import Path
 
-    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(encoding="utf-8")
+    schema = (Path(__file__).parents[1] / "central_command" / "db" / "schema.sql").read_text(
+        encoding="utf-8"
+    )
     seeding = [
-        line for line in schema.splitlines()
+        line
+        for line in schema.splitlines()
         if "'ea'" in line and not line.lstrip().startswith("--")
     ]
     assert seeding == [], f"the EA is seeded in schema.sql: {seeding}"
@@ -186,9 +200,13 @@ async def test_read_team_activity_windows_and_names_its_source():
     from central_command.runtime import tools
 
     mine = await events.emit(
-        "gap.declared", ref_id="eatool_1",
-        payload={"kind": "missing_tool", "subject": "eatool",
-                 "need": "a widget only this test wants"},
+        "gap.declared",
+        ref_id="eatool_1",
+        payload={
+            "kind": "missing_tool",
+            "subject": "eatool",
+            "need": "a widget only this test wants",
+        },
         actor="agent:eatool",
     )
     out = await tools.read_team_activity(_Ctx(), since_hours=24)
@@ -209,7 +227,9 @@ async def test_read_team_activity_excludes_kinds_outside_the_fixed_list():
     from central_command.runtime import tools
 
     off_list = await events.emit(
-        "session.step", ref_id="eatool_2", payload={"note": "not activity"},
+        "session.step",
+        ref_id="eatool_2",
+        payload={"note": "not activity"},
         actor="agent:eatool",
     )
     out = await tools.read_team_activity(_Ctx(), since_hours=24)
@@ -260,8 +280,9 @@ async def test_fire_to_lane_to_conclude_to_resume_to_gated_proposal(monkeypatch)
     since_id = await repo.latest_event_id()
 
     # 1. The scheduled firing. THE task path, with the deterministic block.
-    out = await fire({"id": "ea-digest", "action_kind": "ea.contact",
-                      "action_params": {"kind": "digest"}})
+    out = await fire(
+        {"id": "ea-digest", "action_kind": "ea.contact", "action_params": {"kind": "digest"}}
+    )
     assert out["ok"], out
     result = out["result"]
     assert result["delivered"] is True
@@ -288,7 +309,8 @@ async def test_fire_to_lane_to_conclude_to_resume_to_gated_proposal(monkeypatch)
 
     # 4. The operator answers in the lane; the agent concludes.
     turn = await converse.conversation_turn(
-        lane_id, "Chase the oldest one first, then the blocked task.",
+        lane_id,
+        "Chase the oldest one first, then the blocked task.",
         model=make_ea_conclude_model(),
     )
     assert turn.get("concluded") is True
@@ -303,8 +325,11 @@ async def test_fire_to_lane_to_conclude_to_resume_to_gated_proposal(monkeypatch)
     # read instantly and prove nothing.
     for _ in range(200):
         await asyncio.sleep(0.05)
-        mine = [p for p in await repo.list_proposals("AWAITING_HUMAN")
-                if p["agent_id"] == AGENT_ID and p["session_id"] == result["session_id"]]
+        mine = [
+            p
+            for p in await repo.list_proposals("AWAITING_HUMAN")
+            if p["agent_id"] == AGENT_ID and p["session_id"] == result["session_id"]
+        ]
         if mine:
             break
     else:  # pragma: no cover — a failure here is a real hang, not flake
@@ -322,9 +347,15 @@ async def test_fire_to_lane_to_conclude_to_resume_to_gated_proposal(monkeypatch)
     # as one window: `list_events` caps at 200 rows, and the shared database
     # makes a single window a lottery.
     seen: dict[str, int] = {}
-    for kind in ("heartbeat.fired", "task.created", "agent.asked",
-                 "agent.discussion_opened", "ea.contact_delivered",
-                 "agent.discussion_concluded", "proposal.created"):
+    for kind in (
+        "heartbeat.fired",
+        "task.created",
+        "agent.asked",
+        "agent.discussion_opened",
+        "ea.contact_delivered",
+        "agent.discussion_concluded",
+        "proposal.created",
+    ):
         rows = await repo.list_events(since_id=since_id, kind=kind)
         assert rows, f"{kind} missing from the record"
         seen[kind] = rows[0]["id"]
@@ -359,14 +390,16 @@ async def test_proposing_before_concluding_leaves_a_recoverable_lane(monkeypatch
     )
 
     await ea.ensure_registered()
-    out = await fire({"id": "ea-checkin", "action_kind": "ea.contact",
-                      "action_params": {"kind": "check_in"}})
+    out = await fire(
+        {"id": "ea-checkin", "action_kind": "ea.contact", "action_params": {"kind": "check_in"}}
+    )
     item_id = out["result"]["item_id"]
     lane_id = (await repo.get_operator_item(item_id))["discussion_session_id"]
 
     # WRONG ORDER: the agent proposes inside the lane instead of concluding.
     turn = await converse.conversation_turn(
-        lane_id, "Nothing urgent; log what we agreed.",
+        lane_id,
+        "Nothing urgent; log what we agreed.",
         model=make_ea_episode_model(),
     )
     assert turn.get("proposed") is True
@@ -389,7 +422,8 @@ async def test_proposing_before_concluding_leaves_a_recoverable_lane(monkeypatch
     from central_command.gateway import gateway
 
     await gateway.reject_with_feedback(
-        lane_id, turn["proposal_id"],
+        lane_id,
+        turn["proposal_id"],
         "Conclude the discussion first — the work log goes on the resumed task.",
         model=FunctionModel(
             lambda messages, info: ModelResponse(parts=[TextPart(content="Understood.")])
@@ -401,6 +435,8 @@ async def test_proposing_before_concluding_leaves_a_recoverable_lane(monkeypatch
         "be unrecoverable rather than merely slow"
     )
     again = await converse.conversation_turn(
-        lane_id, "Chase the oldest one first.", model=make_ea_conclude_model(),
+        lane_id,
+        "Chase the oldest one first.",
+        model=make_ea_conclude_model(),
     )
     assert again.get("concluded") is True

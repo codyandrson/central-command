@@ -120,8 +120,12 @@ def test_executed_outcome_hands_back_the_real_result() -> None:
     project key, an issue key) instead of guessing at one."""
     text = orchestration._consult_outcome_text(
         "jira-expert",
-        {"status": "EXECUTED", "intent": "create the CS project", "id": "prop_1",
-         "provenance": {"result_text": "created project CS"}},
+        {
+            "status": "EXECUTED",
+            "intent": "create the CS project",
+            "id": "prop_1",
+            "provenance": {"result_text": "created project CS"},
+        },
         None,
     )
     assert "created project CS" in text
@@ -222,7 +226,8 @@ async def test_a_conversation_asker_rests_with_its_answer_instead_of_closing(mon
         await conn.execute(
             "insert into session (id, agent_id, status, mode, run_state) "
             "values ($1, $2, 'RUNNING', 'conversation', $3::jsonb)",
-            sid, "cw-ea",
+            sid,
+            "cw-ea",
             '{"messages": [], "consult_wait": {"specialist_session_id": "sess_spec", '
             '"tool_call_id": "call_1", "target": "accountability"}}',
         )
@@ -247,8 +252,13 @@ async def test_a_conversation_asker_rests_with_its_answer_instead_of_closing(mon
 
     try:
         out = await orchestration._settle_consult_resume(
-            _Final(), agent=None, model=None, session_id=sid, agent_id="cw-ea",
-            task_id=None, proposal_id="prop_spec",
+            _Final(),
+            agent=None,
+            model=None,
+            session_id=sid,
+            agent_id="cw-ea",
+            task_id=None,
+            proposal_id="prop_spec",
         )
         assert out == {"deferred": False, "output": _Final.output, "continued": True}
         assert landed == []
@@ -284,8 +294,8 @@ def _task_events(kinds: list[str], task_id: str):
     from central_command.db import repo
 
     async def _go():
-        return [e for e in await repo.list_events_of_kinds(kinds)
-                if e["ref_id"] == task_id]
+        return [e for e in await repo.list_events_of_kinds(kinds) if e["ref_id"] == task_id]
+
     return _go()
 
 
@@ -316,16 +326,15 @@ async def test_a_consult_waiting_task_run_holds_in_review_not_failed(monkeypatch
 
     monkeypatch.setattr(overrides, "decide_landed", _decide)
     monkeypatch.setattr(
-        consult_mod, "_consult_model",
-        aresolve(lambda agent_id, model=None: _drafting_model()))
+        consult_mod, "_consult_model", aresolve(lambda agent_id, model=None: _drafting_model())
+    )
     monkeypatch.setattr(
-        routes, "resolve_model",
-        aresolve(lambda *a, **k: _consulting_model(C_ID, "A acted on")))
+        routes, "resolve_model", aresolve(lambda *a, **k: _consulting_model(C_ID, "A acted on"))
+    )
     await _hire_trio()
     task_id = "task_" + _uuid.uuid4().hex[:12]
     try:
-        await repo.create_task(task_id, "Consult task",
-                               "Should TASKS-12 block TASKS-13?", A_ID)
+        await repo.create_task(task_id, "Consult task", "Should TASKS-12 block TASKS-13?", A_ID)
         out = await routes._run_assigned_task(await repo.get_task(task_id))
 
         assert out["consult_waiting"] is True and out["task_id"] == task_id
@@ -365,8 +374,13 @@ async def test_a_resumed_runs_consult_wait_is_not_the_tasks_own_proposal(monkeyp
     await repo.create_running_session(sid, "cw-asker")
     await repo.create_task(task_id, "Consult task", "ask B", "cw-asker")
     await repo.start_task(task_id, sid)
-    out = {"deferred": True, "consult_waiting": True, "session_id": sid,
-           "proposal_id": "prop_specialist", "target": "cw-spec"}
+    out = {
+        "deferred": True,
+        "consult_waiting": True,
+        "session_id": sid,
+        "proposal_id": "prop_specialist",
+        "target": "cw-spec",
+    }
     try:
         await orchestration._land_task_question_outcome(task_id, out)
         assert (await repo.get_task(task_id))["status"] == "REVIEW"

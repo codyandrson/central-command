@@ -79,8 +79,10 @@ cutover, followed by the release's usual restart.
 Scopes requested: {" ".join(google.SCOPES)}
 """
 
-PROMPT = ("Listening on 127.0.0.1 for Google's redirect. Open this URL in a browser that "
-          "reaches that address (over the ssh tunnel), sign in and allow access:\n\n{url}\n")
+PROMPT = (
+    "Listening on 127.0.0.1 for Google's redirect. Open this URL in a browser that "
+    "reaches that address (over the ssh tunnel), sign in and allow access:\n\n{url}\n"
+)
 SUCCESS = "Consent received. You can close this tab."
 
 
@@ -93,25 +95,42 @@ def _describe(e: BaseException) -> str:
     """Type and OAuth error code only: an oauthlib error's `error`, never its
     request or the URL it was parsing."""
     code = getattr(e, "error", None)
-    return f"{type(e).__name__}" + (f" ({str(code)[:80]})" if isinstance(code, str) and code else "")
+    return f"{type(e).__name__}" + (
+        f" ({str(code)[:80]})" if isinstance(code, str) and code else ""
+    )
 
 
-def run(env_file: Path, port: int, *, out=None, err=None,
-        auth_uri: str | None = None, token_uri: str | None = None) -> int:
+def run(
+    env_file: Path,
+    port: int,
+    *,
+    out=None,
+    err=None,
+    auth_uri: str | None = None,
+    token_uri: str | None = None,
+) -> int:
     out = out or sys.stdout
     err = err or sys.stderr
     if not env_file.is_file():
-        print(f"error: {env_file} does not exist — run this from the checkout, or pass --env-file",
-              file=err)
+        print(
+            f"error: {env_file} does not exist — run this from the checkout, or pass --env-file",
+            file=err,
+        )
         return 2
     values = dotenv_values(env_file)
     client_id = (values.get("CC_GOOGLE_CLIENT_ID") or "").strip()
     client_secret = (values.get("CC_GOOGLE_CLIENT_SECRET") or "").strip()
-    missing = [k for k, v in (("CC_GOOGLE_CLIENT_ID", client_id),
-                              ("CC_GOOGLE_CLIENT_SECRET", client_secret)) if not v]
+    missing = [
+        k
+        for k, v in (("CC_GOOGLE_CLIENT_ID", client_id), ("CC_GOOGLE_CLIENT_SECRET", client_secret))
+        if not v
+    ]
     if missing:
-        print(f"error: {', '.join(missing)} not set in {env_file} — create a Desktop-app OAuth "
-              "client in Google Cloud and put its id and secret there (see --help)", file=err)
+        print(
+            f"error: {', '.join(missing)} not set in {env_file} — create a Desktop-app OAuth "
+            "client in Google Cloud and put its id and secret there (see --help)",
+            file=err,
+        )
         return 2
 
     from central_command.integrations import provider_extras
@@ -127,46 +146,67 @@ def run(env_file: Path, port: int, *, out=None, err=None,
     # Let a partial grant through oauthlib so the check below can name what is
     # missing, instead of oauthlib raising "Scope has changed".
     os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
-    flow = InstalledAppFlow.from_client_config({"installed": {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "auth_uri": auth_uri or AUTH_URI,
-        "token_uri": token_uri or TOKEN_URI,
-        "redirect_uris": ["http://127.0.0.1"],
-    }}, scopes=list(google.SCOPES))
+    flow = InstalledAppFlow.from_client_config(
+        {
+            "installed": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "auth_uri": auth_uri or AUTH_URI,
+                "token_uri": token_uri or TOKEN_URI,
+                "redirect_uris": ["http://127.0.0.1"],
+            }
+        },
+        scopes=list(google.SCOPES),
+    )
     try:
         # The library prints the prompt with `print`; send it to `out`.
         with contextlib.redirect_stdout(out):
             creds = flow.run_local_server(
-                host="127.0.0.1", bind_addr="127.0.0.1", port=port, open_browser=False,
-                authorization_prompt_message=PROMPT, success_message=SUCCESS,
+                host="127.0.0.1",
+                bind_addr="127.0.0.1",
+                port=port,
+                open_browser=False,
+                authorization_prompt_message=PROMPT,
+                success_message=SUCCESS,
                 # authorization_url(**kwargs): a refresh token, and one again on a re-run.
-                access_type="offline", prompt="consent",
+                access_type="offline",
+                prompt="consent",
             )
     except KeyboardInterrupt:
         print("cancelled; nothing was written", file=err)
         return 130
     except OSError as e:
-        print(f"error: cannot listen on 127.0.0.1:{port} ({e.strerror or type(e).__name__}) — pick "
-              "another --port and forward that one", file=err)
+        print(
+            f"error: cannot listen on 127.0.0.1:{port} ({e.strerror or type(e).__name__}) — pick "
+            "another --port and forward that one",
+            file=err,
+        )
         return 2
     except Exception as e:  # noqa: BLE001 — a denial, a state mismatch, a token endpoint refusal
         print(f"error: the consent did not complete: {_describe(e)}; nothing was written", file=err)
         return 1
     if not creds.refresh_token:
-        print("error: Google answered without a refresh token; nothing was written. Remove the "
-              "app's access at https://myaccount.google.com/permissions and run this again",
-              file=err)
+        print(
+            "error: Google answered without a refresh token; nothing was written. Remove the "
+            "app's access at https://myaccount.google.com/permissions and run this again",
+            file=err,
+        )
         return 1
     lacking = [s for s in google.SCOPES if s not in _granted(creds)]
     if lacking:
-        print(f"error: the consent did not grant {', '.join(lacking)}; nothing was written. "
-              "Run this again and leave every requested access ticked", file=err)
+        print(
+            f"error: the consent did not grant {', '.join(lacking)}; nothing was written. "
+            "Run this again and leave every requested access ticked",
+            file=err,
+        )
         return 1
     replaced = bool(values.get(KEY))
     set_key(str(env_file), KEY, creds.refresh_token, quote_mode="never")
-    print(f"{'Replaced' if replaced else 'Wrote'} {KEY} in {env_file} "
-          f"(scopes granted: {' '.join(google.SCOPES)}).", file=out)
+    print(
+        f"{'Replaced' if replaced else 'Wrote'} {KEY} in {env_file} "
+        f"(scopes granted: {' '.join(google.SCOPES)}).",
+        file=out,
+    )
     print("Nothing is switched yet: CC_GOOGLE_PROVIDER=native does that at the cutover.", file=out)
     return 0
 
@@ -175,17 +215,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m central_command.google_consent",
         description="Mint the refresh token for the native Google client (DL-234): Google's "
-                    "installed-app OAuth flow (google-auth-oauthlib) with a loopback redirect, the "
-                    "token written into the env file as CC_GOOGLE_REFRESH_TOKEN and never printed.",
+        "installed-app OAuth flow (google-auth-oauthlib) with a loopback redirect, the "
+        "token written into the env file as CC_GOOGLE_REFRESH_TOKEN and never printed.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--env-file", default=".env", type=Path,
-                        help="the env file holding CC_GOOGLE_CLIENT_ID/_SECRET and receiving the "
-                             "token (default: .env in the current directory)")
-    parser.add_argument("--port", default=DEFAULT_PORT, type=int,
-                        help=f"the loopback port Google redirects to; forward this one over ssh "
-                             f"(default {DEFAULT_PORT})")
+    parser.add_argument(
+        "--env-file",
+        default=".env",
+        type=Path,
+        help="the env file holding CC_GOOGLE_CLIENT_ID/_SECRET and receiving the "
+        "token (default: .env in the current directory)",
+    )
+    parser.add_argument(
+        "--port",
+        default=DEFAULT_PORT,
+        type=int,
+        help=f"the loopback port Google redirects to; forward this one over ssh "
+        f"(default {DEFAULT_PORT})",
+    )
     args = parser.parse_args(argv)
     if not 0 <= args.port <= 65535:
         print("error: --port must be 0..65535", file=sys.stderr)

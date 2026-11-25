@@ -50,7 +50,7 @@ def _release_followers_on_signal() -> list:
     import threading
 
     if threading.current_thread() is not threading.main_thread():
-        return []                      # signals are main-thread only (tests)
+        return []  # signals are main-thread only (tests)
     installed = []
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
@@ -78,8 +78,8 @@ def _warn_retired_settings() -> None:
     present = retired_settings_present()
     if present:
         logging.getLogger(__name__).warning(
-            "ignored retired setting(s) %s; %s; remove them from .env to "
-            "silence this warning", ", ".join(present),
+            "ignored retired setting(s) %s; %s; remove them from .env to silence this warning",
+            ", ".join(present),
             "; ".join(f"{k}: {RETIRED_ENV_KEYS[k]}" for k in present),
         )
 
@@ -140,6 +140,7 @@ async def lifespan(app: FastAPI):
     # name into its charter exactly once.
     try:
         from central_command.db import repo as _repo
+
         stored = await _repo.get_app_setting("operator_name", {})
         if isinstance(stored, dict) and str(stored.get("name") or "").strip():
             settings.operator_name = str(stored["name"]).strip()
@@ -331,8 +332,12 @@ async def lifespan(app: FastAPI):
 # can proxy them same-origin (Systems page "Swagger" link) without exposing
 # the API port itself.
 app = FastAPI(
-    title="Central Command", version=__version__, lifespan=lifespan,
-    docs_url="/api/docs", openapi_url="/api/openapi.json", redoc_url=None,
+    title="Central Command",
+    version=__version__,
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    redoc_url=None,
 )
 
 # Dev: the Vite dev server (5173) calls the API on 8080.
@@ -363,6 +368,7 @@ async def _graph_unavailable(_request: Request, exc: ServiceUnavailable) -> JSON
         content={"detail": "graph unavailable", "error": str(exc).splitlines()[0]},
         headers={"Retry-After": "10"},
     )
+
 
 # The Nerve cockpit (web/) speaks the OpenClaw gateway protocol at /ws.
 from central_command.api.nerve_gateway import router as nerve_gateway_router  # noqa: E402

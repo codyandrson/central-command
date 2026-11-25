@@ -17,27 +17,47 @@ from central_command.api import nerve_gateway as ng
 
 
 def _step(session_id: str = "sess_x", agent_id: str = "inbox-triage", messages: int = 1) -> dict:
-    return {"kind": "session.step", "ref_id": session_id,
-            "payload": {"agent_id": agent_id, "messages": messages}}
+    return {
+        "kind": "session.step",
+        "ref_id": session_id,
+        "payload": {"agent_id": agent_id, "messages": messages},
+    }
 
 
 def _tool_call_state() -> dict:
-    return {"messages": [
-        {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "hi"}]},
-        {"kind": "response", "parts": [{
-            "part_kind": "tool-call", "tool_call_id": "call_1",
-            "tool_name": "jira_search", "args": {"jql": "project = T1"},
-        }]},
-        {"kind": "request", "parts": [{
-            "part_kind": "tool-return", "tool_call_id": "call_1",
-            "tool_name": "jira_search", "content": "3 issues",
-        }]},
-    ]}
+    return {
+        "messages": [
+            {"kind": "request", "parts": [{"part_kind": "user-prompt", "content": "hi"}]},
+            {
+                "kind": "response",
+                "parts": [
+                    {
+                        "part_kind": "tool-call",
+                        "tool_call_id": "call_1",
+                        "tool_name": "jira_search",
+                        "args": {"jql": "project = T1"},
+                    }
+                ],
+            },
+            {
+                "kind": "request",
+                "parts": [
+                    {
+                        "part_kind": "tool-return",
+                        "tool_call_id": "call_1",
+                        "tool_name": "jira_search",
+                        "content": "3 issues",
+                    }
+                ],
+            },
+        ]
+    }
 
 
 @pytest.fixture
 def one_key(monkeypatch):
     """No DB: pin the sessionKey resolution to the session's own key."""
+
     async def keys(agent_id, session_id):
         return [f"agent:{agent_id}:{session_id}"]
 
@@ -66,17 +86,29 @@ async def test_the_frame_shape_the_classifier_demands(one_key, run_state):
     frames = await ng._tool_stream_frames(_step(messages=3), cursors)
 
     assert frames == [
-        {"type": "event", "event": "agent", "payload": {
-            "sessionKey": "agent:inbox-triage:sess_x",
-            "stream": "tool",
-            "data": {"phase": "start", "toolCallId": "call_1",
-                     "name": "jira_search", "args": {"jql": "project = T1"}},
-        }},
-        {"type": "event", "event": "agent", "payload": {
-            "sessionKey": "agent:inbox-triage:sess_x",
-            "stream": "tool",
-            "data": {"phase": "result", "toolCallId": "call_1"},
-        }},
+        {
+            "type": "event",
+            "event": "agent",
+            "payload": {
+                "sessionKey": "agent:inbox-triage:sess_x",
+                "stream": "tool",
+                "data": {
+                    "phase": "start",
+                    "toolCallId": "call_1",
+                    "name": "jira_search",
+                    "args": {"jql": "project = T1"},
+                },
+            },
+        },
+        {
+            "type": "event",
+            "event": "agent",
+            "payload": {
+                "sessionKey": "agent:inbox-triage:sess_x",
+                "stream": "tool",
+                "data": {"phase": "result", "toolCallId": "call_1"},
+            },
+        },
     ]
 
 
@@ -101,15 +133,16 @@ async def test_a_landed_session_drops_its_cursor(one_key, run_state):
 
 async def test_other_events_are_ignored(one_key, run_state):
     cursors: dict = {}
-    assert await ng._tool_stream_frames(
-        {"kind": "proposal.created", "ref_id": "prop_1", "payload": {}}, cursors
-    ) == []
+    assert (
+        await ng._tool_stream_frames(
+            {"kind": "proposal.created", "ref_id": "prop_1", "payload": {}}, cursors
+        )
+        == []
+    )
     assert cursors == {}
 
 
-async def test_compaction_shrinking_the_window_does_not_index_past_the_end(
-    one_key, run_state
-):
+async def test_compaction_shrinking_the_window_does_not_index_past_the_end(one_key, run_state):
     cursors = {"sess_x": {"at": 50, "keys": ["agent:a:sess_x"]}}
     run_state["state"] = {"messages": []}
     assert await ng._tool_stream_frames(_step(messages=0), cursors) == []
@@ -119,9 +152,20 @@ async def test_compaction_shrinking_the_window_does_not_index_past_the_end(
 async def test_string_args_are_parsed_so_the_frame_stays_json_shaped(one_key, run_state):
     cursors: dict = {}
     await ng._tool_stream_frames(_step(messages=0), cursors)
-    run_state["state"] = {"messages": [{"kind": "response", "parts": [{
-        "part_kind": "tool-call", "tool_call_id": "c2", "tool_name": "graph_search",
-        "args": '{"query": "who is barbara"}',
-    }]}]}
+    run_state["state"] = {
+        "messages": [
+            {
+                "kind": "response",
+                "parts": [
+                    {
+                        "part_kind": "tool-call",
+                        "tool_call_id": "c2",
+                        "tool_name": "graph_search",
+                        "args": '{"query": "who is barbara"}',
+                    }
+                ],
+            }
+        ]
+    }
     frames = await ng._tool_stream_frames(_step(messages=1), cursors)
     assert frames[0]["payload"]["data"]["args"] == {"query": "who is barbara"}

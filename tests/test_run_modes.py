@@ -49,6 +49,7 @@ def _clear(monkeypatch):
 
 # ── the rule ────────────────────────────────────────────────────────────────
 
+
 def test_the_keys_are_the_three_run_mode_keys():
     assert run_modes.KEYS == KEYS
 
@@ -79,6 +80,7 @@ def test_the_process_environment_without_the_keys_passes(monkeypatch):
 
 # ── stdlib only, loaded by path ─────────────────────────────────────────────
 
+
 def test_the_module_loads_by_path_with_no_central_command_module():
     code = (
         "import importlib.util, sys\n"
@@ -90,8 +92,9 @@ def test_the_module_loads_by_path_with_no_central_command_module():
         "assert not bad, bad\n"
         "print('clean')\n"
     )
-    out = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True,
-                         text=True, cwd=ROOT, timeout=60)
+    out = subprocess.run(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True, cwd=ROOT, timeout=60
+    )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "clean"
 
@@ -103,9 +106,15 @@ def test_the_module_imports_nothing_from_the_package():
 
 # ── the CLI ─────────────────────────────────────────────────────────────────
 
+
 def _cli(*args, cwd=ROOT):
-    return subprocess.run([sys.executable, "-I", str(MODULE), *args],
-                          capture_output=True, text=True, cwd=cwd, timeout=60)
+    return subprocess.run(
+        [sys.executable, "-I", str(MODULE), *args],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        timeout=60,
+    )
 
 
 def test_cli_fails_an_env_file_carrying_a_key(tmp_path):
@@ -123,8 +132,7 @@ def test_cli_passes_an_env_file_without_the_keys(tmp_path):
     env.write_text("CC_LLM_BASE_URL=http://127.0.0.1:4000\n# CC_DEMO_MODE=false\n")
     out = _cli("--env-file", str(env))
     assert out.returncode == 0
-    assert out.stdout.splitlines() == [
-        f"PASS run-modes: none of {', '.join(KEYS)} in {env}"]
+    assert out.stdout.splitlines() == [f"PASS run-modes: none of {', '.join(KEYS)} in {env}"]
 
 
 def test_cli_reads_an_empty_value_and_export_and_quotes(tmp_path):
@@ -134,7 +142,9 @@ def test_cli_reads_an_empty_value_and_export_and_quotes(tmp_path):
     assert out.returncode == 1
     lines = out.stdout.splitlines()
     assert [ln.split(":")[1].split("=")[0].strip() for ln in lines] == [
-        "CC_TEST_MODEL", "CC_DEMO_MODE"]
+        "CC_TEST_MODEL",
+        "CC_DEMO_MODE",
+    ]
     assert "CC_DEMO_MODE='false'" in lines[1]
 
 
@@ -159,12 +169,16 @@ def test_cli_fails_an_unreadable_file(tmp_path):
 
 # ── the API refuses to start ────────────────────────────────────────────────
 
-@pytest.mark.parametrize(("key", "value"), [
-    ("CC_EXECUTOR_MODE", "live"),
-    ("CC_DEMO_MODE", "false"),
-    ("CC_TEST_MODEL", ""),
-    ("CC_EXECUTOR_MODE", "dry_run"),
-])
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("CC_EXECUTOR_MODE", "live"),
+        ("CC_DEMO_MODE", "false"),
+        ("CC_TEST_MODEL", ""),
+        ("CC_EXECUTOR_MODE", "dry_run"),
+    ],
+)
 async def test_the_lifespan_refuses_before_anything_opens(monkeypatch, caplog, key, value):
     from central_command.api import app as app_module
 
@@ -202,6 +216,7 @@ def test_lifespan_is_an_asynccontextmanager_and_the_retired_warning_is_plain():
 
 # ── the tracked templates obey the rule ─────────────────────────────────────
 
+
 @pytest.mark.parametrize("rel", [".env.example", "deploy/k3s/cc-uvicorn.service"])
 def test_the_templates_carry_no_run_mode_key(rel):
     text = shipped_text(rel)
@@ -228,8 +243,7 @@ def test_verify_runs_the_rule_on_every_run_and_scans_only_the_api():
     # Called at top level, after the --clean-install branches have closed.
     calls = [ln for ln in text.splitlines() if ln.strip() == "run_modes_check"]
     assert calls == ["run_modes_check"]
-    last_clean_branch = max(i for i, ln in enumerate(text.splitlines())
-                            if 'CLEAN" == "1"' in ln)
+    last_clean_branch = max(i for i, ln in enumerate(text.splitlines()) if 'CLEAN" == "1"' in ln)
     call_line = text.splitlines().index("run_modes_check")
     assert call_line > last_clean_branch
     # The old executor check, which judged a value, is gone.
@@ -237,8 +251,8 @@ def test_verify_runs_the_rule_on_every_run_and_scans_only_the_api():
 
 
 linux_only = pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="k3s verify.sh runs on Linux (/proc, systemctl)")
+    not sys.platform.startswith("linux"), reason="k3s verify.sh runs on Linux (/proc, systemctl)"
+)
 
 
 def _run_verify_function(tmp_path, pid: int, env_text: str | None):
@@ -258,19 +272,22 @@ def _run_verify_function(tmp_path, pid: int, env_text: str | None):
     script = (
         "PASS=0; FAIL=0\n"
         "ok()  { printf 'ok %s\\n' \"$1\"; }\n"
-        "bad() { printf 'FAIL %s\\n' \"$1\"; }\n"
-        + _verify_function() + "run_modes_check\n"
+        "bad() { printf 'FAIL %s\\n' \"$1\"; }\n" + _verify_function() + "run_modes_check\n"
     )
     env = {"PATH": f"{stubs}:{os.environ['PATH']}", "HOME": str(tmp_path)}
-    return subprocess.run(["bash", "-c", script], cwd=tree, env=env,
-                          capture_output=True, text=True, timeout=60)
+    return subprocess.run(
+        ["bash", "-c", script], cwd=tree, env=env, capture_output=True, text=True, timeout=60
+    )
 
 
 @linux_only
-@pytest.mark.parametrize(("extra", "verdict"), [
-    ({"CC_EXECUTOR_MODE": "live"}, "FAIL"),
-    ({}, "ok"),
-])
+@pytest.mark.parametrize(
+    ("extra", "verdict"),
+    [
+        ({"CC_EXECUTOR_MODE": "live"}, "FAIL"),
+        ({}, "ok"),
+    ],
+)
 def test_verify_checks_the_running_process_environ(tmp_path, extra, verdict):
     proc_env = {"PATH": os.environ["PATH"], **extra}
     proc = subprocess.Popen(["sleep", "60"], env=proc_env)
@@ -289,10 +306,13 @@ def test_verify_checks_the_running_process_environ(tmp_path, extra, verdict):
 
 
 @linux_only
-@pytest.mark.parametrize(("env_text", "verdict"), [
-    ("CC_DEMO_MODE=false\n", "FAIL"),
-    ("CC_LLM_BASE_URL=http://127.0.0.1:4000\n", "ok"),
-])
+@pytest.mark.parametrize(
+    ("env_text", "verdict"),
+    [
+        ("CC_DEMO_MODE=false\n", "FAIL"),
+        ("CC_LLM_BASE_URL=http://127.0.0.1:4000\n", "ok"),
+    ],
+)
 def test_verify_falls_back_to_the_root_env_with_no_process(tmp_path, env_text, verdict):
     out = _run_verify_function(tmp_path, 0, env_text)
     assert out.returncode == 0, out.stderr

@@ -143,8 +143,7 @@ async def test_link_and_transition_handlers_call_the_facade(monkeypatch):
         [
             Action(
                 capability="jira.link_issues",
-                arguments={"from_key": "TASKS-12", "to_key": "TASKS-13",
-                           "link_type": "Blocks"},
+                arguments={"from_key": "TASKS-12", "to_key": "TASKS-13", "link_type": "Blocks"},
                 target_ref={"system": "jira", "id": "TASKS-12", "read_version": "unknown"},
                 reversibility="reversible",
             ),
@@ -158,8 +157,10 @@ async def test_link_and_transition_handlers_call_the_facade(monkeypatch):
         approver="human:lee",
         source_refs=["operator:task"],
     )
-    assert calls == [("link", "TASKS-12", "TASKS-13", "Blocks"),
-                     ("transition", "TASKS-13", "In Progress")]
+    assert calls == [
+        ("link", "TASKS-12", "TASKS-13", "Blocks"),
+        ("transition", "TASKS-13", "In Progress"),
+    ]
     assert "Blocks" in out.result_text and "In Progress" in out.result_text
 
 
@@ -178,12 +179,20 @@ async def test_the_2026_09_29_draft_executes_without_a_priority(monkeypatch):
 
     monkeypatch.setattr(executor.jira, "update_attributes", fake_update)
     out = await executor.execute(
-        [Action(capability="jira.update_attributes",
-                arguments={"issue_key": "TASKS-21", "due_date": "2026-10-11",
-                           "labels": ["vehicle", "cayenne"]},
+        [
+            Action(
+                capability="jira.update_attributes",
+                arguments={
+                    "issue_key": "TASKS-21",
+                    "due_date": "2026-10-11",
+                    "labels": ["vehicle", "cayenne"],
+                },
                 target_ref={"system": "jira", "id": "TASKS-21", "read_version": "unknown"},
-                reversibility="reversible")],
-        approver="human:lee", source_refs=[],
+                reversibility="reversible",
+            )
+        ],
+        approver="human:lee",
+        source_refs=[],
     )
     assert seen == [("TASKS-21", {"due_date": "2026-10-11", "labels": ["vehicle", "cayenne"]})]
     assert "due_date, labels" in out.result_text
@@ -194,22 +203,35 @@ async def test_delete_issue_needs_a_reason_and_records_what_was_deleted(monkeypa
     from central_command.gateway import executor
 
     async def fake_delete(issue_key):
-        return {"issue": {"issue_key": issue_key, "summary": "Tri Peaks quote",
-                          "status": "To Do", "labels": [], "due_date": None}}
+        return {
+            "issue": {
+                "issue_key": issue_key,
+                "summary": "Tri Peaks quote",
+                "status": "To Do",
+                "labels": [],
+                "due_date": None,
+            }
+        }
 
     monkeypatch.setattr(executor.jira, "delete_issue", fake_delete)
 
     def act(args):
-        return Action(capability="jira.delete_issue", arguments=args,
-                      target_ref={"system": "jira", "id": "TASKS-5", "read_version": "unknown"},
-                      reversibility="irreversible")
+        return Action(
+            capability="jira.delete_issue",
+            arguments=args,
+            target_ref={"system": "jira", "id": "TASKS-5", "read_version": "unknown"},
+            reversibility="irreversible",
+        )
 
     with pytest.raises(executor.ExecutionFailed, match="reason"):
-        await executor.execute([act({"issue_key": "TASKS-5"})],
-                               approver="human:lee", source_refs=[])
+        await executor.execute(
+            [act({"issue_key": "TASKS-5"})], approver="human:lee", source_refs=[]
+        )
     out = await executor.execute(
         [act({"issue_key": "TASKS-5", "reason": "operator asked; replaced by TASKS-80"})],
-        approver="human:lee", source_refs=[])
+        approver="human:lee",
+        source_refs=[],
+    )
     assert "TASKS-5 DELETED" in out.result_text
     assert "replaced by TASKS-80" in out.result_text
     assert "Tri Peaks quote" in out.result_text  # the snapshot is the record

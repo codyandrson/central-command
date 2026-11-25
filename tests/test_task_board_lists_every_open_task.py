@@ -1,6 +1,7 @@
 """The task board's list never caps OPEN tasks (2026-09-13): the limit is
 for terminal rows only, so yesterday's REVIEW task is still on the board
 after a day of churn."""
+
 import uuid
 
 from central_command.db import repo

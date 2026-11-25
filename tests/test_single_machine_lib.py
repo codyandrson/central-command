@@ -63,8 +63,11 @@ def run(func: str, env: dict[str, str]) -> str:
     # What matters for the test's intent is that no CC_* leaks in, and none does.
     base = {"PATH": "/usr/bin:/bin:/usr/local/bin"}
     if sys.platform == "win32":
-        base = {k: v for k, v in os.environ.items()
-                if k.upper() in ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP")}
+        base = {
+            k: v
+            for k, v in os.environ.items()
+            if k.upper() in ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP")
+        }
     # cwd= + a RELATIVE source path: the script is sourced as `./machine-lib.sh`
     # so no absolute Windows path ever reaches bash.
     r = subprocess.run(
@@ -93,9 +96,9 @@ def test_no_mirrors_renders_nothing():
 
 def test_one_mirror_renders_a_registry_and_a_mirror_table():
     out = run("cc_render_registries_conf", {"CC_REGISTRY_DOCKERIO": "mirror.corp.example"})
-    assert '[[registry]]' in out
+    assert "[[registry]]" in out
     assert 'prefix = "docker.io"' in out
-    assert '[[registry.mirror]]' in out
+    assert "[[registry.mirror]]" in out
     assert 'location = "mirror.corp.example"' in out
     # Verification is ON by default, so nothing may say otherwise.
     assert "insecure" not in out
@@ -122,10 +125,13 @@ def test_every_prefix_block_also_sets_location():
     for a mirror, location == prefix (the canonical name is where the ref WOULD
     have gone; `[[registry.mirror]]` is where it goes instead).
     """
-    out = run("cc_render_registries_conf", {
-        "CC_REGISTRY_DOCKERIO": "mirror.corp.example",
-        "CC_REGISTRY_GHCR": "mirror.corp.example",
-    })
+    out = run(
+        "cc_render_registries_conf",
+        {
+            "CC_REGISTRY_DOCKERIO": "mirror.corp.example",
+            "CC_REGISTRY_GHCR": "mirror.corp.example",
+        },
+    )
     blocks = [b for b in out.split("[[registry]]") if "prefix = " in b]
     assert blocks, out
     for block in blocks:
@@ -142,8 +148,7 @@ def test_every_prefix_block_also_sets_location():
 
 def test_a_url_shaped_seam_is_reduced_to_a_host():
     """A discovery mirror is a URL; registries.conf takes a host."""
-    out = run("cc_render_registries_conf",
-              {"CC_REGISTRY_GHCR": "https://mirror.corp.example/v2/"})
+    out = run("cc_render_registries_conf", {"CC_REGISTRY_GHCR": "https://mirror.corp.example/v2/"})
     assert 'location = "mirror.corp.example"' in out
     assert "https://" not in out
 
@@ -154,8 +159,10 @@ def test_insecure_marks_the_mirror_and_the_mirror_host_directly_not_the_canonica
     keeps `location` (F29's fix) but must not be marked insecure, or the
     public registry loses verification along with the mirror the operator
     actually chose to trust unverified."""
-    out = run("cc_render_registries_conf",
-              {"CC_REGISTRY_DOCKERIO": "mirror.corp.example", "CC_TLS_INSECURE": "1"})
+    out = run(
+        "cc_render_registries_conf",
+        {"CC_REGISTRY_DOCKERIO": "mirror.corp.example", "CC_TLS_INSECURE": "1"},
+    )
     assert out.count("insecure = true") == 2, out
     assert 'prefix = "docker.io"\nlocation = "docker.io"\n\n[[registry.mirror]]' in out
     # The direct block is the one that actually matters: CC_REGISTRY_* rewrites
@@ -180,12 +187,15 @@ def test_an_operator_pin_host_is_marked_insecure_too():
 
 def test_a_localhost_or_hostless_pin_is_not_a_registry():
     """`localhost/cc-sandbox:1` and a bare name have no registry to configure."""
-    out = run("cc_pin_hosts", {
-        "CC_TLS_INSECURE": "1",
-        "CC_IMG_A": "localhost/cc-crawler:1",
-        "CC_IMG_B": "postgres:16.16-trixie",
-        "CC_IMG_C": "mirror.corp.example:5000/library/neo4j:5.26.33",
-    })
+    out = run(
+        "cc_pin_hosts",
+        {
+            "CC_TLS_INSECURE": "1",
+            "CC_IMG_A": "localhost/cc-crawler:1",
+            "CC_IMG_B": "postgres:16.16-trixie",
+            "CC_IMG_C": "mirror.corp.example:5000/library/neo4j:5.26.33",
+        },
+    )
     assert out.strip() == "mirror.corp.example:5000"
 
 
@@ -218,13 +228,17 @@ def test_only_import_native_ca_needs_a_machine_restart():
     for item in ("registries", "proxy", "ca"):
         r = subprocess.run(
             [bash(), "-c", f". ./machine-lib.sh; cc_machine_restart_needed {item}"],
-            cwd=LIB.parent, capture_output=True, text=True,
+            cwd=LIB.parent,
+            capture_output=True,
+            text=True,
         )
         assert r.returncode == 1, f"{item} must NOT require a restart: {r.stdout}"
         assert r.stdout == ""
     r = subprocess.run(
         [bash(), "-c", ". ./machine-lib.sh; cc_machine_restart_needed registries import-native-ca"],
-        cwd=LIB.parent, capture_output=True, text=True,
+        cwd=LIB.parent,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0
     assert "podman machine stop && podman machine start" in r.stdout
@@ -247,7 +261,9 @@ def test_the_libraries_parse(script: pathlib.Path):
 def verdict(host_gb: str, machine_mib: str) -> str:
     r = subprocess.run(
         [bash(), "-c", f'. ./machine-lib.sh; cc_memory_verdict "{host_gb}" "{machine_mib}"'],
-        cwd=LIB.parent, capture_output=True, text=True,
+        cwd=LIB.parent,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stdout + r.stderr
     return r.stdout.strip()
@@ -312,7 +328,7 @@ def test_the_machine_name_strips_podmans_default_marker():
     and the default machine is the normal case on Windows and macOS.
     """
     src = installer_source()
-    body = src[src.index("machine_name() {"):]
+    body = src[src.index("machine_name() {") :]
     body = body[: body.index("\n}\n")]
     assert "podman machine list --format '{{.Name}}'" in body
     assert '"${n%\\*}"' in body or "${n%\\*}" in body, (
@@ -336,9 +352,9 @@ def test_compose_is_invoked_with_msys_path_conversion_disabled():
         "every compose invocation must exclude the container-side POSIX paths "
         "from MSYS path conversion"
     )
-    body = src[src.index("compose() {"):]
+    body = src[src.index("compose() {") :]
     body = body[: body.index("\n}\n")]
     assert "MSYS2_ENV_CONV_EXCL" in body, f"the compose wrapper itself:\n{body}"
     # Both derived CA variables, because both carry a container-side path.
     for key in ("CC_CA_BUNDLE_MOUNT_SRC", "CC_CA_BUNDLE_IN_CONTAINER"):
-        assert key in src[src.index("COMPOSE_ENV_CONV_EXCL="):][:200], key
+        assert key in src[src.index("COMPOSE_ENV_CONV_EXCL=") :][:200], key

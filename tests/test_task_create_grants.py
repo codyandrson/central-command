@@ -27,8 +27,16 @@ from central_command.runtime.templates import (
 from tests.conftest import needs_pg
 
 # The founding roster schema.sql seeds (the EA, steward and the rest are hired).
-FOUNDING = ("inbox-triage", "jira-expert", "auditor", "orchestrator",
-            "litellm-manager", "coach", "confluence-expert", "wiki-agent")
+FOUNDING = (
+    "inbox-triage",
+    "jira-expert",
+    "auditor",
+    "orchestrator",
+    "litellm-manager",
+    "coach",
+    "confluence-expert",
+    "wiki-agent",
+)
 GRANTED = tuple(a for a in FOUNDING if a != "auditor")
 
 _SCHEMA = Path(repo.__file__).with_name("schema.sql")
@@ -40,7 +48,9 @@ async def _grants(agent_id: str, *, active: bool = True) -> set[str]:
     try:
         rows = await conn.fetch(
             "select pack from agent_grant where agent_id = $1"
-            + (" and revoked_at is null" if active else ""), agent_id)
+            + (" and revoked_at is null" if active else ""),
+            agent_id,
+        )
     finally:
         await conn.close()
     return {r["pack"] for r in rows}
@@ -68,7 +78,8 @@ async def test_task_propose_is_revoked_by_timestamp_never_deleted():
     try:
         rows = await conn.fetch(
             "select agent_id, revoked_at, revoked_reason from agent_grant "
-            "where pack = 'task-propose'")
+            "where pack = 'task-propose'"
+        )
     finally:
         await conn.close()
     assert rows, "the revoked rows are the history; the seeds still write them"
@@ -88,8 +99,12 @@ async def test_default_packs_match_the_seeded_task_create_grants():
 async def test_the_deviation_texts_say_what_is_now_true():
     conn = await repo._conn()
     try:
-        rows = {r["id"]: r["deviations"] for r in await conn.fetch(
-            "select id, deviations from agent where id in ('auditor', 'orchestrator')")}
+        rows = {
+            r["id"]: r["deviations"]
+            for r in await conn.fetch(
+                "select id, deviations from agent where id in ('auditor', 'orchestrator')"
+            )
+        }
     finally:
         await conn.close()
     assert "no task-create grant" in rows["auditor"]
@@ -102,41 +117,60 @@ async def test_the_deviation_texts_say_what_is_now_true():
 def test_every_hire_path_grants_the_pack():
     """The hired agents are not in schema.sql's seeds: their templates are the
     fresh-database path, so each purpose-built loadout carries the pack too."""
-    loadouts = [*TEMPLATES.values(), STEWARD_TEMPLATE, GRAPH_CURATOR_TEMPLATE,
-                EA_TEMPLATE, MCP_MANAGER_TEMPLATE, EDITOR_TEMPLATE,
-                ACCOUNTABILITY_TEMPLATE]
+    loadouts = [
+        *TEMPLATES.values(),
+        STEWARD_TEMPLATE,
+        GRAPH_CURATOR_TEMPLATE,
+        EA_TEMPLATE,
+        MCP_MANAGER_TEMPLATE,
+        EDITOR_TEMPLATE,
+        ACCOUNTABILITY_TEMPLATE,
+    ]
     for t in loadouts:
         assert "task-create" in t.default_packs, f"{t.id} cannot create a task"
 
 
 def test_the_trailing_migration_never_names_the_auditor_as_a_target():
     sql = _SCHEMA.read_text()
-    block = sql[sql.index(_MARKER):]
+    block = sql[sql.index(_MARKER) :]
     assert "a.id <> 'auditor'" in block
     assert not re.search(r"\bdelete\s+from\s+agent_grant", sql, re.IGNORECASE), (
-        "grants are history: a revocation is a timestamp, never a delete")
+        "grants are history: a revocation is a timestamp, never a delete"
+    )
 
 
 @needs_pg
 async def test_the_widening_migration_is_additive_idempotent_and_respects_history():
     sql = _SCHEMA.read_text()
-    block = sql[sql.index(_MARKER):]
+    block = sql[sql.index(_MARKER) :]
     tag = uuid.uuid4().hex[:8]
-    holder, revoked, bare, retired = (f"tc9-{n}-{tag}" for n in
-                                      ("holder", "revoked", "bare", "retired"))
+    holder, revoked, bare, retired = (
+        f"tc9-{n}-{tag}" for n in ("holder", "revoked", "bare", "retired")
+    )
     conn = await repo._conn()
     try:
-        for aid, status, role in ((holder, "ACTIVE", "r"), (revoked, "ACTIVE", "r"),
-                                  (bare, "ACTIVE", "r"), (retired, "RETIRED", "r")):
+        for aid, status, role in (
+            (holder, "ACTIVE", "r"),
+            (revoked, "ACTIVE", "r"),
+            (bare, "ACTIVE", "r"),
+            (retired, "RETIRED", "r"),
+        ):
             await conn.execute(
                 "insert into agent (id, name, model, charter, role, status) "
-                "values ($1, $1, '', '', $2, $3)", aid, role, status)
+                "values ($1, $1, '', '', $2, $3)",
+                aid,
+                role,
+                status,
+            )
         for aid in (holder, revoked, retired):
             await conn.execute(
-                "insert into agent_grant (agent_id, pack) values ($1, 'jira-read')", aid)
+                "insert into agent_grant (agent_id, pack) values ($1, 'jira-read')", aid
+            )
         await conn.execute(
             "insert into agent_grant (agent_id, pack, revoked_at, revoked_reason) "
-            "values ($1, 'task-create', now(), 'operator took it away')", revoked)
+            "values ($1, 'task-create', now(), 'operator took it away')",
+            revoked,
+        )
         await conn.execute(block)
         await conn.execute(block)  # a second run changes nothing
     finally:

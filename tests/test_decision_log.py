@@ -67,8 +67,10 @@ def _resolve(rel: str) -> Path | None:
 def _defines(path: Path, name: str) -> bool:
     """Whether the module defines a function (sync or async, at any nesting) named `name`."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
-               for node in ast.walk(tree))
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name
+        for node in ast.walk(tree)
+    )
 
 
 def test_the_generator_and_the_area_files_agree_on_the_entry_list():
@@ -107,11 +109,20 @@ def test_every_archived_stub_has_its_full_entry_in_the_archive():
     stubs = [e for e in ENTRIES if e.archived_link]
     if not stubs:
         return
-    assert ARCHIVE.exists(), f"{len(stubs)} archived stubs but {ARCHIVE.relative_to(ROOT)} is missing"
+    assert ARCHIVE.exists(), (
+        f"{len(stubs)} archived stubs but {ARCHIVE.relative_to(ROOT)} is missing"
+    )
     archived_ids = {e.id for e in gdi.split_entries(ARCHIVE.read_text(encoding="utf-8"), "archive")}
-    problems = [f"{e.id}: stub in {e.area} has no full entry in the archive" for e in stubs if e.id not in archived_ids]
-    problems += [f"{e.id}: stub link {e.archived_link!r} does not resolve"
-                 for e in stubs if not (DECISIONS_DIR / e.archived_link.split("#")[0]).exists()]
+    problems = [
+        f"{e.id}: stub in {e.area} has no full entry in the archive"
+        for e in stubs
+        if e.id not in archived_ids
+    ]
+    problems += [
+        f"{e.id}: stub link {e.archived_link!r} does not resolve"
+        for e in stubs
+        if not (DECISIONS_DIR / e.archived_link.split("#")[0]).exists()
+    ]
     stray = archived_ids - {e.id for e in stubs}
     problems += [f"{i}: in the archive but has no stub in an area file" for i in sorted(stray)]
     assert not problems, "\n".join(problems)
@@ -125,7 +136,9 @@ def test_superseded_entries_name_successors_that_exist():
             successors = ID_RE.findall(e.bullets.get("Superseded-by", ""))
             if not successors:
                 problems.append(f"{e.id}: superseded but carries no Superseded-by: DL-nnn")
-            problems += [f"{e.id}: Superseded-by {s} does not exist" for s in successors if s not in known]
+            problems += [
+                f"{e.id}: Superseded-by {s} does not exist" for s in successors if s not in known
+            ]
         for s in ID_RE.findall(e.bullets.get("Supersedes", "")):
             if s not in known:
                 problems.append(f"{e.id}: Supersedes {s} does not exist")
@@ -151,7 +164,9 @@ def test_every_test_an_entry_names_exists():
             if path is None or "*" in last or not path.exists() or not func:
                 continue  # existence is the next test's job
             if not _defines(path, func):
-                problems.append(f"{e.id}: Enforced names `{last}::{func}`, which {last} does not define")
+                problems.append(
+                    f"{e.id}: Enforced names `{last}::{func}`, which {last} does not define"
+                )
     assert not problems, "\n".join(problems)
 
 

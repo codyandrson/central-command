@@ -49,7 +49,9 @@ def test_every_validated_mode_is_routed_and_the_control_plane_modes_are_validate
     validate = _node(provider, "Validate request")["parameters"]["jsCode"]
     m = re.search(r"if \(!\[([^\]]+)\]\.includes\(mode\)\)", validate)
     validated = set(re.findall(r"'([a-z_]+)'", m.group(1)))
-    routed = {r["outputKey"] for r in _node(provider, "Route (mode)")["parameters"]["rules"]["values"]}
+    routed = {
+        r["outputKey"] for r in _node(provider, "Route (mode)")["parameters"]["rules"]["values"]
+    }
     assert validated == routed
     # what central_command/integrations/email_facade.py sends
     assert {"message", "list", "report_spam"} <= validated
@@ -60,7 +62,12 @@ def test_every_validated_mode_is_routed_and_the_control_plane_modes_are_validate
 
 def test_message_mode_reports_the_unsubscribe_facts_the_contract_reads():
     code = _node(_load("lib-email-provider.json"), "Normalize response")["parameters"]["jsCode"]
-    for field in ("list_unsubscribe:", "list_unsubscribe_post:", "authentication_results:", "dkim_signatures:"):
+    for field in (
+        "list_unsubscribe:",
+        "list_unsubscribe_post:",
+        "authentication_results:",
+        "dkim_signatures:",
+    ):
         assert field in code
 
 
@@ -69,9 +76,15 @@ def test_report_spam_is_the_one_write_and_it_moves_to_spam():
     spam = _node(provider, "Report spam (Gmail API)")
     assert spam["parameters"]["method"] == "POST"
     assert spam["parameters"]["url"].endswith("/modify")
-    assert json.loads(spam["parameters"]["jsonBody"]) == {"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]}
-    writes = [n for n in provider["nodes"]
-              if n["type"].endswith("httpRequest") and n["parameters"].get("method", "GET") != "GET"]
+    assert json.loads(spam["parameters"]["jsonBody"]) == {
+        "addLabelIds": ["SPAM"],
+        "removeLabelIds": ["INBOX"],
+    }
+    writes = [
+        n
+        for n in provider["nodes"]
+        if n["type"].endswith("httpRequest") and n["parameters"].get("method", "GET") != "GET"
+    ]
     assert [n["name"] for n in writes] == ["Report spam (Gmail API)"]
 
 
@@ -81,6 +94,7 @@ def test_report_spam_is_the_one_write_and_it_moves_to_spam():
 # (the Executor's create/update/delete_event and the EA's list all go through
 # it). Same contract as the email pair: stable ids, a token placeholder, a
 # credential by name, and every mode validated == routed.
+
 
 def test_calendar_facade_calls_the_provider_by_its_shipped_id():
     facade, provider = _load("cc-calendar-facade.json"), _load("lib-google-calendar.json")
@@ -95,7 +109,10 @@ def test_calendar_facade_token_is_a_placeholder_and_only_x_cc_token_is_read():
     assert "const TOKEN = '__CC_CALENDAR_FACADE_TOKEN__';" in code
     assert "x-cc-token" in code and "Gv" not in code
     # the mode allowlist IS the write boundary — pinned so widening it is a diff
-    assert "const MODES = ['list', 'create_event', 'update_event', 'delete_event', 'get_event'];" in code
+    assert (
+        "const MODES = ['list', 'create_event', 'update_event', 'delete_event', 'get_event'];"
+        in code
+    )
 
 
 def test_calendar_credential_is_resolved_by_name_never_by_an_instance_id():
@@ -113,11 +130,18 @@ def test_every_calendar_mode_is_validated_and_routed_and_the_writes_are_the_thre
     validate = _node(provider, "Validate request")["parameters"]["jsCode"]
     m = re.search(r"const MODES = \[([^\]]+)\]", validate)
     validated = set(re.findall(r"'([a-z_]+)'", m.group(1)))
-    routed = {r["outputKey"] for r in _node(provider, "Route (mode)")["parameters"]["rules"]["values"]}
-    assert validated == routed == {"list", "get_event", "create_event", "update_event", "delete_event"}
+    routed = {
+        r["outputKey"] for r in _node(provider, "Route (mode)")["parameters"]["rules"]["values"]
+    }
+    assert (
+        validated == routed == {"list", "get_event", "create_event", "update_event", "delete_event"}
+    )
     # what central_command/integrations/calendar_facade.py sends
-    methods = {n["name"]: n["parameters"].get("method", "GET")
-               for n in provider["nodes"] if n["type"].endswith("httpRequest")}
+    methods = {
+        n["name"]: n["parameters"].get("method", "GET")
+        for n in provider["nodes"]
+        if n["type"].endswith("httpRequest")
+    }
     # The third GET is the create's read-back of an id already taken (DL-219).
     assert sorted(v for v in methods.values()) == ["DELETE", "GET", "GET", "GET", "PATCH", "POST"]
     assert methods["Get existing event (GCal REST)"] == "GET"
@@ -157,12 +181,22 @@ def test_a_get_event_request_stays_a_read(tmp_path):
 
 
 def test_get_event_returns_the_fields_of_the_restore_record(tmp_path):
-    out = _run_node(tmp_path, "Return: get_event", {"statusCode": 200, "body": {
-        "id": "ev1", "status": "confirmed", "summary": "Budget review",
-        "start": {"dateTime": "2026-11-02T10:00:00Z"}, "end": {"dateTime": "2026-11-02T10:30:00Z"},
-        "organizer": {"email": "jane.doe@example.com"},
-        "attendees": [{"email": "a@example.com"}, {"email": "b@example.com"}],
-    }})
+    out = _run_node(
+        tmp_path,
+        "Return: get_event",
+        {
+            "statusCode": 200,
+            "body": {
+                "id": "ev1",
+                "status": "confirmed",
+                "summary": "Budget review",
+                "start": {"dateTime": "2026-11-02T10:00:00Z"},
+                "end": {"dateTime": "2026-11-02T10:30:00Z"},
+                "organizer": {"email": "jane.doe@example.com"},
+                "attendees": [{"email": "a@example.com"}, {"email": "b@example.com"}],
+            },
+        },
+    )
     assert out["ok"] is True
     event = out["event"]
     assert event["event_id"] == "ev1" and event["summary"] == "Budget review"
@@ -170,20 +204,31 @@ def test_get_event_returns_the_fields_of_the_restore_record(tmp_path):
     assert event["attendee_count"] == 2 and event["organizer"] == "jane.doe@example.com"
 
 
-@pytest.mark.parametrize("response", [
-    {"statusCode": 404, "body": {"error": {"message": "Not Found"}}},
-    {"statusCode": 410, "body": {}},
-    {"statusCode": 200, "body": {}},
-])
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"statusCode": 404, "body": {"error": {"message": "Not Found"}}},
+        {"statusCode": 410, "body": {}},
+        {"statusCode": 200, "body": {}},
+    ],
+)
 def test_get_event_without_an_event_is_a_no(tmp_path, response):
     out = _run_node(tmp_path, "Return: get_event", response)
     assert out["ok"] is False and "event" not in out and out["message"]
 
 
-@pytest.mark.parametrize("body", [
-    {}, {"items": None}, {"items": {}}, "not json", {"kind": "calendar#event"},
-    {"kind": "calendar#events", "items": None}, {"kind": "calendar#events", "items": {}},
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"items": None},
+        {"items": {}},
+        "not json",
+        {"kind": "calendar#event"},
+        {"kind": "calendar#events", "items": None},
+        {"kind": "calendar#events", "items": {}},
+    ],
+)
 def test_a_2xx_that_is_not_an_events_list_is_a_no_never_an_empty_list(tmp_path, body):
     """The availability read calls an empty list a free day (epic-work-site-safety R2)."""
     out = _run_list_node(tmp_path, {"statusCode": 200, "body": body})
@@ -198,19 +243,43 @@ def test_the_list_returns_each_events_id_and_never_an_empty_one_as_a_real_id(tmp
     event read as a commitment and the EA could not name its own block: the fakes
     in the other tests carried `event_id`, the provider did not. This runs the
     SHIPPED node on a Google-shaped body (`id`, never `event_id`)."""
-    out = _run_list_node(tmp_path, {"statusCode": 200, "body": {"items": [
-        {"id": "abc123def", "summary": "Budget review",
-         "start": {"dateTime": "2026-11-20T10:00:00-07:00"},
-         "end": {"dateTime": "2026-11-20T10:30:00-07:00"}},
-        {"summary": "No id on this one",
-         "start": {"date": "2026-11-21"}, "end": {"date": "2026-11-22"}},
-    ]}})
+    out = _run_list_node(
+        tmp_path,
+        {
+            "statusCode": 200,
+            "body": {
+                "items": [
+                    {
+                        "id": "abc123def",
+                        "summary": "Budget review",
+                        "start": {"dateTime": "2026-11-20T10:00:00-07:00"},
+                        "end": {"dateTime": "2026-11-20T10:30:00-07:00"},
+                    },
+                    {
+                        "summary": "No id on this one",
+                        "start": {"date": "2026-11-21"},
+                        "end": {"date": "2026-11-22"},
+                    },
+                ]
+            },
+        },
+    )
     first, second = out["events"]
     assert first["event_id"] == "abc123def" and first["summary"] == "Budget review"
     # an event without an id carries "", which every join treats as no id
     assert second["event_id"] == ""
-    assert {"event_id", "start", "end", "all_day", "summary", "location",
-            "attendee_count", "organizer_is_self", "has_agenda", "declined"} <= set(first)
+    assert {
+        "event_id",
+        "start",
+        "end",
+        "all_day",
+        "summary",
+        "location",
+        "attendee_count",
+        "organizer_is_self",
+        "has_agenda",
+        "declined",
+    } <= set(first)
 
 
 def test_an_empty_items_array_is_still_a_complete_empty_list(tmp_path):
@@ -225,8 +294,9 @@ def test_an_events_list_kind_without_items_is_a_complete_empty_list(tmp_path):
 
 
 def test_an_events_list_kind_with_another_page_is_still_truncated(tmp_path):
-    out = _run_list_node(tmp_path, {"statusCode": 200, "body": {
-        "kind": "calendar#events", "nextPageToken": "next"}})
+    out = _run_list_node(
+        tmp_path, {"statusCode": 200, "body": {"kind": "calendar#events", "nextPageToken": "next"}}
+    )
     assert out == {"ok": True, "events": [], "truncated": True}
 
 
@@ -237,7 +307,9 @@ def test_no_shipped_workflow_carries_a_previous_name_or_an_instance_id():
         assert "GrandVision" not in text and "X-Gv-Token" not in text, path.name
         for node in json.loads(text)["nodes"]:
             for cred in (node.get("credentials") or {}).values():
-                assert cred.get("id") is None, f"{path.name}: {node['name']} binds a credential by id"
+                assert cred.get("id") is None, (
+                    f"{path.name}: {node['name']} binds a credential by id"
+                )
 
 
 # --- DL-205: the façade answers a provider REFUSAL with its own status ----------
@@ -257,8 +329,12 @@ def test_facade_answers_through_respond_nodes_and_routes_a_provider_error():
     assert [c["node"] for c in outs[0]] == ["Respond (envelope)"]
     assert [c["node"] for c in outs[1]] == ["Classify provider error"]
     ok = _node(wf, "Respond (envelope)")["parameters"]
-    assert ok["respondWith"] == "firstIncomingItem", "the envelope must stay the first item's JSON, as lastNode answered"
-    assert [c["node"] for c in wf["connections"]["Classify provider error"]["main"][0]] == ["Respond (refusal or outage)"]
+    assert ok["respondWith"] == "firstIncomingItem", (
+        "the envelope must stay the first item's JSON, as lastNode answered"
+    )
+    assert [c["node"] for c in wf["connections"]["Classify provider error"]["main"][0]] == [
+        "Respond (refusal or outage)"
+    ]
     err = _node(wf, "Respond (refusal or outage)")["parameters"]
     assert err["respondWith"] == "json"
     assert "$json.message" in err["responseBody"]
@@ -278,38 +354,54 @@ def _run_facade_classifier(tmp_path, error):
         "process.stderr.write(JSON.stringify(out));\n",
         encoding="utf-8",
     )
-    done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30, check=False)
+    done = subprocess.run(
+        [node, str(script)], capture_output=True, text=True, timeout=30, check=False
+    )
     assert done.returncode == 0, done.stderr
     return json.loads(done.stderr)[0]["json"]
 
 
-@pytest.mark.parametrize("message", [
-    "lib-email-provider: list pagination cap hit (5 pages fetched, more remain) - refusing to silently truncate; narrow scope_query",
-    "lib-email-provider: provider rejected the list query (400) - check scope_query syntax",
-    "lib-email-provider: bad or missing mode 'frobnicate' (must be 'message', 'thread', 'list', or 'report_spam')",
-    'lib-email-provider: mode "list" requires scope_query (non-empty Gmail search string)',
-])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "lib-email-provider: list pagination cap hit (5 pages fetched, more remain) - refusing to silently truncate; narrow scope_query",
+        "lib-email-provider: provider rejected the list query (400) - check scope_query syntax",
+        "lib-email-provider: bad or missing mode 'frobnicate' (must be 'message', 'thread', 'list', or 'report_spam')",
+        'lib-email-provider: mode "list" requires scope_query (non-empty Gmail search string)',
+    ],
+)
 def test_a_refusal_the_provider_states_is_422(tmp_path, message):
     out = _run_facade_classifier(tmp_path, message)
     assert out["status"] == 422 and out["message"] == message
 
 
-@pytest.mark.parametrize("message", [
-    "lib-email-provider: provider auth failed (401) - check the shared email credential",
-    "lib-email-provider: provider rate limit hit - retry later",
-    "lib-email-provider: list request failed before a response (connection/transport): connect ECONNREFUSED",
-    "lib-email-provider: provider list failed (502)",
-    "lib-email-provider: unexpected list response shape (no statusCode) - refusing to treat as an empty page",
-    "Something this facade has never seen",
-])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "lib-email-provider: provider auth failed (401) - check the shared email credential",
+        "lib-email-provider: provider rate limit hit - retry later",
+        "lib-email-provider: list request failed before a response (connection/transport): connect ECONNREFUSED",
+        "lib-email-provider: provider list failed (502)",
+        "lib-email-provider: unexpected list response shape (no statusCode) - refusing to treat as an empty page",
+        "Something this facade has never seen",
+    ],
+)
 def test_everything_else_stays_an_outage_503(tmp_path, message):
     out = _run_facade_classifier(tmp_path, message)
     assert out["status"] == 503 and out["message"] == message
 
 
 def test_the_classifier_reads_an_error_object_too(tmp_path):
-    out = _run_facade_classifier(tmp_path, {"message": "lib-email-provider: list pagination cap hit (5 pages fetched, more remain)", "name": "NodeOperationError"})
-    assert out["status"] == 422 and out["message"].startswith("lib-email-provider: list pagination cap hit")
+    out = _run_facade_classifier(
+        tmp_path,
+        {
+            "message": "lib-email-provider: list pagination cap hit (5 pages fetched, more remain)",
+            "name": "NodeOperationError",
+        },
+    )
+    assert out["status"] == 422 and out["message"].startswith(
+        "lib-email-provider: list pagination cap hit"
+    )
 
 
 # --- mail attachments (DL-216, v2.88.0) --------------------------------------
@@ -336,7 +428,9 @@ def _run_provider_node(tmp_path, name, request, response, *, expect_error=False)
         "process.stderr.write(JSON.stringify(out));\n",
         encoding="utf-8",
     )
-    done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30, check=False)
+    done = subprocess.run(
+        [node, str(script)], capture_output=True, text=True, timeout=30, check=False
+    )
     assert done.returncode == 0, done.stderr
     result = json.loads(done.stderr)
     if expect_error:
@@ -354,14 +448,17 @@ def _b64url(data: bytes) -> str:
 
 def test_the_control_plane_sends_attachment_mode_and_the_provider_routes_it():
     provider = _load("lib-email-provider.json")
-    routed = [r["outputKey"] for r in _node(provider, "Route (mode)")["parameters"]["rules"]["values"]]
+    routed = [
+        r["outputKey"] for r in _node(provider, "Route (mode)")["parameters"]["rules"]["values"]
+    ]
     assert "attachment" in routed
     out = provider["connections"]["Route (mode)"]["main"][routed.index("attachment")]
     assert out == [{"node": "Get attachment (Gmail API)", "type": "main", "index": 0}]
     get = _node(provider, "Get attachment (Gmail API)")["parameters"]
     assert get["method"] == "GET", "attachment mode is a read"
     assert get["url"].endswith(
-        "/messages/{{ $json.source_ref.uuid }}/attachments/{{ $json.source_ref.attachment_id }}")
+        "/messages/{{ $json.source_ref.uuid }}/attachments/{{ $json.source_ref.attachment_id }}"
+    )
     chain = provider["connections"]
     assert chain["Get attachment (Gmail API)"]["main"][0][0]["node"] == "Build attachment envelope"
     assert chain["Build attachment envelope"]["main"][0][0]["node"] == "Return envelope"
@@ -372,12 +469,15 @@ def test_the_facade_still_refuses_the_bulk_attachment_flag():
     assert "if (body.include_attachments) { throw new Error(" in code
 
 
-@pytest.mark.parametrize("ref, ok", [
-    ({"uuid": "18c0ffee00aa11bb", "attachment_id": "ATT_abc-123"}, True),
-    ({"uuid": "18c0ffee00aa11bb"}, False),
-    ({"uuid": "18c0ffee00aa11bb", "attachment_id": "a/../../drafts"}, False),
-    ({"attachment_id": "ATT_abc"}, False),
-])
+@pytest.mark.parametrize(
+    "ref, ok",
+    [
+        ({"uuid": "18c0ffee00aa11bb", "attachment_id": "ATT_abc-123"}, True),
+        ({"uuid": "18c0ffee00aa11bb"}, False),
+        ({"uuid": "18c0ffee00aa11bb", "attachment_id": "a/../../drafts"}, False),
+        ({"attachment_id": "ATT_abc"}, False),
+    ],
+)
 def test_attachment_mode_needs_both_ids_in_the_provider_alphabet(tmp_path, ref, ok):
     """Both ids are URL path segments of the Gmail call."""
     request = {"mode": "attachment", "source_ref": ref}
@@ -393,7 +493,9 @@ def test_attachment_mode_needs_both_ids_in_the_provider_alphabet(tmp_path, ref, 
         "catch (e) { process.stderr.write('thrown: ' + e.message); }\n",
         encoding="utf-8",
     )
-    done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30, check=False)
+    done = subprocess.run(
+        [node, str(script)], capture_output=True, text=True, timeout=30, check=False
+    )
     if ok:
         assert done.stderr == "ok", done.stderr
     else:
@@ -407,31 +509,47 @@ def test_the_attachment_envelope_carries_standard_padded_base64(tmp_path):
     data = b"\xfb\xff\xfe invite bytes ?>"
     assert "-" in _b64url(data) or "_" in _b64url(data)
     request = {"mode": "attachment", "source_ref": {"uuid": "m1", "attachment_id": "A1"}}
-    env = _run_provider_node(tmp_path, "Build attachment envelope", request,
-                             {"statusCode": 200, "body": {"size": len(data), "data": _b64url(data)}})
+    env = _run_provider_node(
+        tmp_path,
+        "Build attachment envelope",
+        request,
+        {"statusCode": 200, "body": {"size": len(data), "data": _b64url(data)}},
+    )
     assert env["mode"] == "attachment" and env["size"] == len(data)
     assert base64.b64decode(env["data_b64"], validate=True) == data
 
 
 @pytest.mark.parametrize("status", [400, 404])
-def test_an_attachment_the_provider_does_not_know_is_a_refusal_the_facade_answers_422(tmp_path, status):
+def test_an_attachment_the_provider_does_not_know_is_a_refusal_the_facade_answers_422(
+    tmp_path, status
+):
     """Attachment ids go stale; that is a NO, never an outage that parks the mail."""
     request = {"mode": "attachment", "source_ref": {"uuid": "m1", "attachment_id": "A1"}}
-    thrown = _run_provider_node(tmp_path, "Build attachment envelope", request,
-                                {"statusCode": status, "body": {}}, expect_error=True)
+    thrown = _run_provider_node(
+        tmp_path,
+        "Build attachment envelope",
+        request,
+        {"statusCode": status, "body": {}},
+        expect_error=True,
+    )
     assert "attachment not found for the given reference" in thrown
     assert _run_facade_classifier(tmp_path, thrown)["status"] == 422
 
 
-@pytest.mark.parametrize("response", [
-    {"statusCode": 500, "body": {}},
-    {"statusCode": 429, "body": {}},
-    {"statusCode": 200, "body": {}},
-    {},
-])
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"statusCode": 500, "body": {}},
+        {"statusCode": 429, "body": {}},
+        {"statusCode": 200, "body": {}},
+        {},
+    ],
+)
 def test_any_other_attachment_failure_stays_an_outage(tmp_path, response):
     request = {"mode": "attachment", "source_ref": {"uuid": "m1", "attachment_id": "A1"}}
-    thrown = _run_provider_node(tmp_path, "Build attachment envelope", request, response, expect_error=True)
+    thrown = _run_provider_node(
+        tmp_path, "Build attachment envelope", request, response, expect_error=True
+    )
     assert _run_facade_classifier(tmp_path, thrown)["status"] == 503
 
 
@@ -439,25 +557,61 @@ def _gmail_invite_message() -> dict:
     """The shape Gmail gives an Outlook invite: an empty text body, the invite
     inline as text/calendar, and the same invite again as invite.ics."""
     ics = b"BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nSUMMARY:Planning review\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-    return {"statusCode": 200, "body": {
-        "id": "m1", "threadId": "t1", "internalDate": "1772474400000", "snippet": "",
-        "payload": {"mimeType": "multipart/mixed", "headers": [
-            {"name": "From", "value": "Jane Doe <jane.doe@example.com>"},
-            {"name": "Subject", "value": "Planning review"}],
-            "parts": [
-                {"mimeType": "multipart/alternative", "parts": [
-                    {"mimeType": "text/plain", "body": {"size": 2, "data": _b64url(b"\r\n")}},
-                    {"mimeType": "text/calendar", "filename": "",
-                     "headers": [{"name": "Content-Type", "value": "text/calendar; charset=\"utf-8\"; method=REQUEST"}],
-                     "body": {"size": len(ics), "data": _b64url(ics)}},
-                ]},
-                {"mimeType": "application/ics", "filename": "invite.ics",
-                 "headers": [{"name": "Content-Disposition", "value": "attachment; filename=\"invite.ics\""}],
-                 "body": {"size": len(ics), "attachmentId": "ATT1"}},
-                {"mimeType": "image/png", "filename": "logo.png",
-                 "headers": [{"name": "Content-ID", "value": "<logo>"}],
-                 "body": {"size": 300, "attachmentId": "ATT2"}},
-            ]}}}
+    return {
+        "statusCode": 200,
+        "body": {
+            "id": "m1",
+            "threadId": "t1",
+            "internalDate": "1772474400000",
+            "snippet": "",
+            "payload": {
+                "mimeType": "multipart/mixed",
+                "headers": [
+                    {"name": "From", "value": "Jane Doe <jane.doe@example.com>"},
+                    {"name": "Subject", "value": "Planning review"},
+                ],
+                "parts": [
+                    {
+                        "mimeType": "multipart/alternative",
+                        "parts": [
+                            {
+                                "mimeType": "text/plain",
+                                "body": {"size": 2, "data": _b64url(b"\r\n")},
+                            },
+                            {
+                                "mimeType": "text/calendar",
+                                "filename": "",
+                                "headers": [
+                                    {
+                                        "name": "Content-Type",
+                                        "value": 'text/calendar; charset="utf-8"; method=REQUEST',
+                                    }
+                                ],
+                                "body": {"size": len(ics), "data": _b64url(ics)},
+                            },
+                        ],
+                    },
+                    {
+                        "mimeType": "application/ics",
+                        "filename": "invite.ics",
+                        "headers": [
+                            {
+                                "name": "Content-Disposition",
+                                "value": 'attachment; filename="invite.ics"',
+                            }
+                        ],
+                        "body": {"size": len(ics), "attachmentId": "ATT1"},
+                    },
+                    {
+                        "mimeType": "image/png",
+                        "filename": "logo.png",
+                        "headers": [{"name": "Content-ID", "value": "<logo>"}],
+                        "body": {"size": 300, "attachmentId": "ATT2"},
+                    },
+                ],
+            },
+        },
+    }
 
 
 def test_an_invite_delivered_inline_is_listed_with_its_text(tmp_path):
@@ -483,8 +637,9 @@ def test_an_inline_invite_over_the_cap_is_listed_without_its_text(tmp_path):
     big = b"BEGIN:VCALENDAR\r\n" + b"X-PAD:" + b"a" * 200_100 + b"\r\nEND:VCALENDAR\r\n"
     part = message["body"]["payload"]["parts"][0]["parts"][1]
     part["body"] = {"size": len(big), "data": _b64url(big)}
-    env = _run_provider_node(tmp_path, "Normalize response",
-                             {"mode": "message", "source_ref": {"uuid": "m1"}}, message)
+    env = _run_provider_node(
+        tmp_path, "Normalize response", {"mode": "message", "source_ref": {"uuid": "m1"}}, message
+    )
     inline = next(a for a in env["messages"][0]["attachments"] if a["attachment_id"] == "")
     assert inline["too_large"] is True and "inline_text" not in inline
 
@@ -496,9 +651,15 @@ def test_an_inline_invite_over_the_cap_is_listed_without_its_text(tmp_path):
 # `already_existed: true`, or refuses (ok:false) when it was since cancelled. With
 # no client id nothing about the create changed.
 
-_CAL_REQUEST = {"mode": "create_event", "title": "Budget review",
-                "start": "2026-11-20T10:00:00Z", "end": "2026-11-20T10:30:00Z",
-                "description": "", "attendees": [], "calendar_id": "primary"}
+_CAL_REQUEST = {
+    "mode": "create_event",
+    "title": "Budget review",
+    "start": "2026-11-20T10:00:00Z",
+    "end": "2026-11-20T10:30:00Z",
+    "description": "",
+    "attendees": [],
+    "calendar_id": "primary",
+}
 
 
 def _run_calendar_node(tmp_path, name, response, validated=None):
@@ -521,7 +682,9 @@ def _run_calendar_node(tmp_path, name, response, validated=None):
         "process.stderr.write(JSON.stringify(out[0].json));\n",
         encoding="utf-8",
     )
-    done = subprocess.run([node, str(script)], capture_output=True, text=True, timeout=30, check=False)
+    done = subprocess.run(
+        [node, str(script)], capture_output=True, text=True, timeout=30, check=False
+    )
     assert done.returncode == 0, done.stderr
     return json.loads(done.stderr)
 
@@ -529,22 +692,46 @@ def _run_calendar_node(tmp_path, name, response, validated=None):
 def test_a_create_without_a_client_id_validates_to_exactly_the_old_body(tmp_path):
     out = _run_calendar_node(tmp_path, "Validate request", _CAL_REQUEST)
     # Byte-for-byte the pre-DL-219 shape, key order included: no `id` key at all.
-    assert json.dumps(out) == json.dumps({"mode": "create_event", "calendar_id": "primary", "__body": {
-        "summary": "Budget review", "start": {"dateTime": "2026-11-20T10:00:00Z"},
-        "end": {"dateTime": "2026-11-20T10:30:00Z"}, "description": "", "attendees": []}})
+    assert json.dumps(out) == json.dumps(
+        {
+            "mode": "create_event",
+            "calendar_id": "primary",
+            "__body": {
+                "summary": "Budget review",
+                "start": {"dateTime": "2026-11-20T10:00:00Z"},
+                "end": {"dateTime": "2026-11-20T10:30:00Z"},
+                "description": "",
+                "attendees": [],
+            },
+        }
+    )
 
 
 def test_a_client_id_goes_into_the_insert_body_as_id(tmp_path):
     client_id = "0123456789abcdefghijklmnopqrstuv" * 2
-    out = _run_calendar_node(tmp_path, "Validate request", {**_CAL_REQUEST, "client_event_id": client_id})
+    out = _run_calendar_node(
+        tmp_path, "Validate request", {**_CAL_REQUEST, "client_event_id": client_id}
+    )
     assert out["__body"]["id"] == client_id
     assert {k: v for k, v in out["__body"].items() if k != "id"} == _run_calendar_node(
-        tmp_path, "Validate request", _CAL_REQUEST)["__body"]
+        tmp_path, "Validate request", _CAL_REQUEST
+    )["__body"]
 
 
-@pytest.mark.parametrize("bad", [
-    "", "abcd", "ABCDEF12345", "abcdw12345", "abc-def-123", "a" * 1025, 12345, None, ["abcde"],
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "",
+        "abcd",
+        "ABCDEF12345",
+        "abcdw12345",
+        "abc-def-123",
+        "a" * 1025,
+        12345,
+        None,
+        ["abcde"],
+    ],
+)
 def test_a_client_id_outside_googles_alphabet_or_length_is_refused(tmp_path, bad):
     out = _run_calendar_node(tmp_path, "Validate request", {**_CAL_REQUEST, "client_event_id": bad})
     if bad is None:
@@ -557,16 +744,21 @@ def test_the_create_answer_routes_a_taken_client_id_to_the_read_back():
     wf = _load("lib-google-calendar.json")
     c = wf["connections"]
     assert c["Create event (GCal REST)"]["main"] == [
-        [{"node": "Route (create answer)", "type": "main", "index": 0}]]
+        [{"node": "Route (create answer)", "type": "main", "index": 0}]
+    ]
     assert c["Route (create answer)"]["main"] == [
         [{"node": "Get existing event (GCal REST)", "type": "main", "index": 0}],
         [{"node": "Return: create_event", "type": "main", "index": 0}],
     ]
     assert c["Get existing event (GCal REST)"]["main"] == [
-        [{"node": "Return: create_event (existing)", "type": "main", "index": 0}]]
+        [{"node": "Return: create_event (existing)", "type": "main", "index": 0}]
+    ]
     route = _node(wf, "Route (create answer)")
     assert route["type"] == "n8n-nodes-base.switch" and route["typeVersion"] == 3.4
-    assert [r["outputKey"] for r in route["parameters"]["rules"]["values"]] == ["existing", "answer"]
+    assert [r["outputKey"] for r in route["parameters"]["rules"]["values"]] == [
+        "existing",
+        "answer",
+    ]
     # The read-back is built like every other REST node: same credential, same
     # full-response classification, same transport-failure handling.
     get, like = _node(wf, "Get existing event (GCal REST)"), _node(wf, "Get event (GCal REST)")
@@ -589,23 +781,29 @@ def _route_create(response, body):
     node = shutil.which("node")
     if not node:
         pytest.skip("node needed")
-    expr = _node(_load("lib-google-calendar.json"), "Route (create answer)")[
-        "parameters"]["rules"]["values"][0]["conditions"]["conditions"][0]["leftValue"]
+    expr = _node(_load("lib-google-calendar.json"), "Route (create answer)")["parameters"]["rules"][
+        "values"
+    ][0]["conditions"]["conditions"][0]["leftValue"]
     assert expr.startswith("={{") and expr.endswith("}}")
-    js = (f"const $json = {json.dumps(response)};\n"
-          f"const $ = () => ({{ first: () => ({{ json: {{ __body: {json.dumps(body)} }} }}) }});\n"
-          f"process.stdout.write(String({expr[3:-2]}));\n")
+    js = (
+        f"const $json = {json.dumps(response)};\n"
+        f"const $ = () => ({{ first: () => ({{ json: {{ __body: {json.dumps(body)} }} }}) }});\n"
+        f"process.stdout.write(String({expr[3:-2]}));\n"
+    )
     done = subprocess.run([node, "-e", js], capture_output=True, text=True, timeout=30, check=False)
     assert done.returncode == 0, done.stderr
     return done.stdout
 
 
-@pytest.mark.parametrize("response, body, route", [
-    ({"statusCode": 409, "body": {}}, {"id": "abcde12345"}, "existing"),
-    ({"statusCode": 409, "body": {}}, {}, "answer"),            # no client id: today's 409
-    ({"statusCode": 200, "body": {"id": "x"}}, {"id": "abcde12345"}, "answer"),
-    ({"error": {"message": "socket hang up"}}, {"id": "abcde12345"}, "answer"),
-])
+@pytest.mark.parametrize(
+    "response, body, route",
+    [
+        ({"statusCode": 409, "body": {}}, {"id": "abcde12345"}, "existing"),
+        ({"statusCode": 409, "body": {}}, {}, "answer"),  # no client id: today's 409
+        ({"statusCode": 200, "body": {"id": "x"}}, {"id": "abcde12345"}, "answer"),
+        ({"error": {"message": "socket hang up"}}, {"id": "abcde12345"}, "answer"),
+    ],
+)
 def test_only_a_409_on_a_client_id_is_read_back(response, body, route):
     assert _route_create(response, body) == route
 
@@ -616,10 +814,17 @@ def test_a_409_with_no_client_id_still_fails_as_before(tmp_path):
 
 
 def test_a_taken_id_is_answered_as_the_event_it_names(tmp_path):
-    ev = {"id": "abcde12345", "status": "confirmed", "summary": "Budget review",
-          "htmlLink": "https://calendar.example.com/e", "start": {"dateTime": "2026-11-20T10:00:00Z"},
-          "end": {"dateTime": "2026-11-20T10:30:00Z"}}
-    out = _run_calendar_node(tmp_path, "Return: create_event (existing)", {"statusCode": 200, "body": ev})
+    ev = {
+        "id": "abcde12345",
+        "status": "confirmed",
+        "summary": "Budget review",
+        "htmlLink": "https://calendar.example.com/e",
+        "start": {"dateTime": "2026-11-20T10:00:00Z"},
+        "end": {"dateTime": "2026-11-20T10:30:00Z"},
+    }
+    out = _run_calendar_node(
+        tmp_path, "Return: create_event (existing)", {"statusCode": 200, "body": ev}
+    )
     fresh = _run_calendar_node(tmp_path, "Return: create_event", {"statusCode": 200, "body": ev})
     assert out == {**fresh, "already_existed": True}
     assert out["event"]["event_id"] == "abcde12345"
@@ -628,17 +833,25 @@ def test_a_taken_id_is_answered_as_the_event_it_names(tmp_path):
 def test_a_taken_id_whose_event_was_cancelled_is_refused_not_recreated(tmp_path):
     from central_command.contract.failures import SEMANTIC, classify_failure_text
 
-    out = _run_calendar_node(tmp_path, "Return: create_event (existing)", {"statusCode": 200, "body": {
-        "id": "abcde12345", "status": "cancelled"}})
+    out = _run_calendar_node(
+        tmp_path,
+        "Return: create_event (existing)",
+        {"statusCode": 200, "body": {"id": "abcde12345", "status": "cancelled"}},
+    )
     assert out["ok"] is False and "event" not in out
     assert "cancelled" in out["message"] and "earlier attempt" in out["message"]
     # Reaches Python as a "refused" NO: nothing in it may read as an outage.
     assert classify_failure_text(out["message"]) == SEMANTIC
 
 
-@pytest.mark.parametrize("response", [
-    {"statusCode": 404, "body": {}}, {"statusCode": 410, "body": {}}, {"statusCode": 200, "body": {}},
-])
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"statusCode": 404, "body": {}},
+        {"statusCode": 410, "body": {}},
+        {"statusCode": 200, "body": {}},
+    ],
+)
 def test_a_taken_id_with_no_readable_event_is_a_no(tmp_path, response):
     from central_command.contract.failures import SEMANTIC, classify_failure_text
 
@@ -647,10 +860,16 @@ def test_a_taken_id_with_no_readable_event_is_a_no(tmp_path, response):
     assert classify_failure_text(out["message"]) == SEMANTIC
 
 
-@pytest.mark.parametrize("response", [
-    {"error": {"message": "ETIMEDOUT"}}, {"statusCode": 500, "body": {}},
-    {"statusCode": 503, "body": {}}, {"statusCode": 429, "body": {}}, {"statusCode": 401, "body": {}},
-])
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"error": {"message": "ETIMEDOUT"}},
+        {"statusCode": 500, "body": {}},
+        {"statusCode": 503, "body": {}},
+        {"statusCode": 429, "body": {}},
+        {"statusCode": 401, "body": {}},
+    ],
+)
 def test_a_failed_read_back_fails_like_every_other_provider_call(tmp_path, response):
     """fail() reaches Central Command as HTTP 500: transient, retried later —
     the same taxonomy the other Return nodes use."""

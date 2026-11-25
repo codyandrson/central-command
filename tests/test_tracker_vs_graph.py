@@ -68,33 +68,47 @@ def _fake_call(monkeypatch, responses):
 
 
 def _comment(n, body, author="Jane Doe"):
-    return {"id": str(n), "author": {"displayName": author}, "body": body,
-            "created": f"2026-11-{n:02d}T10:00:00.000+0000",
-            "updated": f"2026-11-{n:02d}T10:00:00.000+0000"}
+    return {
+        "id": str(n),
+        "author": {"displayName": author},
+        "body": body,
+        "created": f"2026-11-{n:02d}T10:00:00.000+0000",
+        "updated": f"2026-11-{n:02d}T10:00:00.000+0000",
+    }
 
 
 # --- 1. the comments read ----------------------------------------------------
 
 
 async def test_comments_come_newest_first_as_one_bounded_page(native, monkeypatch):
-    calls = _fake_call(monkeypatch, [
-        {"total": 7, "comments": [_comment(7, "newest"), _comment(6, "older")]},
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            {"total": 7, "comments": [_comment(7, "newest"), _comment(6, "older")]},
+        ],
+    )
     out = await jira.list_comments("TASKS-12", limit=2)
-    assert calls == [("GET", jira._api(
-        "/issue/TASKS-12/comment?orderBy=-created&startAt=0&maxResults=2"))]
+    assert calls == [
+        ("GET", jira._api("/issue/TASKS-12/comment?orderBy=-created&startAt=0&maxResults=2"))
+    ]
     assert [c["body"] for c in out["comments"]] == ["newest", "older"]
-    assert out["comments"][0] == {"id": "7", "author": "Jane Doe",
-                                  "created": "2026-11-07T10:00:00.000+0000",
-                                  "body": "newest"}
+    assert out["comments"][0] == {
+        "id": "7",
+        "author": "Jane Doe",
+        "created": "2026-11-07T10:00:00.000+0000",
+        "body": "newest",
+    }
     assert (out["total"], out["count"], out["older"], out["next_offset"]) == (7, 2, 5, 2)
 
 
 async def test_a_server_that_ignored_the_order_is_re_read_from_the_tail(native, monkeypatch):
-    calls = _fake_call(monkeypatch, [
-        {"total": 7, "comments": [_comment(1, "oldest"), _comment(2, "second")]},
-        {"total": 7, "comments": [_comment(6, "older"), _comment(7, "newest")]},
-    ])
+    calls = _fake_call(
+        monkeypatch,
+        [
+            {"total": 7, "comments": [_comment(1, "oldest"), _comment(2, "second")]},
+            {"total": 7, "comments": [_comment(6, "older"), _comment(7, "newest")]},
+        ],
+    )
     out = await jira.list_comments("TASKS-12", limit=2)
     assert calls[1] == ("GET", jira._api("/issue/TASKS-12/comment?startAt=5&maxResults=2"))
     assert [c["body"] for c in out["comments"]] == ["newest", "older"]
@@ -108,10 +122,22 @@ async def test_the_last_page_names_no_next_offset(native, monkeypatch):
 
 
 async def test_a_long_comment_is_cut_and_says_so_and_adf_is_flattened(native, monkeypatch):
-    adf = {"type": "doc", "version": 1, "content": [
-        {"type": "paragraph", "content": [{"type": "text", "text": "Deferred to March."}]}]}
-    _fake_call(monkeypatch, [{"total": 2, "comments": [
-        _comment(9, "x" * (jira.COMMENT_BODY_CEILING + 40)), _comment(8, adf)]}])
+    adf = {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Deferred to March."}]}
+        ],
+    }
+    _fake_call(
+        monkeypatch,
+        [
+            {
+                "total": 2,
+                "comments": [_comment(9, "x" * (jira.COMMENT_BODY_CEILING + 40)), _comment(8, adf)],
+            }
+        ],
+    )
     long, rich = (await jira.list_comments("TASKS-12"))["comments"]
     assert len(long["body"]) == jira.COMMENT_BODY_CEILING and long["body_truncated"]
     assert long["body_characters"] == jira.COMMENT_BODY_CEILING + 40
@@ -130,9 +156,17 @@ async def test_the_issue_read_carries_a_pointer_and_never_the_text(monkeypatch):
 
     async def _page(key, limit=5, offset=0):
         assert limit == 1
-        return {"total": 4, "comments": [
-            {"id": "9", "author": "Jane Doe", "created": "2026-11-19T10:00:00.000+0000",
-             "body": "Deferred until the spring, the operator's call."}]}
+        return {
+            "total": 4,
+            "comments": [
+                {
+                    "id": "9",
+                    "author": "Jane Doe",
+                    "created": "2026-11-19T10:00:00.000+0000",
+                    "body": "Deferred until the spring, the operator's call.",
+                }
+            ],
+        }
 
     monkeypatch.setattr(tools.jira, "get_issue", _issue)
     monkeypatch.setattr(tools.jira, "list_comments", _page)
@@ -186,8 +220,9 @@ def test_the_comment_pack_writes_a_comment_and_nothing_else():
     assert [c.name for c in pack.capabilities] == ["jira.add_comment"]
     assert pack.tool_names == ("propose_action",)
     # ONE object in both packs, so an agent holding both reads it once.
-    in_tracker = next(c for c in packs.PACKS["jira-propose"].capabilities
-                      if c.name == "jira.add_comment")
+    in_tracker = next(
+        c for c in packs.PACKS["jira-propose"].capabilities if c.name == "jira.add_comment"
+    )
     assert in_tracker is pack.capabilities[0]
     section = packs.charter_section(("jira-comment-propose", "jira-propose"))
     assert section.count("Never a comment that only restates a field") == 1
@@ -210,11 +245,13 @@ def test_the_comment_pack_is_not_seeded_in_the_schema():
 
 def test_the_distill_prompt_keeps_work_out_of_the_lessons():
     prompt = reflection._distill_prompt("charter", "transcript")
-    for phrase in ("A LESSON IS A FACT THAT OUTLIVES THE WORK",
-                   "a decision ABOUT work",
-                   "needs an issue key to make sense",
-                   "already recorded, proposed or handed to a teammate",
-                   "OUTCOME of work that has finished"):
+    for phrase in (
+        "A LESSON IS A FACT THAT OUTLIVES THE WORK",
+        "a decision ABOUT work",
+        "needs an issue key to make sense",
+        "already recorded, proposed or handed to a teammate",
+        "OUTCOME of work that has finished",
+    ):
         assert phrase in prompt, phrase
     # The old shape asked for exactly the thing that made an episode a ticket.
     assert "naming the issue keys" not in prompt
@@ -238,7 +275,8 @@ async def test_a_concluded_lane_distills_no_episode(monkeypatch):
 
 def test_the_close_seam_tells_reflection_why_the_session_closed():
     assert "reflect_on_close(session_id, agent_id, reason=reason)" in inspect.getsource(
-        converse.close_session)
+        converse.close_session
+    )
 
 
 # --- 4. the assistant's charter and the review framings ---------------------------
@@ -246,26 +284,31 @@ def test_the_close_seam_tells_reflection_why_the_session_closed():
 
 def test_the_charter_routes_work_to_the_tracker_and_facts_to_the_graph():
     charter = ea_profile.CHARTER
-    for phrase in ("WHAT TO RECORD, AND WHERE",
-                   "has ONE home",
-                   "is a comment on that issue",
-                   # v2.107.1: a deferral moves the date AND is commented; the
-                   # first quarterly review deferred four issues and moved none.
-                   "A DEFERRAL, A SLIP OR A NEW DATE IS BOTH",
-                   "its due date CHANGES, in the planning-fields proposal",
-                   "never a substitute for it",
-                   "ask for the date; never pick one",
-                   "NONE of these is ever a graph.add_episode",
-                   "needs an issue key to make sense",
-                   "WHEN WORK FINISHES, ASK WHAT IT LEFT",
-                   "the date the old thing ended",
-                   "propose nothing then",
-                   "COMMENTS ARE READ ON REQUEST",
-                   "with TWO exceptions"):
+    for phrase in (
+        "WHAT TO RECORD, AND WHERE",
+        "has ONE home",
+        "is a comment on that issue",
+        # v2.107.1: a deferral moves the date AND is commented; the
+        # first quarterly review deferred four issues and moved none.
+        "A DEFERRAL, A SLIP OR A NEW DATE IS BOTH",
+        "its due date CHANGES, in the planning-fields proposal",
+        "never a substitute for it",
+        "ask for the date; never pick one",
+        "NONE of these is ever a graph.add_episode",
+        "needs an issue key to make sense",
+        "WHEN WORK FINISHES, ASK WHAT IT LEFT",
+        "the date the old thing ended",
+        "propose nothing then",
+        "COMMENTS ARE READ ON REQUEST",
+        "with TWO exceptions",
+    ):
         assert phrase in charter, phrase
     # What sent decisions about issues to the graph.
-    for gone in ("work-log", "a priority call, a deadline, who owns what",
-                 "should still know next week"):
+    for gone in (
+        "work-log",
+        "a priority call, a deadline, who owns what",
+        "should still know next week",
+    ):
         assert gone not in charter, gone
 
 

@@ -31,7 +31,7 @@ CHARTER = (
     "consult and the operator tasks directly. You never write to Confluence "
     "yourself: in consultation you ADVISE ONLY; on a direct task you PROPOSE, "
     "and a human approves before anything executes.\n\n"
-    "Your human team lead is <<operator_name>> — \"the operator\" throughout "
+    'Your human team lead is <<operator_name>> — "the operator" throughout '
     "this charter.\n\n"
     "EXPERTISE — apply these practice patterns:\n"
     "- Space architecture: one topic, one page; structure lives in the page "
@@ -56,7 +56,7 @@ CHARTER = (
     "- Version discipline: every page update is proposed against the version "
     "number you READ (confluence_get_page). The Executor refuses a stale "
     "version — that is the review guarantee, not a nuisance.\n"
-    "- CQL answers \"what exists\": search before creating (a duplicate title "
+    '- CQL answers "what exists": search before creating (a duplicate title '
     "in a space is a hard API error; a duplicate page under a different "
     "title is worse — it silently forks the truth).\n\n"
     "CONSULTATION MODE (when the prompt is a question from another agent): "
@@ -86,9 +86,14 @@ CHARTER = (
 
 
 async def build_confluence_expert(
-    model=None, charter: str | None = None, packs=None,
-    capabilities=None, skills_catalog: str = "",
-    extra_toolsets=(), mcp_section: str = "", team_section: str = "",
+    model=None,
+    charter: str | None = None,
+    packs=None,
+    capabilities=None,
+    skills_catalog: str = "",
+    extra_toolsets=(),
+    mcp_section: str = "",
+    team_section: str = "",
 ) -> Agent:
     """The operator-tasked expert; the advisory build is the generic
     `runtime/consult.py:build_advisory_agent`."""
@@ -100,11 +105,8 @@ async def build_confluence_expert(
     return Agent(
         await resolve_model(model, agent_id=AGENT_ID),
         name=AGENT_ID,
-        system_prompt=build_charter(
-            charter or render_v0(CHARTER), packs, mcp_section, team_section
-        ) + (
-            "\n\n" + skills_catalog if skills_catalog else ""
-        ),
+        system_prompt=build_charter(charter or render_v0(CHARTER), packs, mcp_section, team_section)
+        + ("\n\n" + skills_catalog if skills_catalog else ""),
         deps_type=TriageDeps,  # unused, but resume paths pass one — keep the shape
         output_type=[str, DeferredToolRequests],
         tools=[declare_gap, current_time],
@@ -117,6 +119,8 @@ async def ensure_registered() -> None:
     from central_command.db import repo
 
     await repo.upsert_agent(
-        AGENT_ID, "Confluence Expert", "",
+        AGENT_ID,
+        "Confluence Expert",
+        "",
         "Confluence practice: advisory consultation + operator-tasked changes",
     )

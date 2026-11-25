@@ -123,17 +123,22 @@ async def time_context(item_id: str, kind_label: str = "EMAIL") -> str:
     lines = [
         "TIME CONTEXT (computed by the control plane, not by either agent):",
         f"- Reference time: today is {today.isoformat()} ({today.strftime('%A')}).",
-        f"- {age}" if age else
-        f"- The {kind_label.lower()}'s received date is not recorded.",
-        (f"- The {kind_label.lower()}'s own dates are in the PAST relative to the "
-        "reference time; never read them as today."),
+        f"- {age}" if age else f"- The {kind_label.lower()}'s received date is not recorded.",
+        (
+            f"- The {kind_label.lower()}'s own dates are in the PAST relative to the "
+            "reference time; never read them as today."
+        ),
     ]
     return "\n".join(lines)
 
 
 async def audit_prompt(
-    item_id: str, subject: str | None, email_text: str, agent_rationale: str,
-    *, kind_label: str = "EMAIL",
+    item_id: str,
+    subject: str | None,
+    email_text: str,
+    agent_rationale: str,
+    *,
+    kind_label: str = "EMAIL",
 ) -> str:
     """The auditor's input for one parked dismissal. The triage agent's reason
     is labelled as what it is — a CLAIM to test against the source, never
@@ -184,8 +189,9 @@ async def audit_dismissal(
         return None
 
     try:
-        prompt = await audit_prompt(item_id, subject, email_text, agent_rationale,
-                                    kind_label=kind_label)
+        prompt = await audit_prompt(
+            item_id, subject, email_text, agent_rationale, kind_label=kind_label
+        )
         await ensure_registered()
         governed = await repo.current_charter(AGENT_ID)
         run = await build_auditor(
@@ -194,9 +200,9 @@ async def audit_dismissal(
         verdict = run.output
     except Exception as e:  # noqa: BLE001 — a down auditor degrades to the human gate
         await events.emit(
-            "audit.error", ref_id=item_id,
-            payload={"error": str(e), "transient": is_transient(e),
-                     "action_class": action_class},
+            "audit.error",
+            ref_id=item_id,
+            payload={"error": str(e), "transient": is_transient(e), "action_class": action_class},
             actor="auditor",
         )
         return None
@@ -222,7 +228,8 @@ async def audit_dismissal(
     # post-flip copy persisted on the work item. (2026-08-18: the field used
     # to ride along, permanently false, and read as "never auto-confirmed".)
     await events.emit(
-        "audit.verdict", ref_id=item_id,
+        "audit.verdict",
+        ref_id=item_id,
         payload={k: v for k, v in record.items() if k != "auto_confirmed"},
         actor="auditor",
     )
@@ -233,8 +240,11 @@ async def audit_dismissal(
             await events.emit(
                 "work.dismissal_confirmed",
                 ref_id=item_id,
-                payload={"by": "auditor", "action_class": action_class,
-                         "rationale": verdict.rationale},
+                payload={
+                    "by": "auditor",
+                    "action_class": action_class,
+                    "rationale": verdict.rationale,
+                },
                 actor="auditor",
             )
 
@@ -276,8 +286,11 @@ async def audit_bulk_dismissal(
     if prop is None or prop["status"] not in ("AWAITING_HUMAN", "PROPOSED"):
         return None
     action = next(
-        (a for a in prop["actions"]
-         if str(a.get("capability", "")).split("@")[0] == BULK_AUDIT_ACTION_CLASS),
+        (
+            a
+            for a in prop["actions"]
+            if str(a.get("capability", "")).split("@")[0] == BULK_AUDIT_ACTION_CLASS
+        ),
         None,
     )
     if action is None:
@@ -285,8 +298,7 @@ async def audit_bulk_dismissal(
     query = str((action.get("arguments") or {}).get("query") or "")
 
     covered = [
-        r for r in await repo.work_items_folded_into(proposal_id)
-        if r["state"] == "FOLD_PENDING"
+        r for r in await repo.work_items_folded_into(proposal_id) if r["state"] == "FOLD_PENDING"
     ]
     if not covered:
         return None  # nothing reserved, so nothing to sample — human gate.
@@ -326,9 +338,13 @@ async def audit_bulk_dismissal(
         verdict = run.output
     except Exception as e:  # noqa: BLE001 — a down auditor degrades to the human gate
         await events.emit(
-            "audit.error", ref_id=proposal_id,
-            payload={"error": str(e), "transient": is_transient(e),
-                     "action_class": BULK_AUDIT_ACTION_CLASS},
+            "audit.error",
+            ref_id=proposal_id,
+            payload={
+                "error": str(e),
+                "transient": is_transient(e),
+                "action_class": BULK_AUDIT_ACTION_CLASS,
+            },
             actor="auditor",
         )
         return None
@@ -353,7 +369,8 @@ async def audit_bulk_dismissal(
     # 'human:lee'). (2026-08-18: the field used to ride along, permanently
     # false, and read as "never auto-confirmed".)
     await events.emit(
-        "audit.verdict", ref_id=proposal_id,
+        "audit.verdict",
+        ref_id=proposal_id,
         payload={k: v for k, v in record.items() if k != "auto_confirmed"},
         actor="auditor",
     )
@@ -375,16 +392,22 @@ async def audit_bulk_dismissal(
 
         try:
             await gateway.approve_and_execute(
-                prop["session_id"], proposal_id,
-                approver="auditor", model=resume_model,
+                prop["session_id"],
+                proposal_id,
+                approver="auditor",
+                model=resume_model,
             )
             record["auto_confirmed"] = True
         except Exception as e:  # noqa: BLE001 — a failed approval is the human gate
             await events.emit(
-                "audit.error", ref_id=proposal_id,
-                payload={"error": str(e), "transient": is_transient(e),
-                         "action_class": BULK_AUDIT_ACTION_CLASS,
-                         "stage": "auto_approve"},
+                "audit.error",
+                ref_id=proposal_id,
+                payload={
+                    "error": str(e),
+                    "transient": is_transient(e),
+                    "action_class": BULK_AUDIT_ACTION_CLASS,
+                    "stage": "auto_approve",
+                },
                 actor="auditor",
             )
     return record
@@ -463,8 +486,15 @@ def pair_verdicts(rows: list[dict], action_class: str = AUDIT_ACTION_CLASS) -> d
     def close(item_id: str, outcome: str, outcome_event: int, note: str | None = None) -> None:
         verdict = pending.pop(item_id, None)
         if verdict is not None:
-            pairs.append({"item_id": item_id, "outcome": outcome,
-                          "outcome_event": outcome_event, "note": note, **verdict})
+            pairs.append(
+                {
+                    "item_id": item_id,
+                    "outcome": outcome,
+                    "outcome_event": outcome_event,
+                    "note": note,
+                    **verdict,
+                }
+            )
 
     for e in rows:
         kind, ref, payload = e["kind"], e["ref_id"], e.get("payload") or {}
@@ -494,8 +524,12 @@ def pair_verdicts(rows: list[dict], action_class: str = AUDIT_ACTION_CLASS) -> d
         elif kind == "work.reopened":
             close(ref, "reopened", e["id"], note=payload.get("note"))
 
-    q = {"concur_confirmed": 0, "challenge_reopened": 0,
-         "challenge_confirmed": 0, "concur_reopened": 0}
+    q = {
+        "concur_confirmed": 0,
+        "challenge_reopened": 0,
+        "challenge_confirmed": 0,
+        "concur_reopened": 0,
+    }
     for p in pairs:
         q[f"{p['verdict']}_{p['outcome']}"] += 1
 
@@ -506,10 +540,12 @@ def pair_verdicts(rows: list[dict], action_class: str = AUDIT_ACTION_CLASS) -> d
         "agreed": agreed,
         "total_paired": len(pairs),
         "agreement_rate": round(agreed / len(pairs), 3) if pairs else None,
-        "auditor_misses": [p for p in pairs
-                           if p["verdict"] == "concur" and p["outcome"] == "reopened"],
-        "over_cautious": [p for p in pairs
-                          if p["verdict"] == "challenge" and p["outcome"] == "confirmed"],
+        "auditor_misses": [
+            p for p in pairs if p["verdict"] == "concur" and p["outcome"] == "reopened"
+        ],
+        "over_cautious": [
+            p for p in pairs if p["verdict"] == "challenge" and p["outcome"] == "confirmed"
+        ],
         "auto_confirmed": auto_confirmed,
         "awaiting_outcome": len(pending),
     }
@@ -524,25 +560,29 @@ def signals_from_report(report: dict, subjects: dict[str, str] | None = None) ->
     signals: list[dict] = []
     for p in report.get("over_cautious", []):
         subject = subjects.get(p["item_id"]) or p.get("subject") or p["item_id"]
-        signals.append({
-            "kind": "audit-overcautious",
-            "event_id": p["verdict_event"],
-            "feedback": (
-                f"on “{subject}” you challenged with “{p['rationale']}” — "
-                "the team lead confirmed the dismissal anyway: no action was needed"
-            ),
-        })
+        signals.append(
+            {
+                "kind": "audit-overcautious",
+                "event_id": p["verdict_event"],
+                "feedback": (
+                    f"on “{subject}” you challenged with “{p['rationale']}” — "
+                    "the team lead confirmed the dismissal anyway: no action was needed"
+                ),
+            }
+        )
     for p in report.get("auditor_misses", []):
         subject = subjects.get(p["item_id"]) or p.get("subject") or p["item_id"]
         note = f" — their note: “{p['note']}”" if p.get("note") else ""
-        signals.append({
-            "kind": "audit-miss",
-            "event_id": p["verdict_event"],
-            "feedback": (
-                f"on “{subject}” you concurred with “{p['rationale']}” — "
-                f"the team lead REOPENED it: action WAS needed{note}"
-            ),
-        })
+        signals.append(
+            {
+                "kind": "audit-miss",
+                "event_id": p["verdict_event"],
+                "feedback": (
+                    f"on “{subject}” you concurred with “{p['rationale']}” — "
+                    f"the team lead REOPENED it: action WAS needed{note}"
+                ),
+            }
+        )
     return signals
 
 

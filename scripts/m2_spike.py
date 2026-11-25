@@ -29,7 +29,9 @@ EMAIL = "New email from Dana: the TEAM-142 deadline has slipped a week, now Aug 
 
 async def do_propose() -> None:
     await repo.cleanup_spike()
-    await repo.upsert_agent(AGENT_ID, "Inbox Triage", "spike-model", "triage email into Jira proposals")
+    await repo.upsert_agent(
+        AGENT_ID, "Inbox Triage", "spike-model", "triage email into Jira proposals"
+    )
 
     model = make_spike_model()
     agent = await build_agent(model=model)

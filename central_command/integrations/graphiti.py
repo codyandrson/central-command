@@ -64,16 +64,12 @@ async def steward_map() -> dict[str, str]:
     from central_command.db import repo as db_repo
 
     agents = await db_repo.list_agents(include_retired=False)
-    return {
-        a["steward_group"]: a["id"]
-        for a in agents
-        if (a.get("steward_group") or "").strip()
-    }
+    return {a["steward_group"]: a["id"] for a in agents if (a.get("steward_group") or "").strip()}
 
 
 async def _read_groups() -> list[str]:
     groups = [g.strip() for g in settings.graph_read_groups.split(",") if g.strip()]
-    for group_id in (await steward_map()):
+    for group_id in await steward_map():
         if group_id not in groups:
             groups.append(group_id)
     return groups
@@ -109,8 +105,11 @@ def _no_embedding(attributes: dict | None) -> dict:
     wrote) would ride into agents' results. Any key containing 'embedding' is
     dropped, as the retired server dropped it — and so is every control-plane
     property (`CONTROL_PLANE_PROPERTIES`), which agents must never see."""
-    return {k: v for k, v in (attributes or {}).items()
-            if "embedding" not in k.lower() and k not in CONTROL_PLANE_PROPERTIES}
+    return {
+        k: v
+        for k, v in (attributes or {}).items()
+        if "embedding" not in k.lower() and k not in CONTROL_PLANE_PROPERTIES
+    }
 
 
 # Properties the curation writer stamps for the control plane alone: the
@@ -159,8 +158,10 @@ def _recipe(kind: str, limit: int, centered: bool = False):
     from graphiti_core.search import search_config_recipes as recipes
 
     if centered:
-        base = {"edge": recipes.EDGE_HYBRID_SEARCH_NODE_DISTANCE,
-                "node": recipes.NODE_HYBRID_SEARCH_NODE_DISTANCE}[kind]
+        base = {
+            "edge": recipes.EDGE_HYBRID_SEARCH_NODE_DISTANCE,
+            "node": recipes.NODE_HYBRID_SEARCH_NODE_DISTANCE,
+        }[kind]
     else:
         rerank = client.reranker_configured()
         base = {
@@ -211,8 +212,10 @@ def fact_filters(*, as_of=None, after=None, before=None):
 
     def open_or(op, when):
         # [[IS NULL], [<op> when]]: exactly one parameter-carrying group.
-        return [[DateFilter(comparison_operator=Op.is_null)],
-                [DateFilter(date=when, comparison_operator=op)]]
+        return [
+            [DateFilter(comparison_operator=Op.is_null)],
+            [DateFilter(date=when, comparison_operator=op)],
+        ]
 
     valid_at = invalid_at = None
     if as_of is not None:
@@ -253,8 +256,15 @@ def node_filters(entity_types=None):
     return SearchFilters(node_labels=list(dict.fromkeys(entity_types)))
 
 
-async def _search(kind: str, query: str, limit: int, group_ids: list[str], *,
-                  search_filter=None, center_node_uuid: str | None = None):
+async def _search(
+    kind: str,
+    query: str,
+    limit: int,
+    group_ids: list[str],
+    *,
+    search_filter=None,
+    center_node_uuid: str | None = None,
+):
     # Every embedding read passes here, and the embedder record gates all of
     # them: vectors from another model would answer, wrongly and silently. The
     # bolt-only reads below embed nothing and stay open. Function-local, as
@@ -275,8 +285,14 @@ async def _search(kind: str, query: str, limit: int, group_ids: list[str], *,
 
 
 async def search_facts(
-    query: str, max_facts: int = 8, agent_id: str | None = None,
-    group_ids: list[str] | None = None, *, as_of=None, after=None, before=None,
+    query: str,
+    max_facts: int = 8,
+    agent_id: str | None = None,
+    group_ids: list[str] | None = None,
+    *,
+    as_of=None,
+    after=None,
+    before=None,
     center_node_uuid: str | None = None,
 ) -> list[dict]:
     """Relevant facts (entity relationships, with temporal validity), up to
@@ -286,7 +302,10 @@ async def search_facts(
     window (`fact_filters`); `center_node_uuid` ranks by graph distance from
     that entity."""
     results = await _search(
-        "edge", query, max_facts, group_ids or await groups_for(agent_id),
+        "edge",
+        query,
+        max_facts,
+        group_ids or await groups_for(agent_id),
         search_filter=fact_filters(as_of=as_of, after=after, before=before),
         center_node_uuid=center_node_uuid,
     )
@@ -294,8 +313,12 @@ async def search_facts(
 
 
 async def search_nodes(
-    query: str, max_nodes: int = 8, agent_id: str | None = None,
-    group_ids: list[str] | None = None, *, entity_types: list[str] | None = None,
+    query: str,
+    max_nodes: int = 8,
+    agent_id: str | None = None,
+    group_ids: list[str] | None = None,
+    *,
+    entity_types: list[str] | None = None,
     center_node_uuid: str | None = None,
 ) -> list[dict]:
     """Relevant entities (nodes with summaries), up to `max_nodes`. `group_ids`
@@ -309,14 +332,20 @@ async def search_nodes(
     aliases hold it."""
     groups = group_ids or await groups_for(agent_id)
     results = await _search(
-        "node", query, max_nodes, groups,
-        search_filter=node_filters(entity_types), center_node_uuid=center_node_uuid,
+        "node",
+        query,
+        max_nodes,
+        groups,
+        search_filter=node_filters(entity_types),
+        center_node_uuid=center_node_uuid,
     )
     exact = await neo4j_reader.entities_by_exact_name(query, groups, entity_types, max_nodes)
     out: list[dict] = []
     seen: set[str] = set()
-    for item in [*({**row, "attributes": _no_embedding(row["attributes"])} for row in exact),
-                 *(node_result(n) for n in results.nodes)]:
+    for item in [
+        *({**row, "attributes": _no_embedding(row["attributes"])} for row in exact),
+        *(node_result(n) for n in results.nodes),
+    ]:
         if item["uuid"] in seen:
             continue
         seen.add(item["uuid"])
@@ -353,7 +382,9 @@ async def get_episodes(
     e.g. the cockpit's team-wide memory panel). `private_only=True` (with an
     `agent_id`) narrows the read to exactly that agent's private group — the
     per-agent chat panel's default view."""
-    group_ids = [private_group(agent_id)] if private_only and agent_id else await groups_for(agent_id)
+    group_ids = (
+        [private_group(agent_id)] if private_only and agent_id else await groups_for(agent_id)
+    )
     return await get_group_episodes(group_ids, last_n)
 
 
@@ -377,6 +408,9 @@ async def get_status() -> dict:
     try:
         await neo4j_reader._read("RETURN 1 AS ok")
     except Exception as exc:  # noqa: BLE001 — the status IS the answer
-        return {"status": "error", "error": type(exc).__name__,
-                "message": f"{type(exc).__name__}: {exc}"}
+        return {
+            "status": "error",
+            "error": type(exc).__name__,
+            "message": f"{type(exc).__name__}: {exc}",
+        }
     return {"status": "ok", "message": "Neo4j answers over bolt"}

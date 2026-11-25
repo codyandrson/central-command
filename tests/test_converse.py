@@ -57,8 +57,14 @@ async def test_every_active_agent_is_chattable_and_retired_ones_are_not():
     finally:
         await conn.close()
     try:
-        await repo.hire_agent(agent_id, "Converse fixture", "test fixture",
-                              "You are a fixture.", ["graph-read"], template="analyst")
+        await repo.hire_agent(
+            agent_id,
+            "Converse fixture",
+            "test fixture",
+            "You are a fixture.",
+            ["graph-read"],
+            template="analyst",
+        )
         assert agent_id in await conversational_agent_ids()
         assert await repo.retire_agent(agent_id, "test over")
         assert agent_id not in await conversational_agent_ids()
@@ -76,9 +82,7 @@ async def test_every_active_agent_is_chattable_and_retired_ones_are_not():
 
 @needs_pg
 async def test_text_turn_rests_in_awaiting_operator():
-    out = await converse.start_conversation(
-        "litellm-manager", "what can you do?", model=_model()
-    )
+    out = await converse.start_conversation("litellm-manager", "what can you do?", model=_model())
     assert out["awaiting"] == "operator"
     assert "reply" in out
     s = await repo.get_session(out["session_id"])
@@ -194,8 +198,11 @@ async def test_close_is_a_flip_never_a_delete():
 
     again = await converse.end_conversation(sid)  # idempotent
     assert again["status"] == "DONE"
-    ended = [e for e in await repo.list_events(since_id=since)
-             if e["kind"] == "conversation.ended" and e["ref_id"] == sid]
+    ended = [
+        e
+        for e in await repo.list_events(since_id=since)
+        if e["kind"] == "conversation.ended" and e["ref_id"] == sid
+    ]
     assert len(ended) == 1
 
 
@@ -226,16 +233,12 @@ async def test_close_lever_on_a_root_key_closes_the_open_lane():
     from central_command.api.nerve_gateway import _close_conversation_for_key
 
     out = await converse.start_conversation("litellm-manager", "hi", model=_model())
-    closed = await _close_conversation_for_key(
-        "agent:litellm-manager:main", require_explicit=True
-    )
+    closed = await _close_conversation_for_key("agent:litellm-manager:main", require_explicit=True)
     assert closed["session_id"] == out["session_id"]
     assert closed["status"] == "DONE"
 
     with pytest.raises(HTTPException, match="no open session"):
-        await _close_conversation_for_key(
-            "agent:litellm-manager:main", require_explicit=True
-        )
+        await _close_conversation_for_key("agent:litellm-manager:main", require_explicit=True)
 
 
 @needs_pg
@@ -306,9 +309,12 @@ async def test_the_conversation_path_dispatches_on_the_deferred_tool():
     assert "Tasks page" in refused["reply"]
 
     # A propose tool is NOT handled here — it falls through to the parker.
-    assert await _handle_non_proposal_deferral(
-        sid, "jira-expert", _Call("propose_action", {"proposal": {}})
-    ) is None
+    assert (
+        await _handle_non_proposal_deferral(
+            sid, "jira-expert", _Call("propose_action", {"proposal": {}})
+        )
+        is None
+    )
 
     # Args arrive as a JSON string from some models; the question still reads.
     as_string = await _handle_non_proposal_deferral(
@@ -376,15 +382,19 @@ def _propose_then_conclude():
             if isinstance(p, ToolCallPart)
         }
         if "propose_litellm_change" not in called:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name="propose_litellm_change",
-                             args={"proposal": _CONVERSE_PROPOSAL}),
-            ])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="propose_litellm_change", args={"proposal": _CONVERSE_PROPOSAL}
+                    ),
+                ]
+            )
         if "conclude_discussion" not in called:
-            return ModelResponse(parts=[
-                ToolCallPart(tool_name="conclude_discussion",
-                             args={"summary": SUMMARY}),
-            ])
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(tool_name="conclude_discussion", args={"summary": SUMMARY}),
+                ]
+            )
         return ModelResponse(parts=[TextPart(content="Closed out.")])
 
     return FunctionModel(_respond)
@@ -396,11 +406,14 @@ async def _link_as_discussion(session_id: str, agent_id: str) -> dict:
     import uuid
 
     suffix = uuid.uuid4().hex[:8]
-    ids = {"item_id": f"conversetest-item-{suffix}",
-           "task_session": f"conversetest-task-{suffix}"}
+    ids = {"item_id": f"conversetest-item-{suffix}", "task_session": f"conversetest-task-{suffix}"}
     await repo.create_running_session(ids["task_session"], agent_id)
     await repo.create_operator_item(
-        ids["item_id"], "question", ids["task_session"], agent_id, "Which model?",
+        ids["item_id"],
+        "question",
+        ids["task_session"],
+        agent_id,
+        "Which model?",
     )
     await repo.link_operator_item_discussion(ids["item_id"], session_id)
     return ids
@@ -423,7 +436,8 @@ def no_task_resume(monkeypatch):
 
 @needs_pg
 async def test_approving_a_proposal_made_in_a_lane_can_end_in_a_conclusion(
-    monkeypatch, no_task_resume,
+    monkeypatch,
+    no_task_resume,
 ):
     model = _propose_then_conclude()
     out = await converse.start_conversation(
@@ -447,9 +461,11 @@ async def test_approving_a_proposal_made_in_a_lane_can_end_in_a_conclusion(
     assert session["status"] == "DONE"
     assert session["closed_reason"] == "concluded"
 
-    concluded = [e for e in await repo.list_events(since_id=since)
-                 if e["kind"] == "agent.discussion_concluded"
-                 and e["ref_id"] == ids["item_id"]]
+    concluded = [
+        e
+        for e in await repo.list_events(since_id=since)
+        if e["kind"] == "agent.discussion_concluded" and e["ref_id"] == ids["item_id"]
+    ]
     assert len(concluded) == 1
     assert concluded[0]["payload"]["summary"] == SUMMARY
     assert concluded[0]["payload"]["claim_matches_source"] is True
@@ -480,9 +496,7 @@ async def test_the_same_conclusion_in_an_ordinary_conversation_still_rests(
 
 
 @needs_pg
-async def test_a_failing_conclusion_falls_back_to_resting_the_session(
-    monkeypatch, no_task_resume
-):
+async def test_a_failing_conclusion_falls_back_to_resting_the_session(monkeypatch, no_task_resume):
     """Containment: the executed record outranks the resume on every path here,
     so a conclusion that raises must leave the session resting, never orphaned
     between two states."""
