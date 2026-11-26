@@ -948,7 +948,7 @@ async def check_mail(ctx: Context) -> Outcome:
             ),
             None,
         )
-    if settings.google_provider == "native":
+    if settings.google_provider in ("native", "mcp"):
         return await _check_google_mail(reader)
     if not email_facade.configured():
         # The façade's own switch (url AND token); the two messages only say
@@ -993,16 +993,19 @@ async def check_mail(ctx: Context) -> Outcome:
 
 
 async def _check_google_mail(reader: str) -> Outcome:
-    """The native Google client (DL-234): the same references-only list the n8n
-    branch makes, through the same façade function."""
+    """The Google client this deployment selected — the native REST client
+    (DL-234) or Google's MCP servers (DL-237): the same references-only list
+    the n8n branch makes, through the same façade function."""
     from central_command.integrations import email_facade, google
 
+    provider = settings.google_provider
+    client = "the native Google client" if provider == "native" else "the Google MCP client"
     missing = google.missing_settings()
     if missing:
         return at(
             fail(
-                f"{reader} reads mail through the native Google client "
-                f"(CC_GOOGLE_PROVIDER=native), but {', '.join(missing)} is empty — "
+                f"{reader} reads mail through {client} "
+                f"(CC_GOOGLE_PROVIDER={provider}), but {', '.join(missing)} is empty — "
                 "python -m central_command.google_consent writes the refresh token",
                 missing[0],
             ),
@@ -1011,18 +1014,23 @@ async def _check_google_mail(reader: str) -> Outcome:
     try:
         refs = await email_facade.list_refs(MAIL_PROBE_QUERY)
     except Exception as exc:  # noqa: BLE001
+        grant = (
+            "; when Google asks for an approval, run python -m central_command.google_mcp_grant"
+            if provider == "mcp"
+            else ""
+        )
         return at(
             fail(
-                f"the native Google client failed a references-only list "
+                f"{client} failed a references-only list "
                 f"({_describe(exc)}) — check CC_GOOGLE_CLIENT_ID/_SECRET and re-run "
-                "python -m central_command.google_consent",
+                f"python -m central_command.google_consent{grant}",
                 "CC_GOOGLE_REFRESH_TOKEN",
             ),
             None,
         )
     return Outcome(
         PASS,
-        f"the native Google client answers a references-only list "
+        f"{client} answers a references-only list "
         f"({len(refs) if isinstance(refs, list) else 0} ref(s) in the last day)",
         system=None,
     )
@@ -1203,7 +1211,9 @@ def _mail_remedy() -> str:
     if exchange.configured():
         return "CC_EXCHANGE_URL"
     return (
-        "CC_GOOGLE_REFRESH_TOKEN" if settings.google_provider == "native" else "CC_EMAIL_FACADE_URL"
+        "CC_GOOGLE_REFRESH_TOKEN"
+        if settings.google_provider in ("native", "mcp")
+        else "CC_EMAIL_FACADE_URL"
     )
 
 

@@ -1,7 +1,9 @@
 """The optional dependency extra each mail and calendar provider needs (DL-235).
 
 The Exchange client (`integrations/exchange.py`) and the native Google client
-(`integrations/google.py`, `google_consent.py`) are the only users of their
+(`integrations/google.py`, `google_consent.py`) and the Google MCP client
+(`integrations/google_mcp.py`, `google_mcp_grant.py`: google-auth mints its
+access token, DL-237) are the only users of their
 packages, and a deployment runs one provider or neither. So the packages are
 two extras of `pyproject.toml`, `exchange` and `google`, installed only where
 the provider is selected (the installers read the root `.env` through
@@ -12,8 +14,8 @@ This module is the loud half: `missing()` names, for every provider THIS
 deployment selected, the extra whose packages are not installed, and the API
 refuses to start on it (`api/app.py`). The selection is the providers' own
 switch, never a new setting: Exchange is `exchange.configured()` (url,
-username and password set), Google is `google.selected()`
-(`CC_GOOGLE_PROVIDER=native`). `EXTRAS` names distributions as
+username and password set), Google is `google.selected()` or
+`google_mcp.selected()` (`CC_GOOGLE_PROVIDER=native` or `mcp`). `EXTRAS` names distributions as
 `pyproject.toml` declares them; `tests/test_provider_extras.py` pins the two
 equal, and pins the shell mirror's answer to `selected()`.
 """
@@ -38,9 +40,12 @@ EXTRAS: dict[str, tuple[str, ...]] = {
 
 def selected() -> list[str]:
     """The extras this deployment's configuration needs, in `EXTRAS` order."""
-    from central_command.integrations import exchange, google
+    from central_command.integrations import exchange, google, google_mcp
 
-    wanted = {"exchange": exchange.configured(), "google": google.selected()}
+    wanted = {
+        "exchange": exchange.configured(),
+        "google": google.selected() or google_mcp.selected(),
+    }
     return [extra for extra in EXTRAS if wanted[extra]]
 
 

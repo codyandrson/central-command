@@ -350,10 +350,21 @@ class Settings(BaseSettings):
     # (`python -m central_command.google_consent`), never typed by hand. Trust is
     # the global CC_CA_BUNDLE / CC_CLIENT_CERT / CC_TLS_INSECURE surface, as for
     # every other client.
-    google_provider: Literal["n8n", "native"] = "n8n"
+    # "mcp" (DL-237) routes the same two façades to
+    # `integrations/google_mcp.py`, which reaches Gmail and Google Calendar
+    # through GOOGLE'S OWN remote MCP servers (Google's Workspace AI Tools
+    # Addendum, effective 2027-02-01, wants agent-driven access there, not on
+    # REST). It uses the same three settings below and the same `google` extra;
+    # Google's per-tool approvals are given once by the operator with
+    # `python -m central_command.google_mcp_grant`. The two endpoint settings
+    # are Google's servers; they exist so the tests can point at a local stub
+    # and are not set in a deployment.
+    google_provider: Literal["n8n", "native", "mcp"] = "n8n"
     google_client_id: str = ""
     google_client_secret: str = ""
     google_refresh_token: str = ""
+    google_mcp_gmail_url: str = "https://gmailmcp.googleapis.com/mcp/v1"
+    google_mcp_calendar_url: str = "https://calendarmcp.googleapis.com/mcp/v1"
 
     # Web fetch (D-web-read): an ungated read, granted only via the `web-read`
     # pack. The cert/key/CA-bundle settings configure ONE outbound identity for

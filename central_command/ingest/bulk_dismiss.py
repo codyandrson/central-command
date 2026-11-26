@@ -41,6 +41,25 @@ async def resolve_query(query: str) -> dict:
     except email_facade.EmailFacadeError as e:
         raise ValueError(f"{_OVER_CAP_HINT}: {e}") from e
 
+    if email_facade.lists_whole_conversations():
+        # This provider answers a search with whole conversations, so in a
+        # conversation of several listed messages nothing says which of them
+        # the query matched. Dismissing them all would dismiss mail the
+        # operator never selected: refuse, naming the count.
+        per_conversation: dict[str, int] = {}
+        for r in refs:
+            key = str(r.get("conversation_id") or r["uuid"])
+            per_conversation[key] = per_conversation.get(key, 0) + 1
+        unclear = sum(1 for n in per_conversation.values() if n > 1)
+        if unclear:
+            raise ValueError(
+                f"{unclear} conversation(s) in this match hold more than one message, and "
+                "this mail provider matches whole conversations: it cannot say which of "
+                "their messages the query matched, so a bulk dismissal could take mail "
+                "that did not match. Narrow the query to single-message conversations, "
+                "or dismiss those conversations one by one"
+            )
+
     uuid_by_message_id = {ref_message_id(r): r["uuid"] for r in refs}
     rows = await repo.unprocessed_items_for_message_ids(list(uuid_by_message_id))
     message_ids = sorted(r["message_id"] for r in rows)

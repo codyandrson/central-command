@@ -10,7 +10,9 @@ touches them. Edit the JSON, not the canvas.
 They are also the SPECIFICATION of the native Google client
 (`central_command/integrations/google.py`, DL-234), an option that is off by
 default (`CC_GOOGLE_PROVIDER=n8n`): with `native` the same façade functions call
-Google directly and n8n is not on the path. `tests/test_google_parity.py` runs
+Google directly and n8n is not on the path (with `mcp`, DL-237, they call
+Google's own MCP servers through `central_command/integrations/google_mcp.py`,
+which answers the same envelopes but is not a node-by-node copy of these files). `tests/test_google_parity.py` runs
 these files' JavaScript against the same Google stub as the native client, so
 an edit here that is not mirrored there fails the suite.
 

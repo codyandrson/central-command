@@ -24,7 +24,9 @@ Exchange) the one place that posts to n8n, `_call`, hands the SAME payload to
 n8n workflow would have answered, or the status it would have set (422 a
 refusal, 503 a failure). Everything after `_call` is shared by both paths. The
 error carries the `google` dependency, so an outage parks on Google, not on the
-n8n host. The default (`n8n`) never imports the module.
+n8n host. The default (`n8n`) never imports the module. `CC_GOOGLE_PROVIDER=mcp`
+(DL-237) routes the same `_call` to `integrations/google_mcp.py`, Google's own
+Gmail MCP server, with the same envelope and error classes.
 """
 
 from __future__ import annotations
@@ -51,15 +53,21 @@ def _exchange():
 
 
 def _google():
-    """The native Google client when this deployment selected it
-    (`CC_GOOGLE_PROVIDER=native`), else None. Deferred like `_exchange`, so the
-    n8n default never imports it. Exchange, when configured, is asked first by
+    """The Google client this deployment selected: the REST client
+    (`CC_GOOGLE_PROVIDER=native`) or Google's MCP servers (`mcp`, DL-237),
+    else None. Deferred like `_exchange`, so the n8n default never imports it. Exchange, when configured, is asked first by
     every function and still wins."""
-    if settings.google_provider != "native":
-        return None
-    from central_command.integrations import google
+    if settings.google_provider == "native":
+        from central_command.integrations import google
 
-    return google
+        return google
+    if settings.google_provider == "mcp":
+        # Google's own MCP servers (DL-237): the same entry points, envelopes
+        # and error classes as the REST client.
+        from central_command.integrations import google_mcp
+
+        return google_mcp
+    return None
 
 
 def configured() -> bool:
@@ -122,6 +130,14 @@ async def _call_google(google, payload: dict, timeout: float) -> dict:
                 status_code=e.status_code,
             )
         ) from e
+
+
+def lists_whole_conversations() -> bool:
+    """True when this deployment's list is built from a CONVERSATION search:
+    Google's MCP servers (DL-237) return every message of a matching thread,
+    the ones the query did not match among them. A caller that needs to know
+    exactly which messages matched (bulk dismiss) asks this first."""
+    return _exchange() is None and settings.google_provider == "mcp"
 
 
 async def list_refs(scope_query: str) -> list[dict]:

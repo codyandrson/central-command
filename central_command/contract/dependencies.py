@@ -39,7 +39,8 @@ GRAPH = "graph"
 LITELLM = "litellm"
 N8N = "n8n"
 CALENDAR = "calendar"
-# The native Google client (DL-234), when `CC_GOOGLE_PROVIDER=native`. The mail
+# The native Google client (DL-234), when `CC_GOOGLE_PROVIDER=native`, and the
+# Google MCP client (DL-237), when it is `mcp`. The mail
 # and calendar entries below keep `n8n` and `calendar`, the default path; an
 # error from the Google path carries `google` itself (`DEPENDENCIES_ATTR`,
 # stamped by the façades), so a Google outage parks on `google` and the sweep

@@ -128,6 +128,11 @@ def test_nothing_reads_a_mail_body_except_through_the_converter():
         "integrations/email_facade.py",
         "integrations/exchange.py",
         "integrations/google.py",
+        # The same provider reached through Google's MCP servers (DL-237): it
+        # builds the pair from a raw MIME read or, for a message with
+        # attachments, from Google's two body fields; it reads neither for a
+        # model.
+        "integrations/google_mcp.py",
     }
     # `.as_posix()`, not `str()`: on Windows `str(relative_to(...))` is
     # `ingest\ledger.py`, which matches nothing in `allowed`, so the allowlist

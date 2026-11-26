@@ -161,7 +161,7 @@ runtime = [
 # inside its provider's module, lazily, so the application imports without it.
 # The installers add the extra the root .env selects (deploy/env-lib.sh,
 # cc_python_extras: Exchange when CC_EXCHANGE_URL, _USERNAME and _PASSWORD are
-# set, Google when CC_GOOGLE_PROVIDER=native), and the API refuses to start,
+# set, Google when CC_GOOGLE_PROVIDER=native or mcp), and the API refuses to start,
 # naming the extra, when the selected provider's packages are missing
 # (integrations/provider_extras.py). A development or test install takes both:
 # `pip install -e ".[dev,runtime,exchange,google]"`; the suite skips the

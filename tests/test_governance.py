@@ -72,6 +72,10 @@ _BANNED_RUNTIME_MODULES = frozenset(
         # imports the provider, nor the consent command that writes the token.
         "central_command.integrations.google",
         "central_command.google_consent",
+        # The Google MCP client (DL-237) holds the same credential and writes,
+        # and the grant command answers Google's approval questions.
+        "central_command.integrations.google_mcp",
+        "central_command.google_mcp_grant",
     }
 )
 
@@ -148,6 +152,9 @@ def test_the_graph_write_modules_are_banned_in_every_import_spelling():
         "from central_command.integrations import google": True,
         "from ..integrations.google import mail_request": True,
         "from central_command import google_consent": True,
+        "from central_command.integrations import google_mcp": True,
+        "from ..integrations.google_mcp import mail_request": True,
+        "from central_command import google_mcp_grant": True,
         "from central_command.integrations import email_facade": False,
     }
     for source, banned in cases.items():

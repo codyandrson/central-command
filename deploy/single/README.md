@@ -55,7 +55,11 @@ storage for a rollback; remove it by hand once you no longer need one.
   and is off by default: the native Google client (`CC_GOOGLE_PROVIDER=native`
   with your own OAuth client in `.env`, and the refresh token written by
   `.venv/bin/python -m central_command.google_consent`; its `--help` has the
-  steps, DL-234). Nothing about this profile changes until you set it.
+  steps, DL-234). A third value, `CC_GOOGLE_PROVIDER=mcp` (DL-237), reaches
+  Gmail and Calendar through Google's own MCP servers with the same three
+  settings; Google's per-tool approvals are answered once at a terminal with
+  `.venv/bin/python -m central_command.google_mcp_grant`. Nothing about this
+  profile changes until you set it.
 - `crawler` — cc-crawler, the browser-rendering crawl service (rung 2 of docs
   ingestion). On by default. Its image is built locally and is large
   (Chromium); rung 1, a plain HTTP fetch, keeps working without it.

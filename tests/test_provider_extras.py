@@ -101,7 +101,8 @@ def test_the_application_imports_without_the_provider_packages():
     code = (
         "import sys\n"
         "import central_command.api.app, central_command.integrations.exchange, "
-        "central_command.integrations.google, central_command.google_consent\n"
+        "central_command.integrations.google, central_command.google_consent, "
+        "central_command.integrations.google_mcp, central_command.google_mcp_grant\n"
         "bad = [m for m in sys.modules if m.split('.')[0] in "
         "('exchangelib', 'googleapiclient', 'google_auth_oauthlib', 'google_auth_httplib2')]\n"
         "print(bad); sys.exit(1 if bad else 0)\n"
@@ -137,6 +138,8 @@ ENV_CASES = {
     "google": "CC_GOOGLE_PROVIDER=native\n",
     "google quoted, later line wins": 'CC_GOOGLE_PROVIDER=n8n\nCC_GOOGLE_PROVIDER="native"\n',
     "google back to n8n": "CC_GOOGLE_PROVIDER=native\nCC_GOOGLE_PROVIDER=n8n  # default\n",
+    "google mcp": "CC_GOOGLE_PROVIDER=mcp\n",
+    "google mcp quoted": "CC_GOOGLE_PROVIDER='mcp'\n",
     "both, CRLF": (
         "CC_GOOGLE_PROVIDER=native\r\nCC_EXCHANGE_URL=https://mail.example.com/ews\r\n"
         "CC_EXCHANGE_USERNAME=jdoe\r\nCC_EXCHANGE_PASSWORD=secret\r\n"

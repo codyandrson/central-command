@@ -33,7 +33,9 @@ Endpoints (the first three verified against the live Pi stack on 2026-07-31):
   n8n        GET  http://127.0.0.1:5678/healthz          -> 200 {"status":"ok"}
   calendar   the same n8n health (the façade host)
   google     GET  the root of oauth2/gmail/www.googleapis.com (unauthenticated;
-             UP without a socket unless CC_GOOGLE_PROVIDER=native)
+             with CC_GOOGLE_PROVIDER=mcp the token host and the two MCP hosts,
+             gmailmcp/calendarmcp.googleapis.com; UP without a socket unless
+             CC_GOOGLE_PROVIDER is native or mcp)
   graph      TCP  the bolt port of CC_NEO4J_URL          (since 2026-10-04: graphiti-core
              runs in-process, so the graph's dependency is Neo4j itself)
   litellm    GET  http://127.0.0.1:4000/health/liveliness -> 200 "I'm alive!"
@@ -144,14 +146,40 @@ GOOGLE_HOSTS = (
 )
 
 
+# The hosts the Google MCP client (`integrations/google_mcp.py`, DL-237) talks
+# to by default: the same token endpoint and Google's two MCP servers. The probe
+# derives the two MCP hosts from the settings the client posts to; a test pins
+# these defaults equal to the settings' defaults.
+GOOGLE_MCP_HOSTS = (
+    "https://oauth2.googleapis.com",
+    "https://gmailmcp.googleapis.com",
+    "https://calendarmcp.googleapis.com",
+)
+
+
+def google_hosts() -> tuple[str, ...]:
+    """The hosts the selected Google client calls; () when none is selected."""
+    if settings.google_provider == "native":
+        return GOOGLE_HOSTS
+    if settings.google_provider == "mcp":
+        return (
+            GOOGLE_MCP_HOSTS[0],
+            _root(settings.google_mcp_gmail_url),
+            _root(settings.google_mcp_calendar_url),
+        )
+    return ()
+
+
 async def probe_google() -> bool:
-    """The native Google client's hosts, each an UNAUTHENTICATED GET of its root:
-    any answer short of the transient statuses means Google is there (a 404 is an
-    answer). Not selected (`CC_GOOGLE_PROVIDER` is not `native`) means nothing to
-    wait for, and probes UP without a socket."""
-    if settings.google_provider != "native":
+    """The selected Google client's hosts (REST or MCP), each an UNAUTHENTICATED
+    GET of its root: any answer short of the transient statuses means Google is
+    there (a 404 is an answer). Not selected (`CC_GOOGLE_PROVIDER` is neither
+    `native` nor `mcp`) means nothing to wait for, and probes UP without a
+    socket."""
+    hosts = google_hosts()
+    if not hosts:
         return True
-    answers = await asyncio.gather(*(_answers(h + "/") for h in GOOGLE_HOSTS))
+    answers = await asyncio.gather(*(_answers(h + "/") for h in hosts))
     return all(answers)
 
 

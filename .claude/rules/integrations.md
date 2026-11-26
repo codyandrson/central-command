@@ -7,6 +7,8 @@ paths:
   - "central_command/integrations/email_facade.py"
   - "central_command/integrations/google.py"
   - "central_command/google_consent.py"
+  - "central_command/integrations/google_mcp.py"
+  - "central_command/google_mcp_grant.py"
   - "central_command/reports/ea_calendar.py"
   - "central_command/contract/mail.py"
   - "central_command/ingest/**"
@@ -41,6 +43,19 @@ Moved from the root instructions; loads when a matching file is read. How a rule
   were built against the n8n answers, and the cutover must change nothing they
   can see. `runtime/` never imports the module or the consent command
   (`tests/test_governance.py`).
+- **`CC_GOOGLE_PROVIDER=mcp` answers google.py's envelopes through Google's own
+  MCP servers, and an approval Google asks for is never answered by code**
+  (DL-237). `integrations/google_mcp.py` reuses google.py's validators,
+  normaliser, event flags, errors and token; an `input_required` result is a
+  refusal (mail 422, calendar `{ok:false}`) naming
+  `python -m central_command.google_mcp_grant`, the interactive command where
+  the operator answers, and no second request is sent. A mode the MCP tools
+  cannot serve is refused (attachment bytes), and a field they cannot give is
+  left empty the way the normaliser writes "absent", never fetched over REST:
+  a fallback to REST is the access path the switch exists to leave. The gaps
+  (headers of a non-RAW message, the DL-219 client event id, thread-wise
+  listing, withheld threads) are listed in DL-237; `tests/test_google_mcp.py`
+  pins each one.
 - **Jira Cloud and Jira Data Center are two products, not two logins.** DC
   (and the retired Server line) never exposed REST v3 — it answers 404 to
   every `/rest/api/3/...` path — and beyond the version segment rich text is

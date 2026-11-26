@@ -4,6 +4,42 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-26 — v2.138.0: Gmail and Google Calendar through Google's own MCP servers, as a third provider (DL-237)
+
+- **Why.** Google's Workspace AI Tools Addendum (effective 2027-02-01) requires access that an AI
+  agent drives to go through Google's MCP servers, not the REST APIs. Both existing Google paths
+  (the n8n workflows and the `native` REST client) are REST.
+- **What.** `CC_GOOGLE_PROVIDER=mcp` routes the mail and calendar façades to
+  `integrations/google_mcp.py`, which calls `gmailmcp.googleapis.com` and
+  `calendarmcp.googleapis.com` and answers the same envelopes as the REST client. `n8n` stays the
+  default and `native` is unchanged; nothing switches until the operator sets the value. It uses
+  the same three settings and the `google` extra. The client is a small httpx one: the `mcp`
+  library that speaks Google's protocol version (2.x) does not fit the current pin.
+- **Google's approvals are the operator's.** Google asks a person to approve some tools. The request
+  path never answers: the call is refused and names
+  `python -m central_command.google_mcp_grant`, the one-time interactive command where the operator
+  answers Google. It needs a terminal, never chooses by itself, and prints no mail content.
+- **What differs from the REST client.**
+  - No attachment contents: Google offers no tool for them, so the read is refused and the
+    attachment is known by filename and type only.
+  - Mail send is refused, as on every Gmail path.
+  - A message with attachments is read without its raw headers (Google refuses the raw format for
+    those), so it has no one-click unsubscribe and no authentication results.
+  - A listing is built from Google's thread search; under an inbox query, a thread's messages that
+    are not in the inbox are left out.
+  - Google's search answers with whole conversations, so a listing can hold messages the query did
+    not match. Bulk dismiss therefore refuses, on this provider, a match in which a conversation
+    holds more than one listed message: it cannot say which of them matched.
+  - Mail Google filters from agents (a suspicious sender, suspected prompt injection) is not
+    listed; the count is logged at warning level. Only a missing approval refuses the listing.
+    Refusing for a filtered thread would have let any sender stop the mail poll.
+  - Calendar create cannot carry our own event id, so a create retried after a lost answer can
+    land twice on this path (DL-219's guarantee holds on the other two).
+  - An attendee change reads the event first and sends the difference.
+- **Checked against a live account, read-only, before release:** an inbox listing, four message
+  reads, a seven-day calendar listing and the reachability probe. Not checked live: any write, and
+  the approval command's questions for write tools.
+
 ## 2026-11-25 — v2.137.0: The sandbox reaches the internet and no private address range (DL-236)
 
 - **What changed.** On the multi-node profile a sandbox pod's egress is now the internet only. The

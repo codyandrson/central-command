@@ -180,3 +180,43 @@ async def test_unenrolled_uuids_are_ignored(monkeypatch):
     assert resolved["provider_matches"] == 1
     assert resolved["unprocessed"] == 0
     assert resolved["message_ids"] == []
+
+
+async def test_a_conversation_search_refuses_a_match_it_cannot_pin(monkeypatch):
+    """Google's MCP servers answer a search with whole conversations (DL-237).
+    Two listed messages of one conversation: nothing says which one matched,
+    so nothing is resolved, previewed or dismissed."""
+    await _seed()
+
+    async def fake_list_refs(query):
+        return [
+            {"uuid": _UNPROCESSED_UUID, "conversation_id": "t1"},
+            {"uuid": _UNKNOWN_UUID, "conversation_id": "t1"},
+        ]
+
+    monkeypatch.setattr(email_facade, "list_refs", fake_list_refs)
+    monkeypatch.setattr(email_facade, "lists_whole_conversations", lambda: True)
+    with pytest.raises(ValueError, match="1 conversation"):
+        await bulk_dismiss.resolve_query("q")
+    assert (await _row(_UNPROCESSED_UUID))["state"] == "UNPROCESSED"
+
+    # One message per conversation is exact, and resolves as before.
+    async def one_each(query):
+        return [
+            {"uuid": _UNPROCESSED_UUID, "conversation_id": "t1"},
+            {"uuid": _UNKNOWN_UUID, "conversation_id": "t2"},
+        ]
+
+    monkeypatch.setattr(email_facade, "list_refs", one_each)
+    assert (await bulk_dismiss.resolve_query("q"))["unprocessed"] == 1
+
+
+def test_only_the_mcp_provider_lists_whole_conversations(monkeypatch):
+    from central_command.config import settings
+
+    for value, want in (("n8n", False), ("native", False), ("mcp", True)):
+        monkeypatch.setattr(settings, "google_provider", value)
+        monkeypatch.setattr(email_facade, "_exchange", lambda: None)
+        assert email_facade.lists_whole_conversations() is want
+    monkeypatch.setattr(email_facade, "_exchange", lambda: object())
+    assert email_facade.lists_whole_conversations() is False

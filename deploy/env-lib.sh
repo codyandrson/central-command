@@ -811,7 +811,8 @@ cc_images_rows() { # cc_images_rows <images.txt>
 # deploy/single/{setup.sh,phases/app.sh}) get the list from. It mirrors the
 # app's own switches, never a new setting: Exchange is exchange.configured()
 # (CC_EXCHANGE_URL, _USERNAME and _PASSWORD all set), Google is
-# google.selected() (CC_GOOGLE_PROVIDER=native); the API refuses to start,
+# google.selected() or google_mcp.selected() (CC_GOOGLE_PROVIDER=native or
+# mcp: the MCP client mints its token with google-auth, DL-237); the API refuses to start,
 # naming the extra, when the selected provider's packages are missing
 # (central_command/integrations/provider_extras.py), so a .env the reader below
 # misreads fails loud rather than silently. tests/test_provider_extras.py runs
@@ -838,7 +839,7 @@ cc_python_extras() { # cc_python_extras <app-env-file>  -> e.g. dev,runtime,exch
   pass="$(cc__dotenv_value "$(cc_get_kv "$f" CC_EXCHANGE_PASSWORD)")"
   provider="$(cc__dotenv_value "$(cc_get_kv "$f" CC_GOOGLE_PROVIDER)")"
   [[ -n "$url" && -n "$user" && -n "$pass" ]] && extras+=",exchange"
-  [[ "$provider" == "native" ]] && extras+=",google"
+  [[ "$provider" == "native" || "$provider" == "mcp" ]] && extras+=",google"
   printf '%s' "$extras"
 }
 

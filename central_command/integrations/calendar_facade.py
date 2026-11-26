@@ -33,7 +33,9 @@ Exchange) `_call` hands the SAME payload to
 comes back as the workflow answered it (so the `ok` check and everything after
 it are shared), and a failure is the status n8n answered for every `fail()`,
 HTTP 500, stamped with the `google` dependency so an outage parks on Google.
-The default (`n8n`) never imports the module.
+The default (`n8n`) never imports the module. `CC_GOOGLE_PROVIDER=mcp`
+(DL-237) routes the same `_call` to `integrations/google_mcp.py`, Google's own
+Calendar MCP server, with the same envelope and error classes.
 """
 
 from __future__ import annotations
@@ -64,14 +66,21 @@ def _exchange():
 
 
 def _google():
-    """The native Google client when this deployment selected it
-    (`CC_GOOGLE_PROVIDER=native`), else None. Deferred like `_exchange`;
+    """The Google client this deployment selected: the REST client
+    (`CC_GOOGLE_PROVIDER=native`) or Google's MCP servers (`mcp`, DL-237),
+    else None. Deferred like `_exchange`;
     Exchange, when configured, is asked first and still wins."""
-    if settings.google_provider != "native":
-        return None
-    from central_command.integrations import google
+    if settings.google_provider == "native":
+        from central_command.integrations import google
 
-    return google
+        return google
+    if settings.google_provider == "mcp":
+        # Google's own MCP servers (DL-237): the same entry points, envelopes
+        # and error classes as the REST client.
+        from central_command.integrations import google_mcp
+
+        return google_mcp
+    return None
 
 
 def configured() -> bool:
@@ -86,7 +95,8 @@ def provider_configured() -> bool:
     Exchange client. An Exchange site leaves the façade token empty
     (`deploy/n8n/apply-workflows.sh`), so the façade's own check would call it
     unconfigured. `configured()` stays the n8n path's gate. A selected native
-    Google client counts once its three settings are present (DL-234)."""
+    or MCP Google client counts once its three settings are present (DL-234,
+    DL-237)."""
     if _exchange() is not None:
         return True
     google = _google()
