@@ -46,6 +46,9 @@ from central_command.integrations import google, google_mcp
 GMAIL = "Gmail"
 CALENDAR = "Google Calendar"
 TIMEOUT_SECONDS = 60.0
+# The calendar probe's window and page: the widest list the provider sends.
+PROBE_DAYS = 30
+PROBE_PAGE_SIZE = 250
 MAX_ROUNDS = 3
 
 # Targets that cannot exist, for the no-write probe of a write tool.
@@ -230,7 +233,9 @@ async def _grant(tools: list[str], s: _Session) -> None:
             s.say("get_thread: no inbox thread to read; Google will ask at first use")
     if "get_message" in wanted:
         if message_id:
-            await s.probe("get_message", {"messageId": message_id, "messageFormat": "RAW"})
+            # FULL_CONTENT, not RAW: Google refuses RAW for a message with an
+            # attachment, and the approval is per tool, not per format.
+            await s.probe("get_message", {"messageId": message_id, "messageFormat": "FULL_CONTENT"})
         else:
             s.say("get_message: no inbox message to read; Google will ask at first use")
     if "list_events" in wanted or "get_event" in wanted:
@@ -240,8 +245,11 @@ async def _grant(tools: list[str], s: _Session) -> None:
             {
                 "calendarId": "primary",
                 "startTime": now.isoformat(),
-                "endTime": (now + timedelta(days=7)).isoformat(),
-                "pageSize": 1,
+                # The provider's own widest read, not one event: Google asks
+                # by what the answer would hold, and on 2026-11-27 a one-event
+                # probe passed unasked while a 7-day list was refused.
+                "endTime": (now + timedelta(days=PROBE_DAYS)).isoformat(),
+                "pageSize": PROBE_PAGE_SIZE,
                 "orderBy": "startTime",
                 "eventType": list(google_mcp.EVENT_TYPES),
             },
@@ -251,7 +259,9 @@ async def _grant(tools: list[str], s: _Session) -> None:
         if event_id:
             await s.probe("get_event", {"calendarId": "primary", "eventId": event_id})
         else:
-            s.say("get_event: no event in the next 7 days to read; Google will ask at first use")
+            s.say(
+                f"get_event: no event in the next {PROBE_DAYS} days to read; Google will ask at first use"
+            )
     for tool in (t for t in tools if t in WRITES):
         s.say(f"{tool}: asking Google about a call aimed at a target that does not exist")
         await s.probe(tool, _write_probe(tool))

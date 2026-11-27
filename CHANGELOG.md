@@ -4,6 +4,18 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-27 — v2.138.1: the Google approval command asks about the calendar read the provider really makes
+
+- **Why.** On the first day on `CC_GOOGLE_PROVIDER=mcp` every 7-day calendar list was refused as
+  needing the operator's approval, and `python -m central_command.google_mcp_grant` reported that
+  Google had answered and never showed a question. Its `list_events` check asked for one event;
+  Google asks by what the answer would hold, and a one-event answer needed no approval. The
+  command's `get_message` check also read as `RAW`, which Google refuses for a message with an
+  attachment, so it printed an error for a tool that works.
+- **What.** The calendar check is now the provider's widest list (30 days, 250 events), so the
+  question the provider would be refused on is put to the operator. The message check reads
+  `FULL_CONTENT`. Nothing else changes: the command still never chooses and prints nothing read.
+
 ## 2026-11-26 — v2.138.0: Gmail and Google Calendar through Google's own MCP servers, as a third provider (DL-237)
 
 - **Why.** Google's Workspace AI Tools Addendum (effective 2027-02-01) requires access that an AI

@@ -87,6 +87,13 @@ def test_each_read_tool_is_called_once_and_nothing_read_is_printed(mcp):
         "list_events",
         "get_event",
     ]
+    # The calendar probe is the provider's widest list: a one-event probe
+    # passed unasked on 2026-11-27 while the real 7-day list was refused.
+    listing = next(b for b in fake.bodies() if b["params"]["name"] == "list_events")
+    assert listing["params"]["arguments"]["pageSize"] == 250
+    # Never RAW: Google refuses it for a message with an attachment.
+    reading = next(b for b in fake.bodies() if b["params"]["name"] == "get_message")
+    assert reading["params"]["arguments"]["messageFormat"] == "FULL_CONTENT"
     text = out.getvalue()
     for leaked in ("Quarterly secret", "vault code", "Board meeting", "m1", "t1", "ev1"):
         assert leaked not in text
