@@ -56,6 +56,14 @@ Moved from the root instructions; loads when a matching file is read. How a rule
   (headers of a non-RAW message, the DL-219 client event id, thread-wise
   listing, withheld threads) are listed in DL-237; `tests/test_google_mcp.py`
   pins each one.
+- **Every request to Google's MCP servers spends a DAILY quota, so a poll must
+  not repeat a request whose answer cannot have changed.** The free tier counts
+  requests per day per server, and a spent quota stops mail until Google's
+  reset (live 2026-11-27, seven hours after the switch). `_mail_list` keeps a
+  long thread's full message list keyed by what the search shows of it
+  (`_EXPANDED`); a new per-poll or per-item call on this path needs the same
+  thought. A 429 carries the quota's name and this process's request count by
+  tool (`calls_made`).
 - **Agents do not send mail on Gmail; they propose a DRAFT the operator sends**
   (DL-238). `mail.draft` (pack `mail-draft-propose`) is offered only where Gmail
   is reached through Google's MCP server (`packs._offered`; Exchange keeps

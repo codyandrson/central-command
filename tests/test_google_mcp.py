@@ -92,6 +92,8 @@ class FakeMcp:
                 "error": {"code": answer[1], "message": answer[2]},
             }
             return httpx.Response(200, json=msg)
+        if isinstance(answer, tuple) and len(answer) == 2 and isinstance(answer[1], dict):
+            return httpx.Response(answer[0], json=answer[1])
         if isinstance(answer, tuple):
             return httpx.Response(answer[0])
         return httpx.Response(200, json={"jsonrpc": "2.0", "id": body["id"], "result": answer})
@@ -156,6 +158,8 @@ def mcp(monkeypatch):
     gf.install_native(monkeypatch, token)
     fake = FakeMcp()
     gf.install(monkeypatch, fake)
+    google_mcp._EXPANDED.clear()
+    google_mcp._CALLS.clear()
     yield fake, token
     gf.reset_credentials()
 
@@ -302,6 +306,52 @@ async def test_a_thread_google_refuses_to_expand_lists_what_the_search_showed(mc
     fake.on("get_thread", tool_error("blocked", reason="AdminPolicyBlock", code=403))
     refs = await email_facade.list_refs("newer_than:1d")
     assert [r["uuid"] for r in refs] == [*(f"m2{i}" for i in range(5)), "m11"]
+
+
+async def test_a_long_thread_is_read_once_until_it_changes(mcp):
+    """The feed lists the same day every minute against a DAILY request quota
+    (429 "Daily Free Requests", live 2026-11-27): an unchanged long thread costs
+    no second `get_thread`; a new message or a changed shown message does."""
+    fake, _ = mcp
+
+    def page(count, history="h1"):
+        shown = [{"id": f"m{i}", "threadId": "t2", "historyId": "h0"} for i in range(4)]
+        shown.append({"id": "m4", "threadId": "t2", "historyId": history})
+        return ok({"threads": [{"id": "t2", "messageCount": count, "messages": shown}]})
+
+    def whole(count):
+        return ok(
+            {"id": "t2", "messages": [{"id": f"m{i}", "threadId": "t2"} for i in range(count)]}
+        )
+
+    fake.on("search_threads", page(7), page(7), page(8), page(8, "h2"))
+    fake.on("get_thread", whole(7), whole(8), whole(8))
+    first = await email_facade.list_refs("newer_than:1d")
+    again = await email_facade.list_refs("newer_than:1d")
+    assert first == again and len(first) == 7
+    assert len(fake.bodies("get_thread")) == 1
+    assert len(await email_facade.list_refs("newer_than:1d")) == 8  # a new message
+    assert len(fake.bodies("get_thread")) == 2
+    await email_facade.list_refs("newer_than:1d")  # a shown message changed
+    assert len(fake.bodies("get_thread")) == 3
+
+
+async def test_a_rate_limit_says_which_quota_and_what_was_spent(mcp):
+    fake, _ = mcp
+    said = "Quota exceeded for quota metric 'Daily Free Requests' and limit 'Requests per day' of service 'gmailmcp.googleapis.com' for consumer 'project_number:123456'."
+    body = {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "result": {"content": [{"type": "text", "text": said}], "isError": True},
+    }
+    fake.on("search_threads", (429, body))
+    with pytest.raises(email_facade.EmailFacadeError) as e:
+        await email_facade.list_refs("in:inbox")
+    text = str(e.value)
+    assert e.value.status_code == 503
+    assert "provider rate limit hit - retry later" in text
+    assert "Daily Free Requests" in text and "project_number" not in text
+    assert "search_threads 1" in text
 
 
 @pytest.mark.parametrize(

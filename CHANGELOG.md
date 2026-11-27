@@ -4,6 +4,22 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-27 — v2.139.1: the mail poll on Google's MCP server stops re-reading long threads every minute; a rate limit names its quota
+
+- **Why.** Google's free tier for its Gmail MCP server is a daily request count. Seven hours
+  after a deployment switched to it, every poll answered 429 ("Daily Free Requests") and mail
+  stopped until Google's daily reset. The error said only "provider rate limit hit".
+- **Thread reads.** A thread whose search page shows fewer messages than the thread holds was
+  read in full (`get_thread`) on every poll. The full list is now kept per process and reused
+  until the thread gains a message or a shown message changes, so an unchanged day of mail
+  costs the search alone.
+- **The error.** A 429 now carries Google's quota name and limit, and how many requests this
+  process has sent, by tool. The project Google names is left out.
+- **Not measured.** The quota was already spent when this was found, so the requests each poll
+  made were not counted against Google; the per-tool count in the next 429, if there is one,
+  is the measurement. A deployment whose mail and agent reads still exceed the daily count
+  needs a longer `CC_FEED_POLL_SECONDS` or a paid quota.
+
 ## 2026-11-27 — v2.139.0: an agent can propose a Gmail draft the operator sends; one blocked message never stops the mail poll (DL-238)
 
 - **Why.** The operator ruled on 2026-11-26 that agents do not send mail on Gmail and that a

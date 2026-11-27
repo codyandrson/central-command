@@ -106,6 +106,7 @@ import base64
 import json
 import logging
 import re
+from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime
 from email import message_from_bytes
@@ -342,6 +343,44 @@ def _client(timeout: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout, **http_client.client_kwargs())
 
 
+# Requests sent by this process, by tool. Google's free tier is a DAILY request
+# count per server (found live 2026-11-27: the Gmail server answered 429 "Daily
+# Free Requests" seven hours after the switch), and nothing else records how
+# many were spent or on what, so a 429 says it.
+_CALLS: Counter[str] = Counter()
+
+
+def calls_made() -> str:
+    """This process's request count by tool, for a rate-limit message."""
+    said = ", ".join(f"{tool} {n}" for tool, n in sorted(_CALLS.items()))
+    return f"sent since start: {said or 'none'}"
+
+
+_QUOTA = re.compile(r"quota metric '([^']{1,40})' and limit '([^']{1,40})'")
+_CONSUMER = re.compile(r"\s*for consumer '[^']*'")
+
+
+def _quota_said(resp: httpx.Response) -> str:
+    """Google's own sentence for a 429 (which quota, daily or per minute), with
+    the project it names left out. Never raises: the status is the fact."""
+    try:
+        answer = resp.json()
+        result = answer.get("result") if isinstance(answer, dict) else None
+        content = result.get("content") if isinstance(result, dict) else None
+        text = " ".join(
+            str(c.get("text") or "")
+            for c in (content if isinstance(content, list) else [])
+            if isinstance(c, dict)
+        ).strip()
+    except ValueError:
+        text = ""
+    quota = _QUOTA.search(text)
+    if quota:  # the façade keeps 200 characters of a message: the two names fit
+        return f"Google quota: {quota.group(1)}, {quota.group(2)}"
+    text = _CONSUMER.sub("", text)[:80]
+    return f"Google said: {text}" if text else "Google gave no reason"
+
+
 async def post(url: str, tool: str, arguments: dict, timeout: float, extra: dict | None = None):
     """One `tools/call` and its `result` as Google sent it, `input_required`
     included. A 401 refreshes the token once and re-sends once. Raises `_Fail`
@@ -350,6 +389,7 @@ async def post(url: str, tool: str, arguments: dict, timeout: float, extra: dict
     token = await _token()
     resp = None
     for attempt in range(2):
+        _CALLS[tool] += 1
         try:
             async with _client(timeout) as client:
                 resp = await client.post(
@@ -373,6 +413,8 @@ async def post(url: str, tool: str, arguments: dict, timeout: float, extra: dict
         )
     if not 200 <= status < 300:
         sentence = google._auth_or_rate(status, "check the Google MCP server is enabled")
+        if status == 429:
+            sentence = f"{sentence} ({_quota_said(resp)}; {calls_made()})"
         raise _Fail(sentence or f"{tool} provider call failed ({status})")
     answer = parse_answer(resp)
     error = answer.get("error")
@@ -654,6 +696,25 @@ def _thread_complete(thread: dict, messages: list) -> bool:
     return len(messages) < THREAD_SUBSET
 
 
+# A long thread's full message list, kept per process and keyed by what the
+# search page shows of it. The feed lists the same day of mail every minute, and
+# a thread whose page shows fewer messages than it holds cost one `get_thread`
+# on EVERY poll, against a daily request quota. The key changes when the thread
+# gains a message (`messageCount`) or a shown message changes (its `historyId`
+# moves on a label change), and the thread is then read again. A change to a
+# message the page does not show, with the count unchanged, is not seen until
+# then: such a message was listed when it arrived, so the feed has enrolled it.
+_EXPANDED: dict[str, tuple[tuple, list[Any]]] = {}
+_EXPANDED_MAX = 2000
+
+
+def _thread_key(thread: dict, shown: list[dict]) -> tuple:
+    return (
+        thread.get("messageCount"),
+        tuple((m.get("id"), m.get("historyId")) for m in shown),
+    )
+
+
 # A plain `in:inbox` term, not negated. A query that uses OR or braces is left
 # alone: its inbox term may be one alternative of several.
 _IN_INBOX = re.compile(r"(?<![\w:-])in:inbox(?![\w-])", re.IGNORECASE)
@@ -729,7 +790,12 @@ async def _mail_list(payload: dict, timeout: float) -> dict:
         tid = thread.get("id")
         shown = thread.get("messages")
         shown = [m for m in (shown if isinstance(shown, list) else []) if isinstance(m, dict)]
-        if not _thread_complete(thread, shown):
+        key = _thread_key(thread, shown)
+        slot = str(tid) if isinstance(tid, str) else None
+        kept = _EXPANDED.get(slot) if slot else None
+        if kept is not None and kept[0] == key:
+            shown = kept[1]
+        elif not _thread_complete(thread, shown):
             try:
                 full = await _gmail(
                     "get_thread", {"threadId": tid, "messageFormat": "METADATA_ONLY"}, timeout
@@ -749,6 +815,10 @@ async def _mail_list(payload: dict, timeout: float) -> dict:
             else:
                 got = full.get("messages")
                 shown = [m for m in (got if isinstance(got, list) else []) if isinstance(m, dict)]
+                if slot:
+                    if len(_EXPANDED) >= _EXPANDED_MAX:
+                        _EXPANDED.clear()
+                    _EXPANDED[slot] = (key, shown)
         for m in shown:
             if not _in_scope(query, m):
                 continue
