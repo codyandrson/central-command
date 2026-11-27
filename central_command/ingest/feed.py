@@ -28,17 +28,50 @@ from central_command.integrations import email_facade
 log = logging.getLogger(__name__)
 
 
+# Messages the provider would not hand over, so the warning is written once.
+_refused: set[str] = set()
+# Outage-shaped read failures in a row before a poll stops asking.
+_DOWN_AFTER = 3
+
+
 async def poll_once() -> dict:
     """One sweep: list refs → skip already-enrolled → fetch + enroll the rest.
-    Returns {refs, new, enrolled} counts."""
+    Returns {refs, new, enrolled, skipped} counts."""
     refs = await email_facade.list_refs(settings.feed_query)
     by_ledger_id = {ledger.ref_message_id(r): r for r in refs}
     known = await repo.existing_message_ids(list(by_ledger_id))
     fresh = [r for mid, r in by_ledger_id.items() if mid not in known]
 
     enrolled = 0
+    skipped = 0
+    down: Exception | None = None
+    in_a_row = 0
     for ref in fresh:
-        msg = await email_facade.get_message(ref["uuid"])
+        try:
+            msg = await email_facade.get_message(ref["uuid"])
+        except email_facade.EmailFacadeError as e:
+            # One message the provider will not hand over must not stop every
+            # poll at itself (the operator's ruling, 2026-11-27: Gmail withholds
+            # what it classes as suspicious, and a block there never breaks the
+            # feed). So the rest are still read and enrolled. The message is
+            # listed again next poll and enrolled the day the provider hands it
+            # over; the warning is written once per message per process.
+            skipped += 1
+            if ref["uuid"] not in _refused:
+                _refused.add(ref["uuid"])
+                log.warning("feed: one listed message could not be read; skipped: %s", e)
+            if is_transient(e):
+                # An outage-shaped failure is still reported once the rest have
+                # been tried, and a provider that fails this many reads in a
+                # row is down, not refusing a message: stop asking.
+                down = down or e
+                in_a_row += 1
+                if in_a_row >= _DOWN_AFTER:
+                    break
+            else:
+                in_a_row = 0
+            continue
+        in_a_row = 0
         result = await ledger.enroll_provider_message(msg)
         if result["enrolled"]:
             enrolled += 1
@@ -52,7 +85,9 @@ async def poll_once() -> dict:
                 },
                 actor="feed",
             )
-    return {"refs": len(refs), "new": len(fresh), "enrolled": enrolled}
+    if down is not None and not enrolled:
+        raise down  # nothing got through: the poll failed, and says so
+    return {"refs": len(refs), "new": len(fresh), "enrolled": enrolled, "skipped": skipped}
 
 
 class FeedPoller:

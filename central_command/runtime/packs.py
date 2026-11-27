@@ -150,7 +150,12 @@ class GatedCapability:
     # have no Gmail-façade mode and `mail.unsubscribe` reads a DKIM verdict
     # only Gmail supplies, so offering either on the wrong provider is
     # offering a guaranteed failure, and an agent handed one reasons about
-    # the mailbox instead of about the tool.
+    # the mailbox instead of about the tool. A third name, "google-mcp"
+    # (DL-238), is a REFINEMENT of "gmail": Gmail reached through Google's MCP
+    # server (`CC_GOOGLE_PROVIDER=mcp`, no Exchange). `_offered()` counts a
+    # deployment on it as on "gmail" too, so every default above still holds
+    # there; only a capability that NAMES "google-mcp" (`mail.draft`) is
+    # withheld from the rest.
     providers: tuple[str, ...] = ("gmail", "exchange")
 
 
@@ -1737,6 +1742,50 @@ PACKS: dict[str, Pack] = {
             ),
         ),
     ),
+    # mail-draft-propose (DL-238): the operator's replacement for agent mail
+    # sending on Gmail. A DRAFT lands in the operator's own Drafts and they
+    # send it personally, so it is a grant someone makes on purpose like the
+    # others, but it is reversible and sends nothing. Offered ONLY where Gmail
+    # is reached through Google's MCP server: the n8n façade and the REST client
+    # have no draft mode, and Exchange sends through `mail.send`.
+    "mail-draft-propose": Pack(
+        name="mail-draft-propose",
+        description=(
+            "Propose one email DRAFT in the operator's Gmail; they send it themselves "
+            "(Gmail through Google's MCP server only)."
+        ),
+        tool_names=("propose_mail_draft",),
+        guidance=(
+            "DRAFTING MAIL: `propose_mail_draft(subject, body, rationale)` asks the "
+            "operator to approve ONE draft in their Gmail. `to`, `cc` and `bcc` are "
+            "plain addresses (`user@example.com`, no display name); `reply_to_ref` "
+            "names the email being answered and makes the draft a reply to it; give "
+            "at least one of `to` or `reply_to_ref`. The subject and body are plain "
+            "text, no Markdown or HTML, with no attachment and no signature. NOTHING "
+            "IS SENT: the approved draft appears in the operator's Drafts, and they "
+            "open it, edit it if they like, and send it or delete it themselves. "
+            "You have no way to send mail on Gmail, and never say that you sent "
+            "something. Write it as the operator would sign it, and propose a draft "
+            "only where they would plausibly want one."
+        ),
+        capabilities=(
+            GatedCapability(
+                name="mail.draft",
+                providers=("google-mcp",),
+                arguments=(
+                    "{'to'?: ['<address>'], 'cc'?: ['<address>'], 'bcc'?: ['<address>'], "
+                    "'subject': '<subject>', 'body': '<the whole message, plain text>', "
+                    "'reply_to'?: '<pinned by the tool>'} (a `to` or a `reply_to` is required)"
+                ),
+                notes=(
+                    "target_ref = {'system': 'mailbox', 'id': '<the recipients>'}, "
+                    "reversibility = 'reversible'. You write `to`, `subject`, `body` and "
+                    "optionally `cc` and `bcc`; the tool resolves `reply_to_ref` to a "
+                    "message and pins its provider uuid as `reply_to`."
+                ),
+            ),
+        ),
+    ),
     "mail-file-propose": Pack(
         name="mail-file-propose",
         description="Propose filing one email into a mailbox folder (Exchange mailboxes only).",
@@ -2616,6 +2665,8 @@ TOOL_PROVIDERS: dict[str, tuple[str, ...]] = {
     "propose_unsubscribe": ("gmail",),
     "propose_mail_send": ("exchange",),
     "propose_mail_move": ("exchange",),
+    # Gmail through Google's MCP server only (DL-238): see `_provider_names`.
+    "propose_mail_draft": ("google-mcp",),
 }
 
 
@@ -2625,6 +2676,17 @@ def _provider() -> str:
     from central_command.integrations import exchange
 
     return "exchange" if exchange.configured() else "gmail"
+
+
+def _provider_names() -> frozenset[str]:
+    """Every provider name this deployment answers to: its mail provider, plus
+    "google-mcp" when that provider is Gmail reached through Google's MCP server
+    (`CC_GOOGLE_PROVIDER=mcp`; a configured Exchange still wins, as it does in
+    the façades). A capability is offered when it names ANY of them."""
+    provider = _provider()
+    if provider == "gmail" and _settings.google_provider == "mcp":
+        return frozenset({provider, "google-mcp"})
+    return frozenset({provider})
 
 
 def _offered(pack: Pack) -> tuple[tuple[str, ...], tuple[GatedCapability, ...]]:
@@ -2643,14 +2705,16 @@ def _offered(pack: Pack) -> tuple[tuple[str, ...], tuple[GatedCapability, ...]]:
     validity check must keep telling those two apart.
     """
     flavor = _settings.jira_api_flavor or "cloud"
-    provider = _provider()
+    providers = _provider_names()
     tools = tuple(
         t
         for t in pack.tool_names
         if flavor in TOOL_FLAVORS.get(t, ("cloud", "server"))
-        and provider in TOOL_PROVIDERS.get(t, ("gmail", "exchange"))
+        and providers & set(TOOL_PROVIDERS.get(t, ("gmail", "exchange")))
     )
-    caps = tuple(c for c in pack.capabilities if flavor in c.flavors and provider in c.providers)
+    caps = tuple(
+        c for c in pack.capabilities if flavor in c.flavors and providers & set(c.providers)
+    )
     return tools, caps
 
 
@@ -2769,6 +2833,10 @@ NON_ADVISORY_TOOLS = frozenset(
         # asked a question.
         "propose_mail_send",
         "propose_mail_move",
+        # A draft is the same surface and the same deliberate grant (DL-238): a
+        # consulted specialist answers a question, it does not leave drafts in
+        # the operator's mailbox mid-answer.
+        "propose_mail_draft",
         # The note store (DL-217): a consulted specialist answers a question; it
         # does not take standing notes mid-answer. Its session is the asker's
         # sub-run, whose prompt is another agent's words, so a quote grounded there

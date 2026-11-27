@@ -159,6 +159,10 @@ async def test_an_unfaked_jira_approval_lands_failed_as_unconfigured(connects):
     "capability, arguments",
     [
         ("mail.send", {"to": "dana@example.com", "subject": "Hi", "body": "Hello"}),
+        # A draft on a deployment that is not on Google's MCP servers refuses
+        # as semantic (DL-238); with the MCP provider the guard holds the
+        # credentials at nothing, so it could not reach Google either.
+        ("mail.draft", {"to": ["dana@example.com"], "subject": "Hi", "body": "Hello"}),
         (
             "calendar.create_event",
             {"title": "Sync", "start": "2026-11-02T10:00:00Z", "end": "2026-11-02T10:30:00Z"},

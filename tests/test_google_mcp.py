@@ -280,6 +280,30 @@ async def test_list_follows_pages_reads_long_threads_and_dedupes(mcp):
     }
 
 
+async def test_a_thread_google_refuses_to_expand_lists_what_the_search_showed(mcp):
+    """A block by Gmail never stops the poll (the operator, 2026-11-27): the
+    refused thread's shown messages are listed and the other thread is whole."""
+    fake, _ = mcp
+    fake.on(
+        "search_threads",
+        ok(
+            {
+                "threads": [
+                    {
+                        "id": "t2",
+                        "messageCount": 7,
+                        "messages": [{"id": f"m2{i}", "threadId": "t2"} for i in range(5)],
+                    },
+                    {"id": "t1", "messageCount": 1, "messages": [{"id": "m11", "threadId": "t1"}]},
+                ]
+            }
+        ),
+    )
+    fake.on("get_thread", tool_error("blocked", reason="AdminPolicyBlock", code=403))
+    refs = await email_facade.list_refs("newer_than:1d")
+    assert [r["uuid"] for r in refs] == [*(f"m2{i}" for i in range(5)), "m11"]
+
+
 @pytest.mark.parametrize(
     ("query", "kept"),
     [
@@ -687,6 +711,197 @@ async def test_report_spam_marks_the_message_and_answers_the_envelope(mcp):
         "label_ids": [],
     }
     assert fake.bodies()[0]["params"]["arguments"] == {"messageId": "m1"}
+
+
+# --- mail: the draft (DL-238) ---------------------------------------------------
+
+DRAFT = {
+    "id": "r-8821",
+    "messageId": "18c0ffee",
+    "threadId": "18c0ffee00aa0000",
+    "viewUrl": "https://mail.google.com/mail/u/0/#drafts/18c0ffee",
+    "subject": "Thursday",
+}
+
+
+async def test_a_draft_is_created_with_plain_text_arguments_only_and_never_sent(mcp):
+    fake, _ = mcp
+    fake.on("create_draft", ok(DRAFT))
+    out = await email_facade.draft(
+        to=["jane.doe@example.com"],
+        subject="Thursday",
+        body="Thursday works for me.",
+        cc=["john.rivers@example.com"],
+        bcc=["dana.doe@example.com"],
+        reply_to="18c0ffee00aa1111",
+    )
+    assert out == {
+        "kind": "email",
+        "mode": "draft",
+        "ok": True,
+        "draft_id": "r-8821",
+        "thread_id": "18c0ffee00aa0000",
+        "view_url": "https://mail.google.com/mail/u/0/#drafts/18c0ffee",
+    }
+    [body] = fake.bodies()
+    assert body["params"]["name"] == "create_draft"
+    # Exactly the pinned fields: no htmlBody, no attachments, no includeSignature
+    # (Google's default for the signature is left alone), and the reply target is
+    # Google's `replyToMessageId`.
+    assert body["params"]["arguments"] == {
+        "subject": "Thursday",
+        "body": "Thursday works for me.",
+        "to": ["jane.doe@example.com"],
+        "cc": ["john.rivers@example.com"],
+        "bcc": ["dana.doe@example.com"],
+        "replyToMessageId": "18c0ffee00aa1111",
+    }
+    assert fake.requests[0].headers["mcp-name"] == "create_draft"
+    assert str(fake.requests[0].url) == GMAIL_MCP
+
+
+async def test_a_reply_with_no_recipient_omits_to_and_a_new_mail_omits_the_reply_target(mcp):
+    fake, _ = mcp
+    fake.on("create_draft", ok(DRAFT))
+    await email_facade.draft(to=[], subject="Re: Thursday", body="Yes.", reply_to="m1")
+    await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    first, second = (b["params"]["arguments"] for b in fake.bodies())
+    assert first == {"subject": "Re: Thursday", "body": "Yes.", "replyToMessageId": "m1"}
+    assert second == {"subject": "Hi", "body": "Hello.", "to": ["jane.doe@example.com"]}
+
+
+async def test_no_send_tool_is_ever_called_and_the_draft_touches_one_tool_only(mcp):
+    fake, _ = mcp
+    fake.on("create_draft", ok(DRAFT))
+    await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    names = {b["params"]["name"] for b in fake.bodies()}
+    assert names == {"create_draft"}
+    assert not names & {"send_message", "reply"}
+
+
+def test_no_code_path_names_a_send_tool():
+    """`send_message` and `reply` send mail immediately. They exist in Google's
+    schema and are referenced in prose only: no string in the client or the grant
+    command is one of them."""
+    import ast
+    import inspect
+
+    from central_command import google_mcp_grant
+
+    for module in (google_mcp, google_mcp_grant):
+        tree = ast.parse(inspect.getsource(module))
+        names = {
+            n.value
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        }
+        assert not names & {"send_message", "reply", "sendMessage"}, module.__name__
+
+
+async def test_a_draft_google_wants_approved_is_refused_naming_the_grant_command(mcp):
+    fake, _ = mcp
+    fake.on("create_draft", INPUT_REQUIRED)
+    with pytest.raises(email_facade.EmailFacadeError) as e:
+        await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    assert e.value.status_code == 422 and not is_down(e.value)
+    assert "create_draft" in str(e.value) and "google_mcp_grant" in str(e.value)
+    assert classify_failure(e.value) == "semantic"
+    assert len(fake.requests) == 1, "an approval is never answered, so no second request"
+    assert "inputResponses" not in fake.bodies()[0]["params"]
+
+
+async def test_a_draft_answered_without_an_id_is_a_refusal_not_a_retry(mcp):
+    fake, _ = mcp
+    fake.on("create_draft", ok({"threadId": "t1"}))
+    with pytest.raises(email_facade.EmailFacadeError, match="Drafts folder") as e:
+        await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    assert e.value.status_code == 422 and classify_failure(e.value) == "semantic"
+    assert len(fake.requests) == 1
+
+
+async def test_a_draft_a_tool_error_or_a_transport_failure_is_the_outage_class(mcp):
+    fake, _ = mcp
+    fake.on("create_draft", tool_error("Internal error.", code=500))
+    with pytest.raises(email_facade.EmailFacadeError) as down:
+        await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    fake.on("create_draft", httpx.ConnectError("boom"))
+    with pytest.raises(email_facade.EmailFacadeError) as lost:
+        await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    for e in (down.value, lost.value):
+        assert e.status_code == 503 and is_down(e)
+
+
+async def test_a_denied_draft_is_a_refusal(mcp):
+    fake, _ = mcp
+    fake.on("create_draft", tool_error("The user declined the confirmation request."))
+    with pytest.raises(email_facade.EmailFacadeError) as e:
+        await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    assert e.value.status_code == 422 and not is_down(e.value)
+
+
+async def test_a_create_retried_after_a_lost_answer_can_land_twice_and_nothing_looks_for_the_first(
+    mcp,
+):
+    """The accepted gap (DL-238), the draft's twin of `create_event` (DL-237):
+    Google's `create_draft` takes no client id, so a create whose answer was lost
+    is created again by the retry. Nothing reads the Drafts folder first: that
+    would be the similarity guess DL-219 forbids."""
+    fake, _ = mcp
+    fake.on("create_draft", httpx.ReadTimeout("lost"), ok(DRAFT))
+    with pytest.raises(email_facade.EmailFacadeError) as first:
+        await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    assert is_down(first.value)
+    out = await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    assert out["draft_id"] == "r-8821"
+    assert [b["params"]["name"] for b in fake.bodies()] == ["create_draft", "create_draft"]
+    args = [b["params"]["arguments"] for b in fake.bodies()]
+    assert args[0] == args[1], "no client id or marker distinguishes the two requests"
+
+
+@pytest.mark.parametrize(
+    "draft",
+    [
+        {"subject": "Hi", "body": "Hello."},
+        {"to": ["Jane <jane.doe@example.com>"], "subject": "Hi", "body": "Hello."},
+        {"to": ["jane.doe@example.com"], "subject": "Hi", "body": "Hello.", "htmlBody": "<b>x</b>"},
+        {"to": ["jane.doe@example.com"], "subject": "Hi", "body": "Hello.", "attachments": []},
+        {"to": ["jane.doe@example.com"], "subject": "Hi", "body": "Hello.", "reply_to": "a b"},
+    ],
+)
+async def test_a_draft_the_shared_rules_refuse_sends_no_request(mcp, draft):
+    from central_command.integrations import google_mcp
+
+    fake, _ = mcp
+    with pytest.raises(google_mcp.GoogleError) as e:
+        await google_mcp.mail_request({"mode": "draft", "draft": draft})
+    assert e.value.status_code == 422 and fake.requests == []
+
+
+@pytest.mark.parametrize("provider", ["n8n", "native"])
+async def test_a_draft_is_refused_clearly_on_the_other_google_providers(mcp, monkeypatch, provider):
+    fake, _ = mcp
+    monkeypatch.setattr(settings, "google_provider", provider)
+    with pytest.raises(email_facade.EmailFacadeError, match="CC_GOOGLE_PROVIDER=mcp") as e:
+        await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    assert classify_failure(e.value) == "semantic" and not is_down(e.value)
+    assert fake.requests == []
+
+
+async def test_a_draft_is_refused_on_exchange_even_when_mcp_is_selected(mcp, monkeypatch):
+    fake, _ = mcp
+    monkeypatch.setattr(settings, "exchange_url", "https://mail.corp.example/ews/exchange.asmx")
+    monkeypatch.setattr(settings, "exchange_username", "operator@corp.example")
+    monkeypatch.setattr(settings, "exchange_password", "secret")
+    with pytest.raises(email_facade.EmailFacadeError, match="CC_GOOGLE_PROVIDER=mcp"):
+        await email_facade.draft(to=["jane.doe@example.com"], subject="Hi", body="Hello.")
+    assert fake.requests == []
+
+
+async def test_the_rest_client_has_no_draft_mode(mcp, monkeypatch):
+    """google.py mirrors the shipped workflow, which has no draft mode, and its
+    validator must keep refusing one: the draft is served by the MCP client only."""
+    with pytest.raises(google._MailFail, match="bad or missing mode 'draft'"):
+        google._validate_mail({"mode": "draft"})
 
 
 # --- the token and the outage class --------------------------------------------

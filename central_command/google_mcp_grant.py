@@ -20,8 +20,8 @@ Google's preview of the action (`params.message`, which can quote mail); only
 the tool, Google's question (`approval_choice.title`), the choices, and what
 kind of answer came back. No token or secret is printed.
 
-The WRITE tools (`mark_message_spam`, `create_event`, `update_event`,
-`delete_event`) are listed, not called: Google asks for them at first use, and
+The WRITE tools (`mark_message_spam`, `create_draft`, `create_event`,
+`update_event`, `delete_event`) are listed, not called: Google asks for them at first use, and
 that first write fails with the refusal. `--tool <name>` then asks Google about
 that one tool WITHOUT a write: the call is aimed at a target that does not
 exist (a message id or event id no mailbox holds, a calendar id under the
@@ -59,6 +59,14 @@ NO_CALENDAR = "cc-grant-probe@example.invalid"
 READS = (*google_mcp.GMAIL_READS, *google_mcp.CALENDAR_READS)
 WRITES = (*google_mcp.GMAIL_WRITES, *google_mcp.CALENDAR_WRITES)
 
+# A write whose probe is not known to be harmless says so before it is sent.
+WRITE_WARNINGS = {
+    "create_draft": (
+        "an empty draft may appear in your Gmail Drafts folder if Google creates it before "
+        "it checks the reply target; it can be deleted there. Nothing is sent."
+    ),
+}
+
 
 def _url(server: str) -> str:
     return settings.google_mcp_gmail_url if server == GMAIL else settings.google_mcp_calendar_url
@@ -73,6 +81,13 @@ def _write_probe(tool: str) -> dict:
     now = datetime.now(UTC).replace(microsecond=0)
     return {
         "mark_message_spam": {"messageId": NO_MESSAGE},
+        # No `to`: the draft would go nowhere, and the reply target is a
+        # message no mailbox holds. Plain text, as the provider sends it.
+        "create_draft": {
+            "replyToMessageId": NO_MESSAGE,
+            "subject": "Central Command approval probe",
+            "body": "Central Command approval probe. Nothing is sent; delete this draft.",
+        },
         "create_event": {
             "calendarId": NO_CALENDAR,
             "summary": "Central Command approval probe",
@@ -264,6 +279,8 @@ async def _grant(tools: list[str], s: _Session) -> None:
             )
     for tool in (t for t in tools if t in WRITES):
         s.say(f"{tool}: asking Google about a call aimed at a target that does not exist")
+        if tool in WRITE_WARNINGS:
+            s.say(f"{tool}: NOTE: {WRITE_WARNINGS[tool]}")
         await s.probe(tool, _write_probe(tool))
     if not tools:
         s.say(

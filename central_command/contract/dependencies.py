@@ -298,7 +298,7 @@ CAPABILITY_DEPENDENCY: dict[str, tuple[str, ...]] = {
     **_each(
         (N8N,),
         "mail.create_rule mail.report_spam mail.unsubscribe mail.send "
-        "mail.move email.list_refs email.get_message email.get_attachment",
+        "mail.draft mail.move email.list_refs email.get_message email.get_attachment",
     ),
     **_each(
         (LITELLM,),

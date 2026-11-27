@@ -339,5 +339,6 @@ must stand on its own; the cite names where the operator's ruling is filed.
 | DL-235 | The mail and calendar clients' packages are extras the `.env` selects; pgweb logs in as a read-only role | active | 2026-11-23 | test: `tests/test_provider_extras.py::test_the_table_names_exactly_what_each_extra_declares` (+8 more) | [process.md](process.md) |
 | DL-236 | The sandbox reaches the internet and no private address range | active | 2026-11-25 | test: `tests/test_sandbox_isolation.py::test_the_sandbox_reaches_the_internet_and_no_private_range` (+1 more) | [process.md](process.md) |
 | DL-237 | Gmail and Google Calendar can be reached through Google's own MCP servers; Google's approval questions are the operator's to answer | active | 2026-11-26 | test: `tests/test_google_mcp.py::test_every_call_sends_the_headers_and_meta_google_requires` (+21 more) | [process.md](process.md) |
+| DL-238 | On Gmail an agent proposes a draft and the operator sends it; the draft is created through Google's MCP server | active | 2026-11-27 | test: `tests/test_mail_draft.py::test_a_draft_is_proposed_reversible_with_what_the_operator_reads` (+19 more) | [process.md](process.md) |
 
 <!-- END GENERATED INDEX -->

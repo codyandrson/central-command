@@ -69,6 +69,7 @@ PROPOSE_TOOLS = frozenset(
         "propose_report_spam",
         "propose_unsubscribe",
         "propose_mail_send",
+        "propose_mail_draft",
         "propose_mail_move",
         "propose_delete_episode",
     }

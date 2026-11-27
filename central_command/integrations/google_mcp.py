@@ -22,7 +22,8 @@ normaliser writes "absent", and the gap is recorded in DL-237:
   tool, so the mode is a 422 refusal and the file is named "not read" with the
   reason (`ingest/mail_attachments.py` treats a mailbox NO as a record). Mail
   send never reaches this module: `email_facade.send` refuses on every Gmail
-  path before any provider is asked.
+  path before any provider is asked, and the send tools (`send_message`,
+  `reply`) are never called anywhere.
 - `message`: read as `RAW` MIME and normalised by the standard library's
   `email` parser into the shape `normalize_message` reads. Google refuses RAW
   for a message with attachments or other non-body parts; that message is read
@@ -46,6 +47,13 @@ normaliser writes "absent", and the gap is recorded in DL-237:
   warning level, because anyone can send such a mail and a refusal would let
   one message stop every poll.
 - `report_spam`: `mark_message_spam` answers no labels, so `label_ids` is [].
+- mail `draft` (DL-238): `create_draft`, plain text only (`body`, never
+  `htmlBody`, `attachments` or `includeSignature`), the one mail write this
+  provider alone offers. Nothing is sent: the operator opens the draft in Gmail
+  and sends it personally. Like `create_event`, the tool takes no client-chosen
+  id, so a create retried after a lost answer can leave two drafts and nothing
+  here looks for a similar one (the DL-219 rule again); the second is the
+  operator's to delete.
 - calendar `create_event`: `create_event` takes no client-chosen event id, so
   the DL-219 duplicate check (Google's 409 on our id, read back as
   `already_existed`) cannot be made, and a read before the create would be the
@@ -98,6 +106,7 @@ import base64
 import json
 import logging
 import re
+from contextlib import contextmanager
 from datetime import datetime
 from email import message_from_bytes
 from email.header import decode_header, make_header
@@ -109,6 +118,7 @@ import httpx
 
 from central_command import __version__
 from central_command.config import settings
+from central_command.contract.args import validate_action_args
 from central_command.integrations import google
 from central_command.integrations import http as http_client
 from central_command.integrations.google import (
@@ -141,7 +151,7 @@ CONSENT_COMMAND = "python -m central_command.google_consent"
 # The tools this provider calls, by server. The grant command probes the reads
 # and names the writes (`google_mcp_grant.py`).
 GMAIL_READS = ("search_threads", "get_thread", "get_message")
-GMAIL_WRITES = ("mark_message_spam",)
+GMAIL_WRITES = ("mark_message_spam", "create_draft")
 CALENDAR_READS = ("list_events", "get_event")
 CALENDAR_WRITES = ("create_event", "update_event", "delete_event")
 
@@ -720,11 +730,25 @@ async def _mail_list(payload: dict, timeout: float) -> dict:
         shown = thread.get("messages")
         shown = [m for m in (shown if isinstance(shown, list) else []) if isinstance(m, dict)]
         if not _thread_complete(thread, shown):
-            full = await _gmail(
-                "get_thread", {"threadId": tid, "messageFormat": "METADATA_ONLY"}, timeout
-            )
-            got = full.get("messages")
-            shown = [m for m in (got if isinstance(got, list) else []) if isinstance(m, dict)]
+            try:
+                full = await _gmail(
+                    "get_thread", {"threadId": tid, "messageFormat": "METADATA_ONLY"}, timeout
+                )
+            except _Fail as e:
+                if not e.refusal:
+                    raise
+                # Google refused THIS thread (the operator's ruling, 2026-11-27:
+                # a block by Gmail never stops the poll). The messages the
+                # search page showed are listed; the rest of the thread is not.
+                log.warning(
+                    "google mcp: list: Google refused one thread's full read (%s); "
+                    "listing the %d message(s) the search showed",
+                    type(e).__name__,
+                    len(shown),
+                )
+            else:
+                got = full.get("messages")
+                shown = [m for m in (got if isinstance(got, list) else []) if isinstance(m, dict)]
         for m in shown:
             if not _in_scope(query, m):
                 continue
@@ -769,19 +793,59 @@ _ATTACHMENT_REFUSED = (
 )
 
 
-async def _mail(payload: dict, timeout: float) -> dict:
+def _draft_arguments(draft: dict) -> dict:
+    """`create_draft`'s arguments for a draft the Executor pinned: recipients
+    only when there are some, `replyToMessageId` for the mail being answered,
+    and nothing else. Plain text only: no `htmlBody`, no `attachments`, and no
+    `includeSignature`, so Google's own default for the signature stands."""
+    arguments: dict[str, Any] = {"subject": draft["subject"], "body": draft["body"]}
+    for key in ("to", "cc", "bcc"):
+        if draft.get(key):
+            arguments[key] = list(draft[key])
+    if draft.get("reply_to"):
+        arguments["replyToMessageId"] = draft["reply_to"]
+    return arguments
+
+
+async def _mail_draft(payload: dict, timeout: float) -> dict:
+    """mode `draft`: `create_draft`. Executor-only, after approval. The shape
+    is checked again from the ONE list both tiers use (`contract.ARG_SPECS`)
+    before any request, so a draft this client would not have asked for is a
+    refusal, never a call. An approval Google asks for is `_ApprovalNeeded`,
+    never answered here. The answer must carry the draft's id: without it the
+    draft cannot be found, and a retry would make a second one, so that is a
+    refusal (it lands FAILED for the operator to look at), not an outage."""
+    draft = payload.get("draft")
+    draft = draft if isinstance(draft, dict) else {}
+    problems = validate_action_args("mail.draft", draft)
+    if problems:
+        raise _Fail("; ".join(problems)[:300], refusal=True)
+    data = await _gmail("create_draft", _draft_arguments(draft), timeout)
+    draft_id = data.get("id")
+    if not google._id_ok(draft_id):
+        raise _Fail(
+            "create_draft answered without a usable draft id - look in Gmail's Drafts folder "
+            "before drafting again",
+            refusal=True,
+        )
+    return {
+        "kind": "email",
+        "mode": "draft",
+        "ok": True,
+        "draft_id": str(draft_id),
+        "thread_id": data.get("threadId") or "",
+        "view_url": data.get("viewUrl") or "",
+    }
+
+
+@contextmanager
+def _mail_failures(what: Any):
+    """The mail path's failure mapping, shared by every mode: google.py's
+    stated refusals (422/503 by its regex list), a token that cannot be had
+    (503), this module's `_Fail` (422 a refusal, 503 otherwise) and anything
+    else (503, the exception's type only)."""
     try:
-        ref = google._validate_mail(payload)
-        mode = payload["mode"]
-        if mode == "message":
-            return await _mail_message(payload, ref, timeout)
-        if mode == "list":
-            return await _mail_list(payload, timeout)
-        if mode == "report_spam":
-            return await _mail_report_spam(payload, ref, timeout)
-        if mode == "attachment":
-            raise _Fail(_ATTACHMENT_REFUSED, refusal=True)
-        raise _Fail(f"mode '{mode}' is not served by the MCP client")
+        yield
     except google._MailFail as e:
         message = str(e)[:500]
         raise GoogleError(message, status_code=google._mail_status(message)) from None
@@ -796,9 +860,24 @@ async def _mail(payload: dict, timeout: float) -> dict:
         ) from e.__cause__
     except Exception as e:
         raise GoogleError(
-            (_MAIL_PREFIX + f"{payload.get('mode')} failed: {type(e).__name__}")[:500],
+            (_MAIL_PREFIX + f"{what} failed: {type(e).__name__}")[:500],
             status_code=503,
         ) from e
+
+
+async def _mail(payload: dict, timeout: float) -> dict:
+    with _mail_failures(payload.get("mode")):
+        ref = google._validate_mail(payload)
+        mode = payload["mode"]
+        if mode == "message":
+            return await _mail_message(payload, ref, timeout)
+        if mode == "list":
+            return await _mail_list(payload, timeout)
+        if mode == "report_spam":
+            return await _mail_report_spam(payload, ref, timeout)
+        if mode == "attachment":
+            raise _Fail(_ATTACHMENT_REFUSED, refusal=True)
+        raise _Fail(f"mode '{mode}' is not served by the MCP client")
 
 
 async def mail_request(payload: dict, timeout: float = 60.0) -> dict:
@@ -806,6 +885,11 @@ async def mail_request(payload: dict, timeout: float = 60.0) -> dict:
     MCP server: the envelope, or a `GoogleError` (422 refusal, 503 failure)."""
     if missing_settings():
         raise NotConfigured(", ".join(missing_settings()))
+    if payload.get("mode") == "draft":
+        # Not one of google.py's modes (the shipped workflow has no draft mode,
+        # and its validator must keep matching it), so it is served here only.
+        with _mail_failures("draft"):
+            return await _mail_draft(payload, timeout)
     return await _mail(payload, timeout)
 
 

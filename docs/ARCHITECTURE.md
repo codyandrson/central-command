@@ -130,7 +130,7 @@ Rows for the same package are grouped by what the modules are for.
 | Package | Tier | Creds | What it is | Modules and key seams | Rules |
 |---|---|---|---|---|---|
 | `api/` | ② | DSN, bolt, speech key | The FastAPI app: JSON API, SSE stream, the cockpit's WebSocket gateway, the orchestration driver, updates, systems launchpad, attachments, speech, the readiness self-check | `app.py` (assembly), `routes.py`, `nerve_gateway.py` (`/ws`), `orchestration.py`, `backstops.py`, `hold.py`, `update.py`, `systems.py`, `attachments.py` (the cap is `settings.attachment_max_bytes`, `CC_ATTACHMENT_MAX_BYTES`, default 50 MiB, read at call time; a validator refuses a cap whose base64 size would pass the transport ceiling `config.WS_MAX_SIZE_BYTES`, the `--ws-max-size` both API launchers, the k3s unit and the single-node `boot.sh`, pass uvicorn), `speech.py`, `selfcheck.py` (`GET /api/selfcheck`, `POST /api/selfcheck/run`) | [cockpit](../.claude/rules/cockpit.md), [runtime-resilience](../.claude/rules/runtime-resilience.md) |
-| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (111 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `rerun.py` (`rerun_session`, `eligibility`), `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
+| `gateway/` | ② | **write** (via Executor) | The trust boundary: the one approval seam, the Executor, the capability registry (112 capabilities, each declaring its `default_gate` — `human`, `auditor` (only `work.bulk_dismiss`, the class a graduated auditor may confirm; no behaviour change) or `none` — as a column in code, never a table), the dismissal auditor, the graph auditor, deterministic policy checks, agreement records, wiki-claims capture | `gateway.py` (`approve_and_execute`, `reject_with_feedback`, `dismiss_proposal`, `retry_execution`), `executor.py` (`execute`), `capabilities.py` (`REGISTRY`), `auditor.py` (`audit_dismissal`), `graph_auditor.py`, `overrides.py` (`author`, `revoke`, `resolve`, `decide_on_park`, `decide_landed`, `override_sweep`, `PARK_SITES`, `scope_covers`, `validate_scope`, `scope_text`), `policy.py`, `rerun.py` (`rerun_session`, `eligibility`), `steward_agreement.py`, `wiki_claims.py` | [AGENTS.md](../AGENTS.md) |
 | `runtime/` | ③ | **read only** | The seams every run passes through: model resolution, tool surface, durable pause/resume, proposals, questions | `models.py` (`resolve_model`), `packs.py` (`toolset_for`), `tools.py` (the `propose_*` and read tools, and `create_task` — the one direct trigger tool, holding no credential: it reaches `routes.create_and_run_task` by a function-scoped import), `durable.py` (`proposal_from_call`), `session_recall.py` (the episodic-recall index and `search_my_sessions`' four shapes), `notes.py` (the note store's one rendering seam `standing_sections` and the `propose_note` / `propose_note_retire` builders, DL-217), `proposals.py` (`park_proposal`), `run.py` (`run_task`, `run_coach`), `agent.py` (`build_agent_for`, resume only), `deps.py`, `questions.py`, `resume_park.py`, `skills.py`, `spike_model.py` (the deterministic per-agent doubles `resolve_model` swaps in under `settings.test_model`, which only the test suite sets; first built for the M2 spike) | [runtime-resilience](../.claude/rules/runtime-resilience.md), [models](../.claude/rules/models.md) |
 | `runtime/` | ③ | **read only** | Conversations and teamwork: operator conversations, consults, discussions, reflection, the attention budget, accountability check-ins, first-run tour | `converse.py`, `consult.py`, `discussions.py`, `reflection.py`, `attention.py`, `accountability.py`, `tour.py`, `context.py` (context-window pressure) | [runtime-resilience](../.claude/rules/runtime-resilience.md) |
 | `runtime/` | ③ | **read only** | The roster as data: how an agent joins the team, hire templates, the update hold flag | `roster.py`, `hiring.py`, `templates.py`, `hold.py` | [AGENTS.md](../AGENTS.md) |
@@ -1484,7 +1484,12 @@ a `mail.send` or `calendar.create_event` proposal already shows every
 recipient or attendee, and nothing edits it between approval and execution, so
 the approval gate IS the explicit second step. `mail.send` and `mail.move`
 (Exchange-only) stay as built, dormant and granted to no agent; there is no
-draft step, no separate invitation step and no mail trash.
+separate invitation step and no mail trash. The one draft step is Gmail's, and it
+is the replacement for sending there: `mail.draft` (DL-238, pack
+`mail-draft-propose`, offered only on `CC_GOOGLE_PROVIDER=mcp` with no Exchange,
+through `packs._offered`) is a reversible gated write whose Executor creates one
+plain-text draft in the operator's Gmail with Google's `create_draft`, and the
+operator sends it personally; no send tool of Google's is called anywhere.
 
 - **Jira issue types come from the instance.** `jira_list_issue_types
   (project_key)` (the `jira-read` pack on both flavours; Cloud v3 and Data
@@ -1536,7 +1541,15 @@ draft step, no separate invitation step and no mail trash.
   (bulk dismiss refuses a match it cannot pin; an inbox query leaves out what
   is not in the inbox), and mail Google filters as suspicious is not listed
   (logged at warning level; only a missing approval refuses the page). The list of gaps is
-  DL-237.
+  DL-237. The one mail write this provider adds is `create_draft` (DL-238):
+  `email_facade.draft` sends a `draft` payload that only `google_mcp` serves (the
+  REST client and the shipped workflow have no such mode), the shape is the
+  `mail.draft` entry of `contract.ARG_SPECS`, and the answer's draft id, thread id
+  and view URL go into the Executor's result line. The tool takes no client id,
+  so a create retried after a lost answer can leave two drafts (accepted, as for
+  `create_event`: no look-up for a similar one, which DL-219 forbids). The grant
+  command can ask about it by name (`--tool create_draft`) and says an empty draft
+  may appear before it sends that probe.
 - **The provider clients' packages are extras the `.env` selects** (DL-235).
   `exchangelib` is the `exchange` extra and the Google libraries the `google`
   extra; each is imported only inside its provider's modules. The installers

@@ -755,6 +755,42 @@ async def _mail_send(args: dict, approver: str, proposer: str | None) -> str:
     )
 
 
+async def _mail_draft(args: dict, approver: str, proposer: str | None) -> str:
+    # A DRAFT in the operator's Gmail, never a send (DL-238): the proposal
+    # pinned every recipient and the whole body, and the operator opens the
+    # draft in Gmail and sends it personally. `reply_to` names a MESSAGE the
+    # tool resolved, and goes to Google as its `replyToMessageId`.
+    #
+    # Google's create_draft takes no client-chosen id, so a create whose answer
+    # was lost can land twice, exactly as the MCP provider's calendar create
+    # can (DL-237): the action key is deliberately not used, and no look-up for
+    # a similar draft is made, because that would be the similarity guess
+    # DL-219 forbids. The second draft is the operator's to delete.
+    to = list(args.get("to") or [])
+    cc = list(args.get("cc") or [])
+    bcc = list(args.get("bcc") or [])
+    reply_to = args.get("reply_to") or ""
+    out = await email_facade.draft(
+        to=to,
+        subject=args["subject"],
+        body=args["body"],
+        cc=cc,
+        bcc=bcc,
+        reply_to=reply_to or None,
+    )
+    # The result line is the record, and a draft's body is not in it.
+    return (
+        f"Gmail draft created, NOT sent: to {', '.join(to) or 'the sender of the mail it answers'}"
+        + (f" (cc {', '.join(cc)})" if cc else "")
+        + (f" (bcc {', '.join(bcc)})" if bcc else "")
+        + f" — subject {args['subject']!r}"
+        + (f", in reply to {reply_to}" if reply_to else "")
+        + f"; draft id {out['draft_id']}"
+        + (f", thread {out['thread_id']}" if out.get("thread_id") else "")
+        + (f", open it at {out['view_url']}" if out.get("view_url") else "")
+    )
+
+
 async def _mail_move(args: dict, approver: str, proposer: str | None) -> str:
     # The folder is re-resolved from the mailbox rather than trusted as
     # written: a proposal can arrive by API naming a folder that does not
@@ -3256,6 +3292,7 @@ HANDLERS = {
     "mail.report_spam": _mail_report_spam,
     "mail.unsubscribe": _mail_unsubscribe,
     "mail.send": _mail_send,
+    "mail.draft": _mail_draft,
     "mail.move": _mail_move,
     "mail.create_rule": _mail_create_rule,
     "catalog.tag": _catalog_tag,

@@ -3379,6 +3379,105 @@ async def propose_mail_send(
     raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
 
 
+async def propose_mail_draft(
+    ctx: RunContext,
+    subject: str,
+    body: str,
+    rationale: str,
+    to: list[str] | None = None,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    reply_to_ref: str = "",
+) -> str:
+    """Propose ONE email DRAFT in the operator's Gmail. Once approved, the
+    control plane creates exactly the recipients, subject and body pinned here
+    as a draft in the operator's Drafts folder. NOTHING IS SENT: the operator
+    opens the draft in Gmail, reads it, and sends it themselves or deletes it.
+    You never touch the mailbox yourself, and nothing is edited between
+    approval and the draft being made.
+
+    `to`, `cc` and `bcc` are plain email addresses (`user@example.com`, no
+    display name). `subject` and `body` are the whole message in PLAIN TEXT, no
+    Markdown and no HTML, written as the operator would sign it; there are no
+    attachments and no signature. `rationale` is one sentence for the operator:
+    why this draft is worth their time. `reply_to_ref` names an email to answer
+    (work-item id `wi_…`, Message-ID, or the provider uuid mail_read shows);
+    the draft is made as a reply to THAT message. Give at least one of `to` or
+    `reply_to_ref`.
+
+    Reversible and private: the draft sits in the operator's own Drafts until
+    they act on it, and a wrong one is deleted. The draft will still be sent in
+    the operator's name if they send it, so write it as they would.
+    """
+    recipients = [a.strip() for a in (to or []) if isinstance(a, str) and a.strip()]
+    copies = [a.strip() for a in (cc or []) if isinstance(a, str) and a.strip()]
+    blind = [a.strip() for a in (bcc or []) if isinstance(a, str) and a.strip()]
+    if not (subject or "").strip():
+        raise ModelRetry("give the draft a subject.")
+    if not (body or "").strip():
+        raise ModelRetry("write the whole draft body; nothing is added after approval.")
+
+    reply_to = ""
+    parent_sender = parent_subject = ""
+    if (reply_to_ref or "").strip():
+        # Resolved the way every other mail tool does, so the proposal pins a
+        # provider uuid Google can use as `replyToMessageId`.
+        reply_to, parent_sender, parent_subject = await _mail_target(ctx, reply_to_ref)
+    if not recipients and not reply_to:
+        raise ModelRetry(
+            "name at least one recipient in `to`, or the email to answer in `reply_to_ref`."
+        )
+
+    arguments: dict = {"subject": subject, "body": body}
+    for key, value in (("to", recipients), ("cc", copies), ("bcc", blind)):
+        if value:
+            arguments[key] = value
+    if reply_to:
+        arguments["reply_to"] = reply_to
+    addressed = ", ".join(recipients) or parent_sender or "the sender"
+
+    proposal = Proposal(
+        intent=rationale,
+        actions=[
+            Action(
+                capability="mail.draft@v1",
+                arguments=arguments,
+                target_ref={"system": "mailbox", "id": ", ".join(recipients) or reply_to},
+                # Reversible, unlike mail.send: the draft is private to the
+                # operator and is deleted from Gmail; nothing here sends.
+                reversibility=Reversibility.reversible,
+            )
+        ],
+        evidence=[
+            Evidence(
+                # `mailbox`, not `email`: a description the tool built from the
+                # message headers, never a quote, so it is neither checked nor
+                # flagged (DL-230; the `propose_mail_send` precedent).
+                kind="mailbox",
+                source_ref=reply_to or ", ".join(recipients),
+                locator=(
+                    "the message being answered, as read from the mailbox"
+                    if reply_to
+                    else "the message text pinned in this proposal"
+                ),
+                claim=(
+                    f"reply to {parent_sender}: {parent_subject}"
+                    if reply_to
+                    else f"to {', '.join(recipients)}: {subject}"
+                ),
+            )
+        ],
+        expected_effect=(
+            f"one draft appears in the operator's Gmail Drafts, addressed to {addressed}"
+            + (f" (cc {', '.join(copies)})" if copies else "")
+            + (f" ({len(blind)} bcc)" if blind else "")
+            + f" with the subject {subject!r}; nothing is sent"
+        ),
+    )
+    await _validate_proposal(ctx, proposal, agent_authored=False)
+    raise CallDeferred(metadata={"proposal": proposal.model_dump(mode="json")})
+
+
 async def propose_mail_move(ctx: RunContext, message_ref: str, folder: str, rationale: str) -> str:
     """Propose filing one email into a mailbox folder. Once approved, the
     control plane moves it out of its current folder and into `folder`.

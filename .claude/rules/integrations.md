@@ -56,6 +56,16 @@ Moved from the root instructions; loads when a matching file is read. How a rule
   (headers of a non-RAW message, the DL-219 client event id, thread-wise
   listing, withheld threads) are listed in DL-237; `tests/test_google_mcp.py`
   pins each one.
+- **Agents do not send mail on Gmail; they propose a DRAFT the operator sends**
+  (DL-238). `mail.draft` (pack `mail-draft-propose`) is offered only where Gmail
+  is reached through Google's MCP server (`packs._offered`; Exchange keeps
+  `mail.send`), and its Executor handler creates one plain-text draft with
+  `create_draft` through `google_mcp._gmail` and its refusal of an approval
+  question. Google's send tools (`send_message`, `reply`) are never called
+  anywhere: `tests/test_google_mcp.py` walks the source for their names. The draft
+  is reversible (the operator deletes it), takes no attachment, HTML body or
+  signature flag, and `create_draft` takes no client id, so a retried create can
+  leave two drafts; nothing looks for a similar one (the DL-219 rule).
 - **Jira Cloud and Jira Data Center are two products, not two logins.** DC
   (and the retired Server line) never exposed REST v3 — it answers 404 to
   every `/rest/api/3/...` path — and beyond the version segment rich text is

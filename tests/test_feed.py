@@ -115,6 +115,61 @@ async def test_poll_skips_known_mail_without_refetching(monkeypatch):
     assert fetched == []
 
 
+@needs_pg
+async def test_one_unreadable_message_never_stops_the_poll(monkeypatch, caplog):
+    """The operator's ruling, 2026-11-27: Gmail withholding one message must
+    not break the feed. The poll used to stop at the first failed read, so
+    every later poll stopped at the same message and nothing after it was ever
+    enrolled."""
+
+    async def fake_list(scope_query):
+        return [
+            {"uuid": "feedskip001", "conversation_id": "feedskipt001"},
+            {"uuid": "feedskip002", "conversation_id": "feedskipt002"},
+            {"uuid": "feedskip003", "conversation_id": "feedskipt003"},
+        ]
+
+    async def fake_get(uuid):
+        if uuid == "feedskip001":
+            raise email_facade.EmailFacadeError("HTTP 422 withheld", status_code=422)
+        if uuid == "feedskip002":
+            raise email_facade.EmailFacadeError("HTTP 503 blocked", status_code=503)
+        return {**MSG, "uuid": uuid, "conversation_id": "feedskipt003"}
+
+    monkeypatch.setattr(email_facade, "list_refs", fake_list)
+    monkeypatch.setattr(email_facade, "get_message", fake_get)
+    feed._refused.clear()
+    with caplog.at_level("WARNING", logger="central_command.ingest.feed"):
+        r1 = await feed.poll_once()
+        # The third message got through although the two before it failed.
+        assert (r1["new"], r1["enrolled"], r1["skipped"]) == (3, 1, 2)
+        # Next poll: both are still listed and nothing new got through, and one
+        # failure is outage-shaped, so the poll says so (never silent)...
+        with pytest.raises(email_facade.EmailFacadeError, match="503"):
+            await feed.poll_once()
+    # ...but the per-message warning is not repeated every poll.
+    assert sum("could not be read" in r.message for r in caplog.records) == 2
+
+
+@needs_pg
+async def test_a_provider_that_is_down_still_fails_the_poll(monkeypatch):
+    asked = []
+
+    async def fake_list(scope_query):
+        return [{"uuid": f"feeddown00{i}", "conversation_id": f"feeddownt00{i}"} for i in range(6)]
+
+    async def fake_get(uuid):
+        asked.append(uuid)
+        raise email_facade.EmailFacadeError("HTTP 503 down", status_code=503)
+
+    monkeypatch.setattr(email_facade, "list_refs", fake_list)
+    monkeypatch.setattr(email_facade, "get_message", fake_get)
+    feed._refused.clear()
+    with pytest.raises(email_facade.EmailFacadeError):
+        await feed.poll_once()
+    assert len(asked) == feed._DOWN_AFTER  # it stops asking; it does not hammer
+
+
 # A live read of the real mailbox is opt-in, like the graph's live probes
 # (CC_LIVE_GRAPH_TESTS): the suite's no-live-world guard holds the façade at
 # nothing, so this test reads the real endpoint and token from a fresh

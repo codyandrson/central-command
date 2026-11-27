@@ -341,12 +341,16 @@ EXCHANGE_ONLY_TOOLS = {"propose_mail_send", "propose_mail_move"}
 GMAIL_ONLY_TOOLS = {"propose_unsubscribe"}
 EXCHANGE_ONLY_CAPS = {"mail.send", "mail.move"}
 GMAIL_ONLY_CAPS = {"mail.unsubscribe"}
+# Gmail reached through Google's MCP server (DL-238): offered nowhere else.
+MCP_ONLY_TOOLS = {"propose_mail_draft"}
+MCP_ONLY_CAPS = {"mail.draft"}
 
 MAIL_PACKS = (
     "mail-read",
     "mail-spam-propose",
     "mail-unsubscribe-propose",
     "mail-send-propose",
+    "mail-draft-propose",
     "mail-file-propose",
     "mail-rule-propose",
 )
@@ -375,6 +379,31 @@ def test_exchange_withholds_the_gmail_only_members(on_exchange):
     assert EXCHANGE_ONLY_TOOLS <= tools and EXCHANGE_ONLY_CAPS <= caps
 
 
+def test_the_draft_is_withheld_on_the_n8n_default_and_the_rest_client(on_gmail, monkeypatch):
+    """`mail.draft` (DL-238) is offered only on Gmail through Google's MCP
+    server: not on the n8n default, not on the REST client, not on Exchange."""
+    for value in ("n8n", "native"):
+        monkeypatch.setattr(settings, "google_provider", value)
+        tools, caps = _offered_everything(MAIL_PACKS)
+        assert not (tools & MCP_ONLY_TOOLS) and not (caps & MCP_ONLY_CAPS), value
+
+
+def test_the_draft_is_offered_on_google_mcp_beside_everything_gmail_offers(on_gmail, monkeypatch):
+    gmail_tools, gmail_caps = _offered_everything(MAIL_PACKS)
+    monkeypatch.setattr(settings, "google_provider", "mcp")
+    tools, caps = _offered_everything(MAIL_PACKS)
+    assert tools == gmail_tools | MCP_ONLY_TOOLS
+    assert caps == gmail_caps | MCP_ONLY_CAPS
+    assert not (tools & EXCHANGE_ONLY_TOOLS) and not (caps & EXCHANGE_ONLY_CAPS)
+
+
+def test_a_configured_exchange_still_wins_over_the_mcp_switch(on_exchange, monkeypatch):
+    monkeypatch.setattr(settings, "google_provider", "mcp")
+    tools, caps = _offered_everything(MAIL_PACKS)
+    assert not (tools & MCP_ONLY_TOOLS) and not (caps & MCP_ONLY_CAPS)
+    assert EXCHANGE_ONLY_TOOLS <= tools and EXCHANGE_ONLY_CAPS <= caps
+
+
 def test_everything_else_is_offered_on_both_providers(on_gmail, monkeypatch):
     gmail_tools, gmail_caps = _offered_everything(MAIL_PACKS)
     monkeypatch.setattr(settings, "exchange_url", "https://mail/ews/exchange.asmx", raising=False)
@@ -386,7 +415,11 @@ def test_everything_else_is_offered_on_both_providers(on_gmail, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "fixture,withheld", [("on_gmail", EXCHANGE_ONLY_CAPS), ("on_exchange", GMAIL_ONLY_CAPS)]
+    "fixture,withheld",
+    [
+        ("on_gmail", EXCHANGE_ONLY_CAPS | MCP_ONLY_CAPS),
+        ("on_exchange", GMAIL_ONLY_CAPS | MCP_ONLY_CAPS),
+    ],
 )
 def test_granted_capability_names_agrees_with_offered(request, fixture, withheld):
     """The toolset, the generated charter and the gateway's policy check all go
@@ -401,7 +434,7 @@ def test_a_withheld_capability_is_still_KNOWN(on_gmail):
     """Withheld is UNGRANTED, never INVENTED — `known_capability_names` is the
     propose-time validity check and must keep telling those two apart, or a
     proposal naming mail.send on Gmail would be rejected as a fabrication."""
-    assert EXCHANGE_ONLY_CAPS <= packs.known_capability_names()
+    assert EXCHANGE_ONLY_CAPS | MCP_ONLY_CAPS <= packs.known_capability_names()
 
 
 def test_the_toolset_can_be_assembled_on_both_providers(on_exchange):
@@ -460,7 +493,7 @@ def test_the_thread_id_shape_is_unchanged():
 # --- parity for the two new capabilities --------------------------------------
 
 
-@pytest.mark.parametrize("name", sorted(EXCHANGE_ONLY_CAPS))
+@pytest.mark.parametrize("name", sorted(EXCHANGE_ONLY_CAPS | MCP_ONLY_CAPS))
 def test_the_new_capabilities_have_a_spec_a_handler_and_a_registry_row(name):
     assert name in ARG_SPECS, "the handler subscripts these — a spec is the promise"
     assert name in EXECUTOR_HANDLERS, "approved and then nothing executes it"
@@ -477,8 +510,22 @@ def test_mail_send_is_declared_irreversible_in_its_risk_text():
     assert "IRREVERSIBLE" in row.risk and "external" in row.risk.lower()
 
 
+def test_mail_draft_is_reversible_and_says_that_nothing_is_sent():
+    """The opposite of mail.send in the registry text the operator reads: a draft
+    is private to the operator's Drafts and deleted from Gmail, and the row must
+    not carry the irreversible mark or the acknowledgement (DL-238)."""
+    row = next(c for c in REGISTRY if c.name == "mail.draft")
+    assert row.reversibility == "reversible" and not row.acknowledge
+    assert row.default_gate == "human" and row.gate == "human approval"
+    assert "nothing is sent" in row.risk and "IRREVERSIBLE" not in row.risk
+    assert "create_draft" in row.route and "send_message" not in row.route
+    assert set(row.target_args) == {"to", "cc", "bcc"}
+
+
 def test_the_arg_specs_require_what_the_handlers_subscript():
     assert set(ARG_SPECS["mail.send"].required) == {"to", "subject", "body"}
+    assert set(ARG_SPECS["mail.draft"].required) == {"subject", "body"}
+    assert ARG_SPECS["mail.draft"].any_of == (("to", "reply_to"),)
     assert set(ARG_SPECS["mail.move"].required) == {"provider_uuid", "folder"}
 
 

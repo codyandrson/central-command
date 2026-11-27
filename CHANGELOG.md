@@ -4,6 +4,31 @@ Public what-changed record for Central Command. One entry per release or
 notable landing, newest first. The development journal behind these entries
 (incidents, milestone write-ups) is a private instance document.
 
+## 2026-11-27 — v2.139.0: an agent can propose a Gmail draft the operator sends; one blocked message never stops the mail poll (DL-238)
+
+- **Why.** The operator ruled on 2026-11-26 that agents do not send mail on Gmail and that a
+  draft the operator sends personally is the replacement, and on 2026-11-27 that mail Gmail
+  blocks must never break the feed.
+- **Drafts.** New capability `mail.draft` (pack `mail-draft-propose`, tool `propose_mail_draft`),
+  offered only where Gmail is reached through Google's MCP server (`CC_GOOGLE_PROVIDER=mcp`).
+  The agent proposes recipients, a subject and a plain-text body, optionally as a reply to a
+  mail; after approval the Executor calls Google's `create_draft` and records the draft id,
+  thread and link. Nothing is sent, and Google's send tools are never called. Human approval
+  by default; reversible (the operator deletes the draft). No agent holds the pack until the
+  operator grants it.
+- **Accepted gap.** Google's tool takes no client id, so a create retried after a lost answer
+  can leave two drafts.
+- **Approval.** Google may ask the operator to approve `create_draft` at first use:
+  `python -m central_command.google_mcp_grant --tool create_draft`. That check may leave one
+  empty draft in Drafts, and says so before it runs.
+- **The poll.** `feed.poll_once` used to stop at the first message it could not read, so every
+  later poll stopped at the same message and nothing after it was enrolled. It now skips that
+  message (one warning per message), enrols the rest, and still fails the poll when nothing got
+  through and a failure was outage-shaped, or after three such failures in a row. On the MCP
+  provider, a thread Google refuses to expand lists the messages the search showed.
+- **Not tested against Google.** Whether Google asks about `create_draft`, what a reply with no
+  `to` is addressed to, and what Google answers for a message it blocks at read.
+
 ## 2026-11-27 — v2.138.1: the Google approval command asks about the calendar read the provider really makes
 
 - **Why.** On the first day on `CC_GOOGLE_PROVIDER=mcp` every 7-day calendar list was refused as

@@ -54,8 +54,8 @@ def test_every_row_declares_a_default_gate_from_the_closed_vocabulary():
             assert c.default_gate == ("human" if c.gate == "human approval" else "none"), c.name
     counts = {v: sum(c.default_gate == v for c in REGISTRY) for v in DEFAULT_GATES}
     assert (
-        counts == {"human": 72, "auditor": 1, "none": 38}
-    )  # +jira.get_comments (DL-222), +plan.remove_finished_block (DL-221), -litellm.apply_config_change (DL-223), +mcp.server_register/unregister and mcp.list_servers (DL-233)
+        counts == {"human": 73, "auditor": 1, "none": 38}
+    )  # +mail.draft (DL-238), +jira.get_comments (DL-222), +plan.remove_finished_block (DL-221), -litellm.apply_config_change (DL-223), +mcp.server_register/unregister and mcp.list_servers (DL-233)
     assert gated_write_names() == {
         c.name for c in REGISTRY if c.default_gate != "none" and c.kind == "write"
     }

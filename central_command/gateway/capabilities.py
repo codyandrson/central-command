@@ -1581,6 +1581,46 @@ REGISTRY: list[Capability] = [
             "a proposal can arrive by API with any value."
         ),
     ),
+    # mail.draft (DL-238): the operator's replacement for agent mail sending on
+    # Gmail. It creates a DRAFT in the operator's Gmail through Google's own MCP
+    # server and sends nothing: the operator opens it there and sends it
+    # personally. Offered only on that provider (`packs._offered`).
+    Capability(
+        name="mail.draft",
+        target_args=("to", "cc", "bcc"),
+        kind="write",
+        gate="human approval",
+        default_gate="human",
+        # Reversible, and not a send: the draft sits in the operator's own
+        # Drafts folder, nobody else sees it, and the operator deletes it from
+        # Gmail. Like calendar.create_event, the one create that can land twice
+        # (DL-238) is a second draft, which the same delete undoes.
+        reversibility="reversible",
+        risk=(
+            "reversible and nothing is sent — a draft appears in the operator's "
+            "own Drafts folder and no one else sees it until the operator opens "
+            "it and sends it personally; a wrong one is deleted from Gmail. A "
+            "create retried after a lost answer can leave two drafts (Google's "
+            "tool takes no client id)"
+        ),
+        holder="Executor",
+        route=(
+            "integrations/email_facade.py → integrations/google_mcp.py (Google's "
+            "Gmail MCP server, tool create_draft); there is no n8n or REST route "
+            "and no send tool is ever called"
+        ),
+        arguments=["to", "subject", "body", "cc?", "bcc?", "reply_to?"],
+        description=(
+            "Create one plain-text draft in the operator's Gmail; it is never "
+            "sent. `to`/`cc`/`bcc` are lists of plain addresses, `subject` and "
+            "`body` are the whole message as the proposal pinned it (no "
+            "attachment, no HTML, no signature). `reply_to` is the provider "
+            "uuid of the mail being answered, resolved by propose_mail_draft, "
+            "and is passed to Google as `replyToMessageId`; a draft needs a "
+            "`to` or a `reply_to`. The result records the draft id, thread id "
+            "and view URL Google returns, so the operator can open it."
+        ),
+    ),
     Capability(
         name="mail.move",
         target_args=("provider_uuid",),

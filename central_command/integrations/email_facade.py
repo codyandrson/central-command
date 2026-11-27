@@ -229,7 +229,8 @@ async def report_spam(uuid: str) -> dict:
 # EXECUTOR-ONLY, after approval. There is no n8n fallback because the Gmail
 # façade has no such mode: `packs._offered()` WITHHOLDS mail.send / mail.move
 # and their propose tools on Gmail, so an agent there is never taught a verb
-# its mailbox cannot answer.
+# its mailbox cannot answer. `mail.draft` (DL-238) is the mirror image: the one
+# mail write offered ONLY on Gmail through Google's MCP server (below).
 
 
 async def send(
@@ -251,6 +252,40 @@ async def send(
         return await provider.send(to, subject, body, cc=cc, reply_to_ref=reply_to_ref)
     except provider.ExchangeError as e:
         raise EmailFacadeError(str(e)) from e
+
+
+async def draft(
+    to: list[str],
+    subject: str,
+    body: str,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    reply_to: str | None = None,
+) -> dict:
+    """Create ONE draft in the operator's Gmail, through Google's Gmail MCP
+    server (DL-238). It never sends: the operator opens the draft in Gmail and
+    sends it personally. Returns {ok, draft_id, thread_id, view_url}.
+
+    EXECUTOR-ONLY, after approval, and offered on ONE provider: Google through
+    MCP (`CC_GOOGLE_PROVIDER=mcp`, no Exchange). The n8n façade and the REST
+    client have no draft mode, so every other provider refuses here before any
+    socket opens, and `packs._offered()` withholds the capability there. `reply_to`
+    is the provider uuid of the mail being answered (Google's
+    `replyToMessageId`)."""
+    if _exchange() is not None or settings.google_provider != "mcp":
+        raise EmailFacadeError(
+            "mail.draft is offered only when Gmail is reached through Google's MCP server "
+            "(CC_GOOGLE_PROVIDER=mcp, no Exchange): the n8n Gmail façade and the REST client "
+            "have no draft mode"
+        )
+    arguments: dict = {"to": to, "subject": subject, "body": body}
+    if cc:
+        arguments["cc"] = cc
+    if bcc:
+        arguments["bcc"] = bcc
+    if reply_to:
+        arguments["reply_to"] = reply_to
+    return await _call({"mode": "draft", "draft": arguments})
 
 
 async def move(uuid: str, folder: str) -> dict:

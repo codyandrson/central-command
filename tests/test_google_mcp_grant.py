@@ -165,9 +165,13 @@ def test_a_write_tool_is_asked_about_only_by_name_and_aimed_at_nothing(mcp):
 def test_every_write_probe_targets_something_that_cannot_exist():
     for tool in grant.WRITES:
         args = grant._write_probe(tool)
-        assert args.get("messageId") == grant.NO_MESSAGE or args["calendarId"].endswith(
-            "@example.invalid"
-        ), tool
+        # A mail write is aimed at a message no mailbox holds (`messageId`, or a
+        # draft's `replyToMessageId`); a calendar write at a calendar that
+        # cannot exist.
+        no_message = ("messageId", "replyToMessageId")
+        assert any(args.get(k) == grant.NO_MESSAGE for k in no_message) or args[
+            "calendarId"
+        ].endswith("@example.invalid"), tool
         assert args.get("notificationLevel", "NONE") == "NONE"
 
 
@@ -197,3 +201,42 @@ def test_a_bearer_token_is_never_printed(mcp):
     grant.run([], out=out, err=io.StringIO(), interactive=True)
     assert "ya29." not in out.getvalue()
     assert all(json.loads(r.content)["params"]["_meta"] for r in fake.requests)
+
+
+def test_the_draft_probe_warns_before_it_is_sent_and_never_names_a_send_tool(mcp):
+    """Whether Google rejects the unknown reply target before it creates the
+    draft is unverified, so the command says an empty draft may appear before it
+    sends that one probe; it is plain text, aimed at no recipient, and nothing
+    in the command can send mail."""
+    fake, _ = mcp
+    fake.on("create_draft", INPUT_REQUIRED, ok({"id": "r-1"}))
+    out = io.StringIO()
+    assert (
+        grant.run(["create_draft"], out=out, err=io.StringIO(), ask=_answers("1"), interactive=True)
+        == 0
+    )
+    text = out.getvalue()
+    assert "empty draft may appear in your Gmail Drafts folder" in text
+    assert "can be deleted" in text
+    # The line comes before Google is asked anything, and nothing was called twice
+    # beyond the one answered question.
+    assert text.index("empty draft may appear") < text.index("Allow Central Command")
+    first, retry = fake.bodies("create_draft")
+    assert first["params"]["arguments"] == {
+        "replyToMessageId": grant.NO_MESSAGE,
+        "subject": "Central Command approval probe",
+        "body": "Central Command approval probe. Nothing is sent; delete this draft.",
+    }
+    assert retry["params"]["arguments"] == first["params"]["arguments"]
+    assert [b["params"]["name"] for b in fake.bodies()] == ["create_draft", "create_draft"]
+    for name in ("send_message", "reply"):
+        assert name not in grant.READS and name not in grant.WRITES
+
+
+def test_create_draft_is_listed_with_the_write_tools_and_not_called_by_default(mcp):
+    fake, _ = mcp
+    _all_reads(fake)
+    out = io.StringIO()
+    grant.run([], out=out, err=io.StringIO(), ask=_answers(), interactive=True)
+    assert "create_draft" in out.getvalue()
+    assert not any(b["params"]["name"] == "create_draft" for b in fake.bodies())

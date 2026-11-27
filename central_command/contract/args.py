@@ -25,6 +25,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
+from email.utils import parseaddr
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -384,6 +385,72 @@ def _create_issue_estimate_shape(capability: str, args: dict) -> list[str]:
     return [p] if p else []
 
 
+# mail.draft (DL-238): the arguments of one Gmail draft, and nothing else. A draft
+# carries no attachment, no HTML body and no signature flag, so an argument
+# outside this set is refused here, not ignored: a draft the operator reads must
+# be the draft Google is asked to make.
+MAIL_DRAFT_ARGS = ("to", "cc", "bcc", "subject", "body", "reply_to")
+MAIL_DRAFT_RECIPIENTS = ("to", "cc", "bcc")
+# A provider message id (Google's alphabet; google.py's `_ID_RE` is the same).
+_MESSAGE_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def plain_address_ok(value: object) -> bool:
+    """One bare `local@domain` address, whole: no display name, no angle
+    brackets, no quoting, no whitespace or control character and no second address. The standard
+    library's strict address parser decides (it answers ("", "") for anything
+    it cannot read as one address), and what it reads back must be the string
+    given, so nothing is normalised away."""
+    if not isinstance(value, str) or not value:
+        return False
+    if any(c.isspace() or not c.isprintable() or c in '"<>,;' for c in value):
+        return False
+    name, address = parseaddr(value, strict=True)
+    local, at, domain = address.partition("@")
+    return name == "" and address == value and bool(local) and bool(at) and bool(domain)
+
+
+def _mail_draft_shape(capability: str, args: dict) -> list[str]:
+    """`mail.draft`: plain-text, no attachments; at least one of `to` or
+    `reply_to` (a reply with no `to` is addressed by Google from the mail being
+    answered); `reply_to` is the provider uuid of that mail."""
+    problems: list[str] = []
+    unknown = sorted(set(args) - set(MAIL_DRAFT_ARGS))
+    if unknown:
+        problems.append(
+            f"{capability}: unknown argument(s) {', '.join(unknown)} (a draft takes "
+            f"{', '.join(MAIL_DRAFT_ARGS)}: plain text only, no attachments, no HTML, "
+            "no signature)"
+        )
+    for key in MAIL_DRAFT_RECIPIENTS:
+        if key not in args or args[key] is None:
+            continue
+        value = args[key]
+        if not isinstance(value, list):
+            problems.append(
+                f"{capability}: {key} must be a list of plain addresses, got {type(value).__name__}"
+            )
+            continue
+        problems.extend(
+            f"{capability}: {key}[{n}]={address!r} is not a plain address (user@example.com, "
+            "no display name)"
+            for n, address in enumerate(value)
+            if not plain_address_ok(address)
+        )
+    for key in ("subject", "body"):
+        if key in args and not isinstance(args[key], str):
+            problems.append(f"{capability}: {key} must be text, got {type(args[key]).__name__}")
+    reply_to = args.get("reply_to")
+    if reply_to is not None and not (
+        isinstance(reply_to, str) and _MESSAGE_ID_RE.fullmatch(reply_to)
+    ):
+        problems.append(
+            f"{capability}: reply_to={reply_to!r} must be the provider message id "
+            "(letters, digits, '-' and '_') of the mail being answered"
+        )
+    return problems
+
+
 ARG_SPECS: dict[str, ArgSpec] = {
     # `reference_time` (2026-09-19): the instant the source material is from,
     # REQUIRED. Graphiti anchors every present-tense fact's validity to the
@@ -437,6 +504,14 @@ ARG_SPECS: dict[str, ArgSpec] = {
     # not a message id an agent wrote: the Executor re-reads the threading
     # headers from that message, the same rule mail.unsubscribe's url follows.
     "mail.send": ArgSpec(required=("to", "subject", "body")),
+    # mail.draft (DL-238): a Gmail draft the operator opens and sends personally;
+    # nothing here sends. `subject` and `body` are required as for mail.send; a
+    # draft needs a `to` or a `reply_to`; the rest is `_mail_draft_shape`.
+    "mail.draft": ArgSpec(
+        required=("subject", "body"),
+        any_of=(("to", "reply_to"),),
+        checks=(_mail_draft_shape,),
+    ),
     "mail.move": ArgSpec(required=("provider_uuid", "folder")),
     # mail.create_rule (2026-09-22): the handler subscripts all three; the
     # criteria's own validity (at least one field, no bare public domain) is
